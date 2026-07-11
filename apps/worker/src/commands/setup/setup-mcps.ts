@@ -167,7 +167,7 @@ function isRawUpstreamUrl(
   return parsed.origin === upstreamOrigin && parsed.pathname === upstreamPath;
 }
 
-function withCloudJobTokenAuthHeader(
+function withTaskRunTokenAuthHeader(
   headers: Record<string, string> | undefined,
   cloudToken: string,
 ): Record<string, string> {
@@ -309,7 +309,7 @@ export function resolveBuiltInMcpServers(
           type: 'streamable-http',
           url: `${apiUrl}${integrationProxy.proxyPath}`,
           headers: withPreviewProxyBypassHeader(
-            withCloudJobTokenAuthHeader(config.headers, cloudToken),
+            withTaskRunTokenAuthHeader(config.headers, cloudToken),
             taskEnv,
           ),
         };

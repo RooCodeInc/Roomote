@@ -1,8 +1,6 @@
-import { acquireRedisLock, withContention } from '@roomote/redis';
+import { acquireRedisLock } from '@roomote/redis';
 import {
   AGENT_DISPLAY_NAME,
-  ALL_REPOSITORIES,
-  PRODUCT_NAME,
   formatErrorForLog,
   normalizeSetupNewState,
 } from '@roomote/types';
@@ -12,7 +10,6 @@ import {
   buildSuggestionSlackText,
   buildSuggestionTaskPromptText,
   findMatchingEnvironmentIdForRepositoryIds,
-  parseSetupSuggestionIdFromMessageKey,
   parseSetupSuggestionIdFromSlackMessageMetadata,
   repositoryIdsMatchSelection,
   resolveSuggestionLaunchWorkspaceFromMetadata,
@@ -23,24 +20,23 @@ import {
   startSlackAppMentionTask,
   type SlackNotifier,
   type SlackReactionAddedEvent,
-  SlackThreadDeliveryTracker,
 } from '@roomote/slack';
 import {
-  automationWorkItems,
-  agentSuggestionMessages,
   and,
+  claimWorkItem,
   db,
   eq,
-  inArray,
-  isNull,
-  like,
-  taskSuggestions,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  trackedMessages,
+  workItems,
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../../logging.js';
+import { cancelOrphanedWorkItemRunBestEffort } from '../../tasks/orphaned-work-item-run.js';
 import {
   SLACK_SETUP_SUGGESTION_LOCK_PREFIX,
-  TASK_SUGGESTION_AGENT_TYPES,
+  TASK_SUGGESTION_TYPES,
 } from '../constants.js';
 import type { SlackWebhookContext } from '../context.js';
 import {
@@ -84,71 +80,58 @@ const TASK_SUGGESTION_REACTION_MAX_ATTEMPTS = Math.ceil(
     TASK_SUGGESTION_REACTION_POLL_INTERVAL_MS,
 );
 
-async function markTaskSuggestionStarted(params: {
-  suggestionId: string;
-}): Promise<void> {
-  await db
-    .update(taskSuggestions)
-    .set({
-      status: 'started',
-      updatedAt: new Date(),
-    })
-    .where(eq(taskSuggestions.id, params.suggestionId));
+/**
+ * Reaction-launchable suggestion types tracked on the suggestion_card's
+ * `metadata.suggestionType`. Only setup-onboarding and suggested-tasks
+ * cards launch from a reaction.
+ */
+function getLaunchableSuggestionType(
+  metadata: Record<string, unknown> | null | undefined,
+): (typeof TASK_SUGGESTION_TYPES)[number] | null {
+  const suggestionType = metadata?.suggestionType;
+
+  if (
+    typeof suggestionType === 'string' &&
+    (TASK_SUGGESTION_TYPES as readonly string[]).includes(suggestionType)
+  ) {
+    return suggestionType as (typeof TASK_SUGGESTION_TYPES)[number];
+  }
+
+  return null;
 }
 
-async function markAutomationWorkItemStarted(params: {
-  automationWorkItemId: string;
+/**
+ * Finalize a successful launch via the shared work_items helper (`launching` →
+ * `launched` with the task link, guarded so a race is idempotent) and, when it
+ * wins, record the seeded thread on the tracked suggestion card. Returns false
+ * when another launcher already finalized the work item.
+ */
+async function markWorkItemLaunched(params: {
+  workItemId: string;
+  trackedMessageId: string;
   taskId: string | null;
-}): Promise<void> {
-  await db
-    .update(automationWorkItems)
-    .set({
-      status: 'started',
-      executionTaskId: params.taskId,
-      launchedAt: new Date(),
-      launchError: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(automationWorkItems.id, params.automationWorkItemId));
-}
-
-async function markSuggestionLaunchStarted(params: {
-  suggestionId: string;
-  automationWorkItemId: string | null;
-  taskId: string | null;
-}): Promise<void> {
-  await markTaskSuggestionStarted({
-    suggestionId: params.suggestionId,
+  /** The claiming launcher's fencing token (claimed row's `launchClaimedAt`). */
+  claimedAt: Date;
+  launchedThreadTs?: string;
+}): Promise<boolean> {
+  const finalized = await finalizeWorkItemLaunched(db, {
+    id: params.workItemId,
+    taskId: params.taskId,
+    claimedAt: params.claimedAt,
   });
 
-  if (params.automationWorkItemId) {
-    await markAutomationWorkItemStarted({
-      automationWorkItemId: params.automationWorkItemId,
-      taskId: params.taskId,
-    });
+  if (!finalized) {
+    return false;
   }
-}
 
-async function claimTaskSuggestionLaunch(
-  suggestionMessageId: string,
-): Promise<boolean> {
-  const launchClaimedAt = new Date();
-  const [claimedSuggestionMessage] = await db
-    .update(agentSuggestionMessages)
-    .set({
-      launchClaimedAt,
-    })
-    .where(
-      and(
-        eq(agentSuggestionMessages.id, suggestionMessageId),
-        isNull(agentSuggestionMessages.taskId),
-        isNull(agentSuggestionMessages.launchClaimedAt),
-        isNull(agentSuggestionMessages.launchedThreadTs),
-      ),
-    )
-    .returning({ id: agentSuggestionMessages.id });
+  if (params.launchedThreadTs) {
+    await db
+      .update(trackedMessages)
+      .set({ threadTs: params.launchedThreadTs, updatedAt: new Date() })
+      .where(eq(trackedMessages.id, params.trackedMessageId));
+  }
 
-  return Boolean(claimedSuggestionMessage);
+  return true;
 }
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
@@ -179,27 +162,30 @@ async function launchTaskSuggestionTaskFromReaction({
     `${logPrefix} begin launchSetupOnboardingSuggestionTaskFromReaction`,
   );
 
-  let [suggestionMessage] = await db
-    .select({
-      id: agentSuggestionMessages.id,
-      agentType: agentSuggestionMessages.agentType,
-      taskId: agentSuggestionMessages.taskId,
-      suggestionKey: agentSuggestionMessages.suggestionKey,
-      createdByUserId: agentSuggestionMessages.createdByUserId,
-      launchClaimedAt: agentSuggestionMessages.launchClaimedAt,
-      launchedThreadTs: agentSuggestionMessages.launchedThreadTs,
-    })
-    .from(agentSuggestionMessages)
-    .where(
-      and(
-        inArray(agentSuggestionMessages.agentType, TASK_SUGGESTION_AGENT_TYPES),
-        eq(agentSuggestionMessages.channelId, channelId),
-        eq(agentSuggestionMessages.messageTs, messageTs),
-      ),
-    )
-    .limit(1);
+  // Resolve the tracked suggestion card for the reacted message. The card's
+  // metadata carries the suggestion type; its workItemId points at the backing
+  // work_items row that owns the launch state machine.
+  const cardColumns = {
+    id: true as const,
+    workItemId: true as const,
+    metadata: true as const,
+  };
 
-  const suggestionIdFromMetadata = !suggestionMessage
+  const directCard = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.channelId, channelId),
+      eq(trackedMessages.messageTs, messageTs),
+    ),
+    columns: cardColumns,
+  });
+
+  let suggestionCard =
+    directCard && getLaunchableSuggestionType(directCard.metadata)
+      ? directCard
+      : null;
+
+  const suggestionIdFromMetadata = !suggestionCard
     ? parseSetupSuggestionIdFromSlackMessageMetadata(
         await slack.getMessageMetadata({
           channel: channelId,
@@ -214,85 +200,75 @@ async function launchTaskSuggestionTaskFromReaction({
     );
   }
 
-  if (!suggestionMessage && suggestionIdFromMetadata) {
-    [suggestionMessage] = await db
-      .select({
-        id: agentSuggestionMessages.id,
-        agentType: agentSuggestionMessages.agentType,
-        taskId: agentSuggestionMessages.taskId,
-        suggestionKey: agentSuggestionMessages.suggestionKey,
-        createdByUserId: agentSuggestionMessages.createdByUserId,
-        launchClaimedAt: agentSuggestionMessages.launchClaimedAt,
-        launchedThreadTs: agentSuggestionMessages.launchedThreadTs,
-      })
-      .from(agentSuggestionMessages)
-      .where(
-        and(
-          inArray(
-            agentSuggestionMessages.agentType,
-            TASK_SUGGESTION_AGENT_TYPES,
-          ),
-          like(
-            agentSuggestionMessages.suggestionKey,
-            `%:${suggestionIdFromMetadata}`,
-          ),
-        ),
-      )
-      .limit(1);
+  if (!suggestionCard && suggestionIdFromMetadata) {
+    // The metadata suggestionId is the backing work item id.
+    const fallbackCard = await db.query.trackedMessages.findFirst({
+      where: and(
+        eq(trackedMessages.kind, 'suggestion_card'),
+        eq(trackedMessages.workItemId, suggestionIdFromMetadata),
+      ),
+      columns: cardColumns,
+    });
+
+    suggestionCard =
+      fallbackCard && getLaunchableSuggestionType(fallbackCard.metadata)
+        ? fallbackCard
+        : null;
   }
 
-  if (!suggestionMessage) {
+  const suggestionType = suggestionCard
+    ? getLaunchableSuggestionType(suggestionCard.metadata)
+    : null;
+
+  if (!suggestionCard || !suggestionCard.workItemId || !suggestionType) {
     apiLogger.debug(
       `${logPrefix} no tracked setup suggestion found for reaction (direct lookup + metadata fallback)`,
     );
     return false;
   }
 
-  if (
-    suggestionMessage.taskId ||
-    suggestionMessage.launchClaimedAt ||
-    suggestionMessage.launchedThreadTs
-  ) {
+  const workItemId = suggestionCard.workItemId;
+
+  const [workItem] = await db
+    .select({
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      category: workItems.category,
+      priority: workItems.priority,
+      investigationContext: workItems.investigationContext,
+      repositoryIds: workItems.repositoryIds,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      targetEnvironmentId: workItems.targetEnvironmentId,
+      readinessMessage: workItems.readinessMessage,
+      sortOrder: workItems.sortOrder,
+      status: workItems.status,
+    })
+    .from(workItems)
+    .where(eq(workItems.id, workItemId))
+    .limit(1);
+
+  if (!workItem) {
+    return false;
+  }
+
+  // `open` is launchable, and `launching` is allowed through so the shared
+  // claim CAS below can reclaim a *stale* launching item (a launcher that
+  // crashed before finalizing) while still rejecting a fresh one. launched /
+  // failed / dismissed are terminal for this surface.
+  if (workItem.status !== 'open' && workItem.status !== 'launching') {
     apiLogger.debug(
-      `${logPrefix} suggestion already handled, skipping duplicate launch`,
+      `${logPrefix} suggestion already handled (status=${workItem.status}), skipping duplicate launch`,
     );
     return false;
   }
 
-  const suggestionId =
-    suggestionIdFromMetadata ??
-    parseSetupSuggestionIdFromMessageKey(suggestionMessage.suggestionKey);
-  if (!suggestionId) {
-    return false;
-  }
-
-  const [suggestion] = await db
-    .select({
-      id: taskSuggestions.id,
-      automationWorkItemId: taskSuggestions.automationWorkItemId,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      category: taskSuggestions.category,
-      priority: taskSuggestions.priority,
-      investigationContext: taskSuggestions.investigationContext,
-      repositoryIds: taskSuggestions.repositoryIds,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-      readinessMessage: taskSuggestions.readinessMessage,
-      sortOrder: taskSuggestions.sortOrder,
-    })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, suggestionId))
-    .limit(1);
-
-  if (!suggestion) {
-    return false;
-  }
+  const suggestionBrief = workItem.brief ?? '';
 
   let suggestionWorkspace: SuggestionLaunchWorkspace | null = null;
   let launchFailureReason: string | null = null;
 
-  if (suggestionMessage.agentType === 'setup_onboarding') {
+  if (suggestionType === 'setup_onboarding') {
     const deploymentSettings = await db.query.deploymentSettings.findFirst({
       columns: { setupNewState: true },
     });
@@ -309,12 +285,12 @@ async function launchTaskSuggestionTaskFromReaction({
 
     if (
       !repositoryIdsMatchSelection(
-        suggestion.repositoryIds,
+        workItem.repositoryIds,
         setupNewState.selectedRepositoryIds,
       )
     ) {
       apiLogger.debug(
-        `${logPrefix} repository selection mismatch for suggestionId=${suggestionId}`,
+        `${logPrefix} repository selection mismatch for workItemId=${workItemId}`,
       );
       return false;
     }
@@ -326,7 +302,7 @@ async function launchTaskSuggestionTaskFromReaction({
       },
     );
     const suggestionTargetRepositoryFullName =
-      suggestion.targetRepositoryFullName?.trim() || null;
+      workItem.targetRepositoryFullName?.trim() || null;
 
     if (!matchingEnvironment) {
       launchFailureReason =
@@ -348,7 +324,7 @@ async function launchTaskSuggestionTaskFromReaction({
           workspaceDisplayName: matchingEnvironment.name,
         };
       }
-    } else if (suggestion.repositoryIds.length > 1) {
+    } else if (workItem.repositoryIds.length > 1) {
       launchFailureReason =
         "I couldn't start this setup suggestion because it was generated before per-idea launch targeting was saved. Regenerate the setup suggestions and react again.";
     } else {
@@ -358,11 +334,11 @@ async function launchTaskSuggestionTaskFromReaction({
         workspaceDisplayName: matchingEnvironment.name,
       };
     }
-  } else if (suggestionMessage.agentType === 'suggested_tasks') {
+  } else if (suggestionType === 'suggested_tasks') {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
-      targetRepositoryFullName: suggestion.targetRepositoryFullName,
-      targetEnvironmentId: suggestion.targetEnvironmentId,
-      readinessMessage: suggestion.readinessMessage,
+      targetRepositoryFullName: workItem.targetRepositoryFullName,
+      targetEnvironmentId: workItem.targetEnvironmentId,
+      readinessMessage: workItem.readinessMessage,
     });
     suggestionWorkspace = resolved.workspace;
     launchFailureReason = resolved.failureReason;
@@ -382,30 +358,28 @@ async function launchTaskSuggestionTaskFromReaction({
       slack,
       channelId,
       title: `${buildSuggestionBadgePrefix({
-        category: suggestion.category,
-        priority: suggestion.priority,
-      })}${suggestion.title}`,
-      brief: suggestion.brief,
+        category: workItem.category,
+        priority: workItem.priority,
+      })}${workItem.title}`,
+      brief: suggestionBrief,
       reason: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
     });
     return true;
   }
 
-  const didClaimSuggestionLaunch = await claimTaskSuggestionLaunch(
-    suggestionMessage.id,
-  );
+  const claimedWorkItem = await claimWorkItem(db, { id: workItemId });
 
-  if (!didClaimSuggestionLaunch) {
+  if (!claimedWorkItem) {
     return true;
   }
 
+  // The claim's `launch_claimed_at` is this launcher's fencing token; thread it
+  // through every finalize/release so a slow launcher whose stale claim was
+  // reclaimed cannot stomp the new claimant's state.
+  const claimedAt = claimedWorkItem.launchClaimedAt;
+
   if (!suggestionWorkspace) {
-    if (didClaimSuggestionLaunch) {
-      await db
-        .update(agentSuggestionMessages)
-        .set({ launchClaimedAt: null })
-        .where(eq(agentSuggestionMessages.id, suggestionMessage.id));
-    }
+    await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
 
     apiLogger.warn(
       `${logPrefix} suggestion launch failed before task start: ${launchFailureReason ?? 'missing launch workspace'}`,
@@ -416,10 +390,10 @@ async function launchTaskSuggestionTaskFromReaction({
         slack,
         channelId,
         title: `${buildSuggestionBadgePrefix({
-          category: suggestion.category,
-          priority: suggestion.priority,
-        })}${suggestion.title}`,
-        brief: suggestion.brief,
+          category: workItem.category,
+          priority: workItem.priority,
+        })}${workItem.title}`,
+        brief: suggestionBrief,
         reason: launchFailureReason,
       }).catch((error) => {
         console.warn(
@@ -431,17 +405,14 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  const actorUserId =
-    reactingUserMapping.activeMapping?.userId ??
-    suggestionMessage.createdByUserId;
   const suggestionSlackTargetRepositoryFullName =
-    suggestion.targetRepositoryFullName;
+    workItem.targetRepositoryFullName;
 
   const suggestionSlackText = buildSuggestionSlackText({
-    title: suggestion.title,
-    brief: suggestion.brief,
-    category: suggestion.category,
-    priority: suggestion.priority,
+    title: workItem.title,
+    brief: suggestionBrief,
+    category: workItem.category,
+    priority: workItem.priority,
     targetRepositoryFullName: suggestionSlackTargetRepositoryFullName,
   });
   const seededSuggestionSlackText = buildSeededSuggestionSlackText(
@@ -449,19 +420,19 @@ async function launchTaskSuggestionTaskFromReaction({
     reactionEvent.user,
   );
   const suggestionTaskPrompt = buildSuggestionTaskPromptText({
-    title: suggestion.title,
-    brief: suggestion.brief,
-    investigationContext: suggestion.investigationContext,
+    title: workItem.title,
+    brief: suggestionBrief,
+    investigationContext: workItem.investigationContext,
     readinessMessage:
-      suggestionWorkspace.readinessMessage ?? suggestion.readinessMessage,
-    agentType: suggestionMessage.agentType,
-    category: suggestion.category,
-    priority: suggestion.priority,
+      suggestionWorkspace.readinessMessage ?? workItem.readinessMessage,
+    suggestionType,
+    category: workItem.category,
+    priority: workItem.priority,
     targetRepositoryFullName: suggestionSlackTargetRepositoryFullName,
   });
 
   let seededThreadTs: string | undefined;
-  let cloudJob: Awaited<ReturnType<typeof startSlackAppMentionTask>> | null =
+  let taskRun: Awaited<ReturnType<typeof startSlackAppMentionTask>> | null =
     null;
   try {
     seededThreadTs = await slack.postMessage({
@@ -476,18 +447,24 @@ async function launchTaskSuggestionTaskFromReaction({
     });
 
     if (!seededThreadTs) {
-      await db
-        .update(agentSuggestionMessages)
-        .set({ launchClaimedAt: null })
-        .where(eq(agentSuggestionMessages.id, suggestionMessage.id));
+      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
         `${logPrefix} failed to seed top-level Slack message; launch canceled`,
       );
       return false;
     }
 
-    cloudJob = await startSlackAppMentionTask({
-      userId: actorUserId,
+    // The reacting human is the initiator; the old fallback to the
+    // suggestion creator's identity is gone.
+    taskRun = await startSlackAppMentionTask({
+      initiator: {
+        kind: 'user',
+        externalId: reactionEvent.user,
+        ...(reactingUserMapping.activeMapping?.userId
+          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
+          : {}),
+      },
+      trigger: 'manual',
       channel: channelId,
       teamId,
       slackUserId: reactionEvent.user,
@@ -498,10 +475,7 @@ async function launchTaskSuggestionTaskFromReaction({
       repo: suggestionWorkspace.repoForPayload,
       environmentId: suggestionWorkspace.environmentId,
       readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
-      webPath:
-        suggestionMessage.agentType === 'setup_onboarding'
-          ? '/setup'
-          : undefined,
+      webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
       ackEmoji,
       completionEmoji,
       queuedStartedMessage: {
@@ -513,101 +487,104 @@ async function launchTaskSuggestionTaskFromReaction({
       },
     });
 
-    const updated = await db
-      .update(agentSuggestionMessages)
-      .set({
-        taskId: cloudJob.taskId,
-        launchedThreadTs: seededThreadTs,
-        launchedAt: new Date(),
-        launchClaimedAt: null,
-      })
-      .where(
-        and(
-          eq(agentSuggestionMessages.id, suggestionMessage.id),
-          isNull(agentSuggestionMessages.taskId),
-        ),
-      )
-      .returning({ id: agentSuggestionMessages.id });
-
-    if (updated.length === 0) {
-      apiLogger.debug(
-        `[SlackWebhook] setup suggestion reaction became idempotent for ${channelId}:${messageTs}`,
-      );
-      return false;
-    }
-
-    await markSuggestionLaunchStarted({
-      suggestionId,
-      automationWorkItemId: suggestion.automationWorkItemId,
-      taskId: cloudJob.taskId,
+    const launched = await markWorkItemLaunched({
+      workItemId,
+      trackedMessageId: suggestionCard.id,
+      taskId: taskRun.taskId,
+      claimedAt,
+      launchedThreadTs: seededThreadTs,
     });
+
+    if (!launched) {
+      // The task was already enqueued but the fencing guard rejected the
+      // finalize (our stale claim was reclaimed by another launcher), so this
+      // run is orphaned from the work item. Best-effort cancel it while it is
+      // still pre-sandbox; log loudly either way with the cancel outcome.
+      const cancelNote =
+        taskRun.id !== null
+          ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
+          : 'no run id to cancel (reused an existing job)';
+
+      apiLogger.warn(
+        `${logPrefix} finalize lost the fencing guard for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
+      );
+
+      // Mirror the claim-lose path: this duplicate must leave no user-visible
+      // trace. Never post the started message for the canceled orphan, and
+      // remove the seeded root message so no dangling thread points at it;
+      // the winning launcher owns the visible lifecycle.
+      await slack
+        .deleteMessage({ channel: channelId, ts: seededThreadTs })
+        .catch(() => {});
+      return true;
+    }
 
     await postTaskSuggestionStartedMessage({
       slack,
       channelId,
       threadTs: seededThreadTs,
       workspaceName: suggestionWorkspace.workspaceDisplayName,
-      cloudJobId: cloudJob.id,
+      runId: taskRun.id,
       initiatingSlackUserId: reactionEvent.user,
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
     });
 
     apiLogger.debug(
-      `${logPrefix} completed reaction launch lifecycle taskId=${cloudJob.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
+      `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
     );
     return true;
   } catch (error) {
-    if (!cloudJob) {
+    if (!taskRun) {
       if (seededThreadTs) {
         await slack
           .deleteMessage({ channel: channelId, ts: seededThreadTs })
           .catch(() => {});
       }
 
-      await db
-        .update(agentSuggestionMessages)
-        .set({ launchClaimedAt: null })
-        .where(eq(agentSuggestionMessages.id, suggestionMessage.id));
+      await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       apiLogger.debug(
-        `${logPrefix} reaction launch failed before cloud job start; claim released`,
+        `${logPrefix} reaction launch failed before task run start; claim released`,
       );
       throw error;
     }
 
-    const recoveredLaunchState: {
-      taskId: string | null;
-      launchedAt: Date;
-      launchClaimedAt: null;
-      launchedThreadTs?: string;
-    } = {
-      taskId: cloudJob.taskId,
-      launchedAt: new Date(),
-      launchClaimedAt: null,
-    };
-
-    if (seededThreadTs) {
-      recoveredLaunchState.launchedThreadTs = seededThreadTs;
-    }
-
     try {
-      await db
-        .update(agentSuggestionMessages)
-        .set(recoveredLaunchState)
-        .where(
-          and(
-            eq(agentSuggestionMessages.id, suggestionMessage.id),
-            isNull(agentSuggestionMessages.taskId),
-          ),
-        );
-
-      await markSuggestionLaunchStarted({
-        suggestionId,
-        automationWorkItemId: suggestion.automationWorkItemId,
-        taskId: cloudJob.taskId,
+      const recovered = await markWorkItemLaunched({
+        workItemId,
+        trackedMessageId: suggestionCard.id,
+        taskId: taskRun.taskId,
+        claimedAt,
+        launchedThreadTs: seededThreadTs,
       });
 
+      if (!recovered) {
+        // Same orphan case as the happy path: the task is enqueued but the
+        // fencing guard rejected the finalize (claim reclaimed). Best-effort
+        // cancel the orphaned run; log loudly either way with the outcome.
+        const cancelNote =
+          taskRun.id !== null
+            ? await cancelOrphanedWorkItemRunBestEffort(taskRun.id)
+            : 'no run id to cancel (reused an existing job)';
+
+        apiLogger.warn(
+          `${logPrefix} finalize lost the fencing guard during post-enqueue recovery for work item ${workItemId}; task ${taskRun.taskId ?? 'null'} (run ${taskRun.id ?? 'null'}) was orphaned — ${cancelNote}`,
+        );
+
+        // Mirror the claim-lose path: never post the started message for the
+        // canceled orphan, and remove the seeded root message so no dangling
+        // thread points at it; the winning launcher owns the visible
+        // lifecycle.
+        if (seededThreadTs) {
+          await slack
+            .deleteMessage({ channel: channelId, ts: seededThreadTs })
+            .catch(() => {});
+        }
+
+        return true;
+      }
+
       apiLogger.debug(
-        `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${cloudJob.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
+        `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${taskRun.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
       );
 
       if (seededThreadTs) {
@@ -616,9 +593,9 @@ async function launchTaskSuggestionTaskFromReaction({
           channelId,
           threadTs: seededThreadTs,
           workspaceName: suggestionWorkspace.workspaceDisplayName,
-          cloudJobId: cloudJob.id,
+          runId: taskRun.id,
           initiatingSlackUserId: reactionEvent.user,
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
         });
       } else {
         console.warn(
@@ -627,16 +604,13 @@ async function launchTaskSuggestionTaskFromReaction({
       }
 
       apiLogger.debug(
-        `${logPrefix} completed reaction launch lifecycle taskId=${cloudJob.taskId ?? 'null'} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
+        `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
       );
 
       return true;
     } catch (recoveryError) {
       try {
-        await db
-          .update(agentSuggestionMessages)
-          .set({ launchClaimedAt: null })
-          .where(eq(agentSuggestionMessages.id, suggestionMessage.id));
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
       } catch (releaseError) {
         console.warn(
           `${logPrefix} failed to release claim after recovery failure: ${formatErrorForLog(releaseError)}`,
@@ -656,23 +630,46 @@ async function getTaskSuggestionReactionState(input: {
   channelId: string;
   messageTs: string;
 }): Promise<TaskSuggestionReactionState | null> {
-  const [suggestionMessage] = await db
+  const suggestionCard = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.channelId, input.channelId),
+      eq(trackedMessages.messageTs, input.messageTs),
+    ),
+    columns: { workItemId: true, threadTs: true, metadata: true },
+  });
+
+  if (
+    !suggestionCard ||
+    !suggestionCard.workItemId ||
+    !getLaunchableSuggestionType(suggestionCard.metadata)
+  ) {
+    return null;
+  }
+
+  const [workItem] = await db
     .select({
-      taskId: agentSuggestionMessages.taskId,
-      launchClaimedAt: agentSuggestionMessages.launchClaimedAt,
-      launchedThreadTs: agentSuggestionMessages.launchedThreadTs,
+      status: workItems.status,
+      launchedTaskId: workItems.launchedTaskId,
+      launchClaimedAt: workItems.launchClaimedAt,
     })
-    .from(agentSuggestionMessages)
-    .where(
-      and(
-        inArray(agentSuggestionMessages.agentType, TASK_SUGGESTION_AGENT_TYPES),
-        eq(agentSuggestionMessages.channelId, input.channelId),
-        eq(agentSuggestionMessages.messageTs, input.messageTs),
-      ),
-    )
+    .from(workItems)
+    .where(eq(workItems.id, suggestionCard.workItemId))
     .limit(1);
 
-  return suggestionMessage ?? null;
+  if (!workItem) {
+    return null;
+  }
+
+  // Map the work_items launch state onto the reaction-contention shape: a
+  // launched item exposes its task + seeded thread; a claim in flight exposes
+  // launchClaimedAt so contenders wait.
+  return {
+    taskId: workItem.launchedTaskId,
+    launchClaimedAt: workItem.launchClaimedAt,
+    launchedThreadTs:
+      workItem.status === 'launched' ? suggestionCard.threadTs : null,
+  };
 }
 
 async function launchTaskSuggestionTaskWithContention(params: {
@@ -706,158 +703,6 @@ async function launchTaskSuggestionTaskWithContention(params: {
   return lifecycleResult === 'handled';
 }
 
-async function launchCoachSuggestionTaskFromReaction({
-  teamId,
-  slack,
-  reactionEvent,
-  ackEmoji,
-  completionEmoji,
-  sourceText: providedSourceText,
-}: {
-  teamId: string;
-  slack: SlackNotifier;
-  reactionEvent: SlackReactionAddedEvent;
-  ackEmoji: string;
-  completionEmoji: string;
-  sourceText?: string | null;
-}): Promise<boolean> {
-  if (reactionEvent.item.type !== 'message') {
-    return false;
-  }
-
-  const channelId = reactionEvent.item.channel;
-  const messageTs = reactionEvent.item.ts;
-
-  const [suggestion] = await db
-    .select({
-      id: agentSuggestionMessages.id,
-      taskId: agentSuggestionMessages.taskId,
-      createdByUserId: agentSuggestionMessages.createdByUserId,
-    })
-    .from(agentSuggestionMessages)
-    .where(
-      and(
-        eq(agentSuggestionMessages.agentType, 'coach'),
-        eq(agentSuggestionMessages.channelId, channelId),
-        eq(agentSuggestionMessages.messageTs, messageTs),
-      ),
-    )
-    .limit(1);
-
-  if (!suggestion || suggestion.taskId) {
-    return false;
-  }
-
-  const sourceText =
-    providedSourceText?.trim() ??
-    (
-      await slack.getMessage({
-        channel: channelId,
-        messageTs,
-      })
-    )?.text.trim();
-
-  if (!sourceText) {
-    return false;
-  }
-
-  const reactingUserMapping = await lookupSlackUserMapping({
-    slackUserId: reactionEvent.user,
-    teamId,
-  });
-
-  if (reactingUserMapping.hasInactiveMapping) {
-    await slack.postMessage({
-      channel: channelId,
-      text: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
-      blocks: [
-        {
-          type: 'markdown',
-          text: REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE,
-        },
-      ],
-    });
-    return true;
-  }
-
-  const actorUserId =
-    reactingUserMapping.activeMapping?.userId ?? suggestion.createdByUserId;
-  const instructionText = `@${PRODUCT_NAME}, implement this`;
-  const quotedSourceText = sourceText
-    .split('\n')
-    .map((line) => `> ${line}`)
-    .join('\n');
-  const launchText = `<@${reactionEvent.user}>, I'll start on this, per your request:\n${quotedSourceText}`;
-  let deliveryTracker: SlackThreadDeliveryTracker | null = null;
-
-  try {
-    const seededThreadTs = await slack.postMessage({
-      channel: channelId,
-      text: launchText,
-      blocks: [
-        {
-          type: 'markdown',
-          text: launchText,
-        },
-      ],
-    });
-
-    if (!seededThreadTs) {
-      return false;
-    }
-
-    deliveryTracker = new SlackThreadDeliveryTracker(channelId, seededThreadTs);
-    deliveryTracker.track(seededThreadTs);
-
-    const cloudJob = await startSlackAppMentionTask({
-      userId: actorUserId,
-      channel: channelId,
-      teamId,
-      slackUserId: reactionEvent.user,
-      text: instructionText,
-      agentPromptText: `${instructionText}\n\n${sourceText}`,
-      ts: seededThreadTs,
-      threadTs: seededThreadTs,
-      repo: ALL_REPOSITORIES,
-      ackEmoji,
-      completionEmoji,
-      queuedStartedMessage: {
-        ts: seededThreadTs,
-        agentName: AGENT_DISPLAY_NAME,
-        initiatingSlackUserId: reactionEvent.user,
-        workspaceDisplayName: 'all repos',
-        workspaceOnly: false,
-      },
-    });
-
-    const updated = await db
-      .update(agentSuggestionMessages)
-      .set({
-        taskId: cloudJob.taskId,
-        launchedThreadTs: seededThreadTs,
-        launchedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentSuggestionMessages.id, suggestion.id),
-          isNull(agentSuggestionMessages.taskId),
-        ),
-      )
-      .returning({ id: agentSuggestionMessages.id });
-
-    if (updated.length === 0) {
-      apiLogger.debug(
-        `[SlackWebhook] coach reaction became idempotent for ${channelId}:${messageTs}`,
-      );
-      return false;
-    }
-
-    return true;
-  } finally {
-    await deliveryTracker?.commit();
-  }
-}
-
 export async function handleReactionAddedEvent(params: {
   context: SlackWebhookContext;
   event: SlackReactionAddedEvent;
@@ -883,60 +728,7 @@ export async function handleReactionAddedEvent(params: {
     return;
   }
 
-  const launchCoachSuggestionWithContention = async (
-    sourceText?: string | null,
-  ) => {
-    apiLogger.debug(
-      `[SlackWebhook] Processing tracked coach reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
-    );
-
-    const coachLockKey = `slack:coach-reaction:${event.item.channel}:${event.item.ts}`;
-
-    const { value: coachReactionHandled } = await withContention<boolean>(
-      coachLockKey,
-      {
-        ttlSeconds: 30,
-        poll: { intervalMs: 400, maxAttempts: 10 },
-        onAcquired: async () =>
-          launchCoachSuggestionTaskFromReaction({
-            teamId: context.teamId,
-            slack: context.slack,
-            reactionEvent: event,
-            ackEmoji: reactionNames.ackEmoji,
-            completionEmoji: reactionNames.completionEmoji,
-            sourceText,
-          }),
-        onContended: async () => {
-          const [existing] = await db
-            .select({ taskId: agentSuggestionMessages.taskId })
-            .from(agentSuggestionMessages)
-            .where(
-              and(
-                eq(agentSuggestionMessages.agentType, 'coach'),
-                eq(agentSuggestionMessages.channelId, event.item.channel),
-                eq(agentSuggestionMessages.messageTs, event.item.ts),
-              ),
-            )
-            .limit(1);
-
-          return Boolean(existing?.taskId);
-        },
-      },
-    );
-
-    return coachReactionHandled;
-  };
-
   if (isThumbsUp) {
-    const coachReactionHandled = await launchCoachSuggestionWithContention();
-
-    if (coachReactionHandled) {
-      apiLogger.debug(
-        `[SlackWebhook] Coach reaction launched task for ${event.item.channel}:${event.item.ts}`,
-      );
-      return;
-    }
-
     apiLogger.debug(
       `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
     );
@@ -990,17 +782,6 @@ export async function handleReactionAddedEvent(params: {
     sourceMessage.app_id === context.slackInstallation.appId;
 
   if (isRoomoteAuthoredBotMessage) {
-    const coachReactionHandled = await launchCoachSuggestionWithContention(
-      sourceMessage.text,
-    );
-
-    if (coachReactionHandled) {
-      apiLogger.debug(
-        `[SlackWebhook] Coach reaction launched task for ${event.item.channel}:${event.item.ts}`,
-      );
-      return;
-    }
-
     apiLogger.debug(
       `[SlackWebhook] Ignoring summon reaction on Roomote-authored bot message ${event.item.channel}:${event.item.ts}`,
     );

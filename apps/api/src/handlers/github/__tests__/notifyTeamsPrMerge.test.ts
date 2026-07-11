@@ -37,12 +37,12 @@ vi.mock('@roomote/db/server', () => ({
       taskPullRequests: {
         findMany: vi.fn(),
       },
-      cloudJobs: {
+      taskRuns: {
         findMany: vi.fn(),
       },
     },
   },
-  cloudJobs: {},
+  taskRuns: {},
   githubInstallations: {},
   taskPullRequests: {},
   eq: vi.fn(),
@@ -57,7 +57,7 @@ const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
 const mockedTaskPullRequestsFind = vi.mocked(
   db.query.taskPullRequests.findMany,
 );
-const mockedCloudJobsFind = vi.mocked(db.query.cloudJobs.findMany);
+const mockedTaskRunsFind = vi.mocked(db.query.taskRuns.findMany);
 
 const teamsPayload = {
   communicationProvider: 'teams',
@@ -87,7 +87,7 @@ describe('notifyTeamsPrMerge', () => {
   it('posts a markdown merge notification into the Teams thread', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
 
     await notifyTeamsPrMerge(baseParams);
 
@@ -104,7 +104,7 @@ describe('notifyTeamsPrMerge', () => {
   it('skips jobs whose payload is not Teams-backed', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTaskRunsFind.mockResolvedValue([
       { payload: { channel: 'C123', thread_ts: 'ts-1' } },
       { payload: null },
     ] as any);
@@ -117,7 +117,7 @@ describe('notifyTeamsPrMerge', () => {
   it('skips Teams payloads that are missing conversation metadata', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTaskRunsFind.mockResolvedValue([
       {
         payload: {
           communicationProvider: 'teams',
@@ -137,7 +137,7 @@ describe('notifyTeamsPrMerge', () => {
       { taskId: 'task-1' },
       { taskId: 'task-2' },
     ] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTaskRunsFind.mockResolvedValue([
       { payload: teamsPayload },
       { payload: teamsPayload },
     ] as any);
@@ -161,14 +161,14 @@ describe('notifyTeamsPrMerge', () => {
 
     await notifyTeamsPrMerge(baseParams);
 
-    expect(mockedCloudJobsFind).not.toHaveBeenCalled();
+    expect(mockedTaskRunsFind).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
   it('skips posting when Teams bot credentials are not configured', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
     mockCreateTeamsCommunicationProviderFromEnv.mockReturnValue(null as any);
 
     await notifyTeamsPrMerge(baseParams);
@@ -179,7 +179,7 @@ describe('notifyTeamsPrMerge', () => {
   it('does not throw when posting to Teams fails', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: teamsPayload }] as any);
     mockPostMessage.mockRejectedValue(new Error('Teams is down'));
 
     await expect(notifyTeamsPrMerge(baseParams)).resolves.toBeUndefined();
@@ -188,7 +188,7 @@ describe('notifyTeamsPrMerge', () => {
   it('supports Teams alias payload fields from snapshot resume payloads', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
-    mockedCloudJobsFind.mockResolvedValue([
+    mockedTaskRunsFind.mockResolvedValue([
       {
         payload: {
           teamsConversationId: 'conversation-2',

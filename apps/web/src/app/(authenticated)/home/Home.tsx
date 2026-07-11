@@ -15,7 +15,7 @@ import {
 } from '@roomote/types';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 
-import { type CreateCloudTask, createCloudTaskSchema } from '@/types';
+import { type CreateTaskFormValues, createTaskFormSchema } from '@/types';
 
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
@@ -29,10 +29,7 @@ import {
   type WorkspaceSelection,
   useWorkspaceStorage,
 } from '@/hooks/useWorkspaceStorage';
-import {
-  useCreateStandardTaskCloudJob,
-  useRouteHomeTask,
-} from '@/hooks/cloud-jobs';
+import { useCreateStandardTaskRun, useRouteHomeTask } from '@/hooks/task-runs';
 
 import {
   Alert,
@@ -71,7 +68,7 @@ type SubmissionSnapshot = {
   blank: boolean;
 };
 
-const DEFAULT_FORM_VALUES: CreateCloudTask = {
+const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
   repository: AUTO_WORKSPACE_VALUE,
   branch: '',
   environmentId: undefined,
@@ -209,8 +206,8 @@ export function Home({
     };
   }, []);
 
-  const form = useForm<CreateCloudTask>({
-    resolver: zodResolver(createCloudTaskSchema),
+  const form = useForm<CreateTaskFormValues>({
+    resolver: zodResolver(createTaskFormSchema),
     defaultValues: DEFAULT_FORM_VALUES,
   });
   const watchedRepository = form.watch('repository');
@@ -286,7 +283,7 @@ export function Home({
     el.classList.add('animate-wiggle');
   }, []);
 
-  const navigateToJob = (result: {
+  const navigateToTaskRun = (result: {
     success: boolean;
     taskId?: string;
     error?: string;
@@ -300,11 +297,11 @@ export function Home({
   };
 
   const mutationOptions = {
-    onSuccess: navigateToJob,
+    onSuccess: navigateToTaskRun,
     onError: (error: Error) => toast.error(error.message),
   };
 
-  const createStandardTaskJob = useCreateStandardTaskCloudJob(mutationOptions);
+  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions);
   const routeHomeTask = useRouteHomeTask();
   const launchTaskModels = useLaunchTaskModels();
   const selectedModelId =
@@ -321,7 +318,7 @@ export function Home({
       blank: boolean;
     }): Promise<boolean> => {
       try {
-        const result = await createStandardTaskJob.mutateAsync({
+        const result = await createStandardTaskRun.mutateAsync({
           harness: DEFAULT_LAUNCH_CODING_HARNESS,
           model: payload.modelId ?? selectedModelId,
           computeProvider: selectedComputeProvider,
@@ -333,7 +330,7 @@ export function Home({
         return false;
       }
     },
-    [createStandardTaskJob, selectedComputeProvider, selectedModelId],
+    [createStandardTaskRun, selectedComputeProvider, selectedModelId],
   );
 
   useEffect(() => {
@@ -371,7 +368,7 @@ export function Home({
   }, []);
 
   const isBusy =
-    createStandardTaskJob.isPending ||
+    createStandardTaskRun.isPending ||
     routingState === 'routing_pending' ||
     routingState === 'launching';
 

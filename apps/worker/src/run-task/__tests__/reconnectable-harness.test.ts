@@ -19,7 +19,7 @@ import { ReconnectableHarness } from '../reconnectable-harness';
 
 function createLogger() {
   return {
-    cloudJobId: 1,
+    runId: 1,
     filePath: '/tmp/test.log',
     info: vi.fn(),
     warn: vi.fn(),
@@ -899,5 +899,97 @@ describe('ReconnectableHarness', () => {
         payload: ['session-recover-new'],
       }),
     ]);
+  });
+
+  describe('diagnostic breadcrumbs', () => {
+    it('records disconnect and reconnect breadcrumbs', async () => {
+      const harnesses = [new FakeHarness(), new FakeHarness()];
+      const record = vi.fn();
+      const reconnectableHarness = new ReconnectableHarness({
+        logger: createLogger(),
+        spawnHarness: async () => ({
+          harness: harnesses.shift()!,
+          subprocess: createSubprocess() as never,
+        }),
+        diagnosticEvents: { record },
+      });
+      const first = harnesses[0]!;
+
+      await reconnectableHarness.start();
+      first.emit('disconnected');
+
+      await vi.waitFor(() => {
+        expect(record).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: 'harness_reconnected' }),
+        );
+      });
+      expect(record).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'harness_disconnected' }),
+      );
+
+      reconnectableHarness.dispose();
+    });
+
+    it('records exhaustion when reconnecting gives up', async () => {
+      const first = new FakeHarness();
+      let spawnedOnce = false;
+      const record = vi.fn();
+      const reconnectableHarness = new ReconnectableHarness({
+        logger: createLogger(),
+        maxReconnectAttempts: 1,
+        spawnHarness: async () => {
+          if (!spawnedOnce) {
+            spawnedOnce = true;
+            return { harness: first, subprocess: createSubprocess() as never };
+          }
+          throw new Error('spawn failed');
+        },
+        diagnosticEvents: { record },
+      });
+
+      await reconnectableHarness.start();
+      first.emit('disconnected');
+
+      await vi.waitFor(() => {
+        expect(record).toHaveBeenCalledWith(
+          expect.objectContaining({
+            kind: 'harness_reconnect_exhausted',
+            details: expect.objectContaining({ maxAttempts: 1 }),
+          }),
+        );
+      });
+
+      reconnectableHarness.dispose();
+    });
+
+    it('records external reconnect requests with their reason', async () => {
+      const harnesses = [new FakeHarness(), new FakeHarness()];
+      const record = vi.fn();
+      const reconnectableHarness = new ReconnectableHarness({
+        logger: createLogger(),
+        spawnHarness: async () => ({
+          harness: harnesses.shift()!,
+          subprocess: createSubprocess() as never,
+        }),
+        diagnosticEvents: { record },
+      });
+
+      await reconnectableHarness.start();
+      await reconnectableHarness.requestReconnect({
+        reason: 'environment variables updated',
+      });
+
+      expect(record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'harness_restart_requested',
+          details: expect.objectContaining({
+            source: 'external',
+            reason: 'environment variables updated',
+          }),
+        }),
+      );
+
+      reconnectableHarness.dispose();
+    });
   });
 });

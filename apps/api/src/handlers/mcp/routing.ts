@@ -11,7 +11,7 @@ import { roomoteMcp } from './roomote';
 /**
  * Router-facing MCP endpoints.
  * These accept user-scoped auth tokens so the LLM router can gather context
- * before a cloud job exists.
+ * before a task run exists.
  */
 export const mcpRouting = new Hono<{ Variables: Variables }>();
 

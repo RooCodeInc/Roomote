@@ -8,7 +8,7 @@ import {
 import { createWSClient, wsLink } from '@trpc/client/links/wsLink/wsLink';
 import superjson from 'superjson';
 import WebSocket from 'ws';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import { findFreePort } from '../../services/find-free-port';
 
@@ -68,11 +68,11 @@ class FakeHarnessManager extends EventEmitter {
 }
 
 async function startSandboxServer(
-  validateToken: (token: string) => Promise<AuthTokenContext | JobTokenContext>,
+  validateToken: (token: string) => Promise<AuthTokenContext | RunTokenContext>,
   options?: {
     allowTerminal?: boolean;
-    cloudJobId?: number;
-    cloudJobOrgId?: string;
+    runId?: number;
+    taskRunOrgId?: string;
   },
 ) {
   const port = await findFreePort();
@@ -85,7 +85,7 @@ async function startSandboxServer(
     harness: harness as never,
     harnessManager: harnessManager as never,
     allowTerminal: options?.allowTerminal ?? true,
-    cloudJobId: options?.cloudJobId ?? 1,
+    runId: options?.runId ?? 1,
     validateToken,
   });
 
@@ -97,12 +97,13 @@ async function startSandboxServer(
   };
 }
 
-const validJobTokenContext = {
-  cloudJobId: 1,
+const validRunTokenContext = {
+  runId: 1,
   userId: 'user-1',
-  tokenType: 'cj',
+  principal: 'user',
+  tokenType: 'run',
   version: 1,
-} satisfies JobTokenContext;
+} satisfies RunTokenContext;
 
 const validAuthTokenContext = {
   userId: 'user-1',
@@ -140,7 +141,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken);
@@ -173,7 +174,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken);
@@ -205,20 +206,20 @@ describe('sandbox server transports', () => {
     }
   });
 
-  it('rejects HTTP mutations when a job token targets a different sandbox cloud job', async () => {
+  it('rejects HTTP mutations when a run token targets a different sandbox task run', async () => {
     const validateToken = vi.fn(async (token: string) => {
       if (token !== 'ok-token') {
         throw new Error('bad token');
       }
 
       return {
-        ...validJobTokenContext,
-        cloudJobId: 2,
-      } satisfies JobTokenContext;
+        ...validRunTokenContext,
+        runId: 2,
+      } satisfies RunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken, {
-      cloudJobId: 1,
+      runId: 1,
     });
 
     try {
@@ -238,7 +239,7 @@ describe('sandbox server transports', () => {
         client.commands.touchKeepalive.mutate(),
       ).rejects.toMatchObject({
         message: expect.stringContaining(
-          'Token cloud job does not match sandbox cloud job',
+          'Token task run does not match sandbox task run',
         ),
         data: expect.objectContaining({
           code: 'UNAUTHORIZED',
@@ -260,7 +261,7 @@ describe('sandbox server transports', () => {
     });
 
     const sandbox = await startSandboxServer(validateToken, {
-      cloudJobId: 1,
+      runId: 1,
     });
 
     try {
@@ -290,7 +291,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken);
@@ -377,7 +378,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken);
@@ -455,20 +456,20 @@ describe('sandbox server transports', () => {
     }
   });
 
-  it('rejects websocket subscriptions when a job token targets a different sandbox cloud job', async () => {
+  it('rejects websocket subscriptions when a run token targets a different sandbox task run', async () => {
     const validateToken = vi.fn(async (token: string) => {
       if (token !== 'ok-token') {
         throw new Error('bad token');
       }
 
       return {
-        ...validJobTokenContext,
-        cloudJobId: 2,
-      } satisfies JobTokenContext;
+        ...validRunTokenContext,
+        runId: 2,
+      } satisfies RunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken, {
-      cloudJobId: 1,
+      runId: 1,
     });
     const wsClient = createWSClient({
       url: `ws://127.0.0.1:${sandbox.port}/ws/trpc`,
@@ -494,7 +495,7 @@ describe('sandbox server transports', () => {
 
       expect(error).toBeInstanceOf(TRPCClientError);
       expect(error.message).toMatch(
-        /Token cloud job does not match sandbox cloud job|Unauthorized|not open/i,
+        /Token task run does not match sandbox task run|Unauthorized|not open/i,
       );
     } finally {
       await wsClient.close();
@@ -508,7 +509,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken);
@@ -545,20 +546,20 @@ describe('sandbox server transports', () => {
     }
   });
 
-  it('rejects terminal websocket upgrades when a job token targets a different sandbox cloud job', async () => {
+  it('rejects terminal websocket upgrades when a run token targets a different sandbox task run', async () => {
     const validateToken = vi.fn(async (token: string) => {
       if (token !== 'ok-token') {
         throw new Error('bad token');
       }
 
       return {
-        ...validJobTokenContext,
-        cloudJobId: 2,
-      } satisfies JobTokenContext;
+        ...validRunTokenContext,
+        runId: 2,
+      } satisfies RunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken, {
-      cloudJobId: 1,
+      runId: 1,
     });
 
     try {
@@ -595,7 +596,7 @@ describe('sandbox server transports', () => {
         throw new Error('bad token');
       }
 
-      return validJobTokenContext;
+      return validRunTokenContext;
     });
 
     const sandbox = await startSandboxServer(validateToken, {

@@ -64,9 +64,9 @@ export function RecentTasksList({ enabled }: RecentTasksListProps) {
                 <p className="truncate text-sm grow">{task.title}</p>
                 <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                   <WorkspaceBadge
-                    environmentId={task.cloudJob?.payload?.environmentId}
+                    environmentId={task.taskRun?.payload?.environmentId}
                     repo={
-                      task.cloudJob?.payload?.repo ??
+                      task.taskRun?.payload?.repo ??
                       task.repositoryName ??
                       undefined
                     }

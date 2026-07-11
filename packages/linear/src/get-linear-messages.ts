@@ -3,14 +3,14 @@ import { getRedis } from '@roomote/redis';
 import type { LinearSessionMessage } from './types';
 
 /**
- * Retrieve all queued Linear messages for a cloud job.
+ * Retrieve all queued Linear messages for a task run.
  * Messages are cleared after retrieval using an atomic transaction.
  */
 export async function getLinearMessages(
-  cloudJobId: number,
+  runId: number,
 ): Promise<LinearSessionMessage[]> {
   const redis = getRedis();
-  const key = `linear:messages:${cloudJobId}`;
+  const key = `linear:messages:${runId}`;
 
   // Use a transaction to atomically get and delete messages.
   // This prevents race conditions where messages added between lrange and del would be lost.
@@ -25,7 +25,7 @@ export async function getLinearMessages(
 
   if (lrangeError) {
     console.error(
-      `[getLinearMessages] Redis lrange failed for cloud job ${cloudJobId}: ${lrangeError instanceof Error ? lrangeError.message : String(lrangeError)}`,
+      `[getLinearMessages] Redis lrange failed for task run ${runId}: ${lrangeError instanceof Error ? lrangeError.message : String(lrangeError)}`,
     );
 
     return [];
@@ -36,7 +36,7 @@ export async function getLinearMessages(
 
   if (delError) {
     console.error(
-      `[getLinearMessages] Redis del failed for cloud job ${cloudJobId}: ${delError instanceof Error ? delError.message : String(delError)}`,
+      `[getLinearMessages] Redis del failed for task run ${runId}: ${delError instanceof Error ? delError.message : String(delError)}`,
     );
 
     // Continue processing even if del fails - we still have the messages.
@@ -49,7 +49,7 @@ export async function getLinearMessages(
   }
 
   console.log(
-    `[getLinearMessages] Retrieved ${rawMessages.length} message(s) for cloud job ${cloudJobId}`,
+    `[getLinearMessages] Retrieved ${rawMessages.length} message(s) for task run ${runId}`,
   );
 
   // Parse messages with error handling to prevent crashes from corrupted data.
@@ -60,7 +60,7 @@ export async function getLinearMessages(
       messages.push(JSON.parse(msg) as LinearSessionMessage);
     } catch (error) {
       console.error(
-        `[getLinearMessages] Failed to parse message for cloud job ${cloudJobId}: ${error instanceof Error ? error.message : String(error)}`,
+        `[getLinearMessages] Failed to parse message for task run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
       );
 
       // Skip corrupted messages and continue processing.

@@ -1,6 +1,46 @@
 import { buildSetupSourceControlStatus } from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
+  it('returns plain-text savedValue for non-secret fields only', () => {
+    const status = buildSetupSourceControlStatus({
+      runtimeEnv: {
+        NEXT_PUBLIC_GITHUB_APP_SLUG: 'runtime-slug',
+        GITHUB_APP_ID: '123',
+        GITHUB_APP_PRIVATE_KEY: 'runtime-private-key',
+      },
+      persistedEnvVarNames: [
+        'NEXT_PUBLIC_GITHUB_APP_SLUG',
+        'GITHUB_APP_ID',
+        'GITHUB_APP_PRIVATE_KEY',
+        'GITHUB_CLIENT_ID',
+      ],
+      persistedEnvVarValues: {
+        NEXT_PUBLIC_GITHUB_APP_SLUG: 'saved-slug',
+        GITHUB_APP_ID: '999',
+        GITHUB_APP_PRIVATE_KEY: 'should-never-surface',
+        GITHUB_CLIENT_ID: 'saved-client-id',
+      },
+    });
+    const github = status.providers.find(
+      (provider) => provider.provider === 'github',
+    );
+
+    expect(
+      github?.fields.find(
+        (field) => field.envVarName === 'NEXT_PUBLIC_GITHUB_APP_SLUG',
+      )?.savedValue,
+    ).toBe('runtime-slug');
+    expect(
+      github?.fields.find((field) => field.envVarName === 'GITHUB_CLIENT_ID')
+        ?.savedValue,
+    ).toBe('saved-client-id');
+    expect(
+      github?.fields.find(
+        (field) => field.envVarName === 'GITHUB_APP_PRIVATE_KEY',
+      )?.savedValue,
+    ).toBeNull();
+  });
+
   it('counts a provider as setup-complete only when connected with repositories', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {

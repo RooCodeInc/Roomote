@@ -5,6 +5,8 @@ const { mockFetchPr } = vi.hoisted(() => ({
 vi.mock('@roomote/github', () => ({
   createIssueComment: vi.fn(),
   updateIssueComment: vi.fn(),
+  getEffectiveGitHubAppSlug: vi.fn(() => 'roomote'),
+  resolveConfiguredGitHubAppSlug: vi.fn(async () => 'roomote'),
   Cli: {
     fetchPr: mockFetchPr,
   },
@@ -17,7 +19,7 @@ import type {
   GithubPullRequestReviewOpenTask,
   GithubPullRequestReviewSyncTask,
 } from '@roomote/types';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { githubPrReview } from '../githubPrReview';
 import { githubPrReviewSync } from '../githubPrReviewSync';
@@ -54,12 +56,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds initial GitLab MR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: basePayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -73,12 +75,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds GitLab MR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: basePayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -90,12 +92,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds initial Gitea PR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: giteaPayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -107,12 +109,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds Gitea PR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: giteaPayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -124,12 +126,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds initial Azure DevOps PR review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReview({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReview,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReview,
         payload: adoPayload,
       } as GithubPullRequestReviewOpenTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();
@@ -143,12 +145,12 @@ describe('GitLab MR review workflows', () => {
 
   it('builds Azure DevOps PR sync review prompts without fetching GitHub PR details', async () => {
     const result = await githubPrReviewSync({
-      cloudTask: {
-        type: CloudTaskType.GithubPrReviewSync,
+      taskSpec: {
+        type: TaskPayloadKind.GithubPrReviewSync,
         payload: adoPayload,
       } as GithubPullRequestReviewSyncTask,
       gitHubToken: 'unused',
-      cloudJobUrl: 'https://roomote.example/task/1',
+      taskRunUrl: 'https://roomote.example/task/1',
     });
 
     expect(mockFetchPr).not.toHaveBeenCalled();

@@ -1,0 +1,204 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - develop
+
+# One release automation lane on develop. Cancel superseded runs: every run
+# re-derives state from the live develop tip, so the newest push always redoes
+# the work and a stale queued run can never resurrect an outdated Version PR.
+concurrency:
+  group: release-develop
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    name: Version PR
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Prefer RELEASE_BOT_TOKEN so the Version PR triggers CI when it is
+          # opened. Fall back to GITHUB_TOKEN when the secret is not yet set
+          # (first-time bootstrap still opens the PR; CI may need a re-run).
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          # Work on the live develop tip, not the push SHA that triggered
+          # this run: a queued run that starts after more merges must not
+          # recreate a Version PR from an outdated snapshot.
+          ref: develop
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          frozen-lockfile: 'true'
+
+      - name: Create, refresh, or close the Version PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          HUSKY: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          branch='changeset-release/develop'
+
+          close_stale_version_pr() {
+            local existing
+            existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+            if [ -n "$existing" ]; then
+              gh pr close "$existing" --comment 'No versionable changesets remain on develop; closing this stale Version PR.' --delete-branch || true
+            fi
+          }
+
+          pending="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+
+          if [ "${pending:-0}" -eq 0 ]; then
+            close_stale_version_pr
+            echo "No pending changesets; nothing to version."
+            exit 0
+          fi
+
+          pnpm run version
+          version="$(node -p "require('./package.json').version")"
+
+          # Rebuild the branch from the live develop tip on every run so the
+          # Version PR is always a single fresh commit and never drifts.
+          git checkout -B "$branch"
+          git add package.json CHANGELOG.md .changeset
+          if git diff --cached --quiet; then
+            # Changeset files exist but none carry a valid bump (for example
+            # an empty changeset); there is nothing to version yet, and any
+            # previously opened Version PR no longer reflects a real release.
+            close_stale_version_pr
+            echo "No versionable changesets; nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore(release): version roomote ${version}"
+          git push --force origin "$branch"
+
+          notes="$(node scripts/release/extract-changelog-section.mjs "$version" || true)"
+          body_file="$(mktemp)"
+          {
+            echo "Automated Version PR: bumps the product version to \`${version}\` and folds the pending changesets into the root \`CHANGELOG.md\`."
+            echo
+            echo "- **Squash-merge** this PR into \`develop\` to cut the release."
+            echo "- The frozen \`release/v${version}\` promote PR to \`main\` opens automatically after the merge."
+            echo "- New changesets on \`develop\` refresh this PR automatically."
+            echo
+            if [ -n "$notes" ]; then
+              echo "$notes"
+            fi
+          } > "$body_file"
+
+          existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Version PR already open: #$existing"
+            gh pr edit "$existing" --title "Release Roomote ${version}" --body-file "$body_file"
+          else
+            gh pr create \
+              --base develop \
+              --head "$branch" \
+              --title "Release Roomote ${version}" \
+              --body-file "$body_file"
+          fi
+          rm -f "$body_file"
+
+  promote:
+    name: Open or refresh Promote PR
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: version
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          ref: develop
+
+      - name: Cut frozen release branch and open promote PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(node -p "require('./package.json').version")"
+          : "${version:?missing package.json version}"
+          tag="v${version}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1 || git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
+            echo "Tag $tag already exists; nothing to promote."
+            exit 0
+          fi
+
+          git fetch origin main --quiet
+
+          if ! git show-ref --verify --quiet refs/remotes/origin/main; then
+            echo "origin/main is missing; create main before promoting."
+            exit 1
+          fi
+
+          # Freeze the release at the commit that introduced this version
+          # (the Version PR merge), not at the moving develop tip. Commits
+          # merged to develop after that point wait for the next cut instead
+          # of silently riding into this release.
+          bump_sha="$(node scripts/release/find-version-commit.mjs "$version" HEAD)"
+
+          if git merge-base --is-ancestor "$bump_sha" origin/main; then
+            echo "main already contains ${bump_sha}; nothing to promote."
+            exit 0
+          fi
+
+          release_branch="release/${tag}"
+          if git ls-remote --exit-code --heads origin "$release_branch" >/dev/null 2>&1; then
+            echo "Release branch ${release_branch} already exists; leaving it frozen."
+          else
+            git push origin "${bump_sha}:refs/heads/${release_branch}"
+            echo "Cut ${release_branch} at ${bump_sha}"
+          fi
+
+          notes="$(node scripts/release/extract-changelog-section.mjs "$version" || true)"
+          body_file="$(mktemp)"
+          {
+            echo "## Promote ${tag}"
+            echo
+            echo "Frozen at \`${bump_sha}\` — the commit where \`${version}\` was versioned. Commits merged to \`develop\` after that point ship in the next release."
+            echo
+            echo "- Merge this PR with a **merge commit** (do not squash or rebase)."
+            echo "- If multiple promote PRs are open, merge them in version order (oldest first)."
+            echo "- Merging publishes a GitHub Release for \`${tag}\` and triggers the existing GHCR \`v*\` image publish (\`latest\` channel)."
+            echo "- The \`${release_branch}\` branch can be deleted after this PR merges."
+            echo
+            echo "### Changelog"
+            echo
+            if [ -n "$notes" ]; then
+              echo "$notes"
+            else
+              echo "_No CHANGELOG section found for ${version}; see commits on develop._"
+            fi
+          } > "$body_file"
+
+          existing="$(gh pr list --base main --head "$release_branch" --state open --json number,url --jq '.[0].url // empty')"
+          if [ -n "$existing" ]; then
+            echo "Promote PR already open: $existing"
+            gh pr edit "$existing" --title "Promote ${tag} to production" --body-file "$body_file"
+            rm -f "$body_file"
+            exit 0
+          fi
+
+          gh pr create \
+            --base main \
+            --head "$release_branch" \
+            --title "Promote ${tag} to production" \
+            --body-file "$body_file"
+          rm -f "$body_file"

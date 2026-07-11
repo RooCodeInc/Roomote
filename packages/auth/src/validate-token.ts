@@ -1,37 +1,37 @@
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import { validateAuthToken } from './auth-token';
-import { validateJobToken } from './job-token';
+import { validateRunToken } from './run-token';
 
 /**
- * Validates a token that may be either a job token (`cj`) or an auth token (`auth`).
+ * Validates a token that may be either a run token (`run`) or an auth token (`auth`).
  *
- * During the migration to job-scoped tokens, both token types need to be accepted
- * by the sandbox server. This function tries `validateJobToken` first (since job
+ * During the migration to run-scoped tokens, both token types need to be accepted
+ * by the sandbox server. This function tries `validateRunToken` first (since run
  * tokens are the preferred type for worker contexts), then falls back to
  * `validateAuthToken`.
  *
- * Once all callers have migrated to job tokens, this function can be removed and
- * replaced with a direct call to `validateJobToken`.
+ * Once all callers have migrated to run tokens, this function can be removed and
+ * replaced with a direct call to `validateRunToken`.
  */
 export async function validateToken(
   token: string,
-): Promise<JobTokenContext | AuthTokenContext> {
-  let jobTokenError: unknown;
+): Promise<RunTokenContext | AuthTokenContext> {
+  let runTokenError: unknown;
 
   try {
-    return await validateJobToken(token);
+    return await validateRunToken(token);
   } catch (error) {
-    jobTokenError = error;
+    runTokenError = error;
   }
 
   try {
     return await validateAuthToken(token);
   } catch (authTokenError) {
-    const jobMsg =
-      jobTokenError instanceof Error
-        ? jobTokenError.message
-        : String(jobTokenError);
+    const runMsg =
+      runTokenError instanceof Error
+        ? runTokenError.message
+        : String(runTokenError);
 
     const authMsg =
       authTokenError instanceof Error
@@ -39,7 +39,7 @@ export async function validateToken(
         : String(authTokenError);
 
     throw new Error(
-      `Token validation failed (job: ${jobMsg}; auth: ${authMsg})`,
+      `Token validation failed (run: ${runMsg}; auth: ${authMsg})`,
     );
   }
 }

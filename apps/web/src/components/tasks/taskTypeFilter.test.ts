@@ -1,7 +1,4 @@
-import {
-  CloudTaskType,
-  DEFAULT_VISIBLE_CLOUD_TASK_TYPES,
-} from '@roomote/types';
+import { DEFAULT_VISIBLE_TASK_WORKFLOWS } from '@/lib/task-categories';
 
 import {
   getTaskTypeFilterButtonLabel,
@@ -11,12 +8,10 @@ import {
 } from './taskTypeFilter';
 
 describe('taskTypeFilter helpers', () => {
-  it('parses valid task types and ignores invalid entries', () => {
-    expect(
-      parseTaskTypeFilterParam(
-        `invalid,${CloudTaskType.StandardTask},${CloudTaskType.StandardTask}`,
-      ),
-    ).toEqual([CloudTaskType.StandardTask]);
+  it('parses valid workflows and ignores invalid entries', () => {
+    expect(parseTaskTypeFilterParam('invalid,standard,standard')).toEqual([
+      'standard',
+    ]);
   });
 
   it('treats all-invalid values as malformed input', () => {
@@ -29,10 +24,10 @@ describe('taskTypeFilter helpers', () => {
 
   it('treats the default visible selection as the unset state', () => {
     expect(
-      isDefaultTaskTypeFilterSelection(DEFAULT_VISIBLE_CLOUD_TASK_TYPES),
+      isDefaultTaskTypeFilterSelection(DEFAULT_VISIBLE_TASK_WORKFLOWS),
     ).toBe(true);
     expect(
-      serializeTaskTypeFilterParam(DEFAULT_VISIBLE_CLOUD_TASK_TYPES),
+      serializeTaskTypeFilterParam(DEFAULT_VISIBLE_TASK_WORKFLOWS),
     ).toBeNull();
   });
 
@@ -41,9 +36,7 @@ describe('taskTypeFilter helpers', () => {
     expect(getTaskTypeFilterButtonLabel([])).toBe('No Types');
   });
 
-  it('uses the raw task type value when only one type is selected', () => {
-    expect(getTaskTypeFilterButtonLabel([CloudTaskType.GithubPrReview])).toBe(
-      CloudTaskType.GithubPrReview,
-    );
+  it('uses the raw workflow value when only one workflow is selected', () => {
+    expect(getTaskTypeFilterButtonLabel(['pr_review'])).toBe('pr_review');
   });
 });

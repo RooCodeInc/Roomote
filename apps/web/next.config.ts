@@ -54,6 +54,11 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'secure.gravatar.com',
       },
+      {
+        // Microsoft Entra sign-in avatars (Teams deployments).
+        protocol: 'https',
+        hostname: 'graph.microsoft.com',
+      },
     ],
   },
   devIndicators: false,

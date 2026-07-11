@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import { TaskStatusIndicator } from './TaskStatusIndicator';
 
@@ -11,7 +11,7 @@ vi.mock('@/components/system', () => ({
 
 describe('TaskStatusIndicator', () => {
   it('falls back idle status to idle color/label when phase is missing', () => {
-    render(<TaskStatusIndicator status={CloudTaskStatus.Idle} />);
+    render(<TaskStatusIndicator status={RunStatus.Idle} />);
 
     const label = screen.getByText('Idle');
     expect(label.parentElement).toHaveClass('text-muted-foreground');
@@ -20,7 +20,7 @@ describe('TaskStatusIndicator', () => {
   it('prefers phase mapping when phase is available', () => {
     render(
       <TaskStatusIndicator
-        status={CloudTaskStatus.Idle}
+        status={RunStatus.Idle}
         phase="waiting_for_prompt"
       />,
     );
@@ -32,7 +32,7 @@ describe('TaskStatusIndicator', () => {
   it('renders waiting_for_user_input as needs input', () => {
     render(
       <TaskStatusIndicator
-        status={CloudTaskStatus.Running}
+        status={RunStatus.Running}
         phase="waiting_for_user_input"
       />,
     );
@@ -43,7 +43,7 @@ describe('TaskStatusIndicator', () => {
 
   it('renders compact dot-only mode without text', () => {
     const { container } = render(
-      <TaskStatusIndicator compact status={CloudTaskStatus.Running} />,
+      <TaskStatusIndicator compact status={RunStatus.Running} />,
     );
 
     expect(screen.queryByText('Working')).not.toBeInTheDocument();

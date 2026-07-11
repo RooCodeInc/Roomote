@@ -1,18 +1,18 @@
 import {
-  agentSuggestionMessages,
   and,
   db,
   eq,
-  like,
   slackInstallations,
+  trackedMessages,
+  workItems,
 } from '@roomote/db/server';
-import type { BackgroundAgentSuggestionType } from '@roomote/db/server';
+import type { SuggestionType } from '@roomote/db/server';
 import type { McpRecommendation } from '@roomote/cloud-agents/server';
 import type { SlackBlock } from '@roomote/types';
 
 import { SlackNotifier } from './slack-notifier';
 
-export const SETUP_MCP_RECOMMENDATION_AGENT_TYPE: BackgroundAgentSuggestionType =
+export const SETUP_MCP_RECOMMENDATION_SUGGESTION_TYPE: SuggestionType =
   'setup_mcp_recommendation';
 export const SETUP_MCP_RECOMMENDATION_PARENT_TEXT =
   "I scanned your codebase and found some integrations that could make me more helpful. Here's what I'd recommend:";
@@ -69,6 +69,9 @@ type PostedMcpRecommendationMessageRow = {
   sourceTaskId: string;
   recommendationId: string;
   createdByUserId: string;
+  title: string;
+  brief: string;
+  sortOrder: number;
 };
 
 function buildTrackedRecommendationKey(params: {
@@ -262,24 +265,17 @@ export async function postSetupMcpRecommendationsToSlack(params: {
     };
   }
 
-  const [existingMessage] = await db
-    .select({ id: agentSuggestionMessages.id })
-    .from(agentSuggestionMessages)
-    .where(
-      and(
-        eq(
-          agentSuggestionMessages.agentType,
-          SETUP_MCP_RECOMMENDATION_AGENT_TYPE,
-        ),
-        like(
-          agentSuggestionMessages.suggestionKey,
-          `${params.sourceTaskId}:mcp:%`,
-        ),
-      ),
-    )
-    .limit(1);
+  // Idempotency: if we already created mcp_recommendation work items for this
+  // scan task, the cards were already posted for this task.
+  const existingWorkItem = await db.query.workItems.findFirst({
+    where: and(
+      eq(workItems.kind, 'mcp_recommendation'),
+      eq(workItems.sourceTaskId, params.sourceTaskId),
+    ),
+    columns: { id: true },
+  });
 
-  if (existingMessage) {
+  if (existingWorkItem) {
     return {
       posted: false,
       trackedMessages: 0,
@@ -361,6 +357,9 @@ export async function postSetupMcpRecommendationsToSlack(params: {
       sourceTaskId: params.sourceTaskId,
       recommendationId: recommendation.id,
       createdByUserId: params.createdByUserId,
+      title: recommendation.name,
+      brief: getSlackEnableDescription(recommendation),
+      sortOrder: index,
     });
   }
 
@@ -372,26 +371,46 @@ export async function postSetupMcpRecommendationsToSlack(params: {
     };
   }
 
-  await db
-    .insert(agentSuggestionMessages)
+  // One mcp_recommendation work_item per posted card. This is the backing row
+  // the reaction-launch CAS claims; the tracked_messages suggestion_card row
+  // points at it via workItemId.
+  const createdWorkItems = await db
+    .insert(workItems)
     .values(
       insertedRows.map((row) => ({
-        agentType: SETUP_MCP_RECOMMENDATION_AGENT_TYPE,
+        kind: 'mcp_recommendation' as const,
+        sourceTaskId: row.sourceTaskId,
+        title: row.title,
+        brief: row.brief,
+        sortOrder: row.sortOrder,
+        targetEnvironmentId: params.targetEnvironmentId ?? null,
+      })),
+    )
+    .returning({ id: workItems.id });
+
+  await db
+    .insert(trackedMessages)
+    .values(
+      insertedRows.map((row, index) => ({
+        surface: 'slack' as const,
+        kind: 'suggestion_card' as const,
+        dedupeKey: `${row.channelId}:${row.messageTs}`,
         channelId: row.channelId,
         messageTs: row.messageTs,
-        suggestionKey: buildTrackedRecommendationKey({
-          sourceTaskId: row.sourceTaskId,
-          recommendationId: row.recommendationId,
-        }),
-        taskId: null,
+        workItemId: createdWorkItems[index]?.id,
         createdByUserId: row.createdByUserId,
+        summaryText: row.title,
+        metadata: {
+          suggestionType: SETUP_MCP_RECOMMENDATION_SUGGESTION_TYPE,
+          suggestionKey: buildTrackedRecommendationKey({
+            sourceTaskId: row.sourceTaskId,
+            recommendationId: row.recommendationId,
+          }),
+        },
       })),
     )
     .onConflictDoNothing({
-      target: [
-        agentSuggestionMessages.channelId,
-        agentSuggestionMessages.messageTs,
-      ],
+      target: [trackedMessages.kind, trackedMessages.dedupeKey],
     });
 
   return {

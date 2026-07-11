@@ -1,18 +1,19 @@
 import { TRPCClientError } from '@trpc/client';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const {
   mockWithSandboxServerRpcClient,
   mockDbUpdate,
   mockDbUpdateSet,
   mockDbUpdateWhere,
-  mockFindFirstCloudJob,
+  mockFindFirstTaskRun,
   mockDbTransaction,
   mockTxUpdate,
   mockTxUpdateSet,
   mockTxUpdateWhere,
   mockTxReturning,
   mockMarkTaskStartParallelCountEndedAt,
+  mockCancelTaskRunDirect,
 } = vi.hoisted(() => {
   const mockTxReturning = vi.fn();
   const mockTxUpdateWhere = vi.fn(() => ({ returning: mockTxReturning }));
@@ -27,13 +28,14 @@ const {
     mockDbUpdate,
     mockDbUpdateSet,
     mockDbUpdateWhere,
-    mockFindFirstCloudJob: vi.fn(),
+    mockFindFirstTaskRun: vi.fn(),
     mockDbTransaction: vi.fn(),
     mockTxUpdate,
     mockTxUpdateSet,
     mockTxUpdateWhere,
     mockTxReturning,
     mockMarkTaskStartParallelCountEndedAt: vi.fn(),
+    mockCancelTaskRunDirect: vi.fn(),
   };
 });
 
@@ -47,27 +49,28 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn((...args) => ({ type: 'inArray', args })),
   isNull: vi.fn((...args) => ({ type: 'isNull', args })),
   not: vi.fn((...args) => ({ type: 'not', args })),
-  cloudJobs: {
+  taskRuns: {
     id: 'id',
     status: 'status',
     sandboxServerUrl: 'sandboxServerUrl',
     cancelRequestedAt: 'cancelRequestedAt',
   },
+  cancelTaskRunDirect: mockCancelTaskRunDirect,
   markTaskStartParallelCountEndedAt: mockMarkTaskStartParallelCountEndedAt,
   db: {
     update: mockDbUpdate,
     transaction: mockDbTransaction,
     query: {
-      cloudJobs: {
-        findFirst: mockFindFirstCloudJob,
+      taskRuns: {
+        findFirst: mockFindFirstTaskRun,
       },
     },
   },
 }));
 
-import { stopTaskJob } from '../task-stop';
+import { stopTaskRun } from '../task-stop';
 
-describe('stopTaskJob', () => {
+describe('stopTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDbUpdate.mockReturnValue({ set: mockDbUpdateSet });
@@ -85,16 +88,15 @@ describe('stopTaskJob', () => {
     mockWithSandboxServerRpcClient.mockResolvedValue(undefined);
   });
 
-  it('persists cancel intent on the job row before the sandbox stop RPC', async () => {
-    const job = {
+  it('persists cancel intent on the run row before the sandbox stop RPC', async () => {
+    const run = {
       id: 7,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
-      userId: 'user-1',
       actingUserId: null,
     };
 
-    const result = await stopTaskJob({ job, authUserId: 'user-1' });
+    const result = await stopTaskRun({ run, authUserId: 'user-1' });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -108,18 +110,17 @@ describe('stopTaskJob', () => {
   });
 
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
-    const job = {
+    const run = {
       id: 7,
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       sandboxServerUrl: 'https://sandbox.example',
-      userId: 'user-1',
       actingUserId: null,
     };
     mockWithSandboxServerRpcClient.mockRejectedValue(
       new TRPCClientError('sandbox unreachable'),
     );
 
-    const result = await stopTaskJob({ job, authUserId: 'user-1' });
+    const result = await stopTaskRun({ run, authUserId: 'user-1' });
 
     expect(result).toEqual({
       success: false,
@@ -131,31 +132,26 @@ describe('stopTaskJob', () => {
     });
   });
 
-  it('stamps cancelRequestedAt when direct-canceling a job without a sandbox', async () => {
-    const job = {
+  it('stamps cancelRequestedAt when direct-canceling a run without a sandbox', async () => {
+    const run = {
       id: 7,
-      status: CloudTaskStatus.Processing,
+      status: RunStatus.Processing,
       sandboxServerUrl: null,
-      userId: 'user-1',
       actingUserId: null,
     };
-    mockFindFirstCloudJob.mockResolvedValue(job);
+    mockFindFirstTaskRun.mockResolvedValue(run);
+    mockCancelTaskRunDirect.mockResolvedValue(true);
 
-    const result = await stopTaskJob({
-      job,
+    const result = await stopTaskRun({
+      run,
       authUserId: 'user-1',
       allowDirectCancelWithoutSandbox: true,
     });
 
     expect(result).toEqual({ success: true, mode: 'direct_cancel' });
-    expect(mockTxUpdateSet).toHaveBeenCalledWith({
-      status: CloudTaskStatus.Canceled,
-      cancelRequestedAt: expect.any(Date),
-      canceledAt: expect.any(Date),
-    });
-    expect(mockMarkTaskStartParallelCountEndedAt).toHaveBeenCalledWith(
-      expect.anything(),
-      { cloudJobId: 7, endedAt: expect.any(Date) },
-    );
+    // The guarded terminal write (status/cancelRequestedAt/canceledAt) and the
+    // parallel-count close live in the shared cancelTaskRunDirect helper,
+    // covered by its real-DB tests in packages/db.
+    expect(mockCancelTaskRunDirect).toHaveBeenCalledWith({ runId: 7 });
   });
 });

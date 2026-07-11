@@ -1,12 +1,11 @@
 import type {
   AnnouncerFrequency,
   ChannelAutoStartLaunchMode,
-  CoachFrequency,
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
-  PrReviewerSettings,
+  PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
   ScheduleOnlyBackgroundAutomationFrequencyField,
   ScheduleOnlyBackgroundAutomationId,
@@ -28,7 +27,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'channelAutoStartLaunchCriteria'
   | 'managerSlackChannel'
   | 'managerStatsSlackChannel'
-  | 'coachSlackChannel'
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
@@ -38,7 +36,6 @@ export type BackgroundAgentFieldErrorKey =
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
   | 'sentryTriageProjectSlugs'
-  | 'coachInstructions'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
   | 'announcerInstructions';
@@ -52,7 +49,6 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'channelAutoStartSlackChannels'
   | 'managerSlackChannel'
   | 'managerStatsSlackChannel'
-  | 'coachSlackChannel'
   | 'suggesterSlackChannel'
   | 'announcerSlackChannel'
   | 'platformIssueSlackChannel'
@@ -67,7 +63,6 @@ export interface SlackChannelAccessWarnings {
   channelAutoStartSlackChannels: string[];
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
-  coachSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -82,7 +77,6 @@ export interface SlackChannelDisplayNames {
   channelAutoStartSlackChannels: Record<string, string | null>;
   managerSlackChannel: string | null;
   managerStatsSlackChannel: string | null;
-  coachSlackChannel: string | null;
   suggesterSlackChannel: string | null;
   announcerSlackChannel: string | null;
   platformIssueSlackChannel: string | null;
@@ -120,13 +114,12 @@ export interface ResolvedChannelAutoStartRow {
 }
 
 export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomationInputFields {
-  savingAgent:
+  savingAutomation:
     | 'channelAutoStart'
     | 'managerChannel'
     | 'managerStats'
     | 'reviewer'
     | 'conflictResolver'
-    | 'coach'
     | 'suggester'
     | 'sentryTriage'
     | 'dependabotTriage'
@@ -134,9 +127,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'announcer'
     | 'platformIssueAlerts';
   reviewerEnabled: boolean;
-  reviewerEnvironmentScope: NonNullable<PrReviewerSettings['environmentScope']>;
+  reviewerEnvironmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   reviewerEnvironmentIds: string[];
-  reviewerAuthorReviewMode: NonNullable<PrReviewerSettings['authorReviewMode']>;
+  reviewerAuthorReviewMode: NonNullable<PrReviewSettings['authorReviewMode']>;
   reviewerCollaborators: string[];
   reviewerExcludedAuthors: string | null;
   reviewerReviewAllPullRequestAuthors: boolean;
@@ -160,9 +153,6 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   sentryTriageProjectSlugs?: string | null;
   dependabotTriageFrequency?: DependabotTriageFrequency;
   dependabotTriageSlackChannel?: string | null;
-  coachFrequency: CoachFrequency;
-  coachSlackChannel: string | null;
-  coachInstructions: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterInstructions: string | null;

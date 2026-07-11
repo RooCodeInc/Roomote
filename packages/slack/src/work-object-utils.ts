@@ -81,7 +81,7 @@ export function extractTaskIdFromUrl(url: string): string | null {
  * const entity = buildWorkObjectEntity({
  *   taskId: 'abc123',
  *   title: 'Review PR #42',
- *   status: CloudTaskStatus.Running,
+ *   status: RunStatus.Running,
  *   createdBy: 'alice',
  *   assignee: 'bob',
  *   createdAt: Date.now() - 1000,

@@ -4,7 +4,7 @@ import {
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import { Cli as GitHubCli } from '@roomote/github';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import {
   buildGithubCommentActionLink,
@@ -29,11 +29,11 @@ import { resolveLinkedTaskReviewHandoff } from './resolve-linked-task-review-han
 import { standardTask } from './standardTask';
 
 function buildGitLabMergeRequestSyncReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -45,8 +45,8 @@ function buildGitLabMergeRequestSyncReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -59,7 +59,7 @@ function buildGitLabMergeRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review the new GitLab merge request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -75,42 +75,42 @@ function buildGitLabMergeRequestSyncReviewPrompt({
 }
 
 function gitLabMergeRequestSyncReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGitLabMergeRequestSyncReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'gitlab',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 function buildGiteaPullRequestSyncReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -122,8 +122,8 @@ function buildGiteaPullRequestSyncReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -136,7 +136,7 @@ function buildGiteaPullRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review the new Gitea pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -152,42 +152,42 @@ function buildGiteaPullRequestSyncReviewPrompt({
 }
 
 function giteaPullRequestSyncReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildGiteaPullRequestSyncReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'gitea',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 function buildAdoPullRequestSyncReviewPrompt({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
 }): string {
   const {
     payload: {
@@ -199,8 +199,8 @@ function buildAdoPullRequestSyncReviewPrompt({
       branchName,
       targetBranch,
     },
-  } = cloudTask;
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  } = taskSpec;
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
 
   return buildStructuredTaskRequest({
     command: `${delimiter}review-code`,
@@ -213,7 +213,7 @@ function buildAdoPullRequestSyncReviewPrompt({
       source_branch: branchName,
       target_branch: targetBranch,
       current_head_sha: headSha || 'unknown',
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       review_scope:
         'Review the new Azure DevOps pull request changes since the prior review. Use the prepared local repository, source branch, target branch, and commit SHA to inspect the changed range with git commands. Do not use GitHub-only CLI commands such as `gh pr`.',
       suggested_diff_commands: [
@@ -229,50 +229,50 @@ function buildAdoPullRequestSyncReviewPrompt({
 }
 
 function adoPullRequestSyncReview({
-  cloudTask,
-  cloudJobUrl,
+  taskSpec,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewSyncTask;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskSpec: GithubPullRequestReviewSyncTask;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }) {
   const prompt = buildAdoPullRequestSyncReviewPrompt({
-    cloudTask,
-    cloudJobUrl,
+    taskSpec,
+    taskRunUrl,
   });
 
   return standardTask({
     description: prompt,
-    repo: cloudTask.payload.repo,
+    repo: taskSpec.payload.repo,
     taskSurface: 'ado',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
-    linkedWorkItems: cloudTask.payload.linkedWorkItems,
+    linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
   });
 }
 
 export async function githubPrReviewSync({
-  cloudJobId,
-  cloudTask,
+  runId,
+  taskSpec,
   gitHubToken,
-  cloudJobUrl,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudJobId?: number;
-  cloudTask: GithubPullRequestReviewSyncTask;
+  runId?: number;
+  taskSpec: GithubPullRequestReviewSyncTask;
   gitHubToken: string;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }): Promise<{
@@ -280,27 +280,27 @@ export async function githubPrReviewSync({
   harnessInstructions?: string;
   artifacts: Record<string, unknown>;
 }> {
-  switch (resolveSourceControlProviderFromPayload(cloudTask.payload)) {
+  switch (resolveSourceControlProviderFromPayload(taskSpec.payload)) {
     case 'gitlab':
       return gitLabMergeRequestSyncReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
     case 'gitea':
       return giteaPullRequestSyncReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
       });
     case 'ado':
       return adoPullRequestSyncReview({
-        cloudTask,
-        cloudJobUrl,
+        taskSpec,
+        taskRunUrl,
         attribution,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
@@ -319,7 +319,7 @@ export async function githubPrReviewSync({
       linkedTaskId: payloadLinkedTaskId,
       linkedTaskRelayLookupPending: payloadLinkedTaskRelayLookupPending,
     },
-  } = cloudTask;
+  } = taskSpec;
 
   const shouldApprovePr = false;
   const { relayReviewResultsToTask, linkedTaskId } =
@@ -332,8 +332,6 @@ export async function githubPrReviewSync({
       payloadLinkedTaskId,
       payloadLinkedTaskRelayLookupPending,
     });
-
-  const agentType = 'PR Reviewer';
 
   const params: GitHubCli.FetchParams = { gitHubToken, repo: fullName };
   const prParams: GitHubCli.FetchPrParams = { ...params, prNumber };
@@ -355,7 +353,7 @@ export async function githubPrReviewSync({
   const currentHeadSha = pr.headRefOid;
 
   const sha = await getPrSha({
-    currentCloudJobId: cloudJobId,
+    currentRunId: runId,
     repo: fullName,
     prNumber,
   });
@@ -406,7 +404,7 @@ export async function githubPrReviewSync({
   const issueComments = await GitHubCli.fetchIssueComments(prParams);
 
   /**
-   * Top-level PR Reviewer Comment
+   * Top-level PR review comment
    */
 
   const prReviewerCommentId = await getPrReviewCommentId({
@@ -427,9 +425,9 @@ export async function githubPrReviewSync({
     throw new Error('Top-level PR reviewer comment not found');
   }
 
-  const delimiter = getSkillCommandDelimiter(cloudTask.harness);
+  const delimiter = getSkillCommandDelimiter(taskSpec.harness);
   const followLink = buildGithubCommentActionLink({
-    href: cloudJobUrl,
+    href: taskRunUrl,
     label: 'Follow',
   });
   const activeSkillPath = shouldApprovePr
@@ -444,7 +442,7 @@ export async function githubPrReviewSync({
     taskContext: {
       repository: fullName,
       pull_request_number: prNumber,
-      agent_type: agentType,
+      workflow: 'pr_review',
       pull_request_base_sha: pr.baseRefOid,
       last_review_sha: sha,
       current_head_sha: currentHeadSha,
@@ -452,7 +450,7 @@ export async function githubPrReviewSync({
       comment_header_starting: '',
       comment_header_completed: '',
       task_link_follow: followLink,
-      task_link_see: `[See task](${cloudJobUrl})`,
+      task_link_see: `[See task](${taskRunUrl})`,
       linked_implementation_task_handoff_enabled: relayReviewResultsToTask,
       linked_implementation_task_id: linkedTaskId,
       pull_request_details: getPrDetails({ fullName, pr }),
@@ -490,7 +488,7 @@ export async function githubPrReviewSync({
     description: prompt,
     repo: fullName,
     taskSurface: 'github',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,

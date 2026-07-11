@@ -1,5 +1,9 @@
 import * as GitHub from '@roomote/github';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  resolveEnvironmentSourceControlProvider,
+  resolveSingleSourceControlProvider,
+} from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
@@ -9,10 +13,8 @@ import {
   deploymentSettings,
   environments,
   environmentVariables,
-  users,
-  cloudJobs,
-  taskSuggestions,
-  setupNewQueuedTasks,
+  taskRuns,
+  workItems,
   slackInstallations,
   slackUserMappings,
   asc,
@@ -21,6 +23,11 @@ import {
   inArray,
   isNull,
   sql,
+  cancelTaskRunDirect,
+  claimWorkItem,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
   markTaskStartParallelCountEndedAt,
   resolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage,
@@ -42,8 +49,8 @@ import {
   buildSetupSourceControlStatus,
   collectSetupModelProviderCredentialValues,
   createEmptySetupNewState,
-  CloudTaskStatus,
-  CloudTaskType,
+  RunStatus,
+  TaskPayloadKind,
   resolveEvalHarnessSelection,
   type ComputeProvider,
   type DeploymentModelConfig,
@@ -54,9 +61,10 @@ import {
   isAutoProvisionedComputeArtifactField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   isRequiredComputeField,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+  NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
   normalizeDeploymentModelConfig,
   getSetupNewComputeProvisioningState,
@@ -77,7 +85,7 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import {
   assertSetupTokenValid,
-  getLatestCloudJobsByTaskId,
+  getLatestTaskRunsByTaskId,
   getRepositories,
   getRequestInviteToken,
   getSourceControlConnectionSummary,
@@ -134,6 +142,7 @@ type PersistedRuntimeModelConfig = DeploymentModelConfig;
 type SelectedRepositorySummary = {
   id: string;
   fullName: string;
+  sourceControlProvider: SourceControlProvider;
 };
 
 type PersistedQueuedSetupTask = QueuedOnboardingTask;
@@ -150,40 +159,6 @@ type ActiveSetupQualificationBlock = {
   githubAccountType: string | null;
   lastBlockedAt: Date;
 };
-
-const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
-
-async function ensureSetupBootstrapAuditUser(
-  executor: DatabaseOrTransaction,
-): Promise<string> {
-  const [existingUser] = await executor
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, SETUP_BOOTSTRAP_USER_ID))
-    .limit(1);
-
-  if (existingUser) {
-    return existingUser.id;
-  }
-
-  await executor.insert(users).values({
-    id: SETUP_BOOTSTRAP_USER_ID,
-    name: 'Setup Bootstrap',
-    email: 'setup-bootstrap@roomote.local',
-    imageUrl: '',
-    entity: {
-      id: SETUP_BOOTSTRAP_USER_ID,
-      name: 'Setup Bootstrap',
-      email: 'setup-bootstrap@roomote.local',
-      imageUrl: '',
-    },
-    metadata: {
-      system: true,
-    },
-  });
-
-  return SETUP_BOOTSTRAP_USER_ID;
-}
 
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
@@ -308,6 +283,7 @@ async function resolveSelectedRepositories(repositoryIds: string[]): Promise<{
     selectedRepositories.push({
       id: repository.id,
       fullName: repository.fullName,
+      sourceControlProvider: repository.sourceControlProvider,
     });
   }
 
@@ -347,12 +323,17 @@ async function clearTaskSuggestions(
   }
 
   await executor
-    .delete(taskSuggestions)
-    .where(eq(taskSuggestions.sourceTaskId, sourceTaskId));
+    .delete(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, sourceTaskId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    );
 }
 
 async function clearQueuedSetupTasks(executor: DatabaseOrTransaction = db) {
-  await executor.delete(setupNewQueuedTasks);
+  await executor.delete(workItems).where(eq(workItems.kind, 'onboarding'));
 }
 
 async function getActiveSlackInstallation(
@@ -536,13 +517,13 @@ async function getOnboardingTaskState(taskId: string | null) {
     };
   }
 
-  const latestCloudJobs = await getLatestCloudJobsByTaskId([taskId]);
-  const latestJob = latestCloudJobs[taskId];
+  const latestTaskRuns = await getLatestTaskRunsByTaskId([taskId]);
+  const latestRun = latestTaskRuns[taskId];
 
   return {
-    status: latestJob?.status ?? null,
-    taskPhase: latestJob?.taskPhase ?? null,
-    firstAssistantOutputAt: latestJob?.firstAssistantOutputAt ?? null,
+    status: latestRun?.status ?? null,
+    taskPhase: latestRun?.taskPhase ?? null,
+    firstAssistantOutputAt: latestRun?.firstAssistantOutputAt ?? null,
   };
 }
 
@@ -553,16 +534,21 @@ async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
 
   return db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      sortOrder: taskSuggestions.sortOrder,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      sortOrder: workItems.sortOrder,
     })
-    .from(taskSuggestions)
+    .from(workItems)
     .where(
-      suggestionIds ? inArray(taskSuggestions.id, suggestionIds) : undefined,
+      suggestionIds
+        ? and(
+            eq(workItems.kind, 'suggestion'),
+            inArray(workItems.id, suggestionIds),
+          )
+        : eq(workItems.kind, 'suggestion'),
     )
-    .orderBy(asc(taskSuggestions.sortOrder));
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getPersistedQueuedSetupTasks(
@@ -575,18 +561,23 @@ async function getPersistedQueuedSetupTasks(
 
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
 async function getMutableQueuedSetupTasks(
@@ -595,35 +586,87 @@ async function getMutableQueuedSetupTasks(
 ): Promise<MutableQueuedSetupTask[]> {
   return executor
     .select({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
-      launchClaimedAt: setupNewQueuedTasks.launchClaimedAt,
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
+      launchClaimedAt: workItems.launchClaimedAt,
     })
-    .from(setupNewQueuedTasks)
-    .where(eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId))
-    .orderBy(asc(setupNewQueuedTasks.sortOrder));
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
 }
 
-async function markTaskSuggestionStarted(
+/**
+ * Mirrors a launched onboarding copy back onto its source suggestion so the
+ * suggestions UI shows the suggestion as launched once its queued onboarding
+ * copy launches. This is a status *mirror*, not a launch of its own, so it must
+ * never stomp a live claim held by another surface.
+ *
+ * It goes through the shared fenced CAS: `claimWorkItem` the suggestion, and
+ * only `finalizeWorkItemLaunched` when the claim succeeded. When another surface
+ * (e.g. web-implement) already holds a fresh claim, or the suggestion is already
+ * `launched`, the claim returns null and the mirror is skipped — never
+ * overwriting that surface's status/token.
+ *
+ * `dismissed` is opted into the claimable set (matching the web-implement
+ * surface in task-suggestions/implement.ts) with `clearDismissedAt`, so a
+ * suggestion that was dismissed after being queued still flips to `launched`
+ * when its onboarding copy launches. That is the least-surprising state: the
+ * work genuinely launched, so the suggestions UI should reflect it rather than
+ * showing the row as merely dismissed.
+ *
+ * The claim and finalize run in one transaction so a finalize failure rolls the
+ * claim back rather than stranding the suggestion in `launching` with a live
+ * claim until the 10-minute stale-claim recovery.
+ */
+async function markSuggestionWorkItemLaunched(
   input: {
     suggestionId: string;
-    updatedAt: Date;
+    launchedTaskId: string;
   },
   executor: DatabaseOrTransaction = db,
 ) {
-  await executor
-    .update(taskSuggestions)
-    .set({
-      status: 'started',
-      updatedAt: input.updatedAt,
-    })
-    .where(eq(taskSuggestions.id, input.suggestionId));
+  await executor.transaction(async (tx) => {
+    const claimedSuggestion = await claimWorkItem(tx, {
+      id: input.suggestionId,
+      additionalClaimableStatuses: ['dismissed'],
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
+
+    if (!claimedSuggestion) {
+      // Another surface holds a fresh claim, the suggestion already launched, or
+      // it is terminally failed. Skip the mirror rather than overwrite it.
+      console.warn(
+        `[setup-new] Skipped mirroring launched state onto suggestion ${input.suggestionId}: it is already launched or another surface holds a fresh claim.`,
+      );
+      return;
+    }
+
+    const finalized = await finalizeWorkItemLaunched(tx, {
+      id: input.suggestionId,
+      taskId: input.launchedTaskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+    });
+
+    if (!finalized) {
+      // Our claim token was superseded between claim and finalize; leave the new
+      // claimant's state untouched.
+      console.warn(
+        `[setup-new] Suggestion ${input.suggestionId} mirror lost the fencing guard after claiming; another surface reclaimed it. Leaving its state untouched.`,
+      );
+    }
+  });
 }
 
 function stripMutableQueuedSetupTask(
@@ -679,44 +722,62 @@ async function replaceQueuedSetupTasks({
       tx,
     );
 
+    // Refuse to replace the queue while a launch is genuinely in flight or an
+    // item already launched. A *stale* `launchClaimedAt` (older than the shared
+    // stale-claim window) is left by a crash between claim and finalize; with
+    // per-item stale-claim recovery now in place that row is recoverable, so it
+    // must not block re-queuing forever. Only a launched row or a fresh claim
+    // blocks replacement.
+    const staleClaimThreshold = new Date(
+      Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS,
+    );
+
     if (
       existingRows.some(
         (queuedTask) =>
-          queuedTask.launchClaimedAt !== null || queuedTask.launchedAt !== null,
+          queuedTask.launchedAt !== null ||
+          (queuedTask.launchClaimedAt !== null &&
+            queuedTask.launchClaimedAt > staleClaimThreshold),
       )
     ) {
       return existingRows.map(stripMutableQueuedSetupTask);
     }
 
     await tx
-      .delete(setupNewQueuedTasks)
+      .delete(workItems)
       .where(
-        eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
+        and(
+          eq(workItems.sourceTaskId, setupOnboardingTaskId),
+          eq(workItems.kind, 'onboarding'),
+        ),
       );
 
     const nextRows: Array<{
-      setupOnboardingTaskId: string;
+      kind: 'onboarding';
+      sourceTaskId: string;
       selectedByUserId: string;
-      suggestionId: string | null;
+      sourceWorkItemId: string | null;
       title: string;
-      prompt: string;
+      executionPrompt: string;
       sortOrder: number;
     }> = suggestionRows.map((suggestion, index) => ({
-      setupOnboardingTaskId,
+      kind: 'onboarding',
+      sourceTaskId: setupOnboardingTaskId,
       selectedByUserId,
-      suggestionId: suggestion.id,
+      sourceWorkItemId: suggestion.id,
       title: suggestion.title,
-      prompt: suggestion.brief,
+      executionPrompt: suggestion.brief ?? '',
       sortOrder: index,
     }));
 
     if (customTaskPrompt) {
       nextRows.push({
-        setupOnboardingTaskId,
+        kind: 'onboarding',
+        sourceTaskId: setupOnboardingTaskId,
         selectedByUserId,
-        suggestionId: null,
+        sourceWorkItemId: null,
         title: buildCustomQueuedTaskTitle(customTaskPrompt),
-        prompt: customTaskPrompt,
+        executionPrompt: customTaskPrompt,
         sortOrder: nextRows.length,
       });
     }
@@ -725,46 +786,86 @@ async function replaceQueuedSetupTasks({
       return [];
     }
 
-    return tx.insert(setupNewQueuedTasks).values(nextRows).returning({
-      id: setupNewQueuedTasks.id,
-      suggestionId: setupNewQueuedTasks.suggestionId,
-      title: setupNewQueuedTasks.title,
-      prompt: setupNewQueuedTasks.prompt,
-      sortOrder: setupNewQueuedTasks.sortOrder,
-      launchedTaskId: setupNewQueuedTasks.launchedTaskId,
-      launchedAt: setupNewQueuedTasks.launchedAt,
-      environmentId: setupNewQueuedTasks.environmentId,
+    return tx.insert(workItems).values(nextRows).returning({
+      id: workItems.id,
+      suggestionId: workItems.sourceWorkItemId,
+      title: workItems.title,
+      prompt: workItems.executionPrompt,
+      sortOrder: workItems.sortOrder,
+      launchedTaskId: workItems.launchedTaskId,
+      launchedAt: workItems.launchedAt,
+      environmentId: workItems.targetEnvironmentId,
     });
   });
 }
 
-async function claimQueuedSetupTasksForLaunch(setupOnboardingTaskId: string) {
-  return db.transaction(async (tx) => {
-    const claimedAt = new Date();
+type ClaimedQueuedSetupTask = {
+  id: string;
+  suggestionId: string | null;
+  selectedByUserId: string | null;
+  prompt: string | null;
+  /** The `launchClaimedAt` fencing token for this claim. */
+  claimedAt: Date;
+};
 
-    return tx
-      .update(setupNewQueuedTasks)
-      .set({
-        launchClaimedAt: claimedAt,
-        updatedAt: claimedAt,
-      })
-      .where(
-        and(
-          eq(setupNewQueuedTasks.setupOnboardingTaskId, setupOnboardingTaskId),
-          isNull(setupNewQueuedTasks.launchedAt),
-          isNull(setupNewQueuedTasks.launchClaimedAt),
-        ),
-      )
-      .returning({
-        id: setupNewQueuedTasks.id,
-        suggestionId: setupNewQueuedTasks.suggestionId,
-        selectedByUserId: setupNewQueuedTasks.selectedByUserId,
-        prompt: setupNewQueuedTasks.prompt,
-      });
-  });
+/**
+ * Claims the queued onboarding items for a setup task through the shared fenced
+ * CAS, preserving the previous batch semantics: fetch the candidate onboarding
+ * rows for the setup task in queue order, attempt to claim each, and return
+ * whichever claims succeeded (each carrying its own fencing token).
+ *
+ * Migrated off the single batch UPDATE gated on `launchedAt IS NULL AND
+ * launchClaimedAt IS NULL`, which had no stale-claim recovery: a crash between
+ * claim and finalize left an item `launching` forever. `claimWorkItem` instead
+ * claims `open` OR a stale `launching` row (older than the shared stale-claim
+ * window) and guards `launched_task_id IS NULL`, so a crashed launch recovers,
+ * a fresh in-flight claim on one item is skipped (only that item), and an
+ * already-launched item is never re-claimed. Onboarding rows are inserted with
+ * the `work_items.status` default of `open`, so the claim predicate matches the
+ * rows produced by `replaceQueuedSetupTasks`. Each claim is its own atomic CAS,
+ * so no wrapping transaction is needed.
+ */
+async function claimQueuedSetupTasksForLaunch(
+  setupOnboardingTaskId: string,
+): Promise<ClaimedQueuedSetupTask[]> {
+  const candidates = await db
+    .select({ id: workItems.id })
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.sourceTaskId, setupOnboardingTaskId),
+        eq(workItems.kind, 'onboarding'),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  const claimedTasks: ClaimedQueuedSetupTask[] = [];
+
+  for (const candidate of candidates) {
+    const claimed = await claimWorkItem(db, {
+      id: candidate.id,
+      extraConditions: [eq(workItems.kind, 'onboarding')],
+    });
+
+    if (!claimed) {
+      continue;
+    }
+
+    claimedTasks.push({
+      id: claimed.id,
+      suggestionId: claimed.sourceWorkItemId,
+      selectedByUserId: claimed.selectedByUserId,
+      prompt: claimed.executionPrompt,
+      claimedAt: claimed.launchClaimedAt,
+    });
+  }
+
+  return claimedTasks;
 }
 
-async function launchQueuedSetupTasksIfReady({
+// Exported for the DB-backed launch-lifecycle tests, which exercise the fenced
+// claim/finalize/release flow directly. Not part of the tRPC command surface.
+export async function launchQueuedSetupTasksIfReady({
   setupOnboardingTaskId,
   matchingEnvironmentId,
   slackTeamId,
@@ -822,59 +923,176 @@ async function launchQueuedSetupTasksIfReady({
         }
       : {};
 
+  const queuedSourceControlProvider =
+    await resolveEnvironmentSourceControlProvider(matchingEnvironmentId);
+
   await Promise.allSettled(
     claimedTasks.map(async (queuedTask) => {
+      let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
+
+      if (!queuedTask.selectedByUserId) {
+        const failedAt = new Date();
+        const launchError = 'Queued setup task has no selecting user.';
+
+        await db
+          .update(workItems)
+          .set({
+            status: 'failed',
+            failedAt,
+            launchError,
+            launchClaimedAt: null,
+            updatedAt: failedAt,
+          })
+          .where(
+            and(
+              eq(workItems.id, queuedTask.id),
+              eq(workItems.kind, 'onboarding'),
+              eq(workItems.status, 'launching'),
+              eq(workItems.launchClaimedAt, queuedTask.claimedAt),
+            ),
+          );
+
+        console.warn(
+          `[setup-new] onboarding work item ${queuedTask.id} cannot launch: ${launchError}`,
+        );
+        return;
+      }
+
       try {
-        const launchResult = await enqueueCloudTask(
-          {
-            userId: queuedTask.selectedByUserId,
-            type: CloudTaskType.StandardTask,
+        launchResult = await enqueueTask({
+          task: {
+            type: TaskPayloadKind.StandardTask,
             payload: {
               repo: '',
               environmentId: matchingEnvironmentId,
+              ...(queuedSourceControlProvider
+                ? { sourceControlProvider: queuedSourceControlProvider }
+                : {}),
               ...(slackTeamId ? { teamId: slackTeamId } : {}),
               ...(slackChannel ? { slackChannel } : {}),
               ...(slackThreadTs ? { slackThreadTs } : {}),
               ...communicationMetadata,
-              description: queuedTask.prompt,
+              description: queuedTask.prompt ?? '',
             },
           },
-          {
-            launchClass: 'human',
+          initiator: {
+            kind: 'user',
+            userId: queuedTask.selectedByUserId,
           },
-        );
-
-        const launchedAt = new Date();
-
-        await db.transaction(async (tx) => {
-          await tx
-            .update(setupNewQueuedTasks)
-            .set({
-              environmentId: matchingEnvironmentId,
-              launchedTaskId: launchResult.taskId,
-              launchedAt,
-              updatedAt: launchedAt,
-            })
-            .where(eq(setupNewQueuedTasks.id, queuedTask.id));
-
-          if (queuedTask.suggestionId) {
-            await markTaskSuggestionStarted(
-              {
-                suggestionId: queuedTask.suggestionId,
-                updatedAt: launchedAt,
-              },
-              tx,
-            );
-          }
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
+          ...(slackChannel || slackThreadTs
+            ? {
+                channels: {
+                  slackChannelId: slackChannel ?? null,
+                  slackThreadTs: slackThreadTs ?? null,
+                },
+              }
+            : {}),
         });
-      } catch {
-        await db
-          .update(setupNewQueuedTasks)
-          .set({
-            launchClaimedAt: null,
-            updatedAt: new Date(),
-          })
-          .where(eq(setupNewQueuedTasks.id, queuedTask.id));
+      } catch (error) {
+        // The enqueue never succeeded, so no run exists: release our claim back
+        // to `open` so a later trigger can retry promptly. The fenced release
+        // never reverts a `launched` item and never reverts a claim already
+        // reclaimed by another launcher. Only a pre-enqueue failure may release;
+        // see the post-enqueue invariant below.
+        await releaseWorkItemClaim(db, {
+          id: queuedTask.id,
+          claimedAt: queuedTask.claimedAt,
+          extraConditions: [eq(workItems.kind, 'onboarding')],
+        });
+
+        console.warn(
+          `[setup-new] enqueue failed for onboarding work item ${queuedTask.id}; released its claim back to open — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        return;
+      }
+
+      // Fenced finalize: `launching` -> `launched` only when our claim token
+      // still matches, stamping `targetEnvironmentId` in the same guarded write.
+      // Runs directly against `db` (not a transaction): it is a single fenced
+      // UPDATE, and the suggestion mirror below deliberately no longer shares
+      // its atomicity so a mirror failure can never roll back a healthy launch.
+      //
+      // Invariant: once the task is enqueued, a failure of unknown cause must
+      // never release the claim. Releasing would let the next readiness pass
+      // re-claim and launch a duplicate immediately, while leaving the claim in
+      // place lets stale-claim recovery retry safely only after the shared
+      // window. So a throw here is treated exactly like a lost finalize
+      // (`finalized = false`), which drives the orphan-cancel branch. In the
+      // rare ambiguous case where the finalize committed but its ack was lost,
+      // the cancel may kill a healthy linked run; that trade is intentional — a
+      // visibly canceled task beats a silent duplicate.
+      let finalized: boolean;
+
+      try {
+        finalized = await finalizeWorkItemLaunched(db, {
+          id: queuedTask.id,
+          taskId: launchResult.taskId,
+          claimedAt: queuedTask.claimedAt,
+          targetEnvironmentId: matchingEnvironmentId,
+        });
+      } catch (error) {
+        console.warn(
+          `[setup-new] finalize threw for onboarding work item ${queuedTask.id} after enqueuing task ${launchResult.taskId} (run ${launchResult.id}); treating as a lost finalize and leaving the claim for stale-claim recovery — ${
+            error instanceof Error ? error.message : String(error)
+          }.`,
+        );
+        finalized = false;
+      }
+
+      if (!finalized) {
+        // The task is already enqueued but the finalize did not commit (the
+        // fencing guard rejected it, or it threw), so the run is orphaned from
+        // this work item. Best-effort cancel it while it is still pre-sandbox,
+        // and log loudly either way with the cancel outcome (matches the
+        // implement.ts orphan handling). Return before the mirror: a lost or
+        // failed finalize must never mirror a launch that did not link.
+        let cancelNote = 'orphaned run left running';
+
+        try {
+          const canceled = await cancelTaskRunDirect({
+            runId: launchResult.id,
+            error:
+              'Canceled: setup-new queued task launch finalize lost the claim fencing guard',
+          });
+          cancelNote = canceled
+            ? 'orphaned run canceled'
+            : 'orphaned run cancel did not apply (already started or terminal)';
+        } catch (cancelError) {
+          cancelNote = `orphaned run cancel failed: ${
+            cancelError instanceof Error
+              ? cancelError.message
+              : String(cancelError)
+          }`;
+        }
+
+        console.warn(
+          `[setup-new] finalize lost the fencing guard for onboarding work item ${queuedTask.id}; orphaned task ${launchResult.taskId} (run ${launchResult.id}) runs unlinked — ${cancelNote}.`,
+        );
+        return;
+      }
+
+      // Mirror the launched state onto the source suggestion only after a
+      // committed finalize, outside any transaction and best-effort: the launch
+      // link is already finalized and must stay finalized, so a mirror throw is
+      // logged and swallowed rather than allowed to undo the launch.
+      if (queuedTask.suggestionId) {
+        try {
+          await markSuggestionWorkItemLaunched({
+            suggestionId: queuedTask.suggestionId,
+            launchedTaskId: launchResult.taskId,
+          });
+        } catch (error) {
+          console.warn(
+            `[setup-new] failed to mirror launched state onto suggestion ${queuedTask.suggestionId} for task ${launchResult.taskId}; the onboarding launch stays finalized — ${
+              error instanceof Error ? error.message : String(error)
+            }.`,
+          );
+        }
       }
     }),
   );
@@ -958,6 +1176,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretComputeEnvValues,
+    nonSecretSourceControlEnvValues,
     chatgptConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
@@ -967,6 +1186,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
     ]),
     isChatGptSubscriptionConnected(),
   ]);
@@ -1080,6 +1302,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretSourceControlEnvValues,
     selectedProvider: setupNewState.sourceControlProvider,
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
@@ -1347,16 +1570,15 @@ export async function saveSetupNewComputeConfigCommand(
         throw new Error('Selected sandbox provider is unavailable.');
       }
 
-      // When the Modal base image is not entered, not env-provided, and not
-      // already saved, derive it from the effective worker image and persist
-      // it. The published worker image doubles as the Modal base image.
+      // Derive MODAL_BASE_IMAGE_REF when not env-provided or already saved.
+      // Form submissions are ignored (deployment-managed like E2B/Daytona
+      // artifacts).
       const derivedInfraDefaults = new Map<string, string>();
 
       if (input.provider === 'modal') {
         const baseImageField = providerStatus.fields.find(
           (field) => field.envVarName === 'MODAL_BASE_IMAGE_REF',
         );
-        const submittedBaseImage = input.values?.MODAL_BASE_IMAGE_REF?.trim();
         const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
           ...process.env,
           DOCKER_WORKER_IMAGE: effectiveWorkerImage,
@@ -1366,7 +1588,6 @@ export async function saveSetupNewComputeConfigCommand(
           baseImageField &&
           !baseImageField.runtimeSatisfied &&
           !baseImageField.savedSatisfied &&
-          !submittedBaseImage &&
           derivedBaseImageRef
         ) {
           derivedInfraDefaults.set('MODAL_BASE_IMAGE_REF', derivedBaseImageRef);
@@ -1422,10 +1643,9 @@ export async function saveSetupNewComputeConfigCommand(
         }
       }
 
-      // Credentials and submitted/derived infrastructure values are persisted
-      // as encrypted deployment env vars. DOCKER_WORKER_IMAGE is never sticky-
-      // saved — runtime is process-env / release-derived only. Auto-provisioned
-      // template/snapshot IDs are only written by the provisioning runner.
+      // Credentials and operator-editable infrastructure are persisted as
+      // encrypted deployment env vars. Managed artifacts are process-env /
+      // derived / provisioning only.
       const valuesToSave: Array<{ name: string; value: string }> = [];
       const envVarsToClear: string[] = [];
 
@@ -1438,7 +1658,10 @@ export async function saveSetupNewComputeConfigCommand(
           continue;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)
@@ -1464,7 +1687,12 @@ export async function saveSetupNewComputeConfigCommand(
           return false;
         }
 
-        const submitted = input.values?.[field.envVarName]?.trim() ?? '';
+        // Modal base image is not form-collected; only runtime / saved / derived
+        // values count toward satisfaction (same as the save loop above).
+        const submitted =
+          field.envVarName === 'MODAL_BASE_IMAGE_REF'
+            ? ''
+            : (input.values?.[field.envVarName]?.trim() ?? '');
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)
@@ -1661,11 +1889,8 @@ async function saveSetupAuthConfig(input: {
     }
 
     if (valuesToSave.length > 0) {
-      const auditUserId =
-        input.actorUserId ?? (await ensureSetupBootstrapAuditUser(tx));
-
       await upsertDeploymentEnvironmentVariables(tx, {
-        userId: auditUserId,
+        userId: input.actorUserId,
         values: valuesToSave,
       });
     }
@@ -1939,6 +2164,13 @@ export async function startSetupNewOnboardingTaskCommand(
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
     );
+    // Stamp the provider explicitly: dequeue defaults to GitHub when the
+    // payload omits it, which breaks non-GitHub deployments.
+    const setupSourceControlProvider = resolveSingleSourceControlProvider(
+      selectedRepositories.map(
+        (repository) => repository.sourceControlProvider,
+      ),
+    );
     const prompt = appendEnvironmentDefinitionGuidance(
       buildSetupNewKickoffPrompt(selectedRepositoryFullNames),
       currentState.setupGuidance,
@@ -2020,19 +2252,17 @@ export async function startSetupNewOnboardingTaskCommand(
 
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
-          const launchResult = await enqueueCloudTask(
-            {
-              userId,
+          const launchResult = await enqueueTask({
+            task: {
               ...(modelSelection.harness
                 ? { harness: modelSelection.harness }
                 : {}),
-              attributionOverride: {
-                kind: 'automatic',
-                sourceKind: 'automation',
-              },
-              type: CloudTaskType.StandardTask,
+              type: TaskPayloadKind.StandardTask,
               payload: {
                 ...workspacePayload,
+                ...(setupSourceControlProvider
+                  ? { sourceControlProvider: setupSourceControlProvider }
+                  : {}),
                 description: prompt,
                 visibleInTranscript: false,
                 communicationProvider: fallbackTarget.provider,
@@ -2052,10 +2282,11 @@ export async function startSetupNewOnboardingTaskCommand(
                   : {}),
               },
             },
-            {
-              launchClass: 'human',
-            },
-          );
+            initiator: { kind: 'user', userId },
+            workflow: 'setup_onboarding',
+            surface: 'web',
+            trigger: 'manual',
+          });
 
           await savePersistedSetupNewState(
             normalizeSetupNewState({
@@ -2088,15 +2319,17 @@ export async function startSetupNewOnboardingTaskCommand(
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueCloudTask(
-        {
-          userId,
+      const launchResult = await enqueueTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          type: CloudTaskType.StandardTask,
+          type: TaskPayloadKind.StandardTask,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             description: prompt,
             visibleInTranscript: false,
             ...(modelSelection.harnessModelOverrides
@@ -2106,10 +2339,11 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
-        },
-      );
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      });
 
       await savePersistedSetupNewState(
         normalizeSetupNewState({
@@ -2159,22 +2393,20 @@ export async function startSetupNewOnboardingTaskCommand(
     }
 
     const startedAt = new Date().toISOString();
-    let launchResult: Awaited<ReturnType<typeof enqueueCloudTask>>;
+    let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
     try {
-      launchResult = await enqueueCloudTask(
-        {
-          userId,
+      launchResult = await enqueueTask({
+        task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
             : {}),
-          attributionOverride: {
-            kind: 'automatic',
-            sourceKind: 'automation',
-          },
-          type: CloudTaskType.SlackAppMention,
+          type: TaskPayloadKind.SlackAppMention,
           payload: {
             ...workspacePayload,
+            ...(setupSourceControlProvider
+              ? { sourceControlProvider: setupSourceControlProvider }
+              : {}),
             channel: slackChannel,
             user: handoffTarget.slackUserId,
             text: prompt,
@@ -2189,10 +2421,15 @@ export async function startSetupNewOnboardingTaskCommand(
               : {}),
           },
         },
-        {
-          launchClass: 'human',
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'slack',
+        trigger: 'manual',
+        channels: {
+          slackChannelId: slackChannel,
+          slackThreadTs,
         },
-      );
+      });
     } catch (error) {
       await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
       throw error;
@@ -2230,7 +2467,7 @@ export async function startSetupNewOnboardingTaskCommand(
       source: 'setup_dm',
       text: kickoffMessage,
       taskId: launchResult.taskId,
-      cloudJobId: launchResult.id,
+      runId: launchResult.id,
     });
 
     return {
@@ -2269,32 +2506,32 @@ export async function cancelSetupNewOnboardingTaskCommand(
 
   const jobs = await db
     .select({
-      id: cloudJobs.id,
-      status: cloudJobs.status,
+      id: taskRuns.id,
+      status: taskRuns.status,
     })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.taskId, currentState.onboardingTaskId));
+    .from(taskRuns)
+    .where(eq(taskRuns.taskId, currentState.onboardingTaskId));
 
-  const activeJobIds = jobs
-    .filter((job) => !isExitedCloudTaskStatus(job.status))
+  const activeRunIds = jobs
+    .filter((job) => !isExitedRunStatus(job.status))
     .map((job) => job.id);
 
-  if (activeJobIds.length > 0) {
+  if (activeRunIds.length > 0) {
     const endedAt = new Date();
 
     await db.transaction(async (tx) => {
       await tx
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
-          status: CloudTaskStatus.Canceled,
+          status: RunStatus.Canceled,
           canceledAt: endedAt,
         })
-        .where(inArray(cloudJobs.id, activeJobIds));
+        .where(inArray(taskRuns.id, activeRunIds));
 
       await Promise.all(
-        activeJobIds.map((cloudJobId) =>
+        activeRunIds.map((runId) =>
           markTaskStartParallelCountEndedAt(tx, {
-            cloudJobId,
+            runId,
             endedAt,
           }),
         ),

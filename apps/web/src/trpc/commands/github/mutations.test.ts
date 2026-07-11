@@ -69,6 +69,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 import {
   finishCreateGitHubAppManifestCommand,
+  startAuthenticateGitHubAccountCommand,
   startCreateGitHubInstallationCommand,
   startCreateGitHubAppManifestCommand,
 } from './mutations';
@@ -141,17 +142,55 @@ describe('GitHub App manifest commands', () => {
         active: true,
       },
       default_permissions: {
+        actions: 'write',
+        checks: 'write',
         contents: 'write',
+        deployments: 'read',
         issues: 'write',
         metadata: 'read',
         pull_requests: 'write',
+        statuses: 'read',
+        vulnerability_alerts: 'read',
         workflows: 'write',
       },
       default_events: [
+        'check_run',
+        'check_suite',
+        'commit_comment',
+        'create',
+        'delete',
+        'dependabot_alert',
+        'deploy_key',
+        'deployment',
+        'deployment_protection_rule',
+        'deployment_review',
+        'deployment_status',
+        'fork',
+        'gollum',
+        'installation_target',
         'issue_comment',
+        'issue_dependencies',
+        'issues',
+        'label',
+        'merge_group',
+        'meta',
+        'milestone',
+        'public',
         'pull_request',
+        'pull_request_review',
         'pull_request_review_comment',
+        'pull_request_review_thread',
         'push',
+        'release',
+        'repository',
+        'repository_dispatch',
+        'security_advisory',
+        'star',
+        'status',
+        'sub_issues',
+        'watch',
+        'workflow_dispatch',
+        'workflow_job',
         'workflow_run',
       ],
       request_oauth_on_install: true,
@@ -394,5 +433,54 @@ describe('GitHub App manifest commands', () => {
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+});
+
+describe('startAuthenticateGitHubAccountCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('builds the authorize URL from the deployment-resolved client id', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'GITHUB_CLIENT_ID' ? 'Iv1.resolved-client' : null,
+    );
+
+    const result = await startAuthenticateGitHubAccountCommand(
+      buildMockAuth(),
+      { redirect: '/settings?tab=account' },
+    );
+
+    expect(result.success).toBe(true);
+
+    if (!result.success) {
+      return;
+    }
+
+    const url = new URL(result.url);
+    expect(`${url.origin}${url.pathname}`).toBe(
+      'https://github.com/login/oauth/authorize',
+    );
+    expect(url.searchParams.get('client_id')).toBe('Iv1.resolved-client');
+    expect(url.searchParams.get('scope')).toBe('read:user');
+    expect(url.searchParams.get('redirect_uri')).toBe(
+      'https://roomote.example.com/github/callback',
+    );
+    expect(decodeRecord(url.searchParams.get('state') ?? '')).toEqual({
+      redirect: '/settings?tab=account',
+      mode: 'auth',
+    });
+  });
+
+  it('refuses to link an account when no GitHub App client id is configured', async () => {
+    mockResolveDeploymentEnvVar.mockResolvedValue(null);
+
+    const result = await startAuthenticateGitHubAccountCommand(buildMockAuth());
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Configure a GitHub App for this deployment before linking your GitHub account. Create one or enter its credentials first.',
+    });
   });
 });

@@ -4,13 +4,13 @@ const {
   activateSkillsFolderMock,
   awaitSubprocessMock,
   buildSandboxInstructionMock,
-  cloudJobsDoneMock,
-  cloudJobsRecordEventMock,
-  cloudJobsStampMilestoneMock,
-  cloudJobsSyncActingUserIdMock,
-  cloudJobsSetHarnessSessionIdMock,
-  cloudJobsUpdateRuntimeStateMock,
-  cloudJobsUpdateMock,
+  taskRunsDoneMock,
+  taskRunsRecordEventMock,
+  taskRunsStampMilestoneMock,
+  taskRunsSyncActingUserIdMock,
+  taskRunsSetHarnessSessionIdMock,
+  taskRunsUpdateRuntimeStateMock,
+  taskRunsUpdateMock,
   createHarnessMock,
   createInitialTaskStateMock,
   createServerMock,
@@ -37,13 +37,18 @@ const {
   activateSkillsFolderMock: vi.fn(() => false),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
-  cloudJobsDoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsRecordEventMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsSyncActingUserIdMock: vi.fn().mockResolvedValue('unchanged'),
-  cloudJobsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
-  cloudJobsUpdateMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsSyncActingUserIdMock: vi
+    .fn()
+    .mockImplementation(async ({ newUserId }: { newUserId: string }) => ({
+      result: 'unchanged',
+      actingUserId: newUserId,
+    })),
+  taskRunsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
+  taskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
   createHarnessMock: vi.fn().mockResolvedValue({
     harness: {},
     getSubprocess: vi.fn(() => ({})),
@@ -129,14 +134,14 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      done: cloudJobsDoneMock,
-      recordEvent: cloudJobsRecordEventMock,
-      stampMilestone: cloudJobsStampMilestoneMock,
-      setHarnessSessionId: cloudJobsSetHarnessSessionIdMock,
-      syncActingUserId: cloudJobsSyncActingUserIdMock,
-      update: cloudJobsUpdateMock,
-      updateRuntimeState: cloudJobsUpdateRuntimeStateMock,
+    taskRuns: {
+      done: taskRunsDoneMock,
+      recordEvent: taskRunsRecordEventMock,
+      stampMilestone: taskRunsStampMilestoneMock,
+      setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
+      syncActingUserId: taskRunsSyncActingUserIdMock,
+      update: taskRunsUpdateMock,
+      updateRuntimeState: taskRunsUpdateRuntimeStateMock,
     },
     linearInstallations: {
       drainLinearMessages: vi.fn(),
@@ -248,7 +253,15 @@ vi.mock('../../sandbox-server/procedures/slackReplyTurnTracking', () => ({
   recordSandboxPromptSlackTurnStart: recordSandboxPromptSlackTurnStartMock,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+const { actorMismatchSkipNotifierMock } = vi.hoisted(() => ({
+  actorMismatchSkipNotifierMock: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../actor-mismatch-notice', () => ({
+  createActorMismatchSkipNotifier: vi.fn(() => actorMismatchSkipNotifierMock),
+}));
+
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
@@ -276,7 +289,7 @@ describe('runTask', () => {
       taskFinishedAt: undefined,
       taskAbortedAt: undefined,
     });
-    resolveStatusMock.mockReturnValue(CloudTaskStatus.Idle);
+    resolveStatusMock.mockReturnValue(RunStatus.Idle);
     waitForExternalSleepActionMock.mockResolvedValue({
       claimed: false,
       completed: false,
@@ -298,10 +311,15 @@ describe('runTask', () => {
       resumed: false,
       reason: 'no_pending_messages',
     });
-    cloudJobsStampMilestoneMock.mockReset();
-    cloudJobsStampMilestoneMock.mockResolvedValue(undefined);
-    cloudJobsSyncActingUserIdMock.mockReset();
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('unchanged');
+    taskRunsStampMilestoneMock.mockReset();
+    taskRunsStampMilestoneMock.mockResolvedValue(undefined);
+    taskRunsSyncActingUserIdMock.mockReset();
+    taskRunsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'unchanged',
+        actingUserId: newUserId,
+      }),
+    );
     mkdirSyncMock.mockReset();
     writeFileSyncMock.mockReset();
     syncRuntimeGitAuthorMock.mockReset();
@@ -310,10 +328,10 @@ describe('runTask', () => {
 
   it('does not pass a system prompt into the OpenCode harness', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 150,
         taskId: 'task-150',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -355,10 +373,10 @@ describe('runTask', () => {
 
   it('drops untrusted harness home overrides from the OpenCode runtime environment', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -405,10 +423,10 @@ describe('runTask', () => {
 
   it('passes the built-in Roomote MCP task env into harness startup', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -457,10 +475,10 @@ describe('runTask', () => {
     const onStart = vi.fn().mockResolvedValue(undefined);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 105,
         taskId: 'task-105',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -495,12 +513,12 @@ describe('runTask', () => {
 
     await manager.callbacks?.onStart?.('session-105');
 
-    expect(cloudJobsSetHarnessSessionIdMock).toHaveBeenCalledWith({
-      cloudJobId: 105,
+    expect(taskRunsSetHarnessSessionIdMock).toHaveBeenCalledWith({
+      runId: 105,
       harnessSessionId: 'session-105',
     });
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 105,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 105,
       field: 'runtimeTaskStartedAt',
     });
     expect(onStart).toHaveBeenCalledWith(
@@ -516,10 +534,10 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 103,
         taskId: 'task-103',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -566,10 +584,10 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 106,
         taskId: 'task-106',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -614,10 +632,10 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockResolvedValue(false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 107,
         taskId: 'task-107',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -661,10 +679,10 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockResolvedValue(false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -706,10 +724,10 @@ describe('runTask', () => {
 
   it('always enables the terminal runtime env and sandbox server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 110,
         taskId: 'task-110',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -758,10 +776,10 @@ describe('runTask', () => {
     mockEvaluateFeatureFlag.mockImplementation(async () => false);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -815,10 +833,10 @@ describe('runTask', () => {
 
   it('always passes Slack reply satisfaction state into the MCP task env for Slack tasks', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1061,
         taskId: 'task-1061',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -867,10 +885,10 @@ describe('runTask', () => {
 
   it('passes Slack thread context into the runtime env for proof uploads', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 107,
         taskId: 'task-107',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -923,10 +941,10 @@ describe('runTask', () => {
 
   it('passes Slack thread context into the runtime env for coerced legacy proof uploads', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 108,
         taskId: 'task-108',
-        type: CloudTaskType.SlackAppMention,
+        payloadKind: TaskPayloadKind.SlackAppMention,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
@@ -982,12 +1000,11 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 105,
           taskId: 'task-105',
-          type: CloudTaskType.SlackAppMention,
+          payloadKind: TaskPayloadKind.SlackAppMention,
           harness: 'opencode-server',
-          slackThreadTs: '111.222',
           payload: {
             channel: 'C123',
             thread_ts: '111.222',
@@ -1061,14 +1078,14 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 106,
           taskId: 'task-106',
-          type: CloudTaskType.SnapshotResume,
+          payloadKind: TaskPayloadKind.SnapshotResume,
           harness: 'opencode-server',
-          slackThreadTs: '111.000',
           payload: {
             slackChannel: 'C123',
+            thread_ts: '111.000',
             slackOriginMessageTs: '111.333',
             sourceSnapshotId: 'snap-1',
           },
@@ -1123,12 +1140,11 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 107,
           taskId: 'task-107',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'org/repo',
             description: 'do the thing',
@@ -1188,12 +1204,11 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 108,
           taskId: 'task-108',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'org/repo',
             description: 'do the thing',
@@ -1253,12 +1268,11 @@ describe('runTask', () => {
 
     try {
       await runTask({
-        cloudJob: {
+        taskRun: {
           id: 107,
           taskId: 'task-107',
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
-          slackThreadTs: null,
           payload: {
             repo: 'acme/app',
             slackChannel: 'C123',
@@ -1314,12 +1328,11 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 109,
         taskId: 'task-109',
-        type: CloudTaskType.SuggestedTasks,
+        payloadKind: TaskPayloadKind.Scan,
         harness: 'opencode-server',
-        slackThreadTs: null,
         payload: {
           slackChannel: 'C123',
         },
@@ -1352,16 +1365,16 @@ describe('runTask', () => {
     });
 
     expect(drainSlackMessagesMock).toHaveBeenCalledWith({
-      cloudJobId: 109,
+      runId: 109,
     });
   });
 
   it('passes task type into the keepalive fallback when keepaliveMs is missing', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1091,
         taskId: 'task-1091',
-        type: CloudTaskType.GithubPrReview,
+        payloadKind: TaskPayloadKind.GithubPrReview,
         harness: 'opencode-server',
         keepaliveMs: null,
         payload: {},
@@ -1395,17 +1408,17 @@ describe('runTask', () => {
 
     expect(getDefaultKeepaliveMs).toHaveBeenCalledWith(
       expect.objectContaining({
-        taskType: CloudTaskType.GithubPrReview,
+        taskType: TaskPayloadKind.GithubPrReview,
       }),
     );
   });
 
   it('passes a task-scoped agent-browser session into the runtime env', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 101,
         taskId: 'task-101',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1452,7 +1465,7 @@ describe('runTask', () => {
     );
   });
 
-  it('fetches org-scoped MCP servers even when the cloud job has no user id', async () => {
+  it('fetches org-scoped MCP servers even when the task run has no user id', async () => {
     getMcpServerConfigsMock.mockResolvedValueOnce({
       servers: {
         snowflake: {
@@ -1462,10 +1475,10 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 106,
         taskId: 'task-106',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1512,10 +1525,10 @@ describe('runTask', () => {
 
   it('passes the proof browser target to the harness when the environment exposes a browser surface', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1573,10 +1586,10 @@ describe('runTask', () => {
 
   it('does not expose removed proof runner flags when requested', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1621,10 +1634,10 @@ describe('runTask', () => {
 
   it('does not expose removed proof runner flags for coerced legacy jobs', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 154,
         taskId: 'task-154',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1669,10 +1682,10 @@ describe('runTask', () => {
 
   it('does not pass a proof browser target when the environment lacks a browser surface', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 155,
         taskId: 'task-155',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1715,7 +1728,12 @@ describe('runTask', () => {
   });
 
   it('queues a deferred resume prompt from SnapshotResume payloads', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    taskRunsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
@@ -1734,16 +1752,16 @@ describe('runTask', () => {
     });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 303,
         taskId: 'task-303',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {
           channel: 'C123',
           thread_ts: '111.222',
           sourceSnapshotId: 'snap-303',
-          sourceCloudJobId: 302,
+          sourceRunId: 302,
           slackOriginMessageTs: '111.222',
           resumePrompt: 'Tell me what this PR is about.',
           resumePromptSource: 'web',
@@ -1783,8 +1801,8 @@ describe('runTask', () => {
     const manager = harnessManagerInstances[0]!;
 
     expect(manager.resumeTask).toHaveBeenCalledWith('resume-session-303');
-    expect(cloudJobsStampMilestoneMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+    expect(taskRunsStampMilestoneMock).toHaveBeenCalledWith({
+      runId: 303,
       field: 'runtimeTaskStartedAt',
     });
     expect(onStart).toHaveBeenCalledWith(
@@ -1792,12 +1810,13 @@ describe('runTask', () => {
       'resume-session-303',
       {},
     );
-    expect(cloudJobsSyncActingUserIdMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+    expect(taskRunsSyncActingUserIdMock).toHaveBeenCalledWith({
+      runId: 303,
       newUserId: 'user-2',
+      lastKnownUserId: null,
     });
     expect(syncRuntimeGitAuthorMock).toHaveBeenCalledWith({
-      cloudJobId: 303,
+      runId: 303,
       workingDirectory: '/tmp/workspace',
     });
     expect(getMcpServerConfigsMock).toHaveBeenCalledTimes(2);
@@ -1813,7 +1832,7 @@ describe('runTask', () => {
         }),
       }),
     );
-    expect(cloudJobsUpdateMock).toHaveBeenCalledWith({
+    expect(taskRunsUpdateMock).toHaveBeenCalledWith({
       id: 303,
       result: expect.objectContaining({
         runtimeTaskId: 'resume-session-303',
@@ -1842,10 +1861,10 @@ describe('runTask', () => {
     const onStart = vi.fn();
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 304,
         taskId: 'task-304',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -1881,7 +1900,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -1895,7 +1914,12 @@ describe('runTask', () => {
   });
 
   it('passes explicit workflow phases through deferred resume prompts', async () => {
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    taskRunsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     const onStart = vi.fn().mockResolvedValue(undefined);
     createHarnessMock.mockResolvedValueOnce({
       harness: {
@@ -1907,14 +1931,14 @@ describe('runTask', () => {
     getMcpServerConfigsMock.mockResolvedValueOnce({ servers: {} });
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 304,
         taskId: 'task-304',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         payload: {
           sourceSnapshotId: 'snap-304',
-          sourceCloudJobId: 303,
+          sourceRunId: 303,
           resumePrompt: '$review-code\nTell me what this PR is about.',
           resumePromptSource: 'web',
           resumePromptUserId: 'user-2',
@@ -1959,15 +1983,15 @@ describe('runTask', () => {
   });
 
   it('does not compare queued actor-scoped MCP state when actingUserId sync fails', async () => {
-    cloudJobsSyncActingUserIdMock.mockRejectedValueOnce(
+    taskRunsSyncActingUserIdMock.mockRejectedValueOnce(
       new Error('sync failed'),
     );
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 404,
         taskId: 'task-404',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2012,6 +2036,72 @@ describe('runTask', () => {
     expect(syncRuntimeGitAuthorMock).not.toHaveBeenCalled();
   });
 
+  it('skips a queued prompt whose sender is not the server-side acting user and notifies the sender', async () => {
+    // The harness queue can hold a prompt from user B accepted before a
+    // trusted write switched the run to user A. B's content must not run
+    // under A's credential resolution, so the prompt is skipped (not
+    // blocked-and-retried, which would stall the queue forever).
+    await runTask({
+      taskRun: {
+        id: 407,
+        taskId: 'task-407',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        actingUserId: 'user-1',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const prepareQueuedPromptActorScope =
+      createHarnessMock.mock.calls[0]?.[0].prepareQueuedPromptActorScope;
+
+    expect(prepareQueuedPromptActorScope).toBeTypeOf('function');
+
+    taskRunsSyncActingUserIdMock.mockResolvedValueOnce({
+      result: 'mismatch',
+      actingUserId: 'user-1',
+    });
+
+    await expect(prepareQueuedPromptActorScope?.('user-2')).resolves.toEqual({
+      shouldReconnect: false,
+      shouldSkipPrompt: true,
+      reason:
+        'queued prompt sender is not the server-side acting user; the prompt was skipped',
+    });
+
+    // No credential surface was touched for the mismatched sender and the
+    // sender was asked to resend.
+    expect(getDecryptedKeyMock).not.toHaveBeenCalled();
+    expect(syncRuntimeGitAuthorMock).not.toHaveBeenCalled();
+    expect(actorMismatchSkipNotifierMock).toHaveBeenCalledWith({
+      senderUserId: 'user-2',
+      serverActorUserId: 'user-1',
+    });
+  });
+
   it('allows queued actor-scoped prompts to continue when the same-actor refresh recheck fails', async () => {
     getMcpServerConfigsMock
       .mockResolvedValueOnce({
@@ -2024,10 +2114,10 @@ describe('runTask', () => {
       .mockRejectedValueOnce(new Error('temporary failure'));
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 405,
         taskId: 'task-405',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         userId: 'user-2',
         actingUserId: 'user-2',
@@ -2097,7 +2187,12 @@ describe('runTask', () => {
     const requestReconnect = vi.fn().mockResolvedValue(undefined);
 
     waitForShutdownMock.mockReturnValueOnce(waitForShutdownPromise);
-    cloudJobsSyncActingUserIdMock.mockResolvedValue('updated');
+    taskRunsSyncActingUserIdMock.mockImplementation(
+      async ({ newUserId }: { newUserId: string }) => ({
+        result: 'updated',
+        actingUserId: newUserId,
+      }),
+    );
     getMcpServerConfigsMock
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce({
@@ -2125,10 +2220,10 @@ describe('runTask', () => {
     });
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 406,
         taskId: 'task-406',
-        type: CloudTaskType.SnapshotResume,
+        payloadKind: TaskPayloadKind.SnapshotResume,
         harness: 'opencode-server',
         userId: 'owner-user',
         actingUserId: 'owner-user',
@@ -2168,7 +2263,7 @@ describe('runTask', () => {
       const harnessManager = await harnessCreatedPromise;
 
       expect(harnessManager.sendFollowUpPrompt).not.toHaveBeenCalled();
-      expect(cloudJobsUpdateMock).not.toHaveBeenCalledWith(
+      expect(taskRunsUpdateMock).not.toHaveBeenCalledWith(
         expect.objectContaining({
           id: 406,
           result: expect.objectContaining({
@@ -2189,7 +2284,7 @@ describe('runTask', () => {
         source: 'github',
         userId: 'user-2',
       });
-      expect(cloudJobsUpdateMock).toHaveBeenCalledWith({
+      expect(taskRunsUpdateMock).toHaveBeenCalledWith({
         id: 406,
         result: expect.objectContaining({
           deferredResumePromptAccepted: true,
@@ -2213,10 +2308,10 @@ describe('runTask', () => {
 
   it('routes legacy jobs without a persisted harness through opencode-server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 203,
         taskId: 'task-203',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: undefined,
         payload: {},
         result: null,
@@ -2254,10 +2349,10 @@ describe('runTask', () => {
 
   it('starts the OpenCode harness in the worker runtime', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 204,
         taskId: 'task-204',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2300,10 +2395,10 @@ describe('runTask', () => {
 
   it('coerces an explicit legacy direct harness into the sandbox server', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 204,
         taskId: 'task-204',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2341,10 +2436,10 @@ describe('runTask', () => {
 
   it('drops headed browser override env vars from the sanitized runtime env', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 102,
         taskId: 'task-102',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2400,10 +2495,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 150,
         taskId: 'task-150',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2458,10 +2553,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2526,10 +2621,10 @@ describe('runTask', () => {
     };
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 151,
         taskId: 'task-151',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2559,7 +2654,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2597,10 +2692,10 @@ describe('runTask', () => {
     });
 
     const runTaskPromise = runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2630,7 +2725,7 @@ describe('runTask', () => {
     cancelController.abort(new Error('background environment setup failed'));
 
     await expect(runTaskPromise).resolves.toEqual({
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: 'Task aborted',
     });
 
@@ -2646,18 +2741,18 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
-        requestedWorkKind: 'implement',
         payload: {},
         result: null,
       } as never,
       envVars: {},
       workspacePath: '/tmp/workspace',
       prompt: 'Fix the failing test',
+      requestedWorkKind: 'implement',
       harnessInstructions: undefined,
       agentInstructions: undefined,
       environmentConfig: undefined,
@@ -2693,10 +2788,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1515,
         taskId: 'task-1515',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2755,10 +2850,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 152,
         taskId: 'task-152',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2815,10 +2910,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1521,
         taskId: 'task-1521',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2881,10 +2976,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue('Sandbox details' as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1522,
         taskId: 'task-1522',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -2957,10 +3052,10 @@ describe('runTask', () => {
 
   it('promotes wrapped explicit repo-local skill invocations based on the discovered workspace catalog', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1526,
         taskId: 'task-1526',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3012,10 +3107,10 @@ describe('runTask', () => {
 
   it('promotes wrapped plain-text repo-local skill invocations when the first line matches the discovered catalog', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1527,
         taskId: 'task-1527',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3067,10 +3162,10 @@ describe('runTask', () => {
 
   it('keeps bare repo-local skill promotion when mirrored roots exist only inside one repo', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1527,
         taskId: 'task-1527',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3132,10 +3227,10 @@ describe('runTask', () => {
 
   it('does not promote an ambiguous bare repo-local skill name when multiple repos expose it', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1528,
         taskId: 'task-1528',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3197,10 +3292,10 @@ describe('runTask', () => {
 
   it('promotes a repo-qualified repo-local skill invocation when the bare name is ambiguous', async () => {
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 1529,
         taskId: 'task-1529',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3263,10 +3358,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 153,
         taskId: 'task-153',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3317,10 +3412,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 155,
         taskId: 'task-155',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3382,10 +3477,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 156,
         taskId: 'task-156',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3437,10 +3532,10 @@ describe('runTask', () => {
     buildSandboxInstructionMock.mockReturnValue(undefined as never);
 
     await runTask({
-      cloudJob: {
+      taskRun: {
         id: 154,
         taskId: 'task-154',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3484,7 +3579,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (!values.taskPhase) {
           return Promise.resolve({ updated: false });
@@ -3499,10 +3594,10 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 103,
         taskId: 'task-103',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3558,7 +3653,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    let runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    let runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3570,7 +3665,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3591,7 +3686,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (!values.taskPhase) {
           return Promise.resolve({ updated: false });
@@ -3604,9 +3699,9 @@ describe('runTask', () => {
         return Promise.resolve({ updated: true });
       },
     );
-    cloudJobsRecordEventMock.mockImplementation(
+    taskRunsRecordEventMock.mockImplementation(
       (values: { message?: string }) => {
-        if (values.message === 'Persisted runtime state for cloud job #105.') {
+        if (values.message === 'Persisted runtime state for task run #105.') {
           persistedStateEventCount += 1;
 
           if (persistedStateEventCount === 1) {
@@ -3619,10 +3714,10 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 105,
         taskId: 'task-105',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3678,7 +3773,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    let runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    let runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3690,7 +3785,7 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    runtimePhaseCalls = cloudJobsUpdateRuntimeStateMock.mock.calls
+    runtimePhaseCalls = taskRunsUpdateRuntimeStateMock.mock.calls
       .map(([arg]) => arg as { taskPhase?: string })
       .filter((arg) => arg.taskPhase);
 
@@ -3712,7 +3807,7 @@ describe('runTask', () => {
     const subprocessDeferred = new Promise<void>(() => {});
 
     awaitSubprocessMock.mockReturnValue(subprocessDeferred);
-    cloudJobsUpdateRuntimeStateMock.mockImplementation(
+    taskRunsUpdateRuntimeStateMock.mockImplementation(
       (values: { taskPhase?: string }) => {
         if (values.taskPhase === 'waiting_for_prompt') {
           return pendingRuntimeUpdate;
@@ -3723,10 +3818,10 @@ describe('runTask', () => {
     );
 
     void runTask({
-      cloudJob: {
+      taskRun: {
         id: 104,
         taskId: 'task-104',
-        type: CloudTaskType.StandardTask,
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -3777,25 +3872,25 @@ describe('runTask', () => {
 
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(cloudJobsDoneMock).not.toHaveBeenCalled();
+    expect(taskRunsDoneMock).not.toHaveBeenCalled();
 
     expect(resolveRuntimeUpdate).toBeTypeOf('function');
     resolveRuntimeUpdate!();
     await onExitPromise;
 
-    expect(cloudJobsDoneMock).toHaveBeenCalledWith({
+    expect(taskRunsDoneMock).toHaveBeenCalledWith({
       id: 104,
-      status: CloudTaskStatus.Idle,
+      status: RunStatus.Idle,
     });
   });
 
   describe('worker crash handlers', () => {
     const buildCrashTestOptions = (id: number) =>
       ({
-        cloudJob: {
+        taskRun: {
           id,
           taskId: `task-${id}`,
-          type: CloudTaskType.StandardTask,
+          payloadKind: TaskPayloadKind.StandardTask,
           harness: 'opencode-server',
           payload: {},
           result: null,
@@ -3850,7 +3945,7 @@ describe('runTask', () => {
 
       // The module-level handlers register at most once per process, so the
       // count must not grow with each run (regression for finding F: leaked,
-      // stacking listeners across executeJob retries).
+      // stacking listeners across executeTaskRun retries).
       expect(uncaughtAfterSecond).toBe(uncaughtAfterFirst);
       expect(unhandledAfterSecond).toBe(unhandledAfterFirst);
       expect(uncaughtAfterFirst).toBeLessThanOrEqual(uncaughtBefore + 1);
@@ -3863,7 +3958,7 @@ describe('runTask', () => {
       // A normal completed run never persists a workerCrash result, and the
       // try/finally clears the active context so no later crash can be
       // attributed to this finished job.
-      const crashWrites = cloudJobsUpdateMock.mock.calls.filter(
+      const crashWrites = taskRunsUpdateMock.mock.calls.filter(
         (call) =>
           call[0] &&
           typeof call[0] === 'object' &&

@@ -14,7 +14,7 @@ import {
 
 import { ALL_REPOSITORIES } from '@roomote/types';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { cn } from '@/lib/utils';
 
@@ -61,7 +61,7 @@ export const SelectEnvironmentOrRepository = ({
   onEdit,
   onDelete,
 }: SelectEnvironmentOrRepositoryProps) => {
-  const { control, watch, setValue } = useFormContext<CreateCloudTask>();
+  const { control, watch, setValue } = useFormContext<CreateTaskFormValues>();
   const environmentId = watch('environmentId');
   const repository = watch('repository');
 

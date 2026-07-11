@@ -1,5 +1,6 @@
 {
   "name": "@roomote/bullmq",
+  "version": "0.0.3",
   "private": true,
   "type": "module",
   "scripts": {
@@ -26,8 +27,6 @@
     "@roomote/compute-providers": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
-    "@roomote/feature-flags": "workspace:^",
-    "@roomote/github": "workspace:^",
     "@roomote/linear": "workspace:^",
     "@roomote/sdk": "workspace:^",
     "@roomote/slack": "workspace:^",

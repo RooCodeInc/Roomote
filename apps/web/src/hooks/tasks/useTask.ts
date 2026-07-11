@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 
-import { isExitedCloudTaskStatus } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 import { useTRPC } from '@/trpc/client';
 
 interface UseTaskOptions {
@@ -32,12 +32,12 @@ export const useTask = (
     () =>
       setIsSnapshotting(
         !!(
-          query.data?.cloudJob?.sleepRequestedAt ||
-          query.data?.cloudJob?.snapshotRequestedAt
+          query.data?.taskRun?.sleepRequestedAt ||
+          query.data?.taskRun?.snapshotRequestedAt
         ) &&
-          !isExitedCloudTaskStatus(query.data?.cloudJob?.status) &&
-          !query.data?.cloudJob?.snapshotCreatedAt &&
-          !query.data?.cloudJob?.snapshotFailedAt,
+          !isExitedRunStatus(query.data?.taskRun?.status) &&
+          !query.data?.taskRun?.snapshotCreatedAt &&
+          !query.data?.taskRun?.snapshotFailedAt,
       ),
     [query.data],
   );

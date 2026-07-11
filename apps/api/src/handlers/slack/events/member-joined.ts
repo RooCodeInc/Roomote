@@ -1,10 +1,10 @@
 import { formatErrorForLog } from '@roomote/types';
 import {
-  backgroundAgentSettings,
   db,
   count,
+  deploymentSettings,
   eq,
-  upsertBackgroundAutomation,
+  upsertAutomation,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   slackInstallationChannels,
@@ -48,28 +48,24 @@ async function syncManagerStarterAutomations(params: {
   const { settings, updatedAt } = params;
 
   await Promise.all([
-    upsertBackgroundAutomation(db, {
-      automationKey: 'suggester',
+    upsertAutomation(db, {
+      key: 'suggester',
       enabled: settings.suggesterFrequency !== 'off',
       schedule: { mode: settings.suggesterFrequency },
-      settings: settings.suggesterInstructions
-        ? { instructions: settings.suggesterInstructions }
-        : {},
+      instructions: settings.suggesterInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.suggesterSlackChannelId),
       updatedAt,
     }),
-    upsertBackgroundAutomation(db, {
-      automationKey: 'announcer',
+    upsertAutomation(db, {
+      key: 'announcer',
       enabled: settings.announcerFrequency !== 'off',
       schedule: { mode: settings.announcerFrequency },
-      settings: settings.announcerInstructions
-        ? { instructions: settings.announcerInstructions }
-        : {},
+      instructions: settings.announcerInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.announcerSlackChannelId),
       updatedAt,
     }),
-    upsertBackgroundAutomation(db, {
-      automationKey: 'manager_stats',
+    upsertAutomation(db, {
+      key: 'manager_stats',
       enabled: settings.managerStatsFrequency !== 'off',
       schedule: { mode: settings.managerStatsFrequency },
       updatedAt,
@@ -137,13 +133,13 @@ export async function maybePostSlackChannelWelcome(params: {
     const now = new Date();
 
     await db
-      .insert(backgroundAgentSettings)
+      .insert(deploymentSettings)
       .values({
         managerSlackChannelId: event.channel,
         updatedAt: now,
       })
       .onConflictDoUpdate({
-        target: backgroundAgentSettings.id,
+        target: deploymentSettings.id,
         set: {
           managerSlackChannelId: event.channel,
           updatedAt: now,
@@ -195,12 +191,12 @@ export async function maybePostSlackChannelWelcome(params: {
   } catch (error) {
     if (shouldEnableStarterAutomations) {
       await db
-        .update(backgroundAgentSettings)
+        .update(deploymentSettings)
         .set({
           managerSlackChannelId: settings.managerSlackChannelId,
           updatedAt: new Date(),
         })
-        .where(eq(backgroundAgentSettings.id, 'default'))
+        .where(eq(deploymentSettings.id, 'default'))
         .catch((cleanupError) => {
           console.warn(
             `[SlackWebhook] Failed to rollback manager-channel automation settings for ${event.channel}: ${formatErrorForLog(cleanupError)}`,

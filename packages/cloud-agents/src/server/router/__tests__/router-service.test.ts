@@ -1,4 +1,4 @@
-import { CloudAgentType, DEFAULT_TASK_MODEL_SETTINGS } from '@roomote/types';
+import { DEFAULT_TASK_MODEL_SETTINGS } from '@roomote/types';
 
 import type { RoutingContext, RoutableEnvironment } from '../types';
 import { routeTask } from '../router-service';
@@ -33,7 +33,6 @@ describe('routeTask', () => {
     return {
       taskDescription: 'Fix the login flow',
       source: { type: 'slack', channelName: 'engineering' },
-      availableAgents: [],
       availableEnvironments: environments,
       taskModelSettings: DEFAULT_TASK_MODEL_SETTINGS,
       ...overrides,
@@ -78,7 +77,6 @@ describe('routeTask', () => {
       }),
     );
     expect(result.result).toMatchObject({
-      agentType: CloudAgentType.StandardTask,
       workspaceOnly: true,
       reasoning: 'Full Stack is the best fit.',
       workspace: {
@@ -315,7 +313,6 @@ describe('routeTask', () => {
     const result = await routeTask(
       createContext({
         previousSuggestion: {
-          agentType: 'Generalist',
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
           modelId: 'openrouter/anthropic/claude-opus-4.8',
@@ -352,7 +349,6 @@ describe('routeTask', () => {
     const result = await routeTask(
       createContext({
         previousSuggestion: {
-          agentType: 'Generalist',
           workspaceValue: 'Full Stack',
           workspaceDisplayName: 'Full Stack',
           modelId: 'openrouter/anthropic/claude-opus-4.8',

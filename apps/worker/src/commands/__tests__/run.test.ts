@@ -1,11 +1,11 @@
-const { executeJobMock, runTaskMock } = vi.hoisted(() => ({
-  executeJobMock: vi.fn(),
+const { executeTaskRunMock, runTaskMock } = vi.hoisted(() => ({
+  executeTaskRunMock: vi.fn(),
   runTaskMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {},
+    taskRuns: {},
   },
 }));
 
@@ -15,10 +15,10 @@ vi.mock('../../run-task', () => ({
 
 vi.mock('../utils', () => ({
   buildWorkspaceConfig: vi.fn(),
-  executeJob: executeJobMock,
+  executeTaskRun: executeTaskRunMock,
 }));
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { run } from '../run';
 
@@ -28,29 +28,29 @@ describe('run', () => {
     runTaskMock.mockResolvedValue(undefined);
   });
 
-  it('keeps sandbox-backed task execution for non-eval cloud jobs', async () => {
-    executeJobMock.mockResolvedValue(true);
+  it('keeps sandbox-backed task execution for non-eval task runs', async () => {
+    executeTaskRunMock.mockResolvedValue(true);
 
-    const result = await run({ cloudJobId: 99, setupMode: 'full' });
+    const result = await run({ runId: 99, setupMode: 'full' });
 
     expect(result).toBe(true);
-    expect(executeJobMock).toHaveBeenCalledOnce();
+    expect(executeTaskRunMock).toHaveBeenCalledOnce();
   });
 
   it('passes direct-run setup options through to task execution', async () => {
-    executeJobMock.mockResolvedValue(true);
+    executeTaskRunMock.mockResolvedValue(true);
 
     const result = await run({
-      cloudJobId: 99,
+      runId: 99,
       setupMode: 'directDispatch',
       preserveGitState: true,
       keepaliveMsOverride: 30_000,
     });
 
     expect(result).toBe(true);
-    expect(executeJobMock).toHaveBeenCalledWith(
+    expect(executeTaskRunMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        cloudJobId: 99,
+        runId: 99,
         setupMode: 'directDispatch',
         preserveGitState: true,
       }),
@@ -58,12 +58,12 @@ describe('run', () => {
   });
 
   it('forwards direct-run keepalive overrides into runTask', async () => {
-    executeJobMock.mockImplementation(async ({ runFn }) => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
-          cloudJob: {
+          taskRun: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'keep this local task open',
@@ -88,7 +88,7 @@ describe('run', () => {
     });
 
     await run({
-      cloudJobId: 99,
+      runId: 99,
       setupMode: 'directDispatch',
       keepaliveMsOverride: 30_000,
     });
@@ -102,12 +102,12 @@ describe('run', () => {
   });
 
   it('forwards native proof capture into runTask', async () => {
-    executeJobMock.mockImplementation(async ({ runFn }) => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
-          cloudJob: {
+          taskRun: {
             id: 99,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
           },
           envVars: {},
           prompt: 'proof me',
@@ -131,7 +131,7 @@ describe('run', () => {
       return true;
     });
 
-    await run({ cloudJobId: 99, setupMode: 'full' });
+    await run({ runId: 99, setupMode: 'full' });
 
     expect(runTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -140,13 +140,65 @@ describe('run', () => {
     );
   });
 
-  it('forwards workspace readiness warnings into runTask', async () => {
-    executeJobMock.mockImplementation(async ({ runFn }) => {
+  it('forwards the dequeue response requestedWorkKind and task bindings into runTask', async () => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
       await runFn({
         jobContext: {
-          cloudJob: {
+          taskRun: {
+            id: 101,
+            payloadKind: TaskPayloadKind.StandardTask,
+            taskId: 'task-101',
+          },
+          envVars: {},
+          prompt: 'fix the bug',
+          harnessInstructions: undefined,
+          orgAgentInstructions: undefined,
+          styleGuidance: undefined,
+          requestedWorkKind: 'unknown',
+          task: {
+            id: 'task-101',
+            slackChannelId: 'C123',
+            slackThreadTs: '111.222',
+            linearSessionId: null,
+          },
+        },
+        workspace: {
+          environmentConfig: {
+            agentInstructions: undefined,
+          },
+        },
+        workspacePath: '/tmp/workspace',
+        usesSharedWorkspaceRoot: false,
+        callbacks: {},
+        context: {},
+        logger: {} as never,
+        workerEnv: {} as never,
+      });
+
+      return true;
+    });
+
+    await run({ runId: 101, setupMode: 'full' });
+
+    expect(runTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedWorkKind: 'unknown',
+        task: expect.objectContaining({
+          slackChannelId: 'C123',
+          slackThreadTs: '111.222',
+          linearSessionId: null,
+        }),
+      }),
+    );
+  });
+
+  it('forwards workspace readiness warnings into runTask', async () => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
+      await runFn({
+        jobContext: {
+          taskRun: {
             id: 100,
-            type: CloudTaskType.StandardTask,
+            payloadKind: TaskPayloadKind.StandardTask,
             taskId: 'task-100',
           },
           envVars: {},
@@ -174,7 +226,7 @@ describe('run', () => {
       return true;
     });
 
-    await run({ cloudJobId: 100, setupMode: 'full' });
+    await run({ runId: 100, setupMode: 'full' });
 
     expect(runTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({

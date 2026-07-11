@@ -28,6 +28,7 @@ import { createSingleLineWarnLogger } from './logging';
 import { captureApiException } from './monitoring/sentry';
 import {
   requestObservabilityMiddleware,
+  routePolicyMiddleware,
   tokenAuthMiddleware,
 } from './middleware';
 import {
@@ -44,7 +45,7 @@ import {
   telegram,
   mcp,
   mcpRouting,
-  cloudJobsRouter,
+  taskRunsRouter,
   artifactsRouter,
   taskArtifactsRouter,
   oidcRouter,
@@ -156,6 +157,12 @@ export function createApiApp(): ApiApp {
     return tokenAuth(c, next);
   });
 
+  // Central default-deny authorization gate: every request must match a
+  // declared route policy (see route-policies.ts) and satisfy it before any
+  // handler runs. Registered after token auth so validated auth contexts are
+  // available for enforcement.
+  app.use('*', routePolicyMiddleware);
+
   if (Env.NODE_ENV !== 'development') {
     app.use(
       '/admin',
@@ -182,7 +189,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
-  app.route('/api/cloud-jobs', cloudJobsRouter);
+  app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);
   app.route('/api/tasks', taskArtifactsRouter);
   app.route('/', oidcRouter);

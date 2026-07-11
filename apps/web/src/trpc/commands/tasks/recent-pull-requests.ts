@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   isNotNull,
+  isNull,
   tasks,
   taskPullRequests,
 } from '@roomote/db/server';
@@ -41,7 +42,8 @@ export async function getRecentPullRequestsCommand(
     .innerJoin(tasks, eq(taskPullRequests.taskId, tasks.id))
     .where(
       and(
-        eq(tasks.userId, auth.userId),
+        eq(tasks.initiatorUserId, auth.userId),
+        isNull(tasks.deletedAt),
         isNotNull(taskPullRequests.repository),
         isNotNull(taskPullRequests.prNumber),
       ),

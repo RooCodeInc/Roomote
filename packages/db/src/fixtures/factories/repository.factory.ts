@@ -89,6 +89,9 @@ export const repositoryFactory = Factory.define<
         fullRepoName,
       ),
     htmlUrl: htmlUrl ?? `https://${sourceControlHost}/${fullRepoName}`,
+    // Production sync paths always stamp a non-null host; mirror that here so
+    // factory rows exercise the host-aware unique indexes like real rows.
+    host: sourceControlHost,
     private: false,
     defaultBranch: 'main',
     permissions: {},

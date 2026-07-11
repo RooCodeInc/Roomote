@@ -6,11 +6,11 @@ import { toast } from 'sonner';
 import { MoreVertical, Trash2 } from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
-import { isExitedCloudTaskStatus } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
-import { useDeleteTasks, useTask } from '@/hooks/tasks';
-import { useCancelCloudJob } from '@/hooks/cloud-jobs';
+import { useDeleteTasks } from '@/hooks/tasks';
+import { useCancelTaskRun } from '@/hooks/task-runs';
 
 import {
   Button,
@@ -29,26 +29,17 @@ import type { OverflowMenuProps } from './types';
 
 function OverflowMenuBase({
   taskId,
-  cloudJob,
+  taskRun,
   disabled = false,
   onDeleteSuccess,
 }: OverflowMenuProps) {
   const router = useRouter();
   const { user } = useUser();
 
-  const { data: task } = useTask(taskId, false, { enabled: !cloudJob });
-
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
-  const userId = user?.userId;
-  const isAdmin = user?.isAdmin ?? false;
-
-  const canDelete =
-    !!user &&
-    (isAdmin ||
-      (cloudJob ? userId === cloudJob.userId : userId === task?.userId));
-
-  const canShutdown = !!cloudJob && !isExitedCloudTaskStatus(cloudJob.status);
+  // Task deletion is deployment-wide: any member can delete any task.
+  const canShutdown = !!taskRun && !isExitedRunStatus(taskRun.status);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -59,7 +50,7 @@ function OverflowMenuBase({
     onError: () => toast.error('Failed to delete task.'),
   });
 
-  const cancelCloudJob = useCancelCloudJob({
+  const cancelTaskRun = useCancelTaskRun({
     onSuccess: (data) => {
       if (data.success) {
         toast.success('Task shut down request sent.');
@@ -84,9 +75,9 @@ function OverflowMenuBase({
 
   const handleDeleteConfirm = async () => {
     if (canShutdown) {
-      const shutdownResult = await cancelCloudJob.mutateAsync({
+      const shutdownResult = await cancelTaskRun.mutateAsync({
         taskId,
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
       });
 
       if (!shutdownResult.success) {
@@ -98,10 +89,6 @@ function OverflowMenuBase({
     setShowDeleteDialog(false);
   };
 
-  if (!canDelete) {
-    return null;
-  }
-
   return (
     <>
       <DropdownMenu>
@@ -111,16 +98,14 @@ function OverflowMenuBase({
           </SideNavItem>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="left">
-          {canDelete && (
-            <DropdownMenuItem
-              variant="destructive"
-              onClick={() => setShowDeleteDialog(true)}
-              className="flex cursor-pointer items-center gap-2"
-            >
-              <Trash2 className="size-4" />
-              Delete
-            </DropdownMenuItem>
-          )}
+          <DropdownMenuItem
+            variant="destructive"
+            onClick={() => setShowDeleteDialog(true)}
+            className="flex cursor-pointer items-center gap-2"
+          >
+            <Trash2 className="size-4" />
+            Delete
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
       <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
@@ -143,9 +128,9 @@ function OverflowMenuBase({
             <Button
               variant="destructive"
               onClick={handleDeleteConfirm}
-              disabled={deleteTasks.isPending || cancelCloudJob.isPending}
+              disabled={deleteTasks.isPending || cancelTaskRun.isPending}
             >
-              {cancelCloudJob.isPending
+              {cancelTaskRun.isPending
                 ? 'Shutting down...'
                 : deleteTasks.isPending
                   ? 'Deleting...'

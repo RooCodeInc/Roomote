@@ -1,4 +1,4 @@
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 import type { RunTaskState } from './types';
 
@@ -10,22 +10,22 @@ function formatResolvedError(
 }
 
 export function resolveStatus(state: RunTaskState): {
-  status: CloudTaskStatus;
+  status: RunStatus;
   error?: string;
 } {
   if (state.taskAbortedAt) {
     return {
-      status: CloudTaskStatus.Canceled,
+      status: RunStatus.Canceled,
       error: formatResolvedError(state, 'Task aborted'),
     };
   }
 
   if (state.taskFinishedAt) {
-    return { status: CloudTaskStatus.Completed };
+    return { status: RunStatus.Completed };
   }
 
   return {
-    status: CloudTaskStatus.Failed,
+    status: RunStatus.Failed,
     error: formatResolvedError(state, 'Task failed to complete'),
   };
 }

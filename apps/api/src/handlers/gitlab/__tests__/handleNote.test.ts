@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetTaskUrl,
   mockGetGitLabAutomationTargets,
   mockFindReusableGitHubPrFollowUpOwner,
@@ -9,7 +9,7 @@ const {
   mockSendMessageToTask,
   mockSteerMessageToTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
 }));
 
@@ -50,7 +50,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGitLabNote } from '../handleNote';
 import type { GitLabNoteWebhook } from '../types';
@@ -99,7 +99,7 @@ function makeNotePayload(
 
 describe('handleGitLabNote', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGitLabAutomationTargets.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
@@ -113,7 +113,7 @@ describe('handleGitLabNote', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitlab:pr_reviewer:repo-1',
+          id: 'gitlab:pr_review:repo-1',
           settings: null,
           repositoryIds: ['repo-1'],
           userId: 'user-1',
@@ -127,7 +127,7 @@ describe('handleGitLabNote', () => {
       username: 'roomote-bot',
     });
     mockCreateGitLabMergeRequestNote.mockResolvedValue({ id: 1 });
-    mockEnqueueCloudTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
     mockGetTaskUrl.mockReturnValue('https://app.roomote.dev/task/task-1');
   });
 
@@ -135,24 +135,33 @@ describe('handleGitLabNote', () => {
     const result = await handleGitLabNote(makeNotePayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: { kind: 'automatic', sourceKind: 'gitlab' },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitlab',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitlab',
+            prNumber: 42,
+            prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+            headSha: 'abc123',
+            branchName: 'feature/test',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        // A human @roomote mention: the linked commenter is the initiator.
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'pr_review',
+        surface: 'gitlab',
+        trigger: 'message',
+        prLinkage: expect.objectContaining({
+          provider: 'gitlab',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-          headSha: 'abc123',
-          branchName: 'feature/test',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
         }),
       }),
-      expect.objectContaining({ launchClass: 'automation' }),
     );
     expect(mockCreateGitLabMergeRequestNote).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -166,9 +175,9 @@ describe('handleGitLabNote', () => {
   it('links to an active MR review instead of enqueuing a duplicate', async () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
       taskId: 'review-task',
-      jobId: 9,
-      type: CloudTaskType.GithubPrReview,
-      status: CloudTaskStatus.Running,
+      runId: 9,
+      type: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'github_pr',
     });
@@ -184,7 +193,7 @@ describe('handleGitLabNote', () => {
       prNumber: 42,
       headSha: 'abc123',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('already running'),
@@ -198,15 +207,15 @@ describe('handleGitLabNote', () => {
     );
 
     expect(mockFindActiveGitHubPrReviewTask).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('steers the note into an actively running reusable owner task', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Running,
+      runId: 5,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -223,7 +232,7 @@ describe('handleGitLabNote', () => {
         senderMode: 'github_pr_follow_up',
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining('existing task'),
@@ -234,9 +243,9 @@ describe('handleGitLabNote', () => {
   it('sends (resumes) the note when the reusable owner is idle', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Completed,
+      runId: 5,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Completed,
       taskPhase: null,
       match: 'task_pull_request',
       delivery: 'resume',
@@ -258,9 +267,9 @@ describe('handleGitLabNote', () => {
   it('falls back to a new review task when owner delivery fails', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'owner-task',
-      jobId: 5,
-      type: CloudTaskType.StandardTask,
-      status: CloudTaskStatus.Running,
+      runId: 5,
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
       taskPhase: 'running',
       match: 'task_pull_request',
       delivery: 'attach',
@@ -274,7 +283,7 @@ describe('handleGitLabNote', () => {
     const result = await handleGitLabNote(makeNotePayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('ignores notes without an @roomote mention', async () => {
@@ -283,7 +292,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'no_mention' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockCreateGitLabMergeRequestNote).not.toHaveBeenCalled();
   });
 
@@ -315,7 +324,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'roomote_authored_note' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores notes authored by a project access token bot identity', async () => {
@@ -334,7 +343,7 @@ describe('handleGitLabNote', () => {
     );
 
     expect(result).toEqual({ status: 'ok', message: 'system_note' });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('ignores notes on non-merge-request targets', async () => {
@@ -349,7 +358,7 @@ describe('handleGitLabNote', () => {
       status: 'ok',
       message: 'unsupported_noteable_type:Issue',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('posts a reviewer-gate note when no automation target is found', async () => {
@@ -367,7 +376,7 @@ describe('handleGitLabNote', () => {
         mergeRequestIid: 42,
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('prompts the commenter to link GitLab before starting work', async () => {
@@ -385,7 +394,7 @@ describe('handleGitLabNote', () => {
         body: expect.stringContaining('GitLab account linked'),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('bypasses the MR author policy for mentions', async () => {

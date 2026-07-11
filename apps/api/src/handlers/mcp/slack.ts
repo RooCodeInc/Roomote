@@ -2,16 +2,15 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { Hono } from 'hono';
 
 import { Env } from '@roomote/env';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
-  backgroundAutomationSlackThreads,
-  backgroundAutomationRuns,
-  automationWorkItems,
-  cloudJobs,
   db,
   eq,
+  findBackgroundAutomationSlackThread,
   slackInstallations,
+  taskRuns,
+  tasks,
+  workItems,
 } from '@roomote/db/server';
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
@@ -42,13 +41,14 @@ import type { Variables } from '../../types';
 
 import type { McpAuth } from './middleware';
 import { bindLateSlackThreadToTask } from '../tasks/automation-work-items/slack.js';
+import { getTaskChannelBindings } from '../tasks/helpers';
 import {
   buildAutomationRootFooterBlocks,
   refreshAutomationRootFooter,
 } from '../tasks/automation-slack-root-footer.js';
 import {
-  hasRealCloudJobUser,
-  isJobTokenContext,
+  hasRealTaskRunUser,
+  isRunTokenContext,
   McpProxyError,
 } from './proxy-utils';
 import {
@@ -180,16 +180,15 @@ function buildSlackThreadReplyFooterBlock(params: { footerText: string }): {
 async function buildLateBoundSlackRootFooterText(params: {
   taskUrl: string;
   taskId: string;
-  prRepo: string | null;
-  prNumber: number | null;
 }): Promise<string> {
   // The explicit-mention marker is per-thread, so a brand-new root message
-  // can never carry it; only the linked PR and live preview need resolving here.
+  // can never carry it; only the linked PR and live preview need resolving
+  // here. PR metadata lives in taskPullRequests and is resolved by task id.
   const [linkedPr, livePreviewUrl] = await Promise.all([
     resolveSlackThreadLinkedPr({
       taskId: params.taskId,
-      prRepo: params.prRepo,
-      prNumber: params.prNumber,
+      prRepo: null,
+      prNumber: null,
     }),
     resolveSlackThreadLivePreviewUrl(params.taskId),
   ]);
@@ -206,17 +205,18 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   automationWorkItemId: string;
   taskUrl: string;
   taskId: string;
-  prRepo: string | null;
-  prNumber: number | null;
 }): Promise<SlackBlock[] | null> {
-  const workItem = await db.query.automationWorkItems.findFirst({
+  const workItem = await db.query.workItems.findFirst({
     columns: {
       automationKey: true,
     },
-    where: and(eq(automationWorkItems.id, params.automationWorkItemId)),
+    where: and(
+      eq(workItems.kind, 'auto_fix'),
+      eq(workItems.id, params.automationWorkItemId),
+    ),
   });
 
-  if (!workItem) {
+  if (!workItem?.automationKey) {
     return null;
   }
 
@@ -225,8 +225,8 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
       ?.label ?? workItem.automationKey.replaceAll('_', ' ');
   const linkedPr = await resolveSlackThreadLinkedPr({
     taskId: params.taskId,
-    prRepo: params.prRepo,
-    prNumber: params.prNumber,
+    prRepo: null,
+    prNumber: null,
   });
   return buildAutomationRootFooterBlocks({
     automationLabel,
@@ -351,14 +351,12 @@ function buildSlackThreadReplyQuoteBlock(params: { quote: string }): {
   };
 }
 
-async function peekSlackThreadReplyQuote(params: {
-  cloudJobId: number;
-}): Promise<{
+async function peekSlackThreadReplyQuote(params: { runId: number }): Promise<{
   pendingUserMessage: { text: string; userName: string };
   quote: string;
 } | null> {
   try {
-    const latestUserMessage = await getLatestUserMessage(params.cloudJobId);
+    const latestUserMessage = await getLatestUserMessage(params.runId);
 
     if (!latestUserMessage || latestUserMessage.text.trim().length === 0) {
       return null;
@@ -447,29 +445,23 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   threadTs: string;
   taskId: string;
   taskUrl: string;
-  prRepo: string | null;
-  prNumber: number | null;
 }): Promise<void> {
-  const [trackedRun, trackedThread] = await Promise.all([
-    db.query.backgroundAutomationRuns.findFirst({
-      columns: {
-        automationKey: true,
-        taskId: true,
-      },
-      where: and(
-        eq(backgroundAutomationRuns.slackChannelId, params.channel),
-        eq(backgroundAutomationRuns.threadTs, params.threadTs),
-      ),
-      orderBy: (table, { desc }) => [desc(table.createdAt)],
+  // Run rows are gone; the automation-thread linkage lives on the tracked
+  // Slack thread registry plus the task's own channel bindings + initiator
+  // stamp (tasks.initiator_automation).
+  const [trackedThread, boundTask] = await Promise.all([
+    findBackgroundAutomationSlackThread({
+      slackChannelId: params.channel,
+      threadTs: params.threadTs,
     }),
-    db.query.backgroundAutomationSlackThreads.findFirst({
+    db.query.tasks.findFirst({
       columns: {
-        automationKey: true,
-        metadata: true,
+        initiatorAutomation: true,
       },
       where: and(
-        eq(backgroundAutomationSlackThreads.slackChannelId, params.channel),
-        eq(backgroundAutomationSlackThreads.threadTs, params.threadTs),
+        eq(tasks.id, params.taskId),
+        eq(tasks.slackChannelId, params.channel),
+        eq(tasks.slackThreadTs, params.threadTs),
       ),
     }),
   ]);
@@ -479,16 +471,14 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
     trackedThread.metadata.sourceTaskId.trim().length > 0
       ? trackedThread.metadata.sourceTaskId
       : null;
+  const boundTaskAutomationKey = boundTask?.initiatorAutomation ?? null;
 
-  if (
-    trackedRun?.taskId !== params.taskId &&
-    trackedThreadTaskId !== params.taskId
-  ) {
+  if (trackedThreadTaskId !== params.taskId && !boundTaskAutomationKey) {
     return;
   }
 
   const trackedAutomationKey =
-    trackedRun?.automationKey ?? trackedThread?.automationKey ?? null;
+    trackedThread?.automationKey ?? boundTaskAutomationKey ?? null;
   const automationKey = trackedAutomationKey ?? 'automation';
   const automationLabel = trackedAutomationKey
     ? getTriggerableBackgroundAutomationDescriptorByKey(trackedAutomationKey)
@@ -501,8 +491,6 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
     automationLabel: automationLabel ?? automationKey.replaceAll('_', ' '),
     taskUrl: params.taskUrl,
     taskId: params.taskId,
-    prRepo: params.prRepo,
-    prNumber: params.prNumber,
   });
 
   if (!updated) {
@@ -729,29 +717,25 @@ function parseChannelMessagesRequestBody(body: unknown): {
   };
 }
 
-function parseSlackReplyQuoteCloudJobId(body: unknown): number {
+function parseSlackReplyQuoteRunId(body: unknown): number {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('Invalid request body');
   }
 
-  const cloudJobId = (body as Record<string, unknown>).cloudJobId;
-  if (
-    typeof cloudJobId !== 'number' ||
-    !Number.isInteger(cloudJobId) ||
-    cloudJobId <= 0
-  ) {
-    throw new Error('cloudJobId must be a positive integer');
+  const runId = (body as Record<string, unknown>).runId;
+  if (typeof runId !== 'number' || !Number.isInteger(runId) || runId <= 0) {
+    throw new Error('runId must be a positive integer');
   }
 
-  return cloudJobId;
+  return runId;
 }
 
 function parseTrackReplyQuoteRequestBody(body: unknown): {
-  cloudJobId: number;
+  runId: number;
   text: string;
   userName: string;
 } {
-  const cloudJobId = parseSlackReplyQuoteCloudJobId(body);
+  const runId = parseSlackReplyQuoteRunId(body);
   const record = body as Record<string, unknown>;
   const text = typeof record.text === 'string' ? record.text.trim() : '';
   const userName =
@@ -765,14 +749,14 @@ function parseTrackReplyQuoteRequestBody(body: unknown): {
     throw new Error('userName is required');
   }
 
-  return { cloudJobId, text, userName };
+  return { runId, text, userName };
 }
 
 function parseClearReplyQuoteRequestBody(body: unknown): {
-  cloudJobId: number;
+  runId: number;
 } {
   return {
-    cloudJobId: parseSlackReplyQuoteCloudJobId(body),
+    runId: parseSlackReplyQuoteRunId(body),
   };
 }
 
@@ -781,17 +765,17 @@ export const slackMcp = new Hono<{ Variables: SlackMcpVariables }>();
 slackMcp.post('/track_reply_quote', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
         error:
-          'Slack reply quote tracking MCP is only available for cloud job tokens',
+          'Slack reply quote tracking MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  let parsedBody: { cloudJobId: number; text: string; userName: string };
+  let parsedBody: { runId: number; text: string; userName: string };
   try {
     parsedBody = parseTrackReplyQuoteRequestBody(await c.req.json());
   } catch (error) {
@@ -801,15 +785,15 @@ slackMcp.post('/track_reply_quote', async (c) => {
     );
   }
 
-  if (parsedBody.cloudJobId !== authContext.cloudJobId) {
+  if (parsedBody.runId !== authContext.runId) {
     return c.json(
-      { error: 'cloudJobId must match the authenticated cloud job' },
+      { error: 'runId must match the authenticated task run' },
       403,
     );
   }
 
   await trackLatestUserMessageForSlackQuote({
-    cloudJobId: parsedBody.cloudJobId,
+    runId: parsedBody.runId,
     text: parsedBody.text,
     userName: parsedBody.userName,
     onError: (error) => {
@@ -823,17 +807,17 @@ slackMcp.post('/track_reply_quote', async (c) => {
 slackMcp.post('/clear_reply_quote', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
         error:
-          'Slack reply quote clearing MCP is only available for cloud job tokens',
+          'Slack reply quote clearing MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  let parsedBody: { cloudJobId: number };
+  let parsedBody: { runId: number };
   try {
     parsedBody = parseClearReplyQuoteRequestBody(await c.req.json());
   } catch (error) {
@@ -843,14 +827,14 @@ slackMcp.post('/clear_reply_quote', async (c) => {
     );
   }
 
-  if (parsedBody.cloudJobId !== authContext.cloudJobId) {
+  if (parsedBody.runId !== authContext.runId) {
     return c.json(
-      { error: 'cloudJobId must match the authenticated cloud job' },
+      { error: 'runId must match the authenticated task run' },
       403,
     );
   }
 
-  await clearLatestUserMessage(parsedBody.cloudJobId);
+  await clearLatestUserMessage(parsedBody.runId);
 
   return c.json({ success: true });
 });
@@ -858,48 +842,35 @@ slackMcp.post('/clear_reply_quote', async (c) => {
 slackMcp.post('/thread_reply', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
-        error: 'Slack thread reply MCP is only available for cloud job tokens',
+        error: 'Slack thread reply MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      userId: true,
-      type: true,
+      actingUserId: true,
       taskId: true,
-      slackThreadTs: true,
-      prRepo: true,
-      prNumber: true,
       payload: true,
     },
-    where: eq(cloudJobs.id, authContext.cloudJobId),
+    where: eq(taskRuns.id, authContext.runId),
   });
 
-  if (!cloudJob) {
-    return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-
-  if (!hasRealCloudJobUser(resolvedUserId)) {
-    return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (resolvedUserId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and replies go out via the deployment
+  // Slack bot token, so there is no impersonation vector. The token's userId
+  // is mint-time attribution while task_runs.actingUserId is current-steering
+  // attribution — they legitimately diverge once a web steer or follow-up
+  // switches the acting user mid-run.
 
   let parsedBody: {
     text?: string;
@@ -916,12 +887,10 @@ slackMcp.post('/thread_reply', async (c) => {
   }
 
   const communicationReply = await maybeSendCommunicationThreadReply({
-    cloudJob: {
-      id: cloudJob.id,
-      taskId: cloudJob.taskId,
-      prRepo: cloudJob.prRepo ?? null,
-      prNumber: cloudJob.prNumber ?? null,
-      payload: cloudJob.payload,
+    taskRun: {
+      id: taskRun.id,
+      taskId: taskRun.taskId,
+      payload: taskRun.payload,
     },
     parsedBody,
   });
@@ -930,7 +899,12 @@ slackMcp.post('/thread_reply', async (c) => {
     return communicationReply;
   }
 
-  const slackReplyTarget = getSlackReplyTarget(cloudJob);
+  const channelBindings = await getTaskChannelBindings(taskRun.taskId);
+  const slackReplyTarget = getSlackReplyTarget({
+    slackChannelId: channelBindings?.slackChannelId ?? null,
+    slackThreadTs: channelBindings?.slackThreadTs ?? null,
+    payload: taskRun.payload,
+  });
   if (!slackReplyTarget) {
     return c.json(
       {
@@ -945,7 +919,7 @@ slackMcp.post('/thread_reply', async (c) => {
   // automation execution tasks, marked by automationWorkItemId in the payload.
   if (
     !slackReplyTarget.threadTs &&
-    !getAutomationWorkItemIdFromTaskPayload(cloudJob.payload)
+    !getAutomationWorkItemIdFromTaskPayload(taskRun.payload)
   ) {
     return c.json(
       {
@@ -981,7 +955,7 @@ slackMcp.post('/thread_reply', async (c) => {
   try {
     imageBlocks = await buildThreadReplyImageBlocks({
       artifactIds,
-      cloudJob: { id: cloudJob.id, taskId: cloudJob.taskId },
+      taskRun: { id: taskRun.id, taskId: taskRun.taskId },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -996,13 +970,13 @@ slackMcp.post('/thread_reply', async (c) => {
     ? absolutizeSetupMarkdownLinks(parsedBody.text)
     : undefined;
   const normalizedBlocks = absolutizeSetupMarkdownBlocks(parsedBody.blocks);
-  const includeFooter = !isSetupThreadReplyPayload(cloudJob.payload);
+  const includeFooter = !isSetupThreadReplyPayload(taskRun.payload);
   const taskUrl = buildSlackThreadReplyTaskUrl({
-    taskId: cloudJob.taskId,
-    payload: cloudJob.payload,
+    taskId: taskRun.taskId,
+    payload: taskRun.payload,
   });
   const automationWorkItemId = getAutomationWorkItemIdFromTaskPayload(
-    cloudJob.payload,
+    taskRun.payload,
   );
   const existingThreadTs = slackReplyTarget.threadTs;
   let messageTs: string;
@@ -1014,9 +988,7 @@ slackMcp.post('/thread_reply', async (c) => {
         ? await buildLateBoundAutomationRootFooterBlocks({
             automationWorkItemId,
             taskUrl,
-            taskId: cloudJob.taskId,
-            prRepo: cloudJob.prRepo ?? null,
-            prNumber: cloudJob.prNumber ?? null,
+            taskId: taskRun.taskId,
           })
         : null;
     const rootFooterBlocks =
@@ -1026,9 +998,7 @@ slackMcp.post('/thread_reply', async (c) => {
             buildSlackThreadReplyFooterBlock({
               footerText: await buildLateBoundSlackRootFooterText({
                 taskUrl,
-                taskId: cloudJob.taskId,
-                prRepo: cloudJob.prRepo ?? null,
-                prNumber: cloudJob.prNumber ?? null,
+                taskId: taskRun.taskId,
               }),
             }),
           ]
@@ -1084,7 +1054,7 @@ slackMcp.post('/thread_reply', async (c) => {
     ) {
       try {
         await bindLateSlackThreadToTask({
-          taskId: cloudJob.taskId,
+          taskId: taskRun.taskId,
           channelId: slackReplyTarget.channel,
           threadTs: rootMessageTs,
           summaryText: normalizedText ?? fallbackText,
@@ -1103,7 +1073,7 @@ slackMcp.post('/thread_reply', async (c) => {
     }
     if (bindError) {
       console.error(
-        `[slackMcp#thread_reply] Failed to bind late-bound Slack thread ${rootMessageTs} to task ${cloudJob.taskId} after ${LATE_BIND_THREAD_MAX_ATTEMPTS} attempts; later replies may open a new thread: ${
+        `[slackMcp#thread_reply] Failed to bind late-bound Slack thread ${rootMessageTs} to task ${taskRun.taskId} after ${LATE_BIND_THREAD_MAX_ATTEMPTS} attempts; later replies may open a new thread: ${
           bindError instanceof Error ? bindError.message : String(bindError)
         }`,
       );
@@ -1161,9 +1131,9 @@ slackMcp.post('/thread_reply', async (c) => {
       ? buildSlackThreadFooterText({
           taskUrl,
           ...(await resolveSlackThreadFooterContext({
-            taskId: cloudJob.taskId,
-            prRepo: cloudJob.prRepo ?? null,
-            prNumber: cloudJob.prNumber ?? null,
+            taskId: taskRun.taskId,
+            prRepo: null,
+            prNumber: null,
             channelId: slackReplyTarget.channel,
             threadTs: existingThreadTs,
           })),
@@ -1182,7 +1152,7 @@ slackMcp.post('/thread_reply', async (c) => {
         const pendingQuote =
           normalizedText && includeFooter
             ? await peekSlackThreadReplyQuote({
-                cloudJobId: cloudJob.id,
+                runId: taskRun.id,
               })
             : null;
         const replyFallbackText =
@@ -1248,10 +1218,10 @@ slackMcp.post('/thread_reply', async (c) => {
 
         if (pendingQuote) {
           try {
-            await clearLatestUserMessage(cloudJob.id);
+            await clearLatestUserMessage(taskRun.id);
           } catch (error) {
             console.error(
-              `[slackMcp#thread_reply] Failed to clear latest user message for cloud job ${cloudJob.id}: ${
+              `[slackMcp#thread_reply] Failed to clear latest user message for task run ${taskRun.id}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );
@@ -1360,10 +1330,8 @@ slackMcp.post('/thread_reply', async (c) => {
             slack,
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
-            taskId: cloudJob.taskId,
+            taskId: taskRun.taskId,
             taskUrl,
-            prRepo: cloudJob.prRepo ?? null,
-            prNumber: cloudJob.prNumber ?? null,
           });
         } catch (error) {
           console.error(
@@ -1385,21 +1353,22 @@ slackMcp.post('/thread_reply', async (c) => {
       // instead of posting a second top-level root message.
       const lateBound = await withSlackThreadReplyFooterLock({
         channel: slackReplyTarget.channel,
-        threadTs: `late-bind:${cloudJob.taskId}`,
+        threadTs: `late-bind:${taskRun.taskId}`,
         // Root creation holds the lock through a Slack post plus bind
         // retries, so give concurrent first replies a longer acquire window
         // than ordinary footer updates before they give up.
         maxAcquireAttempts: LATE_BIND_LOCK_MAX_ACQUIRE_ATTEMPTS,
         fn: async () => {
-          const reloadedJob = await db.query.cloudJobs.findFirst({
-            columns: { slackThreadTs: true, payload: true },
-            where: eq(cloudJobs.id, cloudJob.id),
+          const reloadedBindings = await getTaskChannelBindings(taskRun.taskId);
+          const reloadedRun = await db.query.taskRuns.findFirst({
+            columns: { payload: true },
+            where: eq(taskRuns.id, taskRun.id),
           });
-          const alreadyBoundThreadTs = reloadedJob
+          const alreadyBoundThreadTs = reloadedRun
             ? (getSlackReplyTarget({
-                type: cloudJob.type,
-                slackThreadTs: reloadedJob.slackThreadTs,
-                payload: reloadedJob.payload,
+                slackChannelId: reloadedBindings?.slackChannelId ?? null,
+                slackThreadTs: reloadedBindings?.slackThreadTs ?? null,
+                payload: reloadedRun.payload,
               })?.threadTs ?? null)
             : null;
 
@@ -1446,10 +1415,14 @@ slackMcp.post('/thread_reply', async (c) => {
     throw error;
   }
 
-  const subject = await findSlackConversationSubjectByUserId({
-    userId: resolvedUserId,
-    slackTeamId: slackInstallation.teamId,
-  });
+  // Conversation-subject bookkeeping is keyed to a human user; skip it for
+  // deployment-service-principal runs, which have no acting user.
+  const subject = hasRealTaskRunUser(taskRun.actingUserId)
+    ? await findSlackConversationSubjectByUserId({
+        userId: taskRun.actingUserId,
+        slackTeamId: slackInstallation.teamId,
+      })
+    : null;
 
   if (subject) {
     await recordSlackConversationMessageBestEffort({
@@ -1462,12 +1435,12 @@ slackMcp.post('/thread_reply', async (c) => {
       messageTs,
       direction: 'outbound',
       authorKind: 'roomote',
-      source: isSetupThreadReplyPayload(cloudJob.payload)
+      source: isSetupThreadReplyPayload(taskRun.payload)
         ? 'setup_thread_reply'
         : 'task_reply',
       text: normalizedText ?? '',
-      taskId: cloudJob.taskId,
-      cloudJobId: cloudJob.id,
+      taskId: taskRun.taskId,
+      runId: taskRun.id,
       metadata: {
         imageCount: imageBlocks.length,
       },
@@ -1480,44 +1453,43 @@ slackMcp.post('/thread_reply', async (c) => {
 slackMcp.post('/thread_lookup', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
-        error: 'Slack thread lookup MCP is only available for cloud job tokens',
+        error: 'Slack thread lookup MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const run = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      userId: true,
+      taskId: true,
       actingUserId: true,
-      type: true,
-      slackThreadTs: true,
       payload: true,
     },
-    where: eq(cloudJobs.id, authContext.cloudJobId),
+    where: eq(taskRuns.id, authContext.runId),
   });
 
-  if (!cloudJob) {
-    return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
+  if (!run) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
-    return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
-      403,
-    );
-  }
+  const bindings = await getTaskChannelBindings(run.taskId);
+  const taskRun = {
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+    payload: run.payload,
+    actingUserId: run.actingUserId,
+  };
 
   let parsedBody: { channel?: string; messageTs: string };
   try {
@@ -1535,7 +1507,7 @@ slackMcp.post('/thread_lookup', async (c) => {
       ...(typeof parsedBody.channel === 'string'
         ? { channel: parsedBody.channel }
         : {}),
-      cloudJob,
+      taskRun,
     });
 
     return c.json(payload);
@@ -1554,42 +1526,34 @@ slackMcp.post('/thread_lookup', async (c) => {
 slackMcp.post('/reaction_add', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
-        error: 'Slack reaction add MCP is only available for cloud job tokens',
+        error: 'Slack reaction add MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      userId: true,
       actingUserId: true,
       payload: true,
     },
-    where: eq(cloudJobs.id, authContext.cloudJobId),
+    where: eq(taskRuns.id, authContext.runId),
   });
 
-  if (!cloudJob) {
-    return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
-    return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   let parsedBody: {
     channel: string;
@@ -1606,7 +1570,7 @@ slackMcp.post('/reaction_add', async (c) => {
   }
 
   const communicationReaction = await maybeAddCommunicationReaction({
-    cloudJob,
+    taskRun,
     parsedBody,
   });
 
@@ -1633,7 +1597,7 @@ slackMcp.post('/reaction_add', async (c) => {
       channel: parsedBody.channel,
       slack,
       slackTeamId: slackInstallation.teamId,
-      actingSlackMembershipUserId: cloudJob.actingUserId ?? null,
+      actingSlackMembershipUserId: taskRun.actingUserId ?? null,
     });
   } catch (error) {
     if (error instanceof McpProxyError) {
@@ -1671,45 +1635,44 @@ slackMcp.post('/reaction_add', async (c) => {
 slackMcp.post('/channel_messages', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
         error:
-          'Slack channel message lookup MCP is only available for cloud job tokens',
+          'Slack channel message lookup MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const run = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      userId: true,
+      taskId: true,
       actingUserId: true,
-      type: true,
-      slackThreadTs: true,
       payload: true,
     },
-    where: eq(cloudJobs.id, authContext.cloudJobId),
+    where: eq(taskRuns.id, authContext.runId),
   });
 
-  if (!cloudJob) {
-    return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
+  if (!run) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
-    return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
-      403,
-    );
-  }
+  const bindings = await getTaskChannelBindings(run.taskId);
+  const taskRun = {
+    slackChannelId: bindings?.slackChannelId ?? null,
+    slackThreadTs: bindings?.slackThreadTs ?? null,
+    payload: run.payload,
+    actingUserId: run.actingUserId,
+  };
 
   let parsedBody: {
     channel?: string;
@@ -1736,7 +1699,7 @@ slackMcp.post('/channel_messages', async (c) => {
       ...(typeof parsedBody.latest === 'string'
         ? { latest: parsedBody.latest }
         : {}),
-      cloudJob,
+      taskRun,
     });
 
     return c.json(payload);
@@ -1755,41 +1718,33 @@ slackMcp.post('/channel_messages', async (c) => {
 slackMcp.post('/channel_post', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
-  if (!isJobTokenContext(authContext)) {
+  if (!isRunTokenContext(authContext)) {
     return c.json(
       {
-        error: 'Slack channel post MCP is only available for cloud job tokens',
+        error: 'Slack channel post MCP is only available for task run tokens',
       },
       403,
     );
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       id: true,
-      userId: true,
       taskId: true,
     },
-    where: eq(cloudJobs.id, authContext.cloudJobId),
+    where: eq(taskRuns.id, authContext.runId),
   });
 
-  if (!cloudJob) {
-    return c.json({ error: 'Cloud job not found for this MCP token' }, 404);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
   }
 
-  if (!hasRealCloudJobUser(cloudJob.userId)) {
-    return c.json(
-      { error: 'MCP proxy requires a cloud job associated with a real user' },
-      403,
-    );
-  }
-
-  if (cloudJob.userId !== authContext.userId) {
-    return c.json(
-      { error: 'MCP token user does not match cloud job user' },
-      403,
-    );
-  }
+  // No principal equality check: the run-scoped token IS the authorization
+  // (only this run's sandbox holds it), and this endpoint operates via the
+  // deployment Slack bot token, so there is no impersonation vector. The
+  // token's userId is mint-time attribution while task_runs.actingUserId is
+  // current-steering attribution — they legitimately diverge once a web steer
+  // or follow-up switches the acting user mid-run.
 
   let parsedBody: {
     channel: string;
@@ -1857,7 +1812,7 @@ slackMcp.post('/channel_post', async (c) => {
   try {
     imageBlocks = await buildThreadReplyImageBlocks({
       artifactIds,
-      cloudJob: { id: cloudJob.id, taskId: cloudJob.taskId },
+      taskRun: { id: taskRun.id, taskId: taskRun.taskId },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

@@ -1,4 +1,6 @@
-import { createTaskWithRetry } from '../tasks';
+import { and, db, eq, tasks, taskFactory } from '../../server';
+
+import { createTaskWithRetry, isVisibleTask } from '../tasks';
 
 function makePkCollisionError() {
   const error = new Error(
@@ -53,9 +55,14 @@ function mockDb(impl: (...args: unknown[]) => unknown) {
 
 const baseValues = {
   title: 'Test Task',
-  provider: 'anthropic',
+  modelProvider: 'anthropic',
   model: 'claude-sonnet-4-20250514',
   timestamp: 1_700_000_000,
+  workflow: 'standard',
+  surface: 'web',
+  trigger: 'manual',
+  initiatorKind: 'user',
+  actorExternalId: 'ext-user-1',
 } satisfies Parameters<typeof createTaskWithRetry>[0];
 
 describe('createTaskWithRetry', () => {
@@ -207,5 +214,37 @@ describe('createTaskWithRetry', () => {
     });
 
     expect(result.id).toBe('ok-id');
+  });
+});
+
+describe('isVisibleTask', () => {
+  const createdTaskIds: string[] = [];
+
+  afterEach(async () => {
+    while (createdTaskIds.length > 0) {
+      const taskId = createdTaskIds.pop()!;
+      await db.delete(tasks).where(eq(tasks.id, taskId));
+    }
+  });
+
+  it('excludes soft-deleted tasks from visible reads', async () => {
+    const visibleTask = await taskFactory.create({ visibility: 'visible' });
+    const deletedTask = await taskFactory.create({
+      visibility: 'visible',
+      deletedAt: new Date(),
+    });
+    createdTaskIds.push(visibleTask.id, deletedTask.id);
+
+    const [foundVisible] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, visibleTask.id), isVisibleTask()));
+    const [foundDeleted] = await db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(and(eq(tasks.id, deletedTask.id), isVisibleTask()));
+
+    expect(foundVisible?.id).toBe(visibleTask.id);
+    expect(foundDeleted).toBeUndefined();
   });
 });

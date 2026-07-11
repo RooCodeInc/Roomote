@@ -9,11 +9,11 @@ import {
   sum,
 } from 'drizzle-orm';
 
-import { CloudTaskStatus, getMcpIntegration } from '@roomote/types';
+import { RunStatus, getMcpIntegration } from '@roomote/types';
 
 import { db } from '../db';
 import {
-  cloudJobs,
+  taskRuns,
   deploymentMcpEnablements,
   deploymentSettings,
   environments,
@@ -133,9 +133,11 @@ export async function collectInstanceReportStats(
       .from(users)
       .where(and(eq(users.role, 'admin'), isNull(users.deletedAt))),
     db
-      .select({ active: countDistinct(tasks.userId) })
+      .select({ active: countDistinct(tasks.initiatorUserId) })
       .from(tasks)
-      .where(and(gte(tasks.createdAt, since), isNotNull(tasks.userId))),
+      .where(
+        and(gte(tasks.createdAt, since), isNotNull(tasks.initiatorUserId)),
+      ),
     db
       .select({ total: count() })
       .from(environments)
@@ -154,11 +156,11 @@ export async function collectInstanceReportStats(
       .where(gte(tasks.createdAt, since)),
     db
       .select({ total: count() })
-      .from(cloudJobs)
+      .from(taskRuns)
       .where(
         and(
-          eq(cloudJobs.status, CloudTaskStatus.Completed),
-          gte(cloudJobs.completedAt, since),
+          eq(taskRuns.status, RunStatus.Completed),
+          gte(taskRuns.completedAt, since),
         ),
       ),
     db
@@ -168,13 +170,13 @@ export async function collectInstanceReportStats(
       .groupBy(tasks.harness),
     db
       .select({
-        provider: tasks.provider,
+        provider: tasks.modelProvider,
         model: tasks.model,
         total: count(),
       })
       .from(tasks)
       .where(gte(tasks.createdAt, since))
-      .groupBy(tasks.provider, tasks.model),
+      .groupBy(tasks.modelProvider, tasks.model),
     db
       .select({
         input: sum(taskInferenceUsageEvents.inputTokens),

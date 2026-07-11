@@ -7,7 +7,7 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import {
-  type CloudJob,
+  type TaskRun,
   db,
   environments,
   repositories,
@@ -1335,17 +1335,17 @@ function normalizeRepositorySelection(repositoryNames: string[]): string[] {
   return [...new Set(repositoryNames.filter(Boolean))];
 }
 
-async function resolveAdoRepositoryNamesForCloudJob(
-  cloudJob: CloudJob,
+async function resolveAdoRepositoryNamesForTaskRun(
+  taskRun: TaskRun,
 ): Promise<string[] | null> {
-  if (cloudJob.payload.environmentId) {
+  if (taskRun.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, cloudJob.payload.environmentId),
+      where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (!environment) {
       throw new Error(
-        `Environment not found for cloud job ${cloudJob.id}: ${cloudJob.payload.environmentId}`,
+        `Environment not found for task run ${taskRun.id}: ${taskRun.payload.environmentId}`,
       );
     }
 
@@ -1356,9 +1356,9 @@ async function resolveAdoRepositoryNamesForCloudJob(
     );
   }
 
-  if (Array.isArray(cloudJob.payload.selectedRepositories)) {
+  if (Array.isArray(taskRun.payload.selectedRepositories)) {
     const selectedRepositories = normalizeRepositorySelection(
-      cloudJob.payload.selectedRepositories,
+      taskRun.payload.selectedRepositories,
     );
 
     if (selectedRepositories.length > 0) {
@@ -1366,15 +1366,15 @@ async function resolveAdoRepositoryNamesForCloudJob(
     }
   }
 
-  if (cloudJob.payload.repo && cloudJob.payload.repo !== ALL_REPOSITORIES) {
-    return [cloudJob.payload.repo];
+  if (taskRun.payload.repo && taskRun.payload.repo !== ALL_REPOSITORIES) {
+    return [taskRun.payload.repo];
   }
 
   return null;
 }
 
-async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
-  const repositoryNames = await resolveAdoRepositoryNamesForCloudJob(cloudJob);
+async function resolveAdoRepositoryRowsForTaskRun(taskRun: TaskRun) {
+  const repositoryNames = await resolveAdoRepositoryNamesForTaskRun(taskRun);
   const queryConditions = [
     eq(repositories.sourceControlProvider, ADO_PROVIDER),
     eq(repositories.isActive, true),
@@ -1395,7 +1395,7 @@ async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
   if (repositoryNames === null) {
     if (repositoryRows.length === 0) {
       throw new Error(
-        `No synced Azure DevOps repositories found for cloud job ${cloudJob.id}.`,
+        `No synced Azure DevOps repositories found for task run ${taskRun.id}.`,
       );
     }
 
@@ -1411,7 +1411,7 @@ async function resolveAdoRepositoryRowsForCloudJob(cloudJob: CloudJob) {
 
   if (missingRepositories.length > 0) {
     throw new Error(
-      `Selected Azure DevOps repositories not found for cloud job ${cloudJob.id}: ${missingRepositories.join(', ')}`,
+      `Selected Azure DevOps repositories not found for task run ${taskRun.id}: ${missingRepositories.join(', ')}`,
     );
   }
 
@@ -1490,8 +1490,8 @@ function buildAdoGitCredential({
   }
 }
 
-export async function createCloudJobAdoCredentials(
-  cloudJob: CloudJob,
+export async function createTaskRunAdoCredentials(
+  taskRun: TaskRun,
   options?: {
     token?: string;
     baseUrl?: string;
@@ -1517,7 +1517,7 @@ export async function createCloudJobAdoCredentials(
     (await resolveAdoUsername()) ??
     DEFAULT_ADO_GIT_USERNAME;
   const host = hostFromBaseUrl(baseUrl);
-  const repositoriesList = await resolveAdoRepositoryRowsForCloudJob(cloudJob);
+  const repositoriesList = await resolveAdoRepositoryRowsForTaskRun(taskRun);
 
   return {
     credentials: repositoriesList.map((repository) =>

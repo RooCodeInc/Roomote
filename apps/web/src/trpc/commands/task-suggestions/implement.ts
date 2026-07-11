@@ -1,17 +1,26 @@
 import {
   buildSuggestionTaskPromptText,
-  enqueueCloudTask,
+  enqueueTask,
 } from '@roomote/cloud-agents/server';
-import { and, db, eq, or, taskSuggestions } from '@roomote/db/server';
-import { CloudTaskType } from '@roomote/types';
+import {
+  and,
+  cancelTaskRunDirect,
+  claimWorkItem,
+  db,
+  eq,
+  finalizeWorkItemLaunched,
+  releaseWorkItemClaim,
+  workItems,
+} from '@roomote/db/server';
+import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 import { resolveSuggestionLaunchWorkspace } from './launch-resolution';
 import { assertSuggestionHistoryEnabled } from './shared';
 import {
-  getResolvedSuggestionSourceCloudJobsByTaskId,
+  getResolvedSuggestionSourceTaskRunsByTaskId,
   getSuggestionHistoryAutomation,
-} from './source-cloud-jobs';
+} from './source-task-runs';
 
 export async function implementTaskSuggestionCommand(
   auth: UserAuthSuccess,
@@ -21,63 +30,58 @@ export async function implementTaskSuggestionCommand(
 
   const [suggestion] = await db
     .select({
-      id: taskSuggestions.id,
-      title: taskSuggestions.title,
-      brief: taskSuggestions.brief,
-      status: taskSuggestions.status,
-      category: taskSuggestions.category,
-      priority: taskSuggestions.priority,
-      investigationContext: taskSuggestions.investigationContext,
-      repositoryIds: taskSuggestions.repositoryIds,
-      targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-      targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-      readinessMessage: taskSuggestions.readinessMessage,
-      sourceTaskId: taskSuggestions.sourceTaskId,
+      id: workItems.id,
+      title: workItems.title,
+      brief: workItems.brief,
+      status: workItems.status,
+      category: workItems.category,
+      priority: workItems.priority,
+      investigationContext: workItems.investigationContext,
+      repositoryIds: workItems.repositoryIds,
+      targetRepositoryFullName: workItems.targetRepositoryFullName,
+      targetEnvironmentId: workItems.targetEnvironmentId,
+      readinessMessage: workItems.readinessMessage,
+      sourceTaskId: workItems.sourceTaskId,
     })
-    .from(taskSuggestions)
-    .where(eq(taskSuggestions.id, input.suggestionId))
+    .from(workItems)
+    .where(
+      and(
+        eq(workItems.id, input.suggestionId),
+        eq(workItems.kind, 'suggestion'),
+      ),
+    )
     .limit(1);
 
   if (!suggestion) {
     throw new Error('Suggestion not found.');
   }
 
-  if (suggestion.status === 'started') {
+  if (suggestion.status === 'launched') {
     throw new Error('This suggestion has already been implemented.');
   }
 
-  const claimedAt = new Date();
-  const [claimedSuggestion] = await db
-    .update(taskSuggestions)
-    .set({
-      status: 'started',
-      dismissedAt: null,
-      updatedAt: claimedAt,
-    })
-    .where(
-      and(
-        eq(taskSuggestions.id, input.suggestionId),
-        or(
-          eq(taskSuggestions.status, 'open'),
-          eq(taskSuggestions.status, 'dismissed'),
-        ),
-      ),
-    )
-    .returning({ id: taskSuggestions.id });
+  // The web surface may relaunch a dismissed suggestion, so `dismissed` joins
+  // the claimable set here (other surfaces omit it). Shared CAS also covers
+  // stale-`launching` recovery.
+  const claimedSuggestion = await claimWorkItem(db, {
+    id: input.suggestionId,
+    additionalClaimableStatuses: ['dismissed'],
+    extraConditions: [eq(workItems.kind, 'suggestion')],
+  });
 
   if (!claimedSuggestion) {
     throw new Error('This suggestion has already been implemented.');
   }
 
   try {
-    const sourceCloudJobByTaskId = suggestion.sourceTaskId
-      ? await getResolvedSuggestionSourceCloudJobsByTaskId([
+    const sourceTaskRunByTaskId = suggestion.sourceTaskId
+      ? await getResolvedSuggestionSourceTaskRunsByTaskId([
           suggestion.sourceTaskId,
         ])
       : {};
     const automation = getSuggestionHistoryAutomation(
       suggestion.sourceTaskId
-        ? sourceCloudJobByTaskId[suggestion.sourceTaskId]
+        ? sourceTaskRunByTaskId[suggestion.sourceTaskId]
         : undefined,
     );
     const resolution = await resolveSuggestionLaunchWorkspace({
@@ -88,10 +92,9 @@ export async function implementTaskSuggestionCommand(
       throw new Error(resolution.failureReason);
     }
 
-    const launchResult = await enqueueCloudTask(
-      {
-        userId: auth.userId,
-        type: CloudTaskType.StandardTask,
+    const launchResult = await enqueueTask({
+      task: {
+        type: TaskPayloadKind.StandardTask,
         payload: {
           repo: resolution.workspace.repoForPayload,
           ...(resolution.workspace.environmentId
@@ -99,8 +102,8 @@ export async function implementTaskSuggestionCommand(
             : {}),
           description: buildSuggestionTaskPromptText({
             title: suggestion.title,
-            brief: suggestion.brief,
-            agentType:
+            brief: suggestion.brief ?? '',
+            suggestionType:
               automation === 'onboarding' ? 'setup_onboarding' : automation,
             investigationContext: suggestion.investigationContext,
             readinessMessage: resolution.workspace.readinessMessage,
@@ -111,28 +114,70 @@ export async function implementTaskSuggestionCommand(
           }),
         },
       },
-      {},
-    );
+      initiator: { kind: 'user', userId: auth.userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    // Record the launch link on the suggestion work_item. Previously the
+    // web-launched suggestion dropped the task association entirely.
+    const finalized = await finalizeWorkItemLaunched(db, {
+      id: input.suggestionId,
+      taskId: launchResult.taskId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+    });
+
+    if (!finalized) {
+      // The task is already enqueued but the fencing guard rejected the
+      // finalize (our stale claim was reclaimed by another launcher), so the
+      // run is orphaned from the work item. Best-effort cancel it while it is
+      // still pre-sandbox, and log loudly either way with the cancel outcome.
+      let cancelNote = 'orphaned run left running';
+
+      try {
+        const canceled = await cancelTaskRunDirect({
+          runId: launchResult.id,
+          error:
+            'Canceled: work-item launch finalize lost the claim fencing guard',
+        });
+        cancelNote = canceled
+          ? 'orphaned run canceled'
+          : 'orphaned run cancel did not apply (already started or terminal)';
+      } catch (cancelError) {
+        cancelNote = `orphaned run cancel failed: ${
+          cancelError instanceof Error
+            ? cancelError.message
+            : String(cancelError)
+        }`;
+      }
+
+      console.warn(
+        `[implementTaskSuggestion] finalize lost the fencing guard for work item ${input.suggestionId}; task ${launchResult.taskId} (run ${launchResult.id}) was orphaned — ${cancelNote}.`,
+      );
+
+      // Never report the canceled orphan as a successful launch. Surface the
+      // same outcome as the claim-lose path (the winning launcher owns the
+      // real task); the catch-block release is fenced on our stale token, so
+      // it cannot touch the winner's claim.
+      throw new Error('This suggestion has already been implemented.');
+    }
 
     return {
       success: true as const,
       taskId: launchResult.taskId,
-      cloudJobId: launchResult.id,
+      runId: launchResult.id,
     };
   } catch (error) {
-    await db
-      .update(taskSuggestions)
-      .set({
-        status: 'open',
-        dismissedAt: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(taskSuggestions.id, input.suggestionId),
-          eq(taskSuggestions.status, 'started'),
-        ),
-      );
+    // Release the claim back to `open` (never reverts a `launched` item; the
+    // shared guard requires status='launching').
+    await releaseWorkItemClaim(db, {
+      id: input.suggestionId,
+      claimedAt: claimedSuggestion.launchClaimedAt,
+      clearDismissedAt: true,
+      extraConditions: [eq(workItems.kind, 'suggestion')],
+    });
 
     throw error;
   }

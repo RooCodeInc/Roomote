@@ -6,7 +6,7 @@ import {
   waitFor,
 } from '@testing-library/react';
 
-import { ALL_REPOSITORIES, CloudAgentType } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import { FeatureFlag } from '@roomote/feature-flags';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
 import type { PromptInputMessage } from '@/components/ai-elements';
@@ -28,8 +28,8 @@ const {
   mockToastError,
   mockToastSuccess,
   mockProcessImageFiles,
-  mockUseCreateStandardTaskCloudJob,
-  mockCreateStandardTaskCloudJob,
+  mockUseCreateStandardTaskRun,
+  mockCreateStandardTaskRun,
   mockUseLaunchTaskModels,
   mockUseRouteHomeTask,
   mockRouteHomeTask,
@@ -39,8 +39,8 @@ const {
   mockToastError: vi.fn(),
   mockToastSuccess: vi.fn(),
   mockProcessImageFiles: vi.fn(),
-  mockUseCreateStandardTaskCloudJob: vi.fn(),
-  mockCreateStandardTaskCloudJob: vi.fn(),
+  mockUseCreateStandardTaskRun: vi.fn(),
+  mockCreateStandardTaskRun: vi.fn(),
   mockUseLaunchTaskModels: vi.fn(),
   mockUseRouteHomeTask: vi.fn(),
   mockRouteHomeTask: vi.fn(),
@@ -103,8 +103,8 @@ vi.mock('@/hooks/useShowDebugUI', () => ({
   }),
 }));
 
-vi.mock('@/hooks/cloud-jobs', () => ({
-  useCreateStandardTaskCloudJob: mockUseCreateStandardTaskCloudJob,
+vi.mock('@/hooks/task-runs', () => ({
+  useCreateStandardTaskRun: mockUseCreateStandardTaskRun,
   useRouteHomeTask: mockUseRouteHomeTask,
 }));
 
@@ -282,7 +282,6 @@ vi.mock('@/components/tasks', async () => {
 const routedEnvironmentSuggestion: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -295,7 +294,6 @@ const routedEnvironmentSuggestion: RoutingDecision = {
 const routedEnvironmentSuggestionWithModel: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -313,7 +311,6 @@ const routedEnvironmentSuggestionWithModel: RoutingDecision = {
 const routedEnvironmentSuggestionWithDefaultModel: RoutingDecision = {
   status: 'routed',
   result: {
-    agentType: CloudAgentType.StandardTask,
     workspace: {
       type: 'environment',
       id: 'env-routed',
@@ -343,14 +340,14 @@ describe('Home', () => {
     vi.clearAllMocks();
 
     mockProcessImageFiles.mockResolvedValue([]);
-    mockCreateStandardTaskCloudJob.mockResolvedValue({
+    mockCreateStandardTaskRun.mockResolvedValue({
       success: true,
       id: 4,
       taskId: 'task-4',
     });
-    mockUseCreateStandardTaskCloudJob.mockReturnValue({
+    mockUseCreateStandardTaskRun.mockReturnValue({
       isPending: false,
-      mutateAsync: mockCreateStandardTaskCloudJob,
+      mutateAsync: mockCreateStandardTaskRun,
     });
     mockUseRouteHomeTask.mockReturnValue({
       isPending: false,
@@ -381,7 +378,7 @@ describe('Home', () => {
     });
   });
 
-  it('renders as implicit Generalist without an agent selector and does not launch on fallback', async () => {
+  it('renders without an agent selector and does not launch on fallback', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(screen.queryByText(/Select agent /)).not.toBeInTheDocument();
@@ -389,7 +386,7 @@ describe('Home', () => {
     expect(screen.getByTestId('repository')).toHaveTextContent(
       AUTO_WORKSPACE_VALUE,
     );
-    expect(mockUseCreateStandardTaskCloudJob).toHaveBeenCalled();
+    expect(mockUseCreateStandardTaskRun).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
@@ -399,7 +396,7 @@ describe('Home', () => {
       });
     });
 
-    expect(mockCreateStandardTaskCloudJob).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('shows a toast and does not launch a task for platform answers', async () => {
@@ -421,7 +418,7 @@ describe('Home', () => {
       );
     });
 
-    expect(mockCreateStandardTaskCloudJob).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('cycles prompt placeholders every 5 seconds from a random starting point', async () => {
@@ -465,7 +462,7 @@ describe('Home', () => {
     expect(mockPush).not.toHaveBeenCalledWith('/tasks');
   });
 
-  it('launches Standard Task without a cloud agent id for routed workspaces', async () => {
+  it('launches a standard task run without an agent identity for routed workspaces', async () => {
     mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestion);
 
     render(<Home initialPlaceholderIndex={0} />);
@@ -473,7 +470,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           computeProvider: 'docker',
           harness: 'opencode-server',
@@ -506,7 +503,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           model: 'openrouter/z-ai/glm-5.2',
           payload: expect.objectContaining({
@@ -531,7 +528,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenNthCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenNthCalledWith(
         1,
         expect.objectContaining({
           model: 'openrouter/z-ai/glm-5.2',
@@ -551,7 +548,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenNthCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           model: 'openrouter/z-ai/glm-5.2',
@@ -566,7 +563,7 @@ describe('Home', () => {
     });
   });
 
-  it('always uses createStandardTaskCloudJob for explicit environment launches', async () => {
+  it('always uses createStandardTaskRun for explicit environment launches', async () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     fireEvent.click(
@@ -575,7 +572,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           computeProvider: 'docker',
           harness: 'opencode-server',
@@ -601,7 +598,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           harness: 'opencode-server',
         }),
@@ -641,7 +638,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           harness: 'opencode-server',
         }),
@@ -663,7 +660,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           harness: 'opencode-server',
         }),
@@ -707,7 +704,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           harness: 'opencode-server',
         }),
@@ -729,7 +726,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           computeProvider: 'modal',
         }),
@@ -752,7 +749,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           computeProvider: 'docker',
           payload: expect.objectContaining({
@@ -782,7 +779,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           computeProvider: 'docker',
           payload: expect.objectContaining({
@@ -828,7 +825,7 @@ describe('Home', () => {
     resolveRoute?.(routedEnvironmentSuggestion);
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalled();
+      expect(mockCreateStandardTaskRun).toHaveBeenCalled();
     });
   });
 
@@ -857,7 +854,7 @@ describe('Home', () => {
     fireEvent.click(submitButton);
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({
             repo: ALL_REPOSITORIES,
@@ -879,7 +876,7 @@ describe('Home', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
 
     await waitFor(() => {
-      expect(mockCreateStandardTaskCloudJob).toHaveBeenCalledWith(
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
           payload: expect.objectContaining({
             repo: ALL_REPOSITORIES,
@@ -926,7 +923,7 @@ describe('Home', () => {
       );
     });
 
-    expect(mockCreateStandardTaskCloudJob).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('prefers environmentId from the URL when present', async () => {

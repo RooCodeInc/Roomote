@@ -379,7 +379,7 @@ const PR_ACTION_LABELS: Record<PrAction, string> = {
 
 /**
  * Deployment-wide default for how repository-changing tasks deliver their
- * work, mirroring the upstream Coder agent `prAction` setting.
+ * work, mirroring the task-run `prAction` setting.
  */
 function PrActionSetting() {
   const prActionQuery = usePrAction();

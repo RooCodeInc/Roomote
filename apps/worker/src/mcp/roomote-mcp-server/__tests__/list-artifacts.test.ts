@@ -88,7 +88,7 @@ describe('handleListArtifacts', () => {
       status: 403,
       text: async () =>
         JSON.stringify({
-          error: 'Cloud job token does not grant read access to requested task',
+          error: 'Task run token does not grant read access to requested task',
         }),
     });
 

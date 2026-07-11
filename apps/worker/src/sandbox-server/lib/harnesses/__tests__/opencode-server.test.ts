@@ -3423,6 +3423,102 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('drops a skipped queued prompt and keeps draining the rest of the queue', async () => {
+    // Actor-mismatch skip: the prompt's sender is not the run's acting user,
+    // so its content must never be delivered — not retried (that would stall
+    // the queue) and not restored. Later queued prompts still drain.
+    const beforeQueuedPrompt = vi.fn<
+      () => Promise<void | {
+        shouldReconnect: boolean;
+        shouldBlockPrompt?: boolean;
+        shouldSkipPrompt?: boolean;
+        reason?: string;
+      }>
+    >();
+    beforeQueuedPrompt
+      .mockResolvedValueOnce({
+        shouldReconnect: false,
+        shouldSkipPrompt: true,
+        reason: 'sender is not the server-side acting user',
+      })
+      .mockResolvedValue(undefined);
+    const { client, harness } = createHarness(undefined, {
+      beforeQueuedPrompt,
+      queuedPromptRetryDelayMs: 20,
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'First.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      // Queue two follow-ups while the first turn is in flight: the first
+      // will be skipped (mismatched sender), the second must still deliver.
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Mismatched second.', visibleInTranscript: true },
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Matching third.', visibleInTranscript: true },
+      });
+
+      // Complete the first turn so the queue drains.
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // The skipped prompt is dropped; the scheduled retry drains the next
+      // queued prompt without a new user message.
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(beforeQueuedPrompt).toHaveBeenCalledTimes(2);
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
+        sessionId: 'ses_1',
+        request: {
+          parts: [
+            { type: 'text', text: expect.stringContaining('Matching third.') },
+          ],
+        },
+      });
+
+      // The mismatched content never reached the model under any identity.
+      for (const call of client.promptAsync.mock.calls) {
+        const parts = (
+          call[0] as {
+            request: { parts: Array<{ type: string; text?: string }> };
+          }
+        ).request.parts;
+
+        for (const part of parts) {
+          expect(part.text ?? '').not.toContain('Mismatched second.');
+        }
+      }
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('validates and reuses a prior session on resume before its first prompt', async () => {
     const { client, harness } = createHarness();
 

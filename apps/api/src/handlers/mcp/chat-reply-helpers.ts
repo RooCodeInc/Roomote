@@ -27,7 +27,7 @@ export type ThreadReplyImage = {
 
 export async function buildThreadReplyImages(params: {
   artifactIds: string[];
-  cloudJob: {
+  taskRun: {
     id: number;
     taskId: string;
   };
@@ -43,7 +43,7 @@ export async function buildThreadReplyImages(params: {
     columns: {
       id: true,
       taskId: true,
-      cloudJobId: true,
+      runId: true,
       contentType: true,
       uploaded: true,
       path: true,
@@ -62,18 +62,15 @@ export async function buildThreadReplyImages(params: {
       throw new Error(`Unknown artifact id: ${artifactId}`);
     }
 
-    if (artifact.taskId !== params.cloudJob.taskId) {
+    if (artifact.taskId !== params.taskRun.taskId) {
       throw new Error(
         `Artifact ${artifactId} does not belong to the current task`,
       );
     }
 
-    if (
-      artifact.cloudJobId !== null &&
-      artifact.cloudJobId !== params.cloudJob.id
-    ) {
+    if (artifact.runId !== null && artifact.runId !== params.taskRun.id) {
       throw new Error(
-        `Artifact ${artifactId} does not belong to the current cloud job`,
+        `Artifact ${artifactId} does not belong to the current task run`,
       );
     }
 
@@ -102,7 +99,7 @@ export async function buildThreadReplyImages(params: {
 
 export async function buildThreadReplyImageBlocks(params: {
   artifactIds: string[];
-  cloudJob: {
+  taskRun: {
     id: number;
     taskId: string;
   };
@@ -133,7 +130,7 @@ export function errorResponseForThreadReplyImageError(
 
   if (
     message.includes('does not belong to the current task') ||
-    message.includes('does not belong to the current cloud job')
+    message.includes('does not belong to the current task run')
   ) {
     return new Response(JSON.stringify({ error: message }), { status: 403 });
   }

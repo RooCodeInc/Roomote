@@ -1,7 +1,7 @@
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
-import type { CloudJobDetail } from '@/lib/server';
-import { getCloudJobVisiblePrompt } from '@/lib';
+import type { TaskRunDetail } from '@/lib/server';
+import { getTaskRunVisiblePrompt } from '@/lib';
 
 import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-prompt';
 
@@ -11,16 +11,18 @@ import {
   shouldPollForFirstHarnessMessage,
 } from './session-state';
 
-function createCloudJobDetail(
-  overrides: Partial<CloudJobDetail> = {},
-): CloudJobDetail {
+function createTaskRunDetail(
+  overrides: Partial<TaskRunDetail> = {},
+): TaskRunDetail {
   return {
     id: 1,
     taskId: 'task-1',
-    userId: 'user-1',
-    type: 'standard.task',
+    kind: 'fresh',
+    sourceRunId: null,
+    actingUserId: null,
+    payloadKind: TaskPayloadKind.StandardTask,
     payload: { repo: 'owner/repo', description: 'Test task' },
-    status: CloudTaskStatus.Pending,
+    status: RunStatus.Pending,
     taskPhase: null,
     error: null,
     prompt: null,
@@ -28,18 +30,16 @@ function createCloudJobDetail(
     machineId: null,
     machineDomain: null,
     machineDomains: null,
-    machinePrimaryPortName: null,
-    machinePorts: null,
-    provider: null,
+    primaryPortName: null,
+    initialPaths: null,
+    proxyPorts: null,
+    vendor: null,
     sandboxCmdId: null,
     sandboxServerUrl: null,
     createdAt: new Date(),
-    updatedAt: new Date(),
     startedAt: null,
     completedAt: null,
     canceledAt: null,
-    draftPrompt: null,
-    sourceCloudJobId: null,
     sourceSnapshotId: null,
     snapshotId: null,
     snapshotRequestedAt: null,
@@ -48,61 +48,48 @@ function createCloudJobDetail(
     sleepAt: null,
     sleepRequestedAt: null,
     refetchInterval: undefined,
-    githubInstallationId: null,
-    githubLogin: null,
-    githubUserId: null,
-    prRepo: null,
-    prNumber: null,
-    githubPrCommentId: null,
-    githubPrReviewCommentId: null,
-    githubPrReviewId: null,
-    githubPrReactionId: null,
-    githubPrReviewReactionId: null,
-    githubPrCommentReactionId: null,
-    githubPrCheckRunId: null,
-    prSha: null,
-    title: null,
     authBypassValue: null,
     authBypassHeaderName: null,
     harness: 'opencode-server',
     user: null,
+    actingUser: null,
     ...overrides,
-  } as CloudJobDetail;
+  } as TaskRunDetail;
 }
 
 describe('getSessionState', () => {
-  it('treats canceled jobs with an early boot error as boot-failed', () => {
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+  it('treats canceled task runs with an early boot error as boot-failed', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Canceled,
       error:
         'OpenAI admin request failed (401): {"error":{"message":"Incorrect API key provided.","code":"invalid_api_key"}}',
     });
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
       }),
     ).toBe('boot-failed');
   });
 
-  it('keeps ordinary canceled jobs in historical mode', () => {
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+  it('keeps ordinary canceled task runs in historical mode', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Canceled,
       error: null,
     });
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
       }),
     ).toBe('historical');
   });
 
-  it('treats canceled jobs with result.error as boot-failed before any messages exist', () => {
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Canceled,
+  it('treats canceled task runs with result.error as boot-failed before any messages exist', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Canceled,
       error: null,
       result: {
         error:
@@ -111,7 +98,7 @@ describe('getSessionState', () => {
     });
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
       }),
@@ -119,19 +106,19 @@ describe('getSessionState', () => {
   });
 
   it('keeps running jobs in startup until the harness emits a first message', () => {
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Running,
     });
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
       }),
     ).toBe('booting');
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: true,
       }),
@@ -139,20 +126,20 @@ describe('getSessionState', () => {
   });
 
   it('keeps snapshot resumes in resuming mode until a first harness message', () => {
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
-      type: CloudTaskType.SnapshotResume,
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Running,
+      payloadKind: TaskPayloadKind.SnapshotResume,
     });
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
       }),
     ).toBe('resuming');
 
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: true,
       }),
@@ -161,14 +148,14 @@ describe('getSessionState', () => {
 
   it('falls through to interactive after 7s without harness messages', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Running,
       startedAt,
     });
 
     // Before the timeout: still booting
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
         now: startedAt.getTime() + 6_999,
@@ -177,7 +164,7 @@ describe('getSessionState', () => {
 
     // At the timeout boundary: interactive
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
         now: startedAt.getTime() + 7_000,
@@ -187,15 +174,15 @@ describe('getSessionState', () => {
 
   it('falls through to interactive after 7s for snapshot resumes without harness messages', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
-      type: CloudTaskType.SnapshotResume,
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Running,
+      payloadKind: TaskPayloadKind.SnapshotResume,
       startedAt,
     });
 
     // Before the timeout: still resuming
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
         now: startedAt.getTime() + 6_999,
@@ -204,7 +191,7 @@ describe('getSessionState', () => {
 
     // At the timeout boundary: interactive
     expect(
-      getSessionState(cloudJob, {
+      getSessionState(taskRun, {
         hasMessages: false,
         hasHarnessMessages: false,
         now: startedAt.getTime() + 7_000,
@@ -232,12 +219,12 @@ describe('isWaitingForFirstHarnessMessage', () => {
 
   it('returns false once session state is interactive even if no harness message exists', () => {
     const startedAt = new Date('2025-01-01T00:00:00Z');
-    const cloudJob = createCloudJobDetail({
-      status: CloudTaskStatus.Running,
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Running,
       startedAt,
     });
 
-    const timedOutSessionState = getSessionState(cloudJob, {
+    const timedOutSessionState = getSessionState(taskRun, {
       hasMessages: false,
       hasHarnessMessages: false,
       now: startedAt.getTime() + 7_000,
@@ -266,7 +253,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        taskRunStatus: RunStatus.Running,
         hasHarnessMessages: false,
         hasInitialPrompt: true,
       }),
@@ -277,7 +264,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        taskRunStatus: RunStatus.Running,
         hasHarnessMessages: false,
         hasInitialPrompt: false,
       }),
@@ -288,7 +275,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'interactive',
-        cloudJobStatus: CloudTaskStatus.Running,
+        taskRunStatus: RunStatus.Running,
         hasHarnessMessages: true,
         hasInitialPrompt: true,
       }),
@@ -297,7 +284,7 @@ describe('shouldPollForFirstHarnessMessage', () => {
     expect(
       shouldPollForFirstHarnessMessage({
         sessionState: 'historical',
-        cloudJobStatus: CloudTaskStatus.Completed,
+        taskRunStatus: RunStatus.Completed,
         hasHarnessMessages: false,
         hasInitialPrompt: true,
       }),
@@ -309,7 +296,7 @@ describe('restoreSnapshotResumeVisiblePromptFields', () => {
   it('restores commentBody for GitHub follow-up resumes', () => {
     const payload: Record<string, unknown> = {
       repo: 'Roomote/example-app',
-      sourceCloudJobId: 123,
+      sourceRunId: 123,
       sourceSnapshotId: 'snapshot-123',
     };
 
@@ -362,9 +349,9 @@ describe('restoreSnapshotResumeVisiblePromptFields', () => {
   });
 });
 
-describe('getCloudJobVisiblePrompt', () => {
+describe('getTaskRunVisiblePrompt', () => {
   it('respects explicit payload transcript visibility flags', () => {
-    const cloudJob = createCloudJobDetail({
+    const taskRun = createTaskRunDetail({
       payload: {
         repo: 'owner/repo',
         description: '$environment-setup',
@@ -372,21 +359,21 @@ describe('getCloudJobVisiblePrompt', () => {
       },
     });
 
-    expect(getCloudJobVisiblePrompt(cloudJob)).toMatchObject({
+    expect(getTaskRunVisiblePrompt(taskRun)).toMatchObject({
       text: '$environment-setup',
       visibleInTranscript: false,
     });
   });
 
   it('keeps legacy hidden bootstrap prompts out of the session transcript', () => {
-    const cloudJob = createCloudJobDetail({
+    const taskRun = createTaskRunDetail({
       payload: {
         repo: 'owner/repo',
         description: '$environment-setup\n<request>Set up the app</request>',
       },
     });
 
-    expect(getCloudJobVisiblePrompt(cloudJob)).toMatchObject({
+    expect(getTaskRunVisiblePrompt(taskRun)).toMatchObject({
       visibleInTranscript: false,
     });
   });

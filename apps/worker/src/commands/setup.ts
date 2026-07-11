@@ -10,7 +10,7 @@
  * needs to exist before this can run.
  */
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { ExecutionError } from '../command-executor';
 import type { WorkerEnv } from '../env';
@@ -74,11 +74,11 @@ interface RunSetupResult {
 }
 
 function shouldContinueEnvironmentSetupFailures({
-  cloudJobType,
+  taskRunType,
 }: {
-  cloudJobType: CloudTaskType;
+  taskRunType: TaskPayloadKind;
 }): boolean {
-  return cloudJobType !== CloudTaskType.SnapshotEnvironment;
+  return taskRunType !== TaskPayloadKind.SnapshotEnvironment;
 }
 
 function formatEnvironmentSetupErrorDetails(error: unknown): string {
@@ -134,7 +134,7 @@ export async function setup({
   const workspaceOptions = {
     ...workspaceOpts,
     cleanupLegacyPaths:
-      workspaceOpts.cloudJobType === CloudTaskType.SnapshotEnvironment,
+      workspaceOpts.taskRunType === TaskPayloadKind.SnapshotEnvironment,
     envVars: {
       ...workerEnv.buildUserFacingEnv(),
       ...workspaceOpts.envVars,
@@ -211,7 +211,7 @@ async function runSetup({
   const continueEnvironmentSetupFailures =
     workspaceOptions.workspace.type === 'environment' &&
     shouldContinueEnvironmentSetupFailures({
-      cloudJobType: workspaceOptions.cloudJobType,
+      taskRunType: workspaceOptions.taskRunType,
     });
 
   await timedStep(

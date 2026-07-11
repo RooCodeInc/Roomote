@@ -1,7 +1,7 @@
 import {
-  type CloudTaskPayload,
-  activeCloudTaskStatuses,
-  CloudTaskType,
+  type TaskPayload,
+  activeRunStatuses,
+  TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
   populateSnapshotResumeSlackMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
@@ -9,13 +9,14 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import type { ModalClient as _ModalSdkClient } from 'modal';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import { createComputeProviderClient } from '@roomote/compute-providers/factory';
 import { createClient } from '@roomote/sdk/client';
 import {
   db,
   environments,
-  cloudJobs,
+  taskRuns,
+  tasks,
   claimPendingEnvironmentSnapshotForAttachment,
   clearEnvironmentSnapshot,
   getEnvironmentSnapshot,
@@ -29,7 +30,7 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { createJobToken } from '@roomote/auth';
+import { createRunToken } from '@roomote/auth';
 import {
   type ComputeProvider,
   isSnapshotCapableComputeProvider,
@@ -52,7 +53,7 @@ import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-pr
 type _ModalSdkDependency = _ModalSdkClient;
 
 type SnapshotResult =
-  | { success: true; cloudJobId: number; taskId: string }
+  | { success: true; runId: number; taskId: string }
   | { success: false; error: string };
 
 type SimpleResult = { success: true } | { success: false; error: string };
@@ -60,50 +61,56 @@ type SimpleResult = { success: true } | { success: false; error: string };
 async function inheritSnapshotResumeVisiblePromptFields(
   payload: Record<string, unknown>,
   sourcePayload: unknown,
-  ancestorSourceCloudJobId: number | null,
+  ancestorSourceRunId: number | null,
 ): Promise<void> {
   restoreSnapshotResumeVisiblePromptFields(payload, sourcePayload);
 
   const visited = new Set<number>();
-  let currentSourceCloudJobId = ancestorSourceCloudJobId;
+  let currentSourceRunId = ancestorSourceRunId;
 
-  while (currentSourceCloudJobId && !visited.has(currentSourceCloudJobId)) {
-    visited.add(currentSourceCloudJobId);
+  while (currentSourceRunId && !visited.has(currentSourceRunId)) {
+    visited.add(currentSourceRunId);
 
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, currentSourceCloudJobId),
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, currentSourceRunId),
       columns: {
         payload: true,
-        sourceCloudJobId: true,
+        sourceRunId: true,
       },
     });
 
-    if (!sourceJob) {
+    if (!sourceRun) {
       return;
     }
 
-    restoreSnapshotResumeVisiblePromptFields(payload, sourceJob.payload);
-    currentSourceCloudJobId = sourceJob.sourceCloudJobId;
+    restoreSnapshotResumeVisiblePromptFields(payload, sourceRun.payload);
+    currentSourceRunId = sourceRun.sourceRunId;
   }
 }
 
-async function findActiveEnvironmentSnapshotJob(params: {
+async function findActiveEnvironmentSnapshotRun(params: {
   environmentId: string;
   provider: ComputeProvider;
 }) {
-  return db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.type, CloudTaskType.SnapshotEnvironment),
-      eq(cloudJobs.vendor, params.provider),
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      sql`${cloudJobs.payload}->>'environmentId' = ${params.environmentId}`,
-    ),
-    columns: {
-      id: true,
-      taskId: true,
-    },
-    orderBy: [desc(cloudJobs.createdAt), desc(cloudJobs.id)],
-  });
+  const [job] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.workflow, 'env_snapshot'),
+        eq(taskRuns.vendor, params.provider),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        sql`${taskRuns.payload}->>'environmentId' = ${params.environmentId}`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return job ?? null;
 }
 
 export async function createEnvironmentSnapshotCommand(
@@ -166,7 +173,7 @@ export async function createEnvironmentSnapshotCommand(
       };
     }
 
-    const activeRefreshJob = await findActiveEnvironmentSnapshotJob({
+    const activeRefreshJob = await findActiveEnvironmentSnapshotRun({
       environmentId: input.environmentId,
       provider,
     });
@@ -190,17 +197,16 @@ export async function createEnvironmentSnapshotCommand(
 
       return {
         success: true,
-        cloudJobId: activeRefreshJob.id,
+        runId: activeRefreshJob.id,
         taskId: activeRefreshJob.taskId,
       };
     }
 
     try {
-      const snapshotLaunch = await enqueueCloudTask(
-        {
-          userId,
+      const snapshotLaunch = await enqueueTask({
+        task: {
           computeProvider: provider,
-          type: CloudTaskType.SnapshotEnvironment,
+          type: TaskPayloadKind.SnapshotEnvironment,
           payload: {
             repo: '',
             environmentId: input.environmentId,
@@ -208,19 +214,21 @@ export async function createEnvironmentSnapshotCommand(
               pendingSnapshotClaim.attachmentSource,
           },
         },
-        {
-          launchClass: 'maintenance',
-        },
-      );
+        initiator: { kind: 'user', userId },
+        workflow: 'env_snapshot',
+        surface: 'web',
+        trigger: 'manual',
+        visibility: 'hidden',
+      });
 
       return {
         success: true,
-        cloudJobId: snapshotLaunch.id,
+        runId: snapshotLaunch.id,
         taskId: snapshotLaunch.taskId,
       };
     } catch (error) {
       const activeRefreshJobAfterEnqueueError =
-        await findActiveEnvironmentSnapshotJob({
+        await findActiveEnvironmentSnapshotRun({
           environmentId: input.environmentId,
           provider,
         });
@@ -228,7 +236,7 @@ export async function createEnvironmentSnapshotCommand(
       if (activeRefreshJobAfterEnqueueError) {
         return {
           success: true,
-          cloudJobId: activeRefreshJobAfterEnqueueError.id,
+          runId: activeRefreshJobAfterEnqueueError.id,
           taskId: activeRefreshJobAfterEnqueueError.taskId,
         };
       }
@@ -298,26 +306,26 @@ export async function clearEnvironmentSnapshotCommand(
   }
 }
 
-export async function createCloudJobSnapshotCommand(
+export async function createTaskRunSnapshotCommand(
   auth: UserAuthSuccess,
-  input: { cloudJobId: number },
+  input: { runId: number },
 ): Promise<SimpleResult> {
   try {
     const { userId } = auth;
 
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.cloudJobId),
+    const taskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.runId),
     });
 
-    if (!cloudJob) {
-      return { success: false, error: 'Cloud job not found' };
+    if (!taskRun) {
+      return { success: false, error: 'Task run not found' };
     }
 
-    if (!cloudJob.machineId) {
+    if (!taskRun.machineId) {
       return { success: false, error: 'No machine associated with this job' };
     }
 
-    const provider = resolveComputeProviderTarget(cloudJob.vendor);
+    const provider = resolveComputeProviderTarget(taskRun.vendor);
     const computeClient = createComputeProviderClient({ provider });
 
     if (!computeClient.capabilities.supportsSnapshots) {
@@ -328,7 +336,7 @@ export async function createCloudJobSnapshotCommand(
     }
 
     const { status } = await computeClient.getInstanceStatus({
-      instanceId: cloudJob.machineId,
+      instanceId: taskRun.machineId,
     });
 
     if (status !== 'running') {
@@ -338,19 +346,19 @@ export async function createCloudJobSnapshotCommand(
       };
     }
 
-    if (cloudJob.snapshotId) {
+    if (taskRun.snapshotId) {
       return { success: false, error: 'Snapshot already exists for this job' };
     }
 
-    if (cloudJob.snapshotFailedAt) {
+    if (taskRun.snapshotFailedAt) {
       return {
         success: false,
         error: 'A previous snapshot attempt failed for this job',
       };
     }
 
-    const authToken = await createJobToken({
-      cloudJobId: input.cloudJobId,
+    const authToken = await createRunToken({
+      runId: input.runId,
       userId,
       timeoutMs: 5 * 60 * 1000,
     });
@@ -360,9 +368,9 @@ export async function createCloudJobSnapshotCommand(
       headers: () => ({ Authorization: `Bearer ${authToken}` }),
     });
 
-    const { enqueued } = await client.cloudJobs.createSnapshot.mutate({
-      cloudJobId: input.cloudJobId,
-      sandboxId: cloudJob.machineId,
+    const { enqueued } = await client.taskRuns.createSnapshot.mutate({
+      runId: input.runId,
+      sandboxId: taskRun.machineId,
     });
 
     if (!enqueued) {
@@ -370,23 +378,23 @@ export async function createCloudJobSnapshotCommand(
     }
 
     await db
-      .update(cloudJobs)
+      .update(taskRuns)
       .set({ snapshotRequestedAt: new Date() })
-      .where(eq(cloudJobs.id, input.cloudJobId));
+      .where(eq(taskRuns.id, input.runId));
 
     return { success: true };
   } catch (error) {
-    console.error('createCloudJobSnapshot error:', error);
+    console.error('createTaskRunSnapshot error:', error);
 
     try {
       await db
-        .update(cloudJobs)
+        .update(taskRuns)
         .set({
           snapshotRequestedAt: null,
           snapshotFailedAt: new Date(),
           error: `Snapshot creation failed: ${error instanceof Error ? error.message : String(error)}`,
         })
-        .where(eq(cloudJobs.id, input.cloudJobId));
+        .where(eq(taskRuns.id, input.runId));
     } catch (_error) {
       // NO-OP
     }
@@ -397,11 +405,11 @@ export async function createCloudJobSnapshotCommand(
   }
 }
 
-export async function restoreCloudJobSnapshotCommand(
+export async function restoreTaskRunSnapshotCommand(
   auth: UserAuthSuccess,
   input: {
     sourceSnapshotId: string;
-    sourceCloudJobId: number;
+    sourceRunId: number;
     clientMessageId?: string;
     description?: string;
     resumePrompt?: string;
@@ -413,17 +421,32 @@ export async function restoreCloudJobSnapshotCommand(
   try {
     const { userId } = auth;
 
-    const sourceJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, input.sourceCloudJobId),
+    const sourceRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, input.sourceRunId),
       columns: {
         port: true,
         payload: true,
         taskId: true,
-        userId: true,
         snapshotCreatedAt: true,
-        sourceCloudJobId: true,
-        draftPrompt: true,
+        sourceRunId: true,
         vendor: true,
+      },
+    });
+
+    if (!sourceRun) {
+      return {
+        success: false,
+        error: 'Source task run not found or you do not have access',
+      };
+    }
+
+    // Conversation cargo (draft prompt, Slack/Linear channel bindings) lives
+    // on the tasks row.
+    const sourceTask = await db.query.tasks.findFirst({
+      where: eq(tasks.id, sourceRun.taskId),
+      columns: {
+        draftPrompt: true,
+        slackChannelId: true,
         slackThreadTs: true,
         linearSessionId: true,
         linearIssueId: true,
@@ -431,28 +454,28 @@ export async function restoreCloudJobSnapshotCommand(
       },
     });
 
-    if (!sourceJob) {
+    if (!sourceTask) {
       return {
         success: false,
-        error: 'Source cloud job not found or you do not have access',
+        error: 'Source task not found or you do not have access',
       };
     }
 
-    if (!isSnapshotResumable(sourceJob.snapshotCreatedAt)) {
+    if (!isSnapshotResumable(sourceRun.snapshotCreatedAt)) {
       return {
         success: false,
         error: EXPIRED_SNAPSHOT_RESUME_ERROR,
       };
     }
 
-    if (!sourceJob.payload?.repo && !sourceJob.payload?.environmentId) {
+    if (!sourceRun.payload?.repo && !sourceRun.payload?.environmentId) {
       return {
         success: false,
-        error: 'Source cloud job has no workspace information',
+        error: 'Source task run has no workspace information',
       };
     }
 
-    const sourcePayload = sourceJob.payload as Record<string, unknown>;
+    const sourcePayload = sourceRun.payload as Record<string, unknown>;
 
     const explicitResumePrompt = input.resumePrompt;
     const hasExplicitResumePrompt = typeof explicitResumePrompt === 'string';
@@ -470,16 +493,16 @@ export async function restoreCloudJobSnapshotCommand(
     // review-feedback notifications) — they are in the transcript but not in
     // the harness session, so the resumed agent would otherwise have no idea
     // what the user's reply refers to.
-    if (resumePrompt.length > 0 && sourceJob.taskId) {
-      outOfBandContext = await claimOutOfBandContextForPrompt(sourceJob.taskId);
+    if (resumePrompt.length > 0 && sourceRun.taskId) {
+      outOfBandContext = await claimOutOfBandContextForPrompt(sourceRun.taskId);
     }
 
-    const payload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
-      repo: sourceJob.payload.repo,
-      environmentId: sourceJob.payload.environmentId,
-      port: sourceJob.port ?? undefined,
+    const payload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
+      repo: sourceRun.payload.repo,
+      environmentId: sourceRun.payload.environmentId,
+      port: sourceRun.port ?? undefined,
       sourceSnapshotId: input.sourceSnapshotId,
-      sourceCloudJobId: input.sourceCloudJobId,
+      sourceRunId: input.sourceRunId,
       ...(resumePrompt.length > 0
         ? {
             resumePrompt: withOutOfBandContext(outOfBandContext, resumePrompt),
@@ -495,58 +518,55 @@ export async function restoreCloudJobSnapshotCommand(
     };
     populateSnapshotResumeSlackMetadata(payload, {
       sourcePayload,
-      threadTs: sourceJob.slackThreadTs,
+      threadTs: sourceTask.slackThreadTs,
     });
 
     await inheritSnapshotResumeVisiblePromptFields(
       payload,
-      sourceJob.payload,
-      sourceJob.sourceCloudJobId,
+      sourceRun.payload,
+      sourceRun.sourceRunId,
     );
 
-    const resumeLaunch = await enqueueCloudTask(
-      {
-        userId: sourceJob.userId ?? userId,
+    const resumeLaunch = await enqueueTask({
+      task: {
         computeProvider:
-          sourceJob.vendor ?? resolveComputeProviderTarget(undefined),
+          sourceRun.vendor ?? resolveComputeProviderTarget(undefined),
         sourceSnapshotId: input.sourceSnapshotId,
-        sourceCloudJobId: input.sourceCloudJobId,
-        type: CloudTaskType.SnapshotResume,
-        ...(sourceJob.slackThreadTs
-          ? { slackThreadTs: sourceJob.slackThreadTs }
+        sourceRunId: input.sourceRunId,
+        type: TaskPayloadKind.SnapshotResume,
+        ...(sourceTask.slackThreadTs
+          ? { slackThreadTs: sourceTask.slackThreadTs }
           : {}),
-        ...(sourceJob.linearSessionId
+        ...(sourceTask.linearSessionId
           ? {
-              linearSessionId: sourceJob.linearSessionId,
-              ...(sourceJob.linearIssueId
-                ? { linearIssueId: sourceJob.linearIssueId }
+              linearSessionId: sourceTask.linearSessionId,
+              ...(sourceTask.linearIssueId
+                ? { linearIssueId: sourceTask.linearIssueId }
                 : {}),
-              ...(sourceJob.linearOrganizationId
-                ? { linearOrganizationId: sourceJob.linearOrganizationId }
+              ...(sourceTask.linearOrganizationId
+                ? { linearOrganizationId: sourceTask.linearOrganizationId }
                 : {}),
             }
           : {}),
         payload,
       },
-      {
-        launchClass: 'human',
-      },
-    );
+      actingUserId: userId,
+    });
 
     if (hasExplicitResumePrompt && resumePrompt.length === 0) {
       await db
-        .update(cloudJobs)
+        .update(tasks)
         .set({ draftPrompt: null })
-        .where(eq(cloudJobs.id, input.sourceCloudJobId));
+        .where(eq(tasks.id, sourceRun.taskId));
     }
 
     return {
       success: true,
-      cloudJobId: resumeLaunch.id,
+      runId: resumeLaunch.id,
       taskId: resumeLaunch.taskId,
     };
   } catch (error) {
-    console.error('restoreCloudJobSnapshot error:', error);
+    console.error('restoreTaskRunSnapshot error:', error);
 
     await releaseOutOfBandContext(outOfBandContext);
 

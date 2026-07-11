@@ -43,7 +43,7 @@ vi.mock('next/cache', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   db: { select: mockDbSelect.select },
-  tasks: { id: 'id', userId: 'userId', orgId: 'orgId' },
+  tasks: { id: 'id', initiatorUserId: 'initiatorUserId' },
   users: { id: 'id', name: 'name' },
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
@@ -111,7 +111,6 @@ describe('generateTaskSummaryCommand', () => {
 
     expect(mockGetTaskMessageEnvelopes).toHaveBeenCalledWith({
       taskId: 'task-empty',
-      userId: auth.userId,
     });
     expect(mockGenerateTrackedNonTaskObject).not.toHaveBeenCalled();
     expect(result).toEqual({
@@ -155,7 +154,7 @@ describe('generateTaskSummaryCommand', () => {
         ts: 1,
         eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
         role: 'user',
-        text: 'Please help me implement cloud job message persistence.',
+        text: 'Please help me implement task run message persistence.',
       }),
       envelope({
         id: 'message-2',
@@ -188,7 +187,7 @@ describe('generateTaskSummaryCommand', () => {
     const prompt = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0]
       ?.prompt as string;
     expect(prompt).toContain(
-      'Bruno Bergher (task starter): Please help me implement cloud job message persistence.',
+      'Bruno Bergher (task starter): Please help me implement task run message persistence.',
     );
     expect(prompt).toContain(
       'Roomote: Implemented Postgres persistence and wired historical hydration.',

@@ -4,7 +4,7 @@
  * originated the layout; the constants apply to every hosted provider.
  */
 
-/** Default sandbox lifetime (ms). Used as the fallback when agent type is unknown. */
+/** Default sandbox lifetime (ms). Used when no workflow-specific value applies. */
 export const SANDBOX_TIMEOUT_MS = 5 * 60 * 60 * 1_000;
 
 export const SANDBOX_DEFAULT_VCPUS = 8;

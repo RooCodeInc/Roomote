@@ -15,7 +15,7 @@ import {
   clearPendingSlackMcpSetupInterrupt,
   collectAndProcessThreadImages,
   fetchThreadMessagesSafe,
-  findActiveSlackJob,
+  findActiveSlackTaskRun,
   formatSlackRoutingWaitReplyText,
   hasPendingRoutingConfirmation,
   hasPendingSlackMcpSetupInterrupt,
@@ -39,6 +39,7 @@ import {
 import {
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+  type TaskInitiator,
 } from '@roomote/types';
 import {
   stripLeadingRawSlackMention,
@@ -51,7 +52,7 @@ import {
   SLACK_ROUTING_LOCK_PREFIX,
 } from '../constants.js';
 import type { AutomatedSlackAppMentionEvent } from '../types.js';
-import { processActiveJobMessage } from './active-job.js';
+import { processActiveRunMessage } from './active-run.js';
 import {
   isBareFastCommandInvocation,
   isFastCommandInvocation,
@@ -932,10 +933,29 @@ async function processSlackChannelAutoStartTask(params: {
           ),
         });
 
+      // Bot-authored auto-starts are automation-initiated with no installer
+      // owner; a human posting in a configured auto-start channel is the
+      // initiating user.
+      const initiator: TaskInitiator = isBotAuthored
+        ? {
+            kind: 'automation',
+            key: 'slack_channel_auto_start',
+            ...(typeof event.user === 'string'
+              ? { actor: { externalId: event.user } }
+              : {}),
+          }
+        : {
+            kind: 'user',
+            externalId: launchIdentity.slackUserId,
+            matchedUserId: launchIdentity.launchUserId,
+          };
+
       const result = await startAutoRoutedSlackTask({
         slackInstallation,
         slack,
-        launchUserId: launchIdentity.launchUserId,
+        initiator,
+        trigger: 'message',
+        launchUserId: isBotAuthored ? null : launchIdentity.launchUserId,
         slackUserId: launchIdentity.slackUserId,
         persistedSlackUserId: isBotAuthored ? null : launchIdentity.slackUserId,
         initiatingSlackUserId:
@@ -974,7 +994,7 @@ async function processSlackChannelAutoStartTask(params: {
           });
         }
         apiLogger.info(
-          `[SlackWebhook] Configured channel auto-start launched task thread_id=${result.threadId} cloud_job_id=${result.cloudJobId} task_id=${result.taskId} channel=${event.channel}`,
+          `[SlackWebhook] Configured channel auto-start launched task thread_id=${result.threadId} task_run_id=${result.runId} task_id=${result.taskId} channel=${event.channel}`,
         );
         return;
       }
@@ -1327,36 +1347,37 @@ async function processAutomatedAppMentionTask(params: {
     slack,
     channel: event.channel,
     threadId,
-    onActive: async (activeJob) => {
+    onActive: async (activeRun) => {
       apiLogger.debug(
-        `[SlackWebhook] Automated app_mention found active job ${activeJob.id} for thread ${threadId} - queuing continuation`,
+        `[SlackWebhook] Automated app_mention found active task run ${activeRun.id} for thread ${threadId} - queuing continuation`,
       );
 
-      processActiveJobMessage(
+      processActiveRunMessage(
         threadEvent,
         slack,
         launchIdentity.launchUserId,
-        activeJob,
+        activeRun,
         slackInstallation.botUserId,
       ).catch((error) => {
         console.error(
-          `❌ Background processing failed for automated active job ${activeJob.id}:`,
+          `❌ Background processing failed for automated active task run ${activeRun.id}:`,
           error instanceof Error ? error.message : String(error),
         );
       });
 
       return true;
     },
-    onResume: async (completedJob) => {
+    onResume: async (completedRun) => {
       const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
 
       try {
+        // Automation-driven resume: no acting human on the new run.
         const handled = await processSnapshotResume(
           threadEvent,
           slack,
-          completedJob,
+          completedRun,
           threadId,
-          launchIdentity.launchUserId,
+          null,
           ackEmoji,
           completionEmoji,
           slackInstallation.botUserId,
@@ -1364,7 +1385,7 @@ async function processAutomatedAppMentionTask(params: {
 
         if (handled) {
           apiLogger.info(
-            `[SlackWebhook] Automated app_mention resumed completed task thread_id=${threadId} source_cloud_job_id=${completedJob.id} channel=${event.channel} app_id=${event.app_id}`,
+            `[SlackWebhook] Automated app_mention resumed completed task thread_id=${threadId} source_task_run_id=${completedRun.id} channel=${event.channel} app_id=${event.app_id}`,
           );
           return { handled: true, value: true };
         }
@@ -1391,10 +1412,19 @@ async function processAutomatedAppMentionTask(params: {
           ),
         });
 
+      // Automated (bot/relay-authored) @mention: automation initiator with
+      // the relay message author as the external actor when available.
       const result = await startAutoRoutedSlackTask({
         slackInstallation,
         slack,
-        launchUserId: launchIdentity.launchUserId,
+        initiator: {
+          kind: 'automation',
+          key: 'slack_channel_auto_start',
+          ...(typeof event.user === 'string'
+            ? { actor: { externalId: event.user } }
+            : {}),
+        },
+        trigger: 'message',
         slackUserId: launchIdentity.slackUserId,
         initiatingSlackUserId:
           launchIdentity.slackUserId === slackInstallation.botUserId
@@ -1461,7 +1491,7 @@ async function processAutomatedAppMentionTask(params: {
       }
 
       apiLogger.info(
-        `[SlackWebhook] Automated app_mention started task thread_id=${result.threadId} cloud_job_id=${result.cloudJobId} task_id=${result.taskId} channel=${event.channel} app_id=${event.app_id}`,
+        `[SlackWebhook] Automated app_mention started task thread_id=${result.threadId} task_run_id=${result.runId} task_id=${result.taskId} channel=${event.channel} app_id=${event.app_id}`,
       );
 
       return true;
@@ -1629,14 +1659,14 @@ export async function handleSlackEntryEvent(params: {
     );
   }
 
-  const activeJob = skipThreadFollowupHandling
+  const activeRun = skipThreadFollowupHandling
     ? null
-    : await findActiveSlackJob(threadId);
+    : await findActiveSlackTaskRun(threadId);
   const shouldRecordThreadReply =
     Boolean(event.thread_ts) &&
     !skipThreadFollowupHandling &&
     (event.type !== 'app_mention' ||
-      Boolean(activeJob) ||
+      Boolean(activeRun) ||
       (await isRoomoteOwnedSlackThread({
         teamId,
         channelId: event.channel,
@@ -1649,14 +1679,14 @@ export async function handleSlackEntryEvent(params: {
     userMapping,
     teamId,
     shouldRecordThreadReply,
-    activeJobId: activeJob?.id,
-    activeTaskId: activeJob?.taskId,
+    activeRunId: activeRun?.id,
+    activeTaskId: activeRun?.taskId,
   });
 
   if (!skipThreadFollowupHandling) {
     const followUpRoute = await resolveSlackThreadFollowUpRoute({
       threadId,
-      prefetchedActiveJob: activeJob ?? null,
+      prefetchedActiveRun: activeRun ?? null,
       allowCompletedResume: false,
     });
     const followUpOutcome = await dispatchSlackThreadFollowUp({
@@ -1664,21 +1694,21 @@ export async function handleSlackEntryEvent(params: {
       slack,
       channel: event.channel,
       threadId,
-      onActive: async (activeThreadJob) => {
+      onActive: async (activeThreadRun) => {
         apiLogger.debug(
-          `Found active job ${activeThreadJob.id} for thread ${threadId} - queuing message for continuation`,
+          `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
         );
 
-        processActiveJobMessage(
+        processActiveRunMessage(
           event,
           slack,
           userMapping.userId,
-          activeThreadJob,
+          activeThreadRun,
           slackInstallation.botUserId,
           prefetchedThreadMessages,
         ).catch((error) => {
           console.error(
-            `❌ Background processing failed for active job ${activeThreadJob.id}:`,
+            `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
             error instanceof Error ? error.message : String(error),
           );
         });
@@ -1776,7 +1806,7 @@ export async function handleSlackEntryEvent(params: {
 
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
-    prefetchedActiveJob: null,
+    prefetchedActiveRun: null,
   });
   const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
     await startNewTaskConfigurationWithLock({
@@ -1800,34 +1830,34 @@ export async function handleSlackEntryEvent(params: {
     slack,
     channel: event.channel,
     threadId,
-    onActive: async (activeThreadJob) => {
+    onActive: async (activeThreadRun) => {
       apiLogger.debug(
-        `Found active job ${activeThreadJob.id} for thread ${threadId} - queuing message for continuation`,
+        `Found active task run ${activeThreadRun.id} for thread ${threadId} - queuing message for continuation`,
       );
 
-      processActiveJobMessage(
+      processActiveRunMessage(
         event,
         slack,
         userMapping.userId,
-        activeThreadJob,
+        activeThreadRun,
         slackInstallation.botUserId,
         prefetchedThreadMessages,
       ).catch((error) => {
         console.error(
-          `❌ Background processing failed for active job ${activeThreadJob.id}:`,
+          `❌ Background processing failed for active task run ${activeThreadRun.id}:`,
           error instanceof Error ? error.message : String(error),
         );
       });
     },
-    onResume: async (completedJob) => {
+    onResume: async (completedRun) => {
       apiLogger.debug(
-        `[SlackWebhook] Found completed job ${completedJob.id} with snapshot ${completedJob.snapshotId} for thread ${threadId} - creating SnapshotResume`,
+        `[SlackWebhook] Found completed task run ${completedRun.id} with snapshot ${completedRun.snapshotId} for thread ${threadId} - creating SnapshotResume`,
       );
 
       void processSnapshotResume(
         event,
         slack,
-        completedJob,
+        completedRun,
         threadId,
         userMapping.userId,
         ackEmoji,
@@ -1863,7 +1893,7 @@ export async function handleSlackEntryEvent(params: {
     onFresh: async () => {
       if (followUpRoute.kind === 'fresh') {
         apiLogger.debug(
-          `No active job found for thread ${threadId} - processing in background`,
+          `No active task run found for thread ${threadId} - processing in background`,
         );
       }
 

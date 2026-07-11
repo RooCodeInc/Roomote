@@ -11,10 +11,12 @@ import {
 } from '@roomote/slack';
 import {
   and,
-  cloudJobs,
   db,
+  desc,
   eq,
   findBackgroundAutomationSlackThread,
+  taskRuns,
+  tasks,
   type SlackUserMapping,
 } from '@roomote/db/server';
 
@@ -62,20 +64,29 @@ export async function findRoomoteOwnedSlackThread(params: {
   channelId: string;
   threadTs: string;
 }): Promise<RoomoteOwnedSlackThreadMatch | null> {
-  const existingSlackJobs = await db
+  const existingSlackRows = await db
     .select({
-      id: cloudJobs.id,
-      taskId: cloudJobs.taskId,
-      payload: cloudJobs.payload,
-      userId: cloudJobs.userId,
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      payload: taskRuns.payload,
+      initiatorUserId: tasks.initiatorUserId,
+      actingUserId: taskRuns.actingUserId,
     })
-    .from(cloudJobs)
-    .where(eq(cloudJobs.slackThreadTs, params.threadTs))
+    .from(tasks)
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(eq(tasks.slackThreadTs, params.threadTs))
     .limit(10);
+
+  const existingSlackTaskRuns = existingSlackRows.map((row) => ({
+    id: row.id,
+    taskId: row.taskId,
+    payload: row.payload,
+    userId: row.initiatorUserId ?? row.actingUserId,
+  }));
 
   let fallbackMatch: RoomoteOwnedSlackThreadMatch | null = null;
 
-  for (const job of existingSlackJobs) {
+  for (const job of existingSlackTaskRuns) {
     const payload = job.payload as
       | { channel?: unknown; teamId?: unknown; user?: unknown }
       | undefined;
@@ -106,6 +117,7 @@ export async function findRoomoteOwnedSlackThread(params: {
 
   const sourceTaskId =
     trackedAutomationThread &&
+    trackedAutomationThread.automationKey != null &&
     isBetaBackgroundAutomationKey(trackedAutomationThread.automationKey) &&
     typeof trackedAutomationThread.metadata?.sourceTaskId === 'string' &&
     trackedAutomationThread.metadata.sourceTaskId.trim().length > 0
@@ -113,31 +125,37 @@ export async function findRoomoteOwnedSlackThread(params: {
       : null;
 
   if (sourceTaskId) {
-    const sourceTaskJob = existingSlackJobs.find(
+    const sourceTaskRun = existingSlackTaskRuns.find(
       (job) => job.taskId === sourceTaskId,
     );
 
-    if (sourceTaskJob) {
+    if (sourceTaskRun) {
       return {
-        userId: sourceTaskJob.userId,
+        userId: sourceTaskRun.userId,
         slackUserId: null,
       };
     }
 
-    const [sourceTaskJobById] = await db
-      .select({ userId: cloudJobs.userId })
-      .from(cloudJobs)
+    const [sourceTaskRunById] = await db
+      .select({
+        initiatorUserId: tasks.initiatorUserId,
+        actingUserId: taskRuns.actingUserId,
+      })
+      .from(tasks)
+      .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
       .where(
         and(
-          eq(cloudJobs.taskId, sourceTaskId),
-          eq(cloudJobs.slackThreadTs, params.threadTs),
+          eq(tasks.id, sourceTaskId),
+          eq(tasks.slackThreadTs, params.threadTs),
         ),
       )
+      .orderBy(desc(taskRuns.createdAt))
       .limit(1);
 
-    if (sourceTaskJobById) {
+    if (sourceTaskRunById) {
       return {
-        userId: sourceTaskJobById.userId,
+        userId:
+          sourceTaskRunById.initiatorUserId ?? sourceTaskRunById.actingUserId,
         slackUserId: null,
       };
     }
@@ -184,7 +202,7 @@ export async function recordInboundSlackConversationMessage(params: {
   userMapping: SlackUserMapping | null;
   teamId: string;
   shouldRecordThreadReply: boolean;
-  activeJobId?: number;
+  activeRunId?: number;
   activeTaskId?: string;
 }): Promise<void> {
   if (
@@ -228,7 +246,7 @@ export async function recordInboundSlackConversationMessage(params: {
     source: getInboundSlackConversationSource(params.event),
     text: normalizedText || params.event.text,
     taskId: params.activeTaskId,
-    cloudJobId: params.activeJobId,
+    runId: params.activeRunId,
     metadata: {
       eventType: params.event.type,
       subtype: params.event.subtype ?? null,

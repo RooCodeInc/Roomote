@@ -324,6 +324,39 @@ function setupMutationMock() {
   return mutateAsync;
 }
 
+function buildRuntimeConfiguredAuthSetup(
+  providerId: Extract<
+    SetupAuthStatus['preselectedProvider'],
+    'slack' | 'microsoft'
+  >,
+): SetupAuthStatus {
+  const authSetup = buildAuthSetup(providerId);
+
+  return {
+    ...authSetup,
+    selectedProvider: providerId,
+    preselectedProvider: providerId,
+    runtimeConfiguredProvider: providerId,
+    runtimeConfiguredProviders: [providerId],
+    lockReason: 'runtime_env',
+    setupSatisfiedByRuntimeEnv: true,
+    providers: authSetup.providers.map((provider) =>
+      provider.id === providerId
+        ? {
+            ...provider,
+            runtimeSatisfied: true,
+            setupSatisfied: true,
+            fields: provider.fields.map((field) => ({
+              ...field,
+              runtimeSatisfied: true,
+              satisfiedByEnvVarName: field.envVarName,
+            })),
+          }
+        : provider,
+    ),
+  };
+}
+
 describe('StepAuthEnvVars', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -765,32 +798,9 @@ describe('StepAuthEnvVars', () => {
     });
   });
 
-  it('starts bootstrap Slack sign-in directly when Slack is runtime configured', async () => {
+  it('shows bootstrap Slack sign-in when Slack is runtime configured', async () => {
     const mutateAsync = setupMutationMock();
-    const authSetup = buildAuthSetup('slack');
-    const runtimeConfiguredAuthSetup: SetupAuthStatus = {
-      ...authSetup,
-      selectedProvider: 'slack',
-      preselectedProvider: 'slack',
-      runtimeConfiguredProvider: 'slack',
-      runtimeConfiguredProviders: ['slack'],
-      lockReason: 'runtime_env',
-      setupSatisfiedByRuntimeEnv: true,
-      providers: authSetup.providers.map((provider) =>
-        provider.id === 'slack'
-          ? {
-              ...provider,
-              runtimeSatisfied: true,
-              setupSatisfied: true,
-              fields: provider.fields.map((field) => ({
-                ...field,
-                runtimeSatisfied: true,
-                satisfiedByEnvVarName: field.envVarName,
-              })),
-            }
-          : provider,
-      ),
-    };
+    const runtimeConfiguredAuthSetup = buildRuntimeConfiguredAuthSetup('slack');
 
     render(
       <StepAuthEnvVars
@@ -808,6 +818,7 @@ describe('StepAuthEnvVars', () => {
       screen.queryByRole('link', { name: /create slack app/i }),
     ).not.toBeInTheDocument();
     expect(screen.getByLabelText('slack')).toBeInTheDocument();
+    expect(signInOauth2Mock).not.toHaveBeenCalled();
 
     fireEvent.click(
       screen.getByRole('button', { name: /sign in with slack/i }),
@@ -823,6 +834,47 @@ describe('StepAuthEnvVars', () => {
     expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
     expect(mutateAsync).toHaveBeenCalledWith({
       provider: 'slack',
+      values: {},
+    });
+  });
+
+  it('shows bootstrap Microsoft sign-in when Microsoft is runtime configured', async () => {
+    const mutateAsync = setupMutationMock();
+    const runtimeConfiguredAuthSetup =
+      buildRuntimeConfiguredAuthSetup('microsoft');
+
+    render(
+      <StepAuthEnvVars
+        authSetup={runtimeConfiguredAuthSetup}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+        bootstrapMode
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        /This deployment is already configured for Microsoft Teams/i,
+      ),
+    ).toBeInTheDocument();
+    expect(signInOauth2Mock).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /sign in with microsoft teams/i,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(signInOauth2Mock).toHaveBeenCalledWith({
+        providerId: 'microsoft-entra-id',
+        callbackURL: '/setup',
+        disableRedirect: true,
+      });
+    });
+    expect(locationAssignMock).toHaveBeenCalledWith('https://slack.test');
+    expect(mutateAsync).toHaveBeenCalledWith({
+      provider: 'microsoft',
       values: {},
     });
   });

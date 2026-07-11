@@ -9,11 +9,11 @@ import { useLogFiles, useTaskSidePanel } from '../hooks';
 
 import type { SidebarActionBaseProps } from './types';
 
-function LogsButtonBase({ cloudJob }: SidebarActionBaseProps) {
+function LogsButtonBase({ taskRun }: SidebarActionBaseProps) {
   const logfiles = useLogFiles();
   const { openLogsView, closeSidePanel, isViewActive } = useTaskSidePanel();
 
-  if (!cloudJob) {
+  if (!taskRun) {
     return null;
   }
 

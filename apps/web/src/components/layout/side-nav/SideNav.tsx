@@ -150,7 +150,7 @@ export const SideNav = () => {
     () => [
       ...new Set(
         nonPinnedQuickAccessTasks
-          .map((task) => task.cloudJob?.payload?.environmentId)
+          .map((task) => task.taskRun?.payload?.environmentId)
           .filter((id): id is string => !!id),
       ),
     ],
@@ -179,7 +179,7 @@ export const SideNav = () => {
     const groups = new Map<string, SideNavTaskGroup>();
 
     for (const task of nonPinnedQuickAccessTasks) {
-      const environmentId = task.cloudJob?.payload?.environmentId ?? null;
+      const environmentId = task.taskRun?.payload?.environmentId ?? null;
       const groupKey = environmentId ?? NO_ENVIRONMENT_GROUP_KEY;
       const existingGroup = groups.get(groupKey);
 

@@ -2,7 +2,7 @@ import { MODAL_CAPABILITIES as MODAL_CAPABILITIES_VALUE } from '@roomote/types';
 import { LRUCache } from 'lru-cache';
 import {
   ModalClient as SdkModalClient,
-  Image,
+  type Image,
   type Sandbox,
   type App,
   type Secret as ModalSecret,
@@ -864,7 +864,12 @@ export class ModalClient implements ComputeProviderClient {
       );
 
       image = await raceWithAbort({
-        promise: Image.fromId(input.sourceSnapshotId),
+        // Must go through the constructed client: the static Image.fromId
+        // resolves auth from the default profile/env vars, which are absent
+        // when Modal credentials come from the encrypted deployment env vars
+        // (fresh spawns worked, snapshot resumes failed with "Profile is
+        // missing token_id or token_secret").
+        promise: this.sdk.images.fromId(input.sourceSnapshotId),
         signal: input.signal,
         abortMessage: `Loading Modal snapshot ${input.sourceSnapshotId} was aborted`,
       });

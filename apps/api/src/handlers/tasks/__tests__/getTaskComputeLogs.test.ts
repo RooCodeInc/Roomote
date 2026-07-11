@@ -52,16 +52,16 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     select: mockSelect,
     query: {
-      cloudJobs: {
+      taskRuns: {
         findMany: mockFindMany,
       },
     },
   },
   tasks: { id: 'tasks.id', orgId: 'tasks.orgId' },
-  cloudJobs: {
-    id: 'cloudJobs.id',
-    taskId: 'cloudJobs.taskId',
-    createdAt: 'cloudJobs.createdAt',
+  taskRuns: {
+    id: 'taskRuns.id',
+    taskId: 'taskRuns.taskId',
+    createdAt: 'taskRuns.createdAt',
   },
   eq: eqMock,
   and: andMock,
@@ -141,7 +141,7 @@ describe('getTaskComputeLogs', () => {
 
   afterEach(() => {});
 
-  it('returns task cloud jobs with output, skipped reasons, and per-job errors', async () => {
+  it('returns task task runs with output, skipped reasons, and per-job errors', async () => {
     mockFindMany.mockResolvedValue([
       {
         id: 101,
@@ -191,7 +191,7 @@ describe('getTaskComputeLogs', () => {
     await expect(response.json()).resolves.toEqual({
       taskId: 'task-1',
       returned: 5,
-      cloudJobs: [
+      taskRuns: [
         {
           id: 101,
           status: 'failed',

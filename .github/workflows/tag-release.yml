@@ -1,0 +1,64 @@
+name: Tag Product Release
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: tag-product-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    name: Create v* tag
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Require RELEASE_BOT_TOKEN
+        env:
+          RELEASE_BOT_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_BOT_TOKEN:-}" ]; then
+            echo "::error::RELEASE_BOT_TOKEN is required to push product tags. GITHUB_TOKEN does not re-trigger publish-ghcr.yml or create-github-release, so a token-less tag would leave v* versions stuck without images. Add a GitHub App installation token or fine-grained PAT (contents + pull-requests write) as the RELEASE_BOT_TOKEN repository secret, then re-run this workflow / re-promote."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Must be RELEASE_BOT_TOKEN (not GITHUB_TOKEN): workflow-created tag
+          # pushes from GITHUB_TOKEN do not kick off publish-ghcr.yml.
+          token: ${{ secrets.RELEASE_BOT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Push annotated product tag when version is new
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          version="$(node -p "require('./package.json').version // ''")"
+          if [ -z "$version" ]; then
+            echo "No package.json version on main; skip."
+            exit 0
+          fi
+          tag="v${version}"
+
+          if git rev-parse "$tag" >/dev/null 2>&1 || git ls-remote --tags origin "refs/tags/$tag" | grep -q .; then
+            echo "Tag $tag already exists; skip."
+            exit 0
+          fi
+
+          git tag -a "$tag" -m "Roomote $tag"
+          git push origin "refs/tags/$tag"
+          echo "Pushed tag $tag"
+          echo "GitHub Release is created by publish-ghcr.yml after roomote-app and roomote-worker images for this tag are published."

@@ -1,6 +1,6 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
-import type { JobTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -47,12 +47,13 @@ function createCaller(options?: {
       getStatus,
     },
     auth: {
-      cloudJobId: 1,
+      runId: 1,
       userId: 'sender-user-1',
-      tokenType: 'cj',
+      principal: 'user',
+      tokenType: 'run',
       version: 1,
-    } satisfies JobTokenContext,
-    cloudJobId: 1,
+    } satisfies RunTokenContext,
+    runId: 1,
     prepareActorScopedTurn: mockPrepareActorScopedTurn,
   } as unknown as Context;
 

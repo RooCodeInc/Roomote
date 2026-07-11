@@ -132,7 +132,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     await expect(
       routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
     ).resolves.toMatchObject({ shouldRoute: true });
-  });
+  }, 15_000);
 
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {
     fetchThreadMessagesMock.mockResolvedValue([

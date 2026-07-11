@@ -10,11 +10,11 @@ interface PreviewClickLikeEvent {
 
 export function buildPreviewIframeUrl(
   previewUrl: string,
-  cloudJobId: number,
+  runId: number,
 ): string {
   return `/api/auth/preview-iframe?${new URLSearchParams({
     preview_url: previewUrl,
-    cloud_job_id: String(cloudJobId),
+    task_run_id: String(runId),
   }).toString()}`;
 }
 

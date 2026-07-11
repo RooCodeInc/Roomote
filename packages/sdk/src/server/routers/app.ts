@@ -7,7 +7,7 @@ import { githubInstallationsRouter } from './github-installations';
 import { slackInstallationsRouter } from './slack-installations';
 import { linearSessionsRouter } from './linear-sessions';
 import { repositoriesRouter } from './repositories';
-import { cloudJobsRouter } from './cloud-jobs';
+import { taskRunsRouter } from './task-runs';
 import { environmentsRouter } from './environments';
 import { featureFlagsRouter } from './feature-flags';
 import { mcpConnectionsRouter } from './mcp-connections';
@@ -19,7 +19,7 @@ export const appRouter = router({
   slackInstallations: slackInstallationsRouter,
   linearSessions: linearSessionsRouter,
   repositories: repositoriesRouter,
-  cloudJobs: cloudJobsRouter,
+  taskRuns: taskRunsRouter,
   environments: environmentsRouter,
   featureFlags: featureFlagsRouter,
   mcpConnections: mcpConnectionsRouter,

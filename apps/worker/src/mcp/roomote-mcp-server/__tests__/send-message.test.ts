@@ -1,5 +1,5 @@
 import { handleSendMessage } from '../send-message.js';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 import * as tasksApiClient from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
 
@@ -46,10 +46,10 @@ describe('handleSendMessage', () => {
     expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
-  it('surfaces snapshot resumes with the new cloud job id', async () => {
+  it('surfaces snapshot resumes with the new task run id', async () => {
     vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
       success: true,
-      result: { resumed: true, cloudJobId: 77, taskId: 'task-1' },
+      result: { resumed: true, runId: 77, taskId: 'task-1' },
     });
 
     const result = await handleSendMessage(
@@ -63,7 +63,7 @@ describe('handleSendMessage', () => {
       success: true,
       message: 'Task task-1 is resuming from snapshot.',
       resumed: true,
-      cloudJobId: 77,
+      runId: 77,
       taskId: 'task-1',
     });
     expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
@@ -113,7 +113,7 @@ describe('handleSendMessage', () => {
   });
 
   it('passes linked review handoff senderMode for review-result relays', async () => {
-    vi.stubEnv('ROOMOTE_TASK_TYPE', CloudTaskType.GithubPrReview);
+    vi.stubEnv('ROOMOTE_TASK_TYPE', TaskPayloadKind.GithubPrReview);
     vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
       success: true,
       result: { sent: true },
@@ -140,7 +140,7 @@ describe('handleSendMessage', () => {
   });
 
   it('passes linked review handoff senderMode for attribute-based review-result relays', async () => {
-    vi.stubEnv('ROOMOTE_TASK_TYPE', CloudTaskType.GithubPrReviewSync);
+    vi.stubEnv('ROOMOTE_TASK_TYPE', TaskPayloadKind.GithubPrReviewSync);
     vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
       success: true,
       result: { sent: true },
@@ -167,7 +167,7 @@ describe('handleSendMessage', () => {
   });
 
   it('keeps linked review handoff senderMode for legacy code-review-results relays', async () => {
-    vi.stubEnv('ROOMOTE_TASK_TYPE', CloudTaskType.GithubPrReviewSync);
+    vi.stubEnv('ROOMOTE_TASK_TYPE', TaskPayloadKind.GithubPrReviewSync);
     vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
       success: true,
       result: { sent: true },
@@ -196,7 +196,7 @@ describe('handleSendMessage', () => {
   });
 
   it('surfaces skipped linked review handoffs as a successful no-op', async () => {
-    vi.stubEnv('ROOMOTE_TASK_TYPE', CloudTaskType.GithubPrReviewSync);
+    vi.stubEnv('ROOMOTE_TASK_TYPE', TaskPayloadKind.GithubPrReviewSync);
     vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
       success: true,
       result: {

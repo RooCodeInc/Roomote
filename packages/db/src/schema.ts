@@ -12,13 +12,22 @@ import {
   unique,
   check,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
 import type {
-  CloudTaskType,
-  CloudTaskStatus,
-  CloudTaskPayload,
+  TaskPayloadKind,
+  TaskWorkflow,
+  TaskSurface,
+  TaskTrigger,
+  TaskVisibility,
+  TaskState,
+  TaskInitiatorKind,
+  CommitAuthorKind,
+  RunKind,
+  RunStatus,
+  TaskPayload,
   RequestedWorkKind,
   RequestedWorkKindSource,
   ComputeProvider,
@@ -27,9 +36,9 @@ import type {
   DeploymentComputeConfig,
   DeploymentModelConfig,
   CodingHarness,
-  CloudJobEventDetails,
-  CloudJobEventSource,
-  CloudJobEventType,
+  RunEventDetails,
+  RunEventSource,
+  RunEventType,
   EnvironmentConfig,
   TaskMessageEventType,
   TaskMessageRole,
@@ -40,16 +49,9 @@ import type {
   McpConnectionAuthConfig,
   SetupNewState,
   LinearPendingSelectionStep,
-  ConflictResolverFrequency,
-  CoachFrequency,
-  SuggesterFrequency,
-  AnnouncerFrequency,
-  ManagerStatsFrequency,
+  AutomationScanCursor,
+  AutomationTarget,
   BackgroundAutomationKey,
-  BackgroundAutomationRunStatus,
-  BackgroundAutomationRunTriggerKind,
-  BackgroundAutomationProvider,
-  BackgroundAutomationTargetKind,
   PlatformIssueReport,
   WorkspaceReadiness,
   ComputeProviderUsageLifecycleAction,
@@ -57,25 +59,18 @@ import type {
   SuggestionCategory,
   SuggestionPriority,
   AutomationWorkItemDisposition,
-  AutomationWorkItemStatus,
-  TaskSuggestionStatus,
-  TaskAttributionKind,
-  TaskAttributionSourceKind,
-  EffectiveAuthorKind,
+  WorkItemKind,
+  WorkItemStatus,
+  TrackedMessageSurface,
+  TrackedMessageKind,
   McpConnectionRole,
-  EffectiveAuthorReason,
-  EffectivePrOwnerKind,
-  EffectivePrOwnerReason,
   CompiledAuthorshipRule,
   AuthorshipRuleIssue,
   SourceControlProvider,
   TaskModelSettings,
   UserRole,
 } from '@roomote/types';
-import {
-  AUTO_RESOLVE_CONFLICTS_LABEL,
-  DEFAULT_TASK_ARTIFACT_TYPE,
-} from '@roomote/types';
+import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
 import { encryptedJson, encryptedText } from './lib/custom-types';
 import type {
@@ -122,11 +117,10 @@ export const users = pgTable(
 );
 
 export const userRelations = relations(users, ({ many }) => ({
-  tasks: many(tasks),
+  tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
-  agentSuggestionMessages: many(agentSuggestionMessages),
-  fastAgentSessions: many(fastAgentSessions),
-  setupNewQueuedTasks: many(setupNewQueuedTasks),
+  slackQuickAnswers: many(slackQuickAnswers),
+  workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
 
@@ -172,6 +166,29 @@ export const deploymentSettings = pgTable('deployment_settings', {
     | 'done'
     | 'completed'
   >(),
+  // Deployment-wide Roomote agent settings (folded in from the former
+  // background_agent_settings table): manager channel, global/authorship
+  // instructions, compiled authorship rules, style guidance, and Slack emoji
+  // preferences. The flat settings view consumed across the product layers a
+  // per-automation projection (built from the automations table) on top.
+  managerSlackChannelId: text('manager_slack_channel_id'),
+  globalAgentInstructions: text('global_agent_instructions'),
+  authorshipInstructions: text('authorship_instructions'),
+  compiledAuthorshipRules: jsonb('compiled_authorship_rules')
+    .$type<CompiledAuthorshipRule[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  compiledAuthorshipIssues: jsonb('compiled_authorship_issues')
+    .$type<AuthorshipRuleIssue[]>()
+    .notNull()
+    .default(sql`'[]'::jsonb`),
+  compiledAuthorshipAt: timestamp('compiled_authorship_at'),
+  styleGuidance: text('style_guidance'),
+  slackSummonEmoji: text('slack_summon_emoji'),
+  slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
+  slackCompletionEmoji: text('slack_completion_emoji')
+    .notNull()
+    .default('white_check_mark'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -340,110 +357,58 @@ export const authVerifications = pgTable(
 );
 
 /**
- * task_suggestions
+ * work_items
+ *
+ * Stage 4 merges task_suggestions + automation_work_items +
+ * setup_new_queued_tasks into one table. `kind` selects the flavor:
+ * - 'suggestion'         scan suggestions a human can implement (was task_suggestions)
+ * - 'auto_fix'           automation act items launched silently (was automation_work_items)
+ * - 'onboarding'         setup-onboarding queued starter tasks (was setup_new_queued_tasks)
+ * - 'mcp_recommendation' MCP setup ideas that back a reaction-launch row
+ *
+ * ONE launch state machine (status + launch* columns) covers every kind, and
+ * every launchable surface records the launched task in launchedTaskId.
  */
 
-export const taskSuggestions = pgTable(
-  'task_suggestions',
+export const workItems = pgTable(
+  'work_items',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    sourceTaskId: text('source_task_id').references(() => tasks.id, {
-      onDelete: 'cascade',
-    }),
-    automationWorkItemId: uuid('automation_work_item_id').references(
-      () => automationWorkItems.id,
-      {
-        onDelete: 'set null',
-      },
-    ),
-    title: text('title').notNull(),
-    brief: text('brief').notNull(),
-    category: text('category').$type<SuggestionCategory | null>(),
-    priority: text('priority').$type<SuggestionPriority | null>(),
-    investigationContext: text('investigation_context'),
-    repositoryIds: jsonb('repository_ids').$type<string[]>().notNull(),
-    targetRepositoryFullName: text('target_repository_full_name'),
-    contentHash: text('content_hash').notNull(),
-    status: text('status')
-      .$type<TaskSuggestionStatus>()
-      .notNull()
-      .default('open'),
-    targetEnvironmentId: uuid('target_environment_id').references(
-      () => environments.id,
-      {
-        onDelete: 'set null',
-      },
-    ),
-    workspaceReadiness: text(
-      'workspace_readiness',
-    ).$type<WorkspaceReadiness | null>(),
-    readinessMessage: text('readiness_message'),
-    sortOrder: integer('sort_order').notNull(),
-    dismissedAt: timestamp('dismissed_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('task_suggestions_deployment_source_task_idx').on(table.sourceTaskId),
-    index('task_suggestions_deployment_status_idx').on(table.status),
-    index('task_suggestions_deployment_content_hash_idx').on(table.contentHash),
-    uniqueIndex('task_suggestions_automation_work_item_id_unique')
-      .on(table.automationWorkItemId)
-      .where(sql`${table.automationWorkItemId} IS NOT NULL`),
-    uniqueIndex('task_suggestions_deployment_source_task_sort_order_unique').on(
-      table.sourceTaskId,
-      table.sortOrder,
-    ),
-  ],
-);
-
-export const taskSuggestionsRelations = relations(
-  taskSuggestions,
-  ({ one, many }) => ({
-    automationWorkItem: one(automationWorkItems, {
-      fields: [taskSuggestions.automationWorkItemId],
-      references: [automationWorkItems.id],
-    }),
-    setupNewQueuedTasks: many(setupNewQueuedTasks),
-  }),
-);
-
-/**
- * automation_work_items
- */
-
-export const automationWorkItems = pgTable(
-  'automation_work_items',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
+    kind: text('kind').notNull().$type<WorkItemKind>(),
+    // The originating automation (nullable; onboarding/manual launches have none).
     automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    // The scan / onboarding task that produced this item.
     sourceTaskId: text('source_task_id').references(() => tasks.id, {
       onDelete: 'cascade',
     }),
-    backgroundAutomationRunId: uuid('background_automation_run_id').references(
-      () => backgroundAutomationRuns.id,
-      {
-        onDelete: 'set null',
-      },
+    // Onboarding: the human who selected the item to queue.
+    selectedByUserId: text('selected_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    // Onboarding: the suggestion work_item this queued task was derived from.
+    sourceWorkItemId: uuid('source_work_item_id').references(
+      (): AnyPgColumn => workItems.id,
+      { onDelete: 'set null' },
     ),
+    // Content.
     title: text('title').notNull(),
-    brief: text('brief').notNull(),
-    category: text('category').$type<SuggestionCategory | null>(),
-    priority: text('priority').$type<SuggestionPriority | null>(),
-    actionKind: text('action_kind').notNull(),
-    disposition: text('disposition')
-      .notNull()
-      .$type<AutomationWorkItemDisposition>(),
-    status: text('status')
-      .notNull()
-      .default('open')
-      .$type<AutomationWorkItemStatus>(),
-    fingerprint: text('fingerprint').notNull(),
+    brief: text('brief'),
     executionPrompt: text('execution_prompt'),
     investigationContext: text('investigation_context'),
-    repositoryIds: jsonb('repository_ids').$type<string[]>().notNull(),
+    category: text('category').$type<SuggestionCategory | null>(),
+    priority: text('priority').$type<SuggestionPriority | null>(),
+    // auto_fix only.
+    actionKind: text('action_kind'),
+    disposition: text(
+      'disposition',
+    ).$type<AutomationWorkItemDisposition | null>(),
+    sortOrder: integer('sort_order').notNull(),
+    repositoryIds: jsonb('repository_ids')
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
     targetRepositoryFullName: text('target_repository_full_name'),
     targetEnvironmentId: uuid('target_environment_id').references(
       () => environments.id,
@@ -455,9 +420,12 @@ export const automationWorkItems = pgTable(
       'workspace_readiness',
     ).$type<WorkspaceReadiness | null>(),
     readinessMessage: text('readiness_message'),
-    sortOrder: integer('sort_order').notNull(),
+    // Dedup fingerprint (task_suggestions.contentHash merged in here).
+    fingerprint: text('fingerprint'),
+    // Launch state machine.
+    status: text('status').notNull().default('open').$type<WorkItemStatus>(),
     launchClaimedAt: timestamp('launch_claimed_at'),
-    executionTaskId: text('execution_task_id').references(() => tasks.id, {
+    launchedTaskId: text('launched_task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
     launchedAt: timestamp('launched_at'),
@@ -468,114 +436,55 @@ export const automationWorkItems = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('automation_work_items_deployment_source_task_idx').on(
-      table.sourceTaskId,
-    ),
-    index('automation_work_items_deployment_key_status_idx').on(
-      table.automationKey,
-      table.status,
-    ),
-    index('automation_work_items_deployment_key_fingerprint_idx').on(
+    index('work_items_source_task_idx').on(table.sourceTaskId),
+    index('work_items_kind_status_idx').on(table.kind, table.status),
+    index('work_items_automation_key_fingerprint_idx').on(
       table.automationKey,
       table.fingerprint,
     ),
-    index('automation_work_items_execution_task_id_idx').on(
-      table.executionTaskId,
-    ),
-    uniqueIndex(
-      'automation_work_items_deployment_source_task_sort_order_unique',
-    ).on(table.sourceTaskId, table.sortOrder),
-  ],
-);
-
-export const automationWorkItemsRelations = relations(
-  automationWorkItems,
-  ({ one, many }) => ({
-    sourceTask: one(tasks, {
-      fields: [automationWorkItems.sourceTaskId],
-      references: [tasks.id],
-      relationName: 'automationWorkItemSourceTask',
-    }),
-    backgroundAutomationRun: one(backgroundAutomationRuns, {
-      fields: [automationWorkItems.backgroundAutomationRunId],
-      references: [backgroundAutomationRuns.id],
-    }),
-    targetEnvironment: one(environments, {
-      fields: [automationWorkItems.targetEnvironmentId],
-      references: [environments.id],
-    }),
-    executionTask: one(tasks, {
-      fields: [automationWorkItems.executionTaskId],
-      references: [tasks.id],
-      relationName: 'automationWorkItemExecutionTask',
-    }),
-    taskSuggestions: many(taskSuggestions),
-  }),
-);
-
-/**
- * setup_new_queued_tasks
- */
-
-export const setupNewQueuedTasks = pgTable(
-  'setup_new_queued_tasks',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    setupOnboardingTaskId: text('setup_onboarding_task_id')
-      .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
-    selectedByUserId: text('selected_by_user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    suggestionId: uuid('suggestion_id').references(() => taskSuggestions.id, {
-      onDelete: 'set null',
-    }),
-    environmentId: uuid('environment_id').references(() => environments.id, {
-      onDelete: 'set null',
-    }),
-    title: text('title').notNull(),
-    prompt: text('prompt').notNull(),
-    sortOrder: integer('sort_order').notNull(),
-    launchClaimedAt: timestamp('launch_claimed_at'),
-    launchedTaskId: text('launched_task_id').references(() => tasks.id, {
-      onDelete: 'set null',
-    }),
-    launchedAt: timestamp('launched_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('setup_new_queued_tasks_deployment_task_idx').on(
-      table.setupOnboardingTaskId,
-    ),
-    index('setup_new_queued_tasks_environment_id_idx').on(table.environmentId),
-    index('setup_new_queued_tasks_launched_task_id_idx').on(
-      table.launchedTaskId,
-    ),
-    uniqueIndex('setup_new_queued_tasks_deployment_task_sort_order_unique').on(
-      table.setupOnboardingTaskId,
+    index('work_items_fingerprint_idx').on(table.fingerprint),
+    index('work_items_launched_task_id_idx').on(table.launchedTaskId),
+    uniqueIndex('work_items_source_task_kind_sort_order_unique').on(
+      table.sourceTaskId,
+      table.kind,
       table.sortOrder,
     ),
   ],
 );
 
-export const setupNewQueuedTasksRelations = relations(
-  setupNewQueuedTasks,
-  ({ one }) => ({
-    selectedByUser: one(users, {
-      fields: [setupNewQueuedTasks.selectedByUserId],
-      references: [users.id],
-    }),
-    suggestion: one(taskSuggestions, {
-      fields: [setupNewQueuedTasks.suggestionId],
-      references: [taskSuggestions.id],
-    }),
-    environment: one(environments, {
-      fields: [setupNewQueuedTasks.environmentId],
-      references: [environments.id],
-    }),
+export const workItemsRelations = relations(workItems, ({ one, many }) => ({
+  automation: one(automations, {
+    fields: [workItems.automationKey],
+    references: [automations.key],
   }),
-);
+  sourceTask: one(tasks, {
+    fields: [workItems.sourceTaskId],
+    references: [tasks.id],
+    relationName: 'workItemSourceTask',
+  }),
+  launchedTask: one(tasks, {
+    fields: [workItems.launchedTaskId],
+    references: [tasks.id],
+    relationName: 'workItemLaunchedTask',
+  }),
+  selectedByUser: one(users, {
+    fields: [workItems.selectedByUserId],
+    references: [users.id],
+  }),
+  targetEnvironment: one(environments, {
+    fields: [workItems.targetEnvironmentId],
+    references: [environments.id],
+  }),
+  sourceWorkItem: one(workItems, {
+    fields: [workItems.sourceWorkItemId],
+    references: [workItems.id],
+    relationName: 'workItemSourceWorkItem',
+  }),
+  derivedWorkItems: many(workItems, {
+    relationName: 'workItemSourceWorkItem',
+  }),
+  trackedMessages: many(trackedMessages),
+}));
 
 /**
  * tasks
@@ -588,49 +497,52 @@ export const tasks = pgTable(
       .primaryKey()
       .$defaultFn(() => generateTaskId()),
 
-    userId: text('user_id').references(() => users.id),
-    attributionKind: text('attribution_kind')
+    // Query-load-bearing classification, stamped at creation.
+    workflow: text('workflow').notNull().$type<TaskWorkflow>(),
+    surface: text('surface').notNull().$type<TaskSurface>(),
+    trigger: text('trigger').notNull().$type<TaskTrigger>(),
+    visibility: text('visibility')
       .notNull()
-      .default('automatic')
-      .$type<TaskAttributionKind>(),
-    attributedUserId: text('attributed_user_id').references(() => users.id),
-    attributionSourceKind: text('attribution_source_kind')
-      .notNull()
-      .default('system')
-      .$type<TaskAttributionSourceKind>(),
-    attributionSourceDisplayName: text('attribution_source_display_name'),
-    attributionSourceExternalId: text('attribution_source_external_id'),
-    attributedGithubLogin: text('attributed_github_login'),
-    attributedGithubUserId: bigint('attributed_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorKind: text(
-      'effective_author_kind',
-    ).$type<EffectiveAuthorKind>(),
-    effectiveAuthorUserId: text('effective_author_user_id').references(
+      .default('visible')
+      .$type<TaskVisibility>(),
+    // Terminal task state. Only written by the finishRun terminal path;
+    // live runtime phase stays on runs.
+    state: text('state').notNull().default('active').$type<TaskState>(),
+
+    // Initiator stamp (immutable, written once at creation).
+    initiatorKind: text('initiator_kind').notNull().$type<TaskInitiatorKind>(),
+    initiatorUserId: text('initiator_user_id').references(() => users.id),
+    // Automation key referencing automations.key. Rows for every key are
+    // seeded by ensureAutomationRows so the FK always holds.
+    initiatorAutomation: text('initiator_automation')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key),
+    // Raw external actor id (Slack user id, GitHub user id/login as
+    // provided). Populated whenever an integration surface knows the raw
+    // actor, for either initiator kind.
+    actorExternalId: text('actor_external_id'),
+    actorDisplayName: text('actor_display_name'),
+
+    // Commit-author block, evaluated unconditionally at enqueue.
+    // 'external' is used for unlinked humans with a GitHub identity so their
+    // noreply commits survive.
+    commitAuthorKind: text('commit_author_kind').$type<CommitAuthorKind>(),
+    commitAuthorUserId: text('commit_author_user_id').references(
       () => users.id,
     ),
-    effectiveAuthorDisplayName: text('effective_author_display_name'),
-    effectiveAuthorGithubLogin: text('effective_author_github_login'),
-    effectiveAuthorGithubUserId: bigint('effective_author_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorReason: text(
-      'effective_author_reason',
-    ).$type<EffectiveAuthorReason>(),
-    effectiveAuthorRuleId: text('effective_author_rule_id'),
-    effectivePrOwnerKind: text(
-      'effective_pr_owner_kind',
-    ).$type<EffectivePrOwnerKind>(),
-    effectivePrOwnerUserId: text('effective_pr_owner_user_id').references(
-      () => users.id,
-    ),
-    effectivePrOwnerDisplayName: text('effective_pr_owner_display_name'),
-    effectivePrOwnerGithubLogin: text('effective_pr_owner_github_login'),
-    effectivePrOwnerReason: text(
-      'effective_pr_owner_reason',
-    ).$type<EffectivePrOwnerReason>(),
-    effectivePrOwnerRuleId: text('effective_pr_owner_rule_id'),
+    commitAuthorLogin: text('commit_author_login'),
+    // GitHub numeric id as text, for the noreply email
+    // `{id}+{login}@users.noreply.github.com`.
+    commitAuthorExternalId: text('commit_author_external_id'),
+    prAssigneeLogin: text('pr_assignee_login'),
+
+    // Channel bindings (nullable; NOT unique -- thread-to-task is 1:N).
+    slackChannelId: text('slack_channel_id'),
+    slackThreadTs: text('slack_thread_ts'),
+    linearSessionId: text('linear_session_id'),
+    linearIssueId: text('linear_issue_id'),
+    linearOrganizationId: text('linear_organization_id'),
+
     harness: text('harness')
       .notNull()
       .default('opencode-server')
@@ -638,13 +550,33 @@ export const tasks = pgTable(
 
     harnessSessionId: text('harness_session_id'), // Assigned by Harness.
 
-    provider: text('provider').notNull(),
+    // Inference provider that served this task's LLM, paired with `model`.
+    // Renamed from the ambiguous `provider` (this deployment also has
+    // source-control, communication, and compute providers).
+    modelProvider: text('model_provider').notNull(),
     title: text('title').notNull(),
     titleEditedByUserAt: timestamp('title_edited_by_user_at'),
     llmTitleCheckpoint: integer('llm_title_checkpoint').notNull().default(0),
     mode: text('mode'),
     model: text('model').notNull(),
-    completed: boolean('completed').notNull().default(false),
+    // Initial task prompt. Per-attempt/resume prompts stay on runs.
+    prompt: text('prompt'),
+    /**
+     * Draft prompt text the user was composing when the sandbox went to
+     * sleep. Saved periodically while typing so it can be restored after
+     * wake-up.
+     */
+    draftPrompt: text('draft_prompt'),
+    requestedWorkKind: text('requested_work_kind')
+      .notNull()
+      .default('unknown')
+      .$type<RequestedWorkKind>(),
+    requestedWorkKindSource: text('requested_work_kind_source')
+      .notNull()
+      .default('system_default')
+      .$type<RequestedWorkKindSource>(),
+    requestedWorkKindConfidence: real('requested_work_kind_confidence'),
+    harnessInstructions: text('harness_instructions'),
     computeDurationMs: bigint('compute_duration_ms', {
       mode: 'number',
     })
@@ -655,11 +587,20 @@ export const tasks = pgTable(
     repositoryUrl: text('repository_url'),
     repositoryName: text('repository_name'),
     defaultBranch: text('default_branch'),
+    // Soft delete; queries filter isNull(deletedAt).
+    deletedAt: timestamp('deleted_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('tasks_user_id_idx').on(table.userId),
+    index('tasks_initiator_user_id_idx').on(table.initiatorUserId),
+    index('tasks_initiator_automation_idx').on(table.initiatorAutomation),
+    index('tasks_workflow_idx').on(table.workflow),
+    index('tasks_visibility_activity_at_idx').using(
+      'btree',
+      table.visibility,
+      table.activityAt.desc(),
+    ),
     index('tasks_harness_session_id_idx').on(table.harnessSessionId),
     index('tasks_timestamp_idx').on(table.timestamp),
     index('tasks_deployment_activity_at_idx').using(
@@ -667,26 +608,80 @@ export const tasks = pgTable(
       table.activityAt.desc(),
       table.id.desc(),
     ),
-    index('tasks_completed_idx').on(table.completed),
     index('tasks_created_at_idx').on(table.createdAt),
+    check(
+      'tasks_initiator_shape_check',
+      sql`(${table.initiatorKind} = 'user' AND ${table.initiatorAutomation} IS NULL AND (${table.initiatorUserId} IS NOT NULL OR ${table.actorExternalId} IS NOT NULL)) OR (${table.initiatorKind} = 'automation' AND ${table.initiatorAutomation} IS NOT NULL AND ${table.initiatorUserId} IS NULL)`,
+    ),
+    // Durable classification vocabularies. Source of truth: the exported
+    // constants in @roomote/types (TASK_WORKFLOWS, TASK_SURFACES, ...);
+    // schema-constraints.test.ts asserts every constant value is accepted so
+    // the lists below cannot silently drift. Extending a vocabulary requires
+    // updating the constant, this check, and a migration.
+    check(
+      'tasks_workflow_check',
+      sql`${table.workflow} in ('standard', 'pr_review', 'pr_conflict_resolve', 'scan', 'mcp_recommendations', 'setup_onboarding', 'env_snapshot', 'eval')`,
+    ),
+    check(
+      'tasks_surface_check',
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'system')`,
+    ),
+    check(
+      'tasks_trigger_check',
+      sql`${table.trigger} in ('message', 'webhook', 'schedule', 'manual')`,
+    ),
+    check(
+      'tasks_visibility_check',
+      sql`${table.visibility} in ('visible', 'hidden')`,
+    ),
+    check(
+      'tasks_state_check',
+      sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
+    ),
+    check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
+    check(
+      'tasks_requested_work_kind_check',
+      sql`${table.requestedWorkKind} in ('question', 'plan', 'implement', 'unknown')`,
+    ),
+    check(
+      'tasks_requested_work_kind_source_check',
+      sql`${table.requestedWorkKindSource} in ('explicit_bootstrap', 'task_tool', 'llm_classifier', 'inherited', 'system_default')`,
+    ),
+    check(
+      'tasks_commit_author_kind_check',
+      sql`${table.commitAuthorKind} IS NULL OR ${table.commitAuthorKind} in ('roomote', 'user', 'external')`,
+    ),
   ],
 );
 
-export const tasksRelations = relations(tasks, ({ many }) => ({
-  taskPins: many(taskPins),
-  cloudJobs: many(cloudJobs),
-  inferenceUsageEvents: many(taskInferenceUsageEvents),
-  automationWorkItemsAsSource: many(automationWorkItems, {
-    relationName: 'automationWorkItemSourceTask',
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
+  initiatorUser: one(users, {
+    fields: [tasks.initiatorUserId],
+    references: [users.id],
+    relationName: 'taskInitiatorUser',
   }),
-  automationWorkItemsAsExecution: many(automationWorkItems, {
-    relationName: 'automationWorkItemExecutionTask',
+  commitAuthorUser: one(users, {
+    fields: [tasks.commitAuthorUserId],
+    references: [users.id],
+    relationName: 'taskCommitAuthorUser',
+  }),
+  taskPins: many(taskPins),
+  runs: many(taskRuns),
+  inferenceUsageEvents: many(taskInferenceUsageEvents),
+  workItemsAsSource: many(workItems, {
+    relationName: 'workItemSourceTask',
+  }),
+  workItemsAsLaunched: many(workItems, {
+    relationName: 'workItemLaunchedTask',
   }),
   artifacts: many(taskArtifacts),
   messages: many(taskMessages),
   slackReplyDetails: many(taskSlackReplyDetails),
   platformIssueReports: many(taskPlatformIssueReports),
-  backgroundAutomationRuns: many(backgroundAutomationRuns),
+  initiatorAutomationRow: one(automations, {
+    fields: [tasks.initiatorAutomation],
+    references: [automations.key],
+  }),
 }));
 
 /**
@@ -741,7 +736,7 @@ export const taskArtifacts = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     artifactType: text('artifact_type')
@@ -757,15 +752,10 @@ export const taskArtifacts = pgTable(
   },
   (table) => [
     index('task_artifacts_task_id_idx').on(table.taskId),
-    index('task_artifacts_cloud_job_id_idx').on(table.cloudJobId),
+    index('task_artifacts_run_id_idx').on(table.runId),
     index('task_artifacts_uploaded_idx').on(table.uploaded),
     index('task_artifacts_created_at_idx').on(table.createdAt),
     index('task_artifacts_path_idx').on(table.taskId, table.path),
-    index('task_artifacts_version_idx').on(
-      table.taskId,
-      table.path,
-      table.version,
-    ),
     unique('task_artifacts_task_id_path_version_unique').on(
       table.taskId,
       table.path,
@@ -779,54 +769,9 @@ export const taskArtifactsRelations = relations(taskArtifacts, ({ one }) => ({
     fields: [taskArtifacts.taskId],
     references: [tasks.id],
   }),
-  cloudJob: one(cloudJobs, {
-    fields: [taskArtifacts.cloudJobId],
-    references: [cloudJobs.id],
-  }),
-}));
-
-/**
- * deleted_tasks
- */
-
-export const deletedTasks = pgTable('deleted_tasks', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  taskId: text('task_id').notNull(), // Not a foreign key - task may be deleted
-  userId: text('user_id'), // Not a foreign key - user may be deleted
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-});
-
-/**
- * task_shares
- */
-
-export const taskShares = pgTable(
-  'task_shares',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    taskId: text('task_id').notNull(),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    shareToken: text('share_token').notNull().unique(),
-    visibility: text('visibility').notNull().default('deployment'),
-    expiresAt: timestamp('expires_at'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    index('task_shares_share_token_idx').on(table.shareToken),
-    index('task_shares_task_id_idx').on(table.taskId),
-    index('task_shares_expires_at_idx').on(table.expiresAt),
-    index('task_shares_created_by_user_id_idx').on(table.createdByUserId),
-    index('task_shares_visibility_idx').on(table.visibility),
-  ],
-);
-
-export const taskSharesRelations = relations(taskShares, ({ one }) => ({
-  createdByUser: one(users, {
-    fields: [taskShares.createdByUserId],
-    references: [users.id],
+  run: one(taskRuns, {
+    fields: [taskArtifacts.runId],
+    references: [taskRuns.id],
   }),
 }));
 
@@ -868,6 +813,19 @@ export const taskPullRequests = pgTable(
     prNumber: integer('pr_number'),
     prTitle: text('pr_title'),
     repository: text('repository'), // e.g., "owner/repo"
+    // Head SHA of the PR as last observed (review/dedup paths key off this).
+    prSha: text('pr_sha'),
+    // Base branch + base commit of the PR. Captured server-side from the
+    // authed PR fetch so the base is visible without re-fetching in the
+    // sandbox.
+    prBaseRef: text('pr_base_ref'),
+    prBaseSha: text('pr_base_sha'),
+    // GitHub-native identifiers that have no provider-neutral equivalent.
+    githubReactionId: bigint('github_reaction_id', { mode: 'number' }),
+    githubCheckRunId: bigint('github_check_run_id', { mode: 'number' }),
+    githubReviewCommentId: bigint('github_review_comment_id', {
+      mode: 'number',
+    }),
 
     // Status
     status: text('status').$type<import('@roomote/types').PullRequestStatus>(),
@@ -914,93 +872,52 @@ export const taskPullRequestsRelations = relations(
 );
 
 /**
- * cloud_jobs
+ * task_runs
+ *
+ * One row per execution attempt of a task. A task has 1:N runs (fresh launch
+ * plus snapshot resumes). Everything attempt-scoped lives here; conversation
+ * cargo and classification live on tasks.
  */
 
-export const cloudJobs = pgTable(
-  'cloud_jobs',
+export const taskRuns = pgTable(
+  'task_runs',
   {
     id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
-    type: text('type').notNull().$type<CloudTaskType>(),
-
-    userId: text('user_id').references(() => users.id),
-    attributionKind: text('attribution_kind')
+    taskId: text('task_id')
       .notNull()
-      .default('automatic')
-      .$type<TaskAttributionKind>(),
-    attributedUserId: text('attributed_user_id').references(() => users.id),
-    attributionSourceKind: text('attribution_source_kind')
-      .notNull()
-      .default('system')
-      .$type<TaskAttributionSourceKind>(),
-    attributionSourceDisplayName: text('attribution_source_display_name'),
-    attributionSourceExternalId: text('attribution_source_external_id'),
-    attributedGithubLogin: text('attributed_github_login'),
-    attributedGithubUserId: bigint('attributed_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorKind: text(
-      'effective_author_kind',
-    ).$type<EffectiveAuthorKind>(),
-    effectiveAuthorUserId: text('effective_author_user_id').references(
-      () => users.id,
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    // 'fresh' for new launches, 'resume' for snapshot resumes (replaces the
+    // SnapshotResume task type as a classification signal).
+    kind: text('kind').notNull().default('fresh').$type<RunKind>(),
+    // Parent run when resuming from snapshot.
+    sourceRunId: integer('source_run_id').references(
+      (): AnyPgColumn => taskRuns.id,
     ),
-    effectiveAuthorDisplayName: text('effective_author_display_name'),
-    effectiveAuthorGithubLogin: text('effective_author_github_login'),
-    effectiveAuthorGithubUserId: bigint('effective_author_github_user_id', {
-      mode: 'number',
-    }),
-    effectiveAuthorReason: text(
-      'effective_author_reason',
-    ).$type<EffectiveAuthorReason>(),
-    effectiveAuthorRuleId: text('effective_author_rule_id'),
-    effectivePrOwnerKind: text(
-      'effective_pr_owner_kind',
-    ).$type<EffectivePrOwnerKind>(),
-    effectivePrOwnerUserId: text('effective_pr_owner_user_id').references(
-      () => users.id,
-    ),
-    effectivePrOwnerDisplayName: text('effective_pr_owner_display_name'),
-    effectivePrOwnerGithubLogin: text('effective_pr_owner_github_login'),
-    effectivePrOwnerReason: text(
-      'effective_pr_owner_reason',
-    ).$type<EffectivePrOwnerReason>(),
-    effectivePrOwnerRuleId: text('effective_pr_owner_rule_id'),
     /**
-     * Effective user for downstream integration auth while this cloud job runs.
-     *
-     * `userId` stays tied to the job owner for job-token scoping and ownership.
-     * `actingUserId` can change as different users send follow-ups to the same
-     * running task, allowing MCP proxies to resolve OAuth credentials for the
-     * most recent human actor instead of always using the original job owner.
+     * The launching or most recently acting human for this run; null for
+     * automation runs. THE ONLY user column on runs. Set at enqueue, updated
+     * by follow-up senders/resumers. Run tokens and MCP OAuth key off it,
+     * falling back to the deployment service principal when null.
      */
     actingUserId: text('acting_user_id').references(() => users.id),
+    // Runtime payload dispatch key (renamed from `type`). No query outside
+    // runtime dispatch may branch on this; queries use tasks.workflow/
+    // surface/visibility.
+    payloadKind: text('payload_kind').notNull().$type<TaskPayloadKind>(),
     harness: text('harness')
       .notNull()
       .default('opencode-server')
       .$type<CodingHarness>(),
 
-    githubLogin: text('github_login'),
-    githubUserId: bigint('github_user_id', { mode: 'number' }),
-
-    status: text('status')
-      .notNull()
-      .default('pending')
-      .$type<CloudTaskStatus>(),
+    status: text('status').notNull().default('pending').$type<RunStatus>(),
+    // Stable ownership scope used by the controller queue. Persisting the
+    // exact value lets every process release and inspect the same lock instead
+    // of attempting to reconstruct ephemeral Redis state.
+    queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
-    payload: jsonb('payload').notNull().$type<CloudTaskPayload>(),
+    payload: jsonb('payload').notNull().$type<TaskPayload>(),
+    // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
-    requestedWorkKind: text('requested_work_kind')
-      .notNull()
-      .default('unknown')
-      .$type<RequestedWorkKind>(),
-    requestedWorkKindSource: text('requested_work_kind_source')
-      .notNull()
-      .default('system_default')
-      .$type<RequestedWorkKindSource>(),
-    requestedWorkKindConfidence: real('requested_work_kind_confidence'),
-    harnessInstructions: text('harness_instructions'),
-    title: text('title'), // LLM-generated short title for display.
     log: text('log'),
     artifacts: jsonb('artifacts'),
     result: jsonb('result'),
@@ -1030,7 +947,7 @@ export const cloudJobs = pgTable(
     /**
      * Proxy port mappings for proxied ports.
      * Maps port names (uppercase) to ephemeral ports that auth-proxy listens on.
-     * Only populated for new jobs that use the sandbox auth-proxy feature.
+     * Only populated for new task runs that use the sandbox auth-proxy feature.
      * @example { "WEB": 49152, "API": 49153 }
      */
     proxyPorts: jsonb('proxy_ports').$type<Record<string, number>>(),
@@ -1042,41 +959,6 @@ export const cloudJobs = pgTable(
     workerReleaseTag: text('worker_release_tag'),
     workerVersion: text('worker_version'),
     workerCommit: text('worker_commit'),
-    ghToken: text('gh_token'),
-    userToken: text('user_token'),
-    taskId: text('task_id').notNull(),
-
-    // Slack Metadata
-    slackThreadTs: text('slack_thread_ts'),
-
-    // Linear Metadata
-    linearSessionId: text('linear_session_id'),
-    linearIssueId: text('linear_issue_id'),
-    linearOrganizationId: text('linear_organization_id'),
-
-    // Source-control PR metadata. These columns are provider-neutral: GitHub,
-    // GitLab, Gitea, and ADO webhook/mutation paths all populate them for the
-    // linked PR. `prSourceControlProvider` records which provider the PR
-    // belongs to so readers can disambiguate; it defaults to `github` for
-    // historical rows and is backfilled from the matching `task_pull_requests`
-    // row.
-    prSourceControlProvider: text('pr_source_control_provider')
-      .default('github')
-      .$type<SourceControlProvider>(),
-    prRepo: text('pr_repo'),
-    prNumber: integer('pr_number'),
-    prSha: text('pr_sha'),
-    // Base branch + base commit of the linked PR. Captured server-side from
-    // the authed PR fetch alongside the PR association so the base of the
-    // linked PR is visible without re-fetching via `gh` in the sandbox.
-    prBaseRef: text('pr_base_ref'),
-    prBaseSha: text('pr_base_sha'),
-    // GitHub-native identifiers that have no provider-neutral equivalent.
-    githubPrReactionId: bigint('github_pr_reaction_id', { mode: 'number' }),
-    githubPrCheckRunId: bigint('github_pr_check_run_id', { mode: 'number' }),
-    githubPrReviewCommentId: bigint('github_pr_review_comment_id', {
-      mode: 'number',
-    }),
 
     // Vendor routing: determines which infrastructure runs the job.
     vendor: text('vendor').$type<ComputeProvider>(),
@@ -1095,15 +977,6 @@ export const cloudJobs = pgTable(
     sleepRequestedAt: timestamp('sleep_requested_at'), // Set once BullMQ claims responsibility for the due sleep action.
     workerHeartbeatAt: timestamp('worker_heartbeat_at'), // Last worker process heartbeat observed for this sandbox-backed job.
     sourceSnapshotId: text('source_snapshot_id'), // Snapshot this job was resumed from.
-    sourceCloudJobId: integer('source_cloud_job_id'), // Parent job when resuming from snapshot.
-
-    /**
-     * Git HEAD SHAs captured at task start for each repo in the workspace.
-     * Used to compute diffs showing what changed during the task.
-     * @example { ".": "abc123" } for single-repo
-     * @example { "frontend": "abc123", "backend": "def456" } for multi-repo
-     */
-    baseShas: jsonb('base_shas').$type<Record<string, string>>(),
 
     /**
      * Value for the auth bypass header (`x-bypass-roomote-auth`).
@@ -1120,12 +993,6 @@ export const cloudJobs = pgTable(
      */
     authBypassHeaderName: text('auth_bypass_header_name'),
 
-    /**
-     * Draft prompt text the user was composing when the sandbox went to sleep.
-     * Saved periodically while typing so it can be restored after wake-up.
-     */
-    draftPrompt: text('draft_prompt'),
-
     // Lifecycle:
     // created -> dequeued -> provisionStarted -> provisionReady -> started
     //   -> setupCompleted -> harnessStarted -> runtimeTaskStarted
@@ -1133,7 +1000,7 @@ export const cloudJobs = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
     dequeuedAt: timestamp('dequeued_at'),
     // Timing diagnostics: stamp once on the first transition through each
-    // milestone (see stampCloudJobMilestone). Used by per-deployment latency analytics.
+    // milestone (see stampTaskRunMilestone). Used by per-deployment latency analytics.
     provisionStartedAt: timestamp('provision_started_at'),
     provisionReadyAt: timestamp('provision_ready_at'),
     startedAt: timestamp('started_at'),
@@ -1145,7 +1012,7 @@ export const cloudJobs = pgTable(
     /**
      * When a user-initiated stop was requested for this job. Stop paths set
      * this before asking the sandbox to cancel so recovery sweeps and
-     * finishCloudJob can tell a deliberate stop from a runtime failure even
+     * finishRun can tell a deliberate stop from a runtime failure even
      * if the worker dies before the row reaches a terminal state.
      */
     cancelRequestedAt: timestamp('cancel_requested_at'),
@@ -1153,64 +1020,69 @@ export const cloudJobs = pgTable(
     launchMode: text('launch_mode').$type<ComputeProviderLaunchMode>(),
   },
   (table) => [
-    index('cloud_jobs_user_id_idx').on(table.userId),
-    index('cloud_jobs_task_id_idx').on(table.taskId),
-    index('cloud_jobs_github_login_idx').on(table.githubLogin),
-    index('cloud_jobs_github_user_id_idx').on(table.githubUserId),
-    index('cloud_jobs_snapshot_id_idx').on(table.snapshotId),
-    index('cloud_jobs_sleep_at_idx').on(table.sleepAt),
-    index('cloud_jobs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
-    index('cloud_jobs_sleep_check_due_idx')
+    index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_queue_scope_idx').on(table.queueScope),
+    index('task_runs_acting_user_id_idx').on(table.actingUserId),
+    index('task_runs_snapshot_id_idx').on(table.snapshotId),
+    index('task_runs_sleep_at_idx').on(table.sleepAt),
+    index('task_runs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
+    index('task_runs_sleep_check_due_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_sleep_check_stale_worker_idx')
+    index('task_runs_sleep_check_stale_worker_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_sleep_check_active_idx')
+    index('task_runs_sleep_check_active_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
         sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b')`,
       ),
-    index('cloud_jobs_source_snapshot_id_idx').on(table.sourceSnapshotId),
-    index('cloud_jobs_source_cloud_job_id_idx').on(table.sourceCloudJobId),
-    index('cloud_jobs_first_assistant_output_at_idx').on(
+    index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
+    index('task_runs_source_run_id_idx').on(table.sourceRunId),
+    index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
+    ),
+    // Durable classification vocabularies; see the tasks table checks. Source
+    // of truth: RUN_KINDS / codingHarnesses in @roomote/types.
+    check('task_runs_kind_check', sql`${table.kind} in ('fresh', 'resume')`),
+    check(
+      'task_runs_harness_check',
+      sql`${table.harness} in ('opencode-server')`,
     ),
   ],
 );
 
-export const cloudJobEvents = pgTable(
-  'cloud_job_events',
+export const taskRunEvents = pgTable(
+  'task_run_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
-    taskId: text('task_id').notNull(), // Not a foreign key - task may be deleted
-    source: text('source').notNull().$type<CloudJobEventSource>(),
-    eventType: text('event_type').notNull().$type<CloudJobEventType>(),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    source: text('source').notNull().$type<RunEventSource>(),
+    eventType: text('event_type').notNull().$type<RunEventType>(),
     message: text('message'),
-    details: jsonb('details')
-      .notNull()
-      .default({})
-      .$type<CloudJobEventDetails>(),
+    details: jsonb('details').notNull().default({}).$type<RunEventDetails>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('cloud_job_events_cloud_job_id_created_at_idx').on(
-      table.cloudJobId,
+    index('task_run_events_run_id_created_at_idx').on(
+      table.runId,
       table.createdAt,
     ),
-    index('cloud_job_events_task_id_created_at_idx').on(
+    index('task_run_events_task_id_created_at_idx').on(
       table.taskId,
       table.createdAt,
     ),
-    index('cloud_job_events_created_at_idx').on(table.createdAt),
-    index('cloud_job_events_source_created_at_idx').on(
+    index('task_run_events_created_at_idx').on(table.createdAt),
+    index('task_run_events_source_created_at_idx').on(
       table.source,
       table.createdAt,
     ),
@@ -1222,18 +1094,20 @@ export const cloudJobEvents = pgTable(
  *
  * Per-run snapshots of how many tasks in the deployment were considered
  * active when a task run started. A resumed task gets a new row because it
- * maps to a new cloud job.
+ * maps to a new task run.
  */
 
 export const taskStartParallelCounts = pgTable(
   'task_start_parallel_counts',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    // Keep parent identifiers for analytics/debugging lookups, but do not use
-    // cascading task/cloud-job FKs so the per-run history survives cleanup.
-    taskId: text('task_id').notNull(),
-    cloudJobId: integer('cloud_job_id').notNull(),
-    cloudJobType: text('cloud_job_type').$type<CloudTaskType>(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    payloadKind: text('payload_kind').$type<TaskPayloadKind>(),
     parallelCount: integer('parallel_count').notNull(),
     activityWindowSeconds: integer('activity_window_seconds').notNull(),
     startedAt: timestamp('started_at').notNull(),
@@ -1241,9 +1115,7 @@ export const taskStartParallelCounts = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('task_start_parallel_counts_cloud_job_id_unique').on(
-      table.cloudJobId,
-    ),
+    uniqueIndex('task_start_parallel_counts_run_id_unique').on(table.runId),
     index('task_start_parallel_counts_task_id_started_at_idx').on(
       table.taskId,
       table.startedAt,
@@ -1259,9 +1131,9 @@ export const taskStartParallelCountsRelations = relations(
       fields: [taskStartParallelCounts.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskStartParallelCounts.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [taskStartParallelCounts.runId],
+      references: [taskRuns.id],
     }),
   }),
 );
@@ -1270,15 +1142,13 @@ export const taskStartParallelCountsRelations = relations(
  * task_messages
  */
 
-const LEGACY_TASK_MESSAGE_CONTENT_SCHEMA = 'mcp.contentblock@2025-06-18';
-
 export const taskMessages = pgTable(
   'task_messages',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
@@ -1287,11 +1157,6 @@ export const taskMessages = pgTable(
     eventType: text('event_type').notNull().$type<TaskMessageEventType>(),
     role: text('role').$type<TaskMessageRole>(),
     protocol: text('protocol').notNull().$type<TaskMessageProtocol>(),
-    // Deprecated: new code should not reference this column directly.
-    // Keep a runtime default until a DB migration drops `content_schema`.
-    contentSchema: text('content_schema')
-      .notNull()
-      .$defaultFn(() => LEGACY_TASK_MESSAGE_CONTENT_SCHEMA),
     /**
      * Canonical renderable body for the message.
      *
@@ -1338,7 +1203,7 @@ export const taskMessages = pgTable(
   },
   (table) => [
     index('task_messages_task_id_ts_idx').on(table.taskId, table.ts),
-    index('task_messages_cloud_job_id_idx').on(table.cloudJobId),
+    index('task_messages_run_id_idx').on(table.runId),
     index('task_messages_created_at_idx').on(table.createdAt),
     unique('task_messages_task_protocol_ts_event_type_unique').on(
       table.taskId,
@@ -1350,9 +1215,9 @@ export const taskMessages = pgTable(
 );
 
 export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
-  cloudJob: one(cloudJobs, {
-    fields: [taskMessages.cloudJobId],
-    references: [cloudJobs.id],
+  run: one(taskRuns, {
+    fields: [taskMessages.runId],
+    references: [taskRuns.id],
   }),
   task: one(tasks, {
     fields: [taskMessages.taskId],
@@ -1372,10 +1237,7 @@ export const taskInferenceUsageEvents = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
-      onDelete: 'set null',
-    }),
-    userId: text('user_id').references(() => users.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     harnessSessionId: text('harness_session_id').notNull(),
@@ -1429,8 +1291,7 @@ export const taskInferenceUsageEvents = pgTable(
       table.messageId,
     ),
     index('task_inference_usage_events_task_id_idx').on(table.taskId),
-    index('task_inference_usage_events_cloud_job_id_idx').on(table.cloudJobId),
-    index('task_inference_usage_events_user_id_idx').on(table.userId),
+    index('task_inference_usage_events_run_id_idx').on(table.runId),
     index('task_inference_usage_events_created_at_idx').on(table.createdAt),
   ],
 );
@@ -1442,13 +1303,9 @@ export const taskInferenceUsageEventsRelations = relations(
       fields: [taskInferenceUsageEvents.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskInferenceUsageEvents.cloudJobId],
-      references: [cloudJobs.id],
-    }),
-    user: one(users, {
-      fields: [taskInferenceUsageEvents.userId],
-      references: [users.id],
+    run: one(taskRuns, {
+      fields: [taskInferenceUsageEvents.runId],
+      references: [taskRuns.id],
     }),
   }),
 );
@@ -1490,9 +1347,9 @@ export const taskPlatformIssueReports = pgTable(
     taskId: text('task_id')
       .notNull()
       .references(() => tasks.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
       onDelete: 'set null',
     }),
@@ -1506,8 +1363,8 @@ export const taskPlatformIssueReports = pgTable(
       table.taskId,
       table.createdAt,
     ),
-    index('task_platform_issue_reports_cloud_job_id_created_at_idx').on(
-      table.cloudJobId,
+    index('task_platform_issue_reports_run_id_created_at_idx').on(
+      table.runId,
       table.createdAt,
     ),
     uniqueIndex('task_platform_issue_reports_task_message_id_unique').on(
@@ -1523,9 +1380,9 @@ export const taskPlatformIssueReportsRelations = relations(
       fields: [taskPlatformIssueReports.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [taskPlatformIssueReports.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [taskPlatformIssueReports.runId],
+      references: [taskRuns.id],
     }),
     taskMessage: one(taskMessages, {
       fields: [taskPlatformIssueReports.taskMessageId],
@@ -1534,23 +1391,32 @@ export const taskPlatformIssueReportsRelations = relations(
   }),
 );
 
-export const cloudJobEventsRelations = relations(cloudJobEvents, ({ one }) => ({
-  cloudJob: one(cloudJobs, {
-    fields: [cloudJobEvents.cloudJobId],
-    references: [cloudJobs.id],
+export const taskRunEventsRelations = relations(taskRunEvents, ({ one }) => ({
+  run: one(taskRuns, {
+    fields: [taskRunEvents.runId],
+    references: [taskRuns.id],
+  }),
+  task: one(tasks, {
+    fields: [taskRunEvents.taskId],
+    references: [tasks.id],
   }),
 }));
 
-export const cloudJobsRelations = relations(cloudJobs, ({ one, many }) => ({
-  user: one(users, {
-    fields: [cloudJobs.userId],
+export const taskRunsRelations = relations(taskRuns, ({ one, many }) => ({
+  actingUser: one(users, {
+    fields: [taskRuns.actingUserId],
     references: [users.id],
   }),
   task: one(tasks, {
-    fields: [cloudJobs.taskId],
+    fields: [taskRuns.taskId],
     references: [tasks.id],
   }),
-  events: many(cloudJobEvents),
+  sourceRun: one(taskRuns, {
+    fields: [taskRuns.sourceRunId],
+    references: [taskRuns.id],
+    relationName: 'taskRunSourceRun',
+  }),
+  events: many(taskRunEvents),
   messages: many(taskMessages),
   inferenceUsageEvents: many(taskInferenceUsageEvents),
   platformIssueReports: many(taskPlatformIssueReports),
@@ -1567,10 +1433,7 @@ export const computeProviderUsage = pgTable(
     provider: text('provider').notNull().$type<ComputeProvider>(),
     providerUsageId: text('provider_usage_id').notNull(),
     authKind: text('auth_kind').notNull(),
-    userId: text('user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
     taskId: text('task_id').references(() => tasks.id, {
@@ -1615,8 +1478,7 @@ export const computeProviderUsage = pgTable(
       table.provider,
       table.providerUsageId,
     ),
-    index('compute_provider_usage_user_id_idx').on(table.userId),
-    index('compute_provider_usage_cloud_job_id_idx').on(table.cloudJobId),
+    index('compute_provider_usage_run_id_idx').on(table.runId),
     index('compute_provider_usage_task_id_idx').on(table.taskId),
     index('compute_provider_usage_created_at_idx').on(table.createdAt),
   ],
@@ -1628,12 +1490,9 @@ export const computeProviderUsageSamples = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     provider: text('provider').notNull().$type<ComputeProvider>(),
     providerUsageId: text('provider_usage_id').notNull(),
-    userId: text('user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    cloudJobId: integer('cloud_job_id')
+    runId: integer('run_id')
       .notNull()
-      .references(() => cloudJobs.id, { onDelete: 'cascade' }),
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
     taskId: text('task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
@@ -1658,10 +1517,7 @@ export const computeProviderUsageSamples = pgTable(
     uniqueIndex(
       'compute_provider_usage_samples_provider_usage_sampled_at_unique',
     ).on(table.provider, table.providerUsageId, table.sampledAt),
-    index('compute_provider_usage_samples_user_id_idx').on(table.userId),
-    index('compute_provider_usage_samples_cloud_job_id_idx').on(
-      table.cloudJobId,
-    ),
+    index('compute_provider_usage_samples_run_id_idx').on(table.runId),
     index('compute_provider_usage_samples_task_id_idx').on(table.taskId),
     index('compute_provider_usage_samples_created_at_idx').on(table.createdAt),
   ],
@@ -1670,13 +1526,9 @@ export const computeProviderUsageSamples = pgTable(
 export const computeProviderUsageRelations = relations(
   computeProviderUsage,
   ({ one }) => ({
-    user: one(users, {
-      fields: [computeProviderUsage.userId],
-      references: [users.id],
-    }),
-    cloudJob: one(cloudJobs, {
-      fields: [computeProviderUsage.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [computeProviderUsage.runId],
+      references: [taskRuns.id],
     }),
     task: one(tasks, {
       fields: [computeProviderUsage.taskId],
@@ -1841,7 +1693,6 @@ export const githubUserMappings = pgTable(
   },
   (table) => [
     index('github_user_mappings_github_login_idx').on(table.githubLogin),
-    index('github_user_mappings_github_user_id_idx').on(table.githubUserId),
     index('github_user_mappings_user_id_idx').on(table.userId),
     unique('github_user_mappings_unique').on(table.githubUserId),
   ],
@@ -1904,10 +1755,6 @@ export const repositories = pgTable(
     ),
     index('repositories_installation_id_idx').on(table.installationId),
     index('repositories_full_name_idx').on(table.fullName),
-    index('repositories_provider_full_name_idx').on(
-      table.sourceControlProvider,
-      table.fullName,
-    ),
     index('repositories_provider_host_full_name_idx').on(
       table.sourceControlProvider,
       table.host,
@@ -1921,12 +1768,20 @@ export const repositories = pgTable(
     uniqueIndex('repositories_deployment_github_repo_unique').on(
       table.githubRepoId,
     ),
-    uniqueIndex('repositories_provider_external_repo_unique').on(
+    // Host participates in repository identity: self-managed GitLab/Gitea/ADO
+    // instances can legitimately reuse the same fullName or externalRepoId, so
+    // uniqueness is scoped to (provider, host, ...). NULL hosts (historical,
+    // un-backfilled rows) are coalesced to '' so they keep colliding with each
+    // other exactly like before host joined the key -- a plain column index
+    // would treat NULLs as distinct and silently weaken the constraint.
+    uniqueIndex('repositories_provider_host_external_repo_unique').on(
       table.sourceControlProvider,
+      sql`coalesce(${table.host}, '')`,
       table.externalRepoId,
     ),
-    uniqueIndex('repositories_provider_full_name_unique').on(
+    uniqueIndex('repositories_provider_host_full_name_unique').on(
       table.sourceControlProvider,
+      sql`coalesce(${table.host}, '')`,
       table.fullName,
     ),
     check(
@@ -2093,6 +1948,8 @@ export const slackInstallations = pgTable(
     enterpriseName: text('enterprise_name'),
     appId: text('app_id').notNull(),
     botUserId: text('bot_user_id').notNull(),
+    botName: text('bot_name'),
+    appName: text('app_name'),
     botAccessToken: text('bot_access_token').notNull(),
     userAccessToken: text('user_access_token'),
     scopes: jsonb('scopes').notNull(),
@@ -2108,7 +1965,6 @@ export const slackInstallations = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('slack_installations_team_id_idx').on(table.teamId),
     index('slack_installations_bot_user_id_idx').on(table.botUserId),
     index('slack_installations_active_idx').on(table.isActive),
   ],
@@ -2177,10 +2033,6 @@ export const slackUserMappings = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('slack_user_mappings_slack_user_idx').on(
-      table.slackUserId,
-      table.slackTeamId,
-    ),
     index('slack_user_mappings_user_id_idx').on(table.userId),
     unique('slack_user_mappings_unique').on(
       table.slackUserId,
@@ -2283,10 +2135,6 @@ export const teamsUserMappings = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('teams_user_mappings_teams_user_idx').on(
-      table.teamsUserId,
-      table.teamsTenantId,
-    ),
     index('teams_user_mappings_aad_object_idx').on(
       table.teamsAadObjectId,
       table.teamsTenantId,
@@ -2326,10 +2174,7 @@ export const slackAuthTokens = pgTable(
     expiresAt: timestamp('expires_at').notNull(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
-  (table) => [
-    index('slack_auth_tokens_token_idx').on(table.token),
-    index('slack_auth_tokens_expires_at_idx').on(table.expiresAt),
-  ],
+  (table) => [index('slack_auth_tokens_expires_at_idx').on(table.expiresAt)],
 );
 
 export const slackAuthTokensRelations = relations(slackAuthTokens, () => ({}));
@@ -2371,11 +2216,11 @@ export const slackConversationMessages = pgTable(
     taskId: text('task_id').references(() => tasks.id, {
       onDelete: 'set null',
     }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
-    fastAgentSessionId: uuid('fast_agent_session_id').references(
-      () => fastAgentSessions.id,
+    slackQuickAnswerId: uuid('slack_quick_answer_id').references(
+      () => slackQuickAnswers.id,
       {
         onDelete: 'set null',
       },
@@ -2394,7 +2239,7 @@ export const slackConversationMessages = pgTable(
       table.messageAt,
     ),
     index('slack_conversation_messages_task_id_idx').on(table.taskId),
-    index('slack_conversation_messages_cloud_job_id_idx').on(table.cloudJobId),
+    index('slack_conversation_messages_run_id_idx').on(table.runId),
     uniqueIndex('slack_conversation_messages_team_channel_message_unique').on(
       table.slackTeamId,
       table.slackChannelId,
@@ -2418,19 +2263,28 @@ export const slackConversationMessagesRelations = relations(
       fields: [slackConversationMessages.taskId],
       references: [tasks.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [slackConversationMessages.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [slackConversationMessages.runId],
+      references: [taskRuns.id],
     }),
-    fastAgentSession: one(fastAgentSessions, {
-      fields: [slackConversationMessages.fastAgentSessionId],
-      references: [fastAgentSessions.id],
+    slackQuickAnswer: one(slackQuickAnswers, {
+      fields: [slackConversationMessages.slackQuickAnswerId],
+      references: [slackQuickAnswers.id],
     }),
   }),
 );
 
-export const fastAgentSessions = pgTable(
-  'fast_agent_sessions',
+/**
+ * slack_quick_answers (renamed from fast_agent_sessions in Stage 4)
+ *
+ * Deliberately kept OUT of the task spine: these rows store the runless
+ * Slack-thread quick-answer conversation for the fast agent. They intentionally
+ * do NOT overlap with tasks/task_runs (no launched task, no run) — a quick
+ * answer never becomes a task, so folding it into the task tables would break
+ * the runless-chat storage the suggester feedback loop reads.
+ */
+export const slackQuickAnswers = pgTable(
+  'slack_quick_answers',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: text('user_id')
@@ -2446,19 +2300,19 @@ export const fastAgentSessions = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('fast_agent_sessions_deployment_channel_thread_unique').on(
+    uniqueIndex('slack_quick_answers_deployment_channel_thread_unique').on(
       table.slackChannel,
       table.slackThreadTs,
     ),
-    index('fast_agent_sessions_deployment_user_idx').on(table.userId),
+    index('slack_quick_answers_deployment_user_idx').on(table.userId),
   ],
 );
 
-export const fastAgentSessionsRelations = relations(
-  fastAgentSessions,
+export const slackQuickAnswersRelations = relations(
+  slackQuickAnswers,
   ({ one }) => ({
     user: one(users, {
-      fields: [fastAgentSessions.userId],
+      fields: [slackQuickAnswers.userId],
       references: [users.id],
     }),
   }),
@@ -2469,7 +2323,7 @@ export const fastAgentSessionsRelations = relations(
  *
  * Stores pending workspace selection state during the Linear elicitation flow.
  * When LLM routing is unavailable, we ask the user to select a workspace for
- * the delegated Generalist path. This table tracks which step we're at and
+ * the standard delegated-task path. This table tracks which step we're at and
  * stores the workspace choices shown to the user.
  */
 
@@ -2495,7 +2349,6 @@ export const linearPendingSelections = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    index('linear_pending_selections_session_id_idx').on(table.sessionId),
     index('linear_pending_selections_expires_at_idx').on(table.expiresAt),
     index('linear_pending_selections_step_idx').on(table.step),
   ],
@@ -2512,308 +2365,51 @@ export const linearPendingSelectionsRelations = relations(
 );
 
 /**
- * background_agent_settings
+ * automations
+ *
+ * One row per automation, keyed by the canonical snake_case automation key.
+ * Rows for every known key are seeded by ensureAutomationRows so
+ * tasks.initiator_automation can hold a real FK. Internal automations
+ * (internal = true) launch tasks but are hidden from the settings UI.
  */
 
-export const backgroundAgentSettings = pgTable('background_agent_settings', {
-  id: text('id').notNull().primaryKey().default('default'),
-  globalAgentInstructions: text('global_agent_instructions'),
-  authorshipInstructions: text('authorship_instructions'),
-  compiledAuthorshipRules: jsonb('compiled_authorship_rules')
-    .$type<CompiledAuthorshipRule[]>()
+export const automations = pgTable('automations', {
+  key: text('key').primaryKey().$type<BackgroundAutomationKey>(),
+  enabled: boolean('enabled').notNull().default(false),
+  internal: boolean('internal').notNull().default(false),
+  schedule: jsonb('schedule')
     .notNull()
-    .default(sql`'[]'::jsonb`),
-  compiledAuthorshipIssues: jsonb('compiled_authorship_issues')
-    .$type<AuthorshipRuleIssue[]>()
+    .default({})
+    .$type<Record<string, unknown>>(),
+  instructions: text('instructions'),
+  settings: jsonb('settings')
     .notNull()
-    .default(sql`'[]'::jsonb`),
-  compiledAuthorshipAt: timestamp('compiled_authorship_at'),
-  styleGuidance: text('style_guidance'),
-  suggesterInstructions: text('suggester_instructions'),
-  suggesterFrequency: text('suggester_frequency')
+    .default({})
+    .$type<Record<string, unknown>>(),
+  targets: jsonb('targets')
     .notNull()
-    .default('off')
-    .$type<SuggesterFrequency>(),
-  suggesterSlackChannelId: text('suggester_slack_channel_id'),
-  suggesterLastRunAt: timestamp('suggester_last_run_at'),
-
-  conflictResolverFrequency: text('conflict_resolver_frequency')
-    .notNull()
-    .default('off')
-    .$type<ConflictResolverFrequency>(),
-  conflictResolverLabel: text('conflict_resolver_label')
-    .notNull()
-    .default(AUTO_RESOLVE_CONFLICTS_LABEL),
-  conflictResolverInstructions: text('conflict_resolver_instructions'),
-  conflictResolverLastRunAt: timestamp('conflict_resolver_last_run_at'),
-
-  coachFrequency: text('coach_frequency')
-    .notNull()
-    .default('off')
-    .$type<CoachFrequency>(),
-  coachSlackChannelId: text('coach_slack_channel_id'),
-  coachInstructions: text('coach_instructions'),
-  coachLastRunAt: timestamp('coach_last_run_at'),
-
-  announcerFrequency: text('announcer_frequency')
-    .notNull()
-    .default('off')
-    .$type<AnnouncerFrequency>(),
-  announcerSlackChannelId: text('announcer_slack_channel_id'),
-  platformIssueSlackChannelId: text('platform_issue_slack_channel_id'),
-  managerSlackChannelId: text('manager_slack_channel_id'),
-  managerStatsFrequency: text('manager_stats_frequency')
-    .notNull()
-    .default('off')
-    .$type<ManagerStatsFrequency>(),
-  managerStatsLastRunAt: timestamp('manager_stats_last_run_at'),
-  announcerInstructions: text('announcer_instructions'),
-  announcerLastRunAt: timestamp('announcer_last_run_at'),
-  slackSummonEmoji: text('slack_summon_emoji'),
-  slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
-  slackCompletionEmoji: text('slack_completion_emoji')
-    .notNull()
-    .default('white_check_mark'),
-
+    .default(sql`'[]'::jsonb`)
+    .$type<AutomationTarget[]>(),
+  lastRunAt: timestamp('last_run_at'),
+  lastSucceededAt: timestamp('last_succeeded_at'),
+  lastFailedAt: timestamp('last_failed_at'),
+  lastError: text('last_error'),
+  scanCursor: jsonb('scan_cursor').$type<AutomationScanCursor | null>(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
-export const backgroundAgentSettingsRelations = relations(
-  backgroundAgentSettings,
-  () => ({}),
-);
-
-export const backgroundAutomations = pgTable(
-  'background_automations',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
-    enabled: boolean('enabled').notNull().default(false),
-    schedule: jsonb('schedule')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    settings: jsonb('settings')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    lastRunAt: timestamp('last_run_at'),
-    lastSucceededAt: timestamp('last_succeeded_at'),
-    lastFailedAt: timestamp('last_failed_at'),
-    lastError: text('last_error'),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automations_key_unique').on(table.automationKey),
-    index('background_automations_key_enabled_idx').on(
-      table.automationKey,
-      table.enabled,
-    ),
-  ],
-);
-
-export const backgroundAutomationsRelations = relations(
-  backgroundAutomations,
-  ({ many }) => ({
-    targets: many(backgroundAutomationTargets),
-  }),
-);
-
-export const backgroundAutomationTargets = pgTable(
-  'background_automation_targets',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationId: uuid('automation_id')
-      .notNull()
-      .references(() => backgroundAutomations.id, { onDelete: 'cascade' }),
-    provider: text('provider').notNull().$type<BackgroundAutomationProvider>(),
-    targetKind: text('target_kind')
-      .notNull()
-      .$type<BackgroundAutomationTargetKind>(),
-    externalRef: text('external_ref').notNull(),
-    metadata: jsonb('metadata')
-      .notNull()
-      .default({})
-      .$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automation_targets_unique').on(
-      table.automationId,
-      table.provider,
-      table.targetKind,
-      table.externalRef,
-    ),
-    index('background_automation_targets_automation_idx').on(
-      table.automationId,
-    ),
-    index('background_automation_targets_provider_kind_ref_idx').on(
-      table.provider,
-      table.targetKind,
-      table.externalRef,
-    ),
-  ],
-);
-
-export const backgroundAutomationTargetsRelations = relations(
-  backgroundAutomationTargets,
-  ({ one }) => ({
-    automation: one(backgroundAutomations, {
-      fields: [backgroundAutomationTargets.automationId],
-      references: [backgroundAutomations.id],
-    }),
-  }),
-);
-
-/**
- * background_automation_slack_threads
- */
-
-export const backgroundAutomationSlackThreads = pgTable(
-  'background_automation_slack_threads',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
-    slackChannelId: text('slack_channel_id').notNull(),
-    threadTs: text('thread_ts').notNull(),
-    summaryText: text('summary_text').notNull().default(''),
-    postedAt: timestamp('posted_at').notNull(),
-    metadata: jsonb('metadata')
-      .notNull()
-      .default(sql`'{}'::jsonb`)
-      .$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex(
-      'background_automation_slack_threads_deployment_channel_thread_unique',
-    ).on(table.slackChannelId, table.threadTs),
-    index('background_automation_slack_threads_recent_lookup_idx').on(
-      table.automationKey,
-      table.slackChannelId,
-      table.postedAt,
-    ),
-  ],
-);
-
-export const backgroundAutomationSlackThreadsRelations = relations(
-  backgroundAutomationSlackThreads,
-  () => ({}),
-);
-
-/**
- * background_automation_runs
- */
-
-export const backgroundAutomationRuns = pgTable(
-  'background_automation_runs',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    automationKey: text('automation_key')
-      .notNull()
-      .$type<BackgroundAutomationKey>(),
-    bullmqJobId: text('bullmq_job_id').notNull(),
-    triggerKind: text('trigger_kind')
-      .notNull()
-      .$type<BackgroundAutomationRunTriggerKind>(),
-    status: text('status').notNull().$type<BackgroundAutomationRunStatus>(),
-    taskId: text('task_id').references(() => tasks.id, {
-      onDelete: 'set null',
-    }),
-    slackChannelId: text('slack_channel_id'),
-    threadTs: text('thread_ts'),
-    startedAt: timestamp('started_at'),
-    finishedAt: timestamp('finished_at'),
-    error: text('error'),
-    metadata: jsonb('metadata')
-      .notNull()
-      .default(sql`'{}'::jsonb`)
-      .$type<Record<string, unknown>>(),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('background_automation_runs_deployment_key_job_unique').on(
-      table.automationKey,
-      table.bullmqJobId,
-    ),
-    index('background_automation_runs_recent_lookup_idx').on(
-      table.automationKey,
-      table.createdAt,
-    ),
-    index('background_automation_runs_task_id_idx').on(table.taskId),
-  ],
-);
-
-export const backgroundAutomationRunsRelations = relations(
-  backgroundAutomationRuns,
-  ({ one, many }) => ({
-    task: one(tasks, {
-      fields: [backgroundAutomationRuns.taskId],
-      references: [tasks.id],
-    }),
-    automationWorkItems: many(automationWorkItems),
-  }),
-);
+export const automationsRelations = relations(automations, ({ many }) => ({
+  tasks: many(tasks),
+  workItems: many(workItems),
+  trackedMessages: many(trackedMessages),
+}));
 
 export type ManagerMcpSetupNotificationReason =
   | 'deployment_disabled'
   | 'deployment_auth_required';
 
-export const mcpSetupManagerNotifications = pgTable(
-  'mcp_setup_manager_notifications',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    serviceId: text('service_id').notNull(),
-    reason: text('reason').notNull().$type<ManagerMcpSetupNotificationReason>(),
-    triggeredByUserId: text('triggered_by_user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    triggeredBySlackUserId: text('triggered_by_slack_user_id').notNull(),
-    messageText: text('message_text').notNull(),
-    channelId: text('channel_id').notNull(),
-    messageTs: text('message_ts').notNull(),
-    sentAt: timestamp('sent_at').notNull(),
-    dismissedAt: timestamp('dismissed_at'),
-    dismissedBySlackUserId: text('dismissed_by_slack_user_id'),
-    dismissedByUserId: text('dismissed_by_user_id').references(() => users.id, {
-      onDelete: 'set null',
-    }),
-    createdAt: timestamp('created_at').notNull().defaultNow(),
-    updatedAt: timestamp('updated_at').notNull().defaultNow(),
-  },
-  (table) => [
-    uniqueIndex('mcp_setup_manager_notif_service_unique').on(table.serviceId),
-    index('mcp_setup_manager_notif_dismissed_at_idx').on(table.dismissedAt),
-  ],
-);
-
-export const mcpSetupManagerNotificationsRelations = relations(
-  mcpSetupManagerNotifications,
-  ({ one }) => ({
-    triggeredByUser: one(users, {
-      fields: [mcpSetupManagerNotifications.triggeredByUserId],
-      references: [users.id],
-      relationName: 'mcpSetupManagerNotificationTriggeredByUser',
-    }),
-    dismissedByUser: one(users, {
-      fields: [mcpSetupManagerNotifications.dismissedByUserId],
-      references: [users.id],
-      relationName: 'mcpSetupManagerNotificationDismissedByUser',
-    }),
-  }),
-);
-
-export type BackgroundAgentSuggestionType =
-  | 'coach'
+export type SuggestionType =
   | 'setup_onboarding'
   | 'suggested_tasks'
   | 'sentry_triage'
@@ -2823,48 +2419,89 @@ export type BackgroundAgentSuggestionType =
   | 'ci_failure_triage'
   | 'setup_mcp_recommendation';
 
-export const agentSuggestionMessages = pgTable(
-  'agent_suggestion_messages',
+/**
+ * tracked_messages
+ *
+ * Stage 4 registry merging agent_suggestion_messages +
+ * background_automation_slack_threads + mcp_setup_manager_notifications. This
+ * is a PURE registry of chat coordinates: launch state lives on work_items and
+ * the reaction-launch claim CAS runs against work_items via workItemId.
+ *
+ * UNIQUE (kind, dedupeKey) enforces per-kind idempotency. dedupeKey formats:
+ * - suggestion_card:    `${channelId}:${messageTs}` (the same suggestion may
+ *                        legitimately post to multiple surfaces/channels, so
+ *                        the channel is part of the key — not the workItemId).
+ * - automation_thread:  `${channelId}:${threadTs}`
+ * - mcp_setup_nudge:    serviceId
+ */
+
+export const trackedMessages = pgTable(
+  'tracked_messages',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    agentType: text('agent_type')
-      .notNull()
-      .$type<BackgroundAgentSuggestionType>(),
-    messageTs: text('message_ts').notNull(),
+    surface: text('surface').notNull().$type<TrackedMessageSurface>(),
+    kind: text('kind').notNull().$type<TrackedMessageKind>(),
+    dedupeKey: text('dedupe_key').notNull(),
     channelId: text('channel_id').notNull(),
-    suggestionKey: text('suggestion_key').notNull(),
-    launchClaimedAt: timestamp('launch_claimed_at'),
-    launchedThreadTs: text('launched_thread_ts'),
-    taskId: text('task_id').references(() => tasks.id, {
+    messageTs: text('message_ts'),
+    threadTs: text('thread_ts'),
+    // The launched-from work item (suggestion_card, mcp_setup_nudge, act
+    // late-bind). Nullable: automation_thread / announcement rows have none.
+    workItemId: uuid('work_item_id').references(() => workItems.id, {
       onDelete: 'set null',
     }),
-    launchedAt: timestamp('launched_at'),
-    createdByUserId: text('created_by_user_id')
+    automationKey: text('automation_key')
+      .$type<BackgroundAutomationKey>()
+      .references(() => automations.key, { onDelete: 'set null' }),
+    // Human who triggered the post (suggestion_card creator, nudge trigger).
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    summaryText: text('summary_text').notNull().default(''),
+    // Per-kind extras: suggestion_card { suggestionType, suggestionId };
+    // mcp_setup_nudge { reason, serviceId, triggeredBySlackUserId,
+    // dismissedBySlackUserId, dismissedByUserId }; automation_thread details.
+    metadata: jsonb('metadata')
       .notNull()
-      .references(() => users.id),
+      .default(sql`'{}'::jsonb`)
+      .$type<Record<string, unknown>>(),
+    postedAt: timestamp('posted_at').notNull().defaultNow(),
+    // Dismissal state (mcp_setup_nudge "No, thanks").
+    dismissedAt: timestamp('dismissed_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex(
-      'agent_suggestion_messages_deployment_channel_message_unique',
-    ).on(table.channelId, table.messageTs),
-    index('agent_suggestion_messages_deployment_agent_suggestion_idx').on(
-      table.agentType,
-      table.suggestionKey,
+    uniqueIndex('tracked_messages_kind_dedupe_key_unique').on(
+      table.kind,
+      table.dedupeKey,
     ),
-    index('agent_suggestion_messages_task_id_idx').on(table.taskId),
+    index('tracked_messages_work_item_id_idx').on(table.workItemId),
+    index('tracked_messages_channel_message_idx').on(
+      table.channelId,
+      table.messageTs,
+    ),
+    index('tracked_messages_automation_channel_posted_idx').on(
+      table.automationKey,
+      table.channelId,
+      table.postedAt,
+    ),
   ],
 );
 
-export const agentSuggestionMessagesRelations = relations(
-  agentSuggestionMessages,
+export const trackedMessagesRelations = relations(
+  trackedMessages,
   ({ one }) => ({
-    task: one(tasks, {
-      fields: [agentSuggestionMessages.taskId],
-      references: [tasks.id],
+    workItem: one(workItems, {
+      fields: [trackedMessages.workItemId],
+      references: [workItems.id],
+    }),
+    automation: one(automations, {
+      fields: [trackedMessages.automationKey],
+      references: [automations.key],
     }),
     createdByUser: one(users, {
-      fields: [agentSuggestionMessages.createdByUserId],
+      fields: [trackedMessages.createdByUserId],
       references: [users.id],
     }),
   }),
@@ -2881,12 +2518,11 @@ export const environmentVariables = pgTable(
     userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     value: encryptedJson<string>('value').notNull(),
-    createdByUserId: text('created_by_user_id')
-      .notNull()
-      .references(() => users.id),
-    lastUpdatedByUserId: text('last_updated_by_user_id')
-      .notNull()
-      .references(() => users.id),
+    // Null denotes a system/bootstrap write performed before a user exists.
+    createdByUserId: text('created_by_user_id').references(() => users.id),
+    lastUpdatedByUserId: text('last_updated_by_user_id').references(
+      () => users.id,
+    ),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -2929,47 +2565,6 @@ export const deploymentSecrets = pgTable(
 );
 
 /**
- * eval_runs
- */
-
-export const EVAL_RUN_STATUSES = [
-  'running',
-  'passed',
-  'failed',
-  'canceled',
-] as const;
-
-export const evalRuns = pgTable(
-  'eval_runs',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    evalName: text('eval_name').notNull(),
-    status: text('status').notNull(),
-    report: jsonb('report'),
-    phases: jsonb('phases'),
-    durationMs: integer('duration_ms'),
-    error: text('error'),
-    triggeredBy: text('triggered_by'),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    finishedAt: timestamp('finished_at', { withTimezone: true }),
-  },
-  (table) => [
-    index('eval_runs_eval_name_idx').on(table.evalName),
-    index('eval_runs_status_idx').on(table.status),
-    index('eval_runs_created_at_desc_idx').using(
-      'btree',
-      table.createdAt.desc(),
-    ),
-    check(
-      'eval_runs_status_check',
-      sql`${table.status} in ('running', 'passed', 'failed', 'canceled')`,
-    ),
-  ],
-);
-
-/**
  * webhooks
  *
  * Records incoming webhooks from external providers (GitHub, Slack, etc.)
@@ -2980,27 +2575,33 @@ export const webhooks = pgTable(
   'webhooks',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    deliveryId: text('delivery_id').notNull().unique(),
+    deliveryId: text('delivery_id').notNull(),
     provider: text('provider').notNull(),
     event: text('event').notNull(),
     payload: jsonb('payload').notNull(),
     succeededAt: timestamp('succeeded_at'),
     failedAt: timestamp('failed_at'),
-    ignoredAt: timestamp('ignored_at'),
     error: text('error'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
-    index('webhooks_provider_idx').on(table.provider),
+    // Delivery ids are only unique within a provider (GitHub GUIDs, Linear
+    // delivery ids, sha256-of-body fallbacks, ...), so dedupe per provider
+    // instead of globally. The recordWebhook helpers rely on this via an
+    // untargeted ON CONFLICT DO NOTHING.
+    uniqueIndex('webhooks_provider_delivery_id_unique').on(
+      table.provider,
+      table.deliveryId,
+    ),
+    // No separate provider index: the unique index above leads with provider
+    // and serves provider-only scans.
     index('webhooks_event_idx').on(table.event),
     index('webhooks_created_at_idx').on(table.createdAt),
-    index('webhooks_delivery_id_idx').on(table.deliveryId),
     check(
       'webhooks_status_exclusive',
       sql`(
         (succeeded_at IS NOT NULL)::int +
-        (failed_at IS NOT NULL)::int +
-        (ignored_at IS NOT NULL)::int
+        (failed_at IS NOT NULL)::int
       ) <= 1`,
     ),
   ],
@@ -3151,7 +2752,7 @@ export const environmentsRelations = relations(
     configVersions: many(environmentConfigVersions),
     snapshots: many(environmentSnapshots),
     repositoryMappings: many(environmentRepositoryMappings),
-    setupNewQueuedTasks: many(setupNewQueuedTasks),
+    workItems: many(workItems),
   }),
 );
 
@@ -3199,7 +2800,7 @@ export const environmentRepositoryMappingsRelations = relations(
  * sandbox_oidc_targets
  *
  * Tracks externally refreshed OIDC token files written into active sandboxes.
- * Rows are keyed by compute provider instance and token path so cloud-job-owned
+ * Rows are keyed by compute provider instance and token path so task-run-owned
  * sandboxes can keep the sandbox-local file contract stable across refreshes.
  */
 
@@ -3210,7 +2811,7 @@ export const sandboxOidcTargets = pgTable(
     environmentId: uuid('environment_id')
       .notNull()
       .references(() => environments.id, { onDelete: 'cascade' }),
-    cloudJobId: integer('cloud_job_id').references(() => cloudJobs.id, {
+    runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'cascade',
     }),
     computeProvider: text('compute_provider')
@@ -3229,14 +2830,14 @@ export const sandboxOidcTargets = pgTable(
   },
   (table) => [
     index('sandbox_oidc_targets_environment_id_idx').on(table.environmentId),
-    index('sandbox_oidc_targets_cloud_job_id_idx').on(table.cloudJobId),
+    index('sandbox_oidc_targets_run_id_idx').on(table.runId),
     index('sandbox_oidc_targets_refresh_at_idx').on(table.refreshAt),
     uniqueIndex('sandbox_oidc_targets_provider_target_file_unique').on(
       table.computeProvider,
       table.computeProviderId,
       table.tokenFile,
     ),
-    check('sandbox_oidc_targets_owner_required', sql`cloud_job_id IS NOT NULL`),
+    check('sandbox_oidc_targets_owner_required', sql`run_id IS NOT NULL`),
   ],
 );
 
@@ -3247,9 +2848,9 @@ export const sandboxOidcTargetsRelations = relations(
       fields: [sandboxOidcTargets.environmentId],
       references: [environments.id],
     }),
-    cloudJob: one(cloudJobs, {
-      fields: [sandboxOidcTargets.cloudJobId],
-      references: [cloudJobs.id],
+    run: one(taskRuns, {
+      fields: [sandboxOidcTargets.runId],
+      references: [taskRuns.id],
     }),
   }),
 );

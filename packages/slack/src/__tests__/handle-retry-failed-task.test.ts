@@ -1,12 +1,14 @@
-import { AGENT_DISPLAY_NAME, CloudTaskType } from '@roomote/types';
+import { AGENT_DISPLAY_NAME, TaskPayloadKind } from '@roomote/types';
 
 const {
-  cloudJobFindFirstMock,
+  taskRunFindFirstMock,
+  taskFindFirstMock,
   slackInstallationFindFirstMock,
   slackUserMappingFindFirstMock,
   environmentFindFirstMock,
 } = vi.hoisted(() => ({
-  cloudJobFindFirstMock: vi.fn(),
+  taskRunFindFirstMock: vi.fn(),
+  taskFindFirstMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   slackUserMappingFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
@@ -43,11 +45,15 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args: unknown[]) => ({ and: args })),
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   db: {
     query: {
-      cloudJobs: {
-        findFirst: cloudJobFindFirstMock,
+      taskRuns: {
+        findFirst: taskRunFindFirstMock,
+      },
+      tasks: {
+        findFirst: taskFindFirstMock,
       },
       slackInstallations: {
         findFirst: slackInstallationFindFirstMock,
@@ -168,7 +174,7 @@ describe('handleRetryFailedTask', () => {
     startSlackAppMentionTaskMock.mockResolvedValue({
       id: 77,
       taskId: 'task-77',
-      reusedExistingJob: false,
+      reusedExistingRun: false,
     });
     slackInstallationFindFirstMock.mockResolvedValue({
       id: 'slack-inst-1',
@@ -185,6 +191,9 @@ describe('handleRetryFailedTask', () => {
         repositories: [{ repository: 'owner/repo' }],
       },
     });
+    taskFindFirstMock.mockResolvedValue({
+      initiatorUserId: 'user-1',
+    });
     setSlackStartedMessageTsMock.mockResolvedValue(undefined);
     redisSetMock.mockResolvedValue('OK');
   });
@@ -194,10 +203,11 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('restarts the failed Slack task for the original requester', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -215,11 +225,16 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith({
-      userId: 'user-1',
+      initiator: {
+        kind: 'user',
+        externalId: 'U123',
+        matchedUserId: 'user-1',
+      },
+      trigger: 'manual',
       channel: 'C123',
       teamId: 'T123',
       teamDomain: undefined,
@@ -316,10 +331,11 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('retries the failed Slack task when a different Slack user clicks Try again', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -331,12 +347,17 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 }), 'U456'),
+      buildRetryPayload(JSON.stringify({ runId: 42 }), 'U456'),
     );
 
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
+        initiator: {
+          kind: 'user',
+          externalId: 'U123',
+          matchedUserId: 'user-1',
+        },
+        trigger: 'manual',
         channel: 'C123',
         teamId: 'T123',
         slackUserId: 'U123',
@@ -378,10 +399,10 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('posts an error when the original failed job cannot be found', async () => {
-    cloudJobFindFirstMock.mockResolvedValue(null);
+    taskRunFindFirstMock.mockResolvedValue(null);
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -396,10 +417,11 @@ describe('handleRetryFailedTask', () => {
   });
 
   it('posts a fallback error when the retry attempt fails', async () => {
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -412,7 +434,7 @@ describe('handleRetryFailedTask', () => {
     startSlackAppMentionTaskMock.mockRejectedValue(new Error('queue failed'));
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -428,10 +450,11 @@ describe('handleRetryFailedTask', () => {
 
   it('posts an error when the original environment is no longer available', async () => {
     environmentFindFirstMock.mockResolvedValue(null);
-    cloudJobFindFirstMock.mockResolvedValue({
+    taskRunFindFirstMock.mockResolvedValue({
       id: 42,
-      type: CloudTaskType.SlackAppMention,
-      userId: 'user-1',
+      taskId: 'task-42',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
       payload: {
         channel: 'C123',
         user: 'U123',
@@ -444,7 +467,7 @@ describe('handleRetryFailedTask', () => {
     });
 
     await handleRetryFailedTask(
-      buildRetryPayload(JSON.stringify({ cloudJobId: 42 })),
+      buildRetryPayload(JSON.stringify({ runId: 42 })),
     );
 
     expect(startSlackAppMentionTaskMock).not.toHaveBeenCalled();

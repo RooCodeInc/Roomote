@@ -5,19 +5,19 @@ import type {
 import { Env } from '@roomote/env';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
-  type CloudTaskPayload,
+  TaskPayloadKind,
+  type TaskPayload,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 import {
   buildTelegramRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
 
-import type { CompletedTelegramJob } from './job-lookup.js';
+import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
 import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
 import { postTelegramMessageBestEffort } from './replies.js';
 import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
@@ -33,17 +33,17 @@ function cleanOptionalString(value: string | undefined): string | undefined {
 }
 
 export async function resumeTelegramTaskFromSnapshot(input: {
-  completedJob: CompletedTelegramJob;
+  completedRun: CompletedTelegramTaskRun;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
 }) {
-  const sourceSnapshotId = input.completedJob.snapshotId;
+  const sourceSnapshotId = input.completedRun.snapshotId;
 
   if (!sourceSnapshotId) {
     throw new Error('Telegram snapshot resume requires a source snapshot.');
   }
 
-  const completedPayload = input.completedJob.payload as Record<
+  const completedPayload = input.completedRun.payload as Record<
     string,
     unknown
   >;
@@ -55,12 +55,12 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     typeof completedPayload.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
+  const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
     repo,
     ...(environmentId ? { environmentId } : {}),
-    ...(input.completedJob.port ? { port: input.completedJob.port } : {}),
+    ...(input.completedRun.port ? { port: input.completedRun.port } : {}),
     sourceSnapshotId,
-    sourceCloudJobId: input.completedJob.id,
+    sourceRunId: input.completedRun.id,
     queuedCommunicationMessages: [input.queuedMessage],
   };
 
@@ -73,13 +73,17 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-  return enqueueCloudTask(
+  // Resumes never create tasks and never re-attribute; the resuming human
+  // becomes the new run's acting user.
+  return enqueueTask(
     {
-      type: CloudTaskType.SnapshotResume,
-      userId: input.queuedMessage.userId,
-      sourceSnapshotId,
-      sourceCloudJobId: input.completedJob.id,
-      payload: resumePayload,
+      task: {
+        type: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId,
+        sourceRunId: input.completedRun.id,
+        payload: resumePayload,
+      },
+      actingUserId: input.queuedMessage.userId ?? null,
     },
     {
       launchClass: 'human',

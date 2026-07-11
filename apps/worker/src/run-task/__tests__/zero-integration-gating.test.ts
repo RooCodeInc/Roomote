@@ -22,13 +22,13 @@ const {
   mkdirSyncMock,
   writeFileSyncMock,
   installZeroCliMock,
-  cloudJobsDoneMock,
-  cloudJobsStampMilestoneMock,
-  cloudJobsSyncActingUserIdMock,
-  cloudJobsSetHarnessSessionIdMock,
-  cloudJobsUpdateRuntimeStateMock,
-  cloudJobsUpdateMock,
-  cloudJobsRecordEventMock,
+  taskRunsDoneMock,
+  taskRunsStampMilestoneMock,
+  taskRunsSyncActingUserIdMock,
+  taskRunsSetHarnessSessionIdMock,
+  taskRunsUpdateRuntimeStateMock,
+  taskRunsUpdateMock,
+  taskRunsRecordEventMock,
   syncRuntimeGitAuthorMock,
   buildSandboxInstructionMock,
   awaitSubprocessMock,
@@ -76,13 +76,16 @@ const {
   mkdirSyncMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsDoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsSyncActingUserIdMock: vi.fn().mockResolvedValue('unchanged'),
-  cloudJobsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
-  cloudJobsUpdateMock: vi.fn().mockResolvedValue(undefined),
-  cloudJobsRecordEventMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsSyncActingUserIdMock: vi.fn().mockResolvedValue({
+    result: 'unchanged',
+    actingUserId: 'user-1',
+  }),
+  taskRunsSetHarnessSessionIdMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsUpdateRuntimeStateMock: vi.fn().mockResolvedValue({ updated: true }),
+  taskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   syncRuntimeGitAuthorMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
@@ -101,14 +104,14 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
-      done: cloudJobsDoneMock,
-      recordEvent: cloudJobsRecordEventMock,
-      stampMilestone: cloudJobsStampMilestoneMock,
-      setHarnessSessionId: cloudJobsSetHarnessSessionIdMock,
-      syncActingUserId: cloudJobsSyncActingUserIdMock,
-      update: cloudJobsUpdateMock,
-      updateRuntimeState: cloudJobsUpdateRuntimeStateMock,
+    taskRuns: {
+      done: taskRunsDoneMock,
+      recordEvent: taskRunsRecordEventMock,
+      stampMilestone: taskRunsStampMilestoneMock,
+      setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
+      syncActingUserId: taskRunsSyncActingUserIdMock,
+      update: taskRunsUpdateMock,
+      updateRuntimeState: taskRunsUpdateRuntimeStateMock,
     },
     linearInstallations: {
       drainLinearMessages: vi.fn(),
@@ -200,6 +203,8 @@ vi.mock('../../lib/sync-runtime-git-author', () => ({
   syncRuntimeGitAuthor: syncRuntimeGitAuthorMock,
 }));
 
+import { TaskPayloadKind } from '@roomote/types';
+
 import { runTask } from '../run-task';
 
 function baseRunTaskArgs() {
@@ -255,10 +260,10 @@ describe('Zero integration runtime gating', () => {
   it('excludes the zero skill and skips CLI install when Zero is not org-enabled', async () => {
     await runTask({
       ...baseRunTaskArgs(),
-      cloudJob: {
+      taskRun: {
         id: 201,
         taskId: 'task-zero-disabled',
-        type: 'standard.task',
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,
@@ -279,10 +284,10 @@ describe('Zero integration runtime gating', () => {
 
     await runTask({
       ...baseRunTaskArgs(),
-      cloudJob: {
+      taskRun: {
         id: 202,
         taskId: 'task-zero-enabled',
-        type: 'standard.task',
+        payloadKind: TaskPayloadKind.StandardTask,
         harness: 'opencode-server',
         payload: {},
         result: null,

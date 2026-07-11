@@ -8,7 +8,7 @@ type PollingLogger = Pick<Console, PollingLogLevel>;
 
 interface PollingTransportContextOptions {
   stage: string;
-  cloudJobId: number;
+  runId: number;
   sessionId: string;
   sdkMethod: string;
   failurePoint?: string;
@@ -31,7 +31,7 @@ interface RunPollingSdkCallOptions<T> extends PollingTransportContextOptions {
 
 function buildPollingTransportErrorContext({
   stage,
-  cloudJobId,
+  runId,
   sessionId,
   sdkMethod,
   failurePoint,
@@ -47,7 +47,7 @@ function buildPollingTransportErrorContext({
 
     return {
       stage,
-      cloudJobId,
+      runId,
       harnessSessionId: sessionId,
       sdkMethod,
       ...(failurePoint ? { failurePoint } : {}),
@@ -62,7 +62,7 @@ function buildPollingTransportErrorContext({
   } catch {
     return {
       stage,
-      cloudJobId,
+      runId,
       harnessSessionId: sessionId,
       sdkMethod,
       ...(failurePoint ? { failurePoint } : {}),

@@ -1,5 +1,5 @@
 import {
-  CloudTaskStatus,
+  RunStatus,
   environmentConfigSchema,
   type EnvironmentConfig,
   LEGACY_SANDBOX_GUI_NAMED_PORT_NAME,
@@ -7,8 +7,8 @@ import {
   slugToPortKey,
 } from '@roomote/types';
 import {
-  type CloudJob,
-  cloudJobs,
+  type TaskRun,
+  taskRuns,
   desc,
   environments,
   eq,
@@ -39,11 +39,11 @@ export interface ResolvedRequest {
    * Used with 'redirect_to_direct' status after auth validation.
    */
   directUrl?: string;
-  cloudJob: CloudJob | null;
+  taskRun: TaskRun | null;
   requiresAuth: boolean;
   /**
    * Whether this specific port has an auth-proxy instance in front of it.
-   * True for EDITOR port (always) or ports listed in cloudJob.proxyPorts.
+   * True for EDITOR port (always) or ports listed in taskRun.proxyPorts.
    * When true, preview_auth cookie is forwarded for defense-in-depth validation.
    * When false, preview_auth cookie is stripped to prevent leakage to app backends.
    */
@@ -72,13 +72,13 @@ export interface ResolvedRequest {
   /**
    * Value for the auth bypass header. When a request includes
    * the bypass header with this value, auth is skipped.
-   * Populated from `cloudJob.authBypassValue`.
+   * Populated from `taskRun.authBypassValue`.
    */
   authBypassHeaderValue?: string;
   /**
    * Custom header name for the auth bypass mechanism.
    * Defaults to `x-bypass-roomote-auth` when not set.
-   * Populated from `cloudJob.authBypassHeaderName`.
+   * Populated from `taskRun.authBypassHeaderName`.
    */
   authBypassHeaderName?: string;
   requestedPortKey?: string;
@@ -120,9 +120,9 @@ function resolveRuntimeEnvironmentConfig(
  * with auth context resolution to minimize DB queries.
  *
  * Resolution logic:
- * 1. Active job - Returns sandbox URL with auth requirements
- * 2. Completed job with taskId - Redirects to task ID URL (stable URL across resumes)
- * 3. Completed job without taskId - Finds most recent resumed job, redirects there
+ * 1. Active task run - Returns sandbox URL with auth requirements
+ * 2. Completed task run with taskId - Redirects to task ID URL (stable URL across resumes)
+ * 3. Completed task run without taskId - Finds most recent resumed run, redirects there
  * 4. Nothing found - Returns 'gone' status
  */
 export async function resolveRequest(
@@ -134,7 +134,7 @@ export async function resolveRequest(
   if (requestedPortKey === LEGACY_SANDBOX_GUI_NAMED_PORT_NAME) {
     return {
       status: 'not_found',
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: true,
       hasAuthProxy: false,
       requestedPortKey,
@@ -143,38 +143,38 @@ export async function resolveRequest(
   }
 
   try {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.taskId, identifier.taskId),
-      orderBy: desc(cloudJobs.createdAt),
+    const taskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.taskId, identifier.taskId),
+      orderBy: desc(taskRuns.createdAt),
     });
 
     const identifierLog = { taskId: escapeForLog(identifier.taskId) };
 
-    if (!cloudJob) {
-      logger.info(identifierLog, 'Job not found');
+    if (!taskRun) {
+      logger.info(identifierLog, 'Run not found');
 
       return {
         status: 'not_found',
-        cloudJob: null,
+        taskRun: null,
         requiresAuth: true,
         hasAuthProxy: false,
         requestedPortKey,
       };
     }
 
-    const taskId = cloudJob.taskId ?? undefined;
+    const taskId = taskRun.taskId ?? undefined;
 
     // Check port configuration for auth requirements and proxied status
-    const portConfig = await checkPortConfig(cloudJob, portName);
+    const portConfig = await checkPortConfig(taskRun, portName);
 
     // Handle unproxied ports: require auth, then redirect to direct sandbox URL
     if (!portConfig.isProxied) {
       // Only redirect if sandbox is active
       if (
-        cloudJob.status === CloudTaskStatus.Running ||
-        cloudJob.status === CloudTaskStatus.Idle
+        taskRun.status === RunStatus.Running ||
+        taskRun.status === RunStatus.Idle
       ) {
-        const directUrl = getSandboxUrl(cloudJob, portName);
+        const directUrl = getSandboxUrl(taskRun, portName);
 
         if (!directUrl) {
           logger.info(
@@ -187,8 +187,8 @@ export async function resolveRequest(
 
           return {
             status: 'not_found',
-            error: `Port "${portName}" not found for job`,
-            cloudJob,
+            error: `Port "${portName}" not found for run`,
+            taskRun,
             taskId,
             requiresAuth: true,
             hasAuthProxy: false,
@@ -207,7 +207,7 @@ export async function resolveRequest(
         return {
           status: 'redirect_to_direct',
           directUrl,
-          cloudJob,
+          taskRun,
           taskId,
           requiresAuth: portConfig.requiresAuth,
           hasAuthProxy: false,
@@ -221,7 +221,7 @@ export async function resolveRequest(
         {
           ...identifierLog,
           portName: escapeForLog(portName),
-          status: cloudJob.status,
+          status: taskRun.status,
         },
         'Unproxied port requested but sandbox not active',
       );
@@ -229,7 +229,7 @@ export async function resolveRequest(
       return {
         status: 'not_found',
         error: `Port "${portName}" is not available through preview-proxy.`,
-        cloudJob,
+        taskRun,
         taskId,
         requiresAuth: true,
         hasAuthProxy: false,
@@ -237,29 +237,29 @@ export async function resolveRequest(
       };
     }
 
-    // If job is active, return the sandbox URL with auth context
+    // If run is active, return the sandbox URL with auth context
     if (
-      cloudJob.status === CloudTaskStatus.Running ||
-      cloudJob.status === CloudTaskStatus.Idle
+      taskRun.status === RunStatus.Running ||
+      taskRun.status === RunStatus.Idle
     ) {
-      const sandboxUrl = getSandboxUrl(cloudJob, portName);
+      const sandboxUrl = getSandboxUrl(taskRun, portName);
 
       if (!sandboxUrl) {
         logger.info(
           {
             ...identifierLog,
             portName: escapeForLog(portName),
-            availablePorts: cloudJob.machineDomains
-              ? Object.keys(cloudJob.machineDomains)
+            availablePorts: taskRun.machineDomains
+              ? Object.keys(taskRun.machineDomains)
               : [],
           },
-          'Port not found for job',
+          'Port not found for run',
         );
 
         return {
           status: 'not_found',
-          error: `Port "${portName}" not found for job`,
-          cloudJob,
+          error: `Port "${portName}" not found for run`,
+          taskRun,
           taskId,
           requiresAuth: true,
           hasAuthProxy: false,
@@ -270,68 +270,68 @@ export async function resolveRequest(
       // Per-port membership check: EDITOR always has auth-proxy, and
       // any port explicitly listed in proxyPorts has one.
       const portKey = slugToPortKey(portName);
-      const proxyPorts = cloudJob.proxyPorts as Record<string, unknown> | null;
+      const proxyPorts = taskRun.proxyPorts as Record<string, unknown> | null;
       const hasAuthProxy =
         portKey === 'EDITOR' || (proxyPorts != null && portKey in proxyPorts);
 
       return {
         status: 'active',
         sandboxUrl,
-        cloudJob,
+        taskRun,
         taskId,
         requiresAuth: portConfig.requiresAuth,
         hasAuthProxy,
         wildcardPrefix: portConfig.wildcardPrefix,
         authBypassPaths: portConfig.authBypassPaths,
-        authBypassHeaderValue: cloudJob.authBypassValue ?? undefined,
-        authBypassHeaderName: cloudJob.authBypassHeaderName ?? undefined,
+        authBypassHeaderValue: taskRun.authBypassValue ?? undefined,
+        authBypassHeaderName: taskRun.authBypassHeaderName ?? undefined,
         requestedPortKey,
       };
     }
 
-    // Job is completed/canceled - handle redirect logic
+    // Run is completed/canceled - handle redirect logic
     if (
-      cloudJob.status === CloudTaskStatus.Completed ||
-      cloudJob.status === CloudTaskStatus.Canceled
+      taskRun.status === RunStatus.Completed ||
+      taskRun.status === RunStatus.Canceled
     ) {
       logger.info(
-        { ...identifierLog, status: cloudJob.status },
-        'Job completed or canceled',
+        { ...identifierLog, status: taskRun.status },
+        'Run completed or canceled',
       );
 
-      // taskId persists across job resumes, so no redirect is needed.
+      // taskId persists across run resumes, so no redirect is needed.
 
-      // No active job found - check if this job can be auto-resumed
+      // No active task run found - check if this run can be auto-resumed
       const canAutoResume =
-        cloudJob.snapshotId != null &&
-        isSnapshotValid(cloudJob.snapshotCreatedAt);
+        taskRun.snapshotId != null &&
+        isSnapshotValid(taskRun.snapshotCreatedAt);
 
       if (canAutoResume) {
         logger.info(
           {
             ...identifierLog,
-            snapshotId: cloudJob.snapshotId,
-            snapshotCreatedAt: cloudJob.snapshotCreatedAt,
+            snapshotId: taskRun.snapshotId,
+            snapshotCreatedAt: taskRun.snapshotCreatedAt,
           },
-          'Job is resumable from snapshot',
+          'Run is resumable from snapshot',
         );
 
         return {
           status: 'resumable',
-          cloudJob,
+          taskRun,
           taskId,
-          snapshotId: cloudJob.snapshotId!,
-          snapshotCreatedAt: cloudJob.snapshotCreatedAt!,
+          snapshotId: taskRun.snapshotId!,
+          snapshotCreatedAt: taskRun.snapshotCreatedAt!,
           requiresAuth: true,
           hasAuthProxy: false,
           requestedPortKey,
         };
       }
 
-      // No snapshot available - job is gone
+      // No snapshot available - run is gone
       return {
         status: 'gone',
-        cloudJob,
+        taskRun,
         taskId,
         requiresAuth: true,
         hasAuthProxy: false,
@@ -339,15 +339,15 @@ export async function resolveRequest(
       };
     }
 
-    // Job is in a non-active state (queued, processing, etc.)
+    // Run is in a non-active state (queued, processing, etc.)
     logger.info(
-      { ...identifierLog, status: cloudJob.status },
+      { ...identifierLog, status: taskRun.status },
       'Sandbox unavailable',
     );
 
     return {
       status: 'sandbox_unavailable',
-      cloudJob,
+      taskRun,
       taskId,
       requiresAuth: true,
       hasAuthProxy: false,
@@ -362,7 +362,7 @@ export async function resolveRequest(
     return {
       status: 'not_found',
       error: 'Internal error resolving sandbox',
-      cloudJob: null,
+      taskRun: null,
       requiresAuth: true,
       hasAuthProxy: false,
       requestedPortKey,
@@ -385,11 +385,11 @@ function uniqueNonEmptyPaths(paths: Array<string | undefined>): string[] {
 }
 
 /**
- * Check if a port requires authentication for a cloud job.
+ * Check if a port requires authentication for a task run.
  * Also returns whether the port is proxied (for cookie forwarding decision).
  */
 async function checkPortConfig(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   portName: string,
 ): Promise<PortAuthResult> {
   const portKey = slugToPortKey(portName);
@@ -402,7 +402,7 @@ async function checkPortConfig(
     return { requiresAuth: false, isProxied: true, wildcardPrefix: false };
   }
 
-  const environmentId = (cloudJob.payload as { environmentId?: string } | null)
+  const environmentId = (taskRun.payload as { environmentId?: string } | null)
     ?.environmentId;
 
   if (!environmentId) {
@@ -441,10 +441,10 @@ async function checkPortConfig(
 }
 
 /**
- * Extracts the sandbox URL for a specific port from the cloud job.
+ * Extracts the sandbox URL for a specific port from the task run.
  */
 function getSandboxUrl(
-  cloudJob: {
+  taskRun: {
     machineDomains: Record<string, string> | null;
     machineDomain?: string | null;
   },
@@ -454,13 +454,13 @@ function getSandboxUrl(
   // URL slugs are lowercase with hyphens; storage keys are uppercase with underscores
   const portKey = slugToPortKey(portName);
 
-  if (cloudJob.machineDomains && typeof cloudJob.machineDomains === 'object') {
-    const url = cloudJob.machineDomains[portKey];
+  if (taskRun.machineDomains && typeof taskRun.machineDomains === 'object') {
+    const url = taskRun.machineDomains[portKey];
     if (url) return url;
   }
 
-  if (portName === 'default' && cloudJob.machineDomain) {
-    return cloudJob.machineDomain;
+  if (portName === 'default' && taskRun.machineDomain) {
+    return taskRun.machineDomain;
   }
 
   return null;

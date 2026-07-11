@@ -125,7 +125,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
-      cloudJobId: 1,
+      runId: 1,
       artifactType: 'general',
       path: 'plans/test.md',
       version: 1,
@@ -157,7 +157,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
-      cloudJobId: 1,
+      runId: 1,
       artifactType: 'general',
       path: 'videos/demo.webm',
       version: 1,
@@ -200,7 +200,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
-      cloudJobId: 1,
+      runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
       version: 1,
@@ -251,7 +251,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
-      cloudJobId: 1,
+      runId: 1,
       artifactType: 'general',
       path: 'screenshots/homepage.png',
       version: 1,
@@ -290,7 +290,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       mockGetUploadedArtifactById.mockResolvedValueOnce({
         id: 'art-1',
         taskId: 'task-1',
-        cloudJobId: 1,
+        runId: 1,
         artifactType: 'general',
         path: 'screenshots/test.img',
         version: 1,
@@ -331,7 +331,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     mockGetUploadedArtifactById.mockResolvedValueOnce({
       id: 'art-1',
       taskId: 'task-1',
-      cloudJobId: 1,
+      runId: 1,
       artifactType: 'general',
       path: 'docs/report.pdf',
       version: 1,

@@ -5,7 +5,7 @@ describe('StandardTask CI guidance ownership', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
       repo: 'Roomote/example-app',
-      cloudJobUrl: 'https://example.com/task/123',
+      taskRunUrl: 'https://example.com/task/123',
     });
 
     expect(harnessInstructions).not.toContain('<post_push_ci_policy>');

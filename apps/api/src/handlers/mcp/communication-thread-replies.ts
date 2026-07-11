@@ -19,7 +19,7 @@ import {
   buildCommunicationThreadReplyFooterTextBestEffort,
   deliverManagedThreadReplyFooter,
   getCommunicationReplyImages,
-  type CommunicationReplyCloudJob,
+  type CommunicationReplyTaskRun,
   type ParsedThreadReplyBody,
 } from './communication-thread-reply-shared';
 
@@ -79,20 +79,20 @@ async function createTelegramCommunicationProvider(): Promise<TelegramCommunicat
 }
 
 async function sendTeamsThreadReply(params: {
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<Response> {
   const channelId = getCommunicationChannelFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const serviceUrl = getCommunicationServiceUrlFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const threadId = getCommunicationThreadIdFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const messageId = getCommunicationMessageIdFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
 
   if (!channelId || !serviceUrl) {
@@ -116,7 +116,7 @@ async function sendTeamsThreadReply(params: {
   }
 
   const { images, errorResponse } = await getCommunicationReplyImages({
-    cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
+    taskRun: { id: params.taskRun.id, taskId: params.taskRun.taskId },
     parsedBody: params.parsedBody,
   });
   if (errorResponse) {
@@ -136,7 +136,7 @@ async function sendTeamsThreadReply(params: {
   const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
     provider: 'teams',
     providerLabel: 'Teams',
-    cloudJob: params.cloudJob,
+    taskRun: params.taskRun,
     logContext: LOG_CONTEXT,
   });
 
@@ -171,7 +171,7 @@ async function sendTeamsThreadReply(params: {
         channelId,
         footerStateThreadId,
         lockKey: `${TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX}${channelId}:${footerStateThreadId}`,
-        cloudJobId: params.cloudJob.id,
+        runId: params.taskRun.id,
         logContext: LOG_CONTEXT,
         postReplyWithFooter: async () => ({
           ...(await postTeamsReply()),
@@ -214,17 +214,17 @@ async function sendTeamsThreadReply(params: {
 }
 
 async function sendTelegramThreadReply(params: {
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<Response> {
   const channelId = getCommunicationChannelFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const threadId = getCommunicationThreadIdFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const messageId = getCommunicationMessageIdFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
 
   if (!channelId) {
@@ -248,7 +248,7 @@ async function sendTelegramThreadReply(params: {
   }
 
   const { images, errorResponse } = await getCommunicationReplyImages({
-    cloudJob: { id: params.cloudJob.id, taskId: params.cloudJob.taskId },
+    taskRun: { id: params.taskRun.id, taskId: params.taskRun.taskId },
     parsedBody: params.parsedBody,
   });
   if (errorResponse) {
@@ -272,14 +272,14 @@ async function sendTelegramThreadReply(params: {
   try {
     const latestInboundMessageId = await getLatestInboundMessageId(
       'telegram',
-      params.cloudJob.id,
+      params.taskRun.id,
     );
     if (latestInboundMessageId) {
       replyToMessageId = latestInboundMessageId;
     }
   } catch (error) {
     console.error(
-      `[${LOG_CONTEXT}] Failed to read latest inbound Telegram message id for cloud job ${params.cloudJob.id}: ${
+      `[${LOG_CONTEXT}] Failed to read latest inbound Telegram message id for task run ${params.taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -306,7 +306,7 @@ async function sendTelegramThreadReply(params: {
 
     await postTelegramThreadReplyFooterBestEffort({
       provider,
-      cloudJob: params.cloudJob,
+      taskRun: params.taskRun,
       channelId,
       threadId,
     });
@@ -320,11 +320,11 @@ async function sendTelegramThreadReply(params: {
 }
 
 async function addTelegramReaction(params: {
-  cloudJob: { id: number; payload: unknown };
+  taskRun: { id: number; payload: unknown };
   parsedBody: { channel: string; messageTs: string; name: string };
 }): Promise<Response> {
   const jobChannelId = getCommunicationChannelFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const requestedChannelId = params.parsedBody.channel.replace(/^#/, '');
 
@@ -385,11 +385,11 @@ async function addTelegramReaction(params: {
 }
 
 async function addTeamsReaction(params: {
-  cloudJob: { id: number; payload: unknown };
+  taskRun: { id: number; payload: unknown };
   parsedBody: { channel: string; messageTs: string; name: string };
 }): Promise<Response> {
   const jobChannelId = getCommunicationChannelFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const requestedChannelId = params.parsedBody.channel.replace(/^#/, '');
 
@@ -414,10 +414,10 @@ async function addTeamsReaction(params: {
   }
 
   const serviceUrl = getCommunicationServiceUrlFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
   const threadId = getCommunicationThreadIdFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
 
   try {
@@ -460,14 +460,14 @@ async function addTeamsReaction(params: {
 
 async function postTelegramThreadReplyFooterBestEffort(params: {
   provider: TelegramCommunicationProvider;
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   channelId: string;
   threadId: string | null;
 }): Promise<void> {
   const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
     provider: 'telegram',
     providerLabel: 'Telegram',
-    cloudJob: params.cloudJob,
+    taskRun: params.taskRun,
     logContext: LOG_CONTEXT,
   });
 
@@ -484,7 +484,7 @@ async function postTelegramThreadReplyFooterBestEffort(params: {
       channelId: params.channelId,
       footerStateThreadId,
       lockKey: `${TELEGRAM_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channelId}:${footerStateThreadId}`,
-      cloudJobId: params.cloudJob.id,
+      runId: params.taskRun.id,
       logContext: LOG_CONTEXT,
       postReplyWithFooter: async () => ({
         ...(await params.provider.postMessage({
@@ -504,7 +504,7 @@ async function postTelegramThreadReplyFooterBestEffort(params: {
     });
   } catch (error) {
     console.error(
-      `[${LOG_CONTEXT}] Failed to post Telegram reply footer for cloud job ${params.cloudJob.id}: ${
+      `[${LOG_CONTEXT}] Failed to post Telegram reply footer for task run ${params.taskRun.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -512,11 +512,11 @@ async function postTelegramThreadReplyFooterBestEffort(params: {
 }
 
 export async function maybeSendCommunicationThreadReply(params: {
-  cloudJob: CommunicationReplyCloudJob;
+  taskRun: CommunicationReplyTaskRun;
   parsedBody: ParsedThreadReplyBody;
 }): Promise<Response | null> {
   const provider = getCommunicationProviderFromTaskPayload(
-    params.cloudJob.payload,
+    params.taskRun.payload,
   );
 
   switch (provider) {
@@ -530,10 +530,10 @@ export async function maybeSendCommunicationThreadReply(params: {
 }
 
 export async function maybeAddCommunicationReaction(params: {
-  cloudJob: { id: number; payload: unknown };
+  taskRun: { id: number; payload: unknown };
   parsedBody: { channel: string; messageTs: string; name: string };
 }): Promise<Response | null> {
-  switch (getCommunicationProviderFromTaskPayload(params.cloudJob.payload)) {
+  switch (getCommunicationProviderFromTaskPayload(params.taskRun.payload)) {
     case 'teams':
       return addTeamsReaction(params);
     case 'telegram':

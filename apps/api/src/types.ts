@@ -1,4 +1,4 @@
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 export type WebhookResponse = {
   status: 'ok' | 'error';
@@ -13,6 +13,6 @@ export type CiE2eAuthContext = {
 };
 
 export type Variables = {
-  authContext: AuthTokenContext | JobTokenContext | undefined;
+  authContext: AuthTokenContext | RunTokenContext | undefined;
   ciE2eAuth: CiE2eAuthContext | undefined;
 };

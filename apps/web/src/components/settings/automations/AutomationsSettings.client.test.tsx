@@ -6,7 +6,7 @@ import {
 
 import {
   buildAutomationSettingsSaveInput,
-  buildSaveStateForAgent,
+  buildSaveStateForAutomation,
   mergeServerStatePreservingDirtySections,
   type FormState,
 } from './formState';
@@ -61,9 +61,6 @@ const baseFormState: FormState = {
   codeQualityAuditorSlackChannel: '',
   ciFailureTriageFrequency: 'off' as const,
   ciFailureTriageSlackChannel: '',
-  coachFrequency: 'off' as const,
-  coachSlackChannel: '',
-  coachInstructions: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
   suggesterInstructions: '',
@@ -174,33 +171,33 @@ describe('Automations selection helpers', () => {
   it('builds a save state that only applies the selected agent changes', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
-      coachInstructions: 'Unsaved coach edit',
+      announcerFrequency: 'daily',
+      announcerInstructions: 'Unsaved announcer edit',
       suggesterInstructions: 'Only save this',
     };
 
     const currentSavedState: FormState = {
       ...baseFormState,
-      coachFrequency: 'off',
-      coachInstructions: '',
+      announcerFrequency: 'off',
+      announcerInstructions: '',
       suggesterInstructions: '',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'suggester',
     );
 
     expect(saveState.suggesterInstructions).toBe('Only save this');
-    expect(saveState.coachFrequency).toBe('off');
-    expect(saveState.coachInstructions).toBe('');
+    expect(saveState.announcerFrequency).toBe('off');
+    expect(saveState.announcerInstructions).toBe('');
   });
 
   it('builds a save state that keeps grouped suggester routing fields isolated to the suggester card', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
+      announcerFrequency: 'daily',
       suggesterRoutingMode: 'group_by_instructions',
       suggesterRoutingInstructions:
         'Incidents, alerts, and reliability ideas -> #eng-infra',
@@ -208,10 +205,10 @@ describe('Automations selection helpers', () => {
 
     const currentSavedState: FormState = {
       ...baseFormState,
-      coachFrequency: 'off',
+      announcerFrequency: 'off',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'suggester',
@@ -221,7 +218,7 @@ describe('Automations selection helpers', () => {
     expect(saveState.suggesterRoutingInstructions).toBe(
       'Incidents, alerts, and reliability ideas -> #eng-infra',
     );
-    expect(saveState.coachFrequency).toBe('off');
+    expect(saveState.announcerFrequency).toBe('off');
   });
 
   it('builds a save state that only applies the channel auto-start changes', () => {
@@ -244,7 +241,7 @@ describe('Automations selection helpers', () => {
       managerSlackChannel: '#managers',
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'channelAutoStart',
@@ -298,9 +295,9 @@ describe('Automations selection helpers', () => {
   it('builds an API save input from the merged agent save state', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      coachFrequency: 'daily',
-      coachSlackChannel: '  #coach  ',
-      coachInstructions: '  Help the team improve discovery.  ',
+      announcerFrequency: 'daily',
+      announcerSlackChannel: '  #announcements  ',
+      announcerInstructions: '  Keep the summary short.  ',
       managerSlackChannel: '  #managers  ',
       securityAuditorFrequency: 'daily',
       securityAuditorSlackChannel: '  #security  ',
@@ -318,15 +315,15 @@ describe('Automations selection helpers', () => {
     const saveInput = buildAutomationSettingsSaveInput(
       currentFormState,
       currentSavedState,
-      'coach',
+      'announcer',
     );
 
     expect(saveInput).toEqual(
       expect.objectContaining({
-        savingAgent: 'coach',
-        coachFrequency: 'daily',
-        coachSlackChannel: '#coach',
-        coachInstructions: 'Help the team improve discovery.',
+        savingAutomation: 'announcer',
+        announcerFrequency: 'daily',
+        announcerSlackChannel: '#announcements',
+        announcerInstructions: 'Keep the summary short.',
         managerSlackChannel: '#saved-managers',
         securityAuditorFrequency: 'off',
         securityAuditorSlackChannel: null,
@@ -439,7 +436,7 @@ describe('Automations selection helpers', () => {
       ],
     };
 
-    const saveState = buildSaveStateForAgent(
+    const saveState = buildSaveStateForAutomation(
       currentFormState,
       currentSavedState,
       'channelAutoStart',
@@ -466,15 +463,15 @@ describe('Automations selection helpers', () => {
       const currentFormState: FormState = {
         ...baseFormState,
         [automation.frequencyField]: 'daily',
-        coachFrequency: 'weekly',
+        announcerFrequency: 'weekly',
       };
 
       const currentSavedState: FormState = {
         ...baseFormState,
-        coachFrequency: 'off',
+        announcerFrequency: 'off',
       };
 
-      const saveState = buildSaveStateForAgent(
+      const saveState = buildSaveStateForAutomation(
         currentFormState,
         currentSavedState,
         automation.id,
@@ -490,7 +487,7 @@ describe('Automations selection helpers', () => {
         expect(saveState[otherAutomation.frequencyField]).toBe('off');
       }
 
-      expect(saveState.coachFrequency).toBe('off');
+      expect(saveState.announcerFrequency).toBe('off');
     },
   );
 

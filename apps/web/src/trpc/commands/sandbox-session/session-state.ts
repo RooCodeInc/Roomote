@@ -1,12 +1,12 @@
 import {
-  CloudTaskStatus,
-  CloudTaskType,
-  isBootingCloudTaskStatus,
-  isExitedCloudTaskStatus,
+  RunStatus,
+  TaskPayloadKind,
+  isBootingRunStatus,
+  isExitedRunStatus,
 } from '@roomote/types';
 
-import type { CloudJobDetail } from '@/lib/server';
-import { getCloudJobError } from '@/lib/cloud-job-errors';
+import type { TaskRunDetail } from '@/lib/server';
+import { getTaskRunError } from '@/lib/task-run-errors';
 
 type SessionState =
   | 'interactive'
@@ -23,15 +23,15 @@ type SessionState =
 const HARNESS_MESSAGE_TIMEOUT_MS = 7_000;
 
 export function getSessionState(
-  cloudJob: CloudJobDetail,
+  taskRun: TaskRunDetail,
   {
     hasMessages,
     hasHarnessMessages,
     now = Date.now(),
   }: { hasMessages: boolean; hasHarnessMessages: boolean; now?: number },
 ): SessionState {
-  const cloudJobStatus = cloudJob.status;
-  const cloudJobError = getCloudJobError(cloudJob);
+  const taskRunStatus = taskRun.status;
+  const taskRunError = getTaskRunError(taskRun);
 
   // If the job exited before the task ever produced output, keep showing the
   // startup screen so the user can see boot logs and the error. We check
@@ -39,18 +39,19 @@ export function getSessionState(
   // before setup finishes.
   if (
     !hasMessages &&
-    (cloudJobStatus === CloudTaskStatus.Failed ||
-      (cloudJobStatus === CloudTaskStatus.Canceled && !!cloudJobError))
+    (taskRunStatus === RunStatus.Failed ||
+      (taskRunStatus === RunStatus.Canceled && !!taskRunError))
   ) {
     return 'boot-failed';
   }
 
-  if (isExitedCloudTaskStatus(cloudJobStatus)) {
+  if (isExitedRunStatus(taskRunStatus)) {
     return 'historical';
   }
 
-  if (isBootingCloudTaskStatus(cloudJobStatus)) {
-    if (cloudJob.type === CloudTaskType.SnapshotResume) {
+  if (isBootingRunStatus(taskRunStatus)) {
+    // Runtime dispatch: payloadKind is the run-level resume signal.
+    if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
       return 'resuming';
     }
     return 'booting';
@@ -67,11 +68,11 @@ export function getSessionState(
   // HARNESS_MESSAGE_TIMEOUT_MS.
   if (!hasHarnessMessages) {
     const timedOut =
-      cloudJob.startedAt != null &&
-      now - cloudJob.startedAt.getTime() >= HARNESS_MESSAGE_TIMEOUT_MS;
+      taskRun.startedAt != null &&
+      now - taskRun.startedAt.getTime() >= HARNESS_MESSAGE_TIMEOUT_MS;
 
     if (!timedOut) {
-      if (cloudJob.type === CloudTaskType.SnapshotResume) {
+      if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
         return 'resuming';
       }
 
@@ -97,16 +98,16 @@ export function isWaitingForFirstHarnessMessage({
 
 export function shouldPollForFirstHarnessMessage({
   sessionState,
-  cloudJobStatus,
+  taskRunStatus,
   hasHarnessMessages,
   hasInitialPrompt,
 }: {
   sessionState: SessionState;
-  cloudJobStatus: CloudTaskStatus;
+  taskRunStatus: RunStatus;
   hasHarnessMessages: boolean;
   hasInitialPrompt: boolean;
 }): boolean {
-  if (hasHarnessMessages || isExitedCloudTaskStatus(cloudJobStatus)) {
+  if (hasHarnessMessages || isExitedRunStatus(taskRunStatus)) {
     return false;
   }
 

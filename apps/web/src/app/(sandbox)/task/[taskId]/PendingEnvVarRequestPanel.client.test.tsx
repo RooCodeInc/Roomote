@@ -216,7 +216,7 @@ describe('PendingEnvVarRequestPanel', () => {
     mutateAsyncMock.mockResolvedValue({
       names: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
       canReload: true,
-      cloudJobId: 123,
+      runId: 123,
     });
     reloadDeploymentEnvVarsMock.mockResolvedValue({ success: true });
     sendPromptMock.mockResolvedValue({ success: true });
@@ -363,7 +363,7 @@ describe('PendingEnvVarRequestPanel', () => {
     mutateAsyncMock.mockResolvedValue({
       names: ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'],
       canReload: false,
-      cloudJobId: 123,
+      runId: 123,
     });
 
     renderPanel();

@@ -1,21 +1,20 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { resolveUserIdForCloudJob } from '@roomote/cloud-agents/server';
 import {
   and,
-  cloudJobs,
   db,
   eq,
   isNull,
   mcpConnections,
+  taskRuns,
 } from '@roomote/db/server';
 import { isMcpConnectionVercelConfig } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
 import {
-  isJobTokenContext,
+  isRunTokenContext,
   McpProxyError,
   type McpAuthContext,
 } from '../proxy-utils';
@@ -42,41 +41,34 @@ async function resolveVercelMcpAuth(
     );
   }
 
-  if (isJobTokenContext(authContext)) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      columns: { id: true, userId: true },
-      where: eq(cloudJobs.id, authContext.cloudJobId),
+  if (isRunTokenContext(authContext)) {
+    const taskRun = await db.query.taskRuns.findFirst({
+      columns: { id: true },
+      where: eq(taskRuns.id, authContext.runId),
     });
 
-    if (!cloudJob) {
-      throw new McpProxyError(404, 'Cloud job not found for this MCP token');
+    if (!taskRun) {
+      throw new McpProxyError(404, 'Task run not found for this MCP token');
     }
 
-    const resolvedUserId = await resolveUserIdForCloudJob(cloudJob);
-    if (!resolvedUserId) {
-      throw new McpProxyError(
-        403,
-        'MCP proxy requires a cloud job associated with a real user',
-      );
-    }
-
-    if (resolvedUserId !== authContext.userId) {
-      throw new McpProxyError(
-        403,
-        'MCP token user does not match cloud job user',
-      );
-    }
+    // No principal equality check: the run-scoped token IS the authorization
+    // (only this run's sandbox holds it), and Vercel credentials come from a
+    // deployment-scoped connection, so the token's userId plays no role in
+    // credential selection. The token's userId is mint-time attribution while
+    // task_runs.actingUserId is current-steering attribution — they
+    // legitimately diverge once a web steer or follow-up switches the acting
+    // user mid-run.
 
     return {
       userId: authContext.userId,
-      tokenType: 'cj',
-      cloudJobId: authContext.cloudJobId,
+      tokenType: 'run',
+      runId: authContext.runId,
     };
   }
 
   throw new McpProxyError(
     403,
-    'Vercel MCP requires a cloud job token for server-side credential access',
+    'Vercel MCP requires a task run token for server-side credential access',
   );
 }
 

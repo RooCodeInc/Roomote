@@ -1,55 +1,125 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  ROOMOTE_CREATOR_FILTER_VALUE,
   buildCreatorFilterValue,
+  formatAutomationAttributionLabel,
+  formatAutomationLabel,
   parseCreatorFilterValue,
 } from './task-creator-filter';
 
 describe('task creator filter helpers', () => {
-  it('round-trips the Roomote creator filter value', () => {
+  it('round-trips automation creator filter values', () => {
     const value = buildCreatorFilterValue({
-      effectiveAuthorKind: 'roomote',
-      userId: null,
-      attributionKind: 'automatic',
-      attributionSourceKind: null,
-      attributionSourceExternalId: null,
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'pr_review',
+      actorExternalId: null,
     });
 
-    expect(value).toBe(ROOMOTE_CREATOR_FILTER_VALUE);
+    expect(value).toBe('automation:pr_review');
     expect(parseCreatorFilterValue(value ?? '')).toEqual({
-      kind: 'roomote',
+      kind: 'automation',
+      key: 'pr_review',
     });
   });
 
-  it('round-trips unlinked creator filter values', () => {
-    const value = buildCreatorFilterValue({
-      effectiveAuthorKind: 'human',
-      userId: null,
-      attributionKind: 'unlinked_user',
-      attributionSourceKind: 'slack',
-      attributionSourceExternalId: 'U123',
-    });
-
-    expect(value).toBe('unlinked:slack:U123');
-    expect(parseCreatorFilterValue(value ?? '')).toEqual({
-      kind: 'unlinked_user',
-      sourceKind: 'slack',
-      sourceExternalId: 'U123',
-    });
+  it('returns null for automation initiators without a key', () => {
+    expect(
+      buildCreatorFilterValue({
+        initiatorKind: 'automation',
+        initiatorUserId: null,
+        initiatorAutomation: null,
+        actorExternalId: null,
+      }),
+    ).toBeNull();
   });
 
-  it('treats matched user ids as opaque filter values', () => {
-    expect(parseCreatorFilterValue('user_123')).toEqual({
-      kind: 'matched_user',
+  it('uses the plain user id for linked human initiators', () => {
+    const value = buildCreatorFilterValue({
+      initiatorKind: 'user',
+      initiatorUserId: 'user_123',
+      initiatorAutomation: null,
+      actorExternalId: null,
+    });
+
+    expect(value).toBe('user_123');
+    expect(parseCreatorFilterValue(value ?? '')).toEqual({
+      kind: 'user',
       userId: 'user_123',
     });
   });
 
-  it('falls back to the opaque matched-user path for malformed unlinked values', () => {
-    expect(parseCreatorFilterValue('unlinked:slack:%E0%A4%A')).toEqual({
-      kind: 'matched_user',
-      userId: 'unlinked:slack:%E0%A4%A',
+  it('round-trips external actor filter values', () => {
+    const value = buildCreatorFilterValue({
+      initiatorKind: 'user',
+      initiatorUserId: null,
+      initiatorAutomation: null,
+      actorExternalId: 'slack:U123',
     });
+
+    expect(value).toBe(`external:${encodeURIComponent('slack:U123')}`);
+    expect(parseCreatorFilterValue(value ?? '')).toEqual({
+      kind: 'external',
+      externalId: 'slack:U123',
+    });
+  });
+
+  it('returns null when no initiator columns identify a creator', () => {
+    expect(
+      buildCreatorFilterValue({
+        initiatorKind: 'user',
+        initiatorUserId: null,
+        initiatorAutomation: null,
+        actorExternalId: null,
+      }),
+    ).toBeNull();
+  });
+
+  it('treats plain values as opaque user ids when parsing', () => {
+    expect(parseCreatorFilterValue('user_123')).toEqual({
+      kind: 'user',
+      userId: 'user_123',
+    });
+  });
+
+  it('falls back to the opaque user path for malformed external values', () => {
+    expect(parseCreatorFilterValue('external:%E0%A4%A')).toEqual({
+      kind: 'user',
+      userId: 'external:%E0%A4%A',
+    });
+  });
+
+  it('falls back to the opaque user path for empty automation keys', () => {
+    expect(parseCreatorFilterValue('automation:')).toEqual({
+      kind: 'user',
+      userId: 'automation:',
+    });
+  });
+});
+
+describe('formatAutomationLabel', () => {
+  it('title-cases snake_case automation keys', () => {
+    expect(formatAutomationLabel('conflict_resolver')).toBe(
+      'Conflict Resolver',
+    );
+  });
+
+  it('uppercases well-known acronyms', () => {
+    expect(formatAutomationLabel('pr_review')).toBe('PR Review');
+    expect(formatAutomationLabel('mcp_recommendations')).toBe(
+      'MCP Recommendations',
+    );
+    expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
+  });
+});
+
+describe('formatAutomationAttributionLabel', () => {
+  it('attributes automation keys as "{name} Automation"', () => {
+    expect(formatAutomationAttributionLabel('review_code')).toBe(
+      'Review Code Automation',
+    );
+    expect(formatAutomationAttributionLabel('conflict_resolver')).toBe(
+      'Conflict Resolver Automation',
+    );
   });
 });

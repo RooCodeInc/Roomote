@@ -1,10 +1,8 @@
-import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { promisify } from 'node:util';
 
 import {
   buildPreviewProxyUrl,
-  CloudTaskType,
+  TaskPayloadKind,
   NonRetryableSpawnError,
   getPrimaryPortFromConfig,
   portNameToSlug,
@@ -13,13 +11,13 @@ import {
 } from '@roomote/types';
 import { Env, resolveAppEnv } from '@roomote/env';
 import {
-  cloudJobs,
+  taskRuns,
   db,
   eq,
   resolveEffectivePreviewRuntimeConfig,
-  type CloudJob,
+  type TaskRun,
 } from '@roomote/db/server';
-import { stampCloudJobMilestone } from '@roomote/sdk/server';
+import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
   buildDockerWorkerEnv,
   resolveAuthBypassHeaderName,
@@ -27,13 +25,24 @@ import {
 } from '@roomote/compute-providers';
 
 import {
-  getNamedPortsForCloudJob,
-  shouldEnableAuthBypassForCloudJob,
-  updateCloudJobMachine,
+  getNamedPortsForTaskRun,
+  shouldEnableAuthBypassForTaskRun,
+  updateTaskRunMachine,
 } from '../utils';
 import { resolveFromWorkspaceRoot } from '../repo-paths';
-
-const execFileAsync = promisify(execFile);
+import {
+  attachDockerEgressPolicy,
+  buildDockerWorkerLabels,
+  buildDockerWorkerResourceArgs,
+  docker,
+  getDockerTaskNetworkName,
+  getDockerWorkerContainerName,
+  isUnsupportedDockerDiskLimitError,
+  prepareDockerTaskNetwork,
+  processListIncludesDockerWorkerRun,
+  removeDockerSandboxResources,
+  type DockerWorkerEgressPolicy,
+} from './docker-sandbox-security';
 
 const DOCKER_CONTAINER_READY_COMMAND = 'sleep';
 const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
@@ -44,29 +53,37 @@ const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 
 export async function spawnDockerWorker(
-  cloudJob: CloudJob,
+  taskRun: TaskRun,
   authToken: string,
   config: {
     image: string;
     platform: string;
     network?: string;
     dockerTimeoutMs: number;
+    cpuLimit: number;
+    memoryLimit: string;
+    pidsLimit: number;
+    diskLimit: string;
+    allowUnboundedDisk: boolean;
+    logMaxSize: string;
+    logMaxFiles: number;
+    egressPolicy: DockerWorkerEgressPolicy;
     localWorkerReleasePath?: string;
     deploymentSlug?: string;
   },
 ): Promise<{ containerId: string }> {
   if (
-    cloudJob.type === CloudTaskType.SnapshotEnvironment ||
-    cloudJob.type === CloudTaskType.SnapshotResume
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
   ) {
     throw new NonRetryableSpawnError(
-      `Docker provider does not support ${cloudJob.type} jobs`,
+      `Docker provider does not support ${taskRun.payloadKind} task run kinds`,
     );
   }
 
   if (!config.localWorkerReleasePath) {
     throw new Error(
-      'Docker provider requires a local worker release archive. Run pnpm dev without --use-release.',
+      'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
 
@@ -77,9 +94,9 @@ export async function spawnDockerWorker(
   }
 
   const { namedPorts, environmentConfig } =
-    await getNamedPortsForCloudJob(cloudJob);
+    await getNamedPortsForTaskRun(taskRun);
 
-  const shouldEnableAuthBypass = shouldEnableAuthBypassForCloudJob({
+  const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
   });
@@ -99,16 +116,11 @@ export async function spawnDockerWorker(
       defaultPreviewDomains: Env.PREVIEW_DOMAINS,
     });
 
-  const containerName = `roomote-worker-${cloudJob.id}`;
-  const dockerNetwork = config.network?.trim();
-  const networkArgs = dockerNetwork
-    ? ['--network', dockerNetwork, '--network-alias', containerName]
-    : [];
-  const portArgs = dockerNetwork
+  const containerName = getDockerWorkerContainerName(taskRun.id);
+  const controlNetwork = config.network?.trim();
+  const portArgs = controlNetwork
     ? []
     : namedPorts.flatMap(({ port }) => ['-p', `127.0.0.1::${port}`]);
-
-  await docker(['rm', '-f', containerName], { allowFailure: true });
 
   // Auto-remove the container when its worker process exits so the cloned repo
   // and the worker's short-lived token files do not linger in a stopped
@@ -116,38 +128,85 @@ export async function spawnDockerWorker(
   const autoRemoveContainer = shouldAutoRemoveDockerWorkerContainer(
     resolveAppEnv(process.env),
   );
+  const dockerNetwork = await prepareDockerTaskNetwork({
+    taskRunId: taskRun.id,
+    controlNetwork,
+    egressPolicy: config.egressPolicy,
+    autoRemove: autoRemoveContainer,
+  });
 
   console.log(
-    `[spawnDockerWorker] Starting Docker worker container for job #${cloudJob.id} ${JSON.stringify(
+    `[spawnDockerWorker] Starting Docker worker container for task run #${taskRun.id} ${JSON.stringify(
       {
         image: config.image,
         platform: config.platform,
-        network: dockerNetwork,
+        controlNetwork,
+        taskNetwork: dockerNetwork,
+        egressPolicy: config.egressPolicy,
         ports: namedPorts.map((port) => `${port.name}:${port.port}`),
       },
     )}`,
   );
 
-  const containerId = (
-    await docker([
-      'run',
-      '-d',
-      ...(autoRemoveContainer ? ['--rm'] : []),
-      '--name',
-      containerName,
-      '--platform',
-      config.platform,
-      '--add-host',
-      'host.docker.internal:host-gateway',
-      ...networkArgs,
-      ...portArgs,
-      config.image,
-      DOCKER_CONTAINER_READY_COMMAND,
-      ...DOCKER_CONTAINER_READY_ARGS,
-    ])
-  ).trim();
+  let containerId = '';
+
+  const startContainer = async (diskLimit?: string): Promise<string> =>
+    (
+      await docker([
+        'run',
+        '-d',
+        ...(autoRemoveContainer ? ['--rm'] : []),
+        '--name',
+        containerName,
+        '--platform',
+        config.platform,
+        '--network',
+        dockerNetwork,
+        '--network-alias',
+        containerName,
+        ...buildDockerWorkerResourceArgs({ ...config, diskLimit }),
+        ...buildDockerWorkerLabels({
+          taskRunId: taskRun.id,
+          autoRemove: autoRemoveContainer,
+        }),
+        ...(!controlNetwork
+          ? ['--add-host', 'host.docker.internal:host-gateway']
+          : []),
+        ...portArgs,
+        config.image,
+        DOCKER_CONTAINER_READY_COMMAND,
+        ...DOCKER_CONTAINER_READY_ARGS,
+      ])
+    ).trim();
 
   try {
+    try {
+      containerId = await startContainer(config.diskLimit);
+    } catch (error) {
+      if (
+        !shouldRetryDockerWorkerWithoutDiskLimit({
+          diskLimit: config.diskLimit,
+          allowUnboundedDisk: config.allowUnboundedDisk,
+          error,
+        })
+      ) {
+        throw error;
+      }
+
+      console.warn(
+        `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
+      );
+      await docker(['rm', '-f', containerName], { allowFailure: true });
+      containerId = await startContainer();
+    }
+
+    await attachDockerEgressPolicy({
+      containerName,
+      egressPolicy: config.egressPolicy,
+      image: config.image,
+      platform: config.platform,
+      blockDockerGateway: Boolean(controlNetwork),
+    });
     await docker([
       'cp',
       `${resolveFromWorkspaceRoot('.docker/sandbox')}/.`,
@@ -174,23 +233,23 @@ export async function spawnDockerWorker(
     ]);
     await docker(['exec', containerName, 'bash', DOCKER_INSTALL_WORKER_SCRIPT]);
 
-    const portMap = dockerNetwork
+    const portMap = controlNetwork
       ? new Map<number, string>()
       : await getPublishedPorts(containerName, namedPorts);
     const sandboxServerUrl = buildDockerSandboxServerUrl({
-      network: dockerNetwork,
-      taskId: cloudJob.taskId,
+      network: controlNetwork ? dockerNetwork : undefined,
+      taskId: taskRun.taskId,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
     });
 
-    await updateCloudJobMachine({
-      cloudJob,
+    await updateTaskRunMachine({
+      taskRun,
       vendor: 'docker',
       machineId: containerName,
       namedPorts,
       domainFn: (port) =>
-        dockerNetwork
+        controlNetwork
           ? `http://${containerName}:${port}`
           : `http://127.0.0.1:${portMap.get(port) ?? String(port)}`,
       explicitPrimaryPortName: getPrimaryPortFromConfig(
@@ -202,8 +261,8 @@ export async function spawnDockerWorker(
       authBypassHeaderName,
     });
 
-    await stampCloudJobMilestone({
-      cloudJobId: cloudJob.id,
+    await stampTaskRunMilestone({
+      runId: taskRun.id,
       field: 'provisionReadyAt',
     });
 
@@ -211,7 +270,7 @@ export async function spawnDockerWorker(
       authToken,
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
       deploymentSlug: config.deploymentSlug,
-      environmentId: cloudJob.payload.environmentId,
+      environmentId: taskRun.payload.environmentId,
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
@@ -252,37 +311,58 @@ export async function spawnDockerWorker(
       'bash',
       '-lc',
       [
-        `worker run ${cloudJob.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
+        `worker run ${taskRun.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
         'status=$?',
         'kill 1',
         'exit "$status"',
       ].join('; '),
     ]);
 
-    await assertDetachedWorkerStarted(containerName, cloudJob.id);
+    await assertDetachedWorkerStarted(containerName, taskRun.id);
 
     console.log(
-      `[spawnDockerWorker] Docker worker launched for job #${cloudJob.id} ${JSON.stringify(
+      `[spawnDockerWorker] Docker worker launched for task run #${taskRun.id} ${JSON.stringify(
         { containerName, containerId },
       )}`,
     );
 
     return { containerId: containerName };
   } catch (error) {
-    if (resolveAppEnv(process.env) === 'development') {
+    if (resolveAppEnv(process.env) === 'development' && containerId) {
       console.error(
         `[spawnDockerWorker] Preserving failed Docker worker container ${containerName} for local debugging`,
       );
     } else {
-      await docker(['rm', '-f', containerName], { allowFailure: true });
+      await removeDockerSandboxResources({
+        containerName,
+        taskNetwork: getDockerTaskNetworkName(taskRun.id),
+      });
     }
     throw error;
   }
 }
 
+export function shouldRetryDockerWorkerWithoutDiskLimit(params: {
+  diskLimit?: string;
+  allowUnboundedDisk: boolean;
+  error: unknown;
+}): boolean {
+  if (!params.diskLimit || !isUnsupportedDockerDiskLimitError(params.error)) {
+    return false;
+  }
+
+  if (!params.allowUnboundedDisk) {
+    throw new NonRetryableSpawnError(
+      `Docker storage driver cannot enforce writable-layer limit ${params.diskLimit}. Refusing to start an unbounded task. Configure a quota-capable Docker data root or set DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true to explicitly accept the host disk-exhaustion risk.`,
+    );
+  }
+
+  return true;
+}
+
 async function assertDetachedWorkerStarted(
   containerName: string,
-  cloudJobId: number,
+  runId: number,
 ): Promise<void> {
   const deadline = Date.now() + DOCKER_WORKER_START_TIMEOUT_MS;
   let processList = '';
@@ -302,7 +382,7 @@ async function assertDetachedWorkerStarted(
 
       throw new Error(
         [
-          `Docker worker container exited before job #${cloudJobId} started.`,
+          `Docker worker container exited before task run #${runId} started.`,
           logs.trim() ? `Recent Docker logs:\n${logs.trim()}` : undefined,
         ]
           .filter(Boolean)
@@ -314,11 +394,11 @@ async function assertDetachedWorkerStarted(
       allowFailure: true,
     });
 
-    if (processListIncludesDockerWorkerRun(processList, cloudJobId)) {
+    if (processListIncludesDockerWorkerRun(processList, runId)) {
       return;
     }
 
-    if (await hasCloudJobStarted(cloudJobId)) {
+    if (await hasTaskRunStarted(runId)) {
       return;
     }
 
@@ -333,7 +413,7 @@ async function assertDetachedWorkerStarted(
 
   throw new Error(
     [
-      `Docker worker command for job #${cloudJobId} was not observed during startup.`,
+      `Docker worker command for task run #${runId} was not observed during startup.`,
       processList.trim()
         ? `Docker process list:\n${processList.trim()}`
         : 'Docker process list was empty.',
@@ -344,36 +424,15 @@ async function assertDetachedWorkerStarted(
   );
 }
 
-async function hasCloudJobStarted(cloudJobId: number): Promise<boolean> {
-  const cloudJob = await db.query.cloudJobs.findFirst({
-    where: eq(cloudJobs.id, cloudJobId),
+async function hasTaskRunStarted(runId: number): Promise<boolean> {
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
     columns: {
       startedAt: true,
     },
   });
 
-  return Boolean(cloudJob?.startedAt);
-}
-
-export function processListIncludesDockerWorkerRun(
-  processList: string,
-  cloudJobId: number,
-): boolean {
-  const escapedCloudJobId = String(cloudJobId).replace(
-    /[.*+?^${}()|[\]\\]/g,
-    '\\$&',
-  );
-
-  return processList
-    .split('\n')
-    .some((line) =>
-      [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`),
-        new RegExp(
-          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedCloudJobId}(?:\\s|$)`,
-        ),
-      ].some((pattern) => pattern.test(line)),
-    );
+  return Boolean(taskRun?.startedAt);
 }
 
 export function buildDockerSandboxServerUrl(params: {
@@ -410,26 +469,6 @@ async function getPublishedPorts(
   }
 
   return ports;
-}
-
-async function docker(
-  args: string[],
-  options: { allowFailure?: boolean } = {},
-): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync('docker', args, {
-      cwd: resolveFromWorkspaceRoot('.'),
-      maxBuffer: 10 * 1024 * 1024,
-    });
-
-    return stdout;
-  } catch (error) {
-    if (options.allowFailure) {
-      return '';
-    }
-
-    throw error;
-  }
 }
 
 async function resolveDockerWorkerOwnershipTarget(

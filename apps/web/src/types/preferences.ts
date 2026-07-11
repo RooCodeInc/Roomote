@@ -22,6 +22,6 @@ export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
 
 export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
-  narrationMode: true,
+  narrationMode: false,
   showDebugUI: false,
 };

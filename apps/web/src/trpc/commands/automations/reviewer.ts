@@ -1,19 +1,19 @@
 import {
-  DEFAULT_PR_REVIEWER_SETTINGS,
+  DEFAULT_PR_REVIEW_SETTINGS,
   getRoomoteManagedGitHubLogins,
-  type PrReviewerSettings,
+  type PrReviewSettings,
 } from '@roomote/types';
 import {
   type DatabaseOrTransaction,
   db,
   getReviewCodeAutomationSettings,
   isNull,
-  upsertBackgroundAutomation,
+  upsertAutomation,
   users,
 } from '@roomote/db/server';
+import { getEffectiveGitHubAppSlug } from '@roomote/github';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from './feature-gates';
 
@@ -28,9 +28,9 @@ export interface ReviewerRelayUser {
 export interface ReviewerBackgroundAgentSettings {
   id: string;
   enabled: boolean;
-  environmentScope: NonNullable<PrReviewerSettings['environmentScope']>;
+  environmentScope: NonNullable<PrReviewSettings['environmentScope']>;
   environmentIds: string[];
-  authorReviewMode: NonNullable<PrReviewerSettings['authorReviewMode']>;
+  authorReviewMode: NonNullable<PrReviewSettings['authorReviewMode']>;
   collaboratorLogins: string[];
   excludedAuthors: string | null;
   reviewAllPullRequestAuthors: boolean;
@@ -49,27 +49,24 @@ function normalizeGitHubLogins(logins: string[]): string[] {
   );
 }
 
-let roomoteReviewerLogins: string[] | null = null;
-
 function getRoomoteReviewerLogins(): string[] {
-  // Keep Env access out of module evaluation so Next.js instrumentation can
-  // bootstrap the Node.js runtime before server routes import this module.
-  if (!roomoteReviewerLogins) {
-    roomoteReviewerLogins = normalizeGitHubLogins(
-      getRoomoteManagedGitHubLogins(Env.NEXT_PUBLIC_GITHUB_APP_SLUG),
-    );
-  }
-
-  return roomoteReviewerLogins;
+  // Computed per call rather than memoized: the configured slug can be
+  // resolved from the database after this module is imported (see
+  // resolveConfiguredGitHubAppSlug), and env access stays out of module
+  // evaluation so Next.js instrumentation can bootstrap the Node.js runtime
+  // before server routes import this module.
+  return normalizeGitHubLogins(
+    getRoomoteManagedGitHubLogins(getEffectiveGitHubAppSlug()),
+  );
 }
 
 export function mapReviewerSettingsToBackgroundSettings(
-  settings: PrReviewerSettings,
+  settings: PrReviewSettings,
   relayUsers: ReviewerRelayUser[],
 ): ReviewerBackgroundAgentSettings {
   return {
     id: UNPROVISIONED_REVIEWER_ID,
-    enabled: settings.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled,
+    enabled: settings.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled,
     environmentScope: 'all',
     environmentIds: [],
     authorReviewMode: 'specific',
@@ -77,16 +74,16 @@ export function mapReviewerSettingsToBackgroundSettings(
     excludedAuthors: null,
     reviewAllPullRequestAuthors:
       settings.reviewAllPullRequestAuthors ??
-      DEFAULT_PR_REVIEWER_SETTINGS.reviewAllPullRequestAuthors,
+      DEFAULT_PR_REVIEW_SETTINGS.reviewAllPullRequestAuthors,
     reviewOnCommit:
-      settings.reviewOnCommit ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewOnCommit,
+      settings.reviewOnCommit ?? DEFAULT_PR_REVIEW_SETTINGS.reviewOnCommit,
     reviewDraftPrs:
-      settings.reviewDraftPrs ?? DEFAULT_PR_REVIEWER_SETTINGS.reviewDraftPrs,
+      settings.reviewDraftPrs ?? DEFAULT_PR_REVIEW_SETTINGS.reviewDraftPrs,
     relayReviewResultsToTask:
       settings.relayReviewResultsToTask ??
-      DEFAULT_PR_REVIEWER_SETTINGS.relayReviewResultsToTask,
+      DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask,
     relayUsers,
-    approvePr: settings.approvePr ?? DEFAULT_PR_REVIEWER_SETTINGS.approvePr,
+    approvePr: settings.approvePr ?? DEFAULT_PR_REVIEW_SETTINGS.approvePr,
   };
 }
 
@@ -94,13 +91,13 @@ export function buildDefaultReviewerSettings(
   relayUsers: ReviewerRelayUser[],
 ): ReviewerBackgroundAgentSettings {
   return mapReviewerSettingsToBackgroundSettings(
-    DEFAULT_PR_REVIEWER_SETTINGS,
+    DEFAULT_PR_REVIEW_SETTINGS,
     relayUsers,
   );
 }
 
 export function getRelayEligibleCreatorIds(
-  settings: PrReviewerSettings | null | undefined,
+  settings: PrReviewSettings | null | undefined,
 ): string[] {
   const userIds = settings?.relayEligibleCreatorIds;
 
@@ -158,9 +155,9 @@ export async function clearReviewerRelayStateForDeployment(): Promise<void> {
   const currentSettings = await getReviewCodeAutomationSettings();
 
   await db.transaction(async (tx) => {
-    await upsertBackgroundAutomation(tx, {
-      automationKey: 'review_code',
-      enabled: currentSettings.enabled ?? DEFAULT_PR_REVIEWER_SETTINGS.enabled,
+    await upsertAutomation(tx, {
+      key: 'review_code',
+      enabled: currentSettings.enabled ?? DEFAULT_PR_REVIEW_SETTINGS.enabled,
       settings: {
         ...currentSettings,
         relayReviewResultsToTask: false,
@@ -175,11 +172,11 @@ export async function ensureManagedReviewerEnabledByDefaultInTx(
   auth: UserAuthSuccess,
 ): Promise<void> {
   assertAdmin(auth);
-  await upsertBackgroundAutomation(tx, {
-    automationKey: 'review_code',
+  await upsertAutomation(tx, {
+    key: 'review_code',
     enabled: true,
     settings: {
-      ...DEFAULT_PR_REVIEWER_SETTINGS,
+      ...DEFAULT_PR_REVIEW_SETTINGS,
       enabled: true,
       approvePr: false,
     },

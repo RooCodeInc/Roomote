@@ -123,8 +123,8 @@ vi.mock('@/hooks/tasks', () => ({
   useTask: vi.fn(() => ({ data: null })),
 }));
 
-vi.mock('@/hooks/cloud-jobs', () => ({
-  useCancelCloudJob: vi.fn(() => ({
+vi.mock('@/hooks/task-runs', () => ({
+  useCancelTaskRun: vi.fn(() => ({
     mutateAsync: cancelMutateAsyncMock,
     isPending: false,
   })),
@@ -142,10 +142,10 @@ vi.mock('@/components/layout/side-nav/SideNavItem', () => ({
 
 import { OverflowMenu } from './OverflowMenu';
 
-function createCloudJob(overrides: Record<string, unknown> = {}) {
+function createTaskRun(overrides: Record<string, unknown> = {}) {
   return {
     id: 123,
-    userId: 'user-1',
+    actingUserId: 'user-1',
     status: 'running',
     machineId: 'machine-1',
     snapshotId: null,
@@ -169,14 +169,14 @@ describe('OverflowMenu', () => {
     authState.user = null;
 
     const { container } = render(
-      <OverflowMenu taskId="task-1" cloudJob={createCloudJob()} />,
+      <OverflowMenu taskId="task-1" taskRun={createTaskRun()} />,
     );
 
     expect(container).toBeEmptyDOMElement();
   });
 
   it('shows a destructive delete action without shutdown-related entries', () => {
-    render(<OverflowMenu taskId="task-1" cloudJob={createCloudJob()} />);
+    render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     const deleteButton = screen.getByRole('button', { name: 'Delete' });
 
@@ -193,7 +193,7 @@ describe('OverflowMenu', () => {
   });
 
   it('keeps the delete confirmation action labeled delete', () => {
-    render(<OverflowMenu taskId="task-1" cloudJob={createCloudJob()} />);
+    render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
@@ -206,8 +206,8 @@ describe('OverflowMenu', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('targets the current cloud job when deleting a running task', async () => {
-    render(<OverflowMenu taskId="task-1" cloudJob={createCloudJob()} />);
+  it('targets the current task run when deleting a running task', async () => {
+    render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
@@ -219,7 +219,7 @@ describe('OverflowMenu', () => {
     await vi.waitFor(() => {
       expect(cancelMutateAsyncMock).toHaveBeenCalledWith({
         taskId: 'task-1',
-        cloudJobId: 123,
+        runId: 123,
       });
     });
   });

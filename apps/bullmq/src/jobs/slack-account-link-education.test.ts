@@ -3,7 +3,7 @@ import { z } from 'zod';
 const {
   mockFindFirstSlackInstallation,
   mockFindFirstSlackUserMapping,
-  mockFindFirstCloudJob,
+  mockFindFirstTaskRun,
   mockOpenConversation,
   mockPostMessage,
   mockRecordSlackConversationMessageBestEffort,
@@ -12,7 +12,7 @@ const {
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
   mockFindFirstSlackUserMapping: vi.fn(),
-  mockFindFirstCloudJob: vi.fn(),
+  mockFindFirstTaskRun: vi.fn(),
   mockOpenConversation: vi.fn(),
   mockPostMessage: vi.fn(),
   mockRecordSlackConversationMessageBestEffort: vi.fn(),
@@ -31,8 +31,8 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) =>
           mockFindFirstSlackUserMapping(...args),
       },
-      cloudJobs: {
-        findFirst: (...args: unknown[]) => mockFindFirstCloudJob(...args),
+      tasks: {
+        findFirst: (...args: unknown[]) => mockFindFirstTaskRun(...args),
       },
     },
   },
@@ -46,8 +46,8 @@ vi.mock('@roomote/db/server', () => ({
     slackUserId: 'slackUserId',
     slackTeamId: 'slackTeamId',
   },
-  cloudJobs: {
-    userId: 'userId',
+  tasks: {
+    initiatorUserId: 'initiatorUserId',
     requestedWorkKind: 'requestedWorkKind',
   },
 }));
@@ -92,7 +92,7 @@ describe('slackAccountLinkEducationJob', () => {
       userId: 'user-1',
       updatedAt: request.mappingLinkedAt,
     });
-    mockFindFirstCloudJob.mockResolvedValue(null);
+    mockFindFirstTaskRun.mockResolvedValue(null);
     mockOpenConversation.mockResolvedValue('D123');
     mockPostMessage.mockResolvedValue('111.222');
   });
@@ -157,7 +157,7 @@ describe('slackAccountLinkEducationJob', () => {
   });
 
   it('skips delivery when the user already created a question task', async () => {
-    mockFindFirstCloudJob.mockResolvedValue({ id: 99 });
+    mockFindFirstTaskRun.mockResolvedValue({ id: 99 });
 
     await slackAccountLinkEducationJob({ data: request } as never);
 

@@ -2,24 +2,22 @@ import { Hono } from 'hono';
 
 import {
   type AuthTokenContext,
-  CloudTaskType,
-  type JobTokenContext,
+  TaskPayloadKind,
+  type RunTokenContext,
 } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
-const { mockCloudJobFindFirst, mockAutomationRunFindFirst } = vi.hoisted(
-  () => ({
-    mockCloudJobFindFirst: vi.fn(),
-    mockAutomationRunFindFirst: vi.fn(),
-  }),
-);
+const { mockTaskRunFindFirst, mockTaskFindFirst } = vi.hoisted(() => ({
+  mockTaskRunFindFirst: vi.fn(),
+  mockTaskFindFirst: vi.fn(),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  CloudJobQueueEnqueueError: class CloudJobQueueEnqueueError extends Error {},
-  enqueueCloudTask: vi.fn(),
+  TaskRunQueueEnqueueError: class TaskRunQueueEnqueueError extends Error {},
+  enqueueTask: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -42,34 +40,34 @@ vi.mock('@roomote/db/server', () => ({
   lte: vi.fn((...args) => ({ type: 'lte', args })),
   or: vi.fn((...args) => ({ type: 'or', args })),
   sql: vi.fn(),
-  automationWorkItems: {},
-  backgroundAutomationRuns: {
-    taskId: 'backgroundAutomationRuns.taskId',
+  workItems: {},
+  taskRuns: {
+    taskId: 'taskRuns.taskId',
   },
-  cloudJobs: {
-    taskId: 'cloudJobs.taskId',
+  tasks: {
+    id: 'tasks.id',
   },
   environments: {},
   repositories: {},
   slackInstallationChannels: {},
   slackInstallations: {},
-  resolveManagerSlackChannelId: vi.fn(),
-  getBackgroundAgentSettingsForDeployment: vi.fn(),
-  updateBackgroundAutomationRunArtifactsByTaskId: vi.fn(),
+  getAutomationRuntime: vi.fn(async () => ({
+    slackChannelId: null,
+  })),
   upsertBackgroundAutomationSlackThread: vi.fn(),
   db: {
     query: {
-      cloudJobs: {
-        findFirst: (...args: unknown[]) => mockCloudJobFindFirst(...args),
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunFindFirst(...args),
       },
-      backgroundAutomationRuns: {
-        findFirst: (...args: unknown[]) => mockAutomationRunFindFirst(...args),
+      tasks: {
+        findFirst: (...args: unknown[]) => mockTaskFindFirst(...args),
       },
     },
   },
 }));
 
-function createApp(authContext?: AuthTokenContext | JobTokenContext) {
+function createApp(authContext?: AuthTokenContext | RunTokenContext) {
   const app = new Hono<{ Variables: Variables }>();
 
   app.use('*', async (c, next) => {
@@ -85,28 +83,29 @@ function createApp(authContext?: AuthTokenContext | JobTokenContext) {
 }
 
 describe('submitAutomationWorkItems', () => {
-  const authContext: JobTokenContext = {
+  const authContext: RunTokenContext = {
     userId: 'user-1',
-    cloudJobId: 1,
-    tokenType: 'cj',
+    principal: 'user',
+    runId: 1,
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
-    mockCloudJobFindFirst.mockReset();
-    mockAutomationRunFindFirst.mockReset();
-    mockCloudJobFindFirst.mockResolvedValue({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockReset();
+    mockTaskFindFirst.mockReset();
+    mockTaskRunFindFirst.mockResolvedValue({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'sentry_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValue({
-      id: 'run-1',
-      automationKey: 'sentry_triage',
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'sentry_triage',
     });
   });
 
@@ -135,7 +134,7 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include targetRepositoryFullName.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects act work items without an execution prompt', async () => {
@@ -162,7 +161,7 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include executionPrompt.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects act work items without a target environment', async () => {
@@ -191,22 +190,22 @@ describe('submitAutomationWorkItems', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'Act automation work items must include targetEnvironmentId.',
     });
-    expect(mockCloudJobFindFirst).not.toHaveBeenCalled();
+    expect(mockTaskRunFindFirst).not.toHaveBeenCalled();
   });
 
   it('rejects Dependabot suggestion work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -237,18 +236,18 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects multiple Dependabot action work items for the same target environment', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -289,18 +288,18 @@ describe('submitAutomationWorkItems', () => {
   });
 
   it('rejects more than three Dependabot action work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'dependabot_triage',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'dependabot_triage',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'dependabot_triage',
     });
 
     const app = createApp(authContext);
@@ -426,18 +425,18 @@ describe('submitAutomationWorkItems', () => {
   });
 
   it('rejects Security Auditor suggestion work items', async () => {
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'security_auditor',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce({
-      id: 'run-1',
-      automationKey: 'security_auditor',
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'security_auditor',
     });
 
     const app = createApp(authContext);
@@ -468,16 +467,19 @@ describe('submitAutomationWorkItems', () => {
 
   it('rejects automation work items for unsupported task sources', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
-    mockCloudJobFindFirst.mockResolvedValueOnce({
-      type: CloudTaskType.SuggestedTasks,
-      userId: 'user-1',
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
       payload: {
         repo: 'acme/app',
         selectedRepositories: ['acme/app'],
         suggestionSource: 'suggest_ideas',
       },
     });
-    mockAutomationRunFindFirst.mockResolvedValueOnce(undefined);
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+    });
 
     const app = createApp(authContext);
     const response = await app.request(

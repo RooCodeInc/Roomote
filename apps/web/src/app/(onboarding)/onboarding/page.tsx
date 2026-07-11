@@ -57,6 +57,7 @@ export default function OnboardingPage() {
             <StepGitHub
               onContinue={goToNextStep}
               previousStepCompleted={linearConnected ? 'Linear' : undefined}
+              githubAppSlug={status?.githubAppSlug}
             />
           )}
           {step === 'invoke' && (

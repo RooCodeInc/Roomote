@@ -11,14 +11,12 @@ import type {
   SentryTriageFrequency,
   SuggesterFrequency,
 } from './background-agents';
-import type { TaskSuggestionSource } from './cloud-jobs';
+import type { TaskSuggestionSource } from './task-runs';
 
 export const AUTO_RESPOND_CHANNELS_SETTINGS_HASH = 'auto-respond-channels';
 export const MANAGER_CHANNEL_SETTINGS_HASH = 'roomote-managers';
 export const MANAGER_STATS_SETTINGS_HASH = 'weekly-manager-stats';
 export const SUGGEST_IDEAS_SETTINGS_HASH = 'suggest-ideas';
-export const SUGGEST_SELF_IMPROVEMENTS_SETTINGS_HASH =
-  'suggest-self-improvements';
 export const SENTRY_TRIAGE_SETTINGS_HASH = 'sentry-triage';
 export const DEPENDABOT_TRIAGE_SETTINGS_HASH = 'dependabot-triage';
 export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
@@ -31,7 +29,6 @@ export type BackgroundAutomationSettingsHash =
   | typeof MANAGER_CHANNEL_SETTINGS_HASH
   | typeof MANAGER_STATS_SETTINGS_HASH
   | typeof SUGGEST_IDEAS_SETTINGS_HASH
-  | typeof SUGGEST_SELF_IMPROVEMENTS_SETTINGS_HASH
   | typeof SENTRY_TRIAGE_SETTINGS_HASH
   | typeof DEPENDABOT_TRIAGE_SETTINGS_HASH
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
@@ -45,46 +42,22 @@ export type BackgroundAutomationManualTriggerRequirement =
   | 'repository'
   | 'sentry';
 
-export type BackgroundAutomationManagerChannelKind =
-  | 'suggester'
-  | 'announcer'
-  | 'managerStats'
-  | 'sentryTriage'
-  | 'dependabotTriage'
-  | 'securityAuditor'
-  | 'codeQualityAuditor'
-  | 'ciFailureTriage';
-
-export type BackgroundAutomationScheduleField =
-  | 'conflictResolverFrequency'
-  | 'suggesterFrequency'
-  | 'announcerFrequency'
-  | 'managerStatsFrequency'
-  | 'sentryTriageFrequency'
-  | 'dependabotTriageFrequency'
-  | 'securityAuditorFrequency'
-  | 'codeQualityAuditorFrequency'
-  | 'ciFailureTriageFrequency';
-
+/**
+ * Descriptor for an automation that can be manually triggered ("Run now")
+ * and scheduled from the Automations settings page. Keyed exclusively by the
+ * canonical snake_case automation key.
+ */
 export type TriggerableBackgroundAutomationDescriptor<
-  TAgentId extends string = string,
   TAutomationKey extends BackgroundAutomationKey = BackgroundAutomationKey,
-  TScheduleField extends string = BackgroundAutomationScheduleField,
   TScheduleMode extends string = string,
 > = {
-  agentId: TAgentId;
   automationKey: TAutomationKey;
   label: string;
   availability: BackgroundAutomationAvailability;
-  schedule: {
-    field: TScheduleField;
-    modes: readonly TScheduleMode[];
-  };
-  manualTrigger: {
-    jobName: string;
-    requirements: readonly BackgroundAutomationManualTriggerRequirement[];
-  };
-  managerChannelKind?: BackgroundAutomationManagerChannelKind;
+  scheduleModes: readonly TScheduleMode[];
+  manualTriggerRequirements: readonly BackgroundAutomationManualTriggerRequirement[];
+  /** Whether the automation posts to the shared manager channel by default. */
+  usesManagerChannel: boolean;
   scheduledSuggestionSource?: TaskSuggestionSource;
 };
 
@@ -130,143 +103,82 @@ const MANAGER_STATS_SCHEDULE_MODES = [
 
 export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
-    agentId: 'conflictResolver',
     automationKey: 'conflict_resolver',
     label: 'Resolve PR Conflicts',
     availability: 'stable',
-    schedule: {
-      field: 'conflictResolverFrequency',
-      modes: CONFLICT_RESOLVER_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'ConflictScan',
-      requirements: ['github', 'repository'],
-    },
+    scheduleModes: CONFLICT_RESOLVER_SCHEDULE_MODES,
+    manualTriggerRequirements: ['github', 'repository'],
+    usesManagerChannel: false,
   },
   {
-    agentId: 'suggester',
     automationKey: 'suggester',
     label: 'Suggest Ideas',
     availability: 'stable',
-    schedule: {
-      field: 'suggesterFrequency',
-      modes: DAILY_WEEKLY_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'Suggester',
-      requirements: ['slack', 'github', 'repository'],
-    },
-    managerChannelKind: 'suggester',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    // Provider-agnostic: suggestion scans work with any synced repository.
+    manualTriggerRequirements: ['slack', 'repository'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'suggest_ideas',
   },
   {
-    agentId: 'announcer',
     automationKey: 'announcer',
     label: 'Summarize Merged PRs',
     availability: 'stable',
-    schedule: {
-      field: 'announcerFrequency',
-      modes: DAILY_WEEKLY_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'Announcer',
-      requirements: ['slack', 'github'],
-    },
-    managerChannelKind: 'announcer',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github'],
+    usesManagerChannel: true,
   },
   {
-    agentId: 'managerStats',
     automationKey: 'manager_stats',
     label: 'Weekly Manager Stats',
     availability: 'stable',
-    schedule: {
-      field: 'managerStatsFrequency',
-      modes: MANAGER_STATS_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'ManagerStats',
-      requirements: ['slack', 'github'],
-    },
-    managerChannelKind: 'managerStats',
+    scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github'],
+    usesManagerChannel: true,
   },
   {
-    agentId: 'sentryTriage',
     automationKey: 'sentry_triage',
     label: 'Triage Sentry Issues',
     availability: 'stable',
-    schedule: {
-      field: 'sentryTriageFrequency',
-      modes: DAILY_WEEKLY_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'SentryTriage',
-      requirements: ['slack', 'sentry'],
-    },
-    managerChannelKind: 'sentryTriage',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'sentry'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'sentry_triage',
   },
   {
-    agentId: 'dependabotTriage',
     automationKey: 'dependabot_triage',
     label: 'Triage Dependabot Alerts',
     availability: 'stable',
-    schedule: {
-      field: 'dependabotTriageFrequency',
-      modes: DAILY_WEEKLY_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'DependabotTriage',
-      requirements: ['slack', 'github', 'repository'],
-    },
-    managerChannelKind: 'dependabotTriage',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'dependabot_triage',
   },
   {
-    agentId: 'securityAuditor',
     automationKey: 'security_auditor',
     label: 'Security Auditor',
     availability: 'stable',
-    schedule: {
-      field: 'securityAuditorFrequency',
-      modes: HOURLY_AUDIT_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'SecurityAuditor',
-      requirements: ['slack', 'github', 'repository'],
-    },
-    managerChannelKind: 'securityAuditor',
+    scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'security_auditor',
   },
   {
-    agentId: 'codeQualityAuditor',
     automationKey: 'code_quality_auditor',
     label: 'Code Quality Auditor',
     availability: 'stable',
-    schedule: {
-      field: 'codeQualityAuditorFrequency',
-      modes: HOURLY_AUDIT_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'CodeQualityAuditor',
-      requirements: ['slack', 'github', 'repository'],
-    },
-    managerChannelKind: 'codeQualityAuditor',
+    scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'code_quality_auditor',
   },
   {
-    agentId: 'ciFailureTriage',
     automationKey: 'ci_failure_triage',
     label: 'CI Failure Triage',
     availability: 'stable',
-    schedule: {
-      field: 'ciFailureTriageFrequency',
-      modes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
-    },
-    manualTrigger: {
-      jobName: 'CiFailureTriage',
-      requirements: ['slack', 'github', 'repository'],
-    },
-    managerChannelKind: 'ciFailureTriage',
+    scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
     scheduledSuggestionSource: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];
@@ -274,25 +186,25 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
 export type TriggerableBackgroundAutomationDescriptorItem =
   (typeof TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS)[number];
 
-export type TriggerableBackgroundAutomationAgentId =
-  TriggerableBackgroundAutomationDescriptorItem['agentId'];
+export type TriggerableBackgroundAutomationKey =
+  TriggerableBackgroundAutomationDescriptorItem['automationKey'];
 
 type BackgroundAutomationSettingsCatalogEntry =
   | {
       hash: BackgroundAutomationSettingsHash;
       label: string;
-      agentId?: never;
+      automationKey?: never;
     }
   | {
       hash: BackgroundAutomationSettingsHash;
       label?: never;
-      agentId: TriggerableBackgroundAutomationAgentId;
+      automationKey: TriggerableBackgroundAutomationKey;
     };
 
 export type BackgroundAutomationSettingsDescriptor = {
   hash: BackgroundAutomationSettingsHash;
   label: string;
-  agentId?: TriggerableBackgroundAutomationAgentId;
+  automationKey?: TriggerableBackgroundAutomationKey;
 };
 
 function hasScheduledSuggestionSource(
@@ -303,21 +215,13 @@ function hasScheduledSuggestionSource(
   return 'scheduledSuggestionSource' in descriptor;
 }
 
-function hasSettingsAgentId(
+function hasSettingsAutomationKey(
   entry: BackgroundAutomationSettingsCatalogEntry,
 ): entry is Extract<
   BackgroundAutomationSettingsCatalogEntry,
-  { agentId: TriggerableBackgroundAutomationAgentId }
+  { automationKey: TriggerableBackgroundAutomationKey }
 > {
-  return 'agentId' in entry;
-}
-
-export function hasTriggerableBackgroundAutomationManagerChannelKind(
-  descriptor: TriggerableBackgroundAutomationDescriptorItem,
-): descriptor is TriggerableBackgroundAutomationDescriptorItem & {
-  managerChannelKind: BackgroundAutomationManagerChannelKind;
-} {
-  return 'managerChannelKind' in descriptor;
+  return 'automationKey' in entry;
 }
 
 const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
@@ -331,56 +235,42 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   },
   {
     hash: MANAGER_STATS_SETTINGS_HASH,
-    agentId: 'managerStats',
+    automationKey: 'manager_stats',
   },
   {
     hash: SUGGEST_IDEAS_SETTINGS_HASH,
-    agentId: 'suggester',
-  },
-  {
-    hash: SUGGEST_SELF_IMPROVEMENTS_SETTINGS_HASH,
-    label: 'Suggest Self-improvements',
+    automationKey: 'suggester',
   },
   {
     hash: SENTRY_TRIAGE_SETTINGS_HASH,
-    agentId: 'sentryTriage',
+    automationKey: 'sentry_triage',
   },
   {
     hash: DEPENDABOT_TRIAGE_SETTINGS_HASH,
-    agentId: 'dependabotTriage',
+    automationKey: 'dependabot_triage',
   },
   {
     hash: SECURITY_AUDITOR_SETTINGS_HASH,
-    agentId: 'securityAuditor',
+    automationKey: 'security_auditor',
   },
   {
     hash: CODE_QUALITY_AUDITOR_SETTINGS_HASH,
-    agentId: 'codeQualityAuditor',
+    automationKey: 'code_quality_auditor',
   },
   {
     hash: CI_FAILURE_TRIAGE_SETTINGS_HASH,
-    agentId: 'ciFailureTriage',
+    automationKey: 'ci_failure_triage',
   },
   {
     hash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
-    agentId: 'announcer',
+    automationKey: 'announcer',
   },
 ] as const satisfies readonly BackgroundAutomationSettingsCatalogEntry[];
 
-const TRIGGERABLE_BACKGROUND_AUTOMATION_AGENT_ID_SET = new Set<string>(
+const TRIGGERABLE_BACKGROUND_AUTOMATION_KEY_SET = new Set<string>(
   TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.map(
-    (descriptor) => descriptor.agentId,
+    (descriptor) => descriptor.automationKey,
   ),
-);
-
-const TRIGGERABLE_BACKGROUND_AUTOMATION_BY_AGENT_ID: ReadonlyMap<
-  TriggerableBackgroundAutomationAgentId,
-  TriggerableBackgroundAutomationDescriptorItem
-> = new Map(
-  TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS.map((descriptor) => [
-    descriptor.agentId,
-    descriptor,
-  ]),
 );
 
 const TRIGGERABLE_BACKGROUND_AUTOMATION_BY_KEY: ReadonlyMap<
@@ -411,38 +301,21 @@ const BACKGROUND_AUTOMATION_SETTINGS_BY_HASH: ReadonlyMap<
   BACKGROUND_AUTOMATION_SETTINGS_CATALOG.map((entry) => [entry.hash, entry]),
 );
 
-const TRIGGERABLE_BACKGROUND_AUTOMATION_SETTINGS_HASH_BY_AGENT_ID: ReadonlyMap<
-  TriggerableBackgroundAutomationAgentId,
+const TRIGGERABLE_BACKGROUND_AUTOMATION_SETTINGS_HASH_BY_KEY: ReadonlyMap<
+  TriggerableBackgroundAutomationKey,
   BackgroundAutomationSettingsHash
 > = new Map(
   BACKGROUND_AUTOMATION_SETTINGS_CATALOG.flatMap((entry) =>
-    hasSettingsAgentId(entry) ? [[entry.agentId, entry.hash] as const] : [],
+    hasSettingsAutomationKey(entry)
+      ? [[entry.automationKey, entry.hash] as const]
+      : [],
   ),
 );
 
-export const SHARED_MANAGER_CHANNEL_ONLY_KINDS = [
-  'managerStats',
-  'sentryTriage',
-  'dependabotTriage',
-  'securityAuditor',
-  'codeQualityAuditor',
-  'ciFailureTriage',
-] as const satisfies readonly BackgroundAutomationManagerChannelKind[];
-
-const SHARED_MANAGER_CHANNEL_ONLY_KIND_SET = new Set<string>(
-  SHARED_MANAGER_CHANNEL_ONLY_KINDS,
-);
-
-export function isTriggerableBackgroundAutomationAgentId(
+export function isTriggerableBackgroundAutomationKey(
   value: string,
-): value is TriggerableBackgroundAutomationAgentId {
-  return TRIGGERABLE_BACKGROUND_AUTOMATION_AGENT_ID_SET.has(value);
-}
-
-export function getTriggerableBackgroundAutomationDescriptor(
-  agentId: TriggerableBackgroundAutomationAgentId,
-): TriggerableBackgroundAutomationDescriptorItem | null {
-  return TRIGGERABLE_BACKGROUND_AUTOMATION_BY_AGENT_ID.get(agentId) ?? null;
+): value is TriggerableBackgroundAutomationKey {
+  return TRIGGERABLE_BACKGROUND_AUTOMATION_KEY_SET.has(value);
 }
 
 export function getTriggerableBackgroundAutomationDescriptorByKey(
@@ -457,15 +330,15 @@ export function getScheduledSuggestionBackgroundAutomationDescriptor(
   return (
     (source
       ? SCHEDULED_SUGGESTION_BACKGROUND_AUTOMATION_BY_SOURCE.get(source)
-      : null) ?? getTriggerableBackgroundAutomationDescriptor('suggester')
+      : null) ?? getTriggerableBackgroundAutomationDescriptorByKey('suggester')
   );
 }
 
 export function getTriggerableBackgroundAutomationSettingsHash(
-  agentId: TriggerableBackgroundAutomationAgentId,
+  automationKey: TriggerableBackgroundAutomationKey,
 ): BackgroundAutomationSettingsHash | null {
   return (
-    TRIGGERABLE_BACKGROUND_AUTOMATION_SETTINGS_HASH_BY_AGENT_ID.get(agentId) ??
+    TRIGGERABLE_BACKGROUND_AUTOMATION_SETTINGS_HASH_BY_KEY.get(automationKey) ??
     null
   );
 }
@@ -481,21 +354,21 @@ export function getBackgroundAutomationSettingsDescriptor(
     return null;
   }
 
-  if (hasSettingsAgentId(entry)) {
-    const descriptor = getTriggerableBackgroundAutomationDescriptor(
-      entry.agentId,
+  if (hasSettingsAutomationKey(entry)) {
+    const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+      entry.automationKey,
     );
 
     if (!descriptor) {
       throw new Error(
-        `Missing triggerable background automation descriptor for ${entry.agentId}.`,
+        `Missing triggerable background automation descriptor for ${entry.automationKey}.`,
       );
     }
 
     return {
       hash: entry.hash,
       label: descriptor.label,
-      agentId: entry.agentId,
+      automationKey: entry.automationKey,
     };
   }
 
@@ -503,10 +376,4 @@ export function getBackgroundAutomationSettingsDescriptor(
     hash: entry.hash,
     label: entry.label,
   };
-}
-
-export function isSharedManagerChannelOnlyKind(
-  kind: BackgroundAutomationManagerChannelKind,
-) {
-  return SHARED_MANAGER_CHANNEL_ONLY_KIND_SET.has(kind);
 }

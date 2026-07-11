@@ -7,7 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
   sourceControlProviderSchema,
@@ -312,8 +312,8 @@ roomoteMcpServer.registerTool(
 );
 
 const WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS = new Set<string>([
-  CloudTaskType.StandardTask,
-  CloudTaskType.SlackAppMention,
+  TaskPayloadKind.StandardTask,
+  TaskPayloadKind.SlackAppMention,
 ]);
 
 function shouldRegisterEnvVarRequestTool(): boolean {
@@ -374,16 +374,7 @@ function shouldRegisterPlatformIssueTool(): boolean {
 }
 
 function shouldRegisterTaskSuggestionsTool(): boolean {
-  return (
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.SuggestedTasks ||
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.LegacyOnboardingSuggestions
-  );
-}
-
-function shouldRegisterLegacyTaskSuggestionsToolAlias(): boolean {
-  return (
-    process.env.ROOMOTE_TASK_TYPE === CloudTaskType.LegacyOnboardingSuggestions
-  );
+  return process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
 }
 
 const ENVIRONMENT_ID_PATTERN =
@@ -398,7 +389,7 @@ const manageTasksToolDescription =
   `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
-  `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default Generalist flow (requires prompt and environmentId). ` +
+  `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message).';
 
@@ -590,7 +581,8 @@ roomoteMcpServer.registerTool(
     title: 'Manage Source Control',
     description:
       'Provider-neutral pull request/merge request operations for the current task. ' +
-      'Use action "create_or_update_pull_request" after committing and pushing a branch. ' +
+      'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
+      'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
       'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs) and ' +
       '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
@@ -660,7 +652,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Required for create_or_update_pull_request. The base branch the PR/MR should target.',
+          'The base branch the PR/MR should target. Required only when create_or_update_pull_request creates a new PR/MR; omit it when an open PR/MR already exists for sourceBranch to keep its current base.',
         ),
       title: z
         .string()
@@ -978,10 +970,6 @@ if (shouldRegisterTaskSuggestionsTool()) {
       hasSubmittedAutomationSlackSummary = true;
     },
   });
-}
-
-if (shouldRegisterLegacyTaskSuggestionsToolAlias()) {
-  registerTaskSuggestionsTool('submit_onboarding_suggestions');
 }
 
 roomoteMcpServer.registerTool(
@@ -1415,9 +1403,7 @@ if (shouldRegisterSlackChannelPostTool()) {
 
       if (
         hasSubmittedAutomationSlackSummary &&
-        (process.env.ROOMOTE_TASK_TYPE === CloudTaskType.SuggestedTasks ||
-          process.env.ROOMOTE_TASK_TYPE ===
-            CloudTaskType.LegacyOnboardingSuggestions)
+        process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
       ) {
         return errorResult(
           'Automation suggestions were already submitted and posted to Slack. Do not call post_to_slack_channel for a duplicate summary.',

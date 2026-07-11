@@ -10,7 +10,9 @@ import type {
 } from '../opencode-server/types';
 
 const TEST_OPENCODE_MODEL = 'test-provider/main-model';
-const SUBAGENT_TASK_TIMEOUT_MS = 60_000;
+// Far beyond any plausible run length: subagent runs are not time-bounded, so
+// nothing may abort even at this horizon.
+const SIX_HOURS_MS = 6 * 60 * 60_000;
 
 class FakeOpenCodeServerClient {
   private eventHandler:
@@ -63,12 +65,9 @@ function createLogger() {
   };
 }
 
-function createHarness(
-  client = new FakeOpenCodeServerClient(),
-  overrides: {
-    subagentTaskInactivityTimeoutMs?: number;
-  } = {},
-) {
+const SETTLEMENT_GRACE_MS = 10_000;
+
+function createHarness(client = new FakeOpenCodeServerClient()) {
   const logger = createLogger();
   const harness = new OpenCodeServerHarness({
     client: client as unknown as OpenCodeServerClient,
@@ -76,8 +75,7 @@ function createHarness(
     logger,
     model: TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
-    subagentTaskTimeoutMs: SUBAGENT_TASK_TIMEOUT_MS,
-    ...overrides,
+    subagentSettlementGraceMs: SETTLEMENT_GRACE_MS,
   });
 
   return { client, harness, logger };
@@ -145,18 +143,6 @@ function createSubtaskPart(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const SUBAGENT_INACTIVITY_TIMEOUT_MS = 10_000;
-
-function createChildTextPart(text: string) {
-  return {
-    id: 'prt_child_text_1',
-    sessionID: 'ses_child_1',
-    messageID: 'msg_child_1',
-    type: 'text',
-    text,
-  };
-}
-
 function createChildToolPart(options: {
   callId: string;
   tool?: string;
@@ -201,13 +187,21 @@ async function armSpawn(
   });
 }
 
-describe('OpenCode subagent watchdog', () => {
+function subagentActivityEvents(outputs: Array<Record<string, unknown>>) {
+  return outputs.filter(
+    (event) =>
+      (event.payload as Record<string, unknown>)?.progressKind ===
+      'subagent_activity',
+  );
+}
+
+describe('OpenCode subagent run tracking', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('aborts the child session recorded on the task tool part when the timeout expires', async () => {
-    const { client, harness, logger } = createHarness();
+  it('never aborts a foreground child, no matter how long it runs', async () => {
+    const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
@@ -218,160 +212,141 @@ describe('OpenCode subagent watchdog', () => {
         properties: {
           part: createTaskToolPart({
             status: 'running',
-            metadata: {
-              sessionId: 'ses_child_1',
-              parentSessionId: 'ses_1',
-            },
+            metadata: { sessionId: 'ses_child_1', parentSessionId: 'ses_1' },
           }),
         },
       });
 
-      // Just before the timeout nothing happens.
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
+      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
+
       expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-
-      // The child session id came from the part metadata, so no children()
-      // lookup is needed.
       expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-      // Never abort the parent session.
-      expect(client.abort).not.toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_1' }),
-      );
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('subagent run exceeded'),
-      );
     } finally {
       harness.dispose();
     }
   });
 
-  it('falls back to listing children when the task tool part has no child session id', async () => {
+  it('never aborts a spawn whose child session id is unknown', async () => {
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
-
-      client.children.mockResolvedValueOnce([
-        { id: 'child_1', parentID: 'ses_1' },
-        { id: 'child_2', parentID: 'ses_1' },
-      ]);
 
       await client.emit({
         type: 'message.part.updated',
         properties: { part: createTaskToolPart({ status: 'pending' }) },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
 
-      expect(client.children).toHaveBeenCalledTimes(1);
-      expect(client.children).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_1' }),
-      );
-      expect(client.abort).toHaveBeenCalledTimes(2);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'child_1' }),
-      );
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'child_2' }),
-      );
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.children).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('does not abort sibling child sessions still owned by a live watchdog', async () => {
+  it('never aborts a child that goes silent between tools', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c1', command: 'pnpm build' }),
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c1', status: 'completed' }),
+        },
+      });
+
+      // Silence after the completed tool: a reasoning model may think for a
+      // long stretch without emitting any events. Nothing may kill it.
+      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.children).not.toHaveBeenCalled();
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('never aborts subtask-part spawns', async () => {
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
 
-      // Watchdog A: no child session id ever captured, so its expiry takes the
-      // list-all-children fallback.
       await client.emit({
         type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({ status: 'pending', callId: 'call_A' }),
-        },
+        properties: { part: createSubtaskPart() },
       });
 
-      // Watchdog B is armed half a window later, so at A's deadline B is still
-      // live (its own deadline is further out). B owns child session
-      // ses_child_B.
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'running',
-            callId: 'call_B',
-            metadata: { sessionId: 'ses_child_B' },
-          }),
-        },
-      });
+      await vi.advanceTimersByTimeAsync(SIX_HOURS_MS);
 
-      // The parent session lists both children when A's fallback runs.
-      client.children.mockResolvedValueOnce([
-        { id: 'ses_child_A', parentID: 'ses_1' },
-        { id: 'ses_child_B', parentID: 'ses_1' },
-      ]);
-
-      // Advance to A's total-timeout deadline (B still has half a window left).
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-
-      expect(client.children).toHaveBeenCalledTimes(1);
-      // Only the orphaned child is aborted; the sibling owned by live watchdog
-      // B is spared.
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_A' }),
-      );
-      expect(client.abort).not.toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_B' }),
-      );
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.children).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('disarms a watchdog when its child session errors (aborted elsewhere)', async () => {
+  it('stops tracking when the task tool part reaches a terminal status', async () => {
     const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
 
     try {
       await connectHarness(harness, client);
-
-      // Establish the parent session so the child error routes through the
-      // child-session branch of the dispatcher.
-      harness.sendCommand({
-        commandName: TaskCommandName.StartNewTask,
-        data: { text: 'Do work.', visibleInTranscript: true },
-      });
-      await vi.waitFor(() => {
-        expect(client.createSession).toHaveBeenCalled();
-      });
-
-      vi.useFakeTimers();
-
+      await armSpawn(client, harness);
       await client.emit({
         type: 'message.part.updated',
         properties: {
           part: createTaskToolPart({
-            status: 'running',
+            status: 'completed',
             metadata: { sessionId: 'ses_child_1' },
+            output: '<task_result>done</task_result>',
           }),
         },
       });
 
-      // The child is aborted by some other path; OpenCode surfaces that as a
-      // session.error attributed to the child. The watchdog must disarm so it
-      // never fires its own deadline later.
+      const settledCount = subagentActivityEvents(outputs).length;
+
+      // Child events after settlement no longer fold into the spawn row.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_late', command: 'ls' }),
+        },
+      });
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it('never finishes the parent turn from a child session.error', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+
       await client.emit({
         type: 'session.error',
         properties: {
@@ -380,197 +355,20 @@ describe('OpenCode subagent watchdog', () => {
         },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.children).not.toHaveBeenCalled();
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskCompleted ||
+            event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
-      harness.dispose();
+      await harness.dispose();
     }
   });
 
-  it('keeps a single timer across re-emits and picks up the child session id from later updates', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      // First update: pending, no metadata yet.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createTaskToolPart({ status: 'pending' }) },
-      });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-      // Second update: running with the child session id. Must not reset or
-      // duplicate the timer, but must record the child session id.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'running',
-            metadata: { sessionId: 'ses_child_1' },
-          }),
-        },
-      });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS / 2);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('clears the watchdog when the task tool part reaches a terminal status', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'running',
-            metadata: { sessionId: 'ses_child_1' },
-          }),
-        },
-      });
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'completed',
-            metadata: { sessionId: 'ses_child_1' },
-            output: '<task_result>done</task_result>',
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('keeps a completed foreground task tool part disarming the watchdog even when metadata is present', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'running',
-            metadata: { sessionId: 'ses_child_1' },
-          }),
-        },
-      });
-      // No background flag anywhere: completion is terminal for the spawn.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'completed',
-            metadata: { sessionId: 'ses_child_1' },
-            output: '<task_result>done</task_result>',
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('keeps the watchdog armed when a background task tool part completes', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      // A background launch's tool call completes immediately while the child
-      // session keeps working, so terminal status must not disarm the
-      // watchdog.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'completed',
-            input: { background: true },
-            metadata: { sessionId: 'ses_child_1' },
-            output: '<task id="job_1" state="running" />',
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('detects background launches and the child session id from state.metadata alone', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      // Some OpenCode builds only report the launch as background metadata
-      // with a `jobId` instead of `sessionId`/`input.background`.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'completed',
-            metadata: { background: true, jobId: 'ses_child_1' },
-            output: '<task id="job_1" state="running" />',
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('disarms the background watchdog on child session idle without finishing the parent turn', async () => {
+  it('ends background tracking on child session idle without finishing the parent turn', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
     harness.subscribe((event) => taskEvents.push(event));
@@ -578,9 +376,6 @@ describe('OpenCode subagent watchdog', () => {
     try {
       await connectHarness(harness, client);
 
-      // Establish the parent session so the child idle is routed through the
-      // dispatcher's child-session branch (the production path) rather than
-      // falling through to the parent handlers.
       harness.sendCommand({
         commandName: TaskCommandName.StartNewTask,
         data: { text: 'Do work.', visibleInTranscript: true },
@@ -588,8 +383,6 @@ describe('OpenCode subagent watchdog', () => {
       await vi.waitFor(() => {
         expect(client.createSession).toHaveBeenCalled();
       });
-
-      vi.useFakeTimers();
 
       // Keep the parent turn in flight so a wrongly routed child idle would
       // observably complete the turn.
@@ -610,16 +403,12 @@ describe('OpenCode subagent watchdog', () => {
       });
 
       // The child session going idle is the background run's completion
-      // signal: it disarms the watchdog and must not finish the parent turn.
+      // signal: it ends tracking and must not finish the parent turn.
       await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_child_1' },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
       expect(
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskCompleted,
@@ -636,12 +425,331 @@ describe('OpenCode subagent watchdog', () => {
           (event) => event.eventName === TaskEventName.TaskCompleted,
         ),
       ).toBe(true);
+      expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('keeps the background watchdog armed across parent turn finish and aborts the hung child', async () => {
+  it('keeps the background tracker across parent turn finish', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Do work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalled();
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            input: { background: true },
+            metadata: { sessionId: 'ses_child_1' },
+            output: '<task id="job_1" state="running" />',
+          }),
+        },
+      });
+
+      // The parent turn finishes right after launching the background run —
+      // the canonical non-blocking delivery shape.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      // The background child keeps working: its events still fold into the
+      // spawn row after the parent turn finished.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({
+            callId: 'c_bg',
+            command: 'agent-browser screenshot',
+          }),
+        },
+      });
+
+      expect(subagentActivityEvents(outputs).length).toBeGreaterThan(0);
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('clears foreground trackers when the parent turn finishes', async () => {
+    const { client, harness } = createHarness();
+    const outputs: Array<Record<string, unknown>> = [];
+    harness.on('runtimeOutput', (event) => {
+      outputs.push(event as unknown as Record<string, unknown>);
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      const settledCount = subagentActivityEvents(outputs).length;
+
+      // Foreground spawn tracking ended with the turn: late child events are
+      // inert.
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_late', command: 'ls' }),
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      expect(subagentActivityEvents(outputs)).toHaveLength(settledCount);
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+});
+
+describe('OpenCode subagent settlement recovery', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('aborts a finished child whose task tool call never settles', async () => {
+    const { client, harness, logger } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // The child session finishes, but no terminal task tool part ever
+      // arrives: the spawn leaked inside OpenCode.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS - 1);
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+      expect(client.children).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('did not settle'),
+      );
+      // Recovery acts on the child only; the parent turn is untouched.
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskCompleted ||
+            event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('never aborts a child whose latest assistant message is still in flight', async () => {
+    const { client, harness, logger } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      // The child looks terminal, but its persisted state says it is still
+      // mid-message — a silent revival or a lookup we cannot trust. Recovery
+      // must keep waiting instead of killing possibly-live work.
+      client.messages.mockResolvedValue([
+        {
+          info: {
+            id: 'msg_child_live',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1 },
+          },
+          parts: [],
+        },
+      ] as unknown as OpenCodeSessionMessage[]);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('not aborting'),
+      );
+
+      // Once the child's work is genuinely finished, the next re-check
+      // recovers the still-unsettled spawn.
+      client.messages.mockResolvedValue([
+        {
+          info: {
+            id: 'msg_child_live',
+            sessionID: 'ses_child_1',
+            role: 'assistant',
+            time: { created: 1, completed: 2 },
+          },
+          parts: [],
+        },
+      ] as unknown as OpenCodeSessionMessage[]);
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('never aborts when the pre-abort verification cannot reach the child', async () => {
+    const { client, harness, logger } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      client.messages.mockRejectedValue(new Error('connection reset'));
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('Could not verify'),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not recover when the task tool part settles within the grace', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createTaskToolPart({
+            status: 'completed',
+            metadata: { sessionId: 'ses_child_1' },
+            output: '<task_result>done</task_result>',
+          }),
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('cancels pending recovery when the child emits again', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
+      });
+
+      // A provider retry picks the child session back up before the grace
+      // expires: the child is alive, so nothing may abort it.
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS - 1);
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: createChildToolPart({ callId: 'c_retry', command: 'ls' }),
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
+      expect(client.abort).not.toHaveBeenCalled();
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('arms the same recovery for a child session error', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      vi.useFakeTimers();
+      await armSpawn(client, harness);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_child_1',
+          error: { name: 'ProviderError' },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS);
+
+      expect(client.abort).toHaveBeenCalledTimes(1);
+      expect(client.abort).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionId: 'ses_child_1' }),
+      );
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not arm recovery for background launches', async () => {
     const { client, harness } = createHarness();
 
     try {
@@ -668,222 +776,63 @@ describe('OpenCode subagent watchdog', () => {
           }),
         },
       });
-
-      // The parent turn finishes right after launching the background proof
-      // and posting the closeout — the canonical non-blocking delivery shape.
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
-      });
-
-      // Turn finish must not disarm the background watchdog: the hung child
-      // is still aborted when the timeout elapses.
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS + 1_000);
-
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('still clears foreground watchdogs when the parent turn finishes', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-
-      harness.sendCommand({
-        commandName: TaskCommandName.StartNewTask,
-        data: { text: 'Do work.', visibleInTranscript: true },
-      });
-      await vi.waitFor(() => {
-        expect(client.createSession).toHaveBeenCalled();
-      });
-
-      vi.useFakeTimers();
-
-      // Foreground spawn still running when the turn ends (e.g. an abort
-      // raced the tool result): turn finish disarms its watchdog.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'running',
-            metadata: { sessionId: 'ses_child_1' },
-          }),
-        },
-      });
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.abort).not.toHaveBeenCalled();
-      expect(client.children).not.toHaveBeenCalled();
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('cleans the child-session key map when a background watchdog expires', async () => {
-    const { client, harness } = createHarness();
-    const taskEvents: TaskEvent[] = [];
-    harness.subscribe((event) => taskEvents.push(event));
-
-    try {
-      await connectHarness(harness, client);
-
-      harness.sendCommand({
-        commandName: TaskCommandName.StartNewTask,
-        data: { text: 'Do work.', visibleInTranscript: true },
-      });
-      await vi.waitFor(() => {
-        expect(client.createSession).toHaveBeenCalled();
-      });
-
-      vi.useFakeTimers();
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createTaskToolPart({
-            status: 'completed',
-            input: { background: true },
-            metadata: { sessionId: 'ses_child_1' },
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS + 1_000);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-
-      // Expiry removed the child-session mapping: a late child idle is inert
-      // (no second abort, no parent-turn side effects).
       await client.emit({
         type: 'session.idle',
         properties: { sessionID: 'ses_child_1' },
       });
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(
-        taskEvents.filter(
-          (event) => event.eventName === TaskEventName.TaskCompleted,
-        ).length,
-      ).toBeLessThanOrEqual(1);
-    } finally {
-      harness.dispose();
-    }
-  });
 
-  it('arms the watchdog for subtask parts as well', async () => {
-    const { client, harness } = createHarness();
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
 
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      client.children.mockResolvedValueOnce([
-        { id: 'child_1', parentID: 'ses_1' },
-      ]);
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createSubtaskPart() },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS);
-
-      expect(client.children).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'child_1' }),
-      );
-    } finally {
-      harness.dispose();
-    }
-  });
-
-  it('clears the watchdog when a subtask part reaches a terminal status', async () => {
-    const { client, harness } = createHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createSubtaskPart() },
-      });
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createSubtaskPart({ state: { status: 'completed' } }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
-
-      expect(client.children).not.toHaveBeenCalled();
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('clears pending watchdogs when the turn finishes', async () => {
+  it('cancels pending recovery when the parent turn finishes', async () => {
     const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
+      await armSpawn(client, harness);
 
       await client.emit({
-        type: 'session.status',
-        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
       });
+      // Parent turn finish tears down foreground spawn tracking, and with it
+      // the pending recovery.
       await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createTaskToolPart({ status: 'running' }) },
-      });
-      // Turn completion tears down execute-tool progress and subagent
-      // watchdogs together.
-      await client.emit({
-        type: 'session.status',
-        properties: { sessionID: 'ses_1', status: { type: 'idle' } },
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
       });
 
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
 
-      expect(client.children).not.toHaveBeenCalled();
       expect(client.abort).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
   });
 
-  it('only logs when listing or aborting child sessions fails', async () => {
-    const { client, harness, logger } = createHarness();
+  it('cancels pending recovery on dispose', async () => {
+    const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
       vi.useFakeTimers();
-
-      client.children.mockRejectedValueOnce(new Error('children failed'));
+      await armSpawn(client, harness);
 
       await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createTaskToolPart({ status: 'running' }) },
+        type: 'session.idle',
+        properties: { sessionID: 'ses_child_1' },
       });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS);
 
-      expect(client.children).toHaveBeenCalledTimes(1);
+      harness.dispose();
+      await vi.advanceTimersByTimeAsync(SETTLEMENT_GRACE_MS * 3);
+
       expect(client.abort).not.toHaveBeenCalled();
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('Failed to list OpenCode child sessions'),
-      );
-      expect(logger.error).not.toHaveBeenCalled();
     } finally {
       harness.dispose();
     }
@@ -915,11 +864,7 @@ describe('OpenCode subagent live activity', () => {
         },
       });
 
-      const activity = outputs.filter(
-        (event) =>
-          (event.payload as Record<string, unknown>)?.progressKind ===
-          'subagent_activity',
-      );
+      const activity = subagentActivityEvents(outputs);
       expect(activity).toHaveLength(1);
       const payload = activity[0]!.payload as Record<string, unknown>;
       expect(payload.toolCallId).toBe('call_task_1');
@@ -956,12 +901,7 @@ describe('OpenCode subagent live activity', () => {
         },
       });
 
-      let activity = outputs.filter(
-        (event) =>
-          (event.payload as Record<string, unknown>)?.progressKind ===
-          'subagent_activity',
-      );
-      expect(activity).toHaveLength(1);
+      expect(subagentActivityEvents(outputs)).toHaveLength(1);
 
       vi.advanceTimersByTime(6_000);
       await client.emit({
@@ -971,11 +911,7 @@ describe('OpenCode subagent live activity', () => {
         },
       });
 
-      activity = outputs.filter(
-        (event) =>
-          (event.payload as Record<string, unknown>)?.progressKind ===
-          'subagent_activity',
-      );
+      const activity = subagentActivityEvents(outputs);
       expect(activity).toHaveLength(2);
       const details = (activity[1]!.payload as Record<string, unknown>)
         .subagentActivity as Record<string, unknown>;
@@ -1004,323 +940,7 @@ describe('OpenCode subagent live activity', () => {
         },
       });
 
-      expect(
-        outputs.filter(
-          (event) =>
-            (event.payload as Record<string, unknown>)?.progressKind ===
-            'subagent_activity',
-        ),
-      ).toHaveLength(0);
-    } finally {
-      await harness.dispose();
-    }
-  });
-});
-
-describe('OpenCode subagent inactivity deadline', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  function createInactivityHarness() {
-    return createHarness(new FakeOpenCodeServerClient(), {
-      subagentTaskInactivityTimeoutMs: SUBAGENT_INACTIVITY_TIMEOUT_MS,
-    });
-  }
-
-  it('aborts a child session that stops emitting events at the inactivity deadline', async () => {
-    const { client, harness, logger } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('stalled with no child-session events'),
-      );
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('slides the inactivity deadline forward on child-session events', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await vi.advanceTimersByTimeAsync(8_000);
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createChildTextPart('still capturing') },
-      });
-
-      // The deadline now measures from the last child event, not the spawn.
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(client.abort).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_child_1' }),
-      );
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('keeps an active child alive past the inactivity window and still enforces the total timeout', async () => {
-    const { client, harness, logger } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      // Child streams an event every half inactivity window until just
-      // before the total timeout.
-      const stepMs = SUBAGENT_INACTIVITY_TIMEOUT_MS / 2;
-      for (
-        let elapsedMs = stepMs;
-        elapsedMs < SUBAGENT_TASK_TIMEOUT_MS;
-        elapsedMs += stepMs
-      ) {
-        await vi.advanceTimersByTimeAsync(stepMs);
-        await client.emit({
-          type: 'message.part.updated',
-          properties: { part: createChildTextPart('still capturing') },
-        });
-      }
-
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(stepMs);
-
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('exceeded the'),
-      );
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('suspends the inactivity deadline while a child tool call is in flight', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      // A silently long-running tool must not be mistaken for a wedged
-      // child: only the total timeout applies while it is in flight.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({ callId: 'c1', command: 'pnpm build' }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('resumes the inactivity deadline when the running child tool completes', async () => {
-    const { client, harness, logger } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({ callId: 'c1', command: 'pnpm build' }),
-        },
-      });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS * 3);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      // Tool completes, then the child goes silent: the idle clock restarts
-      // at the completion event and expires one window later.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({ callId: 'c1', status: 'completed' }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('stalled with no child-session events'),
-      );
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('suspends the inactivity deadline for long-running non-shell tools (MCP calls)', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({
-            callId: 'c_mcp',
-            tool: 'mcp__roomote__manage_artifacts',
-          }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('treats a pending child tool call as in flight', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({ callId: 'c1', status: 'pending' }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('treats a child tool part with no status as in flight (fails toward suspension)', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      const part = createChildToolPart({ callId: 'c1' }) as Record<
-        string,
-        unknown
-      >;
-      part.state = { input: {} };
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('resumes the inactivity deadline when the running child tool errors', async () => {
-    const { client, harness, logger } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-      await armSpawn(client, harness);
-
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createChildToolPart({ callId: 'c1' }) },
-      });
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS * 2);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      // The tool fails (e.g. OpenCode's own shell timeout killed it); the
-      // idle clock restarts at the error event.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: {
-          part: createChildToolPart({ callId: 'c1', status: 'error' }),
-        },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_INACTIVITY_TIMEOUT_MS - 1);
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.abort).toHaveBeenCalledTimes(1);
-      expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('stalled with no child-session events'),
-      );
-    } finally {
-      await harness.dispose();
-    }
-  });
-
-  it('does not enforce the inactivity deadline before a child session id is known', async () => {
-    const { client, harness } = createInactivityHarness();
-
-    try {
-      await connectHarness(harness, client);
-      vi.useFakeTimers();
-
-      // Spawn with no child session id: there is no activity feed to judge
-      // liveness by, so only the total timeout applies.
-      await client.emit({
-        type: 'message.part.updated',
-        properties: { part: createTaskToolPart({ status: 'pending' }) },
-      });
-
-      await vi.advanceTimersByTimeAsync(SUBAGENT_TASK_TIMEOUT_MS - 1);
-      expect(client.children).not.toHaveBeenCalled();
-      expect(client.abort).not.toHaveBeenCalled();
-
-      await vi.advanceTimersByTimeAsync(1);
-      expect(client.children).toHaveBeenCalledTimes(1);
+      expect(subagentActivityEvents(outputs)).toHaveLength(0);
     } finally {
       await harness.dispose();
     }

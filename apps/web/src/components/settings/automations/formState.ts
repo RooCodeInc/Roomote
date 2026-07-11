@@ -13,7 +13,6 @@ export type ConflictResolverFrequency =
   | 'every_hour'
   | 'every_6_hours'
   | 'daily';
-export type CoachFrequency = 'off' | 'daily' | 'weekly' | 'biweekly';
 export type SuggesterFrequency = 'off' | 'daily' | 'weekly';
 export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
@@ -69,9 +68,6 @@ export type FormState = {
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannel: string;
-  coachFrequency: CoachFrequency;
-  coachSlackChannel: string;
-  coachInstructions: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
   suggesterInstructions: string;
@@ -86,7 +82,7 @@ export type FormState = {
   ciFailureTriageSlackChannel: string;
 } & ScheduleOnlyAutomationFormFields;
 
-export type AgentType =
+export type AutomationId =
   | 'channelAutoStart'
   | 'managerChannel'
   | 'managerStats'
@@ -95,7 +91,6 @@ export type AgentType =
   | ScheduleOnlyBackgroundAutomationId
   | 'reviewer'
   | 'conflictResolver'
-  | 'coach'
   | 'suggester'
   | 'announcer'
   | 'platformIssueAlerts';
@@ -143,12 +138,6 @@ const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageSlackChannel',
 ];
 
-const COACH_FIELDS: Array<keyof FormState> = [
-  'coachFrequency',
-  'coachSlackChannel',
-  'coachInstructions',
-];
-
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   'suggesterSlackChannel',
@@ -167,7 +156,7 @@ const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   'platformIssueSlackChannel',
 ];
 
-const SCHEDULE_ONLY_AGENT_FIELDS = Object.fromEntries(
+const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
     automation.id,
     [
@@ -181,63 +170,62 @@ const SCHEDULE_ONLY_AGENT_FIELDS = Object.fromEntries(
   ]),
 ) as Record<ScheduleOnlyBackgroundAutomationId, Array<keyof FormState>>;
 
-const AGENT_FIELDS: Record<AgentType, Array<keyof FormState>> = {
+const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   channelAutoStart: CHANNEL_AUTO_START_FIELDS,
   managerChannel: MANAGER_CHANNEL_FIELDS,
   managerStats: MANAGER_STATS_FIELDS,
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
-  ...SCHEDULE_ONLY_AGENT_FIELDS,
+  ...SCHEDULE_ONLY_AUTOMATION_FIELDS,
   reviewer: REVIEWER_FIELDS,
   conflictResolver: CONFLICT_RESOLVER_FIELDS,
-  coach: COACH_FIELDS,
   suggester: SUGGESTER_FIELDS,
   announcer: ANNOUNCER_FIELDS,
   platformIssueAlerts: PLATFORM_ISSUE_ALERT_FIELDS,
 };
 
-export function isAgentDirty(
+export function isAutomationDirty(
   formState: FormState,
   savedState: FormState,
-  agent: AgentType,
+  automationId: AutomationId,
 ): boolean {
-  return AGENT_FIELDS[agent].some(
+  return AUTOMATION_FIELDS[automationId].some(
     (field) => formState[field] !== savedState[field],
   );
 }
 
-export function resetAgentFields(
+export function resetAutomationFields(
   formState: FormState,
   savedState: FormState,
-  agent: AgentType,
+  automationId: AutomationId,
 ): FormState {
   const updated = { ...formState };
-  for (const field of AGENT_FIELDS[agent]) {
+  for (const field of AUTOMATION_FIELDS[automationId]) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (updated as any)[field] = savedState[field];
   }
   return updated;
 }
 
-export function mergeAgentFields(
+export function mergeAutomationFields(
   currentState: FormState,
   nextState: FormState,
-  agent: AgentType,
+  automationId: AutomationId,
 ): FormState {
   const updated = { ...currentState };
-  for (const field of AGENT_FIELDS[agent]) {
+  for (const field of AUTOMATION_FIELDS[automationId]) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (updated as any)[field] = nextState[field];
   }
   return updated;
 }
 
-export function buildSaveStateForAgent(
+export function buildSaveStateForAutomation(
   formState: FormState,
   savedState: FormState,
-  agent: AgentType,
+  automationId: AutomationId,
 ): FormState {
-  return mergeAgentFields(savedState, formState, agent);
+  return mergeAutomationFields(savedState, formState, automationId);
 }
 
 function buildScheduleOnlyAutomationSaveInput(
@@ -254,12 +242,16 @@ function buildScheduleOnlyAutomationSaveInput(
 export function buildAutomationSettingsSaveInput(
   formState: FormState,
   savedState: FormState,
-  agent: AgentType,
+  automationId: AutomationId,
 ) {
-  const stateToSave = buildSaveStateForAgent(formState, savedState, agent);
+  const stateToSave = buildSaveStateForAutomation(
+    formState,
+    savedState,
+    automationId,
+  );
 
   return {
-    savingAgent: agent,
+    savingAutomation: automationId,
     reviewerEnabled: stateToSave.reviewerEnabled,
     reviewerEnvironmentScope: 'all' as const,
     reviewerEnvironmentIds: [],
@@ -299,9 +291,6 @@ export function buildAutomationSettingsSaveInput(
     dependabotTriageSlackChannel:
       stateToSave.dependabotTriageSlackChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
-    coachFrequency: stateToSave.coachFrequency,
-    coachSlackChannel: stateToSave.coachSlackChannel.trim() || null,
-    coachInstructions: stateToSave.coachInstructions.trim() || null,
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
@@ -333,13 +322,17 @@ export function mergeServerStatePreservingDirtySections(
   let nextFormState = { ...incomingState };
   let nextSavedState = { ...incomingState };
 
-  for (const agent of Object.keys(AGENT_FIELDS) as AgentType[]) {
-    if (isAgentDirty(currentFormState, currentSavedState, agent)) {
-      nextFormState = mergeAgentFields(nextFormState, currentFormState, agent);
-      nextSavedState = mergeAgentFields(
+  for (const automationId of Object.keys(AUTOMATION_FIELDS) as AutomationId[]) {
+    if (isAutomationDirty(currentFormState, currentSavedState, automationId)) {
+      nextFormState = mergeAutomationFields(
+        nextFormState,
+        currentFormState,
+        automationId,
+      );
+      nextSavedState = mergeAutomationFields(
         nextSavedState,
         currentSavedState,
-        agent,
+        automationId,
       );
     }
   }

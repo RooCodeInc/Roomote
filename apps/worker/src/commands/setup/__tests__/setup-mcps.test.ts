@@ -285,13 +285,13 @@ describe('resolveBuiltInMcpServers', () => {
     expect(parsed.mcpServers).not.toHaveProperty('linear');
   });
 
-  it('rewrites user Notion MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user Notion MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -317,7 +317,7 @@ describe('resolveBuiltInMcpServers', () => {
     };
     expect(notionConfig.type).toBe('streamable-http');
     expect(notionConfig.url).toBe('https://api.test.com/api/mcp/notion');
-    expect(notionConfig.headers.Authorization).toBe('Bearer roomote-job-token');
+    expect(notionConfig.headers.Authorization).toBe('Bearer roomote-run-token');
     expect(notionConfig.headers['X-MCP-Client']).toBe('Roomote');
     expect(Object.values(notionConfig.headers)).not.toContain(
       'Bearer raw-notion-token',
@@ -330,7 +330,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
           ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-roomote-bypass',
           ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
@@ -352,17 +352,17 @@ describe('resolveBuiltInMcpServers', () => {
       headers: Record<string, string>;
     };
 
-    expect(notionConfig.headers.Authorization).toBe('Bearer roomote-job-token');
+    expect(notionConfig.headers.Authorization).toBe('Bearer roomote-run-token');
     expect(notionConfig.headers['x-roomote-bypass']).toBe('bypass-token');
   });
 
-  it('rewrites user Sentry MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user Sentry MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -389,7 +389,7 @@ describe('resolveBuiltInMcpServers', () => {
     };
     expect(sentryConfig.type).toBe('streamable-http');
     expect(sentryConfig.url).toBe('https://api.test.com/api/mcp/sentry');
-    expect(sentryConfig.headers.Authorization).toBe('Bearer roomote-job-token');
+    expect(sentryConfig.headers.Authorization).toBe('Bearer roomote-run-token');
     expect(sentryConfig.headers.authorization).toBeUndefined();
     expect(sentryConfig.headers['X-MCP-Client']).toBe('Roomote');
     expect(Object.values(sentryConfig.headers)).not.toContain(
@@ -400,13 +400,13 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
-  it('rewrites user Snowflake MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user Snowflake MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -432,7 +432,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(snowflakeConfig.type).toBe('streamable-http');
     expect(snowflakeConfig.url).toBe('https://api.test.com/api/mcp/snowflake');
     expect(snowflakeConfig.headers.Authorization).toBe(
-      'Bearer roomote-job-token',
+      'Bearer roomote-run-token',
     );
     expect(snowflakeConfig.headers['X-MCP-Client']).toBe('Roomote');
   });
@@ -443,7 +443,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
           ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-roomote-bypass',
           ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
@@ -466,18 +466,18 @@ describe('resolveBuiltInMcpServers', () => {
     };
 
     expect(snowflakeConfig.headers.Authorization).toBe(
-      'Bearer roomote-job-token',
+      'Bearer roomote-run-token',
     );
     expect(snowflakeConfig.headers['x-roomote-bypass']).toBe('bypass-token');
   });
 
-  it('rewrites user PostHog MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user PostHog MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -505,7 +505,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(posthogConfig.type).toBe('streamable-http');
     expect(posthogConfig.url).toBe('https://api.test.com/api/mcp/posthog');
     expect(posthogConfig.headers.Authorization).toBe(
-      'Bearer roomote-job-token',
+      'Bearer roomote-run-token',
     );
     expect(posthogConfig.headers.authorization).toBeUndefined();
     expect(posthogConfig.headers['X-MCP-Client']).toBe('Roomote');
@@ -517,13 +517,13 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
-  it('rewrites user Neon MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user Neon MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -549,20 +549,20 @@ describe('resolveBuiltInMcpServers', () => {
     };
     expect(neonConfig.type).toBe('streamable-http');
     expect(neonConfig.url).toBe('https://api.test.com/api/mcp/neon');
-    expect(neonConfig.headers.Authorization).toBe('Bearer roomote-job-token');
+    expect(neonConfig.headers.Authorization).toBe('Bearer roomote-run-token');
     expect(neonConfig.headers['X-MCP-Client']).toBe('Roomote');
     expect(Object.values(neonConfig.headers)).not.toContain(
       'Bearer raw-neon-token',
     );
   });
 
-  it('rewrites user Supabase MCP to the Roomote proxy with job token auth', () => {
+  it('rewrites user Supabase MCP to the Roomote proxy with run token auth', () => {
     delete process.env.TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com/',
         },
         {
@@ -589,7 +589,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(supabaseConfig.type).toBe('streamable-http');
     expect(supabaseConfig.url).toBe('https://api.test.com/api/mcp/supabase');
     expect(supabaseConfig.headers.Authorization).toBe(
-      'Bearer roomote-job-token',
+      'Bearer roomote-run-token',
     );
     expect(supabaseConfig.headers['X-MCP-Client']).toBe('Roomote');
     expect(Object.values(supabaseConfig.headers)).not.toContain(
@@ -603,7 +603,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com',
         },
         {
@@ -631,7 +631,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com',
         },
         {
@@ -659,7 +659,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com',
         },
         {
@@ -687,7 +687,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com',
         },
         {
@@ -715,7 +715,7 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
         {
-          ROOMOTE_CLOUD_TOKEN: 'roomote-job-token',
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
           ROOMOTE_APP_URL: 'https://api.test.com',
         },
         {
@@ -745,7 +745,7 @@ describe('resolveBuiltInMcpServers', () => {
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
       ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
-      ROOMOTE_TASK_TYPE: 'standard.task',
+      ROOMOTE_TASK_TYPE: 'standard',
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '111.222',
       ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
@@ -770,7 +770,7 @@ describe('resolveBuiltInMcpServers', () => {
       'x-bypass-roomote-auth',
     );
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_VALUE).toBe('bypass-token');
-    expect(roomoteEnv.ROOMOTE_TASK_TYPE).toBe('standard.task');
+    expect(roomoteEnv.ROOMOTE_TASK_TYPE).toBe('standard');
     expect(roomoteEnv.ROOMOTE_SLACK_CHANNEL).toBe('C123');
     expect(roomoteEnv.ROOMOTE_SLACK_THREAD_TS).toBe('111.222');
     expect(roomoteEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE).toBe(

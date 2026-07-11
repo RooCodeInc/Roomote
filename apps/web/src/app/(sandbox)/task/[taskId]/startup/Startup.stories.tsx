@@ -2,7 +2,7 @@
 
 import type { Meta, StoryObj } from '@storybook/nextjs-vite';
 
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 import type { SandboxLogEntry } from '@roomote/types';
 
 import { StartupSequence, type StartupStep } from './StartupMessage';
@@ -33,10 +33,7 @@ type Story = StoryObj<typeof meta>;
 // Mock data helpers
 // ---------------------------------------------------------------------------
 
-const mockStep = (
-  status: CloudTaskStatus,
-  completed: boolean,
-): StartupStep => ({
+const mockStep = (status: RunStatus, completed: boolean): StartupStep => ({
   status,
   completed,
 });
@@ -114,7 +111,7 @@ const mockSandboxLogs: SandboxLogEntry[] = [
 export const StepPending: Story = {
   name: 'Step – Pending (active)',
   render: () => (
-    <StartupSequence steps={[mockStep(CloudTaskStatus.Pending, false)]} />
+    <StartupSequence steps={[mockStep(RunStatus.Pending, false)]} />
   ),
 };
 
@@ -122,7 +119,7 @@ export const StepPending: Story = {
 export const StepDequeued: Story = {
   name: 'Step – Dequeued',
   render: () => (
-    <StartupSequence steps={[mockStep(CloudTaskStatus.Dequeued, false)]} />
+    <StartupSequence steps={[mockStep(RunStatus.Dequeued, false)]} />
   ),
 };
 
@@ -130,7 +127,7 @@ export const StepDequeued: Story = {
 export const StepCompletedProcessing: Story = {
   name: 'Step – Processing (completed)',
   render: () => (
-    <StartupSequence steps={[mockStep(CloudTaskStatus.Processing, true)]} />
+    <StartupSequence steps={[mockStep(RunStatus.Processing, true)]} />
   ),
 };
 
@@ -139,12 +136,12 @@ export const AllStepStatuses: Story = {
   name: 'All step statuses',
   render: () => {
     const statuses = [
-      CloudTaskStatus.Pending,
-      CloudTaskStatus.Dequeued,
-      CloudTaskStatus.Processing,
-      CloudTaskStatus.Preparing,
-      CloudTaskStatus.Spawning,
-      CloudTaskStatus.Connecting,
+      RunStatus.Pending,
+      RunStatus.Dequeued,
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ] as const;
 
     return (
@@ -162,12 +159,12 @@ export const AllStepIcons: Story = {
   name: 'All step icons (none completed)',
   render: () => {
     const statuses = [
-      CloudTaskStatus.Pending,
-      CloudTaskStatus.Dequeued,
-      CloudTaskStatus.Processing,
-      CloudTaskStatus.Preparing,
-      CloudTaskStatus.Spawning,
-      CloudTaskStatus.Connecting,
+      RunStatus.Pending,
+      RunStatus.Dequeued,
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ] as const;
 
     return (
@@ -183,12 +180,12 @@ export const AllStepStatusesGeneric: Story = {
   name: 'All step statuses (generic copy)',
   render: () => {
     const statuses = [
-      CloudTaskStatus.Pending,
-      CloudTaskStatus.Dequeued,
-      CloudTaskStatus.Processing,
-      CloudTaskStatus.Preparing,
-      CloudTaskStatus.Spawning,
-      CloudTaskStatus.Connecting,
+      RunStatus.Pending,
+      RunStatus.Dequeued,
+      RunStatus.Processing,
+      RunStatus.Preparing,
+      RunStatus.Spawning,
+      RunStatus.Connecting,
     ] as const;
 
     return (
@@ -206,9 +203,9 @@ export const Canceled: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Processing, true),
-        mockStep(CloudTaskStatus.Canceled, true),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Canceled, true),
       ]}
     />
   ),
@@ -224,12 +221,12 @@ export const FullBootInProgress: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Processing, true),
-        mockStep(CloudTaskStatus.Preparing, true),
-        mockStep(CloudTaskStatus.Spawning, true),
-        mockStep(CloudTaskStatus.Connecting, false),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Preparing, true),
+        mockStep(RunStatus.Spawning, true),
+        mockStep(RunStatus.Connecting, false),
       ]}
     />
   ),
@@ -241,12 +238,12 @@ export const FullBootRunning: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Processing, true),
-        mockStep(CloudTaskStatus.Preparing, true),
-        mockStep(CloudTaskStatus.Spawning, true),
-        mockStep(CloudTaskStatus.Connecting, true),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Preparing, true),
+        mockStep(RunStatus.Spawning, true),
+        mockStep(RunStatus.Connecting, true),
       ]}
     />
   ),
@@ -258,11 +255,11 @@ export const WithSandboxLogs: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Processing, true),
-        mockStep(CloudTaskStatus.Preparing, true),
-        mockStep(CloudTaskStatus.Spawning, false),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Preparing, true),
+        mockStep(RunStatus.Spawning, false),
       ]}
       logs={mockSandboxLogs}
     />
@@ -275,9 +272,9 @@ export const WithSandboxLogsError: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Spawning, false),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Spawning, false),
       ]}
       logs={mockSandboxLogs.slice(0, 5)}
       logsConnected={false}
@@ -292,12 +289,12 @@ export const FailedWithLogs: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Processing, true),
-        mockStep(CloudTaskStatus.Preparing, true),
-        mockStep(CloudTaskStatus.Spawning, true),
-        mockStep(CloudTaskStatus.Failed, true),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Processing, true),
+        mockStep(RunStatus.Preparing, true),
+        mockStep(RunStatus.Spawning, true),
+        mockStep(RunStatus.Failed, true),
       ]}
       error="Sandbox container failed to start: timeout after 60s"
       logs={mockSandboxLogs}
@@ -312,9 +309,9 @@ export const FailedWithoutError: Story = {
   render: () => (
     <StartupSequence
       steps={[
-        mockStep(CloudTaskStatus.Pending, true),
-        mockStep(CloudTaskStatus.Dequeued, true),
-        mockStep(CloudTaskStatus.Failed, true),
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Failed, true),
       ]}
       logs={mockSandboxLogs.slice(0, 3)}
       logsConnected={false}
@@ -326,6 +323,6 @@ export const FailedWithoutError: Story = {
 export const JustStarted: Story = {
   name: 'Just started',
   render: () => (
-    <StartupSequence steps={[mockStep(CloudTaskStatus.Pending, false)]} />
+    <StartupSequence steps={[mockStep(RunStatus.Pending, false)]} />
   ),
 };

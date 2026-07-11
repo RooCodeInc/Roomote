@@ -109,7 +109,7 @@ describe('Slack routing blocks', () => {
   it('keeps the started message copy neutral about environments', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
       taskId: 'task-123',
       initiatingSlackUserId: 'U123',
     });
@@ -122,7 +122,7 @@ describe('Slack routing blocks', () => {
   it('keeps the same started message copy when a task URL is present', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
       taskId: 'task-123',
       initiatingSlackUserId: 'U123',
       taskUrl: 'https://example.com/task',
@@ -137,7 +137,7 @@ describe('Slack routing blocks', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
       modelDisplayName: 'Opus 4.8',
-      cloudJobId: 123,
+      runId: 123,
       taskId: 'task-123',
       initiatingSlackUserId: 'U123',
     });
@@ -150,7 +150,7 @@ describe('Slack routing blocks', () => {
   it('appends the other-running-task count when provided', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
       otherRunningTasksCount: 2,
       taskId: 'task-123',
       initiatingSlackUserId: 'U123',
@@ -167,7 +167,7 @@ describe('Slack routing blocks', () => {
   it('embeds the task id and initiating Slack user id in cancel buttons', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
       taskId: 'task-123',
       initiatingSlackUserId: 'U123',
       taskUrl: 'https://example.com/task',
@@ -191,7 +191,7 @@ describe('Slack routing blocks', () => {
   it('omits slackUserId from cancel buttons when no initiating Slack user is provided', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
       taskId: 'task-123',
     });
     const actionElements = getActionsElements(blocks);
@@ -208,10 +208,10 @@ describe('Slack routing blocks', () => {
     );
   });
 
-  it('falls back to cloud job id in cancel buttons when task id is unavailable', () => {
+  it('falls back to task run id in cancel buttons when task id is unavailable', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
-      cloudJobId: 123,
+      runId: 123,
     });
     const actionElements = getActionsElements(blocks);
 
@@ -220,7 +220,7 @@ describe('Slack routing blocks', () => {
         expect.objectContaining({
           action_id: 'cancel_task',
           value: JSON.stringify({
-            cloudJobId: 123,
+            runId: 123,
           }),
         }),
       ]),
@@ -229,7 +229,7 @@ describe('Slack routing blocks', () => {
 
   it('builds a retryable failed-task message', () => {
     const blocks = buildTaskFailedBlocks({
-      cloudJobId: 123,
+      runId: 123,
     });
     const actionElements = getActionsElements(blocks);
 
@@ -240,7 +240,7 @@ describe('Slack routing blocks', () => {
       expect.objectContaining({
         action_id: 'retry_failed_task',
         value: JSON.stringify({
-          cloudJobId: 123,
+          runId: 123,
         }),
       }),
     ]);
@@ -248,7 +248,7 @@ describe('Slack routing blocks', () => {
 
   it('builds a retryable failed-task message with runtime-failure copy', () => {
     const blocks = buildTaskFailedBlocks({
-      cloudJobId: 123,
+      runId: 123,
       messageText:
         "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.",
     });
@@ -261,7 +261,7 @@ describe('Slack routing blocks', () => {
       expect.objectContaining({
         action_id: 'retry_failed_task',
         value: JSON.stringify({
-          cloudJobId: 123,
+          runId: 123,
         }),
       }),
     ]);

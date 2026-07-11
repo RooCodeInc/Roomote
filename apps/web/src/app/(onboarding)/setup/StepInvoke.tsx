@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
 import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
@@ -34,12 +34,14 @@ export function StepInvoke({
   const trpc = useTRPC();
   const queryClient = useQueryClient();
   const environments = useEnvironments();
+  const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
   const methods = buildInvokeMethods({
     communicationProviders,
     sourceControlProviders,
     includeLinear,
+    invocationIdentities: commsStatus.data?.invocationIdentities,
   });
 
   const completeSetup = useMutation(

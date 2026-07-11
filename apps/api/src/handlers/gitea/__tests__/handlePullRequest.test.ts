@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetGiteaAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRepositoriesFindFirst,
@@ -8,7 +8,7 @@ const {
   mockNotifyTelegramAndLinearPrMerge,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -68,7 +68,7 @@ vi.mock('../getGiteaAutomationTargets', async () => {
   };
 });
 
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind } from '@roomote/types';
 
 import { handleGiteaPullRequest } from '../handlePullRequest';
 import type { GiteaPullRequestWebhook } from '../types';
@@ -100,7 +100,7 @@ function makePayload(
 
 describe('handleGiteaPullRequest', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
@@ -118,14 +118,14 @@ describe('handleGiteaPullRequest', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitea:pr_reviewer:repo-1',
+          id: 'gitea:pr_review:repo-1',
           settings: null,
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
       ],
     });
-    mockEnqueueCloudTask.mockResolvedValue({
+    mockEnqueueTask.mockResolvedValue({
       id: 1234,
       taskId: 'task-1',
     });
@@ -141,24 +141,34 @@ describe('handleGiteaPullRequest', () => {
         ids: [1234],
       },
     });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: {
-          kind: 'automatic',
-          sourceKind: 'gitea',
-        },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitea',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitea',
+            prNumber: 42,
+            prUrl: 'https://git.example.com/acme/backend/pulls/42',
+            headSha: 'abc123',
+            branchName: 'feature/test',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        initiator: expect.objectContaining({
+          kind: 'automation',
+          key: 'review_code',
+        }),
+        workflow: 'pr_review',
+        surface: 'gitea',
+        trigger: 'webhook',
+        prLinkage: expect.objectContaining({
+          provider: 'gitea',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://git.example.com/acme/backend/pulls/42',
-          headSha: 'abc123',
-          branchName: 'feature/test',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
+          prSha: 'abc123',
         }),
       }),
       expect.objectContaining({
@@ -170,12 +180,14 @@ describe('handleGiteaPullRequest', () => {
   it('enqueues sync reviews for synchronized pull requests', async () => {
     await handleGiteaPullRequest(makePayload('synchronized'));
 
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: CloudTaskType.GithubPrReviewSync,
-        payload: expect.objectContaining({
-          branch: 'feature/test',
-          sha: 'abc123',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReviewSync,
+          payload: expect.objectContaining({
+            branch: 'feature/test',
+            sha: 'abc123',
+          }),
         }),
       }),
       expect.any(Object),
@@ -184,9 +196,9 @@ describe('handleGiteaPullRequest', () => {
 
   it('skips enqueuing a sync review when an active review already exists for the head SHA', async () => {
     mockFindActiveGitHubPrReviewTask.mockResolvedValue({
-      jobId: 99,
+      runId: 99,
       taskId: 'running-task',
-      type: CloudTaskType.GithubPrReviewSync,
+      type: TaskPayloadKind.GithubPrReviewSync,
       status: 'running' as never,
       taskPhase: 'running',
       match: 'github_pr',
@@ -204,14 +216,14 @@ describe('handleGiteaPullRequest', () => {
       headSha: 'abc123',
       sourceControlProvider: 'gitea',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('does not run head-SHA dedup for opened pull requests', async () => {
     await handleGiteaPullRequest(makePayload('opened'));
 
     expect(mockFindActiveGitHubPrReviewTask).not.toHaveBeenCalled();
-    expect(mockEnqueueCloudTask).toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
   it('updates tracked task PR status and notifications for merged pull requests', async () => {
@@ -249,7 +261,7 @@ describe('handleGiteaPullRequest', () => {
       mergedBy: 'roomote-bot',
       sourceControlProvider: 'gitea',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('updates tracked task PR status without notifications for closed pull requests', async () => {

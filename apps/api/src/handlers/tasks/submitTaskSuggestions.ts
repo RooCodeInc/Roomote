@@ -3,8 +3,8 @@ import { z } from 'zod';
 
 import {
   ALL_REPOSITORIES,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskPayload,
+  TaskPayloadKind,
   getScheduledSuggestionBackgroundAutomationDescriptor,
   isBetaBackgroundAutomationKey,
   normalizeSetupNewState,
@@ -26,27 +26,25 @@ import {
   shouldPostHistoricalThreadFeedbackDebugSnippet,
 } from '@roomote/sdk/server';
 import {
-  agentSuggestionMessages,
   and,
   asc,
   buildTaskSuggestionContentHash,
-  cloudJobs,
   db,
   environments,
   eq,
   inArray,
-  like,
   repositories,
   resolveRepositorySelectionByIds,
   slackInstallationChannels,
   slackInstallations,
   slackUserMappings,
   sql,
-  taskSuggestions,
-  updateBackgroundAutomationRunArtifactsByTaskId,
+  taskRuns,
+  tasks,
+  trackedMessages,
   upsertBackgroundAutomationSlackThread,
-  getBackgroundAgentSettingsForDeployment,
-  resolveManagerSlackChannelId,
+  workItems,
+  getAutomationRuntime,
 } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
@@ -62,7 +60,7 @@ import { buildScheduledSuggestionRootMessage } from './scheduled-suggestion-root
 import {
   hasTrackedSetupSuggestionMessages,
   scheduleSuggestedTasksFollowupBestEffort,
-  SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+  SETUP_ONBOARDING_SUGGESTION_TYPE,
 } from './setup-suggestion-lifecycle';
 import { postScheduledSuggestionsToTelegram } from '../telegram/automation-suggestions';
 import { postScheduledSuggestionsToTeams } from '../teams/automation-suggestions';
@@ -91,9 +89,7 @@ const submitTaskSuggestionsBodySchema = z.object({
 const SETUP_ONBOARDING_SUGGESTION_METADATA_EVENT_TYPE =
   'roomote.setup_onboarding_suggestion';
 
-type SuggestedTasksPayload =
-  | CloudTaskPayload<CloudTaskType.SuggestedTasks>
-  | CloudTaskPayload<CloudTaskType.LegacyOnboardingSuggestions>;
+type SuggestedTasksPayload = TaskPayload<typeof TaskPayloadKind.Scan>;
 
 type PersistedTaskSuggestion = {
   id: string;
@@ -107,6 +103,26 @@ type PersistedTaskSuggestion = {
   workspaceReadiness: WorkspaceReadiness | null;
   readinessMessage: string | null;
 };
+
+/**
+ * Suggestion work_items always insert a non-empty brief (the payload requires
+ * `min(1)`), but the merged `work_items.brief` column is nullable. Normalize on
+ * read so downstream Slack/Telegram/Teams formatting keeps a plain string.
+ */
+function toPersistedTaskSuggestion(row: {
+  id: string;
+  title: string;
+  brief: string | null;
+  category: SuggestionCategory | null;
+  priority: SuggestionPriority | null;
+  investigationContext: string | null;
+  targetRepositoryFullName: string | null;
+  targetEnvironmentId: string | null;
+  workspaceReadiness: WorkspaceReadiness | null;
+  readinessMessage: string | null;
+}): PersistedTaskSuggestion {
+  return { ...row, brief: row.brief ?? '' };
+}
 
 type ResolvedRepository = {
   id: string;
@@ -125,8 +141,8 @@ type PreparedTaskSuggestion = {
   readinessMessage: string | null;
 };
 
-type SuggestionAgentType =
-  | typeof SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE
+type TaskSuggestionType =
+  | typeof SETUP_ONBOARDING_SUGGESTION_TYPE
   | 'suggested_tasks'
   | 'sentry_triage'
   | 'dependabot_triage'
@@ -134,14 +150,38 @@ type SuggestionAgentType =
   | 'code_quality_auditor'
   | 'ci_failure_triage';
 
-type AgentSuggestionMessageRow = {
-  agentType: SuggestionAgentType;
+type SuggestionCardMessageRow = {
+  suggestionType: TaskSuggestionType;
   messageTs: string;
   channelId: string;
+  workItemId: string;
   suggestionKey: string;
-  taskId: null;
-  createdByUserId: string;
+  createdByUserId: string | null;
 };
+
+/**
+ * Map Slack suggestion-card rows to `tracked_messages` insert values. The
+ * launch state lives on the referenced `work_items` row; the tracked message
+ * carries only registry metadata (suggestion type + key) and dedups on
+ * `(kind, dedupeKey)` where dedupeKey is `${channelId}:${messageTs}`.
+ */
+function buildSlackSuggestionCardValues(
+  rows: SuggestionCardMessageRow[],
+): (typeof trackedMessages.$inferInsert)[] {
+  return rows.map((row) => ({
+    surface: 'slack' as const,
+    kind: 'suggestion_card' as const,
+    dedupeKey: `${row.channelId}:${row.messageTs}`,
+    channelId: row.channelId,
+    messageTs: row.messageTs,
+    workItemId: row.workItemId,
+    createdByUserId: row.createdByUserId,
+    metadata: {
+      suggestionType: row.suggestionType,
+      suggestionKey: row.suggestionKey,
+    },
+  }));
+}
 
 function buildSuggestionMessageKey(params: {
   sourceTaskId: string;
@@ -527,16 +567,14 @@ async function postTaskSuggestionsThreadToSlack(params: {
   sourceTaskId: string;
   slackBotAccessToken: string;
   slackChannelId: string;
-  createdByUserId: string;
-  agentType: SuggestionAgentType;
+  createdByUserId: string | null;
+  suggestionType: TaskSuggestionType;
   rootText: string;
   automationLabel?: string | null;
   automationSettingsHash?: string;
   historicalThreadFeedbackDebugSnippet?: string | null;
   suggestions: PersistedTaskSuggestion[];
-  insertSuggestionMessages: (
-    rows: AgentSuggestionMessageRow[],
-  ) => Promise<void>;
+  insertSuggestionMessages: (rows: SuggestionCardMessageRow[]) => Promise<void>;
 }): Promise<{ rootMessageTs: string; trackedMessages: number } | null> {
   const slack = new SlackNotifier(params.slackBotAccessToken);
   const targetEnvironmentIds = [
@@ -583,7 +621,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
     params.historicalThreadFeedbackDebugSnippet?.trim();
 
   const canPostHistoricalThreadFeedbackDebugSnippet =
-    historicalThreadFeedbackDebugSnippet
+    historicalThreadFeedbackDebugSnippet && params.createdByUserId
       ? await shouldPostHistoricalThreadFeedbackDebugSnippet({
           userId: params.createdByUserId,
           logPrefix: '[submitTaskSuggestions]',
@@ -608,9 +646,9 @@ async function postTaskSuggestionsThreadToSlack(params: {
     });
   }
 
-  const suggestionMessageRows: AgentSuggestionMessageRow[] = [];
+  const suggestionMessageRows: SuggestionCardMessageRow[] = [];
   const useSharedSuggestionFormatting = usesSharedScheduledSuggestionSlackModel(
-    params.agentType,
+    params.suggestionType,
   );
 
   for (const suggestion of params.suggestions) {
@@ -641,7 +679,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
 
     if (useSharedSuggestionFormatting) {
       const sharedOptions = getSharedScheduledSuggestionSlackTextOptions(
-        params.agentType,
+        params.suggestionType,
       );
       // The fallback `text` keeps the footer inline; the rich `blocks` split it
       // into a small muted Slack `context` block so the bottom line renders as
@@ -694,14 +732,14 @@ async function postTaskSuggestionsThreadToSlack(params: {
     }
 
     suggestionMessageRows.push({
-      agentType: params.agentType,
+      suggestionType: params.suggestionType,
       messageTs,
       channelId: params.slackChannelId,
+      workItemId: suggestion.id,
       suggestionKey: buildSuggestionMessageKey({
         sourceTaskId: params.sourceTaskId,
         suggestionId: suggestion.id,
       }),
-      taskId: null,
       createdByUserId: params.createdByUserId,
     });
   }
@@ -772,18 +810,15 @@ async function postSetupTaskSuggestionsToSlack(params: {
     slackBotAccessToken: slackInstallation.botAccessToken,
     slackChannelId: slackChannel,
     createdByUserId,
-    agentType: SETUP_ONBOARDING_SUGGESTION_AGENT_TYPE,
+    suggestionType: SETUP_ONBOARDING_SUGGESTION_TYPE,
     rootText: introText,
     suggestions,
     insertSuggestionMessages: async (suggestionMessageRows) => {
       await db
-        .insert(agentSuggestionMessages)
-        .values(suggestionMessageRows)
+        .insert(trackedMessages)
+        .values(buildSlackSuggestionCardValues(suggestionMessageRows))
         .onConflictDoNothing({
-          target: [
-            agentSuggestionMessages.channelId,
-            agentSuggestionMessages.messageTs,
-          ],
+          target: [trackedMessages.kind, trackedMessages.dedupeKey],
         });
     },
   });
@@ -819,21 +854,27 @@ async function postSetupTaskSuggestionsToSlack(params: {
   });
 }
 
+/**
+ * Posts the scheduled-automation suggestion summary to Slack. Returns whether
+ * Slack actually DELIVERED the summary (root message posted/persisted, or a
+ * prior run already delivered it). The caller keys its Telegram/Teams fallback
+ * on delivery, not on mere Slack-installation existence, so a Slack-installed
+ * deployment that cannot resolve a channel still falls through to Telegram.
+ */
 async function postSuggestedTasksSummaryToSlack(params: {
   sourceTaskId: string;
   createdByUserId: string | null;
   suggestionSource?: TaskSuggestionSource;
   historicalThreadFeedbackDebugSnippet?: string | null;
   suggestions: PersistedTaskSuggestion[];
-}): Promise<void> {
-  if (
-    params.suggestions.length === 0 ||
-    !params.createdByUserId ||
-    !params.sourceTaskId.trim()
-  ) {
-    return;
+}): Promise<boolean> {
+  if (params.suggestions.length === 0 || !params.sourceTaskId.trim()) {
+    return false;
   }
 
+  // Automation-initiated scans run as the deployment service principal and have
+  // no user anywhere, so `createdByUserId` is null. A null poster must not
+  // suppress the summary post; user-attribution decoration is skipped instead.
   const createdByUserId = params.createdByUserId;
 
   const [slackInstallation] = await db
@@ -846,10 +887,9 @@ async function postSuggestedTasksSummaryToSlack(params: {
     .limit(1);
 
   if (!slackInstallation) {
-    return;
+    return false;
   }
 
-  const settings = await getBackgroundAgentSettingsForDeployment();
   const slackConfig = resolveScheduledSuggestionSlackConfig(
     params.suggestionSource,
   );
@@ -859,10 +899,12 @@ async function postSuggestedTasksSummaryToSlack(params: {
     )?.label ?? null;
   const shouldTrackAutomationThread = Boolean(params.suggestionSource);
 
-  const configuredChannelId = resolveManagerSlackChannelId(
-    settings ?? null,
-    slackConfig.managerChannelKind,
+  // Two-level fallback: the automation's own slack_channel target, then the
+  // shared manager channel (getAutomationRuntime resolves both levels).
+  const automationRuntime = await getAutomationRuntime(
+    slackConfig.automationKey,
   );
+  const configuredChannelId = automationRuntime.slackChannelId;
 
   const [channel] = configuredChannelId
     ? [{ channelId: configuredChannelId }]
@@ -879,10 +921,10 @@ async function postSuggestedTasksSummaryToSlack(params: {
         .limit(1);
 
   if (!channel) {
-    return;
+    return false;
   }
 
-  await db.transaction(async (tx) => {
+  return await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext(${buildSuggestedTasksSummaryLockKey(
         {
@@ -892,21 +934,21 @@ async function postSuggestedTasksSummaryToSlack(params: {
     );
 
     const [existingSummaryMessage] = await tx
-      .select({ id: agentSuggestionMessages.id })
-      .from(agentSuggestionMessages)
+      .select({ id: trackedMessages.id })
+      .from(trackedMessages)
       .where(
         and(
-          eq(agentSuggestionMessages.agentType, slackConfig.agentType),
-          like(
-            agentSuggestionMessages.suggestionKey,
-            `${params.sourceTaskId}:%`,
-          ),
+          eq(trackedMessages.kind, 'suggestion_card'),
+          sql`${trackedMessages.metadata} ->> 'suggestionType' = ${slackConfig.suggestionType}`,
+          sql`${trackedMessages.metadata} ->> 'suggestionKey' LIKE ${`${params.sourceTaskId}:%`}`,
         ),
       )
       .limit(1);
 
     if (existingSummaryMessage) {
-      return;
+      // A prior run already delivered this summary to Slack; treat as delivered
+      // so the fallbacks stay suppressed.
+      return true;
     }
 
     const rootMessage = await buildScheduledSuggestionRootMessage({
@@ -920,7 +962,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
       slackBotAccessToken: slackInstallation.botAccessToken,
       slackChannelId: channel.channelId,
       createdByUserId,
-      agentType: slackConfig.agentType,
+      suggestionType: slackConfig.suggestionType,
       rootText: buildAutomationRootSummaryText({
         summaryText: rootMessage.summaryText,
         actionFooterText: rootMessage.actionFooterText,
@@ -935,13 +977,10 @@ async function postSuggestedTasksSummaryToSlack(params: {
       suggestions: params.suggestions,
       insertSuggestionMessages: async (suggestionMessageRows) => {
         await tx
-          .insert(agentSuggestionMessages)
-          .values(suggestionMessageRows)
+          .insert(trackedMessages)
+          .values(buildSlackSuggestionCardValues(suggestionMessageRows))
           .onConflictDoNothing({
-            target: [
-              agentSuggestionMessages.channelId,
-              agentSuggestionMessages.messageTs,
-            ],
+            target: [trackedMessages.kind, trackedMessages.dedupeKey],
           });
       },
     });
@@ -957,21 +996,23 @@ async function postSuggestedTasksSummaryToSlack(params: {
         thread_ts: postResult.rootMessageTs,
       });
 
+      // Channel bindings live on the tasks row now.
       await tx
-        .update(cloudJobs)
+        .update(tasks)
         .set({
+          slackChannelId: channel.channelId,
           slackThreadTs: postResult.rootMessageTs,
-          payload: sql`coalesce(${cloudJobs.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
         })
-        .where(eq(cloudJobs.taskId, params.sourceTaskId));
-    }
+        .where(eq(tasks.id, params.sourceTaskId));
 
-    if (postResult && shouldTrackAutomationThread) {
-      await updateBackgroundAutomationRunArtifactsByTaskId(tx, {
-        taskId: params.sourceTaskId,
-        slackChannelId: channel.channelId,
-        threadTs: postResult.rootMessageTs,
-      });
+      // Keep run payloads in sync for consumers that read Slack routing
+      // metadata from the payload (prompt assembly, callbacks).
+      await tx
+        .update(taskRuns)
+        .set({
+          payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${slackThreadPayloadPatch}::jsonb`,
+        })
+        .where(eq(taskRuns.taskId, params.sourceTaskId));
     }
 
     if (postResult && shouldTrackAutomationThread) {
@@ -987,6 +1028,9 @@ async function postSuggestedTasksSummaryToSlack(params: {
         },
       });
     }
+
+    // Delivered only when the root message was actually posted/persisted.
+    return Boolean(postResult);
   });
 }
 
@@ -1019,15 +1063,22 @@ export async function submitTaskSuggestions(
   }
 
   try {
-    const [cloudJob, deploymentSettings] = await Promise.all([
-      db.query.cloudJobs.findFirst({
-        where: eq(cloudJobs.taskId, taskId),
+    const [run, task, deploymentSettings] = await Promise.all([
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, taskId),
         orderBy: (table, { desc }) => desc(table.id),
         columns: {
           id: true,
-          type: true,
-          userId: true,
+          payloadKind: true,
+          actingUserId: true,
           payload: true,
+        },
+      }),
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: {
+          initiatorUserId: true,
+          initiatorAutomation: true,
         },
       }),
       db.query.deploymentSettings.findFirst({
@@ -1037,24 +1088,21 @@ export async function submitTaskSuggestions(
       }),
     ]);
 
-    if (!cloudJob) {
+    if (!run) {
       return c.json({ error: 'Task not found' }, 404);
     }
 
-    if (
-      cloudJob.type !== CloudTaskType.SuggestedTasks &&
-      cloudJob.type !== CloudTaskType.LegacyOnboardingSuggestions
-    ) {
+    if (run.payloadKind !== TaskPayloadKind.Scan) {
       return c.json({ error: 'Task is not a Suggested Tasks task' }, 400);
     }
 
-    const payload = cloudJob.payload as SuggestedTasksPayload;
+    const payload = run.payload as SuggestedTasksPayload;
     const setupNewState = normalizeSetupNewState(
       deploymentSettings?.setupNewState,
     );
-    const isOnboardingTrigger =
-      cloudJob.type === CloudTaskType.LegacyOnboardingSuggestions ||
-      payload.trigger === 'onboarding';
+    const createdByUserId =
+      auth.userId ?? run.actingUserId ?? task?.initiatorUserId ?? null;
+    const isOnboardingTrigger = payload.trigger === 'onboarding';
 
     let candidateRepositories: ResolvedRepository[] = [];
 
@@ -1141,36 +1189,47 @@ export async function submitTaskSuggestions(
         );
 
     const persistedSuggestions = await db.transaction(async (tx) => {
+      const workItemColumns = {
+        id: workItems.id,
+        title: workItems.title,
+        brief: workItems.brief,
+        category: workItems.category,
+        priority: workItems.priority,
+        investigationContext: workItems.investigationContext,
+        targetRepositoryFullName: workItems.targetRepositoryFullName,
+        targetEnvironmentId: workItems.targetEnvironmentId,
+        workspaceReadiness: workItems.workspaceReadiness,
+        readinessMessage: workItems.readinessMessage,
+      };
+
       const existingSuggestions = await tx
-        .select({
-          id: taskSuggestions.id,
-          title: taskSuggestions.title,
-          brief: taskSuggestions.brief,
-          category: taskSuggestions.category,
-          priority: taskSuggestions.priority,
-          investigationContext: taskSuggestions.investigationContext,
-          targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-          targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-          workspaceReadiness: taskSuggestions.workspaceReadiness,
-          readinessMessage: taskSuggestions.readinessMessage,
-        })
-        .from(taskSuggestions)
-        .where(and(eq(taskSuggestions.sourceTaskId, taskId)))
-        .orderBy(asc(taskSuggestions.sortOrder));
+        .select(workItemColumns)
+        .from(workItems)
+        .where(
+          and(
+            eq(workItems.kind, 'suggestion'),
+            eq(workItems.sourceTaskId, taskId),
+          ),
+        )
+        .orderBy(asc(workItems.sortOrder));
 
       if (existingSuggestions.length > 0) {
-        return existingSuggestions;
+        return existingSuggestions.map(toPersistedTaskSuggestion);
       }
 
       if (suggestionsToPersist.length === 0) {
         return [] as PersistedTaskSuggestion[];
       }
 
-      return tx
-        .insert(taskSuggestions)
+      const insertedSuggestions = await tx
+        .insert(workItems)
         .values(
           suggestionsToPersist.map(
-            (suggestion, index): typeof taskSuggestions.$inferInsert => ({
+            (suggestion, index): typeof workItems.$inferInsert => ({
+              kind: 'suggestion',
+              // Automation-initiated scans stamp their originating automation;
+              // onboarding/manual scans have no automation initiator (null FK).
+              automationKey: task?.initiatorAutomation ?? null,
               sourceTaskId: taskId,
               title: suggestion.title,
               brief: suggestion.brief,
@@ -1179,7 +1238,8 @@ export async function submitTaskSuggestions(
               investigationContext: suggestion.investigationContext,
               repositoryIds,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
-              contentHash: buildTaskSuggestionContentHash({
+              // task_suggestions.contentHash lives on work_items.fingerprint.
+              fingerprint: buildTaskSuggestionContentHash({
                 title: suggestion.title,
                 brief: suggestion.brief,
                 targetRepositoryFullName: suggestion.targetRepositoryFullName,
@@ -1193,25 +1253,16 @@ export async function submitTaskSuggestions(
             }),
           ),
         )
-        .returning({
-          id: taskSuggestions.id,
-          title: taskSuggestions.title,
-          brief: taskSuggestions.brief,
-          category: taskSuggestions.category,
-          priority: taskSuggestions.priority,
-          investigationContext: taskSuggestions.investigationContext,
-          targetRepositoryFullName: taskSuggestions.targetRepositoryFullName,
-          targetEnvironmentId: taskSuggestions.targetEnvironmentId,
-          workspaceReadiness: taskSuggestions.workspaceReadiness,
-          readinessMessage: taskSuggestions.readinessMessage,
-        });
+        .returning(workItemColumns);
+
+      return insertedSuggestions.map(toPersistedTaskSuggestion);
     });
 
     if (isOnboardingTrigger) {
       await postSetupTaskSuggestionsToSlack({
         sourceTaskId: taskId,
         slackChannel: setupNewState.slackChannel,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestions: persistedSuggestions,
       });
 
@@ -1220,7 +1271,7 @@ export async function submitTaskSuggestions(
       if (!setupNewState.slackChannel) {
         await postSetupTaskSuggestionsToTelegram({
           sourceTaskId: taskId,
-          createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+          createdByUserId,
           suggestions: persistedSuggestions,
         });
 
@@ -1228,40 +1279,47 @@ export async function submitTaskSuggestions(
         // checked inside).
         await postSetupTaskSuggestionsToTeams({
           sourceTaskId: taskId,
-          createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+          createdByUserId,
           suggestions: persistedSuggestions,
         });
       }
     }
 
     if (payload.notifySlack) {
-      await postSuggestedTasksSummaryToSlack({
+      // Surface precedence (Slack > Telegram > Teams) is enforced HERE via the
+      // delivered-boolean chain — each fallback fires only when the higher-
+      // precedence surface did not actually deliver. The fallbacks no longer
+      // self-suppress on Slack-installation existence, so a Slack-installed
+      // deployment that cannot resolve a channel still reaches Telegram/Teams.
+      const slackDelivered = await postSuggestedTasksSummaryToSlack({
         sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
+        createdByUserId,
         suggestionSource: payload.suggestionSource,
         historicalThreadFeedbackDebugSnippet:
           payload.historicalThreadFeedbackDebugSnippet ?? null,
         suggestions: persistedSuggestions,
       });
 
-      // Deployments without a Slack installation fall back to the captured
-      // Telegram primary chat (checked inside; one message with start
-      // buttons per suggestion).
-      await postScheduledSuggestionsToTelegram({
-        sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
-        suggestionSource: payload.suggestionSource,
-        suggestions: persistedSuggestions,
-      });
+      if (!slackDelivered) {
+        // Telegram fallback: the captured primary chat gets one message with
+        // start buttons per suggestion.
+        const telegramDelivered = await postScheduledSuggestionsToTelegram({
+          sourceTaskId: taskId,
+          createdByUserId,
+          suggestionSource: payload.suggestionSource,
+          suggestions: persistedSuggestions,
+        });
 
-      // Teams is the last automation fallback (Slack > Telegram > Teams;
-      // checked inside).
-      await postScheduledSuggestionsToTeams({
-        sourceTaskId: taskId,
-        createdByUserId: auth.userId ?? cloudJob.userId ?? null,
-        suggestionSource: payload.suggestionSource,
-        suggestions: persistedSuggestions,
-      });
+        if (!telegramDelivered) {
+          // Teams is the last fallback.
+          await postScheduledSuggestionsToTeams({
+            sourceTaskId: taskId,
+            createdByUserId,
+            suggestionSource: payload.suggestionSource,
+            suggestions: persistedSuggestions,
+          });
+        }
+      }
     }
 
     return c.json({

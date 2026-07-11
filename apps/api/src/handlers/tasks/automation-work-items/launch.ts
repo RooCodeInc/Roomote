@@ -1,18 +1,16 @@
 import {
-  CloudJobQueueEnqueueError,
-  enqueueCloudTask,
+  TaskRunQueueEnqueueError,
+  enqueueTask,
 } from '@roomote/cloud-agents/server';
-import { CloudTaskType } from '@roomote/types';
+import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
   and,
-  automationWorkItems,
+  claimWorkItem,
   db,
   eq,
-  inArray,
-  isNull,
-  lte,
-  or,
+  finalizeWorkItemLaunched,
   updateBackgroundAutomationSlackThreadMetadata,
+  workItems,
 } from '@roomote/db/server';
 
 import type { SlackNotifier } from '@roomote/slack';
@@ -22,9 +20,6 @@ import { postLateBoundWorkItemFailureMessage } from './slack.js';
 import { postLateBoundWorkItemFailureToTelegram } from './telegram.js';
 import { postLateBoundWorkItemFailureToTeams } from './teams.js';
 import type { PersistedAutomationWorkItem } from './types.js';
-
-const LAUNCH_CLAIM_STALE_MS = 10 * 60 * 1000;
-const LAUNCHABLE_ACT_STATUSES = ['open', 'acting'] as const;
 
 type AutomationExecutionTaskBootstrap =
   | '$implement-changes'
@@ -159,7 +154,8 @@ export type AutomationChatTarget =
     };
 
 export async function launchActWorkItems(params: {
-  userId: string | null;
+  /** The originating automation's key; stamped as the task initiator. */
+  automationKey: BackgroundAutomationKey;
   workItems: PersistedAutomationWorkItem[];
   executionTaskBootstrap: AutomationExecutionTaskBootstrap;
   chatTarget: AutomationChatTarget | null;
@@ -168,27 +164,9 @@ export async function launchActWorkItems(params: {
   let failedCount = 0;
 
   for (const workItem of params.workItems) {
-    const claimStaleBefore = new Date(Date.now() - LAUNCH_CLAIM_STALE_MS);
-
-    const [claimedWorkItem] = await db
-      .update(automationWorkItems)
-      .set({
-        status: 'acting',
-        launchClaimedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(automationWorkItems.id, workItem.id),
-          isNull(automationWorkItems.executionTaskId),
-          inArray(automationWorkItems.status, [...LAUNCHABLE_ACT_STATUSES]),
-          or(
-            isNull(automationWorkItems.launchClaimedAt),
-            lte(automationWorkItems.launchClaimedAt, claimStaleBefore),
-          ),
-        ),
-      )
-      .returning({ id: automationWorkItems.id });
+    // Shared claim CAS: `open`/stale-`launching` with launched_task_id null.
+    // `failed` stays terminal by design (never in the claimable set).
+    const claimedWorkItem = await claimWorkItem(db, { id: workItem.id });
 
     if (!claimedWorkItem) {
       continue;
@@ -204,18 +182,12 @@ export async function launchActWorkItems(params: {
       }
 
       const markWorkItemStarted = async (taskId: string | null) => {
-        const [startedWorkItem] = await db
-          .update(automationWorkItems)
-          .set({
-            status: 'started',
-            executionTaskId: taskId,
-            launchedAt: new Date(),
-            launchClaimedAt: null,
-            launchError: null,
-            updatedAt: new Date(),
-          })
-          .where(and(eq(automationWorkItems.id, workItem.id)))
-          .returning({ id: automationWorkItems.id });
+        const startedWorkItem = await finalizeWorkItemLaunched(db, {
+          id: workItem.id,
+          taskId,
+          claimedAt: claimedWorkItem.launchClaimedAt,
+          clearLaunchError: true,
+        });
 
         if (!startedWorkItem) {
           throw new Error(
@@ -226,63 +198,76 @@ export async function launchActWorkItems(params: {
         linkedTaskId = taskId;
       };
 
-      await enqueueCloudTask(
+      await enqueueTask(
         {
-          userId: params.userId,
-          type: CloudTaskType.StandardTask,
-          payload: {
-            repo: workItem.targetRepositoryFullName,
-            ...(workItem.targetEnvironmentId
-              ? { environmentId: workItem.targetEnvironmentId }
-              : {}),
-            selectedRepositories: [workItem.targetRepositoryFullName],
-            description: buildExecutionTaskPrompt(workItem, {
-              executionTaskBootstrap: params.executionTaskBootstrap,
-              lateBoundChatReplies: params.chatTarget !== null,
-              hasChatThread:
-                params.chatTarget?.provider === 'slack' &&
-                Boolean(params.chatTarget.threadTs),
-              chatSurface:
-                params.chatTarget?.provider === 'telegram'
-                  ? 'Telegram'
-                  : params.chatTarget?.provider === 'teams'
-                    ? 'Teams'
-                    : 'Slack',
-            }),
-            ...(params.chatTarget?.provider === 'slack'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  channel: params.chatTarget.channelId,
-                  slackChannel: params.chatTarget.channelId,
-                  ...(params.chatTarget.threadTs
-                    ? {
-                        thread_ts: params.chatTarget.threadTs,
-                        slackThreadTs: params.chatTarget.threadTs,
-                      }
-                    : {}),
-                }
-              : {}),
-            ...(params.chatTarget?.provider === 'telegram'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  communicationProvider: 'telegram',
-                  communicationChannelId: params.chatTarget.chatId,
-                }
-              : {}),
-            ...(params.chatTarget?.provider === 'teams'
-              ? {
-                  automationWorkItemId: workItem.id,
-                  communicationProvider: 'teams',
-                  communicationChannelId: params.chatTarget.conversationId,
-                  communicationServiceUrl: params.chatTarget.serviceUrl,
-                }
-              : {}),
-            visibleInTranscript: false,
+          task: {
+            type: TaskPayloadKind.StandardTask,
+            payload: {
+              repo: workItem.targetRepositoryFullName,
+              ...(workItem.targetEnvironmentId
+                ? { environmentId: workItem.targetEnvironmentId }
+                : {}),
+              selectedRepositories: [workItem.targetRepositoryFullName],
+              description: buildExecutionTaskPrompt(workItem, {
+                executionTaskBootstrap: params.executionTaskBootstrap,
+                lateBoundChatReplies: params.chatTarget !== null,
+                hasChatThread:
+                  params.chatTarget?.provider === 'slack' &&
+                  Boolean(params.chatTarget.threadTs),
+                chatSurface:
+                  params.chatTarget?.provider === 'telegram'
+                    ? 'Telegram'
+                    : params.chatTarget?.provider === 'teams'
+                      ? 'Teams'
+                      : 'Slack',
+              }),
+              ...(params.chatTarget?.provider === 'slack'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    channel: params.chatTarget.channelId,
+                    slackChannel: params.chatTarget.channelId,
+                    ...(params.chatTarget.threadTs
+                      ? {
+                          thread_ts: params.chatTarget.threadTs,
+                          slackThreadTs: params.chatTarget.threadTs,
+                        }
+                      : {}),
+                  }
+                : {}),
+              ...(params.chatTarget?.provider === 'telegram'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    communicationProvider: 'telegram',
+                    communicationChannelId: params.chatTarget.chatId,
+                  }
+                : {}),
+              ...(params.chatTarget?.provider === 'teams'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    communicationProvider: 'teams',
+                    communicationChannelId: params.chatTarget.conversationId,
+                    communicationServiceUrl: params.chatTarget.serviceUrl,
+                  }
+                : {}),
+              visibleInTranscript: false,
+            },
           },
+          initiator: { kind: 'automation', key: params.automationKey },
+          workflow: 'standard',
+          surface: 'system',
+          trigger: 'schedule',
+          ...(params.chatTarget?.provider === 'slack'
+            ? {
+                channels: {
+                  slackChannelId: params.chatTarget.channelId,
+                  slackThreadTs: params.chatTarget.threadTs ?? null,
+                },
+              }
+            : {}),
         },
         {
           launchClass: 'automation',
-          beforeEnqueue: (cloudJob) => markWorkItemStarted(cloudJob.taskId),
+          beforeEnqueue: (taskRun) => markWorkItemStarted(taskRun.taskId),
         },
       );
 
@@ -305,31 +290,59 @@ export async function launchActWorkItems(params: {
         error instanceof Error
           ? error.message
           : 'Failed to auto-start work item';
-      const shouldRetry =
-        error instanceof CloudJobQueueEnqueueError && linkedTaskId !== null;
+      const retryLaunchedTaskId =
+        error instanceof TaskRunQueueEnqueueError ? linkedTaskId : null;
+      const shouldRetry = retryLaunchedTaskId !== null;
 
-      await db
-        .update(automationWorkItems)
-        .set(
-          shouldRetry
-            ? {
-                status: 'open',
-                executionTaskId: null,
-                launchedAt: null,
-                failedAt: null,
-                launchClaimedAt: null,
-                launchError: message,
-                updatedAt: new Date(),
-              }
-            : {
-                status: 'failed',
-                failedAt: new Date(),
-                launchClaimedAt: null,
-                launchError: message,
-                updatedAt: new Date(),
-              },
-        )
-        .where(eq(automationWorkItems.id, workItem.id));
+      // Both failure writes are fenced so a stale launcher whose claim was
+      // reclaimed can never fail or clear the fresh claimant's row:
+      // - retry (finalize succeeded, queue publish failed): the row is OUR
+      //   `launched` row, so guard on status='launched' + our task link.
+      // - terminal failure: the row must still be `launching` under OUR claim
+      //   token (`launch_claimed_at`); after a reclaim this is a no-op.
+      const [failureWriteApplied] = shouldRetry
+        ? await db
+            .update(workItems)
+            .set({
+              status: 'open',
+              launchedTaskId: null,
+              launchedAt: null,
+              failedAt: null,
+              launchClaimedAt: null,
+              launchError: message,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(workItems.id, workItem.id),
+                eq(workItems.status, 'launched'),
+                eq(workItems.launchedTaskId, retryLaunchedTaskId),
+              ),
+            )
+            .returning({ id: workItems.id })
+        : await db
+            .update(workItems)
+            .set({
+              status: 'failed',
+              failedAt: new Date(),
+              launchClaimedAt: null,
+              launchError: message,
+              updatedAt: new Date(),
+            })
+            .where(
+              and(
+                eq(workItems.id, workItem.id),
+                eq(workItems.status, 'launching'),
+                eq(workItems.launchClaimedAt, claimedWorkItem.launchClaimedAt),
+              ),
+            )
+            .returning({ id: workItems.id });
+
+      if (!failureWriteApplied) {
+        apiLogger.warn(
+          `[submitAutomationWorkItems] fenced failure write for work item ${workItem.id} did not apply (claim reclaimed or state moved on); leaving the current claimant's row untouched`,
+        );
+      }
 
       if (params.chatTarget && !shouldRetry) {
         // Late-bound launches have no execution task to report through, so a

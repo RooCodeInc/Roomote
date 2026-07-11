@@ -14,7 +14,7 @@ import { useStore } from 'zustand';
 import { useShallow } from 'zustand/react/shallow';
 
 import {
-  type CloudTaskStatus,
+  type RunStatus,
   type TaskPhase,
   type AcpPlanTodo,
   type TaskStatusEvent,
@@ -30,7 +30,7 @@ import type { AcpContextUsage } from './services/acp-usage';
 import type { SandboxConnectionFailureCategory } from './services/sandbox-live-connection-diagnostics';
 import type { PendingTaskUserInputRequest } from './services/user-input-request-state';
 import type { PendingTaskEnvVarRequest } from './task-env-var-request-state';
-import type { SandboxConnectionTarget } from './use-cloud-session';
+import type { SandboxConnectionTarget } from './use-task-session';
 import {
   getPendingTaskEnvVarRequest,
   isPendingTaskEnvVarLifecycleEvent,
@@ -59,7 +59,7 @@ interface SandboxProviderProps {
     TaskMessageEnvelopesQueryState,
     'data' | 'isSuccess' | 'isError'
   >;
-  initialTaskStatus?: CloudTaskStatus | null;
+  initialTaskStatus?: RunStatus | null;
   initialTaskPhase?: TaskPhase | null;
   fallback: ReactNode;
   children: ReactNode;

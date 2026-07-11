@@ -48,15 +48,15 @@ describe('api live server integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('rejects unauthenticated cloud job log requests over HTTP', async () => {
+  it('rejects unauthenticated task run log requests over HTTP', async () => {
     const response = await fetch(
-      `${requireApi().baseUrl}/api/cloud-jobs/123/logs`,
+      `${requireApi().baseUrl}/api/task-runs/123/logs`,
     );
 
     expect(response.status).toBe(401);
     expect(response.headers.get('content-type')).toContain('application/json');
     await expect(response.json()).resolves.toEqual({
-      error: 'Unauthorized request',
+      error: 'authentication_required',
     });
   });
 
@@ -66,7 +66,7 @@ describe('api live server integration', () => {
       .mockImplementation(() => undefined);
 
     const response = await fetch(
-      `${requireApi().baseUrl}/api/cloud-jobs/123/logs`,
+      `${requireApi().baseUrl}/api/task-runs/123/logs`,
       {
         headers: {
           'x-request-id': 'req-live-server-123',
@@ -77,7 +77,7 @@ describe('api live server integration', () => {
     expect(response.status).toBe(401);
     expect(consoleWarnSpy).toHaveBeenCalledWith(
       expect.stringContaining(
-        '[API Slow Request] GET /api/cloud-jobs/123/logs status=401 durationMs=',
+        '[API Slow Request] GET /api/task-runs/123/logs status=401 durationMs=',
       ),
     );
     expect(consoleWarnSpy.mock.calls[0]?.[0]).toContain(
@@ -87,7 +87,7 @@ describe('api live server integration', () => {
 
   it('records request endpoint metrics through the real HTTP listener', async () => {
     const response = await fetch(
-      `${requireApi().baseUrl}/api/cloud-jobs/123/logs`,
+      `${requireApi().baseUrl}/api/task-runs/123/logs`,
     );
 
     expect(response.status).toBe(401);
@@ -100,7 +100,7 @@ describe('api live server integration', () => {
       endpoints: [
         expect.objectContaining({
           method: 'GET',
-          route: '/api/cloud-jobs/:id/logs',
+          route: '/api/task-runs/:id/logs',
           count: 1,
           statusCounts: {
             '2xx': 0,

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -20,12 +20,14 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: vi.fn() },
+      taskRuns: { findFirst: vi.fn() },
+      tasks: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
       slackUserMappings: { findFirst: vi.fn() },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
+  tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
   slackUserMappings: {
     userId: 'userId',
@@ -33,6 +35,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   and: vi.fn(),
   eq: vi.fn(),
+  desc: vi.fn(),
+  isVisibleTask: vi.fn(() => ({})),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -123,11 +127,10 @@ async function postChannelMessages(
   });
 }
 
-function mockSlackCloudJob(
+function mockSlackTaskRun(
   overrides: Partial<{
     id: number;
     orgId: string;
-    userId: string | null;
     actingUserId: string | null;
     type: string;
     slackThreadTs: string | null;
@@ -136,7 +139,6 @@ function mockSlackCloudJob(
 ) {
   return {
     id: 42,
-    userId: 'user-1',
     actingUserId: 'user-1',
     type: 'slack.app.mention',
     slackThreadTs: '111.000',
@@ -150,17 +152,18 @@ function mockSlackCloudJob(
 }
 
 describe('slack channel messages MCP endpoint', () => {
-  const jobToken: JobTokenContext = {
-    cloudJobId: 42,
+  const runToken: RunTokenContext = {
+    runId: 42,
     userId: 'user-1',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob() as never,
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun() as never,
     );
     vi.mocked(db.query.slackInstallations.findFirst).mockResolvedValue({
       botAccessToken: 'xoxb-test',
@@ -175,7 +178,7 @@ describe('slack channel messages MCP endpoint', () => {
     isPublicChannelMock.mockResolvedValue(true);
   });
 
-  it('rejects non-job tokens', async () => {
+  it('rejects non-run tokens', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -189,13 +192,13 @@ describe('slack channel messages MCP endpoint', () => {
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Slack channel message lookup MCP is only available for cloud job tokens',
+      'Slack channel message lookup MCP is only available for task run tokens',
     );
   });
 
   it('returns channel history for explicit channels and forwards time bounds', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -219,7 +222,7 @@ describe('slack channel messages MCP endpoint', () => {
       },
     ]);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       channel: 'eng',
       oldest: '2026-04-01T00:00:00Z',
       latest: '2026-04-02T00:00:00Z',
@@ -275,7 +278,7 @@ describe('slack channel messages MCP endpoint', () => {
       },
     ]);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       oldest: '1711929600.000000',
     });
     const body = (await response.json()) as JsonBody;
@@ -291,7 +294,7 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('rejects reversed time bounds', async () => {
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       oldest: '2026-04-02T00:00:00Z',
       latest: '2026-04-01T00:00:00Z',
     });
@@ -303,8 +306,8 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('rejects explicit channel lookup when the acting Slack user is not in the channel', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -312,7 +315,7 @@ describe('slack channel messages MCP endpoint', () => {
     );
     isUserInChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       channel: 'eng',
     });
     const body = (await response.json()) as JsonBody;
@@ -325,8 +328,8 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('rejects explicit channel lookup when the acting user has no linked Slack account before checking visibility', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -337,7 +340,7 @@ describe('slack channel messages MCP endpoint', () => {
     );
     isPublicChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       channel: 'eng',
     });
     const body = (await response.json()) as JsonBody;
@@ -351,8 +354,8 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('rejects explicit channel lookup for private channels', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -360,7 +363,7 @@ describe('slack channel messages MCP endpoint', () => {
     );
     isPublicChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       channel: 'eng',
     });
     const body = (await response.json()) as JsonBody;
@@ -379,7 +382,7 @@ describe('slack channel messages MCP endpoint', () => {
   it('rejects private originating Slack channels when channel is omitted', async () => {
     isPublicChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       oldest: '1711929600.000000',
     });
     const body = (await response.json()) as JsonBody;
@@ -392,8 +395,8 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('returns a 502 when Slack channel history fetch fails', async () => {
-    vi.mocked(db.query.cloudJobs.findFirst).mockResolvedValue(
-      mockSlackCloudJob({
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
         type: 'standard',
         slackThreadTs: null,
         payload: {},
@@ -401,7 +404,7 @@ describe('slack channel messages MCP endpoint', () => {
     );
     fetchChannelMessagesMock.mockRejectedValue(new Error('rate_limited'));
 
-    const response = await postChannelMessages(jobToken, {
+    const response = await postChannelMessages(runToken, {
       channel: 'eng',
     });
     const body = (await response.json()) as JsonBody;

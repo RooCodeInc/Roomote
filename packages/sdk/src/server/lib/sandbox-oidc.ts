@@ -12,7 +12,7 @@ import {
   type EnvironmentConfig,
   type ComputeProvider,
   type ResolvedEnvironmentOidcTarget,
-  CloudTaskStatus,
+  RunStatus,
   extractErrorDetails,
   getEnvironmentOidcTargets,
   isObservedTimeoutError,
@@ -21,8 +21,8 @@ import {
 } from '@roomote/types';
 import {
   and,
-  cloudJobs,
-  recordCloudJobEvent,
+  taskRuns,
+  recordTaskRunEvent,
   createRowMapper,
   db,
   environments,
@@ -50,7 +50,7 @@ type PrimeSandboxOidcTargetsInput = {
   environmentConfig: EnvironmentConfig;
   computeProvider: ComputeProvider;
   computeProviderId: string;
-  cloudJobId?: number;
+  runId?: number;
   now?: Date;
 };
 
@@ -58,7 +58,7 @@ type OwnerState = {
   taskId?: string;
   environmentId: string;
   environmentConfig: EnvironmentConfig;
-  cloudJobId?: number;
+  runId?: number;
 } | null;
 
 type RefreshMachineResult =
@@ -157,7 +157,7 @@ function buildTargetRows(params: {
   environmentId: string;
   computeProvider: ComputeProvider;
   computeProviderId: string;
-  cloudJobId?: number;
+  runId?: number;
   targets: ResolvedEnvironmentOidcTarget[];
 }): SandboxOidcTargetInsert[] {
   const expiresAt = new Date(params.now.getTime() + SANDBOX_OIDC_TOKEN_TTL_MS);
@@ -167,7 +167,7 @@ function buildTargetRows(params: {
 
   return params.targets.map((target) => ({
     environmentId: params.environmentId,
-    cloudJobId: params.cloudJobId ?? null,
+    runId: params.runId ?? null,
     computeProvider: params.computeProvider,
     computeProviderId: params.computeProviderId,
     targetKind: target.kind,
@@ -190,7 +190,7 @@ function groupRowsByInstance(
     const key = [
       row.computeProvider,
       row.computeProviderId,
-      row.cloudJobId ?? 'none',
+      row.runId ?? 'none',
       row.environmentId,
     ].join(':');
     const entries = groups.get(key) ?? [];
@@ -450,9 +450,9 @@ async function loadOwnerStateForRefresh(
     return null;
   }
 
-  if (row.cloudJobId) {
-    const cloudJob = await db.query.cloudJobs.findFirst({
-      where: eq(cloudJobs.id, row.cloudJobId),
+  if (row.runId) {
+    const taskRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, row.runId),
       columns: {
         id: true,
         taskId: true,
@@ -463,30 +463,30 @@ async function loadOwnerStateForRefresh(
       },
     });
 
-    if (!cloudJob) {
+    if (!taskRun) {
       return null;
     }
 
     if (
-      cloudJob.status === CloudTaskStatus.Completed ||
-      cloudJob.status === CloudTaskStatus.Failed ||
-      cloudJob.status === CloudTaskStatus.Canceled
+      taskRun.status === RunStatus.Completed ||
+      taskRun.status === RunStatus.Failed ||
+      taskRun.status === RunStatus.Canceled
     ) {
       return null;
     }
 
     if (
-      cloudJob.vendor !== row.computeProvider ||
-      cloudJob.machineId !== row.computeProviderId
+      taskRun.vendor !== row.computeProvider ||
+      taskRun.machineId !== row.computeProviderId
     ) {
       return null;
     }
 
     return {
-      taskId: cloudJob.taskId,
+      taskId: taskRun.taskId,
       environmentId: row.environmentId,
       environmentConfig: environment.config,
-      cloudJobId: row.cloudJobId,
+      runId: row.runId,
     };
   }
 
@@ -552,19 +552,19 @@ async function getSandboxOidcStatusSnapshot(params: {
 }
 
 async function recordSandboxOidcEventSafe(params: {
-  cloudJobId?: number;
+  runId?: number;
   taskId?: string;
   eventType: 'started' | 'completed' | 'failed';
   message: string;
   details: SandboxOidcStepDetails;
 }): Promise<void> {
-  if (!params.cloudJobId) {
+  if (!params.runId) {
     return;
   }
 
   try {
-    await recordCloudJobEvent(db, {
-      cloudJobId: params.cloudJobId,
+    await recordTaskRunEvent(db, {
+      runId: params.runId,
       taskId: params.taskId,
       source: 'machine_oidc',
       eventType: params.eventType,
@@ -573,7 +573,7 @@ async function recordSandboxOidcEventSafe(params: {
     });
   } catch (error) {
     console.warn(
-      `[sandbox-oidc] Failed to record machine_oidc event for cloud job #${params.cloudJobId}: ${
+      `[sandbox-oidc] Failed to record machine_oidc event for task run #${params.runId}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -672,7 +672,7 @@ export async function primeSandboxOidcTargets(
     execute: writeTempFiles,
     onAttemptStart: async ({ attempt, maxAttempts }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'started',
         message: `Starting OIDC token file upload for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -688,7 +688,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptSuccess: async ({ attempt, maxAttempts, durationMs }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'completed',
         message: `Completed OIDC token file upload for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -711,7 +711,7 @@ export async function primeSandboxOidcTargets(
       retryable,
     }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'failed',
         message: `OIDC token file upload failed for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -782,7 +782,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptStart: async ({ attempt, maxAttempts }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'started',
         message: `Starting OIDC token install command for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -798,7 +798,7 @@ export async function primeSandboxOidcTargets(
     },
     onAttemptSuccess: async ({ attempt, maxAttempts, durationMs }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'completed',
         message: `Completed OIDC token install command for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -821,7 +821,7 @@ export async function primeSandboxOidcTargets(
       retryable,
     }) => {
       await recordSandboxOidcEventSafe({
-        cloudJobId: input.cloudJobId,
+        runId: input.runId,
         taskId: input.taskId,
         eventType: 'failed',
         message: `OIDC token install command failed for ${input.computeProvider}:${input.computeProviderId}.`,
@@ -845,7 +845,7 @@ export async function primeSandboxOidcTargets(
     environmentId: input.environmentId,
     computeProvider: input.computeProvider,
     computeProviderId: input.computeProviderId,
-    cloudJobId: input.cloudJobId,
+    runId: input.runId,
     targets,
   });
 
@@ -861,7 +861,7 @@ export async function primeSandboxOidcTargets(
         ],
         set: {
           environmentId: input.environmentId,
-          cloudJobId: input.cloudJobId ?? null,
+          runId: input.runId ?? null,
           targetKind: sql`excluded.target_kind`,
           audience: sql`excluded.audience`,
           awsRoleArn: sql`excluded.aws_role_arn`,
@@ -888,11 +888,11 @@ export async function primeSandboxOidcTargets(
   return { targetCount: targets.length };
 }
 
-export async function cleanupSandboxOidcTargetsForCloudJob(
-  cloudJobId: number,
+export async function cleanupSandboxOidcTargetsForTaskRun(
+  runId: number,
 ): Promise<void> {
   const rows = await db.query.sandboxOidcTargets.findMany({
-    where: eq(sandboxOidcTargets.cloudJobId, cloudJobId),
+    where: eq(sandboxOidcTargets.runId, runId),
   });
 
   const groups = groupRowsByInstance(rows);
@@ -939,7 +939,7 @@ async function refreshSandboxOidcRowsForMachine(
       environmentConfig: ownerState.environmentConfig,
       computeProvider: firstRow.computeProvider,
       computeProviderId: firstRow.computeProviderId,
-      cloudJobId: ownerState.cloudJobId,
+      runId: ownerState.runId,
       now: new Date(),
     });
 
@@ -973,6 +973,63 @@ async function refreshSandboxOidcRowsForMachine(
   }
 }
 
+/**
+ * Claim the next batch of due OIDC targets (grouped per machine) by pushing
+ * their `refresh_at` forward, so concurrent sweeps skip them. Raw SQL because
+ * of the grouped SKIP LOCKED claim; exported for the real-database test that
+ * keeps these identifiers honest against the schema (a renamed column here is
+ * invisible to TypeScript and to fully mocked tests).
+ */
+export async function claimDueSandboxOidcTargets(params: {
+  now: Date;
+  claimUntil: Date;
+  limit: number;
+}): Promise<SandboxOidcTargetRow[]> {
+  const nowIso = params.now.toISOString();
+  const claimUntilIso = params.claimUntil.toISOString();
+  const limit = params.limit;
+
+  const claimedRaw = await db.execute(sql`
+    WITH due_machines AS (
+      SELECT
+        compute_provider,
+        compute_provider_id,
+        COALESCE(run_id::text, 'none') AS run_key,
+        environment_id,
+        MIN(refresh_at) AS next_refresh_at
+      FROM sandbox_oidc_targets
+      WHERE refresh_at <= ${nowIso}
+      GROUP BY
+        compute_provider,
+        compute_provider_id,
+        COALESCE(run_id::text, 'none'),
+        environment_id
+      ORDER BY next_refresh_at ASC
+      LIMIT ${limit}
+    ), due AS (
+      SELECT targets.id
+      FROM sandbox_oidc_targets AS targets
+      INNER JOIN due_machines ON
+        targets.compute_provider = due_machines.compute_provider AND
+        targets.compute_provider_id = due_machines.compute_provider_id AND
+        COALESCE(targets.run_id::text, 'none') = due_machines.run_key AND
+        targets.environment_id = due_machines.environment_id
+      WHERE targets.refresh_at <= ${nowIso}
+      FOR UPDATE OF targets SKIP LOCKED
+    )
+    UPDATE sandbox_oidc_targets AS targets
+    SET refresh_at = ${claimUntilIso},
+        updated_at = ${nowIso}
+    FROM due
+    WHERE targets.id = due.id
+    RETURNING targets.*;
+  `);
+
+  return claimedRaw.map((row) =>
+    sandboxOidcTargetRowMapper(row as Record<string, unknown>),
+  );
+}
+
 export async function refreshDueSandboxOidcTargets(options?: {
   limit?: number;
   now?: Date;
@@ -986,48 +1043,12 @@ export async function refreshDueSandboxOidcTargets(options?: {
     now.getTime() + SANDBOX_OIDC_REFRESH_CLAIM_DELAY_MS,
   );
   const limit = options?.limit ?? SANDBOX_OIDC_REFRESH_MACHINE_BATCH_SIZE;
-  const nowIso = now.toISOString();
-  const claimUntilIso = claimUntil.toISOString();
 
-  const claimedRaw = await db.execute(sql`
-    WITH due_machines AS (
-      SELECT
-        compute_provider,
-        compute_provider_id,
-        COALESCE(cloud_job_id::text, 'none') AS cloud_job_key,
-        environment_id,
-        MIN(refresh_at) AS next_refresh_at
-      FROM sandbox_oidc_targets
-      WHERE refresh_at <= ${nowIso}
-      GROUP BY
-        compute_provider,
-        compute_provider_id,
-        COALESCE(cloud_job_id::text, 'none'),
-        environment_id
-      ORDER BY next_refresh_at ASC
-      LIMIT ${limit}
-    ), due AS (
-      SELECT targets.id
-      FROM sandbox_oidc_targets AS targets
-      INNER JOIN due_machines ON
-        targets.compute_provider = due_machines.compute_provider AND
-        targets.compute_provider_id = due_machines.compute_provider_id AND
-        COALESCE(targets.cloud_job_id::text, 'none') = due_machines.cloud_job_key AND
-        targets.environment_id = due_machines.environment_id
-      WHERE targets.refresh_at <= ${nowIso}
-      FOR UPDATE OF targets SKIP LOCKED
-    )
-    UPDATE sandbox_oidc_targets AS targets
-    SET refresh_at = ${claimUntilIso},
-        updated_at = ${nowIso}
-    FROM due
-    WHERE targets.id = due.id
-    RETURNING targets.*;
-  `);
-
-  const claimedRows = claimedRaw.map((row) =>
-    sandboxOidcTargetRowMapper(row as Record<string, unknown>),
-  );
+  const claimedRows = await claimDueSandboxOidcTargets({
+    now,
+    claimUntil,
+    limit,
+  });
 
   if (claimedRows.length === 0) {
     return { refreshedMachines: 0, cleanedMachines: 0, failedMachines: 0 };

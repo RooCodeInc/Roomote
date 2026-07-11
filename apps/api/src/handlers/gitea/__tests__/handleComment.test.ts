@@ -1,5 +1,5 @@
 const {
-  mockEnqueueCloudTask,
+  mockEnqueueTask,
   mockGetTaskUrl,
   mockGetGiteaAutomationTargets,
   mockGetGiteaDeploymentUser,
@@ -9,7 +9,7 @@ const {
   mockSendMessageToTask,
   mockSteerMessageToTask,
 } = vi.hoisted(() => ({
-  mockEnqueueCloudTask: vi.fn(),
+  mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockGetGiteaDeploymentUser: vi.fn(),
@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueCloudTask: mockEnqueueCloudTask,
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
 }));
 
@@ -53,7 +53,7 @@ vi.mock('../../tasks/sendMessageToTask', () => ({
   steerMessageToTask: mockSteerMessageToTask,
 }));
 
-import { CloudTaskStatus, CloudTaskType } from '@roomote/types';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import { handleGiteaComment } from '../handleComment';
 import type { GiteaPullRequestCommentWebhook } from '../types';
@@ -106,7 +106,7 @@ function makeCommentPayload(
 
 describe('handleGiteaComment', () => {
   beforeEach(() => {
-    mockEnqueueCloudTask.mockReset();
+    mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
     mockGetGiteaDeploymentUser.mockReset();
@@ -120,7 +120,7 @@ describe('handleGiteaComment', () => {
       status: 'ok',
       targets: [
         {
-          id: 'gitea:pr_reviewer:repo-1',
+          id: 'gitea:pr_review:repo-1',
           settings: null,
           repositoryIds: ['repo-1'],
           userId: 'user-1',
@@ -131,7 +131,7 @@ describe('handleGiteaComment', () => {
     mockCreateGiteaPullRequestComment.mockResolvedValue({ id: 1 });
     mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
-    mockEnqueueCloudTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
+    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
     mockGetTaskUrl.mockReturnValue('https://roomote.example/tasks/task-1');
     mockSendMessageToTask.mockResolvedValue({ success: true });
     mockSteerMessageToTask.mockResolvedValue({ success: true });
@@ -141,22 +141,31 @@ describe('handleGiteaComment', () => {
     const result = await handleGiteaComment(makeCommentPayload());
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        userId: 'user-1',
-        attributionOverride: { kind: 'automatic', sourceKind: 'gitea' },
-        type: CloudTaskType.GithubPrReview,
-        payload: expect.objectContaining({
-          repo: 'acme/backend',
-          sourceControlProvider: 'gitea',
+        task: expect.objectContaining({
+          type: TaskPayloadKind.GithubPrReview,
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'gitea',
+            prNumber: 42,
+            prUrl: 'https://git.example.com/acme/backend/pulls/42',
+            branch: 'feature/test',
+            sha: 'abc123',
+            targetBranch: 'main',
+          }),
+        }),
+        // A human @roomote mention: the linked commenter is the initiator.
+        initiator: { kind: 'user', userId: 'user-1' },
+        workflow: 'pr_review',
+        surface: 'gitea',
+        trigger: 'message',
+        prLinkage: expect.objectContaining({
+          provider: 'gitea',
+          repository: 'acme/backend',
           prNumber: 42,
-          prUrl: 'https://git.example.com/acme/backend/pulls/42',
-          branch: 'feature/test',
-          sha: 'abc123',
-          targetBranch: 'main',
         }),
       }),
-      expect.objectContaining({ launchClass: 'automation' }),
     );
     expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -170,7 +179,7 @@ describe('handleGiteaComment', () => {
   it('routes mentions into a reusable active task before starting a new review', async () => {
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
       taskId: 'task-existing',
-      status: CloudTaskStatus.Running,
+      status: RunStatus.Running,
       taskPhase: 'running',
     });
     mockGetTaskUrl.mockReturnValue(
@@ -187,7 +196,7 @@ describe('handleGiteaComment', () => {
         message: expect.stringContaining('mentioned Roomote in a comment'),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('links to an active review instead of starting a duplicate review task', async () => {
@@ -209,7 +218,7 @@ describe('handleGiteaComment', () => {
         ),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('prompts the commenter to link Gitea before starting work', async () => {
@@ -234,7 +243,7 @@ describe('handleGiteaComment', () => {
         ),
       }),
     );
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('handles issue comment payloads that only include issue PR context', async () => {
@@ -245,14 +254,15 @@ describe('handleGiteaComment', () => {
     );
 
     expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
-    expect(mockEnqueueCloudTask).toHaveBeenCalledWith(
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        payload: expect.objectContaining({
-          prNumber: 42,
-          prTitle: 'Update backend',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            prNumber: 42,
+            prTitle: 'Update backend',
+          }),
         }),
       }),
-      expect.anything(),
     );
   });
 
@@ -268,7 +278,7 @@ describe('handleGiteaComment', () => {
       status: 'ok',
       message: 'roomote_authored_comment',
     });
-    expect(mockEnqueueCloudTask).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('requires linked commenter attribution for explicit mentions', async () => {

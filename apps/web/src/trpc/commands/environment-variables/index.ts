@@ -87,7 +87,7 @@ export async function upsertDeploymentEnvironmentVariables(
     userId,
     values,
   }: {
-    userId: string;
+    userId: string | null;
     values: Array<{ name: string; value: string }>;
   },
 ) {
@@ -114,8 +114,8 @@ export async function upsertDeploymentEnvironmentVariables(
     userId: null;
     name: string;
     value: string;
-    createdByUserId: string;
-    lastUpdatedByUserId: string;
+    createdByUserId: string | null;
+    lastUpdatedByUserId: string | null;
   }> = [];
 
   for (const value of values) {

@@ -1,11 +1,11 @@
 import {
   ALL_REPOSITORIES,
-  CloudTaskType,
+  TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
 import { withContention } from '@roomote/redis';
-import { enqueueCloudTask } from '@roomote/cloud-agents/server';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   appendSlackVideoDescriptionsToText,
   clearLatestUserMessage,
@@ -18,7 +18,7 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import { and, cloudJobs, db, desc, eq, gt } from '@roomote/db/server';
+import { and, db, desc, eq, gt, taskRuns, tasks } from '@roomote/db/server';
 import {
   appendAttachmentTextsToPromptText,
   stripLeadingRawSlackMention,
@@ -32,9 +32,9 @@ import {
 } from '../helpers/attachments.js';
 import { getIsSlackDiverged } from '../helpers/thread-sync.js';
 
-type CompletedSlackJob = {
+type CompletedSlackTaskRun = {
   id: number;
-  userId: string | null;
+  actingUserId: string | null;
   snapshotId: string | null;
   payload: unknown;
   port: number | null;
@@ -43,9 +43,9 @@ type CompletedSlackJob = {
 export async function processSnapshotResume(
   event: SlackEvent,
   slack: SlackNotifier,
-  completedJob: CompletedSlackJob,
+  completedRun: CompletedSlackTaskRun,
   threadId: string,
-  userId: string,
+  userId: string | null,
   ackEmoji: string,
   completionEmoji: string,
   botUserId?: string,
@@ -54,7 +54,7 @@ export async function processSnapshotResume(
     event.channel,
     threadId,
   );
-  const completedPayload = completedJob.payload as Record<string, unknown>;
+  const completedPayload = completedRun.payload as Record<string, unknown>;
   const repo =
     typeof completedPayload?.repo === 'string'
       ? completedPayload.repo
@@ -63,7 +63,7 @@ export async function processSnapshotResume(
     typeof completedPayload?.environmentId === 'string'
       ? completedPayload.environmentId
       : undefined;
-  const logContext = `snapshot resume cloud job in ${event.channel}:${threadId}`;
+  const logContext = `snapshot resume task run in ${event.channel}:${threadId}`;
 
   const [promptReadyThreadMessages, normalizedMessageText, trackedBotReply] =
     await Promise.all([
@@ -72,7 +72,7 @@ export async function processSnapshotResume(
         channel: event.channel,
         threadTs: threadId,
         botUserId,
-        startedMessageJobId: completedJob.id,
+        startedMessageRunId: completedRun.id,
         logContext,
       }),
       slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
@@ -89,7 +89,7 @@ export async function processSnapshotResume(
   const attachments = await processSlackAttachments({
     slack,
     files: currentMessageFiles,
-    userId: completedJob.userId ?? undefined,
+    userId: completedRun.actingUserId ?? undefined,
     userTextContext: stripLeadingSlackProductMention(
       stripLeadingRawSlackMention(event.text),
     ),
@@ -106,7 +106,7 @@ export async function processSnapshotResume(
     ? new Set(currentMessageFiles.map((file) => file.id))
     : undefined;
   const isSlackDiverged = await getIsSlackDiverged({
-    cloudJobId: completedJob.id,
+    runId: completedRun.id,
     trackedBotReply,
   });
   const {
@@ -123,7 +123,7 @@ export async function processSnapshotResume(
         claimedMessages,
         excludeFileIds,
         logContext,
-        userId: completedJob.userId ?? undefined,
+        userId: completedRun.actingUserId ?? undefined,
         messageText,
         currentAttachmentTexts: attachments.attachmentTexts,
         currentVideoDescriptions: attachments.videoDescriptions,
@@ -147,7 +147,7 @@ export async function processSnapshotResume(
     const queuedSlackMessage = {
       text: messageTextWithVideoDescriptions,
       user: event.user,
-      userId,
+      userId: userId ?? undefined,
       ts: event.ts,
       images: allImages.length > 0 ? allImages : undefined,
       formattedPrompt,
@@ -156,9 +156,9 @@ export async function processSnapshotResume(
     const payloadBase = {
       repo,
       environmentId,
-      port: completedJob.port ?? undefined,
-      sourceSnapshotId: completedJob.snapshotId!,
-      sourceCloudJobId: completedJob.id,
+      port: completedRun.port ?? undefined,
+      sourceSnapshotId: completedRun.snapshotId!,
+      sourceRunId: completedRun.id,
       slackOriginMessageTs: event.ts,
       ackEmoji,
       completionEmoji,
@@ -172,52 +172,61 @@ export async function processSnapshotResume(
     });
     restoreSnapshotResumeVisiblePromptFields(directPayload, completedPayload);
 
-    const { value: resumeJobId } = await withContention<number>(
+    const { value: resumeRunId } = await withContention<number>(
       `slack:resume-lock:${threadId}`,
       {
         ttlSeconds: 30,
         poll: { intervalMs: 500, maxAttempts: 10 },
         onAcquired: async () => {
-          const resumeLaunch = await enqueueCloudTask(
+          // Resumes never create tasks and never re-attribute; the Slack
+          // follow-up sender becomes the new run's acting user.
+          const resumeLaunch = await enqueueTask(
             {
-              type: CloudTaskType.SnapshotResume,
-              userId,
-              slackThreadTs: threadId,
-              sourceSnapshotId: completedJob.snapshotId!,
-              sourceCloudJobId: completedJob.id,
-              payload: directPayload,
+              task: {
+                type: TaskPayloadKind.SnapshotResume,
+                sourceSnapshotId: completedRun.snapshotId!,
+                sourceRunId: completedRun.id,
+                payload: directPayload,
+              },
+              actingUserId: userId,
             },
             {},
           );
 
           apiLogger.debug(
-            `✅ Created SnapshotResume cloud job ${resumeLaunch.id} for thread ${threadId}`,
+            `✅ Created SnapshotResume task run ${resumeLaunch.id} for thread ${threadId}`,
           );
 
           return resumeLaunch.id;
         },
         onContended: async () => {
-          const recent = await db.query.cloudJobs.findFirst({
-            where: and(
-              eq(cloudJobs.slackThreadTs, threadId),
-              eq(cloudJobs.type, CloudTaskType.SnapshotResume),
-              gt(cloudJobs.createdAt, new Date(Date.now() - 60_000)),
-            ),
-            orderBy: desc(cloudJobs.createdAt),
-            columns: { id: true },
-          });
+          // Slack channel bindings live on tasks; resume runs are the
+          // kind='resume' rows of the bound task.
+          const [recent] = await db
+            .select({ id: taskRuns.id })
+            .from(taskRuns)
+            .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+            .where(
+              and(
+                eq(tasks.slackThreadTs, threadId),
+                eq(taskRuns.kind, 'resume'),
+                gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
+              ),
+            )
+            .orderBy(desc(taskRuns.createdAt))
+            .limit(1);
 
           return recent?.id;
         },
       },
     );
 
-    if (resumeJobId === undefined) {
+    if (resumeRunId === undefined) {
       return false;
     }
 
-    await queueSlackMessage(resumeJobId, queuedSlackMessage);
-    await clearLatestUserMessage(resumeJobId);
+    await queueSlackMessage(resumeRunId, queuedSlackMessage);
+    await clearLatestUserMessage(resumeRunId);
     deliveryTracker.track(event.ts);
     return true;
   } catch (error) {

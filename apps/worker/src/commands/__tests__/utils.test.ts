@@ -6,7 +6,7 @@ import {
   writeCommonEnvFile,
   isValidEnvVarName,
 } from '../utils/env-vars';
-import type { CloudJob } from '@roomote/sdk/client';
+import type { TaskRun } from '@roomote/sdk/client';
 
 vi.mock('fs', () => ({
   existsSync: vi.fn(),
@@ -100,30 +100,30 @@ afterEach(() => {
 });
 
 describe('injectEnvVars', () => {
-  it('prefers runtime auth bypass env vars over cloud job values', async () => {
+  it('prefers runtime auth bypass env vars over task run values', async () => {
     const envVars: Record<string, string> = {};
-    const cloudJob = {
-      authBypassValue: 'cloud-job-bypass-value',
-      authBypassHeaderName: 'x-cloud-job-bypass',
-    } as CloudJob;
+    const taskRun = {
+      authBypassValue: 'task-run-bypass-value',
+      authBypassHeaderName: 'x-task-run-bypass',
+    } as TaskRun;
 
     process.env.ROOMOTE_AUTH_BYPASS_VALUE = 'runtime-bypass-value';
     process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME = 'x-runtime-bypass';
 
-    await injectEnvVars(envVars, cloudJob);
+    await injectEnvVars(envVars, taskRun);
 
     expect(envVars.ROOMOTE_AUTH_BYPASS_VALUE).toBe('runtime-bypass-value');
     expect(envVars.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe('x-runtime-bypass');
   });
 
-  it('injects auth bypass variables from the cloud job', async () => {
+  it('injects auth bypass variables from the task run', async () => {
     const envVars: Record<string, string> = {};
-    const cloudJob = {
+    const taskRun = {
       authBypassValue: 'bypass-value',
       authBypassHeaderName: 'x-bypass-roomote-auth',
-    } as CloudJob;
+    } as TaskRun;
 
-    await injectEnvVars(envVars, cloudJob);
+    await injectEnvVars(envVars, taskRun);
 
     expect(envVars.ROOMOTE_AUTH_BYPASS_VALUE).toBe('bypass-value');
     expect(envVars.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe(
@@ -132,7 +132,7 @@ describe('injectEnvVars', () => {
     expect(envVars.ROOMOTE_WEB_HOST).toBeUndefined();
   });
 
-  it('uses runtime auth bypass env vars when no cloud job is provided', async () => {
+  it('uses runtime auth bypass env vars when no task run is provided', async () => {
     const envVars: Record<string, string> = { FOO: 'bar' };
 
     process.env.ROOMOTE_AUTH_BYPASS_VALUE = 'runtime-bypass';
@@ -150,7 +150,7 @@ describe('injectEnvVars', () => {
 
   it('builds preview-proxy hosts from an explicitly provided base URL even after process env scrub', async () => {
     const envVars: Record<string, string> = {};
-    const cloudJob = {
+    const taskRun = {
       taskId: 'task-123',
       machineDomains: {
         WEB: 'https://sandbox-web.modal.host',
@@ -158,9 +158,9 @@ describe('injectEnvVars', () => {
       proxyPorts: {
         WEB: 4321,
       },
-    } as unknown as CloudJob;
+    } as unknown as TaskRun;
 
-    await injectEnvVars(envVars, cloudJob, {
+    await injectEnvVars(envVars, taskRun, {
       previewProxyBaseUrl: 'https://preview.newmote.run',
     });
 

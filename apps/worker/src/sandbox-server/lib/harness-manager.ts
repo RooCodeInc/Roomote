@@ -128,7 +128,7 @@ interface HarnessManagerConfig {
   sandboxTimeoutMs?: number;
   /** Absolute machine expiry deadline in epoch milliseconds, if known. */
   sandboxExpiresAtMs?: number;
-  cloudJobId?: number;
+  runId?: number;
   taskId?: string | null;
   logger: HarnessManagerLogger;
   callbacks?: HarnessManagerCallbacks;
@@ -175,7 +175,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private keepaliveMs: number;
   private sandboxTimeoutMs: number;
   private sandboxExpiresAtMs?: number;
-  private cloudJobId?: number;
+  private runId?: number;
   private taskId?: string | null;
   private logger: HarnessManagerLogger;
   private callbacks: HarnessManagerCallbacks;
@@ -198,7 +198,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.keepaliveMs = config.keepaliveMs;
     this.sandboxTimeoutMs = config.sandboxTimeoutMs ?? SANDBOX_TIMEOUT_MS;
     this.sandboxExpiresAtMs = config.sandboxExpiresAtMs;
-    this.cloudJobId = config.cloudJobId;
+    this.runId = config.runId;
     this.taskId = config.taskId;
     this.logger = config.logger;
     this.callbacks = config.callbacks ?? {};
@@ -483,7 +483,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   }
 
   /**
-   * Resume a task from a snapshot (used by the worker for SnapshotResume jobs).
+   * Resume a task from a snapshot (used by the worker for SnapshotResume runs).
    */
   resumeTask(harnessSessionId: string): void {
     this.resetState();
@@ -992,7 +992,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         captureWorkerMessage(
           'Harness exhausted reconnect attempts and is shutting down the sandbox runtime',
           {
-            cloudJobId: this.cloudJobId,
+            runId: this.runId,
             taskId: this.taskId,
             stage: 'harness-manager.disconnected',
             taskPhase: this.phase,

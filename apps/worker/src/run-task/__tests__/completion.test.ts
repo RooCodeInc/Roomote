@@ -1,7 +1,7 @@
 // pnpm --filter @roomote/worker test src/run-task/__tests__/completion.test.ts
 
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_MAINTENANCE_KEEPALIVE_MS,
 } from '@roomote/types';
 
@@ -45,7 +45,7 @@ describe('getDefaultKeepaliveMs', () => {
     ).toBe(15 * 60 * 1000);
   });
 
-  it.each([CloudTaskType.GithubPrReview, CloudTaskType.GithubPrReviewSync])(
+  it.each([TaskPayloadKind.GithubPrReview, TaskPayloadKind.GithubPrReviewSync])(
     'uses the maintenance keepalive for %s jobs',
     (taskType) => {
       expect(
@@ -63,7 +63,7 @@ describe('getDefaultKeepaliveMs', () => {
   it('keeps an immediate keepalive for PR review follow-up jobs', () => {
     expect(
       getDefaultKeepaliveMs({
-        taskType: CloudTaskType.GithubPrReviewFollowUp,
+        taskType: TaskPayloadKind.GithubPrReviewFollowUp,
         appEnv: 'production',
         defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
         delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,
@@ -75,7 +75,7 @@ describe('getDefaultKeepaliveMs', () => {
   it('uses the production human fallback when launch metadata is missing', () => {
     expect(
       getDefaultKeepaliveMs({
-        taskType: CloudTaskType.StandardTask,
+        taskType: TaskPayloadKind.StandardTask,
         appEnv: 'production',
         defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
         delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,

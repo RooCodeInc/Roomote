@@ -1,17 +1,20 @@
 import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
-import { activeCloudTaskStatuses } from '@roomote/types';
+import { activeRunStatuses } from '@roomote/types';
 import {
   and,
-  cloudJobs,
   db,
   eq,
+  finalizeWorkItemLaunched,
   inArray,
   isNull,
+  releaseWorkItemClaim,
   sql,
+  taskRuns,
 } from '@roomote/db/server';
 
 import { apiLogger } from '../../logging.js';
-import { stopTaskJob } from '../tasks/task-stop.js';
+import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { stopTaskRun } from '../tasks/task-stop.js';
 import {
   parseCancelTaskCallbackData,
   parseTelegramRouteCallbackData,
@@ -30,23 +33,22 @@ import {
 import { startNewTelegramTask } from './task-orchestration.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 
-async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
-  return db.query.cloudJobs.findFirst({
+async function findCancelableTaskRun(runId: number, chatId: string) {
+  return db.query.taskRuns.findFirst({
     where: and(
-      eq(cloudJobs.id, cloudJobId),
-      // Only cancel jobs launched from the chat the button lives in — the
+      eq(taskRuns.id, runId),
+      // Only cancel task runs launched from the chat the button lives in — the
       // inbound message path is chat-scoped the same way.
-      sql`${cloudJobs.payload}->>'communicationProvider' = 'telegram'`,
-      sql`${cloudJobs.payload}->>'communicationChannelId' = ${chatId}`,
-      inArray(cloudJobs.status, [...activeCloudTaskStatuses]),
-      isNull(cloudJobs.canceledAt),
+      sql`${taskRuns.payload}->>'communicationProvider' = 'telegram'`,
+      sql`${taskRuns.payload}->>'communicationChannelId' = ${chatId}`,
+      inArray(taskRuns.status, [...activeRunStatuses]),
+      isNull(taskRuns.canceledAt),
     ),
     columns: {
       id: true,
       taskId: true,
       status: true,
       sandboxServerUrl: true,
-      userId: true,
       actingUserId: true,
     },
   });
@@ -54,7 +56,7 @@ async function findCancelableCloudJob(cloudJobId: number, chatId: string) {
 
 async function handleCancelTaskCallback(params: {
   query: TelegramCallbackQuery;
-  cloudJobId: number;
+  runId: number;
 }): Promise<void> {
   const message = params.query.message;
   const chatId = message ? String(message.chat.id) : null;
@@ -67,9 +69,9 @@ async function handleCancelTaskCallback(params: {
     return;
   }
 
-  const cancelableJob = await findCancelableCloudJob(params.cloudJobId, chatId);
+  const cancelableRun = await findCancelableTaskRun(params.runId, chatId);
 
-  if (!cancelableJob) {
+  if (!cancelableRun) {
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: params.query.id,
       text: 'That task is no longer running.',
@@ -91,8 +93,8 @@ async function handleCancelTaskCallback(params: {
       .join(' ')
       .trim() || params.query.from.username;
 
-  const stopResult = await stopTaskJob({
-    job: cancelableJob,
+  const stopResult = await stopTaskRun({
+    run: cancelableRun,
     allowDirectCancelWithoutSandbox: true,
     cancelledBy: {
       ...(cancelledByName ? { name: cancelledByName } : {}),
@@ -108,7 +110,7 @@ async function handleCancelTaskCallback(params: {
 
   if (!canceled) {
     apiLogger.warn(
-      `[telegram] Failed to cancel cloud job ${params.cloudJobId} from callback: ${JSON.stringify(stopResult)}`,
+      `[telegram] Failed to cancel task run ${params.runId} from callback: ${JSON.stringify(stopResult)}`,
     );
   }
 
@@ -200,8 +202,13 @@ async function handleSuggestionLaunchCallback(params: {
     channel: chatId,
   };
 
+  // The claim's `launchClaimedAt` is this launcher's fencing token; thread it
+  // through finalize/release so a slow launcher whose stale claim was
+  // reclaimed cannot stomp the new claimant's state.
+  const claimedAt = suggestion.launchClaimedAt;
+
   try {
-    await startNewTelegramTask({
+    const started = await startNewTelegramTask({
       message,
       launchOwnerUserId: senderUserId,
       queuedMessage,
@@ -213,12 +220,71 @@ async function handleSuggestionLaunchCallback(params: {
       // The button click already is the explicit start signal.
       skipRoutingConfirmation: true,
     });
+
+    if (started.status === 'started') {
+      // Close the launch state machine: `launching` -> `launched` with the
+      // task link, so a later click can never relaunch this suggestion and the
+      // task stays linked to its work item.
+      const finalized = await finalizeWorkItemLaunched(db, {
+        id: params.suggestionId,
+        taskId: started.launchResult.taskId,
+        claimedAt,
+      });
+
+      if (!finalized) {
+        // The task is already enqueued but the fencing guard rejected the
+        // finalize (our stale claim was reclaimed by another launcher), so
+        // the run is orphaned from the work item. Best-effort cancel it while
+        // it is still pre-sandbox; log loudly either way with the outcome.
+        const cancelNote = await cancelOrphanedWorkItemRunBestEffort(
+          started.launchResult.id,
+        );
+
+        apiLogger.warn(
+          `[telegram] finalize lost the fencing guard for work item ${params.suggestionId}; task ${started.launchResult.taskId} (run ${started.launchResult.id}) was orphaned — ${cancelNote}`,
+        );
+
+        // The callback was already answered "Starting: ..." and the launch
+        // path already posted a started message pointing at the orphan, so
+        // post a corrective reply: the user must follow the winning launch,
+        // not the canceled duplicate. (Deferring the started post until after
+        // finalize would change startNewTelegramTask's contract for its other
+        // callers, so correct instead.)
+        await postTelegramMessageBestEffort({
+          chatId,
+          replyToMessageId: messageId,
+          text: `"${suggestion.title}" was already started elsewhere — this duplicate task was canceled.`,
+        });
+      }
+    } else {
+      // No task was launched: routing answered inline (`replied_inline`), or —
+      // defensively, since skipRoutingConfirmation is set — a confirmation was
+      // requested. Release the claim so the suggestion is retryable now
+      // instead of dead for the 10-minute stale window.
+      await releaseWorkItemClaim(db, { id: params.suggestionId, claimedAt });
+    }
   } catch (error) {
     apiLogger.warn(
       `[telegram] Failed to launch suggestion ${params.suggestionId} from callback: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+
+    // Release the claim (fenced on our token) so the suggestion becomes
+    // retryable immediately rather than after the 10-minute stale window.
+    await releaseWorkItemClaim(db, {
+      id: params.suggestionId,
+      claimedAt,
+    }).catch((releaseError) => {
+      apiLogger.warn(
+        `[telegram] Failed to release claim for work item ${params.suggestionId} after launch failure: ${
+          releaseError instanceof Error
+            ? releaseError.message
+            : String(releaseError)
+        }`,
+      );
+    });
+
     await postTelegramMessageBestEffort({
       chatId,
       replyToMessageId: messageId,
@@ -236,10 +302,10 @@ export async function handleTelegramCallbackQuery(
   query: TelegramCallbackQuery,
 ): Promise<void> {
   const data = query.data?.trim() ?? '';
-  const cancelCloudJobId = parseCancelTaskCallbackData(data);
+  const cancelRunId = parseCancelTaskCallbackData(data);
 
-  if (cancelCloudJobId !== null) {
-    await handleCancelTaskCallback({ query, cloudJobId: cancelCloudJobId });
+  if (cancelRunId !== null) {
+    await handleCancelTaskCallback({ query, runId: cancelRunId });
     return;
   }
 

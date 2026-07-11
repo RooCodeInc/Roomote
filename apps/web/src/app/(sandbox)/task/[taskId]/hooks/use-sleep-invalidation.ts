@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { CloudJobDetail } from '@/lib/server';
+import type { TaskRunDetail } from '@/lib/server';
 
 import { useTRPC } from '@/trpc/client';
 
@@ -12,11 +12,11 @@ import { parseSleepDeadlineMs } from './sleep-deadline';
  * reached. This closes the polling gap without requiring the server to stream
  * countdown ticks every second.
  */
-export function useSleepInvalidation(cloudJob?: CloudJobDetail | null) {
+export function useSleepInvalidation(taskRun?: TaskRunDetail | null) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const taskId = cloudJob?.taskId;
-  const sleepDeadlineMs = parseSleepDeadlineMs(cloudJob?.sleepAt);
+  const taskId = taskRun?.taskId;
+  const sleepDeadlineMs = parseSleepDeadlineMs(taskRun?.sleepAt);
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastInvalidatedExpiryRef = useRef<number | null>(null);

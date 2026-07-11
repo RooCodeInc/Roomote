@@ -1,6 +1,7 @@
 import { db, webhooks as webhooksTable, eq } from '@roomote/db/server';
 
 import type { WebhookResponse } from '../../types';
+import { redactWebhookPayload } from '../webhook-payload-redaction';
 
 /**
  * Escape newline and carriage return characters to prevent log injection attacks.
@@ -41,7 +42,9 @@ export async function recordLinearWebhook<T>(
         deliveryId: webhookId,
         provider: 'linear',
         event,
-        payload,
+        // Only the stored copy is redacted; the handler still receives the
+        // original payload.
+        payload: redactWebhookPayload(payload),
         // No status timestamps set yet - will be updated after handler runs
       })
       .onConflictDoNothing()

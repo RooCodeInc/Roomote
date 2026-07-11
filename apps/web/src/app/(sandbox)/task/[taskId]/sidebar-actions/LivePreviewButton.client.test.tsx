@@ -98,7 +98,7 @@ vi.mock('../hooks/use-preview-pane', () => ({
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
-  useRestoreCloudJobSnapshot: () => ({
+  useRestoreTaskRunSnapshot: () => ({
     mutateAsync: restoreSnapshotMutateAsyncMock,
     isPending: false,
   }),
@@ -158,7 +158,7 @@ describe('LivePreviewButton', () => {
     vi.clearAllMocks();
     restoreSnapshotMutateAsyncMock.mockResolvedValue({
       success: true,
-      cloudJobId: 456,
+      runId: 456,
       taskId: 'task-1',
     });
     usePreviewUrlsMock.mockReturnValue({
@@ -188,7 +188,7 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        cloudJob={{ id: 123, status: 'running' } as never}
+        taskRun={{ id: 123, status: 'running' } as never}
       />,
     );
 
@@ -196,7 +196,7 @@ describe('LivePreviewButton', () => {
 
     expect(trigger).toHaveAttribute(
       'href',
-      '/api/auth/preview-iframe?preview_url=https%3A%2F%2Fweb.preview.test%2Fdashboard&cloud_job_id=123',
+      '/api/auth/preview-iframe?preview_url=https%3A%2F%2Fweb.preview.test%2Fdashboard&task_run_id=123',
     );
     expect(trigger).toHaveAttribute('target', '_blank');
 
@@ -225,7 +225,7 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        cloudJob={{ id: 123, status: 'running' } as never}
+        taskRun={{ id: 123, status: 'running' } as never}
       />,
     );
 
@@ -233,7 +233,7 @@ describe('LivePreviewButton', () => {
 
     expect(trigger).toHaveAttribute(
       'href',
-      '/api/auth/preview-iframe?preview_url=https%3A%2F%2Fapi.preview.test%2Fdocs%3Ftab%3Dapi&cloud_job_id=123',
+      '/api/auth/preview-iframe?preview_url=https%3A%2F%2Fapi.preview.test%2Fdocs%3Ftab%3Dapi&task_run_id=123',
     );
 
     fireEvent.click(trigger);
@@ -254,7 +254,7 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        cloudJob={{ id: 123, status: 'running' } as never}
+        taskRun={{ id: 123, status: 'running' } as never}
       />,
     );
 
@@ -271,7 +271,7 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        cloudJob={{ id: 123, snapshotId: 'snapshot-1' } as never}
+        taskRun={{ id: 123, snapshotId: 'snapshot-1' } as never}
       />,
     );
 
@@ -286,7 +286,7 @@ describe('LivePreviewButton', () => {
     await waitFor(() =>
       expect(restoreSnapshotMutateAsyncMock).toHaveBeenCalledWith({
         sourceSnapshotId: 'snapshot-1',
-        sourceCloudJobId: 123,
+        sourceRunId: 123,
         resumePrompt: '',
       }),
     );

@@ -2,8 +2,8 @@ import {
   getScheduledSuggestionBackgroundAutomationDescriptor,
   getTriggerableBackgroundAutomationSettingsHash,
   type TaskSuggestionSource,
-  type TriggerableBackgroundAutomationAgentId,
   type TriggerableBackgroundAutomationDescriptorItem,
+  type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 
 type ScheduledSuggestionSummaryPromptConfig = {
@@ -17,7 +17,7 @@ type ScheduledSuggestionSummaryPromptConfig = {
 };
 
 type ScheduledSuggestionSurfaceConfig = {
-  agentType:
+  suggestionType:
     | 'suggested_tasks'
     | 'sentry_triage'
     | 'dependabot_triage'
@@ -36,16 +36,9 @@ type ScheduledSuggestionSurfaceConfig = {
 };
 
 export type ScheduledSuggestionSlackConfig = {
-  agentType: ScheduledSuggestionSurfaceConfig['agentType'];
+  suggestionType: ScheduledSuggestionSurfaceConfig['suggestionType'];
   automationSettingsHash: string;
   actionFooterText: string;
-  managerChannelKind:
-    | 'suggester'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor'
-    | 'ciFailureTriage';
   summaryKind: ScheduledSuggestionSurfaceConfig['summaryKind'];
   automationKey:
     | 'suggester'
@@ -59,15 +52,15 @@ export type ScheduledSuggestionSlackConfig = {
 
 const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
   | 'suggester'
-  | 'sentryTriage'
-  | 'dependabotTriage'
-  | 'securityAuditor'
-  | 'codeQualityAuditor'
-  | 'ciFailureTriage',
+  | 'sentry_triage'
+  | 'dependabot_triage'
+  | 'security_auditor'
+  | 'code_quality_auditor'
+  | 'ci_failure_triage',
   ScheduledSuggestionSurfaceConfig
 > = {
   suggester: {
-    agentType: 'suggested_tasks',
+    suggestionType: 'suggested_tasks',
     summaryKind: 'suggested_tasks',
     actionFooterText:
       "I pulled the most useful follow-up ideas into the thread for review.\nReact with a :thumbsup: on any idea and I'll start it.",
@@ -86,8 +79,8 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went looking for follow-up work worth picking up next, and a few ideas stood out as worth doing now.',
     },
   },
-  sentryTriage: {
-    agentType: 'sentry_triage',
+  sentry_triage: {
+    suggestionType: 'sentry_triage',
     summaryKind: 'sentry_triage',
     actionFooterText:
       'I pulled the most useful Sentry follow-ups into the thread for review.',
@@ -106,8 +99,8 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through Sentry for errors that are actually hitting users, and a few stood out as worth acting on now.',
     },
   },
-  dependabotTriage: {
-    agentType: 'dependabot_triage',
+  dependabot_triage: {
+    suggestionType: 'dependabot_triage',
     summaryKind: 'dependabot_triage',
     actionFooterText:
       'I pulled the strongest update candidates into the thread for review.',
@@ -126,8 +119,8 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the open Dependabot alerts for updates worth taking now, and a few low-risk ones stood out.',
     },
   },
-  securityAuditor: {
-    agentType: 'security_auditor',
+  security_auditor: {
+    suggestionType: 'security_auditor',
     summaryKind: 'security_auditor',
     actionFooterText:
       'I pulled the highest-value security follow-ups into the thread for review.',
@@ -146,8 +139,8 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the latest merged PRs for security gaps that could have slipped past review, and a few follow-ups stood out as worth fixing now.',
     },
   },
-  codeQualityAuditor: {
-    agentType: 'code_quality_auditor',
+  code_quality_auditor: {
+    suggestionType: 'code_quality_auditor',
     summaryKind: 'code_quality_auditor',
     actionFooterText:
       'I pulled the highest-leverage code quality follow-ups into the thread for review.',
@@ -167,8 +160,8 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the latest merged PRs for maintainability issues that get more expensive to fix later, and a few cleanups stood out as worth doing now.',
     },
   },
-  ciFailureTriage: {
-    agentType: 'ci_failure_triage',
+  ci_failure_triage: {
+    suggestionType: 'ci_failure_triage',
     summaryKind: 'ci_failure_triage',
     actionFooterText:
       'Each fix runs as its own task and reports back here when it finishes.',
@@ -193,32 +186,22 @@ function isScheduledSuggestionDescriptor(
   descriptor: TriggerableBackgroundAutomationDescriptorItem | null,
 ): descriptor is TriggerableBackgroundAutomationDescriptorItem & {
   scheduledSuggestionSource: TaskSuggestionSource;
-  managerChannelKind:
-    | 'suggester'
-    | 'sentryTriage'
-    | 'dependabotTriage'
-    | 'securityAuditor'
-    | 'codeQualityAuditor';
 } {
-  return Boolean(
-    descriptor &&
-    'scheduledSuggestionSource' in descriptor &&
-    'managerChannelKind' in descriptor,
-  );
+  return Boolean(descriptor && 'scheduledSuggestionSource' in descriptor);
 }
 
 function getScheduledSuggestionSurfaceConfig(
-  agentId: TriggerableBackgroundAutomationAgentId,
+  automationKey: TriggerableBackgroundAutomationKey,
 ) {
   if (
-    agentId === 'suggester' ||
-    agentId === 'sentryTriage' ||
-    agentId === 'dependabotTriage' ||
-    agentId === 'securityAuditor' ||
-    agentId === 'codeQualityAuditor' ||
-    agentId === 'ciFailureTriage'
+    automationKey === 'suggester' ||
+    automationKey === 'sentry_triage' ||
+    automationKey === 'dependabot_triage' ||
+    automationKey === 'security_auditor' ||
+    automationKey === 'code_quality_auditor' ||
+    automationKey === 'ci_failure_triage'
   ) {
-    return SCHEDULED_SUGGESTION_SURFACE_CONFIG[agentId];
+    return SCHEDULED_SUGGESTION_SURFACE_CONFIG[automationKey];
   }
 
   return null;
@@ -237,9 +220,11 @@ export function resolveScheduledSuggestionSlackConfig(
   }
 
   const automationSettingsHash = getTriggerableBackgroundAutomationSettingsHash(
-    descriptor.agentId,
+    descriptor.automationKey,
   );
-  const surfaceConfig = getScheduledSuggestionSurfaceConfig(descriptor.agentId);
+  const surfaceConfig = getScheduledSuggestionSurfaceConfig(
+    descriptor.automationKey,
+  );
 
   if (!automationSettingsHash || !surfaceConfig) {
     throw new Error(
@@ -248,10 +233,9 @@ export function resolveScheduledSuggestionSlackConfig(
   }
 
   return {
-    agentType: surfaceConfig.agentType,
+    suggestionType: surfaceConfig.suggestionType,
     automationSettingsHash,
     actionFooterText: surfaceConfig.actionFooterText,
-    managerChannelKind: descriptor.managerChannelKind,
     summaryKind: surfaceConfig.summaryKind,
     automationKey:
       surfaceConfig.summaryKind === 'suggested_tasks'

@@ -34,6 +34,47 @@ type CloudActionResult =
   | { success: true; redirectUrl: string }
   | { success: false; error: string };
 
+const GITHUB_APP_DEFAULT_EVENTS = [
+  'check_run',
+  'check_suite',
+  'commit_comment',
+  'create',
+  'delete',
+  'dependabot_alert',
+  'deploy_key',
+  'deployment',
+  'deployment_protection_rule',
+  'deployment_review',
+  'deployment_status',
+  'fork',
+  'gollum',
+  'installation_target',
+  'issue_comment',
+  'issue_dependencies',
+  'issues',
+  'label',
+  'merge_group',
+  'meta',
+  'milestone',
+  'public',
+  'pull_request',
+  'pull_request_review',
+  'pull_request_review_comment',
+  'pull_request_review_thread',
+  'push',
+  'release',
+  'repository',
+  'repository_dispatch',
+  'security_advisory',
+  'star',
+  'status',
+  'sub_issues',
+  'watch',
+  'workflow_dispatch',
+  'workflow_job',
+  'workflow_run',
+] as const;
+
 type GitHubAppManifest = {
   name: string;
   url: string;
@@ -46,19 +87,18 @@ type GitHubAppManifest = {
   setup_url: string;
   public: boolean;
   default_permissions: {
+    actions: 'write';
+    checks: 'write';
     contents: 'write';
+    deployments: 'read';
     issues: 'write';
     metadata: 'read';
     pull_requests: 'write';
+    statuses: 'read';
+    vulnerability_alerts: 'read';
     workflows: 'write';
   };
-  default_events: [
-    'issue_comment',
-    'pull_request',
-    'pull_request_review_comment',
-    'push',
-    'workflow_run',
-  ];
+  default_events: (typeof GITHUB_APP_DEFAULT_EVENTS)[number][];
   request_oauth_on_install: boolean;
   setup_on_update: boolean;
 };
@@ -193,19 +233,18 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       active: true,
     },
     default_permissions: {
+      actions: 'write',
+      checks: 'write',
       contents: 'write',
+      deployments: 'read',
       issues: 'write',
       metadata: 'read',
       pull_requests: 'write',
+      statuses: 'read',
+      vulnerability_alerts: 'read',
       workflows: 'write',
     },
-    default_events: [
-      'issue_comment',
-      'pull_request',
-      'pull_request_review_comment',
-      'push',
-      'workflow_run',
-    ],
+    default_events: [...GITHUB_APP_DEFAULT_EVENTS],
     request_oauth_on_install: true,
     setup_on_update: true,
     public: false,
@@ -304,9 +343,26 @@ async function getGitHubOAuthUser({
     }
   | { success: false; error: string }
 > {
+  const [clientId, clientSecret] = await Promise.all([
+    resolveDeploymentEnvVar('GITHUB_CLIENT_ID'),
+    resolveDeploymentEnvVar('GITHUB_CLIENT_SECRET'),
+  ]);
+
+  if (!clientId || !clientSecret) {
+    console.error(
+      `[${context}] GitHub App OAuth credentials are not configured.`,
+    );
+
+    return {
+      success: false,
+      error:
+        'GitHub App OAuth credentials are not configured for this deployment.',
+    };
+  }
+
   const params = new URLSearchParams({
-    client_id: Env.GITHUB_CLIENT_ID,
-    client_secret: Env.GITHUB_CLIENT_SECRET,
+    client_id: clientId,
+    client_secret: clientSecret,
     code,
   });
 
@@ -411,7 +467,7 @@ async function revertPrCommit(
       headers: () => ({ Authorization: `Bearer ${authToken}` }),
     });
 
-    return await client.cloudJobs.revertPrCommit.mutate(input);
+    return await client.taskRuns.revertPrCommit.mutate(input);
   } catch (error) {
     console.error('[revertPrCommit]', error);
 
@@ -739,9 +795,19 @@ export async function startAuthenticateGitHubAccountCommand(
   state?: Record<string, string>,
 ): Promise<{ success: true; url: string } | { success: false; error: string }> {
   try {
+    const clientId = await resolveDeploymentEnvVar('GITHUB_CLIENT_ID');
+
+    if (!clientId) {
+      return {
+        success: false,
+        error:
+          'Configure a GitHub App for this deployment before linking your GitHub account. Create one or enter its credentials first.',
+      };
+    }
+
     const baseUrl = Env.ROOMOTE_APP_URL;
     const params = new URLSearchParams({
-      client_id: Env.GITHUB_CLIENT_ID,
+      client_id: clientId,
       scope: 'read:user',
       state: encodeRecord({ ...(state ?? {}), mode: 'auth' }),
     });

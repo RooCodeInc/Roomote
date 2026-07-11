@@ -166,6 +166,16 @@ services:
         condition: service_completed_successfully
       api:
         condition: service_started
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://api:3001/health/controller >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   bullmq:
     <<: *roomote-service
@@ -177,6 +187,16 @@ services:
       PORT: 3002
     ports:
       - '127.0.0.1:13002:3002'
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 5 http://127.0.0.1:3002/admin/health >/dev/null',
+        ]
+      interval: 5s
+      timeout: 6s
+      retries: 12
+      start_period: 20s
 
   preview-proxy:
     <<: *roomote-service
@@ -192,10 +212,11 @@ services:
       - '127.0.0.1:18081:8081'
 
 networks:
-  # Task worker containers (docker compute provider) join only this network
-  # via DOCKER_WORKER_NETWORK, so a task sandbox can reach the API, controller,
-  # and preview-proxy but not Postgres, Redis, or MinIO. The default network is
-  # implicit (roomote_default) and carries the datastores.
+  # The controller uses this network to discover the API and optional preview
+  # proxy. Each task gets a separate bridge network; only the API and an
+  # enabled preview proxy are attached to it, so task sandboxes never share a
+  # network with one another or with Postgres, Redis, or MinIO. The default
+  # network is implicit (roomote_default) and carries the datastores.
   worker:
     name: roomote_worker
     driver: bridge

@@ -1,6 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { CloudTaskStatus } from '@roomote/types';
+import { RunStatus } from '@roomote/types';
 
 const workspaceBadgeMock = vi.fn();
 const pullRequestBadgeMock = vi.fn();
@@ -78,7 +78,7 @@ vi.mock('@/components/sandbox', () => ({
     className,
   }: {
     compact?: boolean;
-    status?: CloudTaskStatus;
+    status?: RunStatus;
     phase?: string | null;
     className?: string;
   }) => {
@@ -102,8 +102,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-1',
           title: 'Task title',
-          cloudJob: {
-            status: CloudTaskStatus.Running,
+          taskRun: {
+            status: RunStatus.Running,
             taskPhase: 'running',
             prRepo: 'owner/repo',
             prNumber: 123,
@@ -134,7 +134,7 @@ describe('SideNavTaskItem', () => {
     expect(taskStatusIndicatorMock).toHaveBeenCalledWith(
       expect.objectContaining({
         compact: true,
-        status: CloudTaskStatus.Running,
+        status: RunStatus.Running,
         phase: 'running',
       }),
     );
@@ -158,8 +158,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-2',
           title: 'Task two',
-          cloudJob: {
-            status: CloudTaskStatus.Completed,
+          taskRun: {
+            status: RunStatus.Completed,
             taskPhase: null,
             payload: {
               repo: 'invalid_repo_name',
@@ -191,8 +191,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-3',
           title: 'Task starting',
-          cloudJob: {
-            status: CloudTaskStatus.Pending,
+          taskRun: {
+            status: RunStatus.Pending,
             taskPhase: null,
             payload: {
               environmentId: 'env-3',
@@ -219,8 +219,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-4',
           title: 'Task with live status',
-          cloudJob: {
-            status: CloudTaskStatus.Pending,
+          taskRun: {
+            status: RunStatus.Pending,
             taskPhase: null,
             payload: {
               environmentId: 'env-4',
@@ -259,8 +259,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-5',
           title: longTitle,
-          cloudJob: {
-            status: CloudTaskStatus.Running,
+          taskRun: {
+            status: RunStatus.Running,
             taskPhase: 'running',
             payload: {
               environmentId: 'env-5',
@@ -310,8 +310,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-6',
           title: 'Keyboard pin target',
-          cloudJob: {
-            status: CloudTaskStatus.Running,
+          taskRun: {
+            status: RunStatus.Running,
             taskPhase: 'running',
             payload: {
               environmentId: 'env-6',
@@ -347,8 +347,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-7',
           title: 'Expanded booting task',
-          cloudJob: {
-            status: CloudTaskStatus.Pending,
+          taskRun: {
+            status: RunStatus.Pending,
             taskPhase: null,
             payload: {
               environmentId: 'env-7',
@@ -378,8 +378,8 @@ describe('SideNavTaskItem', () => {
         task={{
           id: 'task-8',
           title: 'Expanded live running task',
-          cloudJob: {
-            status: CloudTaskStatus.Running,
+          taskRun: {
+            status: RunStatus.Running,
             taskPhase: 'waiting_for_prompt',
             payload: {
               environmentId: 'env-8',

@@ -94,6 +94,7 @@ export async function postSetupTaskSuggestionsToTeams(params: {
 
   await insertSetupSuggestionMessageRows(
     buildSharedMessageSuggestionRows({
+      surface: 'teams',
       messageId: introMessageId,
       channelId: conversation.conversationId,
       sourceTaskId,

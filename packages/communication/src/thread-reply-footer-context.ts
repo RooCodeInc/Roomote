@@ -1,10 +1,10 @@
 import {
-  cloudJobs,
   db,
   environments,
   eq,
   resolveEffectivePreviewRuntimeConfig,
   taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import type { PullRequestStatus } from '@roomote/types';
@@ -104,17 +104,17 @@ export async function resolveThreadReplyLivePreviewUrl(
     return null;
   }
 
-  const cloudJob = await db.query.cloudJobs.findFirst({
+  const taskRun = await db.query.taskRuns.findFirst({
     columns: {
       payload: true,
       primaryPortName: true,
     },
-    where: eq(cloudJobs.taskId, taskId),
+    where: eq(taskRuns.taskId, taskId),
     orderBy: (table, { desc }) => [desc(table.createdAt)],
   });
 
   const environmentId = (
-    cloudJob?.payload as { environmentId?: string } | undefined
+    taskRun?.payload as { environmentId?: string } | undefined
   )?.environmentId;
 
   if (!environmentId) {
@@ -136,7 +136,7 @@ export async function resolveThreadReplyLivePreviewUrl(
   }
 
   const primaryPortName =
-    cloudJob?.primaryPortName ??
+    taskRun?.primaryPortName ??
     getPrimaryPortFromConfig(environment?.config?.ports)?.name;
 
   if (!primaryPortName) {

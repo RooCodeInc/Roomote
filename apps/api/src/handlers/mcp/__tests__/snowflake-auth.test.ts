@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, JobTokenContext } from '@roomote/types';
+import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
 const {
-  mockFindCloudJob,
+  mockFindTaskRun,
   mockFindConnection,
-  mockResolveUserIdForCloudJob,
   mockEq,
   mockAnd,
   mockIsNull,
@@ -26,9 +25,8 @@ const {
   }));
 
   return {
-    mockFindCloudJob: vi.fn(),
+    mockFindTaskRun: vi.fn(),
     mockFindConnection: vi.fn(),
-    mockResolveUserIdForCloudJob: vi.fn(),
     mockEq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
     mockAnd: vi.fn((...clauses: unknown[]) => clauses),
     mockIsNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
@@ -43,11 +41,11 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      cloudJobs: { findFirst: mockFindCloudJob },
+      taskRuns: { findFirst: mockFindTaskRun },
       mcpConnections: { findFirst: mockFindConnection },
     },
   },
-  cloudJobs: { id: 'id' },
+  taskRuns: { id: 'id' },
   mcpConnections: {
     mcpId: 'mcpId',
     enabled: 'enabled',
@@ -63,10 +61,6 @@ vi.mock('@roomote/db/encryption', () => ({
   decrypt: vi.fn((value: string) =>
     value.startsWith('enc:') ? value.slice(4) : value,
   ),
-}));
-
-vi.mock('@roomote/cloud-agents/server', () => ({
-  resolveUserIdForCloudJob: mockResolveUserIdForCloudJob,
 }));
 
 vi.mock('snowflake-sdk', () => ({
@@ -143,11 +137,12 @@ function mockConnectionRow(overrides?: Record<string, unknown>) {
   } as Awaited<ReturnType<typeof db.query.mcpConnections.findFirst>>;
 }
 
-function createJobToken(overrides?: Partial<JobTokenContext>): JobTokenContext {
+function createRunToken(overrides?: Partial<RunTokenContext>): RunTokenContext {
   return {
-    cloudJobId: 42,
+    runId: 42,
     userId: 'user-1',
-    tokenType: 'cj',
+    principal: 'user',
+    tokenType: 'run',
     version: 1,
     ...(overrides ?? {}),
   };
@@ -156,20 +151,9 @@ function createJobToken(overrides?: Partial<JobTokenContext>): JobTokenContext {
 describe('snowflake MCP auth and tool handling', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFindCloudJob.mockResolvedValue({
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
-      userId: 'user-1',
-    });
-    mockResolveUserIdForCloudJob.mockImplementation(async (cloudJob) => {
-      if (!cloudJob || typeof cloudJob !== 'object') {
-        return null;
-      }
-
-      return 'userId' in cloudJob &&
-        typeof cloudJob.userId === 'string' &&
-        cloudJob.userId.length > 0
-        ? cloudJob.userId
-        : null;
+      actingUserId: 'user-1',
     });
     mockFindConnection.mockResolvedValue(mockConnectionRow());
     mockSnowflakeConnect.mockImplementation((callback) => {
@@ -242,12 +226,12 @@ describe('snowflake MCP auth and tool handling', () => {
     const body = (await response.json()) as JsonRpcErrorBody;
 
     expect(response.status).toBe(403);
-    expect(body.error.message).toContain('requires a cloud job token');
+    expect(body.error.message).toContain('requires a task run token');
   });
 
-  it('initializes successfully for cloud job tokens', async () => {
+  it('initializes successfully for task run tokens', async () => {
     const response = await postMcp(
-      createApp(createJobToken()),
+      createApp(createRunToken()),
       createInitializeRequest(1),
     );
 
@@ -266,7 +250,7 @@ describe('snowflake MCP auth and tool handling', () => {
   });
 
   it('lists the Snowflake tools', async () => {
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/list',
@@ -287,7 +271,7 @@ describe('snowflake MCP auth and tool handling', () => {
   });
 
   it('executes SQL through the Snowflake SDK wrapper', async () => {
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 7,
       method: 'tools/call',
@@ -324,7 +308,7 @@ describe('snowflake MCP auth and tool handling', () => {
       }),
     );
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 71,
       method: 'tools/call',
@@ -363,7 +347,7 @@ describe('snowflake MCP auth and tool handling', () => {
       }),
     );
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 72,
       method: 'tools/call',
@@ -396,7 +380,7 @@ describe('snowflake MCP auth and tool handling', () => {
   });
 
   it('returns normalized table descriptions', async () => {
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 8,
       method: 'tools/call',
@@ -437,7 +421,7 @@ describe('snowflake MCP auth and tool handling', () => {
       }),
     );
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 99,
       method: 'tools/call',
@@ -469,7 +453,7 @@ describe('snowflake MCP auth and tool handling', () => {
       }),
     );
 
-    const response = await postMcp(createApp(createJobToken()), {
+    const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 100,
       method: 'tools/call',
@@ -498,25 +482,58 @@ describe('snowflake MCP auth and tool handling', () => {
     });
   });
 
-  it('validates cloud job tokens before serving Snowflake tools', async () => {
+  it('validates task run tokens before serving Snowflake tools', async () => {
     const response = await postMcp(
-      createApp(createJobToken()),
+      createApp(createRunToken()),
       createInitializeRequest(3),
     );
 
     expect(response.status).toBe(200);
-    expect(mockFindCloudJob).toHaveBeenCalled();
+    expect(mockFindTaskRun).toHaveBeenCalled();
   });
 
-  it('accepts org-scoped cloud job tokens whose user comes from fallback resolution', async () => {
-    mockFindCloudJob.mockResolvedValue({
+  it('accepts a token minted for user A after the acting user switched to user B', async () => {
+    // Web steer / follow-up delivery mutate task_runs.actingUserId mid-run;
+    // the run-scoped token stays authorized (the token's userId is mint-time
+    // attribution and is never compared against the mutable acting user).
+    mockFindTaskRun.mockResolvedValue({
       id: 42,
-      userId: null,
+      actingUserId: 'user-2',
     });
-    mockResolveUserIdForCloudJob.mockResolvedValue('admin-user');
 
     const response = await postMcp(
-      createApp(createJobToken({ userId: 'admin-user' })),
+      createApp(createRunToken()),
+      createInitializeRequest(4),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it('accepts a deployment-principal token after a human became the acting user', async () => {
+    // A human replying in the thread of an automation run switches the acting
+    // user from null to that human; the run-scoped null-principal token must
+    // keep working.
+    mockFindTaskRun.mockResolvedValue({
+      id: 42,
+      actingUserId: 'user-2',
+    });
+
+    const response = await postMcp(
+      createApp(createRunToken({ userId: null, principal: 'deployment' })),
+      createInitializeRequest(4),
+    );
+
+    expect(response.status).toBe(200);
+  });
+
+  it('allows deployment-principal tokens for deployment-principal task runs backed by a deployment-scoped connection', async () => {
+    mockFindTaskRun.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+    });
+
+    const response = await postMcp(
+      createApp(createRunToken({ userId: null, principal: 'deployment' })),
       createInitializeRequest(4),
     );
 
@@ -525,10 +542,6 @@ describe('snowflake MCP auth and tool handling', () => {
       result: {
         serverInfo: { name: 'roomote-snowflake-mcp' },
       },
-    });
-    expect(mockResolveUserIdForCloudJob).toHaveBeenCalledWith({
-      id: 42,
-      userId: null,
     });
   });
 });

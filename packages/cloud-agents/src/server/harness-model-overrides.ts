@@ -1,9 +1,9 @@
 import {
-  type CloudTask,
+  type TaskSpec,
   type CodingHarness,
   type HarnessModelOverrides,
   type TaskModelSettings,
-  CloudTaskType,
+  TaskPayloadKind,
   getDefaultTaskModelId,
   getHarnessModelOverride,
   isTaskModelIdAllowed,
@@ -18,10 +18,10 @@ function isConfiguredModelId(
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isCodeReviewTaskType(task: CloudTask): boolean {
+function isCodeReviewTaskType(task: TaskSpec): boolean {
   return (
-    task.type === CloudTaskType.GithubPrReview ||
-    task.type === CloudTaskType.GithubPrReviewSync
+    task.type === TaskPayloadKind.GithubPrReview ||
+    task.type === TaskPayloadKind.GithubPrReviewSync
   );
 }
 
@@ -39,7 +39,7 @@ function resolveTaskModelForHarness(
   );
 }
 
-function applyHarnessModelOverrides<T extends CloudTask>(
+function applyHarnessModelOverrides<T extends TaskSpec>(
   task: T,
   harnessModelOverrides?: HarnessModelOverrides,
 ): T {
@@ -64,24 +64,22 @@ function applyHarnessModelOverrides<T extends CloudTask>(
   };
 }
 
-export function resolveEffectiveHarnessModelState<
-  T extends CloudTask,
->(options: {
+export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
   task: T;
   targetHarness: CodingHarness;
   isSnapshotResume: boolean;
-  sourceJobHarnessModelOverrides?: HarnessModelOverrides;
+  sourceRunHarnessModelOverrides?: HarnessModelOverrides;
   deploymentMetadata?: MetadataRecord | null;
   deploymentTaskModelSettings?: TaskModelSettings | null;
   deploymentCodeReviewModelId?: string | null;
 }): { task: T; model: string } {
   const shouldReuseSourceHarnessModelOverrides =
-    options.isSnapshotResume && Boolean(options.sourceJobHarnessModelOverrides);
+    options.isSnapshotResume && Boolean(options.sourceRunHarnessModelOverrides);
 
   if (shouldReuseSourceHarnessModelOverrides) {
     const nextTask = applyHarnessModelOverrides(
       options.task,
-      options.sourceJobHarnessModelOverrides,
+      options.sourceRunHarnessModelOverrides,
     );
 
     return {

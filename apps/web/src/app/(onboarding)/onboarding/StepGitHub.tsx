@@ -10,17 +10,21 @@ import { Button, Github, Spinner } from '@/components/system';
 import { StepCompletedBadge } from '../setup/StepCompletedBadge';
 import { StepTitle } from '../setup/StepTitle';
 
-const githubAppMention = getGitHubAppMention(
-  process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
-);
-
 export function StepGitHub({
   onContinue,
   previousStepCompleted,
+  githubAppSlug,
 }: {
   onContinue: () => void;
   previousStepCompleted?: string;
+  githubAppSlug?: string;
 }) {
+  // The server-resolved slug covers deployments whose app slug lives only in
+  // the database (the /setup manifest flow); the inlined build-time env value
+  // is the fallback for the hosted product.
+  const githubAppMention = getGitHubAppMention(
+    githubAppSlug || process.env.NEXT_PUBLIC_GITHUB_APP_SLUG || 'roomote',
+  );
   const authenticateGitHubAccount = useAuthenticateGitHubAccount({
     onSuccess: (result) => {
       if (result.success) {

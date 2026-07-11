@@ -100,7 +100,7 @@ async function createArtifactRecord(
 
   const artifact = await createTaskArtifactRecord({
     taskId,
-    cloudJobId: auth.cloudJobId ?? null,
+    runId: auth.runId ?? null,
     artifactType,
     contentType,
     path,

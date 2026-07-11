@@ -46,9 +46,9 @@ import {
 import { getRedis, withContention } from '@roomote/redis';
 import {
   ALL_REPOSITORIES,
-  type CloudTask,
-  type CloudTaskPayload,
-  CloudTaskType,
+  type TaskSpec,
+  type TaskPayload,
+  TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
   populateSnapshotResumeCommunicationMetadata,
@@ -56,19 +56,24 @@ import {
 } from '@roomote/types';
 import {
   buildTeamsRoutingContext,
-  enqueueCloudTask,
+  enqueueTask,
   getTaskUrl,
-  resolveUserIdForCloudJob,
   routeTask,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
+import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { verifyBotFrameworkJwt } from './bot-framework-auth.js';
 import {
-  findActiveTeamsJob,
-  findCompletedTeamsJobWithSnapshot,
-} from './find-active-teams-job.js';
+  findActiveTeamsTaskRun,
+  findCompletedTeamsTaskRunWithSnapshot,
+} from './find-active-teams-run.js';
+import {
+  launchClaimedTeamsSuggestion,
+  parseTeamsSuggestionStartText,
+  resolveAndClaimTeamsSuggestionStart,
+} from './suggestion-start.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const TEAMS_ACTIVITY_DEDUP_PREFIX = 'teams:activity:';
@@ -917,34 +922,36 @@ async function resolveTeamsWorkspace(
  * Result of resuming a Teams task from a snapshot.
  *
  * - `leader`: this caller won the contention lock, enqueued the
- *   SnapshotResume job, and embedded its follow-up message in the job payload.
+ *   SnapshotResume run, and embedded its follow-up message in the job payload.
  *   The caller is responsible for posting the snapshot-resume acknowledgement.
  * - `follower`: another caller already won the lock and enqueued the resume
  *   job. This caller polled for that job and queued its follow-up message to
  *   it. No acknowledgement is posted, since the leader already posted one.
  */
 type TeamsSnapshotResumeResult =
-  | { mode: 'leader'; cloudJobId: number; taskId: string }
-  | { mode: 'follower'; cloudJobId: number };
+  | { mode: 'leader'; runId: number; taskId: string }
+  | { mode: 'follower'; runId: number };
 
 async function resumeTeamsTaskFromSnapshot(input: {
-  completedJob: Awaited<ReturnType<typeof findCompletedTeamsJobWithSnapshot>>;
+  completedRun: Awaited<
+    ReturnType<typeof findCompletedTeamsTaskRunWithSnapshot>
+  >;
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
 }): Promise<TeamsSnapshotResumeResult | null> {
-  if (!input.completedJob?.snapshotId) {
+  if (!input.completedRun?.snapshotId) {
     return null;
   }
 
-  const completedJob = input.completedJob;
-  const sourceSnapshotId = input.completedJob.snapshotId;
+  const completedRun = input.completedRun;
+  const sourceSnapshotId = input.completedRun.snapshotId;
   const { queuedMessage, metadata } = input;
 
   // Two near-simultaneous Teams follow-ups in the same conversation can both
-  // pass findCompletedTeamsJobWithSnapshot and enqueue duplicate resume jobs
+  // pass findCompletedTeamsTaskRunWithSnapshot and enqueue duplicate resume task runs
   // for the same snapshot. Acquire a short-lived distributed lock keyed on the
   // conversation (and thread, when present) so only one caller enqueues the
-  // SnapshotResume job; contended callers poll for the leader's resume job and
+  // SnapshotResume run; contended callers poll for the leader's resume task run and
   // queue their message to it. Mirrors the Slack withContention and Linear
   // SET NX resume-lock patterns.
   const lockKey = `teams:resume-lock:${metadata.communicationChannelId}:${metadata.communicationThreadId ?? ''}`;
@@ -953,7 +960,7 @@ async function resumeTeamsTaskFromSnapshot(input: {
     ttlSeconds: 30,
     poll: { intervalMs: 500, maxAttempts: 10 },
     onAcquired: async () => {
-      const completedPayload = completedJob.payload as Record<string, unknown>;
+      const completedPayload = completedRun.payload as Record<string, unknown>;
       const repo =
         typeof completedPayload.repo === 'string'
           ? completedPayload.repo
@@ -962,14 +969,15 @@ async function resumeTeamsTaskFromSnapshot(input: {
         typeof completedPayload.environmentId === 'string'
           ? completedPayload.environmentId
           : undefined;
-      const resumePayload: CloudTaskPayload<CloudTaskType.SnapshotResume> = {
-        repo,
-        ...(environmentId ? { environmentId } : {}),
-        ...(completedJob.port ? { port: completedJob.port } : {}),
-        sourceSnapshotId,
-        sourceCloudJobId: completedJob.id,
-        queuedCommunicationMessages: [queuedMessage],
-      };
+      const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> =
+        {
+          repo,
+          ...(environmentId ? { environmentId } : {}),
+          ...(completedRun.port ? { port: completedRun.port } : {}),
+          sourceSnapshotId,
+          sourceRunId: completedRun.id,
+          queuedCommunicationMessages: [queuedMessage],
+        };
 
       populateSnapshotResumeCommunicationMetadata(resumePayload, {
         provider: 'teams',
@@ -982,59 +990,58 @@ async function resumeTeamsTaskFromSnapshot(input: {
       });
       restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
-      const resumeUserId =
-        queuedMessage.userId ??
-        completedJob.userId ??
-        (await resolveUserIdForCloudJob(completedJob));
-      if (!resumeUserId) {
-        throw new Error(
-          'No active user is available for Teams snapshot resume.',
-        );
-      }
+      // Prefer the queued message sender, then the source run's acting user.
+      // No forged fallback: when neither is a real user the resume runs as
+      // the deployment service principal.
+      const resumeUserId = queuedMessage.userId ?? completedRun.userId ?? null;
 
-      const resumeLaunch = await enqueueCloudTask(
+      // Resumes never create tasks and never re-attribute; the resuming
+      // human becomes the new run's acting user.
+      const resumeLaunch = await enqueueTask(
         {
-          type: CloudTaskType.SnapshotResume,
-          userId: resumeUserId,
-          sourceSnapshotId,
-          sourceCloudJobId: completedJob.id,
-          payload: resumePayload,
+          task: {
+            type: TaskPayloadKind.SnapshotResume,
+            sourceSnapshotId,
+            sourceRunId: completedRun.id,
+            payload: resumePayload,
+          },
+          actingUserId: resumeUserId,
         },
         {
-          launchClass: 'human',
+          launchClass: resumeUserId ? 'human' : 'automation',
         },
       );
 
       apiLogger.debug(
-        `✅ Created SnapshotResume cloud job ${resumeLaunch.id} for Teams conversation ${metadata.communicationChannelId}`,
+        `✅ Created SnapshotResume task run ${resumeLaunch.id} for Teams conversation ${metadata.communicationChannelId}`,
       );
 
       return {
         mode: 'leader',
-        cloudJobId: resumeLaunch.id,
+        runId: resumeLaunch.id,
         taskId: resumeLaunch.taskId,
       };
     },
     onContended: async () => {
-      // Another handler is already creating the resume job. Poll for the new
-      // active job so we can queue the follow-up message to the correct
+      // Another handler is already creating the resume task run. Poll for the new
+      // active task run so we can queue the follow-up message to the correct
       // (resume) job instead of enqueuing a duplicate.
-      const resumeJob = await findActiveTeamsJob({
+      const resumeRun = await findActiveTeamsTaskRun({
         conversationId: metadata.communicationChannelId,
         threadId: metadata.communicationThreadId,
       });
 
-      if (!resumeJob) {
+      if (!resumeRun) {
         return undefined;
       }
 
-      await queueCommunicationMessage('teams', resumeJob.id, queuedMessage);
+      await queueCommunicationMessage('teams', resumeRun.id, queuedMessage);
 
       apiLogger.debug(
-        `[teams] Queued contended Teams follow-up ${queuedMessage.ts} for resume cloud job ${resumeJob.id}`,
+        `[teams] Queued contended Teams follow-up ${queuedMessage.ts} for resume task run ${resumeRun.id}`,
       );
 
-      return { mode: 'follower', cloudJobId: resumeJob.id };
+      return { mode: 'follower', runId: resumeRun.id };
     },
   });
 
@@ -1276,24 +1283,33 @@ async function startNewTeamsTask(input: {
     throw new Error('Teams task routing selected an unavailable workspace.');
   }
 
-  const task: Extract<CloudTask, { type: CloudTaskType.StandardTask }> = {
-    type: CloudTaskType.StandardTask,
-    userId: launchUserId,
-    payload: {
-      repo: workspace.repoForPayload,
-      ...(workspace.environmentId
-        ? { environmentId: workspace.environmentId }
-        : {}),
-      description: input.queuedMessage.text,
-      ...(input.queuedMessage.images?.length
-        ? { images: input.queuedMessage.images }
-        : {}),
-      ...input.metadata,
+  const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
+    {
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: workspace.repoForPayload,
+        ...(workspace.environmentId
+          ? { environmentId: workspace.environmentId }
+          : {}),
+        description: input.queuedMessage.text,
+        ...(input.queuedMessage.images?.length
+          ? { images: input.queuedMessage.images }
+          : {}),
+        ...input.metadata,
+      },
+    };
+  const launchResult = await enqueueTask(
+    {
+      task,
+      initiator: { kind: 'user', userId: launchUserId },
+      workflow: 'standard',
+      surface: 'teams',
+      trigger: 'message',
     },
-  };
-  const launchResult = await enqueueCloudTask(task, {
-    launchClass: 'human',
-  });
+    {
+      launchClass: 'human',
+    },
+  );
 
   const taskUrl = getTaskUrl({
     taskId: launchResult.taskId,
@@ -1322,7 +1338,7 @@ type ResumePendingTeamsAuthResult =
   | {
       success: true;
       status: 'queued' | 'resumed' | 'started' | 'replied_inline';
-      cloudJobId?: number;
+      runId?: number;
       taskId?: string;
       taskUrl?: string;
     }
@@ -1374,38 +1390,44 @@ async function resumePendingTeamsAuthToken(
       { userId: mappedUserId },
     );
 
-  const activeJob = await findActiveTeamsJob({
+  const activeRun = await findActiveTeamsTaskRun({
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
   });
 
-  if (activeJob) {
+  if (activeRun) {
+    // Trusted pre-queue actor switch; see acting-user-sync.ts.
+    await syncActingUserForInboundMessage({
+      logContext: 'teams.pendingAuthActivity',
+      runId: activeRun.id,
+      senderUserId: mappedUserId,
+    });
     await queueCommunicationMessage(
       'teams',
-      activeJob.id,
+      activeRun.id,
       queuedMessageWithImages,
     );
 
     apiLogger.debug(
-      `[teams] Queued pending Teams auth activity ${queuedMessage.ts} for cloud job ${activeJob.id}`,
+      `[teams] Queued pending Teams auth activity ${queuedMessage.ts} for task run ${activeRun.id}`,
     );
 
     return {
       success: true,
       status: 'queued',
-      cloudJobId: activeJob.id,
+      runId: activeRun.id,
     };
   }
 
-  const completedJob = await findCompletedTeamsJobWithSnapshot({
+  const completedRun = await findCompletedTeamsTaskRunWithSnapshot({
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
   });
 
-  if (completedJob) {
+  if (completedRun) {
     try {
       const resumeResult = await resumeTeamsTaskFromSnapshot({
-        completedJob,
+        completedRun,
         queuedMessage: queuedMessageWithImages,
         metadata,
       });
@@ -1430,7 +1452,7 @@ async function resumePendingTeamsAuthToken(
           return {
             success: true,
             status: 'resumed',
-            cloudJobId: resumeResult.cloudJobId,
+            runId: resumeResult.runId,
             taskId: resumeResult.taskId,
             taskUrl,
           };
@@ -1439,7 +1461,7 @@ async function resumePendingTeamsAuthToken(
         return {
           success: true,
           status: 'queued',
-          cloudJobId: resumeResult.cloudJobId,
+          runId: resumeResult.runId,
         };
       }
     } catch (error) {
@@ -1468,7 +1490,7 @@ async function resumePendingTeamsAuthToken(
   return {
     success: true,
     status: 'started',
-    cloudJobId: launch.launchResult!.id,
+    runId: launch.launchResult!.id,
     taskId: launch.launchResult!.taskId,
     taskUrl: getTaskUrl({
       taskId: launch.launchResult!.taskId,
@@ -1587,12 +1609,12 @@ teams.post('/', async (c) => {
   }
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
-  const activeJob = await findActiveTeamsJob({
+  const activeRun = await findActiveTeamsTaskRun({
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
   });
 
-  if (!activeJob) {
+  if (!activeRun) {
     if (!isTeamsTaskEntryActivity(activity)) {
       // Replying to the bot in a thread it owns needs no @-mention unless
       // somebody else sent a message or was mentioned since the bot's last
@@ -1614,7 +1636,7 @@ teams.post('/', async (c) => {
 
       if (!shouldRouteUnmentionedThreadReply) {
         apiLogger.debug(
-          `[teams] Ignoring Teams message without active job or task entry signal for conversation ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
+          `[teams] Ignoring Teams message without active task run or task entry signal for conversation ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
         );
 
         return c.json({ ok: true, queued: false, reason: 'not_task_entry' });
@@ -1631,21 +1653,105 @@ teams.post('/', async (c) => {
       });
     }
 
+    // Structured "start idea N" hook for the posted suggestion lists. Matches
+    // are driven through the shared work-item claim state machine (claim ->
+    // launch -> fenced finalize/release) like the Slack reaction and Telegram
+    // button surfaces; anything that does not parse, or a conversation with no
+    // tracked suggestion cards, falls through to normal task entry unchanged.
+    // This runs before the snapshot resume so a suggestion start is never
+    // swallowed as a follow-up to the conversation's previous task.
+    const suggestionIdeaNumber = parseTeamsSuggestionStartText(
+      queuedMessage.text,
+    );
+
+    if (suggestionIdeaNumber !== null) {
+      const resolution = await resolveAndClaimTeamsSuggestionStart({
+        conversationId: metadata.communicationChannelId,
+        ideaNumber: suggestionIdeaNumber,
+      });
+
+      if (resolution.outcome === 'not_found') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `I couldn't find idea ${suggestionIdeaNumber} — the latest suggestions list has ${resolution.ideaCount} idea${resolution.ideaCount === 1 ? '' : 's'}.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_not_found',
+        });
+      }
+
+      if (resolution.outcome === 'already_started') {
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: `"${resolution.title}" was already started or is no longer available.`,
+        });
+
+        return c.json({
+          ok: true,
+          queued: false,
+          reason: 'suggestion_already_started',
+        });
+      }
+
+      if (resolution.outcome === 'claimed') {
+        const suggestionLaunch = await launchClaimedTeamsSuggestion({
+          suggestion: resolution.suggestion,
+          launchTask: (promptText) =>
+            startNewTeamsTask({
+              activity,
+              mappedUserId,
+              queuedMessage: { ...queuedMessage!, text: promptText },
+              metadata,
+            }),
+          postMessage: (text) =>
+            postTeamsMessageBestEffort({
+              conversationId: metadata.communicationChannelId,
+              threadId: metadata.communicationThreadId,
+              serviceUrl: metadata.communicationServiceUrl,
+              text,
+            }),
+        });
+
+        return c.json(
+          suggestionLaunch.result === 'started'
+            ? {
+                ok: true,
+                started: true,
+                runId: suggestionLaunch.runId,
+              }
+            : {
+                ok: true,
+                queued: false,
+                reason: `suggestion_${suggestionLaunch.result}`,
+              },
+        );
+      }
+
+      // outcome === 'no_cards': fall through to normal task entry.
+    }
+
     queuedMessage = await attachTeamsActivityImagesToQueuedMessage(
       activity,
       queuedMessage,
       { userId: mappedUserId },
     );
 
-    const completedJob = await findCompletedTeamsJobWithSnapshot({
+    const completedRun = await findCompletedTeamsTaskRunWithSnapshot({
       conversationId: metadata.communicationChannelId,
       threadId: metadata.communicationThreadId,
     });
 
-    if (completedJob) {
+    if (completedRun) {
       try {
         const resumeResult = await resumeTeamsTaskFromSnapshot({
-          completedJob,
+          completedRun,
           queuedMessage,
           metadata,
         });
@@ -1670,14 +1776,14 @@ teams.post('/', async (c) => {
             return c.json({
               ok: true,
               resumed: true,
-              cloudJobId: resumeResult.cloudJobId,
+              runId: resumeResult.runId,
             });
           }
 
           return c.json({
             ok: true,
             queued: true,
-            cloudJobId: resumeResult.cloudJobId,
+            runId: resumeResult.runId,
           });
         }
       } catch (error) {
@@ -1707,7 +1813,7 @@ teams.post('/', async (c) => {
     return c.json({
       ok: true,
       started: true,
-      cloudJobId: launch.launchResult!.id,
+      runId: launch.launchResult!.id,
     });
   }
 
@@ -1717,11 +1823,18 @@ teams.post('/', async (c) => {
     { ...(mappedUserId ? { userId: mappedUserId } : {}) },
   );
 
-  await queueCommunicationMessage('teams', activeJob.id, queuedMessage);
+  // Trusted pre-queue actor switch; see acting-user-sync.ts. The worker only
+  // runs the queued turn as this sender if the server actor already matches.
+  await syncActingUserForInboundMessage({
+    logContext: 'teams.activeRunMessage',
+    runId: activeRun.id,
+    senderUserId: mappedUserId,
+  });
+  await queueCommunicationMessage('teams', activeRun.id, queuedMessage);
 
   apiLogger.debug(
-    `[teams] Queued Teams activity ${queuedMessage.ts} for cloud job ${activeJob.id}`,
+    `[teams] Queued Teams activity ${queuedMessage.ts} for task run ${activeRun.id}`,
   );
 
-  return c.json({ ok: true, queued: true, cloudJobId: activeJob.id });
+  return c.json({ ok: true, queued: true, runId: activeRun.id });
 });

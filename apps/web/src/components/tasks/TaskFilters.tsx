@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import {
-  ALL_REPOSITORIES,
-  type CloudTaskType,
-  HIDDEN_CLOUD_TASK_TYPES,
-  cloudTaskTypes,
-} from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskWorkflow } from '@roomote/types';
 
 import { type TimePeriodFilter, HAS_PULL_REQUEST_FILTER_VALUE } from '@/types';
 
+import {
+  DEFAULT_VISIBLE_TASK_WORKFLOWS,
+  HIDDEN_TASK_WORKFLOWS,
+} from '@/lib/task-categories';
+import { formatAutomationLabel } from '@/lib/task-creator-filter';
 import { cn } from '@/lib/utils';
 
 import {
@@ -52,7 +52,7 @@ type TaskFiltersProps = {
   repositoryName: string | null;
   pullRequest: string | null;
   model: string | null;
-  taskTypes?: CloudTaskType[];
+  taskTypes?: TaskWorkflow[];
   timePeriod: TimePeriodFilter;
 
   // Change handlers.
@@ -60,7 +60,7 @@ type TaskFiltersProps = {
   onRepositoryChange: (name: string | null) => void;
   onPullRequestChange: (pullRequest: string | null) => void;
   onModelChange: (model: string | null) => void;
-  onTaskTypesChange?: (taskTypes: CloudTaskType[]) => void;
+  onTaskTypesChange?: (taskTypes: TaskWorkflow[]) => void;
   onTimePeriodChange: (period: TimePeriodFilter) => void;
 
   // Visibility controls (all shown by default).
@@ -188,20 +188,14 @@ export const TaskFilters = ({
     return 'PR';
   }, [pullRequest, selectedPrLabel]);
 
-  const visibleTaskTypes = useMemo(
-    () => cloudTaskTypes.filter((type) => !HIDDEN_CLOUD_TASK_TYPES.has(type)),
-    [],
-  );
-  const hiddenTaskTypes = useMemo(
-    () => cloudTaskTypes.filter((type) => HIDDEN_CLOUD_TASK_TYPES.has(type)),
-    [],
-  );
+  const visibleTaskTypes = DEFAULT_VISIBLE_TASK_WORKFLOWS;
+  const hiddenTaskTypes = useMemo(() => [...HIDDEN_TASK_WORKFLOWS], []);
   const taskTypeButtonLabel = useMemo(
     () => getTaskTypeFilterButtonLabel(taskTypes),
     [taskTypes],
   );
 
-  const toggleTaskType = (taskType: CloudTaskType) => {
+  const toggleTaskType = (taskType: TaskWorkflow) => {
     if (!onTaskTypesChange) {
       return;
     }
@@ -536,7 +530,9 @@ export const TaskFilters = ({
                   toggleTaskType(taskType);
                 }}
               >
-                <span className="truncate">{taskType}</span>
+                <span className="truncate">
+                  {formatAutomationLabel(taskType)}
+                </span>
               </DropdownMenuCheckboxItem>
             ))}
             {hiddenTaskTypes.length > 0 && (
@@ -555,7 +551,9 @@ export const TaskFilters = ({
                   toggleTaskType(taskType);
                 }}
               >
-                <span className="truncate">{taskType}</span>
+                <span className="truncate">
+                  {formatAutomationLabel(taskType)}
+                </span>
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>

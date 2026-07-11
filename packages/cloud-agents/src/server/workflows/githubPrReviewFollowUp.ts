@@ -1,5 +1,5 @@
 import { type GithubPullRequestReviewFollowUpTask } from '@roomote/types';
-import type { ResolvedTaskAttributionDisplay } from '@roomote/db/server';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 import { Env } from '@roomote/env';
 import { buildGitHubMentionFollowUpRequest } from '../github-pr-follow-up-context';
 import { buildGitHubMentionFollowUpHarnessInstructions } from '../github-message-instructions';
@@ -21,17 +21,17 @@ import {
 import { standardTask } from './standardTask';
 
 export async function githubPrReviewFollowUp({
-  cloudTask,
+  taskSpec,
   gitHubToken,
-  cloudJobUrl,
+  taskRunUrl,
   attribution,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
 }: {
-  cloudTask: GithubPullRequestReviewFollowUpTask;
+  taskSpec: GithubPullRequestReviewFollowUpTask;
   gitHubToken: string;
-  cloudJobUrl: string;
-  attribution?: ResolvedTaskAttributionDisplay;
+  taskRunUrl: string;
+  attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
 }): Promise<{
@@ -47,9 +47,7 @@ export async function githubPrReviewFollowUp({
       commentBody,
       linkedWorkItems: payloadLinkedWorkItems,
     },
-  } = cloudTask;
-
-  const agentType = 'Standard Task';
+  } = taskSpec;
 
   const params: GitHubCli.FetchParams = { gitHubToken, repo: fullName };
   const prParams: GitHubCli.FetchPrParams = { ...params, prNumber };
@@ -95,13 +93,13 @@ export async function githubPrReviewFollowUp({
   const taskContext = {
     repository: fullName,
     pull_request_number: prNumber,
-    agent_type: agentType,
+    workflow: 'pr_review',
     pull_request_base_sha: pr.baseRefOid,
     revert_commit_base_url: revertCommitBaseUrl,
     comment_header_starting: '',
     comment_header_completed: '',
-    task_link_follow: `[Follow](${cloudJobUrl})`,
-    task_link_see: `[See task](${cloudJobUrl})`,
+    task_link_follow: `[Follow](${taskRunUrl})`,
+    task_link_see: `[See task](${taskRunUrl})`,
     pull_request_details: getPrDetails({ fullName, pr }),
     ...(commentId ? { triggering_comment_id: commentId } : {}),
     triggering_comment: getTriggeringComment(triggeringComment),
@@ -134,7 +132,7 @@ export async function githubPrReviewFollowUp({
     description: prompt,
     repo: fullName,
     taskSurface: 'github',
-    cloudJobUrl,
+    taskRunUrl,
     attribution,
     requestFormat: 'structured',
     linkedWorkItems,

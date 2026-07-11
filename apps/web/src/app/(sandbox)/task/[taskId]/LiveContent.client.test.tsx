@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
-import type { CloudSession } from './hooks/use-cloud-session';
+import type { TaskSession } from './hooks/use-task-session';
 
 const { usePendingUserInputRequestStateMock } = vi.hoisted(() => ({
   usePendingUserInputRequestStateMock: vi.fn(),
@@ -38,15 +38,15 @@ vi.mock('./startup', () => ({
 
 import { TaskInputStack } from './TaskInputStack';
 
-const baseSession: CloudSession = {
+const baseSession: TaskSession = {
   artifacts: [],
   blank: false,
-  cloudJob: {
+  taskRun: {
     id: 1,
     status: 'dequeued' as const,
     taskPhase: null,
-    type: 'standard.task' as const,
-  } as CloudSession['cloudJob'],
+    payloadKind: 'standard' as const,
+  } as TaskSession['taskRun'],
   draftPrompt: null,
   harness: 'opencode-server',
   hasTransportError: false,

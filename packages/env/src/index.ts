@@ -47,6 +47,17 @@ function emptyStringDefault() {
   return z.string().default('');
 }
 
+function dockerSize() {
+  return z.string().regex(/^\d+(?:\.\d+)?[kmgt]?b?$/i, 'Invalid Docker size');
+}
+
+function optInBoolean() {
+  return z
+    .enum(['true', 'false', '1', '0'])
+    .default('false')
+    .transform((value) => value === 'true' || value === '1');
+}
+
 const serverSchema = {
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
@@ -67,6 +78,14 @@ const serverSchema = {
     .default(process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
   DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
+  DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
+  DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
+  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
+  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
+  DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
+  DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
+  DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),
   ROOMOTE_PUBLIC_URL: z.string().url().optional(),
   ROOMOTE_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
@@ -122,10 +141,11 @@ const serverSchema = {
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
-  // task sandboxes. See .agent-guidance/architecture/runtime-env.md.
+  // task sandboxes.
   TEAMS_BOT_APP_ID: z.string().min(1).optional(),
   TEAMS_BOT_APP_PASSWORD: z.string().min(1).optional(),
   TEAMS_BOT_TENANT_ID: z.string().min(1).optional(),
+  TEAMS_BOT_NAME: z.string().min(1).optional(),
   TEAMS_BOT_TOKEN_ENDPOINT: z.string().url().optional(),
   TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
   TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
@@ -193,6 +213,9 @@ const serverSchema = {
   ROOMOTE_ALLOWED_EMAILS: z.string().optional(),
   PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
   SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  // How long recorded webhook payloads are kept before the WebhookCleanup
+  // scheduled job (apps/bullmq) deletes them.
+  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -209,6 +232,102 @@ const serverSchema = {
     .positive()
     .default(2_000),
 };
+
+export const ROOMOTE_SERVICE_VALUES = [
+  'web',
+  'api',
+  'controller',
+  'bullmq',
+  'preview-proxy',
+  'db-migrate',
+] as const;
+
+export type RoomoteService = (typeof ROOMOTE_SERVICE_VALUES)[number];
+
+type ServerEnvKey = keyof typeof serverSchema;
+
+const REQUIRED_SERVER_ENV_KEYS = new Set<ServerEnvKey>([
+  'ROOMOTE_APP_URL',
+  'TRPC_URL',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'DASHBOARD_PASSWORD',
+  'ENCRYPTION_KEY',
+  'ARTIFACT_SIGNING_KEY',
+  'S3_ENDPOINT',
+  'S3_REGION',
+  'S3_ACCESS_KEY_ID',
+  'S3_SECRET_ACCESS_KEY',
+  'S3_BUCKET_ARTIFACTS',
+]);
+
+/**
+ * Required non-optional values for each production process. Optional
+ * integration/provider settings keep their normal schemas and defaults, but a
+ * process no longer has to receive unrelated core secrets merely to satisfy
+ * the shared environment parser.
+ */
+export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
+  web: [...REQUIRED_SERVER_ENV_KEYS],
+  api: [
+    'ROOMOTE_APP_URL',
+    'TRPC_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'ENCRYPTION_KEY',
+    'ARTIFACT_SIGNING_KEY',
+    'DASHBOARD_PASSWORD',
+    'S3_ENDPOINT',
+    'S3_REGION',
+    'S3_ACCESS_KEY_ID',
+    'S3_SECRET_ACCESS_KEY',
+    'S3_BUCKET_ARTIFACTS',
+  ],
+  controller: [
+    'ROOMOTE_APP_URL',
+    'TRPC_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'ENCRYPTION_KEY',
+  ],
+  bullmq: [
+    'ROOMOTE_APP_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'DASHBOARD_PASSWORD',
+    'ENCRYPTION_KEY',
+  ],
+  'preview-proxy': ['ROOMOTE_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
+  'db-migrate': ['DATABASE_URL'],
+} as const satisfies Record<RoomoteService, readonly ServerEnvKey[]>;
+
+function resolveRoomoteService(
+  value: string | undefined,
+): RoomoteService | undefined {
+  return ROOMOTE_SERVICE_VALUES.find((service) => service === value);
+}
+
+function buildServiceServerSchema(
+  service: RoomoteService | undefined,
+): typeof serverSchema {
+  if (!service) {
+    return serverSchema;
+  }
+
+  const requiredForService = new Set<ServerEnvKey>(
+    SERVICE_REQUIRED_SERVER_ENV_KEYS[service],
+  );
+
+  return Object.fromEntries(
+    Object.entries(serverSchema).map(([key, schema]) => [
+      key,
+      REQUIRED_SERVER_ENV_KEYS.has(key as ServerEnvKey) &&
+      !requiredForService.has(key as ServerEnvKey)
+        ? schema.optional()
+        : schema,
+    ]),
+  ) as typeof serverSchema;
+}
 
 const clientSchema = {
   NEXT_PUBLIC_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
@@ -236,6 +355,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'TEAMS_BOT_APP_ID',
   'TEAMS_BOT_APP_PASSWORD',
   'TEAMS_BOT_TENANT_ID',
+  'TEAMS_BOT_NAME',
   'TEAMS_BOT_TOKEN_ENDPOINT',
   'TEAMS_BOT_OAUTH_SCOPE',
   'TELEGRAM_BOT_TOKEN',
@@ -303,7 +423,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
 
 /**
  * The base64-encoded P-256 keypair env keys that every deployment needs for
- * job-token and preview-token signing/verification.
+ * run-token and preview-token signing/verification.
  */
 export const AUTH_KEYPAIR_ENV_KEYS = [
   'JOB_AUTH_PRIVATE_KEY',
@@ -426,7 +546,19 @@ type AuthKeypairEnv = Partial<Record<AuthKeypairEnvKey, string>> & {
   APP_ENV?: string;
 };
 
-function assertAuthKeypairEnv(env: AuthKeypairEnv) {
+const SERVICE_AUTH_KEYPAIR_ENV_KEYS = {
+  web: AUTH_KEYPAIR_ENV_KEYS,
+  api: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
+  controller: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
+  bullmq: [],
+  'preview-proxy': ['JOB_AUTH_PUBLIC_KEY', 'PREVIEW_AUTH_PUBLIC_KEY'],
+  'db-migrate': [],
+} as const satisfies Record<RoomoteService, readonly AuthKeypairEnvKey[]>;
+
+function assertAuthKeypairEnv(
+  env: AuthKeypairEnv,
+  service: RoomoteService | undefined,
+) {
   // Development auto-generates missing keypairs at boot (see
   // shouldAutoGenerateAuthKeypairs); production and preview must supply them.
   if (
@@ -436,7 +568,10 @@ function assertAuthKeypairEnv(env: AuthKeypairEnv) {
     return;
   }
 
-  const missingKeys = AUTH_KEYPAIR_ENV_KEYS.filter((key) => !env[key]?.trim());
+  const requiredKeys = service
+    ? SERVICE_AUTH_KEYPAIR_ENV_KEYS[service]
+    : AUTH_KEYPAIR_ENV_KEYS;
+  const missingKeys = requiredKeys.filter((key) => !env[key]?.trim());
 
   if (missingKeys.length === 0) {
     return;
@@ -539,6 +674,13 @@ function buildRoomoteRuntimeEnv(
     env.S3_BUCKET_ARTIFACTS ??= LOCAL_S3_BUCKET_ARTIFACTS;
   }
 
+  // Slack rejects the whole account-linking DM (invalid_blocks) when the
+  // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
+  // must fall back to the web app's linking route rather than empty string.
+  if (!env.SLACK_AUTH_URI && env.ROOMOTE_APP_URL) {
+    env.SLACK_AUTH_URI = `${env.ROOMOTE_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+  }
+
   return env;
 }
 
@@ -557,17 +699,18 @@ export function createRoomoteEnv(
   resolve: (key: string) => string | undefined = (key) => processEnv[key],
 ) {
   const skipValidation = typeof processEnv.SKIP_ENV_VALIDATION !== 'undefined';
+  const service = resolveRoomoteService(processEnv.ROOMOTE_SERVICE);
 
   const env = createEnv({
     shared: sharedSchema,
-    server: serverSchema,
+    server: buildServiceServerSchema(service),
     client: clientSchema,
     runtimeEnv: buildRoomoteRuntimeEnv(processEnv, resolve),
     skipValidation,
   });
 
   if (!skipValidation) {
-    assertAuthKeypairEnv(env);
+    assertAuthKeypairEnv(env, service);
   }
 
   assertCompleteMicrosoftAuthEnv(env);

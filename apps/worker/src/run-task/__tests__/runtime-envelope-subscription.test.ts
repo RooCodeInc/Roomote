@@ -2,7 +2,7 @@ import { TaskEventName, type TaskEvent } from '@roomote/types';
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
-    cloudJobs: {
+    taskRuns: {
       recordMessageEnvelope: vi.fn().mockResolvedValue(undefined),
       recordInferenceUsage: vi.fn().mockResolvedValue({ recorded: true }),
       stampMilestone: vi.fn().mockResolvedValue(undefined),
@@ -100,11 +100,9 @@ function createRuntimeHarness() {
 
 describe('subscribeHarnessCallbacks', () => {
   const recordMessageEnvelopeMock = vi.mocked(
-    sdk.cloudJobs.recordMessageEnvelope,
+    sdk.taskRuns.recordMessageEnvelope,
   );
-  const recordInferenceUsageMock = vi.mocked(
-    sdk.cloudJobs.recordInferenceUsage,
-  );
+  const recordInferenceUsageMock = vi.mocked(sdk.taskRuns.recordInferenceUsage);
   const captureWorkerExceptionMock = vi.mocked(captureWorkerException);
 
   beforeEach(() => {
@@ -122,11 +120,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 45, taskId: '17294o7tqi124' } as never,
+      taskRun: { id: 45, taskId: '17294o7tqi124' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 45,
+        runId: 45,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -148,7 +146,7 @@ describe('subscribeHarnessCallbacks', () => {
     emitEnvelope(userPromptEnvelope);
 
     expect(recordMessageEnvelopeMock).toHaveBeenCalledWith({
-      cloudJobId: 45,
+      runId: 45,
       taskId: '17294o7tqi124',
       envelope: userPromptEnvelope,
     });
@@ -158,7 +156,7 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
-  it('persists hidden inference usage events through the cloud job SDK', async () => {
+  it('persists hidden inference usage events through the task run SDK', async () => {
     const { harness, emitInferenceUsage } = createRuntimeHarness();
     let resolveRecord: (() => void) | undefined;
     recordInferenceUsageMock.mockImplementationOnce(
@@ -170,11 +168,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 145, taskId: 'task-inference' } as never,
+      taskRun: { id: 145, taskId: 'task-inference' } as never,
       callbacks: { onMessage: vi.fn().mockResolvedValue(undefined) },
       context: {},
       logger: {
-        cloudJobId: 145,
+        runId: 145,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -203,7 +201,7 @@ describe('subscribeHarnessCallbacks', () => {
     });
 
     expect(recordInferenceUsageMock).toHaveBeenCalledWith({
-      cloudJobId: 145,
+      runId: 145,
       harnessSessionId: 'ses-inference',
       messageId: 'msg-inference',
       providerId: 'openrouter',
@@ -244,11 +242,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 46, taskId: 'task-fallback' } as never,
+      taskRun: { id: 46, taskId: 'task-fallback' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 46,
+        runId: 46,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -300,7 +298,7 @@ describe('subscribeHarnessCallbacks', () => {
     });
 
     expect(recordMessageEnvelopeMock).toHaveBeenCalledWith({
-      cloudJobId: 46,
+      runId: 46,
       taskId: 'task-fallback',
       envelope: pendingEnvelope,
     });
@@ -315,11 +313,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 48, taskId: 'task-live-text' } as never,
+      taskRun: { id: 48, taskId: 'task-live-text' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 48,
+        runId: 48,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -370,11 +368,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 50, taskId: 'task-first-assistant-output' } as never,
+      taskRun: { id: 50, taskId: 'task-first-assistant-output' } as never,
       callbacks: { onMessage: vi.fn().mockResolvedValue(undefined) },
       context: {},
       logger: {
-        cloudJobId: 50,
+        runId: 50,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -383,7 +381,7 @@ describe('subscribeHarnessCallbacks', () => {
       },
     });
 
-    const stampMock = vi.mocked(sdk.cloudJobs.stampMilestone);
+    const stampMock = vi.mocked(sdk.taskRuns.stampMilestone);
     stampMock.mockClear();
 
     const makeOutput = (ts: number): AcpMessage => ({
@@ -408,7 +406,7 @@ describe('subscribeHarnessCallbacks', () => {
     });
 
     expect(stampMock).toHaveBeenCalledWith({
-      cloudJobId: 50,
+      runId: 50,
       field: 'firstAssistantOutputAt',
     });
 
@@ -424,11 +422,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 49, taskId: 'task-persist-failure' } as never,
+      taskRun: { id: 49, taskId: 'task-persist-failure' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 49,
+        runId: 49,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -454,7 +452,7 @@ describe('subscribeHarnessCallbacks', () => {
       expect(captureWorkerExceptionMock).toHaveBeenCalledWith(
         persistError,
         expect.objectContaining({
-          cloudJobId: 49,
+          runId: 49,
           taskId: 'task-persist-failure',
           component: 'subscribeHarnessCallbacks',
           stage: 'recordMessageEnvelope',
@@ -473,11 +471,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 49, taskId: 'task-no-raw-output' } as never,
+      taskRun: { id: 49, taskId: 'task-no-raw-output' } as never,
       callbacks: { onMessage: vi.fn().mockResolvedValue(undefined) },
       context: {},
       logger: {
-        cloudJobId: 49,
+        runId: 49,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -513,11 +511,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 50, taskId: 'task-rui' } as never,
+      taskRun: { id: 50, taskId: 'task-rui' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 50,
+        runId: 50,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),
@@ -601,11 +599,11 @@ describe('subscribeHarnessCallbacks', () => {
 
     const unsubscribe = subscribeHarnessCallbacks({
       harness: harness as never,
-      cloudJob: { id: 51, taskId: 'task-rui-response' } as never,
+      taskRun: { id: 51, taskId: 'task-rui-response' } as never,
       callbacks,
       context: {},
       logger: {
-        cloudJobId: 51,
+        runId: 51,
         filePath: '/tmp/test.log',
         info: vi.fn(),
         warn: vi.fn(),

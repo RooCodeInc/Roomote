@@ -1,31 +1,30 @@
 import {
-  type CloudTask,
-  CloudTaskType,
+  type TaskSpec,
   PRODUCT_NAME,
   buildSlackThreadPermalink,
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
   getGitHubAppMention,
-  resolveCloudTaskWorkspace,
+  resolveTaskWorkspace,
 } from '@roomote/types';
 import {
-  type ResolvedTaskAttributionDisplay,
   db,
   repositories,
   environmentRepositoryMappings,
-  cloudJobs,
+  taskPullRequests,
+  taskRuns,
+  tasks,
   eq,
+  ne,
   and,
-  inArray,
   isNull,
   isNotNull,
   desc,
   asc,
-  sql,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
-import { Schemas } from '@roomote/github';
+import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
+import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 const DEFAULT_GITHUB_APP_SLUG = 'roomote';
 
@@ -52,10 +51,10 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug = Env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+  githubAppSlug = getEffectiveGitHubAppSlug(),
   escapeDoubleQuotes = false,
 }: {
-  attribution: ResolvedTaskAttributionDisplay;
+  attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
   taskSurface?:
     | 'web'
@@ -84,7 +83,7 @@ export function getPrBodyAttributionLine({
   escapeDoubleQuotes?: boolean;
 }) {
   if (
-    !attribution.githubDisplay &&
+    attribution.kind === 'roomote' &&
     !taskUrl &&
     !(slackChannel && slackThreadTs) &&
     !(telegramChatId && telegramMessageId) &&
@@ -137,7 +136,7 @@ function buildPrBodyAttributionLine({
   githubAppSlug,
   escapeDoubleQuotes = false,
 }: {
-  attribution: ResolvedTaskAttributionDisplay;
+  attribution: ResolvedTaskCommitAuthor;
   taskUrl?: string;
   taskSurface?:
     | 'web'
@@ -235,13 +234,11 @@ function buildPrBodyAttributionLine({
       ? `${taskLink} or ${defaultFollowUpInstruction}`
       : defaultFollowUpInstruction;
 
-  if (attribution.authorKind === 'roomote') {
+  if (attribution.kind === 'roomote') {
     return `> Created by Roomote. ${instruction}`;
   }
 
-  const safeUserName = escapeValue(
-    attribution.githubDisplay ?? attribution.productDisplay ?? PRODUCT_NAME,
-  );
+  const safeUserName = escapeValue(attribution.displayName || PRODUCT_NAME);
 
   return `> Opened on behalf of ${safeUserName}. ${instruction}`;
 }
@@ -568,7 +565,10 @@ function isRoomoteIssueCommentAuthor(user: {
 }): boolean {
   const normalizedLogin = user.login.toLowerCase();
   const appSlugs = new Set([
-    (Env.NEXT_PUBLIC_GITHUB_APP_SLUG || DEFAULT_GITHUB_APP_SLUG).toLowerCase(),
+    // The effective slug prefers the database-configured value cached by
+    // resolveConfiguredGitHubAppSlug (refreshed at workflow entry) so
+    // deployments configured through the /setup flow recognize their own bot.
+    getEffectiveGitHubAppSlug().toLowerCase(),
     'roomote',
     'roomote-dev',
   ]);
@@ -706,9 +706,9 @@ function getUniqueRepositoryFullNames(
 }
 
 export async function getWorkspaceRepositoryFullNames(
-  cloudTask: CloudTask,
+  taskSpec: TaskSpec,
 ): Promise<string[] | undefined> {
-  const workspace = resolveCloudTaskWorkspace(cloudTask.payload);
+  const workspace = resolveTaskWorkspace(taskSpec.payload);
 
   if (workspace.type === 'repository') {
     return undefined;
@@ -752,36 +752,37 @@ export async function getWorkspaceRepositoryFullNames(
 }
 
 export async function getPrSha({
-  currentCloudJobId,
+  currentRunId,
   repo,
   prNumber,
 }: {
-  currentCloudJobId?: number;
+  currentRunId?: number;
   repo: string;
   prNumber: number;
 }) {
   const conditions = [
-    inArray(cloudJobs.type, [
-      CloudTaskType.GithubPrReview,
-      CloudTaskType.GithubPrReviewSync,
-    ]),
-    eq(cloudJobs.prRepo, repo),
-    eq(cloudJobs.prNumber, prNumber),
-    isNotNull(cloudJobs.startedAt),
-    isNotNull(cloudJobs.prSha),
-    isNull(cloudJobs.canceledAt),
+    eq(tasks.workflow, 'pr_review'),
+    eq(taskPullRequests.repository, repo),
+    eq(taskPullRequests.prNumber, prNumber),
+    isNotNull(taskPullRequests.prSha),
+    isNotNull(taskRuns.startedAt),
+    isNull(taskRuns.canceledAt),
   ];
 
-  if (typeof currentCloudJobId === 'number') {
-    conditions.push(sql`${cloudJobs.id} != ${currentCloudJobId}`);
+  if (typeof currentRunId === 'number') {
+    conditions.push(ne(taskRuns.id, currentRunId));
   }
 
-  const result = await db.query.cloudJobs.findFirst({
-    where: and(...conditions),
-    orderBy: [desc(cloudJobs.createdAt)],
-  });
+  const [result] = await db
+    .select({ prSha: taskPullRequests.prSha })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+    .where(and(...conditions))
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
-  return result?.prSha;
+  return result?.prSha ?? undefined;
 }
 
 export async function getPrReviewCommentId({
@@ -791,17 +792,22 @@ export async function getPrReviewCommentId({
   repo: string;
   prNumber: number;
 }) {
-  const result = await db.query.cloudJobs.findFirst({
-    where: and(
-      eq(cloudJobs.type, CloudTaskType.GithubPrReview),
-      eq(cloudJobs.prRepo, repo),
-      eq(cloudJobs.prNumber, prNumber),
-      isNotNull(cloudJobs.githubPrReviewCommentId),
-    ),
-    orderBy: [asc(cloudJobs.createdAt)],
-  });
+  const [result] = await db
+    .select({ githubReviewCommentId: taskPullRequests.githubReviewCommentId })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.repository, repo),
+        eq(taskPullRequests.prNumber, prNumber),
+        isNotNull(taskPullRequests.githubReviewCommentId),
+      ),
+    )
+    .orderBy(asc(taskPullRequests.createdAt))
+    .limit(1);
 
-  return result?.githubPrReviewCommentId;
+  return result?.githubReviewCommentId ?? undefined;
 }
 
 export function getTriggeringComment(

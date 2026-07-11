@@ -324,8 +324,8 @@ function OnboardingTaskConsole({
             <div className="flex flex-wrap items-center gap-2 font-semibold">
               {statusCopy}
               <TaskStatusIndicator
-                status={session.cloudJob?.status}
-                phase={session.cloudJob?.taskPhase}
+                status={session.taskRun?.status}
+                phase={session.taskRun?.taskPhase}
                 compact={true}
                 className="text-xs"
               />

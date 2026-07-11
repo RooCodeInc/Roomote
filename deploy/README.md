@@ -62,9 +62,12 @@ ghcr.io/roocodeinc/roomote-app:<version>
 ghcr.io/roocodeinc/roomote-worker:<version>
 ```
 
-`roomote-app` is one shared application image that ships web, api, controller,
-bullmq, preview-proxy, and the db-migrate one-shot; each Compose service
-selects its process through the image's entrypoint dispatcher.
+Every control-plane service (web, API, controller, BullMQ, preview proxy, and
+migrations) runs from the shared non-root `roomote-app` image; the container
+command and `ROOMOTE_SERVICE` select the service and its environment contract.
+Privilege separation lives in the Compose files: read-only filesystems,
+dropped capabilities, per-service env contracts, and a Docker socket proxy
+reachable only from the controller service.
 
 Do not deploy `latest`. Pushes to `develop` automatically publish
 `develop-<short-sha>` image tags built with `APP_ENV=preview` for preview soak
@@ -84,8 +87,8 @@ metadata from the CLI arguments, and sets:
 chmod 600 /opt/roomote/.env
 ```
 
-Deployment-owned image metadata includes the app image tag, worker image, and
-the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
+Deployment-owned image metadata includes the control-plane image tag, worker
+image, and the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
 versioned as `/roomote/releases/worker-v<version>.tar.gz` so hosted providers
 such as Modal can derive worker release metadata from the archive filename.
 The installer and deployer also keep `MODAL_BASE_IMAGE_REF` aligned with
@@ -273,12 +276,23 @@ docker compose --env-file .env -f docker-compose.prod.yml stop controller || tru
 DOCKER_WORKER_IMAGE="$(awk -F= '/^(export[[:space:]]+)?DOCKER_WORKER_IMAGE=/ { sub(/^[^=]*=/, ""); print; exit }' .env)"
 docker pull "$DOCKER_WORKER_IMAGE"
 docker compose --env-file .env -f docker-compose.prod.yml pull
+docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
 ```
 
-The Compose file defines container healthchecks for `web`, `api`, and
-`preview-proxy`, and `up --wait` holds the deploy command until those services
-are healthy. The deployer stops the controller before deployment metadata
+Database migrations run as a dedicated one-shot step after images are pulled
+and before any running service is replaced. If the migration step fails, the
+deployer restarts the previous controller and exits with the previous release
+still serving; see the compatibility policy below for why that is always safe.
+The on-host `roomote upgrade` additionally creates an encrypted pre-upgrade
+backup and restores the previous deployment configuration files when the
+migration step fails.
+
+The Compose file defines container healthchecks for `web`, `api`, `controller`,
+`bullmq`, and `preview-proxy`. The controller probe uses the API's Redis
+heartbeat and stuck-task checks; the BullMQ probe queries its queues. `up
+--wait` holds the deploy command until the complete execution plane is healthy.
+The deployer stops the controller before deployment metadata
 changes and image pulls so new tasks remain queued during rollout instead of
 being claimed by the old controller. The wait timeout is intentionally longer
 than the controller stop grace so any already-active hosted-provider spawn can
@@ -298,59 +312,192 @@ to adjust rollback depth for a deployment. Retention is best-effort after a
 healthy rollout; a Docker cleanup failure prints a warning instead of failing
 the completed deploy or upgrade.
 
-## Back Up Data
+## Upgrade And Migration Compatibility Policy
 
-For local Postgres and managed Postgres, use the backup command:
+This is the contract between releases, migrations, and the upgrade tooling.
+Schema changes that cannot satisfy it must be split across releases.
+
+### Expand/contract migrations
+
+Every migration must keep the previous release working against the new
+schema. Ship schema changes in two phases:
+
+- **Expand** (safe in any release): add tables, add nullable columns, add
+  columns with database-side defaults, add indexes, widen types, add enum
+  values. New code reads and writes the new shape; old code keeps working
+  because nothing it uses changed.
+- **Contract** (only after no supported version references the old shape):
+  drop or rename tables and columns, add `NOT NULL` to existing columns,
+  narrow types, remove enum values. A rename is an expand (add the new
+  column, dual-write, backfill) followed by a contract (drop the old column)
+  at least one release later.
+
+Long-running backfills do not belong in migrations. Run them as idempotent
+application code after the rollout so the migration step stays fast enough
+for the rollout timeout below.
+
+### Minimum rollback-compatible version
+
+The schema produced by release N must support the application code of the
+release immediately before it (N-1). The supported rollback target is
+therefore always the previously deployed release, without undoing
+migrations: roll the application back and leave the schema at N. Rolling
+back more than one release is not guaranteed by this policy; use the
+pre-upgrade backup bundle for that instead.
+
+### Pre-upgrade backup
+
+`roomote upgrade` creates an encrypted backup bundle (the same format as
+`roomote backup`) before it changes any deployment file or container. The
+passphrase comes from `--backup-passphrase-file`, then
+`ROOMOTE_BACKUP_PASSPHRASE`; with neither, the command generates one and
+stores it next to the bundle under `/opt/roomote/backups/`, in the same
+trust domain as `/opt/roomote/.env`. Move both off-host if the bundle
+should double as a disaster-recovery copy. `--skip-backup` opts out, and
+`roomote rollback` skips it by design so an unhealthy stack cannot block
+the rollback. The operator-run deployer does not back up implicitly; run
+`roomote-deploy backup` before production upgrades.
+
+### Migration lock and timeout behavior
+
+Migrations run as the one-shot `db-migrate` service from the release being
+deployed. Drizzle applies all pending migrations inside a single
+transaction, so a failed migration rolls the schema back to its previous
+state. There is no advisory lock and no statement timeout on the migration
+step itself; single-writer behavior comes from running one `db-migrate`
+container per deployment, so never run two upgrades against the same
+database concurrently. Every application service in the Compose stack waits
+on `db-migrate` completing successfully before it starts, and the rollout as
+a whole is bounded by `up --wait --wait-timeout 600`.
+
+### Failure behavior
+
+The upgrade sequence pulls images first, then runs migrations, and only then
+replaces running services. A migration failure aborts the upgrade with the
+previous release still serving: `roomote upgrade` restores the previous
+Compose, Caddy, and `.env` files and restarts the controller; the deployer
+restarts the controller and asks the operator to re-run with the previous
+tag. A failure after migrations succeeded (for example `up --wait` timing
+out) leaves the schema at the candidate version, which the previous release
+supports by the rule above, so `roomote rollback` or an upgrade to the
+previous tag recovers without touching the database.
+
+### Rollback path
+
+- `roomote rollback` re-deploys the release recorded in
+  `ROOMOTE_PREVIOUS_VERSION` by the last upgrade.
+- `roomote upgrade <previous-tag>` (or `roomote-deploy upgrade --version
+<previous-tag>`) is the explicit equivalent and works for any retained tag.
+- `roomote restore <bundle> --yes` with the pre-upgrade bundle is the
+  last-resort path and also rewinds the database and artifacts.
+
+Image retention keeps the current release plus the newest tags (default 3
+total), so the rollback image is normally still on the host. The restore
+path is exercised in CI on every non-docs change (the backup-restore job),
+and the rollback path is exercised against real images by the publish gate
+below.
+
+### Version visibility
+
+Settings -> Deployment -> Diagnostics surfaces the running application
+version (`Roomote version`, from the `RELEASE_VERSION` baked into the image)
+and the schema version (`Current migration`, the latest applied Drizzle
+migration hash). The same pair is recorded in every backup manifest as
+`roomoteVersion` and `schemaVersion`, and `/opt/roomote/.env` records
+`ROOMOTE_VERSION` plus the `ROOMOTE_PREVIOUS_VERSION` rollback target.
+
+### CI enforcement
+
+- **Upgrade Compatibility** (`.github/workflows/CI.yml`, every non-docs PR):
+  boots the previous published release from GHCR, applies the candidate
+  branch's migrations to its database, and requires the previous release to
+  stay healthy, including a cold restart, on the candidate schema
+  ([`deploy/ci/upgrade-compatibility.sh`](ci/upgrade-compatibility.sh)).
+- **Fresh-host Backup Restore** (every non-docs PR): restores an encrypted
+  bundle onto empty volumes
+  ([`deploy/host/tests/backup-restore.integration.sh`](host/tests/backup-restore.integration.sh)).
+- **Deployment acceptance** (`publish-ghcr.yml`, gates every image publish):
+  builds candidate images, upgrades the previous published release to the
+  candidate, rolls back, re-upgrades, launches a real Docker task, and
+  restores a backup onto fresh volumes
+  ([`deploy/ci/deployment-smoke.sh`](ci/deployment-smoke.sh)).
+
+## Back Up a Deployment
+
+Create a passphrase file in your secret manager or a temporary root-readable
+file. The passphrase must be stored separately from the bundle:
 
 ```bash
-deploy/scripts/roomote-deploy backup --customer matt-test
+umask 077
+openssl rand -base64 32 > /secure/path/roomote-backup-passphrase
 ```
 
-It creates a remote dump in `/opt/roomote/backups/` and copies it to:
+Then create the backup:
+
+```bash
+deploy/scripts/roomote-deploy backup \
+  --customer matt-test \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
+```
+
+It creates an encrypted, versioned `.roomote` bundle in
+`/opt/roomote/backups/` and copies it to:
 
 ```text
 deploy/state/matt-test/backups/
 ```
 
-Equivalent remote command:
+The bundle contains:
+
+- a PostgreSQL dump;
+- `/opt/roomote/.env`, including the original `ENCRYPTION_KEY` and signing
+  keys, plus the Compose and Caddy configuration;
+- the local MinIO data volume, or a manifest identifying an external bucket;
+- Redis when `--include-redis` is present;
+- the Roomote release, schema version, checksums, and exact image digests.
+
+The backup stops application writers and Docker task workers before capturing
+the stores. This gives PostgreSQL, local MinIO, and optional Redis an
+application-quiesced consistency point, but creates a maintenance window. With
+external object storage, bucket objects are not copied; use provider-level
+bucket backups as well.
+
+Equivalent on-host command:
 
 ```bash
-cd /opt/roomote
-mkdir -p backups
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
-  > "backups/backup-$(date +%F-%H%M%S).sql"
+roomote backup \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --include-redis
 ```
 
-## Restore Data
+## Restore a Deployment
 
-Restores are intentionally explicit because they overwrite database state:
+Install Roomote on the replacement host first so Docker and the host CLI are
+present. Restores are intentionally explicit because they replace
+configuration, keys, database records, artifacts, and optional Redis state:
 
 ```bash
 deploy/scripts/roomote-deploy restore \
   --customer matt-test \
-  --backup deploy/state/matt-test/backups/backup-2026-06-29-120000.sql \
+  --backup deploy/state/matt-test/backups/backup-20260710T120000Z.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
   --yes
 ```
 
-The restore stops the app services (web, API, controller, BullMQ, preview
-proxy) before dropping the schema so live connections are not killed
-mid-restore and nothing writes while the dump loads, then brings the stack
-back up with `--wait` afterward.
+Restore decrypts and verifies the full bundle before changing the target host.
+It then stops the new installation, restores the original `.env` and release
+files, repins the recorded image digests, repopulates empty local MinIO and
+Redis volumes, restores PostgreSQL, and brings the recorded stack up with
+`--wait`. If Redis was omitted, its target volume is cleared. External object
+storage must already contain the objects referenced by the restored database.
 
-Equivalent remote command after copying a dump to `/opt/roomote/backups`:
+Equivalent command after copying a bundle to the new host:
 
 ```bash
-cd /opt/roomote
-docker compose --env-file .env -f docker-compose.prod.yml \
-  stop web api controller bullmq preview-proxy
-docker run --rm --network roomote_default --env-file /opt/roomote/.env \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"'
-docker run --rm --network roomote_default --env-file /opt/roomote/.env -i \
-  postgres:17.5 sh -c 'psql "$DATABASE_URL" -v ON_ERROR_STOP=1' \
-  < /opt/roomote/backups/backup.sql
-docker compose --env-file .env -f docker-compose.prod.yml \
-  up -d --wait --wait-timeout 600
+roomote restore /opt/roomote/backups/backup.roomote \
+  --passphrase-file /secure/path/roomote-backup-passphrase \
+  --yes
 ```
 
 ## Destroy

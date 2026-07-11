@@ -2,6 +2,7 @@ import type { LucideIcon } from '@/components/system';
 import {
   Brain,
   Cpu,
+  FlaskConical,
   Globe,
   GraduationCap,
   GitMerge,
@@ -10,12 +11,12 @@ import {
   PlugIcon,
   Rainbow,
   ScrollText,
+  ServerCog,
   Users,
   VectorSquare,
 } from '@/components/system';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { PRODUCT_NAME } from '@roomote/types';
-import { FlaskConical, Volleyball } from 'lucide-react';
 
 export type SettingsPageId =
   | 'personal'
@@ -181,8 +182,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     id: 'experimental',
     label: 'Experimental',
     title: 'Experimental',
-    description:
-      'Toggle deployment-wide feature flags. Admin-only and changes apply to everyone in this workspace.',
+    description: 'Control the availability of experimental features.',
     href: SETTINGS_PATHS.experimental,
     icon: FlaskConical,
     adminOnly: true,
@@ -191,12 +191,11 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
   },
   {
     id: 'misc',
-    label: 'Misc',
-    title: 'Misc',
-    description:
-      'Miscellaneous deployment-wide settings. Admin-only and changes apply to everyone in this workspace.',
+    label: 'Deployment',
+    title: 'Deployment',
+    description: 'Deployment-wide settings and diagnostics.',
     href: SETTINGS_PATHS.misc,
-    icon: Volleyball,
+    icon: ServerCog,
     adminOnly: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.misc),
   },

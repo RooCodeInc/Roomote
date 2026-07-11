@@ -176,13 +176,11 @@ describe('authorize', () => {
   });
 
   it('admits a bootstrap sign-in as admin even when another user already exists', async () => {
-    // Saving bootstrap auth config creates the system `setup-bootstrap-user`
-    // audit row (and an aborted earlier attempt can leave a real account
-    // behind), so the setup-token holder must still come back in as an
-    // operator, not a member.
+    // An aborted earlier attempt can leave a real account behind, so the
+    // setup-token holder must still come back in as an operator, not a member.
     mockAccessDecision.current = { allowed: true, via: 'bootstrap' };
     mockUsersFindFirst.mockResolvedValue(null);
-    mockTxState.anyUser = { id: 'setup-bootstrap-user' };
+    mockTxState.anyUser = { id: 'aborted-setup-user' };
 
     const result = await authorize();
 

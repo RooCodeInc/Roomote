@@ -1,11 +1,13 @@
 import {
   db,
-  cloudJobs,
   githubInstallations,
   taskPullRequests,
+  taskRuns,
+  tasks,
   eq,
   and,
   inArray,
+  isNotNull,
 } from '@roomote/db/server';
 import {
   buildPullRequestMergedNotificationText,
@@ -94,7 +96,7 @@ async function resolveLinearClient() {
 
 /**
  * Notifies Telegram chats and Linear sessions associated with a PR that the PR
- * has been merged. Links the merged PR to cloud jobs scoped to the merging
+ * has been merged. Links the merged PR to task runs scoped to the merging
  * source control provider (GitHub, GitLab, Gitea, or Azure DevOps) using the
  * repository name and PR number, then posts the merge message to every Telegram
  * chat (via the best-effort poster) and Linear agent session (via a closing
@@ -150,20 +152,32 @@ export async function notifyTelegramAndLinearPrMerge({
       return;
     }
 
-    const linkedJobs = await db.query.cloudJobs.findMany({
-      where: inArray(cloudJobs.taskId, taskIds),
-      columns: {
-        linearSessionId: true,
-        payload: true,
-      },
-    });
+    // Telegram routing metadata lives on run payloads; Linear session
+    // bindings live on the tasks rows.
+    const [linkedRuns, linkedTasksWithLinearSessions] = await Promise.all([
+      db.query.taskRuns.findMany({
+        where: inArray(taskRuns.taskId, taskIds),
+        columns: {
+          payload: true,
+        },
+      }),
+      db.query.tasks.findMany({
+        where: and(
+          inArray(tasks.id, taskIds),
+          isNotNull(tasks.linearSessionId),
+        ),
+        columns: {
+          linearSessionId: true,
+        },
+      }),
+    ]);
 
-    const telegramTargets = linkedJobs
-      .map((job) => getTelegramPrMergeTarget(job.payload))
+    const telegramTargets = linkedRuns
+      .map((run) => getTelegramPrMergeTarget(run.payload))
       .filter((target): target is TelegramPrMergeTarget => target !== null);
 
-    const linearSessionIds = linkedJobs
-      .map((job) => job.linearSessionId)
+    const linearSessionIds = linkedTasksWithLinearSessions
+      .map((task) => task.linearSessionId)
       .filter((sessionId): sessionId is string => Boolean(sessionId));
 
     if (telegramTargets.length === 0 && linearSessionIds.length === 0) {

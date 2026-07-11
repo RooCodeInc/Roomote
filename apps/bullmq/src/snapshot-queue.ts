@@ -27,13 +27,13 @@ export function startSnapshotQueue() {
 
   worker.on('completed', (job) =>
     console.log(
-      `[SnapshotQueue] job ${job.id} completed for cloudJob #${job.data.cloudJobId}`,
+      `[SnapshotQueue] job ${job.id} completed for taskRun #${job.data.runId}`,
     ),
   );
 
   worker.on('failed', (job, err) =>
     console.error(
-      `[SnapshotQueue] job ${job?.id} failed for cloudJob #${job?.data.cloudJobId}:`,
+      `[SnapshotQueue] job ${job?.id} failed for taskRun #${job?.data.runId}:`,
       err.message,
     ),
   );

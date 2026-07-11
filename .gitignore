@@ -61,7 +61,7 @@ releases/
 
 # promptfoo eval results
 packages/cloud-agents/evals/**/results/
-packages/cloud-agents/results/eval-results.json
+packages/cloud-agents/results/
 
 # local agent notes
 AGENTS.local.md

@@ -5,7 +5,7 @@ import { memo } from 'react';
 import { ArrowRightToLine, MessagesSquare } from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
-import type { CloudSession } from '../hooks';
+import type { TaskSession } from '../hooks';
 import { useTaskSidePanel } from '../hooks';
 
 import { useSandboxLayout } from '../../../use-sandbox-layout';
@@ -19,7 +19,7 @@ import { TerminalButton } from './TerminalButton';
 import { OverflowMenu } from './OverflowMenu';
 
 interface SidebarActionsProps {
-  session: CloudSession;
+  session: TaskSession;
   showDiff?: boolean;
   onToggleDiff?: () => void;
   changedFileCount?: number;
@@ -33,7 +33,7 @@ function SidebarActionsBase({
   changedFileCount = 0,
   isDiffLoading = false,
 }: SidebarActionsProps) {
-  const { taskId, cloudJob, artifacts, sessionState } = session;
+  const { taskId, taskRun, artifacts, sessionState } = session;
   const isInteractive = sessionState === 'interactive';
   const disableSandboxActions =
     sessionState === 'booting' || sessionState === 'resuming';
@@ -59,14 +59,14 @@ function SidebarActionsBase({
         className="md:hidden"
         icon={MessagesSquare}
       />
-      {cloudJob && (
+      {taskRun && (
         <LivePreviewButton
           taskId={taskId}
-          cloudJob={cloudJob}
+          taskRun={taskRun}
           disabled={disableSandboxActions}
         />
       )}
-      {cloudJob && onToggleDiff && (
+      {taskRun && onToggleDiff && (
         <DiffButton
           active={showDiff}
           onClick={onToggleDiff}
@@ -75,26 +75,26 @@ function SidebarActionsBase({
           disabled={disableSandboxActions}
         />
       )}
-      {cloudJob && (
+      {taskRun && (
         <ArtifactsButton
           taskId={taskId}
-          cloudJob={cloudJob}
+          taskRun={taskRun}
           artifacts={artifacts}
           disabled={disableSandboxActions}
         />
       )}
-      {isInteractive && cloudJob ? (
-        <TerminalButton taskId={taskId} cloudJob={cloudJob} />
+      {isInteractive && taskRun ? (
+        <TerminalButton taskId={taskId} taskRun={taskRun} />
       ) : null}
-      {isInteractive && cloudJob ? (
-        <LogsButton taskId={taskId} cloudJob={cloudJob} />
+      {isInteractive && taskRun ? (
+        <LogsButton taskId={taskId} taskRun={taskRun} />
       ) : null}
       <TaskInfoButton session={session} disabled={disableSandboxActions} />
 
       <div className="grow" />
       <OverflowMenu
         taskId={taskId}
-        cloudJob={cloudJob}
+        taskRun={taskRun}
         disabled={disableSandboxActions}
       />
     </div>

@@ -8,13 +8,13 @@ import { toast } from 'sonner';
 
 import { PRODUCT_NAME } from '@roomote/types';
 
-import type { CreateCloudTask } from '@/types';
+import type { CreateTaskFormValues } from '@/types';
 
 import { cn } from '@/lib/utils';
 import { processImageFiles } from '@/lib';
 import { SETTINGS_PATHS } from '@/lib/settings';
 
-import { useCreateStandardTaskCloudJob } from '@/hooks/cloud-jobs';
+import { useCreateStandardTaskRun } from '@/hooks/task-runs';
 import { useEnvironments } from '@/hooks/environments';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 
@@ -43,7 +43,7 @@ export function PreviewEnvironment({
 }: PreviewEnvironmentProps) {
   const router = useRouter();
   const environments = useEnvironments();
-  const form = useForm<CreateCloudTask>({
+  const form = useForm<CreateTaskFormValues>({
     defaultValues: {
       repository: repo,
       branch: initialBranch,
@@ -82,7 +82,7 @@ export function PreviewEnvironment({
     setSelectedModelId(launchTaskModels.data.defaultModelId);
   }, [launchTaskModels.data?.defaultModelId, selectedModelId]);
 
-  const navigateToJob = useCallback(
+  const navigateToTaskRun = useCallback(
     (result: { success: boolean; taskId?: string; error?: string }) => {
       if (result.success && 'taskId' in result) {
         setIsExiting(true);
@@ -96,16 +96,15 @@ export function PreviewEnvironment({
 
   const mutationOptions = useCallback(
     () => ({
-      onSuccess: navigateToJob,
+      onSuccess: navigateToTaskRun,
       onError: (error: Error) => toast.error(error.message),
     }),
-    [navigateToJob],
+    [navigateToTaskRun],
   );
 
-  const createStandardTaskJob =
-    useCreateStandardTaskCloudJob(mutationOptions());
+  const createStandardTaskRun = useCreateStandardTaskRun(mutationOptions());
 
-  const isBusy = createStandardTaskJob.isPending;
+  const isBusy = createStandardTaskRun.isPending;
 
   const handleSubmit = useCallback(
     async (message: PromptInputMessage) => {
@@ -134,7 +133,7 @@ export function PreviewEnvironment({
         images = processed.map((p) => p.dataUrl);
       }
 
-      await createStandardTaskJob.mutateAsync({
+      await createStandardTaskRun.mutateAsync({
         model: selectedModelId,
         payload: {
           repo: payloadRepo,
@@ -146,7 +145,7 @@ export function PreviewEnvironment({
         },
       });
     },
-    [createStandardTaskJob, form, repo, selectedModelId, sha],
+    [createStandardTaskRun, form, repo, selectedModelId, sha],
   );
 
   return (

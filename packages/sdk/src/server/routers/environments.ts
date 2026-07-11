@@ -3,8 +3,8 @@ import { z } from 'zod';
 
 import {
   authenticatedProcedure,
-  isJobToken,
-  nonJobProcedure,
+  isRunToken,
+  userOnlyProcedure,
   router,
 } from '../trpc';
 
@@ -15,8 +15,8 @@ import {
 } from '../lib/environments';
 
 export const environmentsRouter = router({
-  list: nonJobProcedure.query(({ ctx }) => listEnvironments(ctx.auth)),
-  byId: nonJobProcedure
+  list: userOnlyProcedure.query(({ ctx }) => listEnvironments(ctx.auth)),
+  byId: userOnlyProcedure
     .input(z.object({ id: z.string() }))
     .query(({ ctx, input }) => findEnvironment(ctx.auth, input.id)),
   findEnvironment: authenticatedProcedure
@@ -30,10 +30,10 @@ export const environmentsRouter = router({
       }),
     )
     .mutation(({ ctx, input }) => {
-      if (!isJobToken(ctx.auth)) {
+      if (!isRunToken(ctx.auth)) {
         throw new TRPCError({
           code: 'FORBIDDEN',
-          message: 'This endpoint is only available to job tokens',
+          message: 'This endpoint is only available to run tokens',
         });
       }
 

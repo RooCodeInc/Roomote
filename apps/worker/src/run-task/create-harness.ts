@@ -1,6 +1,6 @@
 import type { ResultPromise } from 'execa';
 
-import { type DequeuedCloudJob, sdk } from '@roomote/sdk/client';
+import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 import {
   getHarnessModelOverride,
   type EnvironmentMcpServers,
@@ -14,8 +14,11 @@ import {
 } from '../commands/setup/setup-mcps';
 import type { HarnessLogger } from '../logging';
 
+import { captureWorkerException } from '../monitoring/sentry';
+
 import type { RunTaskCallbacks, RunTaskContext } from './types';
 import { buildHarnessCommandEnv } from './harnesses';
+import { createDiagnosticEventRecorder } from './diagnostic-events';
 import { ReconnectableHarness } from './reconnectable-harness';
 import { subscribeHarnessCallbacks } from './subscribe-harness-callbacks';
 
@@ -28,7 +31,7 @@ interface CreateHarnessOptions {
   integrations: IntegrationMcpOptions;
   mcpTaskEnv: Record<string, string>;
   environmentMcpServers?: EnvironmentMcpServers;
-  cloudJob: DequeuedCloudJob['cloudJob'];
+  taskRun: DequeuedTaskRun['taskRun'];
   developerInstructionsContent?: string;
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
@@ -36,6 +39,7 @@ interface CreateHarnessOptions {
   prepareQueuedPromptActorScope?: (targetUserId?: string) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
+    shouldSkipPrompt?: boolean;
     reason?: string;
   }>;
 }
@@ -56,7 +60,7 @@ export async function createHarness({
   integrations,
   mcpTaskEnv,
   environmentMcpServers,
-  cloudJob,
+  taskRun,
   developerInstructionsContent,
   callbacks,
   context,
@@ -66,13 +70,18 @@ export async function createHarness({
   const harnessCommandEnv = buildHarnessCommandEnv(runtimeEnv);
   const stampHarnessStarted = () => {
     // Best-effort: do not derail task startup on telemetry failures.
-    void sdk.cloudJobs
+    void sdk.taskRuns
       .stampMilestone({
-        cloudJobId: cloudJob.id,
+        runId: taskRun.id,
         field: 'harnessStartedAt',
       })
       .catch(() => {});
   };
+
+  const diagnosticEvents = createDiagnosticEventRecorder({
+    runId: taskRun.id,
+    logger,
+  });
 
   const spawnHarness = async (options?: {
     initialSessionId?: string;
@@ -82,9 +91,9 @@ export async function createHarness({
       integrations,
       environmentMcpServers,
     );
-    const modelOverride = cloudJob.payload?.harnessModelOverrides
+    const modelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(
-          cloudJob.payload.harnessModelOverrides,
+          taskRun.payload.harnessModelOverrides,
           harnessType,
         )
       : undefined;
@@ -106,19 +115,48 @@ export async function createHarness({
     return await startOpenCodeServerHarness({
       ...commonOptions,
       developerInstructionsContent,
+      onUnexpectedExit: (certificate) => {
+        const summary = `OpenCode server exited unexpectedly (code=${
+          certificate.exitCode ?? 'none'
+        }, signal=${certificate.signal ?? 'none'}) after ${Math.round(
+          certificate.uptimeMs / 1000,
+        )}s`;
+
+        diagnosticEvents.record({
+          kind: 'opencode_unexpected_exit',
+          message: summary,
+          details: {
+            exitCode: certificate.exitCode,
+            signal: certificate.signal,
+            uptimeMs: certificate.uptimeMs,
+            memoryAfterExit: certificate.memoryAfterExit,
+            outputTail: certificate.outputTail,
+          },
+        });
+        captureWorkerException(new Error(summary), {
+          runId: taskRun.id,
+          taskId: taskRun.taskId ?? undefined,
+          component: 'createHarness',
+          stage: 'opencode_unexpected_exit',
+          exitCode: certificate.exitCode,
+          signal: certificate.signal,
+          uptimeMs: certificate.uptimeMs,
+        });
+      },
     });
   };
 
   const reconnectableHarness = new ReconnectableHarness({
     logger,
     spawnHarness,
+    diagnosticEvents,
   });
   await reconnectableHarness.start({ initialSessionId: harnessSessionId });
   stampHarnessStarted();
 
   const unsubscribe = subscribeHarnessCallbacks({
     harness: reconnectableHarness,
-    cloudJob,
+    taskRun,
     callbacks,
     context,
     logger,

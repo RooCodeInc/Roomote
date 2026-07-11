@@ -12,9 +12,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CircleSlash } from '@/components/system';
 
 import {
-  CloudTaskType,
+  TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  isExitedCloudTaskStatus,
+  isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
 
@@ -30,7 +30,7 @@ import { useSandboxLayout } from '../../use-sandbox-layout';
 import {
   HistoricalSandboxProvider,
   SandboxProvider,
-  useCloudSession,
+  useTaskSession,
   useTaskCompletionNotification,
   useTaskMessageEnvelopes,
 } from './hooks';
@@ -49,7 +49,7 @@ export default function SandboxPage() {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const session = useCloudSession(unresolvedTaskId, {
+  const session = useTaskSession(unresolvedTaskId, {
     refetchInterval: 30_000,
   });
 
@@ -59,12 +59,12 @@ export default function SandboxPage() {
 
   const [liveTaskPhase, setLiveTaskPhase] = useState<TaskPhase | null>(null);
 
-  const { cloudJob, task, token, taskId, sessionState, isSessionLoading } =
+  const { taskRun, task, token, taskId, sessionState, isSessionLoading } =
     session;
   const lastHistoryRefreshSignalRef = useRef<string | null>(null);
-  const activeCloudJobId = cloudJob?.id;
-  const activeCloudJobStatus = cloudJob?.status;
-  const activeCloudJobTaskPhase = cloudJob?.taskPhase;
+  const activeRunId = taskRun?.id;
+  const activeTaskRunStatus = taskRun?.status;
+  const activeTaskRunTaskPhase = taskRun?.taskPhase;
   const hasTranscriptHistory = (historyEnvelopesQuery.data?.length ?? 0) > 0;
   const hasArtifacts = session.artifacts.length > 0;
   const hasVisibleSessionPrompt =
@@ -73,7 +73,7 @@ export default function SandboxPage() {
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
   const shouldRenderHistoricalBootFailure =
-    cloudJob?.type === CloudTaskType.SnapshotResume &&
+    taskRun?.payloadKind === TaskPayloadKind.SnapshotResume &&
     sessionState === 'boot-failed' &&
     (hasTranscriptHistory || hasArtifacts || hasVisibleSessionPrompt);
   const handleBootStatusChange = useCallback(() => {
@@ -134,18 +134,18 @@ export default function SandboxPage() {
   useEffect(() => {
     if (
       !taskId ||
-      !activeCloudJobId ||
-      !activeCloudJobStatus ||
+      !activeRunId ||
+      !activeTaskRunStatus ||
       sessionState !== 'interactive' ||
-      isExitedCloudTaskStatus(activeCloudJobStatus)
+      isExitedRunStatus(activeTaskRunStatus)
     ) {
       return;
     }
 
     const historyRefreshSignal = [
-      activeCloudJobId,
-      activeCloudJobStatus,
-      activeCloudJobTaskPhase ?? '',
+      activeRunId,
+      activeTaskRunStatus,
+      activeTaskRunTaskPhase ?? '',
     ].join(':');
 
     if (historyRefreshSignal === lastHistoryRefreshSignalRef.current) {
@@ -158,9 +158,9 @@ export default function SandboxPage() {
       queryKey: trpc.tasks.messageEnvelopes.queryKey({ taskId }),
     });
   }, [
-    activeCloudJobId,
-    activeCloudJobStatus,
-    activeCloudJobTaskPhase,
+    activeRunId,
+    activeTaskRunStatus,
+    activeTaskRunTaskPhase,
     queryClient,
     sessionState,
     taskId,
@@ -170,7 +170,7 @@ export default function SandboxPage() {
   const taskPhase = getTaskNotificationPhase({
     sessionState,
     liveTaskPhase,
-    persistedTaskPhase: cloudJob?.taskPhase as TaskPhase | null | undefined,
+    persistedTaskPhase: taskRun?.taskPhase as TaskPhase | null | undefined,
   });
 
   // Notify with a beep + green-dot favicon when the task finishes work, needs
@@ -203,11 +203,9 @@ export default function SandboxPage() {
       <HistoricalSandboxProvider
         taskId={taskId}
         history={historyEnvelopesQuery}
-        harness={cloudJob?.harness ?? DEFAULT_CODING_HARNESS}
-        taskStatus={cloudJob?.status ?? null}
-        taskPhase={
-          (cloudJob?.taskPhase as TaskPhase | null | undefined) ?? null
-        }
+        harness={taskRun?.harness ?? DEFAULT_CODING_HARNESS}
+        taskStatus={taskRun?.status ?? null}
+        taskPhase={(taskRun?.taskPhase as TaskPhase | null | undefined) ?? null}
         fallback={
           <>
             <Header session={session} />
@@ -225,11 +223,9 @@ export default function SandboxPage() {
       <HistoricalSandboxProvider
         taskId={taskId}
         history={historyEnvelopesQuery}
-        harness={cloudJob?.harness ?? DEFAULT_CODING_HARNESS}
-        taskStatus={cloudJob?.status ?? null}
-        taskPhase={
-          (cloudJob?.taskPhase as TaskPhase | null | undefined) ?? null
-        }
+        harness={taskRun?.harness ?? DEFAULT_CODING_HARNESS}
+        taskStatus={taskRun?.status ?? null}
+        taskPhase={(taskRun?.taskPhase as TaskPhase | null | undefined) ?? null}
         fallback={
           <>
             <Header session={session} />
@@ -240,9 +236,7 @@ export default function SandboxPage() {
         <HistoricalContent
           session={session}
           footer={
-            cloudJob ? (
-              <SnapshotResumeFailureFooter cloudJob={cloudJob} />
-            ) : null
+            taskRun ? <SnapshotResumeFailureFooter taskRun={taskRun} /> : null
           }
         />
       </HistoricalSandboxProvider>
@@ -254,8 +248,8 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          cloudJobId={cloudJob!.id}
-          initialCloudJob={cloudJob!}
+          runId={taskRun!.id}
+          initialTaskRun={taskRun!}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -270,8 +264,8 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          cloudJobId={cloudJob!.id}
-          initialCloudJob={cloudJob!}
+          runId={taskRun!.id}
+          initialTaskRun={taskRun!}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -284,13 +278,13 @@ export default function SandboxPage() {
   return (
     <SandboxProvider
       taskId={taskId}
-      url={cloudJob!.sandboxServerUrl}
+      url={taskRun!.sandboxServerUrl}
       token={token}
       refreshConnection={session.refreshConnection}
       history={historyEnvelopesQuery}
-      initialTaskStatus={cloudJob?.status ?? null}
+      initialTaskStatus={taskRun?.status ?? null}
       initialTaskPhase={
-        (cloudJob?.taskPhase as TaskPhase | null | undefined) ?? null
+        (taskRun?.taskPhase as TaskPhase | null | undefined) ?? null
       }
       fallback={
         <>

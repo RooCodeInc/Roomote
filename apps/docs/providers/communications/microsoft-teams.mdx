@@ -64,7 +64,12 @@ with env vars instead, set:
 TEAMS_BOT_APP_ID=<microsoft-app-id>
 TEAMS_BOT_APP_PASSWORD=<client-secret>
 TEAMS_BOT_TENANT_ID=<tenant-id>
+TEAMS_BOT_NAME=<bot-display-name>
 ```
+
+`TEAMS_BOT_NAME` is optional, but recommended when your Teams app is not named
+Roomote. Roomote uses it in generated Teams app packages and user-facing
+invocation guidance.
 
 Advanced token overrides are available when your tenant or cloud environment
 requires custom Bot Framework token settings:
@@ -152,7 +157,8 @@ the bot one message.
 
 When an inbound Teams activity includes a Microsoft Entra AAD object ID,
 Roomote can map it to an existing Microsoft sign-in account. If no mapping
-exists yet, Teams task launches use the deployment's fallback owner.
+exists yet, Roomote asks the sender to link their Microsoft account before
+starting a task rather than launching it under another owner.
 
 ## Local URL changes
 

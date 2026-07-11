@@ -2,6 +2,7 @@ import { db, webhooks as webhooksTable, eq } from '@roomote/db/server';
 import type { SourceControlProvider } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { redactWebhookPayload } from '../webhook-payload-redaction';
 
 /**
  * Records a webhook after executing the handler, setting status based on the response.
@@ -29,7 +30,9 @@ export async function recordWebhook<T>(
         deliveryId,
         provider,
         event,
-        payload,
+        // Only the stored copy is redacted; the handler still receives the
+        // original payload.
+        payload: redactWebhookPayload(payload),
         // No status timestamps set yet - will be updated after handler runs
       })
       .onConflictDoNothing()

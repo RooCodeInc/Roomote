@@ -291,14 +291,14 @@ describe('worker sentry monitoring', () => {
     initWorkerSentry();
     setWorkerRuntimeContext({ taskId: 'task-7' });
     captureWorkerException(new Error('boom'), {
-      cloudJobId: 7,
-      stage: 'handleJobError',
+      runId: 7,
+      stage: 'handleTaskRunError',
     });
 
     expect(withScopeMock).toHaveBeenCalledTimes(1);
     expect(setLevelMock).toHaveBeenCalledWith('error');
     expect(setTagMock).toHaveBeenCalledWith('roomote.task_id', 'task-7');
-    expect(setTagMock).toHaveBeenCalledWith('roomote.cloud_job_id', '7');
+    expect(setTagMock).toHaveBeenCalledWith('roomote.task_run_id', '7');
     expect(setTagMock).toHaveBeenCalledWith(
       'roomote.environment_id',
       'env_123',
@@ -312,13 +312,13 @@ describe('worker sentry monitoring', () => {
       'worker-exception',
     );
     expect(setContextMock).toHaveBeenCalledWith('worker', {
-      cloudJobId: 7,
+      runId: 7,
       computeProvider: 'roomote',
       computeProviderFingerprint: 'sandbox-roomote-noble',
       computeProviderFingerprintKind: 'runtime',
       environmentId: 'env_123',
       deploymentSlug: 'roomote',
-      stage: 'handleJobError',
+      stage: 'handleTaskRunError',
       taskId: 'task-7',
     });
     expect(setFingerprintMock).toHaveBeenCalledWith([
@@ -355,14 +355,14 @@ describe('worker sentry monitoring', () => {
     );
 
     captureWorkerException(multiplexError, {
-      cloudJobId: 17,
+      runId: 17,
       environmentId: 'env_preview_a',
       stage: 'multiplexAuthProxy.proxy.error',
       targetPort: 3000,
       taskId: 'task-a',
     });
     captureWorkerException(authProxyError, {
-      cloudJobId: 18,
+      runId: 18,
       environmentId: 'env_preview_b',
       stage: 'authProxy.proxy.error',
       targetPort: 5001,
@@ -375,7 +375,7 @@ describe('worker sentry monitoring', () => {
     ]);
   });
 
-  it('falls back to cloud job id for worker exception fingerprints when task id is unavailable', async () => {
+  it('falls back to task run id for worker exception fingerprints when task id is unavailable', async () => {
     process.env.ROOMOTE_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
@@ -383,13 +383,13 @@ describe('worker sentry monitoring', () => {
 
     initWorkerSentry();
     captureWorkerException(new Error('boom'), {
-      cloudJobId: 17,
-      stage: 'handleJobError',
+      runId: 17,
+      stage: 'handleTaskRunError',
     });
 
     expect(setFingerprintMock).toHaveBeenCalledWith([
       'roomote-worker-exception',
-      'cloudJobId',
+      'runId',
       '17',
     ]);
   });
@@ -402,7 +402,7 @@ describe('worker sentry monitoring', () => {
 
     initWorkerSentry();
     captureWorkerException(new Error('connect ECONNREFUSED 127.0.0.1:3001'), {
-      stage: 'handleJobError',
+      stage: 'handleTaskRunError',
       taskId: 'task-17',
     });
 
@@ -445,8 +445,8 @@ describe('worker sentry monitoring', () => {
     error.name = 'TRPCClientError';
 
     captureWorkerException(error, {
-      cloudJobId: 17,
-      stage: 'handleJobError',
+      runId: 17,
+      stage: 'handleTaskRunError',
       taskId: 'task-17',
     });
 
@@ -458,7 +458,7 @@ describe('worker sentry monitoring', () => {
     ]);
   });
 
-  it('falls back to environment id for worker exception fingerprints when task and cloud job ids are unavailable', async () => {
+  it('falls back to environment id for worker exception fingerprints when task and task run ids are unavailable', async () => {
     process.env.ROOMOTE_APP_ENV = 'preview';
 
     const { captureWorkerException, initWorkerSentry } =
@@ -503,11 +503,11 @@ describe('worker sentry monitoring', () => {
 
     initWorkerSentry();
     captureWorkerMessage('boom message', {
-      cloudJobId: 9,
+      runId: 9,
       stage: 'message',
     });
     captureWorkerErrorLog(['log-only failure'], {
-      cloudJobId: 11,
+      runId: 11,
       stage: 'logger',
     });
 
@@ -516,8 +516,8 @@ describe('worker sentry monitoring', () => {
       'log-only failure',
       'error',
     );
-    expect(setTagMock).toHaveBeenCalledWith('roomote.cloud_job_id', '9');
-    expect(setTagMock).toHaveBeenCalledWith('roomote.cloud_job_id', '11');
+    expect(setTagMock).toHaveBeenCalledWith('roomote.task_run_id', '9');
+    expect(setTagMock).toHaveBeenCalledWith('roomote.task_run_id', '11');
     expect(setTagMock).toHaveBeenCalledWith('roomote.signal', 'worker-message');
   });
 
@@ -530,7 +530,7 @@ describe('worker sentry monitoring', () => {
     captureWorkerMessage(
       'cancel restart requested',
       {
-        cloudJobId: 12,
+        runId: 12,
         sessionId: 'session-12',
       },
       {
@@ -541,7 +541,7 @@ describe('worker sentry monitoring', () => {
     );
 
     expect(setLevelMock).toHaveBeenCalledWith('warning');
-    expect(setTagMock).toHaveBeenCalledWith('roomote.cloud_job_id', '12');
+    expect(setTagMock).toHaveBeenCalledWith('roomote.task_run_id', '12');
     expect(setTagMock).toHaveBeenCalledWith(
       'roomote.signal',
       'acp-cancel-restart-requested',
@@ -562,7 +562,7 @@ describe('worker sentry monitoring', () => {
     captureWorkerMessage(
       'OpenCode inference turn failed',
       {
-        cloudJobId: 33,
+        runId: 33,
         turnId: 'turn-33',
       },
       {
