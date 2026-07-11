@@ -76,8 +76,9 @@ below tracks the stable `main` image channel; see
 Run the stack as a single Fly app (one Machine per service) with Fly Managed
 Postgres, Upstash Redis, and Tigris object storage from the maintained
 `fly.toml`. Docker sandboxes are not available there, so task execution uses
-hosted sandboxes such as Modal, E2B, or Daytona. Fly has no one-click template
-marketplace, so deploys are a short copy-paste `flyctl` sequence; see
+hosted sandboxes such as Modal, E2B, or Daytona. The maintained config tracks
+the stable `main` image channel. Fly has no one-click template marketplace, so
+deploys are a short copy-paste `flyctl` sequence; see
 [deploy/fly/README.md](deploy/fly/README.md).
 
 ### Bare machine
