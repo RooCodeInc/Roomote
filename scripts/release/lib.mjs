@@ -4,7 +4,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import {
+  readdirSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 
 export function readJson(path) {
@@ -216,4 +222,85 @@ export function findVersionCommit({ cwd, version, ref = 'HEAD' }) {
     candidate = sha;
   }
   return candidate;
+}
+
+const CHANGELOG_HEADER =
+  '# Changelog\n\nThis file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.\n\n';
+
+/**
+ * Build one product CHANGELOG.md release section from pending changesets,
+ * grouped by the highest bump level each changeset requests.
+ *
+ * @param {ReturnType<typeof parsePendingChangesets>} pending
+ * @param {string} nextVersion
+ * @param {string} date ISO date (YYYY-MM-DD)
+ * @returns {string} markdown section starting with `## <version> (<date>)`
+ */
+export function buildChangelogSection(pending, nextVersion, date) {
+  const byLevel = { major: [], minor: [], patch: [] };
+  for (const entry of pending) {
+    const highest = ['major', 'minor', 'patch'].find((level) =>
+      Object.values(entry.bumps).includes(level),
+    );
+    if (!highest) continue;
+    const summary = entry.summary.replace(/\s+/g, ' ').trim() || entry.file;
+    byLevel[highest].push(summary);
+  }
+
+  const lines = [`## ${nextVersion} (${date})`, ''];
+  for (const [label, key] of [
+    ['Major changes', 'major'],
+    ['Minor changes', 'minor'],
+    ['Patch changes', 'patch'],
+  ]) {
+    if (byLevel[key].length === 0) continue;
+    lines.push(`### ${label}`, '');
+    for (const item of byLevel[key]) {
+      lines.push(`- ${item}`);
+    }
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd() + '\n';
+}
+
+/**
+ * Apply the pending changesets as one product version bump: prepend the
+ * release section to the root CHANGELOG.md, set the root package.json
+ * version, and delete the consumed changeset files. Workspace package
+ * versions are intentionally left untouched; the root version is the only
+ * product version.
+ *
+ * @param {string} repoRoot
+ * @param {{ date?: string }} [options]
+ * @returns {{ previous: string, next: string, changesets: string[] } | null}
+ *   null when there is nothing to version
+ */
+export function applyProductVersion(repoRoot, options = {}) {
+  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  const pending = parsePendingChangesets(repoRoot);
+  if (pending.length === 0) return null;
+
+  const rootPath = join(repoRoot, 'package.json');
+  const root = readJson(rootPath);
+  const previous = readCurrentProductVersion(repoRoot);
+  const levels = pending.flatMap((entry) => Object.values(entry.bumps));
+  const next = computeNextVersion(previous, levels);
+
+  const changelogPath = join(repoRoot, 'CHANGELOG.md');
+  const existing = existsSync(changelogPath)
+    ? readFileSync(changelogPath, 'utf8')
+    : CHANGELOG_HEADER;
+  writeFileSync(
+    changelogPath,
+    insertChangelogSection(existing, buildChangelogSection(pending, next, date)),
+  );
+
+  root.version = next;
+  writeFileSync(rootPath, `${JSON.stringify(root, null, 2)}\n`);
+
+  for (const entry of pending) {
+    rmSync(join(repoRoot, '.changeset', entry.file));
+  }
+
+  return { previous, next, changesets: pending.map((entry) => entry.file) };
 }

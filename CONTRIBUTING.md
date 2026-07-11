@@ -31,8 +31,9 @@ is not necessary.
 ## Product releases
 
 Roomote ships a **single product version** for the monorepo (not per-package npm
-releases). Workspace `package.json` versions move in lockstep via
-[Changesets](https://github.com/changesets/changesets). The canonical version is
+releases). [Changesets](https://github.com/changesets/changesets) files are the
+authoring format for bump level + release notes; workspace `package.json`
+versions are frozen and never bumped. The canonical version is
 the root `package.json` field and is published as GitHub Release / tag `vX.Y.Z`.
 
 Optional contributor entrypoint when your change should show up in the changelog:
@@ -41,14 +42,14 @@ Optional contributor entrypoint when your change should show up in the changelog
 pnpm changeset
 ```
 
-Any `@roomote/*` package selection is equivalent under the fixed group. See
-[`.changeset/README.md`](.changeset/README.md).
+Any `@roomote/*` package selection is equivalent — only the bump level is read.
+See [`.changeset/README.md`](.changeset/README.md).
 
 ### How a release ships
 
 1. Merge work to `develop` (squash). When pending changesets exist, automation
-   opens a **Release Roomote** Version PR that bumps lockstep versions and
-   `CHANGELOG.md`.
+   opens a **Release Roomote** Version PR that bumps the root version and
+   `CHANGELOG.md` (nothing else).
 2. When the product version is untagged, automation cuts a frozen
    `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a
    **Promote `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work

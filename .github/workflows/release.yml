@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   version:
-    name: Changesets version PR
+    name: Version PR
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout
@@ -39,16 +39,65 @@ jobs:
         with:
           frozen-lockfile: 'true'
 
-      - name: Create or update Version Packages PR
-        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
-        with:
-          version: pnpm run version
-          title: 'Release Roomote'
-          commit: 'chore(release): version roomote'
-          createGithubReleases: false
+      - name: Create, refresh, or close the Version PR
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HUSKY: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          branch='changeset-release/develop'
+          pending="$(find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' 2>/dev/null | wc -l | tr -d ' ')"
+
+          if [ "${pending:-0}" -eq 0 ]; then
+            existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+            if [ -n "$existing" ]; then
+              gh pr close "$existing" --comment 'No pending changesets remain on develop; closing this stale Version PR.' --delete-branch
+            fi
+            echo "No pending changesets; nothing to version."
+            exit 0
+          fi
+
+          pnpm run version
+          version="$(node -p "require('./package.json').version")"
+
+          # Rebuild the branch from the live develop tip on every run so the
+          # Version PR is always a single fresh commit and never drifts.
+          git checkout -B "$branch"
+          git add package.json CHANGELOG.md .changeset
+          git commit -m "chore(release): version roomote ${version}"
+          git push --force origin "$branch"
+
+          notes="$(node scripts/release/extract-changelog-section.mjs "$version" || true)"
+          body_file="$(mktemp)"
+          {
+            echo "Automated Version PR: bumps the product version to \`${version}\` and folds the pending changesets into the root \`CHANGELOG.md\`."
+            echo
+            echo "- **Squash-merge** this PR into \`develop\` to cut the release."
+            echo "- The frozen \`release/v${version}\` promote PR to \`main\` opens automatically after the merge."
+            echo "- New changesets on \`develop\` refresh this PR automatically."
+            echo
+            if [ -n "$notes" ]; then
+              echo "$notes"
+            fi
+          } > "$body_file"
+
+          existing="$(gh pr list --base develop --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            echo "Version PR already open: #$existing"
+            gh pr edit "$existing" --title "Release Roomote ${version}" --body-file "$body_file"
+          else
+            gh pr create \
+              --base develop \
+              --head "$branch" \
+              --title "Release Roomote ${version}" \
+              --body-file "$body_file"
+          fi
+          rm -f "$body_file"
 
   promote:
     name: Open or refresh Promote PR
