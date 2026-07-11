@@ -14,14 +14,33 @@ formality we skip - it is the contribution process.
 See CONTRIBUTING.md for details.
 -->
 
+<!--
+Agents (including Roomote): Include the IMPORTANT warning, Related issue
+(with Fixes # when applicable), and "## Why this PR exists" checkboxes for
+human/community contributions.
+
+OMIT those three sections entirely when either:
+1. This PR is opened or refreshed by Roomote (body includes or will include
+   a provenance blockquote with `Opened on behalf of`), or
+2. The initiating user is listed in CODEOWNERS for this repository.
+
+Do not check a "I am a maintainer" box as a substitute for omitting the
+section — when Roomote provenance or CODEOWNER status already establishes
+that path, the checklist is redundant noise.
+-->
+
 > [!IMPORTANT]
 > Roomote does not generally accept unsolicited community pull requests. Unless a maintainer invited this PR in an issue or discussion, it will likely be closed without review. A [well-written issue](https://github.com/RooCodeInc/Roomote/issues/new/choose) is the best way to contribute.
 
 ## Related issue
 
 <!--
-Required. Link the issue where a maintainer agreed this change should happen,
-and use "Fixes #123" so it closes automatically on merge.
+For human/community PRs: link the issue where a maintainer agreed this change
+should happen, and use "Fixes #123" so it closes automatically on merge.
+
+Agents: when omitting the community gates above (Roomote provenance or
+CODEOWNER), replace this section with a short note such as "Internal Roomote
+work" / the task link, or drop the heading if there is nothing useful to say.
 -->
 
 Fixes #
