@@ -509,14 +509,15 @@ export async function listBitbucketRepositories({
     fetchImpl,
   });
 
-  // The cross-workspace GET /2.0/repositories?role=... listing was removed by
-  // Bitbucket on April 14, 2026 (changelog CHANGE-2770) and now returns 410
-  // Gone. Repositories must be listed per workspace, with workspaces
-  // discovered from the caller's memberships.
+  // Bitbucket removed all cross-workspace listings on April 14, 2026
+  // (changelog CHANGE-2770): GET /2.0/repositories?role=..., /2.0/workspaces,
+  // and /2.0/user/permissions/workspaces all return 410 Gone. The only
+  // supported membership enumeration is the newer GET /2.0/user/workspaces;
+  // repositories must then be listed per workspace.
   const workspaceSlugs: string[] = [];
   let workspacesUrl: string | null = buildBitbucketApiUrl(
     auth.apiBaseUrl,
-    '/user/permissions/workspaces',
+    '/user/workspaces',
     { pagelen: BITBUCKET_REPOSITORIES_PER_PAGE },
   );
 

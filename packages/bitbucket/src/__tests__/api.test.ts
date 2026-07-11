@@ -18,7 +18,7 @@ describe('listBitbucketRepositories', () => {
       const url = String(input);
       requestedUrls.push(url);
 
-      if (url.includes('/user/permissions/workspaces')) {
+      if (url.includes('/user/workspaces')) {
         return jsonResponse({
           values: [
             { workspace: { slug: 'acme' } },
