@@ -172,6 +172,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
+    name: 'webhook-bitbucket',
+    match: { type: 'prefix', path: '/api/webhooks/bitbucket' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
     name: 'webhook-ado',
     match: { type: 'prefix', path: '/api/webhooks/ado' },
     policy: 'webhook',
