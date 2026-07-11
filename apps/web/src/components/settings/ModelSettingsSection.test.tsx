@@ -403,7 +403,7 @@ describe('ModelSettingsSection', () => {
       screen.getByLabelText('Default coding model is managed by R_MODEL'),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText('Planning model is managed by R_PLANNING_MODEL'),
+      screen.getByLabelText('Advisor model is managed by R_PLANNING_MODEL'),
     ).toBeInTheDocument();
   });
 
@@ -434,7 +434,7 @@ describe('ModelSettingsSection', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByLabelText(
-        'Planning model reasoning is managed by R_PLANNING_MODEL_REASONING_EFFORT',
+        'Advisor model reasoning is managed by R_PLANNING_MODEL_REASONING_EFFORT',
       ),
     ).toBeInTheDocument();
   });
@@ -815,14 +815,14 @@ describe('ModelSettingsSection', () => {
     expect(toast.success).not.toHaveBeenCalled();
   });
 
-  it('shows the planning model role', () => {
+  it('shows the advisor model role', () => {
     settingsData.current = buildSettingsData();
 
     renderModelSettingsSection();
 
-    expect(screen.getByText('Planning model')).toBeInTheDocument();
+    expect(screen.getByText('Advisor model')).toBeInTheDocument();
     expect(
-      screen.getByRole('combobox', { name: 'Planning model reasoning level' }),
+      screen.getByRole('combobox', { name: 'Advisor model reasoning level' }),
     ).toBeInTheDocument();
   });
 

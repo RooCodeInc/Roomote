@@ -15,9 +15,9 @@ describe('FEATURE_FLAG_CONFIG', () => {
     expect(config.metadataKey).toBe('show_debug_ui_setting');
   });
 
-  it('PlanMode defaults to false', () => {
+  it('PlanMode defaults to true', () => {
     const config = FEATURE_FLAG_CONFIG[FeatureFlag.PlanMode];
-    expect(config.defaultValue).toBe(false);
+    expect(config.defaultValue).toBe(true);
     expect(config.metadataKey).toBe('plan_mode');
   });
 

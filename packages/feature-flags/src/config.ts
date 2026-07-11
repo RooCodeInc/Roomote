@@ -10,7 +10,9 @@ import {
  */
 export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
   [FeatureFlag.PlanMode]: {
-    defaultValue: false,
+    // On by default for every deployment; explicit `plan_mode: false`
+    // metadata remains an opt-out kill switch.
+    defaultValue: true,
     metadataKey: 'plan_mode',
     description: 'Enable plan mode, which keeps planning turns read-only',
   },
