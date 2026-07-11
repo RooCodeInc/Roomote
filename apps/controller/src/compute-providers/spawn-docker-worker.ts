@@ -285,6 +285,11 @@ export async function spawnDockerWorker(
         R_APP_URL: toContainerReachableUrl(
           process.env.R_APP_URL ?? Env.R_APP_URL,
         ),
+        // Legacy alias for pre-rename workers inside resumed snapshots; must
+        // carry the same container-reachable override as R_APP_URL above.
+        ROOMOTE_APP_URL: toContainerReachableUrl(
+          process.env.R_APP_URL ?? Env.R_APP_URL,
+        ),
         ...(resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl && {
           PREVIEW_PROXY_BASE_URL:
             resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,
