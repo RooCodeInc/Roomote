@@ -110,6 +110,10 @@ export function buildBaseWorkerEnv({
       SANDBOX_EXPIRES_AT_MS: String(sandboxExpiresAtMs),
     }),
     R_APP_URL: Env.R_APP_URL,
+    // Legacy alias: sandboxes resumed from snapshots created before the R_*
+    // rename run a worker build that requires ROOMOTE_APP_URL at startup.
+    // Remove once pre-rename snapshots have aged out.
+    ROOMOTE_APP_URL: Env.R_APP_URL,
     TRPC_URL: Env.TRPC_URL,
     SKIP_ENV_VALIDATION: '1',
     // These are launcher-to-worker transport values. Keep them tied to the

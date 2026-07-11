@@ -38,6 +38,15 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.PREVIEW_PROXY_BASE_URL).toBeUndefined();
   });
 
+  it('injects the legacy ROOMOTE_APP_URL alias for pre-rename snapshot workers', () => {
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {},
+    });
+
+    expect(env.ROOMOTE_APP_URL).toBe(env.R_APP_URL);
+  });
+
   it('forwards an explicit preview proxy base URL', () => {
     process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.example.com';
 
