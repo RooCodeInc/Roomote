@@ -35,6 +35,7 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
   const visionModel = process.env.R_VISION_MODEL?.trim();
   const codeReviewModel = process.env.R_CODE_REVIEW_MODEL?.trim();
   const exploreModel = process.env.R_EXPLORE_MODEL?.trim();
+  const planningModel = process.env.R_PLANNING_MODEL?.trim();
 
   if (model) {
     env.R_MODEL = model;
@@ -56,12 +57,17 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     env.R_EXPLORE_MODEL = exploreModel;
   }
 
+  if (planningModel) {
+    env.R_PLANNING_MODEL = planningModel;
+  }
+
   for (const key of [
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
     'R_VISION_MODEL_REASONING_EFFORT',
     'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     'R_EXPLORE_MODEL_REASONING_EFFORT',
+    'R_PLANNING_MODEL_REASONING_EFFORT',
   ] as const) {
     const value = process.env[key]?.trim();
 
