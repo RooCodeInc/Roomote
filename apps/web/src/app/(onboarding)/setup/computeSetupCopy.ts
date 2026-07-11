@@ -25,12 +25,12 @@ const COMPUTE_CREDENTIALS_HINTS: Partial<
     ' of the dashboard.',
   ],
   daytona: [
-    'Create a key from the ',
+    'Create an API key with write and delete permissions on Sandboxes and Snapshots (no other scopes needed) from the ',
     {
       label: 'API Keys page',
       href: 'https://app.daytona.io/dashboard/keys',
     },
-    ' in the dashboard.',
+    '.',
   ],
 };
 
