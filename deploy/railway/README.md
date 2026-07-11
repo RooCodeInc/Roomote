@@ -154,7 +154,7 @@ S3_REGION=us-east-1
 S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
 SETUP_TOKEN=${{secret(32)}}
-R_PING_BASE_URL=https://ping.openmote.dev
+R_PING_BASE_URL=https://ping.roomote.dev
 PREVIEW_PROXY_BASE_URL=
 NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=
 PREVIEW_DOMAINS=
@@ -246,7 +246,7 @@ Notes:
   `/setup?token=<value>` also works.
 - `R_PING_BASE_URL` is the endpoint for Roomote's anonymous analytics
   and version checks (the image default is `https://ping.roomote.dev`; the
-  template points at the openmote ping service). Admins can opt out of
+  template points at the Roomote ping service). Admins can opt out of
   anonymous analytics in the setup wizard or **Settings → Misc**; version
   checks ignore that setting.
 - The three `PREVIEW_*` variables ship **empty** (mark them optional in the

@@ -10,20 +10,20 @@ describe('Roomote GitHub bot identity helpers', () => {
       expect(getRoomoteGitHubAppSlugs().sort()).toEqual(
         ['roomote', 'roomote-dev'].sort(),
       );
-      expect(getRoomoteGitHubAppSlugs('OpenMote').sort()).toEqual(
-        ['openmote', 'roomote', 'roomote-dev'].sort(),
+      expect(getRoomoteGitHubAppSlugs('Acme').sort()).toEqual(
+        ['acme', 'roomote', 'roomote-dev'].sort(),
       );
     });
   });
 
   describe('getRoomoteManagedGitHubLogins', () => {
     it('returns exact bot and app logins for hosted and configured slugs', () => {
-      expect(getRoomoteManagedGitHubLogins('openmote').sort()).toEqual(
+      expect(getRoomoteManagedGitHubLogins('acme').sort()).toEqual(
         [
-          'app/openmote',
+          'app/acme',
           'app/roomote',
           'app/roomote-dev',
-          'openmote[bot]',
+          'acme[bot]',
           'roomote-dev[bot]',
           'roomote[bot]',
         ].sort(),
@@ -41,9 +41,9 @@ describe('Roomote GitHub bot identity helpers', () => {
 
   describe('matchesRoomoteGitHubLogin', () => {
     it('matches exact managed logins for a custom slug', () => {
-      expect(matchesRoomoteGitHubLogin('openmote[bot]', 'openmote')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('app/openmote', 'openmote')).toBe(true);
-      expect(matchesRoomoteGitHubLogin('openmote[bot]', 'roomote')).toBe(false);
+      expect(matchesRoomoteGitHubLogin('acme[bot]', 'acme')).toBe(true);
+      expect(matchesRoomoteGitHubLogin('app/acme', 'acme')).toBe(true);
+      expect(matchesRoomoteGitHubLogin('acme[bot]', 'roomote')).toBe(false);
     });
 
     it('matches roomote-dev and hosted logins without a custom slug', () => {

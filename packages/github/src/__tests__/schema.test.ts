@@ -56,15 +56,15 @@ describe('isRoomoteGitHubLogin', () => {
     const { setConfiguredGitHubAppSlugCache } = await import('../app-slug');
 
     // Before resolution the process-env default applies.
-    expect(isRoomoteGitHubLogin('openmote[bot]')).toBe(false);
+    expect(isRoomoteGitHubLogin('acme[bot]')).toBe(false);
 
     setConfiguredGitHubAppSlugCache({
-      value: 'openmote',
+      value: 'acme',
       expiresAt: Date.now() + 60_000,
     });
 
-    expect(isRoomoteGitHubLogin('openmote[bot]')).toBe(true);
-    expect(isRoomoteGitHubLogin('app/openmote')).toBe(true);
+    expect(isRoomoteGitHubLogin('acme[bot]')).toBe(true);
+    expect(isRoomoteGitHubLogin('app/acme')).toBe(true);
     // The hosted-product logins stay recognized alongside the configured one.
     expect(isRoomoteGitHubLogin('roomote[bot]')).toBe(true);
     expect(isRoomoteGitHubLogin('roomote-dev[bot]')).toBe(true);
