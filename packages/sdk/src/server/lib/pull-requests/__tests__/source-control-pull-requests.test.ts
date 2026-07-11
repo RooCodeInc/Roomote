@@ -16,7 +16,7 @@ const {
   mockResolveAdoToken,
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
-  mockResolveConfiguredGitHubAppSlug,
+  mockResolveConfiguredGitHubAppSlugIfConfigured,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -30,7 +30,7 @@ const {
   mockResolveAdoToken: vi.fn(),
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
-  mockResolveConfiguredGitHubAppSlug: vi.fn(),
+  mockResolveConfiguredGitHubAppSlugIfConfigured: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -39,8 +39,8 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
-  resolveConfiguredGitHubAppSlug: (...args: unknown[]) =>
-    mockResolveConfiguredGitHubAppSlug(...args),
+  resolveConfiguredGitHubAppSlugIfConfigured: (...args: unknown[]) =>
+    mockResolveConfiguredGitHubAppSlugIfConfigured(...args),
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -149,7 +149,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
@@ -310,7 +310,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
 describe('platform-managed draft state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');
@@ -391,7 +391,9 @@ describe('platform-managed draft state', () => {
   });
 
   it('rewrites a hardcoded @roomote attribution mention to the configured app slug', async () => {
-    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote-roomote');
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(
+      'roomote-roomote',
+    );
     const octokit = makeOctokit({
       created: {
         number: 12,
@@ -413,6 +415,35 @@ describe('platform-managed draft state', () => {
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
         body: '> Created by Roomote. Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).\n\n## What changed\n\nDone.',
+      }),
+    );
+  });
+
+  it('does not downgrade a correct custom-slug attribution when no slug is configured', async () => {
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
+    const preservedBody =
+      '> Created by Roomote. Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).\n\n## What changed\n\nDone.';
+    const octokit = makeOctokit({
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+      },
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...githubInput,
+        body: preservedBody,
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: preservedBody,
       }),
     );
   });
@@ -604,7 +635,7 @@ describe('platform-managed draft state', () => {
 describe('optional targetBranch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+    mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockGetDeploymentPrAction.mockResolvedValue('draft');
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockResolveGitLabToken.mockResolvedValue('gitlab-token');

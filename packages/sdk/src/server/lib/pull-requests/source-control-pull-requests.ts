@@ -15,7 +15,10 @@ import {
   resolveGiteaBaseUrl,
   resolveGiteaToken,
 } from '@roomote/gitea';
-import { getOctokit, resolveConfiguredGitHubAppSlug } from '@roomote/github';
+import {
+  getOctokit,
+  resolveConfiguredGitHubAppSlugIfConfigured,
+} from '@roomote/github';
 import {
   buildGitLabApiBaseUrl,
   resolveGitLabBaseUrl,
@@ -258,15 +261,24 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
 
-  // Agents sometimes invent `@roomote` in the provenance footer even when
-  // the deployment's configured app slug differs. Normalize the leading
-  // attribution line against the effective slug before any provider write.
-  const githubAppSlug = await resolveConfiguredGitHubAppSlug();
+  // PR provenance mentions are injected into the agent prompt at task start
+  // via `getPrBodyAttributionLine`. When slug resolution at prompt-build time
+  // fell back to the schema default (`roomote`), the agent faithfully copies
+  // `@roomote` into the body. Repair that only when this process has a real
+  // configured slug — never rewrite with the default, or a correct custom
+  // handle (e.g. `@roomote-roomote`) could be downgraded.
+  const configuredGitHubAppSlug =
+    await resolveConfiguredGitHubAppSlugIfConfigured();
   const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
-    {
-      ...input,
-      body: normalizePrBodyAttributionAppMention(input.body, githubAppSlug),
-    };
+    configuredGitHubAppSlug
+      ? {
+          ...input,
+          body: normalizePrBodyAttributionAppMention(
+            input.body,
+            configuredGitHubAppSlug,
+          ),
+        }
+      : input;
 
   const result = await (() => {
     switch (provider) {

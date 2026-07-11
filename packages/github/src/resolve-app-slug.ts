@@ -46,3 +46,48 @@ export async function resolveConfiguredGitHubAppSlug(): Promise<string> {
 
   return getEffectiveGitHubAppSlug();
 }
+
+/**
+ * Like {@link resolveConfiguredGitHubAppSlug}, but returns only a slug that is
+ * actually configured in process env or the deployment env table. Returns
+ * `null` when nothing is configured or resolution fails cold, so callers do
+ * not confuse the schema default `'roomote'` with a real deployment setting.
+ *
+ * Prefer this when rewriting user-visible attribution text: a missing config
+ * should leave the agent-supplied body alone instead of downgrading a correct
+ * custom-slug mention to `@roomote`.
+ */
+export async function resolveConfiguredGitHubAppSlugIfConfigured(): Promise<
+  string | null
+> {
+  const cache = getConfiguredGitHubAppSlugCache();
+
+  if (cache?.value && cache.expiresAt > Date.now()) {
+    return cache.value;
+  }
+
+  try {
+    const slug = await resolveDeploymentEnvVar('R_GITHUB_APP_SLUG');
+
+    setConfiguredGitHubAppSlugCache({
+      value: slug,
+      expiresAt: Date.now() + CONFIGURED_APP_SLUG_CACHE_TTL_MS,
+    });
+
+    return slug;
+  } catch (error) {
+    console.warn(
+      `[resolveConfiguredGitHubAppSlugIfConfigured] leaving body-owned mentions alone after slug resolution failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    const lastKnown = getConfiguredGitHubAppSlugCache()?.value;
+    if (lastKnown) {
+      return lastKnown;
+    }
+
+    const processSlug = process.env.R_GITHUB_APP_SLUG?.trim();
+    return processSlug || null;
+  }
+}
