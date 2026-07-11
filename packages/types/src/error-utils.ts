@@ -64,6 +64,12 @@ function getErrorLikeMessage(error: unknown): string {
     return error.message;
   }
 
+  // Several generated API clients (including Blaxel's) reject with a plain
+  // object shaped like { code, error } instead of an Error instance.
+  if (isRecord(error) && typeof error.error === 'string') {
+    return error.error;
+  }
+
   return String(error);
 }
 

@@ -2,6 +2,7 @@ import {
   type ComputeProviderLaunchMode,
   type NamedPort,
   SANDBOX_FILES_DIR,
+  serializeError,
 } from '@roomote/types';
 
 import { generateProxyPorts, getExposedPorts } from '../environment-machine';
@@ -159,6 +160,7 @@ export async function createBlaxelMachine(
       });
       break;
     } catch (error) {
+      const errorMessage = serializeError(error).message;
       await options.onMutation?.({
         provider: 'blaxel',
         operation: options.resumeHandle
@@ -173,10 +175,13 @@ export async function createBlaxelMachine(
           launchMode: options.launchMode as ComputeProviderLaunchMode,
           sourceSnapshotId: options.resumeHandle ?? null,
           ports,
-          error: error instanceof Error ? error.message : String(error),
+          error: errorMessage,
         },
       });
-      if (isAbortError(error) || attempt === MAX_RETRIES) throw error;
+      if (isAbortError(error)) throw error;
+      if (attempt === MAX_RETRIES) {
+        throw error instanceof Error ? error : new Error(errorMessage);
+      }
       await sleepWithSignal(2_000 * 2 ** (attempt - 1), createSignal);
     }
   }
