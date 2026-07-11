@@ -559,44 +559,15 @@ Top-level Comment #${comment.id} from @${comment.user.login}:
 const ROOMOTE_REVIEW_SUMMARY_MARKER = '<!-- roomote-review-summary';
 const ROOMOTE_PR_FIX_MARKER = '<!-- roomote-pr-fix';
 
-function isRoomoteIssueCommentAuthor(user: {
-  login: string;
-  type: string;
-}): boolean {
-  const normalizedLogin = user.login.toLowerCase();
-  const appSlugs = new Set([
-    // The effective slug prefers the database-configured value cached by
-    // resolveConfiguredGitHubAppSlug (refreshed at workflow entry) so
-    // deployments configured through the /setup flow recognize their own bot.
-    getEffectiveGitHubAppSlug().toLowerCase(),
-    'roomote',
-    'roomote-dev',
-  ]);
-
-  for (const appSlug of appSlugs) {
-    if (
-      normalizedLogin === `${appSlug}[bot]` ||
-      normalizedLogin === `app/${appSlug}`
-    ) {
-      return true;
-    }
-  }
-
-  return (
-    normalizedLogin.startsWith('roomote-') ||
-    normalizedLogin.startsWith('app/roomote-')
-  );
-}
-
 function isMarkerBasedReviewSummaryComment(comment: Schemas.IssueComment) {
   return (
-    isRoomoteIssueCommentAuthor(comment.user) &&
+    Schemas.isRoomoteCommentAuthor(comment.user) &&
     comment.body.trimStart().startsWith(ROOMOTE_REVIEW_SUMMARY_MARKER)
   );
 }
 
 function isLegacyReviewSummaryComment(comment: Schemas.IssueComment) {
-  if (!isRoomoteIssueCommentAuthor(comment.user)) {
+  if (!Schemas.isRoomoteCommentAuthor(comment.user)) {
     return false;
   }
 
