@@ -136,10 +136,19 @@ describe('isMention', () => {
       ).toBe(true);
     });
 
-    it('ignores mentions of the default slug when another slug is configured', () => {
+    it('still detects the canonical @roomote alias', () => {
       expect(
         isMention({
           body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('applies word boundaries to the canonical alias too', () => {
+      expect(
+        isMention({
+          body: 'cc @roomote-fan on this one',
           user: { login: 'testuser' },
         }),
       ).toBe(false);

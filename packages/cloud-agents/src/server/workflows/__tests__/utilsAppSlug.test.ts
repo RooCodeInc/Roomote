@@ -60,16 +60,17 @@ describe('findReusableReviewSummaryComment', () => {
 });
 
 describe('getPrBodyAttributionLine', () => {
-  it('mentions the process-env app slug by default', () => {
+  it('always advertises the canonical @roomote mention', () => {
     const line = getPrBodyAttributionLine({
       attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@octomote');
+    expect(line).toContain('@roomote');
+    expect(line).not.toContain('@octomote');
   });
 
-  it('mentions the database-configured app slug once cached', () => {
+  it('ignores the database-configured app slug for the advertised mention', () => {
     setConfiguredGitHubAppSlugCache({
       value: 'acme',
       expiresAt: Date.now() + 60_000,
@@ -80,7 +81,7 @@ describe('getPrBodyAttributionLine', () => {
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@acme');
-    expect(line).not.toContain('@octomote');
+    expect(line).toContain('@roomote');
+    expect(line).not.toContain('@acme');
   });
 });
