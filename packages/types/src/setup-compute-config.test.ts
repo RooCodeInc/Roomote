@@ -6,6 +6,7 @@ import {
   deriveModalBaseImageRefDefault,
   deriveWorkerImageFromReleaseVersion,
   getDefaultAvailableComputeProvider,
+  getComputeFieldValidationError,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -126,6 +127,16 @@ describe('buildSetupComputeStatus', () => {
     expect(infrastructureByProvider.e2b).toEqual([
       'E2B_TEMPLATE_ID',
       'E2B_DOMAIN',
+    ]);
+    expect(infrastructureByProvider.blaxel).toEqual([
+      'BLAXEL_IMAGE',
+      'BLAXEL_REGION',
+      'BLAXEL_STANDBY_MAX_COUNT',
+      'BLAXEL_STANDBY_MAX_AGE_HOURS',
+    ]);
+    expect(infrastructureByProvider.docker).toEqual([
+      'DOCKER_STANDBY_MAX_COUNT',
+      'DOCKER_STANDBY_MAX_AGE_HOURS',
     ]);
 
     // Advanced infrastructure fields are surfaced behind an advanced area.
@@ -599,6 +610,33 @@ describe('buildSetupComputeStatus', () => {
       blaxel: false,
       docker: true,
     });
+  });
+});
+
+describe('getComputeFieldValidationError', () => {
+  const field = {
+    envVarName: 'BLAXEL_STANDBY_MAX_AGE_HOURS',
+    label: 'Retention period (hours)',
+    required: false,
+    category: 'infrastructure' as const,
+    input: { type: 'number' as const, min: 1, max: 168, step: 1 },
+  };
+
+  it('accepts blank and in-range whole-number values', () => {
+    expect(getComputeFieldValidationError(field, '')).toBeNull();
+    expect(getComputeFieldValidationError(field, '72')).toBeNull();
+  });
+
+  it('rejects values outside the configured constraints', () => {
+    expect(getComputeFieldValidationError(field, '0')).toBe(
+      'Retention period (hours) must be at least 1.',
+    );
+    expect(getComputeFieldValidationError(field, '169')).toBe(
+      'Retention period (hours) must be at most 168.',
+    );
+    expect(getComputeFieldValidationError(field, '1.5')).toBe(
+      'Retention period (hours) must be a whole number.',
+    );
   });
 });
 

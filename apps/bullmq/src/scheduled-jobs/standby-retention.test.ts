@@ -1,4 +1,7 @@
-import { selectStandbyEvictions } from './standby-retention';
+import {
+  resolveStandbyRetentionPolicy,
+  selectStandbyEvictions,
+} from './standby-retention';
 
 const now = new Date('2026-07-12T12:00:00.000Z');
 
@@ -40,5 +43,36 @@ describe('selectStandbyEvictions', () => {
         now,
       ).map(({ handle }) => handle),
     ).toEqual(['h1', 'h2']);
+  });
+});
+
+describe('resolveStandbyRetentionPolicy', () => {
+  it('uses provider defaults when no overrides are configured', () => {
+    expect(resolveStandbyRetentionPolicy('docker', {})).toEqual({
+      maxCount: 10,
+      maxAgeMs: 24 * 60 * 60 * 1_000,
+    });
+    expect(resolveStandbyRetentionPolicy('blaxel', {})).toEqual({
+      maxCount: 25,
+      maxAgeMs: 168 * 60 * 60 * 1_000,
+    });
+  });
+
+  it('applies saved or runtime provider overrides', () => {
+    expect(
+      resolveStandbyRetentionPolicy('docker', {
+        DOCKER_STANDBY_MAX_COUNT: '3',
+        DOCKER_STANDBY_MAX_AGE_HOURS: '12',
+      }),
+    ).toEqual({ maxCount: 3, maxAgeMs: 12 * 60 * 60 * 1_000 });
+  });
+
+  it('falls back safely for invalid values', () => {
+    expect(
+      resolveStandbyRetentionPolicy('blaxel', {
+        BLAXEL_STANDBY_MAX_COUNT: '-1',
+        BLAXEL_STANDBY_MAX_AGE_HOURS: '169',
+      }),
+    ).toEqual({ maxCount: 25, maxAgeMs: 168 * 60 * 60 * 1_000 });
   });
 });

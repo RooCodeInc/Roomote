@@ -84,6 +84,10 @@ for 24 hours by default. Configure `DOCKER_STANDBY_MAX_COUNT` and
 Docker standby retention. The five-minute retention sweep removes the oldest
 or expired containers and their task networks.
 
+These retention limits are also editable under **Settings > Sandboxes > Local
+Docker > Advanced settings**. Process environment variables take precedence
+and appear as locked values in Settings.
+
 The default `internet` egress policy allows public repository and tool access
 while installing immutable blackhole routes for private, shared-address, and
 cloud metadata ranges (including AWS/GCP/Azure, Alibaba, and Oracle endpoints).

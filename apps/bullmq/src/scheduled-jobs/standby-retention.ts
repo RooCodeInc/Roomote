@@ -9,7 +9,6 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { createComputeProviderClient } from '@roomote/compute-providers';
-import { Env } from '@roomote/env';
 import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 const LOG_PREFIX = '[standbyRetention]';
@@ -40,19 +39,45 @@ export function selectStandbyEvictions(
   );
 }
 
-function getPolicy(provider: StandbyProvider): {
+const DEFAULT_POLICY = {
+  docker: { maxCount: 10, maxAgeHours: 24 },
+  blaxel: { maxCount: 25, maxAgeHours: 168 },
+} as const;
+
+function parsePolicyInteger(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max = Number.POSITIVE_INFINITY,
+): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= min && parsed <= max
+    ? parsed
+    : fallback;
+}
+
+export function resolveStandbyRetentionPolicy(
+  provider: StandbyProvider,
+  env: Partial<Record<string, string>>,
+): {
   maxCount: number;
   maxAgeMs: number;
 } {
-  return provider === 'docker'
-    ? {
-        maxCount: Env.DOCKER_STANDBY_MAX_COUNT,
-        maxAgeMs: Env.DOCKER_STANDBY_MAX_AGE_HOURS * MS_PER_HOUR,
-      }
-    : {
-        maxCount: Env.BLAXEL_STANDBY_MAX_COUNT,
-        maxAgeMs: Env.BLAXEL_STANDBY_MAX_AGE_HOURS * MS_PER_HOUR,
-      };
+  const prefix = provider === 'docker' ? 'DOCKER' : 'BLAXEL';
+  const defaults = DEFAULT_POLICY[provider];
+  const maxCount = parsePolicyInteger(
+    env[`${prefix}_STANDBY_MAX_COUNT`],
+    defaults.maxCount,
+    0,
+  );
+  const maxAgeHours = parsePolicyInteger(
+    env[`${prefix}_STANDBY_MAX_AGE_HOURS`],
+    defaults.maxAgeHours,
+    1,
+    168,
+  );
+
+  return { maxCount, maxAgeMs: maxAgeHours * MS_PER_HOUR };
 }
 
 async function createClient(provider: StandbyProvider) {
@@ -124,7 +149,8 @@ async function enforceProviderRetention(
   provider: StandbyProvider,
   now: Date,
 ): Promise<number> {
-  const policy = getPolicy(provider);
+  const resolvedEnv = await resolveComputeProviderEnvValues(provider);
+  const policy = resolveStandbyRetentionPolicy(provider, resolvedEnv);
   const candidates = await getCandidates(provider);
   const protectedHandles = await getProtectedHandles(provider);
   const evicted = selectStandbyEvictions(
