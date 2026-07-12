@@ -7,6 +7,12 @@ export function resetPostedProofThreadsForTest(): void {
   postedProofThreads.clear();
 }
 
+export function isVisualProofAutoPostEnabled(): boolean {
+  const value = process.env.ROOMOTE_SLACK_PROOF_AUTO_POST?.trim().toLowerCase();
+
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
 function hasChatReplyContext(): boolean {
   return Boolean(
     (process.env.ROOMOTE_SLACK_CHANNEL?.trim() &&
@@ -63,7 +69,7 @@ export async function replyToChatWithVisualProof({
   replyToChatThreadImpl?: typeof replyToChatThread;
 }): Promise<boolean> {
   const config = roomoteConfig;
-  if (!config || !hasChatReplyContext()) {
+  if (!config || !isVisualProofAutoPostEnabled() || !hasChatReplyContext()) {
     return false;
   }
 

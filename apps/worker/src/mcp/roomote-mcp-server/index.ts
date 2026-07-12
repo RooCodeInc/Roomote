@@ -23,6 +23,7 @@ import {
 
 import { handleCreatePlan } from './create-plan.js';
 import { handleUpload } from './upload.js';
+import { isVisualProofAutoPostEnabled } from './chat-proof-auto-post.js';
 import { handleDescribeVideo } from './describe-video.js';
 import { handleDownload } from './download.js';
 import { handleListArtifacts } from './list-artifacts.js';
@@ -170,7 +171,11 @@ roomoteMcpServer.registerTool(
     description:
       'Create, upload, download, and list artifacts in Roomote. ' +
       'Use action "create_plan" to create a markdown plan artifact (requires title and content). Returns viewUrl for sharing. ' +
-      'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks, visual-proof uploads are posted back to the originating Slack thread automatically. Returns rawUrl for direct embedding (for example PR <img src>). ' +
+      'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type). Use type "general" for ordinary files. ' +
+      (isVisualProofAutoPostEnabled()
+        ? 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks when visual-proof auto-post is enabled, visual-proof uploads are posted back to the originating Slack thread automatically. '
+        : 'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not auto-posted to chat for this task; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images). ') +
+      'Returns rawUrl for direct embedding (for example PR <img src>). ' +
       (shouldIncludeLegacySlackArtifactCompositionGuidance()
         ? 'After uploading image files, if `send_chat_reply` or `post_to_slack_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack. '
         : '') +
@@ -198,7 +203,9 @@ roomoteMcpServer.registerTool(
       type: manageArtifactsUploadTypeSchema
         .optional()
         .describe(
-          'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof that auto-posts to Slack for Slack-started tasks.',
+          isVisualProofAutoPostEnabled()
+            ? 'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof that auto-posts to Slack for Slack-started tasks when visual-proof auto-post is enabled.'
+            : 'Artifact type for upload. Required for upload; use "general" for ordinary files and "visual-proof" for visual proof. Visual-proof uploads do not auto-post to chat for this task.',
         ),
       artifactType: taskArtifactTypeSchema
         .optional()
