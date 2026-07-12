@@ -23,12 +23,6 @@ BL_API_KEY=...
 BL_WORKSPACE=my-workspace
 ```
 
-When you save the credentials, Roomote automatically imports the configured
-Roomote worker image and builds a [Blaxel sandbox image](https://docs.blaxel.ai/Sandboxes/Templates).
-The build injects Blaxel's sandbox API and saves the resulting immutable
-`sandbox/name:version` reference as `BLAXEL_IMAGE`. You may still provide
-`BLAXEL_IMAGE` through the process environment to use a prebuilt image.
-
 You can optionally select a region:
 
 ```sh
