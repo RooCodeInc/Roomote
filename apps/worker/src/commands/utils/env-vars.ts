@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { chmodSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -101,7 +101,8 @@ export function writeCommonEnvFile(envVars: Record<string, string>): void {
   );
   lines.push('', 'unset __ROOMOTE_ENV_LOADED', '');
 
-  writeFileSync(COMMON_ENV_FILE_PATH, lines.join('\n'), { mode: 0o644 });
+  writeFileSync(COMMON_ENV_FILE_PATH, lines.join('\n'), { mode: 0o600 });
+  chmodSync(COMMON_ENV_FILE_PATH, 0o600);
 }
 
 /**
