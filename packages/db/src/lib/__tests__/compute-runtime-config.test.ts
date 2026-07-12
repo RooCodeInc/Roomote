@@ -154,9 +154,9 @@ describe('resolveComputeProviderEnvValues', () => {
     expect(values.MODAL_BASE_IMAGE_REF).toBeUndefined();
   });
 
-  it('resolves saved Docker standby settings with runtime values taking precedence', async () => {
+  it('normalizes typed Docker standby settings with runtime values taking precedence', async () => {
     const values = await resolveComputeProviderEnvValues('docker', {
-      runtimeEnv: { DOCKER_STANDBY_MAX_COUNT: '7' },
+      runtimeEnv: { DOCKER_STANDBY_MAX_COUNT: 7 },
       executor: makeExecutor([
         { name: 'DOCKER_STANDBY_MAX_AGE_HOURS', value: '18' },
       ]),
