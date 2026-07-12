@@ -35,25 +35,6 @@ const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>([
   'bedrock-mantle',
 ]);
 
-const LEGACY_BEDROCK_MODEL_IDS = new Map<string, string>([
-  [
-    'amazon-bedrock/global.anthropic.claude-fable-5',
-    'bedrock-mantle/anthropic.claude-fable-5',
-  ],
-  [
-    'amazon-bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0',
-    'bedrock-mantle/anthropic.claude-haiku-4-5',
-  ],
-  [
-    'amazon-bedrock/global.anthropic.claude-opus-4-8',
-    'bedrock-mantle/anthropic.claude-opus-4-8',
-  ],
-  [
-    'amazon-bedrock/global.anthropic.claude-sonnet-5',
-    'bedrock-mantle/anthropic.claude-sonnet-5',
-  ],
-]);
-
 /**
  * Gateway providers route models from many labs under a single provider
  * prefix (e.g. `openrouter/z-ai/glm-5.2`, `vercel/openai/gpt-5.6-terra`,
@@ -201,11 +182,6 @@ export function getTaskModelProviderId(modelId: string): string | null {
 
 export function normalizeTaskModelId(modelId: string): string {
   const trimmedModelId = modelId.trim();
-  const migratedBedrockModelId = LEGACY_BEDROCK_MODEL_IDS.get(trimmedModelId);
-
-  if (migratedBedrockModelId) {
-    return migratedBedrockModelId;
-  }
 
   if (
     trimmedModelId &&

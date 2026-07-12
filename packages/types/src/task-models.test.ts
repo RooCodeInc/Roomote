@@ -50,12 +50,6 @@ describe('normalizeTaskModelId', () => {
     );
   });
 
-  it('migrates legacy Bedrock Runtime model ids to Bedrock Mantle', () => {
-    expect(
-      normalizeTaskModelId('amazon-bedrock/global.anthropic.claude-sonnet-5'),
-    ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');
-  });
-
   it('leaves fully-qualified openrouter ids unchanged', () => {
     expect(normalizeTaskModelId('openrouter/openai/gpt-5.4')).toBe(
       'openrouter/openai/gpt-5.4',
