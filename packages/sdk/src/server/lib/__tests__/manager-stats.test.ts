@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 // The lib module imports the db and github packages at load time; stub them so
 // the pure classification helpers can be exercised without a database or any
-// GitHub network access. `isRoomoteGitHubLogin` is stubbed to false so the only
-// bot signal in these tests is the `newmote[bot]` literal handled in the lib.
+// GitHub network access. `isRoomoteGitHubLogin` is stubbed to recognize only
+// `octomote[bot]` so the tests control the bot signal without slug resolution.
 vi.mock('@roomote/db/server', () => ({
   db: {},
   repositories: {},
@@ -16,7 +16,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/github', () => ({
   Schemas: {
-    isRoomoteGitHubLogin: () => false,
+    isRoomoteGitHubLogin: (login: string) => login === 'octomote[bot]',
   },
   getPullRequestsForAnalytics: vi.fn(),
   getPullRequest: vi.fn(),
@@ -150,7 +150,7 @@ describe('summarizeRoomotePullRequests', () => {
           analyticsPr({ number: 1 }), // authored via task metadata
           analyticsPr({ number: 2 }), // reviewed via task metadata
           // Bot-authored PR with no task row -> authored.
-          analyticsPr({ number: 3, authorLogin: 'newmote[bot]' }),
+          analyticsPr({ number: 3, authorLogin: 'octomote[bot]' }),
           // Unrelated PR that Roomote never touched -> excluded.
           analyticsPr({ number: 4, authorLogin: 'human-dev' }),
         ],
@@ -177,7 +177,7 @@ describe('summarizeRoomotePullRequests', () => {
         analyticsPr({
           number: 3,
           state: 'merged',
-          authorLogin: 'newmote[bot]',
+          authorLogin: 'octomote[bot]',
         }), // bot-authored + merged
       ],
       metadataByKey,
@@ -194,7 +194,7 @@ describe('summarizeRoomotePullRequests', () => {
     ]);
 
     const { authored, reviewed } = summarizeRoomotePullRequests({
-      pullRequests: [analyticsPr({ number: 5, authorLogin: 'newmote[bot]' })],
+      pullRequests: [analyticsPr({ number: 5, authorLogin: 'octomote[bot]' })],
       metadataByKey,
     });
 

@@ -139,7 +139,12 @@ function buildProviderSetup(
                 id: 'amazon-bedrock' as SetupModelProviderId,
                 label: 'Amazon Bedrock',
                 envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-                envVarLabel: 'Bedrock API key',
+                envVarLabel: 'Mantle API key',
+                credentialHelp: {
+                  text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+                  href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
+                  linkLabel: 'Open AWS Bedrock API keys',
+                },
                 additionalEnvFields: [
                   {
                     envVarName: 'AWS_REGION',
@@ -149,8 +154,7 @@ function buildProviderSetup(
                     placeholder: 'us-east-1',
                   },
                 ],
-                defaultRoomoteModel:
-                  'amazon-bedrock/global.anthropic.claude-sonnet-5',
+                defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
                 authKind: 'api-key' as const,
                 suggestedTaskModels: [],
                 runtimeApiKeySatisfied: false,
@@ -415,12 +419,12 @@ describe('InferenceProviderSection', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Edit Amazon Bedrock Bedrock API key',
+        name: 'Edit Amazon Bedrock Mantle API key',
       }),
     );
 
     expect(
-      screen.getByLabelText('New Bedrock API key for Amazon Bedrock'),
+      screen.getByLabelText('New Mantle API key for Amazon Bedrock'),
     ).toHaveValue('');
     expect(screen.getByLabelText('AWS region for Amazon Bedrock')).toHaveValue(
       'us-west-2',
@@ -451,7 +455,7 @@ describe('InferenceProviderSection', () => {
 
     fireEvent.click(
       screen.getByRole('button', {
-        name: 'Edit Amazon Bedrock Bedrock API key',
+        name: 'Edit Amazon Bedrock Mantle API key',
       }),
     );
 
@@ -547,12 +551,18 @@ describe('InferenceProviderSection', () => {
       screen.getByRole('combobox', { name: 'Provider to add' }),
     ).toHaveTextContent('Amazon Bedrock');
     expect(
-      screen.getByLabelText('Bedrock API key for Amazon Bedrock'),
+      screen.getByLabelText('Mantle API key for Amazon Bedrock'),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Open AWS Bedrock API keys' }),
+    ).toHaveAttribute(
+      'href',
+      'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
+    );
 
     await act(async () => {
       fireEvent.change(
-        screen.getByLabelText('Bedrock API key for Amazon Bedrock'),
+        screen.getByLabelText('Mantle API key for Amazon Bedrock'),
         { target: { value: 'bedrock-key' } },
       );
       fireEvent.change(screen.getByLabelText('AWS region for Amazon Bedrock'), {

@@ -423,15 +423,26 @@ any feedback. Rules:
   conflicts), do not add a question or call to action
 - never claim that any changes were made in response to the feedback, and do
   not promise follow-up actions
-- when "Current pull request state" includes CI check lines (for example
-  "- Lint: success"), use those live per-check statuses when mentioning CI
+- focus the message on offers to address open feedback (comments, findings,
+  requested changes), failed CI, or merge conflicts. Prefer one clear call to
+  action for the actionable problem
 - when any CI check is listed as failure or error, treat it as high-signal and
   actionable: call the failure out clearly instead of burying it after a soft
   "looked good" review wrap-up. Prefer a shape like "I reviewed
   [owner/repo#42](pull request URL) on GitHub and the code looked good
   overall, but a test is failing in CI. Do you want me to fix it?" Name the
   failed check when one is listed. Pending checks may get a brief mention but
-  must not overshadow a hard failure.
+  must not overshadow a hard failure
+- when open feedback is already actionable (findings, requested changes, or
+  unhandled review comments), do not mention that CI is passing or green —
+  skip "All listed CI checks are passing" style padding and go straight from
+  the findings to the offer to help
+- only mention successful or all-green CI when there is nothing actionable
+  (no open feedback, no failed CI, no merge conflicts), and only as brief
+  context — for example after a clean self-review with no issues
+- when "Current pull request state" includes CI check lines (for example
+  "- Lint: success"), use those live per-check statuses only if you do mention
+  CI under the rules above
 - when "Current pull request state" includes "- Merge conflicts: yes", treat
   conflicts as high-signal and actionable with the same weight as failed CI.
   Call them out clearly and offer to resolve them, for example: "and the PR

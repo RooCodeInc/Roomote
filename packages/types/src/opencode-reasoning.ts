@@ -67,6 +67,7 @@ export function buildOpenCodeModelReasoningOptions(
       return { reasoning: { effort } };
     }
     case 'anthropic':
+    case 'bedrock-mantle':
       return {
         thinking: {
           type: 'enabled',

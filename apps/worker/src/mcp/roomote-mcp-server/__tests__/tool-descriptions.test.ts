@@ -172,6 +172,7 @@ describe('roomote MCP tool descriptions', () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '123.456',
+      ROOMOTE_SLACK_PROOF_AUTO_POST: 'true',
     });
     const artifactsTool = getRegisteredTool(
       registeredTools,
@@ -188,10 +189,28 @@ describe('roomote MCP tool descriptions', () => {
       'Use action "upload" to upload a workspace-relative file or an absolute file under /tmp (requires path and type).',
     );
     expect(artifactsTool.config.description).toContain(
-      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks, visual-proof uploads are posted back to the originating Slack thread automatically.',
+      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof; for Slack-started tasks when visual-proof auto-post is enabled, visual-proof uploads are posted back to the originating Slack thread automatically.',
     );
     expect(artifactsTool.config.description).not.toContain(
       'After uploading image files, if `send_chat_reply` or `post_to_slack_channel` is available, pass the returned artifact IDs to those tools via `imageArtifactIds` so the user sees them directly in Slack.',
+    );
+  });
+
+  it('documents manual visual-proof posting when Slack auto-post is disabled', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_SLACK_CHANNEL: 'C123',
+      ROOMOTE_SLACK_THREAD_TS: '123.456',
+    });
+    const artifactsTool = getRegisteredTool(
+      registeredTools,
+      'manage_artifacts',
+    );
+
+    expect(artifactsTool.config.description).toContain(
+      'Use type "visual-proof" for uploaded screenshots or proof artifacts that should be treated as visual proof. Visual-proof uploads are not auto-posted to chat for this task; when the image should appear in the originating thread, pass returned artifact IDs to `send_chat_reply` via `imageArtifactIds` (or share `viewUrl`/`rawUrl` in the reply text for non-images).',
+    );
+    expect(artifactsTool.config.description).not.toContain(
+      'visual-proof uploads are posted back to the originating Slack thread automatically.',
     );
   });
 

@@ -780,7 +780,7 @@ describe('getAllowedDevOrigins', () => {
   it('adds wildcard preview domains from PREVIEW_DOMAINS', () => {
     expect(
       getAllowedDevOrigins(
-        'preview.newmote.run, preview-john.ngrok.app, preview.newmote.run',
+        'preview.octomote.run, preview-john.ngrok.app, preview.octomote.run',
       ),
     ).toEqual([
       'localhost',
@@ -788,7 +788,7 @@ describe('getAllowedDevOrigins', () => {
       '*.ngrok.dev',
       '*.ngrok.app',
       '*.ngrok-free.dev',
-      '*.preview.newmote.run',
+      '*.preview.octomote.run',
       '*.preview-john.ngrok.app',
     ]);
   });

@@ -177,7 +177,7 @@ describe('review-code GitHub workflow paths', () => {
       'Before sending the linked-task handoff, do one final PR-state check from the revalidated `get_pull_request` result and skip the handoff when the pull request is no longer open, even though the provider review comments and summary should still be posted normally.',
     );
     expect(skillContent).toContain(
-      'Do not ask the linked implementation task to rely on Roomote-authored review comment links; pull-request follow-up should continue through direct comments and `@roomote` or `@newmote` mentions instead.',
+      'Do not ask the linked implementation task to rely on Roomote-authored review comment links; pull-request follow-up should continue through direct comments and `@roomote` mentions instead.',
     );
     expect(skillContent).toContain(
       'For every terminal outcome in this variant, call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "send_message"',

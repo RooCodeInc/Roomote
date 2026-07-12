@@ -5,6 +5,7 @@ import {
 } from '@roomote/types';
 
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
+const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
 
 type ModelsDevModalities = {
   input?: string[];
@@ -173,6 +174,8 @@ export async function fetchModelsDevCatalog(
  * Resolves the models.dev catalog slug for a Roomote task model id.
  * Strips a leading gateway provider prefix (`openrouter/`, `vercel/`,
  * `requesty/`, `baseten/`, `togetherai/`) and any leading `~` alias marker.
+ * Mantle's `lab.model` identifiers are converted to models.dev's `lab/model`
+ * slugs so metadata continues to resolve through the underlying model lab.
  */
 export function resolveModelsDevSlug(modelId: string): string {
   let slug = modelId;
@@ -185,6 +188,13 @@ export function resolveModelsDevSlug(modelId: string): string {
   }
   if (slug.startsWith('~')) {
     slug = slug.slice(1);
+  }
+  if (slug.startsWith(BEDROCK_MANTLE_PROVIDER_PREFIX)) {
+    const mantleModelId = slug.slice(BEDROCK_MANTLE_PROVIDER_PREFIX.length);
+    const labSeparatorIndex = mantleModelId.indexOf('.');
+    if (labSeparatorIndex > 0) {
+      return `${mantleModelId.slice(0, labSeparatorIndex)}/${mantleModelId.slice(labSeparatorIndex + 1)}`;
+    }
   }
   return slug;
 }

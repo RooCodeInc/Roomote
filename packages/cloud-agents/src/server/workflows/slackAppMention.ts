@@ -18,13 +18,19 @@ import { standardTask } from './standardTask';
 
 export function buildSlackMessageInstructions({
   includeRequestUserInputGuidance = false,
+  visualProofAutoPostEnabled = false,
 }: {
   includeRequestUserInputGuidance?: boolean;
+  visualProofAutoPostEnabled?: boolean;
 } = {}): string {
-  const slackProofDeliveryInstructions = `
+  const slackProofDeliveryInstructions = visualProofAutoPostEnabled
+    ? `
     <rule>Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.</rule>
     <rule>When that built-in proof auto-post happens, do not send a second Slack reply that only narrates the visible proof, counts screenshots, names localhost capture URLs, mentions internal temp or artifact file paths, repeats the capture summary, or says there was no blocker. Treat the built-in proof post as the proof-ready update unless the proof is blocked or that detail materially changes the user's next step.</rule>
-    <rule>Keep later Slack replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.</rule>`;
+    <rule>Keep later Slack replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.</rule>`
+    : `
+    <rule>Visual-proof uploads are not auto-posted to Slack for this task. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `
 <slack_message_instructions>
@@ -239,6 +245,7 @@ export async function slackAppMention({
   username: _legacyUsername,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
+  visualProofAutoPostEnabled,
   prAction,
 }: {
   taskSpec: SlackAppMentionTask;
@@ -249,6 +256,7 @@ export async function slackAppMention({
   username?: string;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
+  visualProofAutoPostEnabled?: boolean;
   prAction?: PrAction;
 }): Promise<{
   prompt: string;
@@ -324,6 +332,7 @@ export async function slackAppMention({
 
   const slackInstructions = buildSlackMessageInstructions({
     includeRequestUserInputGuidance: true,
+    visualProofAutoPostEnabled,
   });
   result.harnessInstructions = result.harnessInstructions
     ? `${slackInstructions}\n\n${result.harnessInstructions}`

@@ -6,7 +6,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   return {
     ...actual,
     Env: {
-      R_GITHUB_APP_SLUG: 'newmote',
+      R_GITHUB_APP_SLUG: 'octomote',
     },
   };
 });
@@ -36,7 +36,7 @@ afterEach(() => {
 
 describe('findReusableReviewSummaryComment', () => {
   it('recognizes the process-env app slug bot as the summary author', () => {
-    const comment = makeReviewSummaryComment('newmote[bot]');
+    const comment = makeReviewSummaryComment('octomote[bot]');
 
     expect(findReusableReviewSummaryComment([comment])).toBe(comment);
   });
@@ -66,7 +66,7 @@ describe('getPrBodyAttributionLine', () => {
       taskUrl: 'https://app.roomote.dev/tasks/123',
     });
 
-    expect(line).toContain('@newmote');
+    expect(line).toContain('@octomote');
   });
 
   it('mentions the database-configured app slug once cached', () => {
@@ -81,6 +81,6 @@ describe('getPrBodyAttributionLine', () => {
     });
 
     expect(line).toContain('@acme');
-    expect(line).not.toContain('@newmote');
+    expect(line).not.toContain('@octomote');
   });
 });

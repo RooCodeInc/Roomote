@@ -14,7 +14,10 @@ import {
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { updateTaskPrStatus } from '@roomote/sdk/server';
+import {
+  recordPrStatusChangeInTaskHistory,
+  updateTaskPrStatus,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
@@ -118,12 +121,31 @@ export async function handleGitLabMergeRequest(
   }
 
   if (mergeRequest.action === 'close' || mergeRequest.action === 'merge') {
-    await updateTaskPrStatus(
-      'gitlab',
-      repoFullName,
-      mergeRequest.iid,
-      mergeRequest.action === 'merge' ? 'merged' : 'closed',
-    );
+    const status =
+      mergeRequest.action === 'merge'
+        ? ('merged' as const)
+        : ('closed' as const);
+
+    await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status);
+
+    await Promise.resolve(
+      recordPrStatusChangeInTaskHistory({
+        sourceControlProvider: 'gitlab',
+        repository: repoFullName,
+        prNumber: mergeRequest.iid,
+        prTitle: mergeRequest.title,
+        prUrl: mergeRequest.url,
+        status,
+        actorLogin:
+          payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
+      }),
+    ).catch((error) => {
+      console.warn(
+        `[handleGitLabMergeRequest] Failed to record PR status in task history for ${repoFullName}!${mergeRequest.iid}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
 
     if (mergeRequest.action === 'merge') {
       await notifyMergedMergeRequestThreads(payload, repoFullName);

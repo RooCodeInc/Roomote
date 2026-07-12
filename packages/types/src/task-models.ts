@@ -30,9 +30,10 @@ export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'xai',
 ] as const;
 
-const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
-  DIRECT_TASK_MODEL_PROVIDER_IDS,
-);
+const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>([
+  ...DIRECT_TASK_MODEL_PROVIDER_IDS,
+  'bedrock-mantle',
+]);
 
 /**
  * Gateway providers route models from many labs under a single provider

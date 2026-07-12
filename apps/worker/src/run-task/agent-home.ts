@@ -4,7 +4,9 @@ import * as path from 'node:path';
 import {
   buildOpenCodeModelReasoningOptions,
   collectOpenRouterVariantModelAlias,
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
@@ -43,7 +45,16 @@ const OPENCODE_CONFIG_PARENT_DIR_NAME = '.config';
 
 const OPENCODE_CONFIG_DIR_NAME = 'opencode';
 
+const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
+  'google-application-credentials.json';
+
 const OPENROUTER_PROVIDER_ID = 'openrouter';
+
+const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
+
+const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
+
+const AWS_REGION_PATTERN = /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -540,6 +551,68 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
     : {};
+}
+
+function mergeBedrockMantleProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const mantleModelIds = [
+    ...new Set(
+      modelIds.flatMap((modelId) => {
+        const prefix = `${BEDROCK_MANTLE_PROVIDER_ID}/`;
+        const normalized = modelId?.trim();
+
+        return normalized?.startsWith(prefix)
+          ? [normalized.slice(prefix.length)]
+          : [];
+      }),
+    ),
+  ];
+
+  if (mantleModelIds.length === 0) {
+    return providerConfig;
+  }
+
+  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
+
+  if (!AWS_REGION_PATTERN.test(region)) {
+    throw new Error(
+      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
+    );
+  }
+
+  const existingProvider = asRecord(providerConfig[BEDROCK_MANTLE_PROVIDER_ID]);
+  const existingOptions = asRecord(existingProvider.options);
+  const existingModels = asRecord(existingProvider.models);
+  const models = Object.fromEntries(
+    mantleModelIds.map((modelId) => [
+      modelId,
+      {
+        name: modelId,
+        ...asRecord(existingModels[modelId]),
+      },
+    ]),
+  );
+
+  return {
+    ...providerConfig,
+    [BEDROCK_MANTLE_PROVIDER_ID]: {
+      ...existingProvider,
+      npm: '@ai-sdk/anthropic',
+      name: 'Amazon Bedrock',
+      options: {
+        ...existingOptions,
+        baseURL: `https://bedrock-mantle.${region}.api.aws/anthropic/v1`,
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+      models: {
+        ...existingModels,
+        ...models,
+      },
+    },
+  };
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -1046,9 +1119,18 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeOpenRouterVariantAliasModels(
-    providerReasoningConfig,
-    variantAliases,
+  const providerConfig = mergeBedrockMantleProviderConfig(
+    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+    runtimeEnv,
+    [
+      effectiveCodingModel,
+      model,
+      smallModel,
+      visionModel,
+      codeReviewModel,
+      exploreModel,
+      planningModel,
+    ],
   );
 
   return {
@@ -1148,6 +1230,8 @@ export function generateOpenCodeConfig({
     OPENCODE_CONFIG_PARENT_DIR_NAME,
     OPENCODE_CONFIG_DIR_NAME,
   );
+  fs.mkdirSync(openCodeConfigDir, { recursive: true });
+  materializeInlineGoogleCredentials(runtimeEnv, homeDir);
   const resolvedModel = resolveConfiguredPromptModel(model);
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
@@ -1163,7 +1247,6 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  fs.mkdirSync(openCodeConfigDir, { recursive: true });
   writeOpenCodeSlackHookFiles(openCodeConfigDir);
 
   if (developerInstructionsContent) {
@@ -1299,6 +1382,65 @@ export function generateOpenCodeConfig({
     openCodeConfigDir,
     model: promptModel,
   };
+}
+
+/**
+ * Resolve the OpenCode data directory shared by credential files, auth state,
+ * and runtime shell overlays.
+ */
+export function resolveOpenCodeDataDir(
+  homeDir: string,
+  runtimeEnv: Record<string, string>,
+): string {
+  const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
+
+  return path.join(
+    xdgDataHome || path.join(homeDir, '.local', 'share'),
+    OPENCODE_CONFIG_DIR_NAME,
+  );
+}
+
+/**
+ * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
+ * file path. Roomote accepts pasted JSON, so materialize it at the common
+ * config-generation boundary before any provider process can observe it.
+ * Throw on write failures rather than forwarding raw credentials to OpenCode,
+ * whose file-not-found errors may echo the credential value.
+ */
+function materializeInlineGoogleCredentials(
+  runtimeEnv: Record<string, string>,
+  homeDir: string,
+): void {
+  const credentialsValue =
+    runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
+
+  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
+    return;
+  }
+
+  const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
+  const credentialsFilePath = path.join(
+    openCodeDataDir,
+    GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME,
+  );
+
+  try {
+    fs.mkdirSync(openCodeDataDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(credentialsFilePath, credentialsValue, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown credentials write error';
+    throw new Error(
+      `Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} before starting OpenCode: ${message}`,
+    );
+  }
+
+  runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] = credentialsFilePath;
 }
 
 function normalizePackagedFolderName(

@@ -2,6 +2,7 @@ const {
   mockEnqueueTask,
   mockGetAdoAutomationTargets,
   mockUpdateTaskPrStatus,
+  mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
   mockDedupSelect,
   mockNotifySlackPrMerge,
@@ -11,6 +12,7 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetAdoAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
+  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   // Resolves the rows for each `db.select().from(tasks).innerJoin(...)`
   // dedup lookup, in call order.
@@ -26,6 +28,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   updateTaskPrStatus: mockUpdateTaskPrStatus,
+  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
 }));
 
 vi.mock('@roomote/db/server', () => ({
