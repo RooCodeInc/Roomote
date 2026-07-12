@@ -13,6 +13,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  type SourceControlProvider,
   sourceControlProviderSchema,
 } from '@roomote/types';
 
@@ -27,8 +28,6 @@ export const recordPrStatusChangeInTaskHistoryInputSchema = z.object({
   prUrl: z.string().min(1),
   status: z.enum(['merged', 'closed']),
   actorLogin: z.string().default('someone'),
-  /** ISO timestamp from the provider event used for stable task-message ts. */
-  eventAt: z.string().nullable().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
 });
 
@@ -42,6 +41,33 @@ type RecordPrStatusChangeInTaskHistoryResult = {
 };
 
 /**
+ * Provider-native shorthand for a pull/merge request number.
+ * GitHub/Gitea/Bitbucket use `#n`, GitLab uses `!n`, Azure DevOps has no
+ * short sigil so the number is labeled as a PR.
+ */
+export function formatPullRequestReference({
+  repository,
+  prNumber,
+  sourceControlProvider = 'github',
+}: {
+  repository: string;
+  prNumber: number;
+  sourceControlProvider?: SourceControlProvider;
+}): string {
+  switch (sourceControlProvider) {
+    case 'gitlab':
+      return `${repository}!${prNumber}`;
+    case 'ado':
+      return `${repository} PR ${prNumber}`;
+    case 'github':
+    case 'gitea':
+    case 'bitbucket':
+    default:
+      return `${repository}#${prNumber}`;
+  }
+}
+
+/**
  * Builds the plain-text task-history line for a terminal PR status change so
  * the agent (and transcript) see the same event signal as users do in chat.
  */
@@ -52,23 +78,17 @@ export function formatPrStatusChangeTaskHistoryText({
   prUrl,
   status,
   actorLogin,
-}: Omit<
-  RecordPrStatusChangeInTaskHistoryInput,
-  'eventAt' | 'sourceControlProvider'
->): string {
-  return `${repository}#${prNumber} (${prTitle}) was ${status} by ${actorLogin}\n${prUrl}`;
-}
+  sourceControlProvider = 'github',
+}: Omit<RecordPrStatusChangeInTaskHistoryInput, never> & {
+  sourceControlProvider?: SourceControlProvider;
+}): string {
+  const reference = formatPullRequestReference({
+    repository,
+    prNumber,
+    sourceControlProvider,
+  });
 
-function resolveEventTimestamp(eventAt: string | null | undefined): number {
-  if (eventAt) {
-    const parsed = Date.parse(eventAt);
-
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return Date.now();
+  return `${reference} (${prTitle}) was ${status} by ${actorLogin}\n${prUrl}`;
 }
 
 function buildStatusRecordedKey({
@@ -94,6 +114,11 @@ function buildStatusRecordedKey({
  * linked to a pull request when that PR is merged or closed. Mirrors the
  * PR-review notification source-of-truth path so the next agent turn re-surfaces
  * the status change without starting a new turn here.
+ *
+ * Message timestamps use `Date.now()` (not provider event times) so two
+ * terminal events in the same second cannot collide on the
+ * `(taskId, protocol, ts, eventType)` unique key. Webhook-retry idempotency is
+ * owned by the Redis claim key below.
  */
 export async function recordPrStatusChangeInTaskHistory(
   input: RecordPrStatusChangeInTaskHistoryInput,
@@ -123,8 +148,8 @@ export async function recordPrStatusChangeInTaskHistory(
     prUrl: parsedInput.prUrl,
     status: parsedInput.status,
     actorLogin: parsedInput.actorLogin,
+    sourceControlProvider,
   });
-  const ts = resolveEventTimestamp(parsedInput.eventAt);
   const redis = getRedis();
 
   let recordedTaskCount = 0;
@@ -172,7 +197,9 @@ export async function recordPrStatusChangeInTaskHistory(
         runId: latestRun.id,
         taskId,
         envelope: {
-          ts,
+          // Fresh wall-clock ms avoids second-granularity provider clock
+          // collisions across distinct PR status events on the same task.
+          ts: Date.now(),
           eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
           role: 'assistant',
           protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,

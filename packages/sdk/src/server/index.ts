@@ -146,6 +146,7 @@ export {
 
 export {
   formatPrStatusChangeTaskHistoryText,
+  formatPullRequestReference,
   recordPrStatusChangeInTaskHistory,
   recordPrStatusChangeInTaskHistoryInputSchema,
   type RecordPrStatusChangeInTaskHistoryInput,

@@ -46,8 +46,37 @@ import {
 
 import {
   formatPrStatusChangeTaskHistoryText,
+  formatPullRequestReference,
   recordPrStatusChangeInTaskHistory,
 } from '../record-pr-status-change';
+
+describe('formatPullRequestReference', () => {
+  it('uses provider-native pull request shorthand', () => {
+    expect(
+      formatPullRequestReference({
+        repository: 'owner/repo',
+        prNumber: 42,
+        sourceControlProvider: 'github',
+      }),
+    ).toBe('owner/repo#42');
+
+    expect(
+      formatPullRequestReference({
+        repository: 'group/project',
+        prNumber: 42,
+        sourceControlProvider: 'gitlab',
+      }),
+    ).toBe('group/project!42');
+
+    expect(
+      formatPullRequestReference({
+        repository: 'org/project/repo',
+        prNumber: 42,
+        sourceControlProvider: 'ado',
+      }),
+    ).toBe('org/project/repo PR 42');
+  });
+});
 
 describe('formatPrStatusChangeTaskHistoryText', () => {
   it('formats merged and closed status lines with a PR link', () => {
@@ -77,16 +106,51 @@ describe('formatPrStatusChangeTaskHistoryText', () => {
       'owner/repo#42 (Fix auth) was closed by matt\nhttps://github.com/owner/repo/pull/42',
     );
   });
+
+  it('uses GitLab and ADO reference styles', () => {
+    expect(
+      formatPrStatusChangeTaskHistoryText({
+        repository: 'group/project',
+        prNumber: 7,
+        prTitle: 'Ship it',
+        prUrl: 'https://gitlab.com/group/project/-/merge_requests/7',
+        status: 'merged',
+        actorLogin: 'alice',
+        sourceControlProvider: 'gitlab',
+      }),
+    ).toBe(
+      'group/project!7 (Ship it) was merged by alice\nhttps://gitlab.com/group/project/-/merge_requests/7',
+    );
+
+    expect(
+      formatPrStatusChangeTaskHistoryText({
+        repository: 'org/project/repo',
+        prNumber: 9,
+        prTitle: 'Ship it',
+        prUrl: 'https://dev.azure.com/org/project/_git/repo/pullrequest/9',
+        status: 'closed',
+        actorLogin: 'bob',
+        sourceControlProvider: 'ado',
+      }),
+    ).toBe(
+      'org/project/repo PR 9 (Ship it) was closed by bob\nhttps://dev.azure.com/org/project/_git/repo/pullrequest/9',
+    );
+  });
 });
 
 describe('recordPrStatusChangeInTaskHistory', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
     mockFindFirstTaskRun.mockResolvedValue({ id: 99 });
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   const baseInput = {
@@ -96,7 +160,6 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     prUrl: 'https://github.com/owner/repo/pull/42',
     status: 'merged' as const,
     actorLogin: 'matt',
-    eventAt: '2026-07-12T12:00:00.000Z',
     sourceControlProvider: 'github' as const,
   };
 
@@ -122,6 +185,9 @@ describe('recordPrStatusChangeInTaskHistory', () => {
   });
 
   it('records an out-of-band assistant message for each linked task', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-12T15:30:00.123Z'));
+
     mockFindManyTaskPullRequests.mockResolvedValue([
       { taskId: 'task-1' },
       { taskId: 'task-1' },
@@ -141,7 +207,7 @@ describe('recordPrStatusChangeInTaskHistory', () => {
 
     const text =
       'owner/repo#42 (Fix auth) was closed by alice\nhttps://github.com/owner/repo/pull/42';
-    const expectedTs = Date.parse('2026-07-12T12:00:00.000Z');
+    const expectedTs = Date.parse('2026-07-12T15:30:00.123Z');
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
     expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(1, {

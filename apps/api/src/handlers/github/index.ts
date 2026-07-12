@@ -461,9 +461,6 @@ github.post('/', async (c) => {
               (payload.pull_request.merged
                 ? payload.pull_request.merged_by?.login
                 : null) || payload.sender.login,
-            eventAt: payload.pull_request.merged
-              ? payload.pull_request.merged_at
-              : payload.pull_request.closed_at,
           }),
         ).catch((error) => {
           console.warn(
