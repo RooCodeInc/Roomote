@@ -37,6 +37,7 @@ export async function spawnBlaxelWorker(
     blaxelRegion?: string;
     blaxelTimeoutMs: number;
     localTarballPath?: string;
+    extraEnv?: Record<string, string>;
     deploymentSlug?: string;
     blaxelTags?: Record<string, string>;
   },
@@ -182,7 +183,10 @@ export async function spawnBlaxelWorker(
         deploymentSlug: config.deploymentSlug,
         environmentId,
         image: config.blaxelImage,
-        extraEnv: { SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs) },
+        extraEnv: {
+          ...config.extraEnv,
+          SANDBOX_TIMEOUT_MS: String(config.blaxelTimeoutMs),
+        },
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),

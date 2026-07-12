@@ -133,6 +133,7 @@ export async function spawnModalWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     modalTags?: Record<string, string>;
+    extraEnv?: Record<string, string>;
   },
 ): Promise<{
   machineId: string;
@@ -390,6 +391,7 @@ export async function spawnModalWorker(
         environmentId,
         baseImageRef: modalBaseImageRef,
         extraEnv: {
+          ...config.extraEnv,
           SANDBOX_TIMEOUT_MS: String(modalTimeoutMs),
         },
       }),

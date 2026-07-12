@@ -71,6 +71,7 @@ export async function spawnDockerWorker(
     egressPolicy: DockerWorkerEgressPolicy;
     localWorkerReleasePath?: string;
     deploymentSlug?: string;
+    extraEnv?: Record<string, string>;
   },
 ): Promise<{ containerId: string }> {
   if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
@@ -307,6 +308,7 @@ export async function spawnDockerWorker(
       environmentId: taskRun.payload.environmentId,
       image: config.image,
       extraEnv: {
+        ...config.extraEnv,
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
         TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
         // Mock-Slack parity: worker-side SlackNotifier calls (question blocks,

@@ -19,6 +19,34 @@ describe('generateOpenCodeConfig provider support', () => {
     return homeDir;
   }
 
+  it('configures managed inference without writing the scoped token to disk', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'roomote/default',
+        ROOMOTE_CLOUD_INFERENCE_BASE_URL:
+          'http://roomote-cloud:4100/inference/v1/',
+        ROOMOTE_CLOUD_INFERENCE_TOKEN: 'scoped-runtime-token',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.roomote).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Roomote Managed Inference',
+      options: {
+        baseURL: 'http://roomote-cloud:4100/inference/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_INFERENCE_TOKEN}',
+      },
+      models: {
+        default: { name: 'Roomote Default' },
+      },
+    });
+    expect(result.configContent).not.toContain('scoped-runtime-token');
+  });
+
   it('routes Bedrock models through the Mantle Anthropic endpoint', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

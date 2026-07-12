@@ -111,6 +111,7 @@ export async function spawnE2bWorker(
     e2bTemplateId: string;
     e2bTimeoutMs: number;
     localTarballPath?: string;
+    extraEnv?: Record<string, string>;
     deploymentSlug?: string;
     e2bTags?: Record<string, string>;
   },
@@ -331,6 +332,7 @@ export async function spawnE2bWorker(
         environmentId,
         templateId: e2bTemplateId,
         extraEnv: {
+          ...config.extraEnv,
           SANDBOX_TIMEOUT_MS: String(e2bTimeoutMs),
         },
       }),

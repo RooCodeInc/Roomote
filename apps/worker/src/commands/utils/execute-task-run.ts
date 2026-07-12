@@ -14,6 +14,7 @@ import {
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import { WorkerEnv } from '../../env';
+import { closeManagedRuntime } from '../../managed-runtime';
 import {
   type HarnessLogger,
   createStartupLogger,
@@ -311,6 +312,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
   let callbacks: RunTaskCallbacks = {};
   let startupLogger = createStartupLogger();
   let workerEnv: WorkerEnv | undefined = undefined;
+  let managedRuntimeStatus: RunStatus | undefined = undefined;
   let backgroundEnvironmentSetupController =
     new BackgroundEnvironmentSetupController({
       recordWorkerRuntimeEvent: async () => undefined,
@@ -402,6 +404,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       await backgroundEnvironmentSetupController.flush();
       startupLogger.debug.log('Task is already canceled, exiting');
       await callbacks.onExit?.(taskRun, RunStatus.Canceled, context);
+      managedRuntimeStatus = RunStatus.Canceled;
       return true;
     }
 
@@ -642,6 +645,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     });
     const result =
       await backgroundEnvironmentSetupController.runTask(runTaskPromise);
+    managedRuntimeStatus = result.status;
 
     await backgroundEnvironmentSetupController.flush();
 
@@ -671,6 +675,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
 
     return true;
   } catch (error) {
+    managedRuntimeStatus = RunStatus.Failed;
     await backgroundEnvironmentSetupController.flush();
 
     if (taskRun && error instanceof WorkspaceRepositoryPreparationError) {
@@ -730,6 +735,19 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
             message: `Stopped compute usage loop for task run #${taskRun.id}.`,
             details: { reason: 'compute_provider_usage_loop_stopped' },
           });
+        }
+      }
+
+      if (workerEnv && managedRuntimeStatus) {
+        try {
+          await closeManagedRuntime({
+            workerEnv,
+            status: managedRuntimeStatus,
+          });
+        } catch (error) {
+          startupLogger.debug.warn(
+            `[managed-runtime] Failed to close session: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
     } finally {

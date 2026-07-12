@@ -112,6 +112,7 @@ export async function spawnDaytonaWorker(
     daytonaSnapshotName: string;
     daytonaTimeoutMs: number;
     localTarballPath?: string;
+    extraEnv?: Record<string, string>;
     deploymentSlug?: string;
     daytonaTags?: Record<string, string>;
   },
@@ -328,6 +329,7 @@ export async function spawnDaytonaWorker(
         environmentId,
         snapshotName: daytonaSnapshotName,
         extraEnv: {
+          ...config.extraEnv,
           SANDBOX_TIMEOUT_MS: String(daytonaTimeoutMs),
         },
       }),

@@ -74,6 +74,10 @@ const MODEL_RUNTIME_ENV_KEYS = [
   'OPENCODE_CONFIG_CONTENT',
   'OPENCODE_COMMAND',
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  'ROOMOTE_CLOUD_INFERENCE_BASE_URL',
+  'ROOMOTE_CLOUD_INFERENCE_TOKEN',
+  'ROOMOTE_CLOUD_SESSION_URL',
+  'ROOMOTE_CLOUD_RESERVATION_ID',
 ] as const;
 function buildLauncherOpenCodeEnv(
   processEnv: NodeJS.ProcessEnv,
@@ -358,6 +362,14 @@ export class WorkerEnv {
 
   getRuntimeEnv(): Record<string, string> {
     return { ...this.runtimeEnv };
+  }
+
+  getManagedRuntimeEnv(): Record<string, string> {
+    return Object.fromEntries(
+      Object.entries(this.launcherOpenCodeEnv).filter(([key]) =>
+        key.startsWith('ROOMOTE_CLOUD_'),
+      ),
+    );
   }
 
   /** Set a single system base var. */

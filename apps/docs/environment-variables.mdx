@@ -168,6 +168,8 @@ as per-task auth tokens or workspace paths.
 | `R_EXPLORE_MODEL_REASONING_EFFORT`     | Optional     | Reasoning level for the exploration model.                                                                                              |
 | `R_PLANNING_MODEL_REASONING_EFFORT`    | Optional     | Reasoning level for the advisor model.                                                                                                  |
 | `R_MODEL_ENV_KEYS`                     | Optional     | Comma- or space-separated list of extra provider key env vars to forward to task workers.                                               |
+| `ROOMOTE_CLOUD_URL`                    | Hosted only  | Roomote Cloud control-plane origin. Set by the hosted deployment together with its deployment token.                                    |
+| `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`       | Hosted only  | Rotatable deployment credential for managed runtime admission. It is hashed by Roomote Cloud and never forwarded into task sandboxes.   |
 | `OPENROUTER_API_KEY`                   | Provider key | OpenRouter API key. Can also be saved from **Settings > Models**.                                                                       |
 | `AI_GATEWAY_API_KEY`                   | Provider key | Vercel AI Gateway API key.                                                                                                              |
 | `OPENAI_API_KEY`                       | Provider key | OpenAI API key.                                                                                                                         |

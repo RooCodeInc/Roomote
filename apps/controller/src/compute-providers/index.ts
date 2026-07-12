@@ -1,4 +1,5 @@
 export { spawnModalWorker } from './spawn-modal-worker';
+export { spawnRoomoteCloudWorker } from './spawn-roomote-cloud-worker';
 export { spawnDockerWorker } from './spawn-docker-worker';
 export { cleanupStaleDockerSandboxes } from './docker-sandbox-security';
 export { spawnDaytonaWorker } from './spawn-daytona-worker';

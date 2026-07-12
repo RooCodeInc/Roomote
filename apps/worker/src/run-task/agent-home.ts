@@ -50,6 +50,8 @@ const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
+const ROOMOTE_CLOUD_PROVIDER_ID = 'roomote';
+
 const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
 
 const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
@@ -1119,18 +1121,24 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeBedrockMantleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+  const providerConfig = mergeRoomoteCloudProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeOpenRouterVariantAliasModels(
+        providerReasoningConfig,
+        variantAliases,
+      ),
+      runtimeEnv,
+      [
+        effectiveCodingModel,
+        model,
+        smallModel,
+        visionModel,
+        codeReviewModel,
+        exploreModel,
+        planningModel,
+      ],
+    ),
     runtimeEnv,
-    [
-      effectiveCodingModel,
-      model,
-      smallModel,
-      visionModel,
-      codeReviewModel,
-      exploreModel,
-      planningModel,
-    ],
   );
 
   return {
@@ -1140,6 +1148,38 @@ function resolveModelBackedOpenCodeConfig(
     ...(Object.keys(providerConfig).length > 0
       ? { provider: providerConfig }
       : {}),
+  };
+}
+
+function mergeRoomoteCloudProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+): Record<string, unknown> {
+  const baseUrl = runtimeEnv.ROOMOTE_CLOUD_INFERENCE_BASE_URL?.trim();
+  const token = runtimeEnv.ROOMOTE_CLOUD_INFERENCE_TOKEN?.trim();
+
+  if (!baseUrl && !token) return providerConfig;
+  if (!baseUrl || !token) {
+    throw new Error(
+      'Managed inference config is partial; both ROOMOTE_CLOUD_INFERENCE_BASE_URL and ROOMOTE_CLOUD_INFERENCE_TOKEN are required',
+    );
+  }
+
+  return {
+    ...providerConfig,
+    [ROOMOTE_CLOUD_PROVIDER_ID]: {
+      npm: '@ai-sdk/openai-compatible',
+      name: 'Roomote Managed Inference',
+      options: {
+        baseURL: baseUrl.replace(/\/+$/u, ''),
+        apiKey: '{env:ROOMOTE_CLOUD_INFERENCE_TOKEN}',
+      },
+      models: {
+        default: { name: 'Roomote Default' },
+        fast: { name: 'Roomote Fast' },
+        review: { name: 'Roomote Review' },
+      },
+    },
   };
 }
 
