@@ -63,7 +63,7 @@ describe('review meta footer', () => {
         commitHref,
       }),
     ).toBe(
-      `<sub>Reviewing <a href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef" target="_blank" rel="noopener noreferrer">#abc1234</a></sub>`,
+      `<sub>Reviewing <a href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef" target="_blank" rel="noopener noreferrer">abc1234</a></sub>`,
     );
 
     expect(
@@ -71,7 +71,7 @@ describe('review meta footer', () => {
         phase: 'Reviewed',
         sha: 'abc1234deadbeef',
       }),
-    ).toBe('<sub>Reviewed #abc1234</sub>');
+    ).toBe('<sub>Reviewed abc1234</sub>');
   });
 
   it('parses the marker SHA', () => {
@@ -90,10 +90,11 @@ describe('review meta footer', () => {
 
     expect(body.endsWith('</sub>')).toBe(true);
     expect(body).toContain('<sub>Reviewing ');
-    expect(body).toContain('#abc1234');
+    expect(body).toContain('abc1234');
     expect(body).toContain(
       'href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef"',
     );
+    expect(body).not.toContain('#abc1234');
     expect(body).not.toContain(' UTC');
     expect(body).not.toContain(' · ');
     expect(body.indexOf(REVIEW_CHECKLIST_END_MARKER)).toBeLessThan(
@@ -117,11 +118,11 @@ describe('review meta footer', () => {
     });
 
     expect(updated.startsWith(MARKER('aaa1111deadbeef'))).toBe(true);
-    expect(updated).toContain('#aaa1111');
+    expect(updated).toContain('>aaa1111</a>');
     expect(updated).toContain(
       'href="https://github.com/RooCodeInc/Roomote/commit/aaa1111deadbeef"',
     );
-    expect(updated).not.toContain('#bbb2222');
+    expect(updated).not.toContain('bbb2222');
   });
 });
 
@@ -149,7 +150,7 @@ describe('buildTerminalReviewSummaryBody', () => {
     expect(updated).toContain(
       `${REVIEW_CHECKLIST_START_MARKER}\n- [ ] Fix the thing\n- [x] Already addressed\n${REVIEW_CHECKLIST_END_MARKER}`,
     );
-    expect(updated).toContain('<sub>Reviewed #abc123</sub>');
+    expect(updated).toContain('<sub>Reviewed abc123</sub>');
   });
 
   it('finalizes an in-progress sync summary', () => {
@@ -167,7 +168,7 @@ describe('buildTerminalReviewSummaryBody', () => {
     expect(updated!.startsWith(MARKER('def456', 'sync'))).toBe(true);
     expect(updated).toContain(terminal);
     expect(updated).not.toContain(IN_PROGRESS_SYNC);
-    expect(updated).toContain('<sub>Reviewed #def456</sub>');
+    expect(updated).toContain('<sub>Reviewed def456</sub>');
   });
 
   it('does not clobber a comment the agent already finalized', () => {

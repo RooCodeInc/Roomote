@@ -82,7 +82,7 @@ export function buildGithubCommitHref({
 
 /**
  * Visible trailing status footer for the main Roomote review summary comment.
- * Example: `<sub>Reviewing <a ...>#abc1234</a></sub>`
+ * Example: `<sub>Reviewing <a ...>abc1234</a></sub>`
  */
 export function buildReviewMetaFooter({
   phase,
@@ -94,10 +94,9 @@ export function buildReviewMetaFooter({
   commitHref?: string;
 }): string {
   const shortSha = sha.slice(0, 7);
-  const shaLabel = `#${shortSha}`;
   const linkedSha = commitHref
-    ? buildGithubCommentActionLink({ href: commitHref, label: shaLabel })
-    : shaLabel;
+    ? buildGithubCommentActionLink({ href: commitHref, label: shortSha })
+    : shortSha;
 
   return `<sub>${phase} ${linkedSha}</sub>`;
 }
