@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 
 import {
   generateOpenCodeConfig,
+  resolveOpenCodeDataDir,
   ROOMOTE_OPENCODE_SLACK_STOP_HOOK_FILE_NAME,
   type OpenCodeConfigMcpServer,
 } from '../../../../run-task/agent-home';
@@ -264,24 +265,6 @@ async function materializeOpenCodeBashEnvOverlay(options: {
     { mode: 0o600 },
   );
   commandEnv.BASH_ENV = overlayPath;
-}
-
-/**
- * Resolve the opencode data directory the harness uses for `auth.json`.
- * Mirrors opencode's `Global.Path.data`: `$XDG_DATA_HOME/opencode` when
- * `XDG_DATA_HOME` is set, otherwise `~/.local/share/opencode`.
- */
-function resolveOpenCodeDataDir(
-  homeDir: string,
-  commandEnv: Record<string, string>,
-): string {
-  const xdgDataHome = commandEnv.XDG_DATA_HOME?.trim();
-
-  if (xdgDataHome) {
-    return path.join(xdgDataHome, 'opencode');
-  }
-
-  return path.join(homeDir, '.local', 'share', 'opencode');
 }
 
 /**

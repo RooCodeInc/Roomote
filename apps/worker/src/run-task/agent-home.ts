@@ -1391,6 +1391,22 @@ export function generateOpenCodeConfig({
  * Throw on write failures rather than forwarding raw credentials to OpenCode,
  * whose file-not-found errors may echo the credential value.
  */
+/**
+ * Resolve the OpenCode data directory shared by credential files, auth state,
+ * and runtime shell overlays.
+ */
+export function resolveOpenCodeDataDir(
+  homeDir: string,
+  runtimeEnv: Record<string, string>,
+): string {
+  const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
+
+  return path.join(
+    xdgDataHome || path.join(homeDir, '.local', 'share'),
+    OPENCODE_CONFIG_DIR_NAME,
+  );
+}
+
 function materializeInlineGoogleCredentials(
   runtimeEnv: Record<string, string>,
   homeDir: string,
@@ -1402,10 +1418,7 @@ function materializeInlineGoogleCredentials(
     return;
   }
 
-  const openCodeDataDir = path.join(
-    runtimeEnv.XDG_DATA_HOME?.trim() || path.join(homeDir, '.local', 'share'),
-    OPENCODE_CONFIG_DIR_NAME,
-  );
+  const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
   const credentialsFilePath = path.join(
     openCodeDataDir,
     GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME,
