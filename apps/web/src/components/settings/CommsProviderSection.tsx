@@ -665,7 +665,7 @@ export function CommsProviderSection({
               surface="settings"
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
-                  ? 'Roomote will generate the webhook secret if you leave it blank, register the webhook automatically when you save, and default Telegram task launches to the admin who saves this configuration.'
+                  ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
                   : undefined
               }
               onShowManualSlackValues={() => setShowManualSlackValues(true)}

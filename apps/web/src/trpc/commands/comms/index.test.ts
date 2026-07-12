@@ -219,6 +219,48 @@ describe('comms commands', () => {
         },
       });
     });
+
+    it('auto-generates a Telegram webhook secret when the field is omitted', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'telegram',
+        values: {
+          R_TELEGRAM_BOT_TOKEN: 'bot-token',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          userId: 'comms-test-user',
+          values: expect.arrayContaining([
+            expect.objectContaining({
+              name: 'R_TELEGRAM_BOT_TOKEN',
+              value: 'bot-token',
+            }),
+            expect.objectContaining({
+              name: 'R_TELEGRAM_WEBHOOK_SECRET',
+              value: expect.any(String),
+            }),
+          ]),
+        }),
+      );
+
+      const savedValues =
+        mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]?.values ??
+        [];
+      const generatedSecret = savedValues.find(
+        (value: { name: string; value: string }) =>
+          value.name === 'R_TELEGRAM_WEBHOOK_SECRET',
+      )?.value;
+      expect(generatedSecret).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+    });
   });
 
   describe('telegram status', () => {
@@ -235,6 +277,22 @@ describe('comms commands', () => {
       expect(telegram?.setupSatisfied).toBe(true);
       // No bot token resolvable in this test, so no webhook probe runs.
       expect(telegram?.telegramWebhook).toBeNull();
+    });
+
+    it('treats Telegram as configured with only a bot token and keeps the secret optional', async () => {
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TELEGRAM_BOT_TOKEN',
+      ]);
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const telegram = status.providers.find((p) => p.id === 'telegram');
+      const webhookSecret = telegram?.fields.find(
+        (field) => field.envVarName === 'R_TELEGRAM_WEBHOOK_SECRET',
+      );
+
+      expect(telegram?.savedSatisfied).toBe(true);
+      expect(telegram?.setupSatisfied).toBe(true);
+      expect(webhookSecret?.required).toBe(false);
     });
   });
 

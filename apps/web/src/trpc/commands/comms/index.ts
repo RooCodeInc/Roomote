@@ -227,6 +227,7 @@ function withTelegramProvider(
             envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
             label: 'Telegram Webhook Secret',
             secret: true,
+            required: false,
           }),
           buildField({
             envVarName: 'R_TELEGRAM_BOT_USERNAME',
@@ -234,15 +235,9 @@ function withTelegramProvider(
             required: false,
           }),
         ],
-        runtimeSatisfied:
-          isRuntime('R_TELEGRAM_BOT_TOKEN') &&
-          isRuntime('R_TELEGRAM_WEBHOOK_SECRET'),
-        savedSatisfied:
-          isSaved('R_TELEGRAM_BOT_TOKEN') &&
-          isSaved('R_TELEGRAM_WEBHOOK_SECRET'),
-        setupSatisfied:
-          isSatisfied('R_TELEGRAM_BOT_TOKEN') &&
-          isSatisfied('R_TELEGRAM_WEBHOOK_SECRET'),
+        runtimeSatisfied: isRuntime('R_TELEGRAM_BOT_TOKEN'),
+        savedSatisfied: isSaved('R_TELEGRAM_BOT_TOKEN'),
+        setupSatisfied: isSatisfied('R_TELEGRAM_BOT_TOKEN'),
         telegramWebhook,
       },
     ],

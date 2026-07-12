@@ -47,18 +47,28 @@ const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
 ]);
 
+const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
+  'R_TELEGRAM_WEBHOOK_SECRET',
+]);
+
 export function getSetupVisibleFields(provider: ProviderStatus | null) {
   if (!provider) {
     return [];
   }
 
-  if (provider.id !== 'microsoft') {
-    return provider.fields;
+  if (provider.id === 'microsoft') {
+    return provider.fields.filter(
+      (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
   }
 
-  return provider.fields.filter(
-    (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
-  );
+  if (provider.id === 'telegram') {
+    return provider.fields.filter(
+      (field) => !TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
+  }
+
+  return provider.fields;
 }
 
 export function getSetupEffectiveFieldValue({
