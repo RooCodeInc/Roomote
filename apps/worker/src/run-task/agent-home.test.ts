@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { generateOpenCodeConfig } from './agent-home';
 
-describe('generateOpenCodeConfig Amazon Bedrock support', () => {
+describe('generateOpenCodeConfig provider support', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -14,7 +14,7 @@ describe('generateOpenCodeConfig Amazon Bedrock support', () => {
   });
 
   function createHomeDir(): string {
-    const homeDir = mkdtempSync(join(tmpdir(), 'roomote-bedrock-'));
+    const homeDir = mkdtempSync(join(tmpdir(), 'roomote-opencode-'));
     tempDirs.push(homeDir);
     return homeDir;
   }
@@ -76,5 +76,52 @@ describe('generateOpenCodeConfig Amazon Bedrock support', () => {
         },
       }),
     ).toThrow('AWS_REGION must be a valid AWS region');
+  });
+
+  it('materializes inline Google Vertex credentials before OpenCode starts', () => {
+    const homeDir = createHomeDir();
+    const credentialsJson = JSON.stringify({
+      type: 'service_account',
+      project_id: 'vertex-project',
+      private_key: 'test-private-key',
+      client_email: 'roomote@vertex-project.iam.gserviceaccount.com',
+    });
+    const runtimeEnv = {
+      R_MODEL: 'google-vertex/gemini-3.5-flash',
+      GOOGLE_APPLICATION_CREDENTIALS: `  ${credentialsJson}\n`,
+      GOOGLE_VERTEX_PROJECT: 'vertex-project',
+      GOOGLE_VERTEX_LOCATION: 'global',
+    };
+
+    generateOpenCodeConfig({ homeDir, runtimeEnv });
+
+    const credentialsPath = runtimeEnv.GOOGLE_APPLICATION_CREDENTIALS;
+    expect(credentialsPath).toBe(
+      join(
+        homeDir,
+        '.local',
+        'share',
+        'opencode',
+        'google-application-credentials.json',
+      ),
+    );
+    expect(readFileSync(credentialsPath, 'utf8')).toBe(
+      `  ${credentialsJson}\n`,
+    );
+    expect(statSync(credentialsPath).mode & 0o777).toBe(0o600);
+  });
+
+  it('leaves Google Vertex credential file paths unchanged', () => {
+    const runtimeEnv = {
+      R_MODEL: 'google-vertex/gemini-3.5-flash',
+      GOOGLE_APPLICATION_CREDENTIALS: '/run/secrets/google-credentials.json',
+      GOOGLE_VERTEX_PROJECT: 'vertex-project',
+    };
+
+    generateOpenCodeConfig({ homeDir: createHomeDir(), runtimeEnv });
+
+    expect(runtimeEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(
+      '/run/secrets/google-credentials.json',
+    );
   });
 });

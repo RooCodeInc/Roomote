@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -1479,10 +1480,16 @@ describe('opencode-server bootstrap', () => {
       type: 'service_account',
       project_id: 'my-project',
     });
+    const sharedBashEnvPath = path.join(homeDir, 'roomote-env.sh');
+    fs.writeFileSync(
+      sharedBashEnvPath,
+      `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'\n`,
+    );
 
     const { commandEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
+        BASH_ENV: sharedBashEnvPath,
         GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
       },
       workspacePath: '/tmp/workspace',
@@ -1498,6 +1505,32 @@ describe('opencode-server bootstrap', () => {
     );
     expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentialsPath);
     expect(fs.readFileSync(credentialsPath, 'utf8')).toBe(credentialsJson);
+    const openCodeBashEnvPath = commandEnv.BASH_ENV;
+    expect(openCodeBashEnvPath).toBe(
+      path.join(
+        homeDir,
+        '.local',
+        'share',
+        'opencode',
+        'roomote-opencode-env.sh',
+      ),
+    );
+    if (!openCodeBashEnvPath) {
+      throw new Error('Missing OpenCode BASH_ENV overlay');
+    }
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).not.toContain(
+      credentialsJson,
+    );
+    expect(
+      execFileSync(
+        'bash',
+        ['-lc', 'printf %s "$GOOGLE_APPLICATION_CREDENTIALS"'],
+        {
+          env: commandEnv,
+          encoding: 'utf8',
+        },
+      ),
+    ).toBe(credentialsPath);
   });
 
   it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', async () => {

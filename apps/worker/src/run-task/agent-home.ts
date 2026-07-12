@@ -4,7 +4,9 @@ import * as path from 'node:path';
 import {
   buildOpenCodeModelReasoningOptions,
   collectOpenRouterVariantModelAlias,
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
@@ -42,6 +44,9 @@ const STANDARD_PACKAGED_SKILLS_DIR_NAME = 'standard';
 const OPENCODE_CONFIG_PARENT_DIR_NAME = '.config';
 
 const OPENCODE_CONFIG_DIR_NAME = 'opencode';
+
+const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
+  'google-application-credentials.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
@@ -1225,6 +1230,8 @@ export function generateOpenCodeConfig({
     OPENCODE_CONFIG_PARENT_DIR_NAME,
     OPENCODE_CONFIG_DIR_NAME,
   );
+  fs.mkdirSync(openCodeConfigDir, { recursive: true });
+  materializeInlineGoogleCredentials(runtimeEnv, homeDir);
   const resolvedModel = resolveConfiguredPromptModel(model);
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
@@ -1240,7 +1247,6 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  fs.mkdirSync(openCodeConfigDir, { recursive: true });
   writeOpenCodeSlackHookFiles(openCodeConfigDir);
 
   if (developerInstructionsContent) {
@@ -1376,6 +1382,65 @@ export function generateOpenCodeConfig({
     openCodeConfigDir,
     model: promptModel,
   };
+}
+
+/**
+ * Resolve the OpenCode data directory shared by credential files, auth state,
+ * and runtime shell overlays.
+ */
+export function resolveOpenCodeDataDir(
+  homeDir: string,
+  runtimeEnv: Record<string, string>,
+): string {
+  const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
+
+  return path.join(
+    xdgDataHome || path.join(homeDir, '.local', 'share'),
+    OPENCODE_CONFIG_DIR_NAME,
+  );
+}
+
+/**
+ * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
+ * file path. Roomote accepts pasted JSON, so materialize it at the common
+ * config-generation boundary before any provider process can observe it.
+ * Throw on write failures rather than forwarding raw credentials to OpenCode,
+ * whose file-not-found errors may echo the credential value.
+ */
+function materializeInlineGoogleCredentials(
+  runtimeEnv: Record<string, string>,
+  homeDir: string,
+): void {
+  const credentialsValue =
+    runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
+
+  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
+    return;
+  }
+
+  const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
+  const credentialsFilePath = path.join(
+    openCodeDataDir,
+    GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME,
+  );
+
+  try {
+    fs.mkdirSync(openCodeDataDir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(credentialsFilePath, credentialsValue, {
+      encoding: 'utf8',
+      mode: 0o600,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unknown credentials write error';
+    throw new Error(
+      `Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} before starting OpenCode: ${message}`,
+    );
+  }
+
+  runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] = credentialsFilePath;
 }
 
 function normalizePackagedFolderName(
