@@ -80,35 +80,25 @@ export function buildGithubCommitHref({
   return `https://github.com/${owner}/${repo}/commit/${sha}`;
 }
 
-export function formatReviewMetaUtc(at: Date = new Date()): string {
-  return at
-    .toISOString()
-    .replace('T', ' ')
-    .replace(/\.\d{3}Z$/, ' UTC');
-}
-
 /**
  * Visible trailing status footer for the main Roomote review summary comment.
- * Example: `<sub>Reviewing <a ...>#abc1234</a> at 2026-07-12 15:04:05 UTC</sub>`
+ * Example: `<sub>Reviewing <a ...>abc1234</a></sub>`
  */
 export function buildReviewMetaFooter({
   phase,
   sha,
-  at = new Date(),
   commitHref,
 }: {
   phase: ReviewMetaPhase;
   sha: string;
-  at?: Date;
   commitHref?: string;
 }): string {
   const shortSha = sha.slice(0, 7);
-  const shaLabel = `#${shortSha}`;
   const linkedSha = commitHref
-    ? buildGithubCommentActionLink({ href: commitHref, label: shaLabel })
-    : shaLabel;
+    ? buildGithubCommentActionLink({ href: commitHref, label: shortSha })
+    : shortSha;
 
-  return `<sub>${phase} ${linkedSha} at ${formatReviewMetaUtc(at)}</sub>`;
+  return `<sub>${phase} ${linkedSha}</sub>`;
 }
 
 function resolveReviewMetaPhase({
@@ -130,7 +120,6 @@ export function buildReviewSummaryBody({
   statusContent,
   checklistContent,
   metaPhase,
-  metaAt,
   commitHref,
   repositoryFullName,
   reviewedSha,
@@ -139,7 +128,6 @@ export function buildReviewSummaryBody({
   statusContent: string;
   checklistContent?: string;
   metaPhase?: ReviewMetaPhase;
-  metaAt?: Date;
   commitHref?: string;
   repositoryFullName?: string | null;
   reviewedSha?: string;
@@ -156,7 +144,6 @@ export function buildReviewSummaryBody({
     ? buildReviewMetaFooter({
         phase: resolveReviewMetaPhase({ statusContent, metaPhase }),
         sha,
-        at: metaAt,
         commitHref: resolvedCommitHref,
       })
     : undefined;
@@ -183,14 +170,12 @@ export function buildInProgressReviewSummaryBody({
   summaryMarker,
   commitHref,
   repositoryFullName,
-  metaAt,
 }: {
   existingBody: string;
   inProgressStatus: string;
   summaryMarker: string;
   commitHref?: string;
   repositoryFullName?: string | null;
-  metaAt?: Date;
 }): string {
   const trimmedBody = existingBody.trim();
 
@@ -201,7 +186,6 @@ export function buildInProgressReviewSummaryBody({
       metaPhase: 'Reviewing',
       commitHref,
       repositoryFullName,
-      metaAt,
     });
   }
 
@@ -238,7 +222,6 @@ export function buildInProgressReviewSummaryBody({
     metaPhase: 'Reviewing',
     commitHref,
     repositoryFullName,
-    metaAt,
   });
 }
 
@@ -253,13 +236,11 @@ export function buildTerminalReviewSummaryBody({
   terminalStatus,
   commitHref,
   repositoryFullName,
-  metaAt,
 }: {
   existingBody: string;
   terminalStatus: string;
   commitHref?: string;
   repositoryFullName?: string | null;
-  metaAt?: Date;
 }): string | null {
   const trimmedBody = existingBody.trim();
 
@@ -298,7 +279,6 @@ export function buildTerminalReviewSummaryBody({
     metaPhase: 'Reviewed',
     commitHref,
     repositoryFullName,
-    metaAt,
   });
 }
 

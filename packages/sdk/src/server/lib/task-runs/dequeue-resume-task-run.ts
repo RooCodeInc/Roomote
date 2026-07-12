@@ -5,6 +5,7 @@ import {
   type RequestedWorkKind,
   RunStatus,
   TaskPayloadKind,
+  isStandbyResumeCapableComputeProvider,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
@@ -52,11 +53,11 @@ type DequeueResumeTaskRunResult =
       setupOnboardingTask: boolean;
       gitAuthor: GitAuthor;
       /**
-       * The Roomote harness session ID that should be resumed.
-       * Resolved from tasks.harnessSessionId of the run's own task — resume
-       * runs share the task with the run they resume.
+       * The Roomote harness session ID that should be resumed, when one has
+       * started. Retained standby environments can be suspended before their
+       * first prompt creates a harness session.
        */
-      harnessSessionId: string;
+      harnessSessionId?: string;
       /**
        * The repo from the source task run's payload.
        * Used to determine the correct workspace path.
@@ -79,8 +80,9 @@ type DequeueResumeTaskRunResult =
  *
  * This function claims the run, validates it, and reads the persisted
  * harnessSessionId from the run's task (resume runs are rows on the same
- * task). The worker uses that harness session ID to resume the existing task
- * instead of starting a new one.
+ * task). The worker uses that harness session ID to resume an existing task.
+ * Retained standby environments may legitimately have no session yet when
+ * they were suspended before their first prompt.
  *
  * Unlike regular dequeue, this doesn't generate a prompt since we're resuming
  * an existing task with its own conversation history.
@@ -130,7 +132,7 @@ export const dequeueResumeTaskRun = async (
           orgAgentInstructions?: string;
           styleGuidance?: string;
           gitAuthor: GitAuthor;
-          harnessSessionId: string;
+          harnessSessionId?: string;
           sourceRepo?: string;
           sourceEnvironmentId?: string;
           sourceSelectedRepositories?: string[];
@@ -226,8 +228,10 @@ export const dequeueResumeTaskRun = async (
       // Resume runs share their task with the run they resume, so the
       // harness session lives on the run's own task row.
       const harnessSessionId = taskRun.task.harnessSessionId ?? null;
+      const canResumeWithoutHarnessSession =
+        isStandbyResumeCapableComputeProvider(taskRun.vendor);
 
-      if (!harnessSessionId) {
+      if (!harnessSessionId && !canResumeWithoutHarnessSession) {
         console.error(
           `${tag} Task ${taskRun.taskId} for resume run ${taskRun.id} has no harnessSessionId`,
         );
@@ -274,7 +278,9 @@ export const dequeueResumeTaskRun = async (
       const sourceEnvironmentId = resumePayload.environmentId;
       const sourceSelectedRepositories = resumePayload.selectedRepositories;
       console.log(
-        `${tag} Found harness session ID ${harnessSessionId} for resume run ${taskRun.id} (taskId=${taskRun.taskId}, sourceRunId=${sourceRunId}, repo=${sourceRepo}, environmentId=${sourceEnvironmentId})`,
+        harnessSessionId
+          ? `${tag} Found harness session ID ${harnessSessionId} for resume run ${taskRun.id} (taskId=${taskRun.taskId}, sourceRunId=${sourceRunId}, repo=${sourceRepo}, environmentId=${sourceEnvironmentId})`
+          : `${tag} Resuming retained ${taskRun.vendor} environment for run ${taskRun.id} before its first harness session (taskId=${taskRun.taskId}, sourceRunId=${sourceRunId}, repo=${sourceRepo}, environmentId=${sourceEnvironmentId})`,
       );
 
       // Fetch environment variables
@@ -335,7 +341,7 @@ export const dequeueResumeTaskRun = async (
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
         styleGuidance: settings?.styleGuidance ?? undefined,
         gitAuthor,
-        harnessSessionId,
+        harnessSessionId: harnessSessionId ?? undefined,
         sourceRepo,
         sourceEnvironmentId,
         sourceSelectedRepositories,
@@ -445,7 +451,9 @@ export const dequeueResumeTaskRun = async (
       runId: result.taskRun.id,
       taskId: result.taskRun.taskId,
       eventType: 'started',
-      message: `Snapshot resume bootstrap started with source session ${result.harnessSessionId}.`,
+      message: result.harnessSessionId
+        ? `Snapshot resume bootstrap started with source session ${result.harnessSessionId}.`
+        : 'Standby resume bootstrap started before the first harness session.',
       details: {
         stage: 'bootstrap',
         sourceRunId: result.taskRun.sourceRunId ?? null,

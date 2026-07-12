@@ -108,7 +108,17 @@ describe('buildDockerSandboxServerUrl', () => {
     ).toBe('https://task123456789-sandbox-server.preview.roomote.example.com');
   });
 
-  it('keeps local Docker workers on their direct published URL path', () => {
+  it('routes local Docker sandbox transport through the public app origin', () => {
+    expect(
+      buildDockerSandboxServerUrl({
+        taskId: 'task123456789',
+        publicAppUrl: 'https://roomote-example.ngrok.app/',
+        previewProxyBaseUrl: 'https://preview.roomote.example.com',
+      }),
+    ).toBe('https://roomote-example.ngrok.app/_roomote-sandbox/task123456789');
+  });
+
+  it('keeps the direct published URL fallback without a public app origin', () => {
     expect(
       buildDockerSandboxServerUrl({
         taskId: 'task123456789',

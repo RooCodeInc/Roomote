@@ -60,7 +60,10 @@ export class DockerService {
       process.env.DOCKER_WORKER_PLATFORM ?? this.DEFAULT_WORKER_PLATFORM;
     const rootDir = path.resolve(process.cwd(), '../..');
 
-    if (await this.hasImage(image)) {
+    if (
+      (await this.hasImage(image)) &&
+      (await this.hasRequiredWorkerImageTools(image, platform))
+    ) {
       return;
     }
 
@@ -280,6 +283,28 @@ export class DockerService {
   private static async hasImage(image: string): Promise<boolean> {
     try {
       await execa('docker', ['image', 'inspect', image]);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  private static async hasRequiredWorkerImageTools(
+    image: string,
+    platform: string,
+  ): Promise<boolean> {
+    try {
+      await execa('docker', [
+        'run',
+        '--rm',
+        '--platform',
+        platform,
+        '--entrypoint',
+        '/bin/sh',
+        image,
+        '-c',
+        'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null',
+      ]);
       return true;
     } catch (_error) {
       return false;

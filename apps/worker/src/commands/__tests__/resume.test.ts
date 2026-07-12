@@ -123,4 +123,39 @@ describe('resume', () => {
       }),
     );
   });
+
+  it('restores a retained environment before its first harness session', async () => {
+    executeTaskRunMock.mockImplementation(async ({ runFn }) => {
+      await runFn({
+        jobContext: {
+          taskRun: {
+            id: 44,
+            payloadKind: TaskPayloadKind.SnapshotResume,
+            taskId: 'task-44',
+          },
+          task: {},
+          envVars: {},
+          harnessSessionId: undefined,
+        },
+        workspace: {},
+        workspacePath: '/tmp/workspace',
+        usesSharedWorkspaceRoot: false,
+        callbacks: {},
+        context: {},
+        logger: {} as never,
+        workerEnv: {} as never,
+      });
+
+      return true;
+    });
+
+    await resume(44);
+
+    expect(runTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: '',
+        harnessSessionId: undefined,
+      }),
+    );
+  });
 });

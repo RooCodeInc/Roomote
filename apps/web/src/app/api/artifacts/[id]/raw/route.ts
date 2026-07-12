@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  ARTIFACT_RAW_URL_MAX_AGE_SECONDS,
+  currentEpochSeconds,
+} from '@roomote/sdk/server';
 
 import {
   getUploadedArtifactById,
@@ -16,6 +20,9 @@ const ALLOWED_PUBLIC_CONTENT_TYPES = new Set([
   'image/svg+xml',
   'video/webm',
 ]);
+
+/** Never cache longer than this, and never past remaining signature / TTL. */
+const RAW_RESPONSE_CACHE_MAX_AGE_SECONDS = 3600;
 
 export async function GET(
   request: NextRequest,
@@ -94,10 +101,18 @@ export async function GET(
 
   // Convert the S3 readable stream to a Web ReadableStream
   const webStream = s3Response.Body.transformToWebStream();
+  const remainingTtlSeconds = Math.max(
+    0,
+    ARTIFACT_RAW_URL_MAX_AGE_SECONDS - (currentEpochSeconds() - ts),
+  );
+  const cacheMaxAge = Math.min(
+    RAW_RESPONSE_CACHE_MAX_AGE_SECONDS,
+    remainingTtlSeconds,
+  );
 
   const headers = new Headers({
     'Content-Type': artifact.contentType,
-    'Cache-Control': 'public, max-age=86400, immutable',
+    'Cache-Control': `public, max-age=${cacheMaxAge}, immutable`,
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'",
   });

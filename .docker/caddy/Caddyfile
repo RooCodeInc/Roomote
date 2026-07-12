@@ -31,6 +31,22 @@
 		}
 	}
 
+	# Route the sandbox-server transport through the same public origin as the
+	# web app. A browser opened through ngrok cannot connect to the worker's
+	# loopback-only published port directly because 127.0.0.1 would refer to the
+	# browser device. The preview proxy resolves the task's current worker port
+	# after Caddy translates this path route into its normal virtual host.
+	@local_sandbox path_regexp local_sandbox ^/_roomote-sandbox/([a-z0-9]+)(/.*)$
+
+	handle @local_sandbox {
+		rewrite * {re.local_sandbox.2}
+		reverse_proxy host.docker.internal:18081 {
+			header_up Host {re.local_sandbox.1}-sandbox-server.roomotepreview.localhost:18081
+			lb_try_duration 10s
+			lb_try_interval 250ms
+		}
+	}
+
 	handle {
 		reverse_proxy host.docker.internal:13000 {
 			lb_try_duration 10s

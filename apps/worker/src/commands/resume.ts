@@ -78,7 +78,7 @@ export async function resume(runId: number): Promise<boolean> {
       // Seed callback context for resumed integrations before runTask starts.
       // onStart still runs for resume task runs, but it should reuse the existing
       // harness session rather than overwrite it.
-      if (isLinearResume || isSlackResume) {
+      if ((isLinearResume || isSlackResume) && jobContext.harnessSessionId) {
         context.sessionId = jobContext.harnessSessionId;
         context.parentTaskId = jobContext.harnessSessionId;
         context.taskId = jobContext.taskRun.taskId;
