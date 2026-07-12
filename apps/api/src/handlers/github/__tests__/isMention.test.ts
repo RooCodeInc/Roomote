@@ -79,6 +79,42 @@ describe('isMention', () => {
     ).toBe(false);
   });
 
+  it('returns false for a longer login that starts with the slug', () => {
+    expect(
+      isMention({
+        body: 'cc @roomote-fan on this one',
+        user: { login: 'testuser' },
+      }),
+    ).toBe(false);
+  });
+
+  it('returns false for email addresses containing the slug', () => {
+    expect(
+      isMention({
+        body: 'forwarded from grace@roomote.onmicrosoft.com',
+        user: { login: 'testuser' },
+      }),
+    ).toBe(false);
+  });
+
+  it('returns true when the mention is followed by punctuation', () => {
+    expect(
+      isMention({
+        body: 'thanks @roomote!',
+        user: { login: 'testuser' },
+      }),
+    ).toBe(true);
+  });
+
+  it('returns true when the mention starts the comment', () => {
+    expect(
+      isMention({
+        body: '@roomote please rerun the review',
+        user: { login: 'testuser' },
+      }),
+    ).toBe(true);
+  });
+
   describe('with a database-configured app slug', () => {
     beforeEach(() => {
       setConfiguredGitHubAppSlugCache({
