@@ -393,6 +393,39 @@ describe('dequeueResumeTaskRun', () => {
     expect(mockReleaseTaskRun).toHaveBeenCalledWith(resumeRun);
   });
 
+  it.each(['docker', 'blaxel'] as const)(
+    'resumes a retained %s environment before its first harness session',
+    async (vendor) => {
+      const resumeRun = makeSnapshotResumeRun(
+        { vendor },
+        { harnessSessionId: null },
+      );
+
+      mockTxExecute.mockResolvedValue([{ id: resumeRun.id }]);
+      mockTxFindFirstTaskRuns.mockResolvedValueOnce(resumeRun);
+
+      const result = await dequeueResumeTaskRun({ orgId: 'org-1' } as never, {
+        runId: resumeRun.id,
+      });
+
+      expect(result?.harnessSessionId).toBeUndefined();
+      expect(mockCancelTaskRun).not.toHaveBeenCalled();
+      expect(mockRecordSnapshotResumeEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          runId: resumeRun.id,
+          eventType: 'started',
+          message: expect.stringContaining('before the first harness session'),
+          details: expect.objectContaining({
+            harnessSessionId: undefined,
+            sourceRunId: 99,
+            sourceSnapshotId: 'snap-1',
+          }),
+        }),
+      );
+    },
+  );
+
   it('invokes the bootstrap failure callback when resume bootstrap fails before startup', async () => {
     const resumeRun = makeSnapshotResumeRun({}, { harnessSessionId: null });
 
