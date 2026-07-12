@@ -1385,13 +1385,6 @@ export function generateOpenCodeConfig({
 }
 
 /**
- * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
- * file path. Roomote accepts pasted JSON, so materialize it at the common
- * config-generation boundary before any provider process can observe it.
- * Throw on write failures rather than forwarding raw credentials to OpenCode,
- * whose file-not-found errors may echo the credential value.
- */
-/**
  * Resolve the OpenCode data directory shared by credential files, auth state,
  * and runtime shell overlays.
  */
@@ -1407,6 +1400,13 @@ export function resolveOpenCodeDataDir(
   );
 }
 
+/**
+ * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
+ * file path. Roomote accepts pasted JSON, so materialize it at the common
+ * config-generation boundary before any provider process can observe it.
+ * Throw on write failures rather than forwarding raw credentials to OpenCode,
+ * whose file-not-found errors may echo the credential value.
+ */
 function materializeInlineGoogleCredentials(
   runtimeEnv: Record<string, string>,
   homeDir: string,
