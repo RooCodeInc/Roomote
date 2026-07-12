@@ -16,7 +16,7 @@ Use Modal when:
 - several people may run tasks at the same time
 - task work should not consume CPU or memory on the Roomote host
 - you want hosted sandboxes with snapshot support
-- you can provide Modal credentials and a worker image Modal can pull
+- you can provide Modal credentials
 
 ## Configuration
 
@@ -28,56 +28,26 @@ MODAL_TOKEN_ID=...
 MODAL_TOKEN_SECRET=...
 ```
 
-Modal also needs a base image. Roomote usually derives `MODAL_BASE_IMAGE_REF`
-from the shared worker image (`DOCKER_WORKER_IMAGE` or the derived release
-image):
-
-```sh
-DOCKER_WORKER_IMAGE=ghcr.io/roocodeinc/roomote-worker:<version>
-```
-
-Set `MODAL_BASE_IMAGE_REF` only when you need to pin a custom Modal base image:
-
-```sh
-MODAL_BASE_IMAGE_REF=ghcr.io/roocodeinc/roomote-worker:<version>
-```
-
 Optional values:
 
 ```sh
 MODAL_ENDPOINT=...
 MODAL_ENVIRONMENT=...
 MODAL_APP_NAME=...
-MODAL_REGISTRY_USERNAME=...
-MODAL_REGISTRY_PASSWORD=...
-MODAL_ECR_OIDC_ROLE_ARN=...
-MODAL_ECR_REGION=...
 # Optional sandbox placement; also available as Advanced infrastructure in
 # Settings > Sandboxes. Comma-separated Modal regions, for example us or us-west.
 MODAL_REGIONS=us
 ```
-
-Use the registry variables when Modal must pull from a private registry. For
-production, prefer immutable image tags such as a release or commit tag.
 
 `MODAL_REGIONS` is an optional comma-separated list of Modal container placement
 regions (for example `us`, `us-west`, or `us,eu`). When unset, Modal chooses
 placement. Prefer broader tokens such as `us` for capacity and cold-start
 behavior. Pinning a region can add a Modal pricing multiplier and only applies
 to newly created or resumed sandboxes, not sandboxes that are already running.
-Do not confuse `MODAL_REGIONS` with `MODAL_ECR_REGION`, which only controls AWS
-ECR image pulls.
-
-## Worker image expectations
-
-Hosted providers cannot use a local-only image tag such as
-`roomote-worker:local`. The worker image must be registry-qualified and
-reachable by Modal. If Modal cannot pull the image, tasks will fail before the
-worker runtime starts.
 
 ## Verify setup
 
-1. save Modal credentials and a registry-qualified worker image
+1. save Modal credentials
 2. select Modal as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
@@ -85,9 +55,5 @@ worker runtime starts.
 
 ## Common issues
 
-- **Modal cannot pull the worker image.** Use a registry-qualified image and
-  configure registry credentials or ECR OIDC settings when needed.
 - **Tasks fail immediately after launch.** Check `MODAL_TOKEN_ID`,
   `MODAL_TOKEN_SECRET`, and any Modal environment or endpoint overrides.
-- **The wrong worker runtime starts.** Pin `DOCKER_WORKER_IMAGE` or
-  `MODAL_BASE_IMAGE_REF` to an immutable tag.

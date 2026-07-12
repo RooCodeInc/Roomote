@@ -1,12 +1,12 @@
 ---
 title: Daytona
 icon: '/logo/integrations/daytona.svg'
-description: Run Roomote tasks on Daytona-hosted sandboxes from a registered worker snapshot.
+description: Run Roomote tasks on Daytona-hosted sandboxes.
 ---
 
 Daytona is a hosted sandbox provider with straightforward API-key setup.
-Roomote starts task sandboxes from a registered worker snapshot, and supports
-environment and task-level filesystem snapshots for faster resume flows.
+It supports environment and task-level filesystem snapshots for faster resume
+flows.
 
 ## When to use Daytona
 
@@ -31,14 +31,6 @@ scopes are needed.
 DAYTONA_API_KEY=...
 ```
 
-Roomote registers the worker snapshot automatically from the configured worker
-image (`DOCKER_WORKER_IMAGE` or release derivation). You can also pin the
-snapshot as an env var:
-
-```sh
-DAYTONA_SNAPSHOT_NAME=roomote-worker-<tag>
-```
-
 Optional values:
 
 ```sh
@@ -49,30 +41,9 @@ DAYTONA_TARGET=...
 Use `DAYTONA_API_URL` for custom Daytona endpoints. Use `DAYTONA_TARGET` when
 your account or deployment needs a specific target or region.
 
-## Worker snapshot vs product snapshots
-
-Daytona uses the word "snapshot" for two Roomote concepts:
-
-1. **Worker base snapshot** (`DAYTONA_SNAPSHOT_NAME`) — the baked Roomote
-   worker image registered once per worker image tag. Fresh sandboxes boot from
-   this base.
-2. **Product snapshots** — filesystem captures of a running task or environment
-   setup, stored as named Daytona snapshots and used for env caching and
-   sleep/resume (same product behavior as Modal and E2B).
-
-The worker base snapshot should contain the Roomote worker runtime: system
-packages, browser tooling, language tools, command helpers, and the worker
-bootstrap used to connect back to Roomote.
-
-Settings and setup only collect the API key — not a snapshot name field.
-Roomote registers the worker snapshot from the worker image during setup when
-needed. For production, keep the worker image or base snapshot name pinned so
-task startup is predictable.
-
 ## Verify setup
 
-1. save `DAYTONA_API_KEY` (and let Roomote register the snapshot, or set
-   `DAYTONA_SNAPSHOT_NAME` in the deployment env)
+1. save `DAYTONA_API_KEY`
 2. select Daytona as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
@@ -80,10 +51,5 @@ task startup is predictable.
 
 ## Common issues
 
-- **Daytona reports a missing snapshot.** Confirm auto-provisioning finished,
-  or that `DAYTONA_SNAPSHOT_NAME` exists and is available to the configured
-  API key.
-- **Tasks start with missing tools.** Refresh the worker snapshot from the
-  current Roomote worker image.
 - **The provider starts in the wrong region or target.** Set
   `DAYTONA_TARGET` to the intended target.
