@@ -52,9 +52,17 @@ and appear as locked values in Settings.
 ## Runtime behavior
 
 - Roomote requests a Blaxel TTL matching the task timeout.
+- Fresh sandbox provisioning uses a stable task identity and Blaxel's
+  idempotent create API so controller retries reconnect instead of creating
+  duplicate sandboxes.
 - Each exposed port receives a public Blaxel preview URL. Roomote's preview
-  proxy remains the user-facing authentication layer.
+  proxy remains the user-facing authentication layer. Existing preview
+  resources are reused across standby resumes.
 - The detached worker process uses Blaxel keep-alive while the task is active.
+- When Blaxel reports `WORKLOAD_UNAVAILABLE`, Roomote retries workload access
+  with bounded exponential backoff. Missing workloads, invalid routes, and
+  application-origin errors are handled separately rather than retried as
+  transient platform failures.
 - When a resumable task goes to sleep, Roomote stops its worker, extends the
   sandbox lifetime to the configured standby age (seven days by default), and
   lets Blaxel move the sandbox to standby.

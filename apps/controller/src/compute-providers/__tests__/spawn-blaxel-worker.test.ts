@@ -103,6 +103,7 @@ describe('spawnBlaxelWorker', () => {
 
     expect(mockCreateBlaxelMachine).toHaveBeenCalledWith(
       expect.objectContaining({
+        idempotencyKey: 'roomote-task-task-321',
         launchMode: 'task_standby',
         resumeHandle: 'roomote-blaxel-standby',
       }),
