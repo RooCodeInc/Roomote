@@ -18,6 +18,7 @@ import { Env } from '@/lib/server/env';
 import {
   buildSetupAuthStatus,
   getSetupAuthProvider,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
   SETUP_AUTH_PROVIDER_IDS,
   type SetupAuthProviderId,
   type SetupAuthStatus,
@@ -29,6 +30,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   assertAdmin,
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 
@@ -313,11 +315,13 @@ export async function getCommsStatusCommand(
 
   const [
     persistedEnvVarNames,
+    nonSecretAuthEnvValues,
     telegramWebhook,
     invocationIdentities,
     telegramCredentials,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getTelegramWebhookStatus(),
     resolveInvocationIdentities(),
     resolveTelegramRuntimeCredentials(),
@@ -327,6 +331,7 @@ export async function getCommsStatusCommand(
     buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
     }),
     {
       persistedEnvVarNames,

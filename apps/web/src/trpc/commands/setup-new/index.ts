@@ -65,6 +65,7 @@ import {
   isConfiguredEnvValue,
   isExitedRunStatus,
   isRequiredComputeField,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
@@ -1177,6 +1178,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
+    nonSecretAuthEnvValues,
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
@@ -1186,6 +1188,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
@@ -1271,6 +1274,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const authSetup = buildSetupAuthStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretAuthEnvValues,
     selectedProvider: setupNewState.authProvider,
   });
   const modelSetup = buildSetupModelStatus({
@@ -2036,10 +2040,12 @@ export async function getSetupBootstrapStatusCommand(input?: {
     };
   }
 
-  const [setupNewState, persistedEnvVarNames] = await Promise.all([
-    getPersistedSetupNewState(),
-    getPersistedEnvironmentVariableNames(),
-  ]);
+  const [setupNewState, persistedEnvVarNames, nonSecretAuthEnvValues] =
+    await Promise.all([
+      getPersistedSetupNewState(),
+      getPersistedEnvironmentVariableNames(),
+      getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    ]);
 
   return {
     setupOpen: bootstrapState.setupOpen,
@@ -2048,6 +2054,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
     authSetup: buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
       selectedProvider: setupNewState.authProvider,
     }),
   };

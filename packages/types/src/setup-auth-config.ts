@@ -154,6 +154,24 @@ export const COMMS_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set(
   ),
 );
 
+function isSecretAuthField(field: SetupAuthProviderFieldDescriptor) {
+  return field.secret === true;
+}
+
+/**
+ * Non-secret auth/comms env var names (including accepted aliases) that the
+ * Settings/setup UIs may surface as plain text via `savedValue`.
+ */
+export const NON_SECRET_AUTH_ENV_VAR_NAMES: readonly string[] = [
+  ...new Set(
+    SETUP_AUTH_PROVIDER_CATALOG.flatMap((descriptor) =>
+      descriptor.fields
+        .filter((field) => !isSecretAuthField(field))
+        .flatMap((field) => field.acceptedEnvVarNames),
+    ),
+  ),
+];
+
 function isRequiredField(field: SetupAuthProviderFieldDescriptor) {
   return field.required !== false;
 }
@@ -175,12 +193,14 @@ export function getSetupAuthProvider(
 export function buildSetupAuthStatus(input: {
   runtimeEnv?: Partial<Record<string, string | undefined>> | null;
   persistedEnvVarNames?: Iterable<string>;
+  persistedEnvVarValues?: Partial<Record<string, string>>;
   selectedProvider?: SetupAuthProviderId | null;
 }): SetupAuthStatus {
   const runtimeEnv = input.runtimeEnv ?? {};
   const persistedEnvVarNameSet = new Set(
     Array.from(input.persistedEnvVarNames ?? []).map((name) => name.trim()),
   );
+  const persistedEnvVarValues = input.persistedEnvVarValues ?? {};
 
   const effectiveTeamsBotCredentialEnvVarNames =
     resolveTeamsBotCredentialEnvVarNames({
@@ -211,11 +231,21 @@ export function buildSetupAuthStatus(input: {
         field.acceptedEnvVarNames.find((envVarName) =>
           persistedEnvVarNameSet.has(envVarName),
         );
+      const runtimeValue = runtimeMatch
+        ? runtimeEnv[runtimeMatch]?.trim() || null
+        : null;
+      const persistedValue = savedMatch
+        ? persistedEnvVarValues[savedMatch]?.trim() || null
+        : null;
+      const savedValue = isSecretAuthField(field)
+        ? null
+        : (runtimeValue ?? persistedValue);
 
       return {
         ...field,
         runtimeSatisfied: runtimeMatch !== undefined,
         savedSatisfied: savedMatch !== undefined,
+        savedValue,
         satisfiedByEnvVarName: runtimeMatch ?? savedMatch ?? null,
       };
     });

@@ -8,6 +8,7 @@ const {
   mockDbTransaction,
   mockUpsertDeploymentEnvironmentVariables,
   mockGetPersistedEnvironmentVariableNames,
+  mockGetPersistedEnvironmentVariableValues,
   mockResolveEffectiveDeploymentEnvVars,
   mockResolveInvocationIdentities,
   mockResolveTelegramRuntimeCredentials,
@@ -20,6 +21,7 @@ const {
   mockDbTransaction: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
+  mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveEffectiveDeploymentEnvVars: vi.fn().mockResolvedValue({}),
   mockResolveInvocationIdentities: vi.fn().mockResolvedValue([]),
   mockResolveTelegramRuntimeCredentials: vi.fn(async () => ({
@@ -75,6 +77,8 @@ vi.mock('../environment-variables', () => ({
   },
   getPersistedEnvironmentVariableNames:
     mockGetPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues:
+    mockGetPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
@@ -116,6 +120,7 @@ describe('comms commands', () => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockResolveTelegramRuntimeCredentials.mockResolvedValue({
       botToken: null,
       webhookSecret: null,
@@ -169,6 +174,9 @@ describe('comms commands', () => {
         'R_SLACK_CLIENT_SECRET',
         'R_SLACK_SIGNING_SECRET',
       ]);
+      mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+        R_SLACK_CLIENT_ID: 'saved-client-id',
+      });
 
       const status = await getCommsStatusCommand(buildMockAuth());
 
@@ -176,6 +184,19 @@ describe('comms commands', () => {
       expect(slack).toBeDefined();
       expect(slack?.savedSatisfied).toBe(true);
       expect(slack?.setupSatisfied).toBe(true);
+      expect(
+        slack?.fields.find((field) => field.envVarName === 'R_SLACK_CLIENT_ID'),
+      ).toMatchObject({
+        savedValue: 'saved-client-id',
+      });
+      expect(
+        slack?.fields.find(
+          (field) => field.envVarName === 'R_SLACK_CLIENT_SECRET',
+        ),
+      ).toMatchObject({
+        savedValue: null,
+      });
+      expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalled();
     });
 
     it('surfaces rejected token reasons on Telegram webhook status', async () => {

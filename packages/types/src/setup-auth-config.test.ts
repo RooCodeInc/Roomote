@@ -196,6 +196,10 @@ describe('buildSetupAuthStatus', () => {
         'R_SLACK_CLIENT_SECRET',
         'R_SLACK_SIGNING_SECRET',
       ],
+      persistedEnvVarValues: {
+        R_SLACK_CLIENT_ID: 'saved-slack-client-id',
+        R_SLACK_CLIENT_SECRET: 'should-never-surface',
+      },
     });
 
     const slack = status.providers.find((provider) => provider.id === 'slack');
@@ -212,17 +216,50 @@ describe('buildSetupAuthStatus', () => {
         expect.objectContaining({
           envVarName: 'R_SLACK_CLIENT_ID',
           satisfiedByEnvVarName: 'R_SLACK_CLIENT_ID',
+          savedValue: 'saved-slack-client-id',
         }),
         expect.objectContaining({
           envVarName: 'R_SLACK_CLIENT_SECRET',
           satisfiedByEnvVarName: 'R_SLACK_CLIENT_SECRET',
+          savedValue: null,
         }),
         expect.objectContaining({
           envVarName: 'R_SLACK_SIGNING_SECRET',
           satisfiedByEnvVarName: 'R_SLACK_SIGNING_SECRET',
+          savedValue: null,
         }),
       ]),
     );
+  });
+
+  it('returns plain-text savedValue for non-secret fields only', () => {
+    const status = buildSetupAuthStatus({
+      runtimeEnv: {
+        R_SLACK_CLIENT_ID: 'runtime-client-id',
+        R_SLACK_CLIENT_SECRET: 'runtime-client-secret',
+        R_SLACK_SIGNING_SECRET: 'runtime-signing-secret',
+      },
+      persistedEnvVarNames: [
+        'R_SLACK_CLIENT_ID',
+        'R_SLACK_CLIENT_SECRET',
+        'R_SLACK_SIGNING_SECRET',
+      ],
+      persistedEnvVarValues: {
+        R_SLACK_CLIENT_ID: 'saved-client-id',
+        R_SLACK_CLIENT_SECRET: 'should-never-surface',
+      },
+    });
+    const slack = status.providers.find((provider) => provider.id === 'slack');
+
+    expect(
+      slack?.fields.find((field) => field.envVarName === 'R_SLACK_CLIENT_ID')
+        ?.savedValue,
+    ).toBe('runtime-client-id');
+    expect(
+      slack?.fields.find(
+        (field) => field.envVarName === 'R_SLACK_CLIENT_SECRET',
+      )?.savedValue,
+    ).toBeNull();
   });
 
   it('does not ask for Slack App ID during auth setup', () => {
