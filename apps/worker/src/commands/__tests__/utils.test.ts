@@ -162,11 +162,11 @@ describe('injectEnvVars', () => {
     } as unknown as TaskRun;
 
     await injectEnvVars(envVars, taskRun, {
-      previewProxyBaseUrl: 'https://preview.newmote.run',
+      previewProxyBaseUrl: 'https://preview.octomote.run',
     });
 
     expect(envVars.ROOMOTE_WEB_HOST).toBe(
-      'https://task-123-web.preview.newmote.run',
+      'https://task-123-web.preview.octomote.run',
     );
   });
 
@@ -175,10 +175,10 @@ describe('injectEnvVars', () => {
       const envVars: Record<string, string> = {};
 
       await injectEnvVars(envVars, undefined, {
-        previewProxyBaseUrl: 'https://preview.newmote.run',
+        previewProxyBaseUrl: 'https://preview.octomote.run',
       });
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('preview.newmote.run');
+      expect(envVars.PREVIEW_DOMAINS).toBe('preview.octomote.run');
     });
 
     it('strips the port from the derived preview domain', async () => {
@@ -197,7 +197,7 @@ describe('injectEnvVars', () => {
       };
 
       await injectEnvVars(envVars, undefined, {
-        previewProxyBaseUrl: 'https://preview.newmote.run',
+        previewProxyBaseUrl: 'https://preview.octomote.run',
       });
 
       expect(envVars.PREVIEW_DOMAINS).toBe('custom.example.com');

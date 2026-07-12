@@ -269,7 +269,7 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     const response = await workerFetch(
-      'https://api.newmote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
+      'https://api.octomote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
       {
         method: 'POST',
         body: '{"0":{"json":{"runId":42}}}',
@@ -305,7 +305,7 @@ describe('createWorkerFetchWithRetry', () => {
     });
 
     const response = await workerFetch(
-      'https://api.newmote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
+      'https://api.octomote.dev/trpc/taskRuns.recordMessageEnvelope?batch=1',
       {
         method: 'POST',
         body: '{"0":{"json":{"runId":42}}}',

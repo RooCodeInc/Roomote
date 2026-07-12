@@ -836,11 +836,7 @@ function isAnalyticsRoomoteGitHubLogin(login: string | null) {
 
   const normalizedLogin = login.trim().toLowerCase();
 
-  return (
-    GitHub.Schemas.isRoomoteGitHubLogin(normalizedLogin) ||
-    normalizedLogin === 'newmote[bot]' ||
-    normalizedLogin === 'app/newmote'
-  );
+  return GitHub.Schemas.isRoomoteGitHubLogin(normalizedLogin);
 }
 
 function isRoomotePullRequestAuthor(login: string | null) {
