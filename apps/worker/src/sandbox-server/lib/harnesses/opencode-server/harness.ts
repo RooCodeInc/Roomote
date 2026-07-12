@@ -53,6 +53,13 @@ import {
   PLAN_WORKFLOW_SKILL,
   resolveWorkflowSkillTransition,
 } from './workflow-skill-transition';
+import {
+  DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS,
+  DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS,
+  OpenCodeStallWatchdogs,
+  formatOpenCodeTurnStallErrorText,
+  type PendingSteerPickup,
+} from './stall-watchdogs';
 import type {
   OpenCodeEventPayload,
   OpenCodeGlobalEvent,
@@ -147,20 +154,6 @@ interface FinalizedAssistantTurn {
   tokenUsage: Record<string, unknown>;
 }
 
-// A prompt natively injected into an active turn (prompt_async, no abort)
-// with no evidence yet that OpenCode's loop picked it up. Retained so a
-// pickup stall can replay the same content through the queued
-// abort-and-replay path. clientMessageId is deliberately not retained: the
-// injection already persisted the visible user prompt under that id, and the
-// invisible replay must not collide with it.
-interface PendingSteerPickup {
-  text: string;
-  images?: string[];
-  userId?: string;
-  userName?: string;
-  userImageUrl?: string;
-}
-
 interface OpenCodeSlackStopHookDecision {
   blocked: boolean;
   reason?: string;
@@ -242,29 +235,6 @@ const MAX_OPENCODE_STOP_HOOK_REMINDERS = 3;
 // turn re-entry (or teardown) clears it first via clearAllExecuteToolProgress,
 // so it only ever fires on a genuine silence.
 const OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS = 10 * 60_000;
-// A natively steered prompt (prompt_async into an active turn) is only read
-// by OpenCode between loop steps. When the turn's current LLM stream request
-// has silently stalled (observed live: `message=stream providerID=...` with
-// no further loop step, no session.idle, no session.error), the loop never
-// reaches another step boundary, so the injection call succeeds but the
-// prompt sits unseen forever. This window bounds how long a successful
-// injection may go with zero turn progress before the steer escalates to the
-// queue + abort-and-replay path that failed injections already take. Any
-// turn progress disarms it — a live turn reaches its next step boundary, and
-// with it the injected prompt, on its own.
-const DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS = 90_000;
-// Fail-safe for a turn wedged inside a single LLM stream request. A stalled
-// stream emits nothing — no message events, no session.idle, no
-// session.error — so nothing else bounds the turn and the task hangs
-// "running" until the sandbox hard deadline. If an in-flight turn produces
-// no OpenCode session events for this window, and verification against
-// OpenCode's own message state shows no tool part still running (long tool
-// executions legitimately emit no events), the turn is treated as wedged:
-// aborted, a retryable error surfaced to the transcript, and queued prompts
-// drained. Deliberately generous: platform-API MCP calls are bounded at 120s
-// and artifact transfers at 600s, so a quiet-but-alive turn either shows a
-// running tool part or completes well inside this window.
-const DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS = 15 * 60_000;
 const EXPECTED_REPLAY_ABORT_SUPPRESSION_MS = 10_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INITIAL_DELAY_MS = 15_000;
 const DEFAULT_EXECUTE_TOOL_PROGRESS_INTERVAL_MS = 30_000;
@@ -1066,14 +1036,6 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
   }`;
 }
 
-function formatOpenCodeTurnStallErrorText(stallTimeoutMs: number): string {
-  const minutes = Math.max(1, Math.round(stallTimeoutMs / 60_000));
-
-  return `The session stopped responding mid-turn: no activity arrived from the model for about ${minutes} minute${
-    minutes === 1 ? '' : 's'
-  }, so the stalled turn was aborted. This is usually a transient provider stall and is safe to retry.`;
-}
-
 function formatOpenCodeUserInputResponsePrompt(options: {
   request: HarnessPendingUserInputRequest;
   answers: AcpRequestUserInputAnswers;
@@ -1480,8 +1442,6 @@ export class OpenCodeServerHarness
   private readonly executeToolProgressInitialDelayMs: number;
   private readonly executeToolProgressIntervalMs: number;
   private readonly stopHookReminderStallTimeoutMs: number;
-  private readonly steerPickupTimeoutMs: number;
-  private readonly turnStallTimeoutMs: number;
   private readonly subagentSettlementGraceMs: number;
   private readonly queuedPromptRetryDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
@@ -1532,10 +1492,7 @@ export class OpenCodeServerHarness
   private stopHookReminderCount = 0;
   private stopHookReminderStallTimer: ReturnType<typeof setTimeout> | null =
     null;
-  private steerPickupTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingSteerPickups: PendingSteerPickup[] = [];
-  private turnStallTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastTurnEventAtMs = 0;
+  private readonly stallWatchdogs: OpenCodeStallWatchdogs;
   private resolveEventStreamReady: (() => void) | undefined;
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
@@ -1578,10 +1535,6 @@ export class OpenCodeServerHarness
     this.stopHookReminderStallTimeoutMs =
       options.stopHookReminderStallTimeoutMs ??
       OPENCODE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS;
-    this.steerPickupTimeoutMs =
-      options.steerPickupTimeoutMs ?? DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS;
-    this.turnStallTimeoutMs =
-      options.turnStallTimeoutMs ?? DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS;
     this.subagentSettlementGraceMs =
       options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
     this.queuedPromptRetryDelayMs =
@@ -1605,6 +1558,56 @@ export class OpenCodeServerHarness
       getSessionId: () => this.sessionId,
       getNextSequence: () => this.runtimeEvents.nextTs(),
       emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
+    });
+    this.stallWatchdogs = new OpenCodeStallWatchdogs({
+      steerPickupTimeoutMs:
+        options.steerPickupTimeoutMs ??
+        DEFAULT_OPENCODE_STEER_PICKUP_TIMEOUT_MS,
+      turnStallTimeoutMs:
+        options.turnStallTimeoutMs ?? DEFAULT_OPENCODE_TURN_STALL_TIMEOUT_MS,
+      logger: this.logger,
+      isDisposed: () => this.disposed,
+      isInFlight: () => this.inFlight,
+      getSessionId: () => this.sessionId,
+      hasDeferringActivity: () =>
+        this.pendingUserInputRequests.size > 0 ||
+        this.activeExecuteToolProgress.size > 0 ||
+        this.activeSubagentWatchdogs.size > 0,
+      verifyNoRunningTool: async (sessionId) => {
+        try {
+          const messages = await this.client.messages({
+            sessionId,
+            limit: 20,
+            signal: this.eventAbortController.signal,
+          });
+          const latestAssistantMessage = [...messages]
+            .reverse()
+            .find((message) => message.info.role === 'assistant');
+
+          const hasRunningTool = Boolean(
+            latestAssistantMessage?.parts.some(
+              (part) =>
+                part.type === 'tool' &&
+                (part as OpenCodeToolPart).state?.status === 'running',
+            ),
+          );
+
+          return hasRunningTool ? 'running_tool' : 'no_running_tool';
+        } catch (error) {
+          this.logger.warn(
+            `Could not verify OpenCode session ${sessionId} before recovering a stalled turn; leaving it running: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return 'unverified';
+        }
+      },
+      onSteerPickupStall: async (pending) => {
+        await this.handleSteerPickupStall(pending);
+      },
+      onTurnStalled: async (sessionId) => {
+        await this.recoverWedgedTurn(sessionId);
+      },
     });
   }
 
@@ -2019,7 +2022,7 @@ export class OpenCodeServerHarness
           // injected prompts between loop steps, and a turn stalled inside a
           // single LLM stream request never reaches one. Watch for turn
           // progress and escalate to abort-and-replay if none arrives.
-          this.armSteerPickupWatchdog({
+          this.stallWatchdogs.armSteerPickup({
             text,
             ...(command.data.images ? { images: command.data.images } : {}),
             ...(command.data.userId ? { userId: command.data.userId } : {}),
@@ -2264,8 +2267,7 @@ export class OpenCodeServerHarness
     // The steer-pickup and turn-stall watchdogs share it too: every teardown
     // point here ends the turn they were guarding, and any new turn re-arms
     // them on prompt submission.
-    this.clearSteerPickupWatchdog();
-    this.clearTurnStallWatchdog();
+    this.stallWatchdogs.clearAll();
     // Subagent run tracking shares the same lifecycle: every teardown point
     // that clears execute-tool heartbeats (turn finish, cancel, session error,
     // queued replay, dispose) must also drop pending subagent trackers.
@@ -3129,7 +3131,7 @@ export class OpenCodeServerHarness
       throw error;
     }
 
-    this.armTurnStallWatchdog();
+    this.stallWatchdogs.armTurnStall();
   }
 
   private async handleEvent(rawEvent: OpenCodeGlobalEvent): Promise<void> {
@@ -3153,7 +3155,7 @@ export class OpenCodeServerHarness
     if (sessionId && this.sessionId && sessionId !== this.sessionId) {
       // Child-session events are turn progress for the parent too: they mean
       // OpenCode is alive executing a spawn the in-flight turn is waiting on.
-      this.noteTurnProgress();
+      this.stallWatchdogs.noteProgress();
 
       // Child-session (subagent) events are otherwise dropped here; fold tool
       // activity into the parent spawn row and record hidden inference usage
@@ -3205,10 +3207,8 @@ export class OpenCodeServerHarness
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
       // pickup stays armed.
-      this.noteTurnActivity();
-      if (!this.turnStallTimer) {
-        this.scheduleTurnStallCheck(this.turnStallTimeoutMs);
-      }
+      this.stallWatchdogs.noteActivity();
+      this.stallWatchdogs.ensureTurnStallArmed();
       return;
     }
 
@@ -3322,7 +3322,7 @@ export class OpenCodeServerHarness
       return;
     }
 
-    this.noteTurnProgress();
+    this.stallWatchdogs.noteProgress();
 
     if (
       this.suppressAssistantOutputUntilNextPrompt &&
@@ -3621,7 +3621,7 @@ export class OpenCodeServerHarness
       return;
     }
 
-    this.noteTurnProgress();
+    this.stallWatchdogs.noteProgress();
 
     if (info.sessionID && !this.sessionId) {
       this.sessionId = info.sessionID;
@@ -3737,59 +3737,14 @@ export class OpenCodeServerHarness
     await this.drainQueuedPrompts();
   }
 
-  private armSteerPickupWatchdog(steer: PendingSteerPickup): void {
-    this.pendingSteerPickups.push(steer);
-
-    if (this.steerPickupTimer) {
-      clearTimeout(this.steerPickupTimer);
-    }
-
-    const timer = setTimeout(() => {
-      void this.handleSteerPickupStall().catch((error: unknown) => {
-        this.logger.error(
-          `OpenCode steer pickup escalation failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
-    }, this.steerPickupTimeoutMs);
-    timer.unref?.();
-    this.steerPickupTimer = timer;
-  }
-
-  private clearSteerPickupWatchdog(): void {
-    if (this.steerPickupTimer) {
-      clearTimeout(this.steerPickupTimer);
-      this.steerPickupTimer = null;
-    }
-
-    if (this.pendingSteerPickups.length > 0) {
-      this.pendingSteerPickups = [];
-    }
-  }
-
   /**
-   * Fires when a successfully injected mid-turn steer saw no turn progress
-   * within the pickup window: the turn is presumed stalled inside a single
-   * LLM stream request, where OpenCode never reaches the loop step boundary
-   * that would read the injection. Escalate to the queue + prioritize +
-   * abort-and-replay path that failed injections already take, so the steer
-   * actually lands. The replays are queued invisibly because the injection
-   * already persisted each steer's visible user prompt.
+   * Host side of a steer-pickup stall: queue each steer's content invisibly,
+   * front-load it, and interrupt for abort-and-replay. The coordinator already
+   * logged the stall and filtered disposed/empty/non-in-flight cases.
    */
-  private async handleSteerPickupStall(): Promise<void> {
-    this.steerPickupTimer = null;
-    const pending = this.pendingSteerPickups;
-    this.pendingSteerPickups = [];
-
-    if (this.disposed || pending.length === 0 || !this.inFlight) {
-      return;
-    }
-
-    this.logger.warn(
-      `OpenCode showed no turn progress within ${this.steerPickupTimeoutMs}ms of a native mid-turn steer injection; escalating ${pending.length} steer(s) to abort-and-replay so they land.`,
-    );
-
+  private async handleSteerPickupStall(
+    pending: PendingSteerPickup[],
+  ): Promise<void> {
     const queuedIds = pending.map((steer) =>
       this.prompts.enqueue({
         ...steer,
@@ -3805,139 +3760,6 @@ export class OpenCodeServerHarness
     await this.interruptForQueuedReplay();
   }
 
-  /** Any session event that proves the OpenCode session is alive. */
-  private noteTurnActivity(): void {
-    this.lastTurnEventAtMs = Date.now();
-  }
-
-  /**
-   * Evidence the in-flight turn is actually advancing (assistant message or
-   * part activity, child-session activity). Beyond refreshing the stall
-   * window this disarms the steer-pickup watchdog: a turn that is making
-   * progress reaches its next loop step — and with it any injected prompt —
-   * on its own.
-   */
-  private noteTurnProgress(): void {
-    this.noteTurnActivity();
-    this.clearSteerPickupWatchdog();
-  }
-
-  private armTurnStallWatchdog(): void {
-    this.noteTurnActivity();
-    this.scheduleTurnStallCheck(this.turnStallTimeoutMs);
-  }
-
-  private scheduleTurnStallCheck(delayMs: number): void {
-    this.clearTurnStallWatchdog();
-    const timer = setTimeout(() => {
-      void this.handleTurnStallCheck().catch((error: unknown) => {
-        this.logger.error(
-          `OpenCode turn stall check failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
-    }, delayMs);
-    timer.unref?.();
-    this.turnStallTimer = timer;
-  }
-
-  private clearTurnStallWatchdog(): void {
-    if (this.turnStallTimer) {
-      clearTimeout(this.turnStallTimer);
-      this.turnStallTimer = null;
-    }
-  }
-
-  /**
-   * A turn wedged inside a single LLM stream request emits nothing: no
-   * message events, no session.idle, no session.error. Left alone it hangs
-   * "running" until the sandbox hard deadline and natively injected steers
-   * are never read. This check fires after `turnStallTimeoutMs` of event
-   * silence on an in-flight turn and treats the session as wedged — but only
-   * after ruling out every quiet-but-alive state:
-   *
-   * - execute tools and subagent runs legitimately emit no events while they
-   *   work (both tracked in-memory);
-   * - a pending question tool waits on the user indefinitely;
-   * - any tool part still `running` on the latest assistant message —
-   *   verified against OpenCode's own state, since MCP tools have no local
-   *   tracker — means the turn is inside a tool execution, not a stream.
-   *
-   * A failed verification lookup proves nothing and never recovers: a false
-   * abort kills real work while an extra wait only delays an already-wedged
-   * turn, so every margin leans toward waiting (same bias as
-   * recoverUnsettledSpawn).
-   */
-  private async handleTurnStallCheck(): Promise<void> {
-    this.turnStallTimer = null;
-    const sessionId = this.sessionId;
-
-    if (this.disposed || !this.inFlight || !sessionId) {
-      return;
-    }
-
-    const idleMs = Date.now() - this.lastTurnEventAtMs;
-
-    if (idleMs < this.turnStallTimeoutMs) {
-      this.scheduleTurnStallCheck(this.turnStallTimeoutMs - idleMs);
-      return;
-    }
-
-    if (
-      this.pendingUserInputRequests.size > 0 ||
-      this.activeExecuteToolProgress.size > 0 ||
-      this.activeSubagentWatchdogs.size > 0
-    ) {
-      this.scheduleTurnStallCheck(this.turnStallTimeoutMs);
-      return;
-    }
-
-    let verifiedNoRunningTool = false;
-
-    try {
-      const messages = await this.client.messages({
-        sessionId,
-        limit: 20,
-        signal: this.eventAbortController.signal,
-      });
-      const latestAssistantMessage = [...messages]
-        .reverse()
-        .find((message) => message.info.role === 'assistant');
-
-      verifiedNoRunningTool = !latestAssistantMessage?.parts.some(
-        (part) =>
-          part.type === 'tool' &&
-          (part as OpenCodeToolPart).state?.status === 'running',
-      );
-    } catch (error) {
-      this.logger.warn(
-        `Could not verify OpenCode session ${sessionId} before recovering a stalled turn; leaving it running: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
-    // The verification round-tripped: re-check that nothing moved meanwhile.
-    if (this.disposed || !this.inFlight || this.turnStallTimer) {
-      return;
-    }
-
-    if (!verifiedNoRunningTool) {
-      this.scheduleTurnStallCheck(this.turnStallTimeoutMs);
-      return;
-    }
-
-    const idleAfterVerifyMs = Date.now() - this.lastTurnEventAtMs;
-
-    if (idleAfterVerifyMs < this.turnStallTimeoutMs) {
-      this.scheduleTurnStallCheck(this.turnStallTimeoutMs - idleAfterVerifyMs);
-      return;
-    }
-
-    await this.recoverWedgedTurn(sessionId);
-  }
-
   /**
    * Terminal recovery for a wedged turn, mirroring handleSessionError's
    * teardown around an intentional abort: stop the stuck request
@@ -3948,8 +3770,10 @@ export class OpenCodeServerHarness
    * state instead of hanging until the sandbox deadline.
    */
   private async recoverWedgedTurn(sessionId: string): Promise<void> {
+    const stallTimeoutMs = this.stallWatchdogs.turnStallTimeoutMsValue;
+
     this.logger.error(
-      `OpenCode turn produced no session events for ${this.turnStallTimeoutMs}ms with no tool running; treating the session as wedged and aborting the turn sessionId=${sessionId}`,
+      `OpenCode turn produced no session events for ${stallTimeoutMs}ms with no tool running; treating the session as wedged and aborting the turn sessionId=${sessionId}`,
     );
 
     this.armReplayAbortErrorSuppression();
@@ -3974,7 +3798,7 @@ export class OpenCodeServerHarness
     this.suppressAssistantOutputUntilNextPrompt = true;
     this.runtimeEvents.assistantMessage({
       sessionId,
-      text: formatOpenCodeTurnStallErrorText(this.turnStallTimeoutMs),
+      text: formatOpenCodeTurnStallErrorText(stallTimeoutMs),
     });
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
