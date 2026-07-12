@@ -72,7 +72,7 @@ describe('getPrBodyAttributionLine', () => {
   });
 
   it('advertises the deployment slug when the canonical alias is disabled', () => {
-    const mutableEnv = Env as Record<string, string | undefined>;
+    const mutableEnv = Env as unknown as Record<string, string | undefined>;
     mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION = 'true';
 
     try {

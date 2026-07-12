@@ -166,7 +166,7 @@ describe('isMention', () => {
   });
 
   describe('with the canonical alias disabled', () => {
-    const mutableEnv = Env as Record<string, string | undefined>;
+    const mutableEnv = Env as unknown as Record<string, string | undefined>;
 
     beforeEach(() => {
       mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION = 'true';
