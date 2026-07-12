@@ -457,7 +457,7 @@ export const TaskFilters = ({
                 checked={pullRequest === pr.value}
                 className="cursor-pointer"
               >
-                <div className="flex flex-col min-w-0">
+                <div className="flex min-w-0 w-full flex-col text-left">
                   <span className="truncate">{pr.label}</span>
                   {pr.subLabel && (
                     <span className="truncate text-xs text-muted-foreground">
@@ -509,7 +509,7 @@ export const TaskFilters = ({
                 checked={model === option.value}
                 className="cursor-pointer"
               >
-                <div className="flex min-w-0 flex-col">
+                <div className="flex min-w-0 w-full flex-col text-left">
                   <span className="truncate">{option.label}</span>
                   {option.subLabel && (
                     <span className="truncate text-xs text-muted-foreground">
