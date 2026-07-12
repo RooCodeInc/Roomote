@@ -323,7 +323,14 @@ export async function requestTaskRunSleepCommand(
       return { success: false, error: 'No machine associated with this job' };
     }
 
-    const provider = resolveComputeProviderTarget(taskRun.vendor);
+    const provider = taskRun.vendor;
+
+    if (!provider) {
+      return {
+        success: false,
+        error: 'No compute provider associated with this task',
+      };
+    }
 
     if (
       !isTaskResumeCapableComputeProvider(provider) ||

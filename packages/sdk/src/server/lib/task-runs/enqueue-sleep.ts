@@ -1,9 +1,10 @@
-import { Queue } from 'bullmq';
+import { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 
 import { getRedis } from '@roomote/redis';
 
 export const TASK_SLEEP_QUEUE_NAME = 'task-sleep-jobs';
+const TASK_SLEEP_RESULT_TIMEOUT_MS = 60_000;
 
 const BLOCKING_JOB_STATES = new Set([
   'active',
@@ -20,6 +21,7 @@ export const taskSleepRequestSchema = z.object({
 export type TaskSleepRequest = z.infer<typeof taskSleepRequestSchema>;
 
 let taskSleepQueue: Queue<TaskSleepRequest> | null = null;
+let taskSleepQueueEvents: QueueEvents | null = null;
 
 function getTaskSleepQueue(): Queue<TaskSleepRequest> {
   if (!taskSleepQueue) {
@@ -37,6 +39,16 @@ function getTaskSleepQueue(): Queue<TaskSleepRequest> {
   return taskSleepQueue;
 }
 
+function getTaskSleepQueueEvents(): QueueEvents {
+  if (!taskSleepQueueEvents) {
+    taskSleepQueueEvents = new QueueEvents(TASK_SLEEP_QUEUE_NAME, {
+      connection: getRedis(),
+    });
+  }
+
+  return taskSleepQueueEvents;
+}
+
 /** Enqueue an immediate provider-neutral sleep request for a task run. */
 export async function enqueueTaskSleep(
   request: TaskSleepRequest,
@@ -49,12 +61,20 @@ export async function enqueueTaskSleep(
     const state = await existingJob.getState();
 
     if (BLOCKING_JOB_STATES.has(state)) {
+      await existingJob.waitUntilFinished(
+        getTaskSleepQueueEvents(),
+        TASK_SLEEP_RESULT_TIMEOUT_MS,
+      );
       return false;
     }
 
     await existingJob.remove();
   }
 
-  await queue.add('sleep-task', request, { jobId });
+  const job = await queue.add('sleep-task', request, { jobId });
+  await job.waitUntilFinished(
+    getTaskSleepQueueEvents(),
+    TASK_SLEEP_RESULT_TIMEOUT_MS,
+  );
   return true;
 }
