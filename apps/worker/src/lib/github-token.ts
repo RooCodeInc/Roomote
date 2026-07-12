@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { createServer } from 'http';
 import { homedir } from 'os';
 import { join } from 'path';
@@ -745,5 +745,6 @@ export async function applySourceControlTokenMetadata(
 }
 
 function ensureGhTokenDirectory(): void {
-  mkdirSync(GH_TOKEN_DIR, { recursive: true });
+  mkdirSync(GH_TOKEN_DIR, { recursive: true, mode: 0o700 });
+  chmodSync(GH_TOKEN_DIR, 0o700);
 }

@@ -13,6 +13,7 @@ vi.mock('fs', () => ({
   readFileSync: vi.fn(),
   writeFileSync: vi.fn(),
   mkdirSync: vi.fn(),
+  chmodSync: vi.fn(),
   rmSync: vi.fn(),
 }));
 
@@ -586,6 +587,8 @@ describe('writeCommonEnvFile', () => {
     expect(content).toContain(`source '${GITLAB_TOKEN_ENV_PATH}'`);
     expect(content).toContain(`source '${GITEA_TOKEN_ENV_PATH}'`);
     expect(content).toContain(`source '${ADO_TOKEN_ENV_PATH}'`);
+    expect(envWrite?.[2]).toEqual({ mode: 0o600 });
+    expect(fs.chmodSync).toHaveBeenCalledWith(COMMON_ENV_PATH, 0o600);
   });
 });
 
