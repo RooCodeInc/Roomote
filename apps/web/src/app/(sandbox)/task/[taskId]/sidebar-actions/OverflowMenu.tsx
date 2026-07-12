@@ -8,13 +8,15 @@ import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
 import {
   isExitedRunStatus,
-  isSnapshotCapableComputeProvider,
+  isResumableTaskPayloadKind,
+  isTaskResumeCapableComputeProvider,
+  runningRunStatuses,
 } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import { useDeleteTasks } from '@/hooks/tasks';
 import { useCancelTaskRun } from '@/hooks/task-runs';
-import { useCreateTaskRunSnapshot } from '@/hooks/snapshots';
+import { useRequestTaskRunSleep } from '@/hooks/snapshots';
 
 import {
   Button,
@@ -49,9 +51,11 @@ function OverflowMenuBase({
     !!taskRun &&
     !!taskRun.machineId &&
     !isExitedRunStatus(taskRun.status) &&
+    runningRunStatuses.some((status) => status === taskRun.status) &&
     !isTaskRunAsleep(taskRun) &&
     !taskRun.snapshotFailedAt &&
-    isSnapshotCapableComputeProvider(taskRun.vendor);
+    isResumableTaskPayloadKind(taskRun.payloadKind) &&
+    isTaskResumeCapableComputeProvider(taskRun.vendor);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -73,7 +77,7 @@ function OverflowMenuBase({
     onError: () => toast.error('Failed to shut down task.'),
   });
 
-  const createTaskRunSnapshot = useCreateTaskRunSnapshot({
+  const requestTaskRunSleep = useRequestTaskRunSleep({
     onSuccess: () => {
       toast.success('Task is going to sleep.');
     },
@@ -92,12 +96,12 @@ function OverflowMenuBase({
   }
 
   const handleSleep = async () => {
-    if (!taskRun || createTaskRunSnapshot.isPending) {
+    if (!taskRun || requestTaskRunSleep.isPending) {
       return;
     }
 
     try {
-      await createTaskRunSnapshot.mutateAsync({ runId: taskRun.id });
+      await requestTaskRunSleep.mutateAsync({ runId: taskRun.id });
     } catch {
       // Errors are toasted by the mutation hook.
     }
@@ -131,7 +135,7 @@ function OverflowMenuBase({
           {canSleep ? (
             <DropdownMenuItem
               onClick={handleSleep}
-              disabled={createTaskRunSnapshot.isPending}
+              disabled={requestTaskRunSleep.isPending}
               className="flex cursor-pointer items-center gap-2"
             >
               <Moon className="size-4" />

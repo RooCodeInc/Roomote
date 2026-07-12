@@ -15,6 +15,12 @@ export {
 export { finishRun } from './lib/task-runs/finish-run';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
+export {
+  enqueueTaskSleep,
+  TASK_SLEEP_QUEUE_NAME,
+  taskSleepRequestSchema,
+  type TaskSleepRequest,
+} from './lib/task-runs/enqueue-sleep';
 export { recordComputeProviderUsage } from './lib/task-runs/record-compute-provider-usage';
 export {
   recordTaskMessageEnvelope,

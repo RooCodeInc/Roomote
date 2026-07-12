@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
 
-export function useCreateTaskRunSnapshot(options?: {
+export function useRequestTaskRunSleep(options?: {
   onSuccess?: (result: { success: true }) => void;
   onError?: (error: unknown) => void;
 }) {
@@ -13,7 +13,7 @@ export function useCreateTaskRunSnapshot(options?: {
   const trpc = useTRPC();
 
   return useMutation(
-    trpc.snapshots.createTaskRun.mutationOptions({
+    trpc.snapshots.requestTaskRunSleep.mutationOptions({
       onSuccess: (result) => {
         if (result.success) {
           queryClient.invalidateQueries({

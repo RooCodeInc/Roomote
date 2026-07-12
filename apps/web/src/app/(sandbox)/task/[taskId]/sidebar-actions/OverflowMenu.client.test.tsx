@@ -5,7 +5,7 @@ const {
   pushMock,
   cancelMutateAsyncMock,
   deleteMutateAsyncMock,
-  createSnapshotMutateAsyncMock,
+  requestSleepMutateAsyncMock,
   errorToastMock,
   successToastMock,
   authState,
@@ -13,7 +13,7 @@ const {
   pushMock: vi.fn(),
   cancelMutateAsyncMock: vi.fn(),
   deleteMutateAsyncMock: vi.fn(),
-  createSnapshotMutateAsyncMock: vi.fn(),
+  requestSleepMutateAsyncMock: vi.fn(),
   errorToastMock: vi.fn(),
   successToastMock: vi.fn(),
   authState: {
@@ -139,8 +139,8 @@ vi.mock('@/hooks/task-runs', () => ({
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
-  useCreateTaskRunSnapshot: vi.fn(() => ({
-    mutateAsync: createSnapshotMutateAsyncMock,
+  useRequestTaskRunSleep: vi.fn(() => ({
+    mutateAsync: requestSleepMutateAsyncMock,
     isPending: false,
   })),
 }));
@@ -162,6 +162,7 @@ function createTaskRun(overrides: Record<string, unknown> = {}) {
     id: 123,
     actingUserId: 'user-1',
     status: 'running',
+    payloadKind: 'standard',
     vendor: 'modal',
     machineId: 'machine-1',
     snapshotId: null,
@@ -179,7 +180,7 @@ describe('OverflowMenu', () => {
     authState.user = { userId: 'user-1', isAdmin: false };
     cancelMutateAsyncMock.mockResolvedValue({ success: true });
     deleteMutateAsyncMock.mockResolvedValue(undefined);
-    createSnapshotMutateAsyncMock.mockResolvedValue({ success: true });
+    requestSleepMutateAsyncMock.mockResolvedValue({ success: true });
   });
 
   it('does not render when auth context is unavailable', () => {
@@ -209,7 +210,7 @@ describe('OverflowMenu', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a Sleep action for awake snapshot-capable runs', () => {
+  it('shows a Sleep action for awake resumable runs', () => {
     render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     expect(screen.getByRole('button', { name: 'Sleep' })).toBeInTheDocument();
@@ -228,7 +229,7 @@ describe('OverflowMenu', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('hides Sleep for providers that do not support snapshots', () => {
+  it('shows Sleep for Docker standby runs', () => {
     render(
       <OverflowMenu
         taskId="task-1"
@@ -236,12 +237,10 @@ describe('OverflowMenu', () => {
       />,
     );
 
-    expect(
-      screen.queryByRole('button', { name: 'Sleep' }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sleep' })).toBeInTheDocument();
   });
 
-  it('requests a task-run snapshot when Sleep is chosen', async () => {
+  it('requests provider-neutral sleep when Sleep is chosen', async () => {
     render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
 
     await act(async () => {
@@ -249,7 +248,7 @@ describe('OverflowMenu', () => {
     });
 
     await vi.waitFor(() => {
-      expect(createSnapshotMutateAsyncMock).toHaveBeenCalledWith({
+      expect(requestSleepMutateAsyncMock).toHaveBeenCalledWith({
         runId: 123,
       });
     });

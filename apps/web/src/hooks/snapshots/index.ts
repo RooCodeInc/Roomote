@@ -1,4 +1,4 @@
 export { useCreateEnvironmentSnapshot } from './useCreateEnvironmentSnapshot';
 export { useClearEnvironmentSnapshot } from './useClearEnvironmentSnapshot';
-export { useCreateTaskRunSnapshot } from './useCreateTaskRunSnapshot';
+export { useRequestTaskRunSleep } from './useRequestTaskRunSleep';
 export { useRestoreTaskRunSnapshot } from './useRestoreTaskRunSnapshot';
