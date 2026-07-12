@@ -52,15 +52,47 @@ describe('createBlaxelMachine', () => {
     });
   });
 
-  it('preserves messages from plain Blaxel API errors', async () => {
-    vi.useFakeTimers();
-    try {
-      const onMutation = vi.fn();
-      const resumeFromStandby = vi
-        .fn()
-        .mockRejectedValue({ code: 409, error: 'Resource already exists' });
+  it('forwards the stable provisioning key to fresh sandbox creation', async () => {
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker'),
+      tag: 'worker-vtest',
+      version: 'test',
+    });
+    const createInstance = vi.fn().mockResolvedValue({
+      instanceId: 'roomote-stable',
+      domains: {},
+    });
+    const runCommand = vi.fn().mockResolvedValue({ exitCode: 0 });
 
-      const result = createBlaxelMachine({
+    await createBlaxelMachine({
+      blaxelApiKey: 'key',
+      blaxelWorkspace: 'workspace',
+      blaxelImage: 'sandbox/roomote-worker:test',
+      idempotencyKey: 'roomote-task-run:42',
+      launchMode: 'fresh',
+      computeClient: {
+        vendor: 'blaxel',
+        createInstance,
+        resumeFromStandby: vi.fn(),
+        writeFiles: vi.fn(),
+        runCommand,
+        destroyInstance: vi.fn(),
+      },
+    });
+
+    expect(createInstance).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: 'roomote-task-run:42' }),
+    );
+  });
+
+  it('preserves messages from plain Blaxel API errors', async () => {
+    const onMutation = vi.fn();
+    const resumeFromStandby = vi
+      .fn()
+      .mockRejectedValue({ code: 409, error: 'Resource already exists' });
+
+    await expect(
+      createBlaxelMachine({
         blaxelApiKey: 'key',
         blaxelWorkspace: 'workspace',
         blaxelImage: 'sandbox/roomote-worker:test',
@@ -75,23 +107,45 @@ describe('createBlaxelMachine', () => {
           runCommand: vi.fn(),
           destroyInstance: vi.fn(),
         },
-      });
-      const rejection = expect(result).rejects.toThrow(
-        'Resource already exists',
+      }),
+    ).rejects.toThrow('Resource already exists');
+    expect(resumeFromStandby).toHaveBeenCalledTimes(1);
+    expect(onMutation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        eventType: 'failed',
+        details: expect.objectContaining({
+          error: 'Resource already exists',
+        }),
+      }),
+    );
+  });
+
+  it('does not multiply an exhausted workload-unavailable retry budget', async () => {
+    const resumeFromStandby = vi
+      .fn()
+      .mockRejectedValue(
+        new Error(
+          '404 {"error":{"code":"WORKLOAD_UNAVAILABLE","origin":"platform","retryable":true}}',
+        ),
       );
 
-      await vi.advanceTimersByTimeAsync(6_000);
-      await rejection;
-      expect(onMutation).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          eventType: 'failed',
-          details: expect.objectContaining({
-            error: 'Resource already exists',
-          }),
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    await expect(
+      createBlaxelMachine({
+        blaxelApiKey: 'key',
+        blaxelWorkspace: 'workspace',
+        blaxelImage: 'sandbox/roomote-worker:test',
+        launchMode: 'task_standby',
+        resumeHandle: 'roomote-blaxel-standby',
+        computeClient: {
+          vendor: 'blaxel',
+          createInstance: vi.fn(),
+          resumeFromStandby,
+          writeFiles: vi.fn(),
+          runCommand: vi.fn(),
+          destroyInstance: vi.fn(),
+        },
+      }),
+    ).rejects.toThrow('WORKLOAD_UNAVAILABLE');
+    expect(resumeFromStandby).toHaveBeenCalledTimes(1);
   });
 });
