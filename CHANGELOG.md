@@ -2,6 +2,13 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.2.0 (2026-07-12)
+
+### Minor changes
+
+- Blaxel is available as a hosted sandbox compute provider in onboarding and Settings → Sandboxes: provider configuration, automatic worker-image provisioning into a Blaxel-compatible immutable sandbox image with progress and retry UI, OIDC, usage tracking, and lifecycle cleanup, so deployments can run task sandboxes on Blaxel alongside existing providers.
+- Blaxel tasks support native standby resume: idle sandboxes stay retained for seven days with the worker stopped, and follow-up work reconnects to the same instance with refreshed TTLs and preview URLs instead of always spinning a fresh environment. Resume uses the worker-resume path and recreates conflicted preview endpoints so retained sandboxes come back cleanly after standby.
+
 ## 0.1.1 (2026-07-11)
 
 ### Patch changes
