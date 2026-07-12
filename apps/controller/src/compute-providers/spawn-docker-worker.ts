@@ -272,6 +272,7 @@ export async function spawnDockerWorker(
     const sandboxServerUrl = buildDockerSandboxServerUrl({
       network: controlNetwork ? dockerNetwork : undefined,
       taskId: taskRun.taskId,
+      publicAppUrl: process.env.R_PUBLIC_URL || process.env.R_APP_URL,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
     });
@@ -476,17 +477,26 @@ async function hasTaskRunStarted(runId: number): Promise<boolean> {
 export function buildDockerSandboxServerUrl(params: {
   network?: string;
   taskId?: string | null;
+  publicAppUrl?: string;
   previewProxyBaseUrl?: string;
 }): string | undefined {
-  if (!params.network || !params.taskId || !params.previewProxyBaseUrl) {
+  if (!params.taskId) {
     return undefined;
   }
 
-  return buildPreviewProxyUrl(
-    params.taskId,
-    portNameToSlug(SANDBOX_SERVER_NAMED_PORT.name),
-    params.previewProxyBaseUrl,
-  );
+  if (params.network && params.previewProxyBaseUrl) {
+    return buildPreviewProxyUrl(
+      params.taskId,
+      portNameToSlug(SANDBOX_SERVER_NAMED_PORT.name),
+      params.previewProxyBaseUrl,
+    );
+  }
+
+  if (!params.network && params.publicAppUrl) {
+    return `${params.publicAppUrl.replace(/\/+$/, '')}/_roomote-sandbox/${params.taskId}`;
+  }
+
+  return undefined;
 }
 
 async function getPublishedPorts(
