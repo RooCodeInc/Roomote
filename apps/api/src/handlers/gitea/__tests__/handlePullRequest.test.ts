@@ -2,6 +2,7 @@ const {
   mockEnqueueTask,
   mockGetGiteaAutomationTargets,
   mockUpdateTaskPrStatus,
+  mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
@@ -11,6 +12,7 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
+  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
@@ -24,6 +26,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   updateTaskPrStatus: mockUpdateTaskPrStatus,
+  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
 }));
 
 vi.mock('@roomote/db/server', () => ({

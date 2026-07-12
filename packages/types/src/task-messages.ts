@@ -101,11 +101,21 @@ export const PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE =
   'pr_review_notification';
 
 /**
+ * `metadata.source` value for transcript messages that record a linked pull
+ * request terminal status change (merged / closed). Written directly to task
+ * history without entering the harness session, so the next agent turn can
+ * re-surface them the same way as PR review-feedback notifications.
+ */
+export const PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE =
+  'pr_status_notification';
+
+/**
  * All `metadata.source` values that mark a transcript message as out-of-band
  * (persisted to task history without entering the harness session).
  */
 export const OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
 ] as const;
 
 /**

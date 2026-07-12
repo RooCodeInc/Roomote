@@ -144,6 +144,14 @@ export {
   type PrReviewTriageContext,
 } from './lib/task-runs/pr-review-notification-delivery';
 
+export {
+  formatPrStatusChangeTaskHistoryText,
+  formatPullRequestReference,
+  recordPrStatusChangeInTaskHistory,
+  recordPrStatusChangeInTaskHistoryInputSchema,
+  type RecordPrStatusChangeInTaskHistoryInput,
+} from './lib/task-runs/record-pr-status-change';
+
 export { resolveSlackTaskRunRouting } from './lib/task-runs/slack-task-run-routing';
 
 export {

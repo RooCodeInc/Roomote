@@ -18,6 +18,7 @@ const {
   mockResolveDeploymentEnvVar,
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
+  mockRecordPrStatusChangeInTaskHistory,
   mockVerifyAndReceive,
   webhooksConstructorParams,
 } = vi.hoisted(() => ({
@@ -45,6 +46,7 @@ const {
   mockResolveDeploymentEnvVar: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
+  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockVerifyAndReceive: vi.fn(),
   webhooksConstructorParams: [] as unknown[],
 }));
@@ -96,6 +98,7 @@ vi.mock('@roomote/sdk/server', () => ({
   updateTaskPrStatus: mockUpdateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
+  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
 }));
 
 vi.mock('../../logging', () => ({
