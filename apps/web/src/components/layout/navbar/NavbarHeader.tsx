@@ -35,6 +35,7 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
           alt="Roomote"
           width={28}
           height={28}
+          priority
           className="h-7 w-7 cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80 dark:invert"
         />
       </Link>
