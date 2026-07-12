@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type {
   SetupComputeStatus,
   SetupNewComputeProvisioningState,
@@ -118,5 +118,88 @@ describe('ComputeProviderSection provisioning states', () => {
     expect(
       screen.queryByText(/Provisioning the worker base image/),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe('ComputeProviderSection advanced settings', () => {
+  const dockerProvider: ComputeProviderStatus = {
+    provider: 'docker',
+    label: 'Local Docker',
+    description: 'Local Docker sandboxes.',
+    supportsSnapshots: false,
+    fields: [
+      {
+        envVarName: 'DOCKER_STANDBY_MAX_COUNT',
+        label: 'Maximum retained tasks',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 0, step: 1, placeholder: '10' },
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+    ],
+    runtimeConfigSatisfied: true,
+    savedConfigSatisfied: true,
+    configSatisfied: true,
+    infrastructureSatisfied: true,
+  };
+
+  it('keeps provider overrides collapsed until requested and saves edits', () => {
+    const onSave = vi.fn();
+    render(
+      <ComputeProviderSection
+        provider={dockerProvider}
+        isDefault
+        onSave={onSave}
+        onClear={vi.fn()}
+        savePending={false}
+        clearPending={false}
+      />,
+    );
+
+    expect(
+      screen.queryByLabelText('Maximum retained tasks (optional)'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced settings' }));
+    const maxCount = screen.getByLabelText('Maximum retained tasks (optional)');
+    expect(maxCount).toHaveAttribute('type', 'number');
+
+    fireEvent.change(maxCount, { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+
+    expect(onSave).toHaveBeenCalledWith('docker', {
+      DOCKER_STANDBY_MAX_COUNT: '4',
+    });
+  });
+
+  it('shows process environment overrides as locked', () => {
+    render(
+      <ComputeProviderSection
+        provider={{
+          ...dockerProvider,
+          fields: [
+            {
+              ...dockerProvider.fields[0]!,
+              runtimeSatisfied: true,
+              savedValue: '6',
+            },
+          ],
+        }}
+        isDefault
+        onSave={vi.fn()}
+        onClear={vi.fn()}
+        savePending={false}
+        clearPending={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced settings' }));
+    expect(
+      screen.getByLabelText('Maximum retained tasks (optional)'),
+    ).toBeDisabled();
   });
 });

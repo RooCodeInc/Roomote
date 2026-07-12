@@ -33,6 +33,10 @@ function makeRequest(id: string, params?: { sig?: string; ts?: string }) {
   return new NextRequest(url, { method: 'GET' });
 }
 
+function freshTs(): string {
+  return String(Math.floor(Date.now() / 1000));
+}
+
 describe('GET /api/artifacts/[id]/raw', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -182,7 +186,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     } as never);
 
     const response = await GET(
-      makeRequest('art-1', { sig: 'valid-sig', ts: '1700000000' }),
+      makeRequest('art-1', { sig: 'valid-sig', ts: freshTs() }),
       {
         params: Promise.resolve({ id: 'art-1' }),
       },
@@ -225,7 +229,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
     } as never);
 
     const response = await GET(
-      makeRequest('art-1', { sig: 'valid-sig', ts: '1700000000' }),
+      makeRequest('art-1', { sig: 'valid-sig', ts: freshTs() }),
       {
         params: Promise.resolve({ id: 'art-1' }),
       },
@@ -234,9 +238,14 @@ describe('GET /api/artifacts/[id]/raw', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('Content-Type')).toBe('image/png');
     expect(response.headers.get('Content-Length')).toBe('4');
-    expect(response.headers.get('Cache-Control')).toBe(
-      'public, max-age=86400, immutable',
+    expect(response.headers.get('Cache-Control')).toMatch(
+      /^public, max-age=\d+, immutable$/,
     );
+    const cacheControl = response.headers.get('Cache-Control') ?? '';
+    const maxAge = Number(cacheControl.match(/max-age=(\d+)/)?.[1]);
+    expect(maxAge).toBeGreaterThan(0);
+    expect(maxAge).toBeLessThanOrEqual(3600);
+
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('Content-Security-Policy')).toBe(
       "default-src 'none'; style-src 'unsafe-inline'",
@@ -315,7 +324,7 @@ describe('GET /api/artifacts/[id]/raw', () => {
       } as never);
 
       const response = await GET(
-        makeRequest('art-1', { sig: 'valid-sig', ts: '1700000000' }),
+        makeRequest('art-1', { sig: 'valid-sig', ts: freshTs() }),
         {
           params: Promise.resolve({ id: 'art-1' }),
         },

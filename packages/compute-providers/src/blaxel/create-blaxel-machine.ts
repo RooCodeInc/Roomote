@@ -15,6 +15,7 @@ import type {
   ComputeProviderClient,
   ComputeProviderMutationObserver,
 } from '../types';
+import { shouldRetryBlaxelLifecycleError } from './errors';
 
 const MAX_RETRIES = 3;
 const INSTALL_SCRIPT_PATH = `${SANDBOX_FILES_DIR}/install-worker.sh`;
@@ -34,6 +35,7 @@ export interface CreateBlaxelMachineOptions {
   blaxelApiKey: string;
   blaxelWorkspace: string;
   blaxelImage: string;
+  idempotencyKey?: string;
   blaxelRegion?: string;
   namedPorts?: NamedPort[];
   proxyPorts?: Record<string, number>;
@@ -130,6 +132,7 @@ export async function createBlaxelMachine(
         });
       } else {
         created = await computeClient.createInstance({
+          idempotencyKey: options.idempotencyKey,
           ports,
           tags: options.tags,
           metadata: {
@@ -179,7 +182,7 @@ export async function createBlaxelMachine(
         },
       });
       if (isAbortError(error)) throw error;
-      if (attempt === MAX_RETRIES) {
+      if (attempt === MAX_RETRIES || !shouldRetryBlaxelLifecycleError(error)) {
         throw error instanceof Error ? error : new Error(errorMessage);
       }
       await sleepWithSignal(2_000 * 2 ** (attempt - 1), createSignal);

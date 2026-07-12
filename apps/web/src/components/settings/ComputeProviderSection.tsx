@@ -20,6 +20,10 @@ import {
   BrandIcon,
   Button,
   Check,
+  ChevronDown,
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -107,16 +111,15 @@ export function ComputeProviderSection({
   clearPending,
 }: ComputeProviderSectionProps) {
   const inputFields = provider.fields.filter(isComputeCredentialField);
-  // Optional operator-editable infrastructure (domain/region). Managed Modal
-  // base image and E2B/Daytona artifacts are never form inputs.
-  const optionalInfraFields = provider.fields.filter(
+  // Provider-specific routing, endpoint, and retention settings. Managed
+  // worker artifacts are never form inputs. Runtime overrides remain visible
+  // here but locked so operators can see where the effective policy comes from.
+  const advancedInfraFields = provider.fields.filter(
     (field) =>
       isComputeInfrastructureField(field) &&
       isComputeOperatorEditableField(field) &&
-      !field.runtimeSatisfied,
+      field.advanced,
   );
-  // Keep the old name for the rest of this component without a big rename.
-  const advancedInfraFields = optionalInfraFields;
   const missingDefaultBlockingInfraFields = provider.fields.filter(
     (field) =>
       isComputeInfrastructureField(field) &&
@@ -159,11 +162,13 @@ export function ComputeProviderSection({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
+    setAdvancedExpanded(false);
     setRemoveDialogOpen(false);
     setExpanded(hasNoInputFields || hasConfiguredValues);
   }, [
@@ -248,7 +253,7 @@ export function ComputeProviderSection({
 
   const hasEditableFields =
     inputFields.some((field) => !field.runtimeSatisfied) ||
-    advancedInfraFields.length > 0;
+    advancedInfraFields.some((field) => !field.runtimeSatisfied);
   const runtimeConfigured =
     inputFields.length > 0 &&
     inputFields.every((field) => field.runtimeSatisfied);
@@ -276,14 +281,21 @@ export function ComputeProviderSection({
         key={field.envVarName}
         className="grid gap-2 md:grid-cols-[220px_minmax(0,1fr)] md:items-center max-w-xl"
       >
-        <div className="text-sm font-medium">
+        <label
+          htmlFor={`${provider.provider}-${field.envVarName}`}
+          className="text-sm font-medium"
+        >
           {field.label}
           {field.required === false ? ' (optional)' : ''}
-        </div>
+        </label>
         <div className="flex items-center gap-2">
           <Input
+            id={`${provider.provider}-${field.envVarName}`}
             secret={isSecretField && !field.runtimeSatisfied}
-            type={isSecretField ? undefined : 'text'}
+            type={isSecretField ? undefined : (field.input?.type ?? 'text')}
+            min={field.input?.min}
+            max={field.input?.max}
+            step={field.input?.step}
             className="font-mono"
             value={
               isSecretField && field.runtimeSatisfied
@@ -317,12 +329,23 @@ export function ComputeProviderSection({
                 [field.envVarName]: nextValue,
               }));
             }}
-            placeholder={field.runtimeSatisfied ? '' : field.label}
+            placeholder={
+              field.runtimeSatisfied
+                ? 'Managed by environment variable'
+                : (field.input?.placeholder ?? field.label)
+            }
             disabled={savePending || field.runtimeSatisfied}
             data-1p-ignore
           />
           {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
         </div>
+        {field.helpText ? (
+          <p className="text-xs text-muted-foreground md:col-start-2">
+            {field.runtimeSatisfied
+              ? `${field.helpText} Managed by ${field.envVarName}.`
+              : field.helpText}
+          </p>
+        ) : null}
       </div>
     );
   };
@@ -386,7 +409,7 @@ export function ComputeProviderSection({
               </p>
             </div>
 
-            {hasNoInputFields && advancedInfraFields.length === 0 && (
+            {hasNoInputFields && (
               <div>
                 <p className="font-semibold text-sm">Configuration values</p>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -395,7 +418,7 @@ export function ComputeProviderSection({
               </div>
             )}
 
-            {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
+            {inputFields.length > 0 && (
               <div>
                 <p className="font-semibold text-sm">
                   {hasConfiguredValues
@@ -413,10 +436,40 @@ export function ComputeProviderSection({
                 ) : null}
                 <div className="space-y-2 mt-2">
                   {inputFields.map((field) => renderFieldInput(field))}
-                  {advancedInfraFields.map((field) => renderFieldInput(field))}
                 </div>
               </div>
             )}
+
+            {advancedInfraFields.length > 0 ? (
+              <Collapsible
+                open={advancedExpanded}
+                onOpenChange={setAdvancedExpanded}
+                className="max-w-xl"
+              >
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full cursor-pointer items-center justify-between rounded-md py-2 text-left text-sm font-semibold hover:text-accent-foreground"
+                  >
+                    <span>Advanced settings</span>
+                    <ChevronDown
+                      className={`size-4 transition-transform ${advancedExpanded ? 'rotate-180' : ''}`}
+                    />
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-3 pt-2">
+                  <p className="text-sm text-muted-foreground">
+                    Provider routing, endpoint, and standby retention overrides.
+                    Leave optional values blank to use provider defaults.
+                  </p>
+                  <div className="space-y-3">
+                    {advancedInfraFields.map((field) =>
+                      renderFieldInput(field),
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            ) : null}
 
             {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
               <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
@@ -487,10 +540,11 @@ export function ComputeProviderSection({
       <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Remove {provider.label} credentials?</DialogTitle>
+            <DialogTitle>Remove {provider.label} configuration?</DialogTitle>
             <DialogDescription>
-              Saved {provider.label} credentials will be removed from the
-              database. Configured environment variables are not affected.
+              Saved {provider.label} credentials and advanced settings will be
+              removed from the database. Process environment variables are not
+              affected.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

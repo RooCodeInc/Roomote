@@ -374,6 +374,55 @@ describe('DockerService.ensureWorkerImage', () => {
     );
   });
 
+  it('reuses an existing worker image when required networking tools are available', async () => {
+    vi.mocked(execa).mockResolvedValue({} as Awaited<ReturnType<typeof execa>>);
+
+    await DockerService.ensureWorkerImage(false);
+
+    expect(execa).toHaveBeenCalledWith('docker', [
+      'run',
+      '--rm',
+      '--platform',
+      process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+      '--entrypoint',
+      '/bin/sh',
+      'roomote-worker:local',
+      '-c',
+      'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null',
+    ]);
+    expect(execa).not.toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['build']),
+      expect.anything(),
+    );
+  });
+
+  it('rebuilds an existing worker image that lacks required networking tools', async () => {
+    const rootDir = path.resolve(process.cwd(), '../..');
+
+    vi.mocked(execa)
+      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>)
+      .mockRejectedValueOnce(new Error('ip is missing'))
+      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>);
+
+    await DockerService.ensureWorkerImage(false);
+
+    expect(execa).toHaveBeenCalledWith(
+      'docker',
+      [
+        'build',
+        '--platform',
+        process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        '-f',
+        'apps/worker/Dockerfile',
+        '-t',
+        'roomote-worker:local',
+        '.',
+      ],
+      { cwd: rootDir },
+    );
+  });
+
   it('honors custom Docker worker image and platform settings', async () => {
     const rootDir = path.resolve(process.cwd(), '../..');
     process.env.DOCKER_WORKER_IMAGE = 'custom-worker:test';

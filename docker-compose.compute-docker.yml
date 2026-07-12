@@ -25,8 +25,17 @@ services:
       DOCKER_WORKER_LOG_MAX_SIZE: ${DOCKER_WORKER_LOG_MAX_SIZE:-10m}
       DOCKER_WORKER_LOG_MAX_FILES: ${DOCKER_WORKER_LOG_MAX_FILES:-3}
       DOCKER_WORKER_EGRESS_POLICY: ${DOCKER_WORKER_EGRESS_POLICY:-internet}
+      DOCKER_STANDBY_MAX_COUNT: ${DOCKER_STANDBY_MAX_COUNT:-10}
+      DOCKER_STANDBY_MAX_AGE_HOURS: ${DOCKER_STANDBY_MAX_AGE_HOURS:-24}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       worker-image:
         condition: service_completed_successfully
+
+  bullmq:
+    environment:
+      DOCKER_STANDBY_MAX_COUNT: ${DOCKER_STANDBY_MAX_COUNT:-10}
+      DOCKER_STANDBY_MAX_AGE_HOURS: ${DOCKER_STANDBY_MAX_AGE_HOURS:-24}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

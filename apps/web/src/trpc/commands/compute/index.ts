@@ -13,6 +13,7 @@ import {
   buildSetupComputeStatus,
   deriveWorkerImageFromReleaseVersion,
   getSetupComputeProvider,
+  getComputeFieldValidationError,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -238,6 +239,10 @@ export async function saveComputeConfigCommand(
         field.envVarName === 'MODAL_BASE_IMAGE_REF'
           ? ''
           : (input.values?.[field.envVarName]?.trim() ?? '');
+      const validationError = getComputeFieldValidationError(field, submitted);
+      if (validationError) {
+        throw new Error(validationError);
+      }
       const nextValue =
         submitted ||
         (isComputeInfrastructureField(field)
@@ -364,8 +369,8 @@ export async function clearComputeConfigCommand(
   assertAdmin(auth);
 
   const provider = getSetupComputeProvider(input.provider);
-  // Clears this provider's saved credentials and its provider-specific
-  // infrastructure values (base image ref, template id, snapshot name).
+  // Clears this provider's saved credentials and provider-specific advanced
+  // settings/artifacts. Process environment values remain untouched.
   const providerEnvVarNames = provider.fields.map((field) => field.envVarName);
 
   if (providerEnvVarNames.length === 0) {

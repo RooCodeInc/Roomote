@@ -27,8 +27,8 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: false,
   supportsCommandOutputLookup: false,
   supportsSnapshots: false,
-  supportsStandbyResume: false,
-  supportsResume: false,
+  supportsStandbyResume: true,
+  supportsResume: true,
   supportsFileWrite: false,
 };
 

@@ -29,6 +29,7 @@ export const Logo = ({
       alt={`${PRODUCT_NAME} logo`}
       width={iconSize}
       height={iconSize}
+      priority
       onClick={() => router.push('/')}
       className={cn(
         'logo cursor-pointer transition-all duration-300 hover:scale-105 hover:opacity-80',

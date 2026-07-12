@@ -5,13 +5,17 @@ const {
   pushMock,
   cancelMutateAsyncMock,
   deleteMutateAsyncMock,
+  requestSleepMutateAsyncMock,
   errorToastMock,
+  successToastMock,
   authState,
 } = vi.hoisted(() => ({
   pushMock: vi.fn(),
   cancelMutateAsyncMock: vi.fn(),
   deleteMutateAsyncMock: vi.fn(),
+  requestSleepMutateAsyncMock: vi.fn(),
   errorToastMock: vi.fn(),
+  successToastMock: vi.fn(),
   authState: {
     user: { userId: 'user-1', isAdmin: false } as {
       userId: string;
@@ -41,7 +45,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('sonner', () => ({
   toast: {
-    success: vi.fn(),
+    success: successToastMock,
     error: errorToastMock,
   },
 }));
@@ -76,17 +80,20 @@ vi.mock('@/components/system', () => ({
     onClick,
     className,
     variant,
+    disabled,
   }: {
     children: ReactNode;
     onClick?: () => void;
     className?: string;
     variant?: string;
+    disabled?: boolean;
   }) => (
     <button
       type="button"
       onClick={onClick}
       className={className}
       data-variant={variant}
+      disabled={disabled}
     >
       {children}
     </button>
@@ -104,6 +111,7 @@ vi.mock('@/components/system', () => ({
     <p>{children}</p>
   ),
   MoreVertical: () => <svg aria-hidden="true" />,
+  Moon: () => <svg aria-hidden="true" />,
   Trash2: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,
 }));
@@ -130,6 +138,13 @@ vi.mock('@/hooks/task-runs', () => ({
   })),
 }));
 
+vi.mock('@/hooks/snapshots', () => ({
+  useRequestTaskRunSleep: vi.fn(() => ({
+    mutateAsync: requestSleepMutateAsyncMock,
+    isPending: false,
+  })),
+}));
+
 vi.mock('../hooks/use-preview-urls', () => ({
   usePreviewUrls: vi.fn(() => ({ previewUrls: null })),
 }));
@@ -147,6 +162,8 @@ function createTaskRun(overrides: Record<string, unknown> = {}) {
     id: 123,
     actingUserId: 'user-1',
     status: 'running',
+    payloadKind: 'standard',
+    vendor: 'modal',
     machineId: 'machine-1',
     snapshotId: null,
     snapshotRequestedAt: null,
@@ -163,6 +180,7 @@ describe('OverflowMenu', () => {
     authState.user = { userId: 'user-1', isAdmin: false };
     cancelMutateAsyncMock.mockResolvedValue({ success: true });
     deleteMutateAsyncMock.mockResolvedValue(undefined);
+    requestSleepMutateAsyncMock.mockResolvedValue({ success: true });
   });
 
   it('does not render when auth context is unavailable', () => {
@@ -190,6 +208,50 @@ describe('OverflowMenu', () => {
     expect(
       screen.queryByRole('button', { name: /snapshot/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('shows a Sleep action for awake resumable runs', () => {
+    render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
+
+    expect(screen.getByRole('button', { name: 'Sleep' })).toBeInTheDocument();
+  });
+
+  it('hides Sleep when the task is already asleep', () => {
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun({ snapshotId: 'snap-1' })}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Sleep' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows Sleep for Docker standby runs', () => {
+    render(
+      <OverflowMenu
+        taskId="task-1"
+        taskRun={createTaskRun({ vendor: 'docker' })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Sleep' })).toBeInTheDocument();
+  });
+
+  it('requests provider-neutral sleep when Sleep is chosen', async () => {
+    render(<OverflowMenu taskId="task-1" taskRun={createTaskRun()} />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sleep' }));
+    });
+
+    await vi.waitFor(() => {
+      expect(requestSleepMutateAsyncMock).toHaveBeenCalledWith({
+        runId: 123,
+      });
+    });
   });
 
   it('keeps the delete confirmation action labeled delete', () => {

@@ -3,14 +3,20 @@
 import { memo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { MoreVertical, Trash2 } from '@/components/system';
+import { Moon, MoreVertical, Trash2 } from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
-import { isExitedRunStatus } from '@roomote/types';
+import {
+  isExitedRunStatus,
+  isResumableTaskPayloadKind,
+  isTaskResumeCapableComputeProvider,
+  runningRunStatuses,
+} from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import { useDeleteTasks } from '@/hooks/tasks';
 import { useCancelTaskRun } from '@/hooks/task-runs';
+import { useRequestTaskRunSleep } from '@/hooks/snapshots';
 
 import {
   Button,
@@ -26,6 +32,7 @@ import {
 } from '@/components/system';
 
 import type { OverflowMenuProps } from './types';
+import { isTaskRunAsleep } from './utils';
 
 function OverflowMenuBase({
   taskId,
@@ -40,6 +47,15 @@ function OverflowMenuBase({
 
   // Task deletion is deployment-wide: any member can delete any task.
   const canShutdown = !!taskRun && !isExitedRunStatus(taskRun.status);
+  const canSleep =
+    !!taskRun &&
+    !!taskRun.machineId &&
+    !isExitedRunStatus(taskRun.status) &&
+    runningRunStatuses.some((status) => status === taskRun.status) &&
+    !isTaskRunAsleep(taskRun) &&
+    !taskRun.snapshotFailedAt &&
+    isResumableTaskPayloadKind(taskRun.payloadKind) &&
+    isTaskResumeCapableComputeProvider(taskRun.vendor);
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -61,6 +77,12 @@ function OverflowMenuBase({
     onError: () => toast.error('Failed to shut down task.'),
   });
 
+  const requestTaskRunSleep = useRequestTaskRunSleep({
+    onSuccess: () => {
+      toast.success('Task is going to sleep.');
+    },
+  });
+
   if (!user) {
     return null;
   }
@@ -72,6 +94,18 @@ function OverflowMenuBase({
       </SideNavItem>
     );
   }
+
+  const handleSleep = async () => {
+    if (!taskRun || requestTaskRunSleep.isPending) {
+      return;
+    }
+
+    try {
+      await requestTaskRunSleep.mutateAsync({ runId: taskRun.id });
+    } catch {
+      // Errors are toasted by the mutation hook.
+    }
+  };
 
   const handleDeleteConfirm = async () => {
     if (canShutdown) {
@@ -98,6 +132,16 @@ function OverflowMenuBase({
           </SideNavItem>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" side="left">
+          {canSleep ? (
+            <DropdownMenuItem
+              onClick={handleSleep}
+              disabled={requestTaskRunSleep.isPending}
+              className="flex cursor-pointer items-center gap-2"
+            >
+              <Moon className="size-4" />
+              Sleep
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setShowDeleteDialog(true)}

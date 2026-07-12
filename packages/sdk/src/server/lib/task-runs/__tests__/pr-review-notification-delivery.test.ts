@@ -136,7 +136,9 @@ const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
 
 function mockGreenCiChecks() {
   mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
-  mockPullsGet.mockResolvedValue({ data: { head: { sha: 'abc123' } } });
+  mockPullsGet.mockResolvedValue({
+    data: { head: { sha: 'abc123' }, mergeable: true },
+  });
   mockListCheckRunsForRef.mockResolvedValue({
     data: {
       check_runs: [
@@ -219,6 +221,7 @@ describe('preparePrReviewNotificationDelivery', () => {
 
     expect(prompt).toContain('- CI / Lint: success');
     expect(prompt).toContain('- CI / Tests: success');
+    expect(prompt).not.toContain('- Merge conflicts: yes');
   });
 
   it('passes one line per check status into the triage LLM context', async () => {
@@ -257,6 +260,22 @@ describe('preparePrReviewNotificationDelivery', () => {
       summary:
         'alice approved [owner/repo#42](https://github.com/owner/repo/pull/42).',
     });
+  });
+
+  it('passes merge conflicts into the triage LLM context', async () => {
+    mockPullsGet.mockResolvedValue({
+      data: { head: { sha: 'abc123' }, mergeable: false },
+    });
+
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events,
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('- Merge conflicts: yes');
   });
 
   it('skips without triage when no conversation route can be resolved', async () => {
@@ -353,6 +372,19 @@ describe('triagePrReviewActivity', () => {
     expect(system).toContain(
       'when "Current pull request state" includes CI check lines',
     );
+    expect(system).toContain(
+      'when any CI check is listed as failure or error, treat it as high-signal',
+    );
+    expect(system).toContain(
+      'when "Current pull request state" includes "- Merge conflicts: yes"',
+    );
+    expect(system).toContain(
+      'current pull request state shows a CI check as failure or error',
+    );
+    expect(system).toContain(
+      'current pull request state includes "- Merge conflicts: yes"',
+    );
+    expect(system).toContain('Do you want me to fix it?');
   });
 
   it('includes the latest Roomote review summary comment verbatim for self-review results', async () => {
@@ -375,6 +407,7 @@ describe('triagePrReviewActivity', () => {
             { name: 'CI / Tests', status: 'success' },
           ],
         },
+        mergeable: true,
       },
     });
 
@@ -389,6 +422,34 @@ describe('triagePrReviewActivity', () => {
     expect(prompt).toContain('Current pull request state:');
     expect(prompt).toContain('- CI / Lint: success');
     expect(prompt).toContain('- CI / Tests: success');
+    expect(prompt).not.toContain('- Merge conflicts: yes');
+  });
+
+  it('includes merge conflicts in the triage prompt for self-review results', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: { worthNotifying: true, summary: 'ok.' },
+    });
+
+    await triagePrReviewActivity({
+      ...request,
+      events,
+      context: {
+        resolvedThreadCount: 0,
+        unresolvedThreadCount: 0,
+        latestReviewStatus: null,
+        latestReviewSummaryComment: null,
+        ciStatus: {
+          checks: [{ name: 'CI / Tests', status: 'failure' }],
+        },
+        mergeable: false,
+      },
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+
+    expect(prompt).toContain('Current pull request state:');
+    expect(prompt).toContain('- Merge conflicts: yes');
+    expect(prompt).toContain('- CI / Tests: failure');
   });
 
   it('returns a skip decision when the model says the activity is not worth notifying', async () => {
@@ -475,7 +536,22 @@ describe('gatherPrReviewTriageContext', () => {
           { name: 'CI / Tests', status: 'success' },
         ],
       },
+      mergeable: true,
     });
+  });
+
+  it('includes mergeable false when the PR has conflicts', async () => {
+    mockPullsGet.mockResolvedValue({
+      data: { head: { sha: 'abc123' }, mergeable: false },
+    });
+
+    const context = await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(context.mergeable).toBe(false);
   });
 
   it('includes pending CI status when checks are still running', async () => {
@@ -537,6 +613,7 @@ describe('gatherPrReviewTriageContext', () => {
     });
 
     expect(context.ciStatus).toBeNull();
+    expect(context.mergeable).toBeNull();
     expect(mockPullsGet).not.toHaveBeenCalled();
     expect(mockListCheckRunsForRef).not.toHaveBeenCalled();
     expect(mockGetCombinedStatusForRef).not.toHaveBeenCalled();
@@ -560,6 +637,7 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
       ciStatus: null,
+      mergeable: null,
     });
   });
 });

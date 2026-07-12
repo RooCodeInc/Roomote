@@ -22,6 +22,21 @@ import { stringifyDecryptedEnvVarValue } from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
+type ComputeRuntimeEnv = Partial<Record<string, unknown>>;
+
+function normalizeComputeRuntimeEnvValue(value: unknown): string | undefined {
+  switch (typeof value) {
+    case 'string':
+      return value.trim() || undefined;
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+      return String(value);
+    default:
+      return undefined;
+  }
+}
+
 async function loadPersistedRuntimeComputeConfig(
   executor: DatabaseOrTransaction = db,
 ) {
@@ -159,11 +174,17 @@ export async function resolveDefaultComputeProvider(
 export async function resolveComputeProviderEnvValues(
   provider: ComputeProvider,
   options: {
-    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    runtimeEnv?: ComputeRuntimeEnv;
     executor?: DatabaseOrTransaction;
   } = {},
 ): Promise<Partial<Record<string, string>>> {
-  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const rawRuntimeEnv = options.runtimeEnv ?? process.env;
+  const runtimeEnv = Object.fromEntries(
+    Object.entries(rawRuntimeEnv).flatMap(([name, value]) => {
+      const normalized = normalizeComputeRuntimeEnvValue(value);
+      return normalized === undefined ? [] : [[name, normalized]];
+    }),
+  );
   const executor = options.executor ?? db;
   const descriptor = getSetupComputeProvider(provider);
   const envVarNames = descriptor.fields.map((field) => field.envVarName);
@@ -176,7 +197,7 @@ export async function resolveComputeProviderEnvValues(
   const missingEnvVarNames: string[] = [];
 
   for (const envVarName of envVarNames) {
-    const runtimeValue = runtimeEnv[envVarName]?.trim();
+    const runtimeValue = runtimeEnv[envVarName];
 
     if (runtimeValue) {
       resolvedValues[envVarName] = runtimeValue;

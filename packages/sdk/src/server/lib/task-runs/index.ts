@@ -6,6 +6,7 @@ export * from './dequeue-task-run';
 export * from './dequeue-resume-task-run';
 export * from './finish-run';
 export * from './enqueue-snapshot';
+export * from './enqueue-sleep';
 export * from './revert-pr-commit';
 export * from './refresh-github-token';
 export * from './fetch-snapshot-env';

@@ -7,6 +7,7 @@ import {
   getDockerTaskNetworkName,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
+  restoreDockerStandbyNetworking,
   type DockerCommand,
 } from '../docker-sandbox-security';
 
@@ -225,6 +226,98 @@ describe('attachDockerEgressPolicy', () => {
       'ip route replace blackhole 192.168.0.0/16',
     );
     expect(routeScript).toContain('ip route replace blackhole 169.254.0.0/16');
+  });
+});
+
+describe('restoreDockerStandbyNetworking', () => {
+  it('re-applies egress routes and reconnects recreated trusted services', async () => {
+    const runDocker = vi.fn<DockerCommand>(async (args) => {
+      if (
+        args[0] === 'network' &&
+        args[1] === 'inspect' &&
+        args[2] === 'roomote-control'
+      ) {
+        return JSON.stringify([
+          {
+            Id: 'control-network-id',
+            Containers: {
+              apiContainerId: { Name: 'roomote-api' },
+              previewContainerId: { Name: 'roomote-preview-proxy' },
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'apiContainerId') {
+        return JSON.stringify([
+          {
+            Config: { Labels: { 'com.docker.compose.service': 'api' } },
+            NetworkSettings: {
+              Networks: {
+                control: {
+                  NetworkID: 'control-network-id',
+                  Aliases: ['api'],
+                },
+              },
+            },
+          },
+        ]);
+      }
+      if (args[0] === 'inspect' && args[1] === 'previewContainerId') {
+        return JSON.stringify([
+          {
+            Config: {
+              Labels: { 'com.docker.compose.service': 'preview-proxy' },
+            },
+            NetworkSettings: {
+              Networks: {
+                control: {
+                  NetworkID: 'control-network-id',
+                  Aliases: ['preview-proxy'],
+                },
+              },
+            },
+          },
+        ]);
+      }
+      return '';
+    });
+
+    await restoreDockerStandbyNetworking(
+      {
+        containerName: 'roomote-worker-96',
+        taskNetwork: 'roomote-task-96',
+        controlNetwork: 'roomote-control',
+        egressPolicy: 'internet',
+        image: 'roomote-worker:test',
+        platform: 'linux/amd64',
+      },
+      runDocker,
+    );
+
+    expect(runDocker).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'run',
+        '--network',
+        'container:roomote-worker-96',
+        'roomote-worker:test',
+      ]),
+    );
+    expect(runDocker).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'network',
+        'connect',
+        'roomote-task-96',
+        'apiContainerId',
+      ]),
+    );
+    expect(runDocker).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        'network',
+        'connect',
+        'roomote-task-96',
+        'previewContainerId',
+      ]),
+    );
   });
 });
 

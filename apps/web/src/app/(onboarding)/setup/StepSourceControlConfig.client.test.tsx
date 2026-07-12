@@ -170,13 +170,13 @@ describe('StepSourceControlConfig', () => {
     );
 
     fireEvent.change(screen.getByLabelText('GitHub organization (optional)'), {
-      target: { value: ' roovetgit ' },
+      target: { value: ' example-org ' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));
 
     expect(createGitHubAppManifestMock).toHaveBeenCalledWith({
       redirect: '/setup?step=source-control-connect',
-      organization: 'roovetgit',
+      organization: 'example-org',
     });
   });
 

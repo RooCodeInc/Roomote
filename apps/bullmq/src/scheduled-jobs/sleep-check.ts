@@ -57,6 +57,7 @@ const SLEEP_CHECK_PROVIDERS = sleepCheckManagedComputeProviders;
 
 type SleepCheckPath =
   | 'due_sleep'
+  | 'manual_sleep'
   | 'stale_worker'
   | 'hard_limit'
   | 'booting_no_heartbeat';
@@ -157,6 +158,8 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'blaxel',
         envFallback: await resolveComputeProviderEnvValues('blaxel'),
       });
+    case 'docker':
+      return createComputeProviderClient({ provider: 'docker' });
     default:
       throw new Error(
         `Sleep check has no compute client for provider "${provider}"`,
@@ -688,7 +691,7 @@ async function claimAndEnterStandby(
     await recordSleepCheckEvent(
       job,
       'completed',
-      `Retained Blaxel sandbox ${job.machineId} on standby for task run #${job.id}.`,
+      `Retained ${job.vendor} sandbox ${job.machineId} on standby for task run #${job.id}.`,
       {
         path,
         decision: 'standby_completed',
@@ -731,6 +734,82 @@ async function claimResumableSleep(
   }
 
   return (await claimAndSnapshot(job, path)) === 'enqueued';
+}
+
+/**
+ * Process a user-requested sleep immediately. Unlike the scheduled due-sleep
+ * path, this intentionally does not extend the deadline for an active phase.
+ */
+export async function sleepTaskRunNow(runId: number): Promise<void> {
+  const job = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: {
+      id: true,
+      payloadKind: true,
+      status: true,
+      taskPhase: true,
+      machineId: true,
+      vendor: true,
+      taskId: true,
+      snapshotRequestedAt: true,
+      sandboxCmdId: true,
+      sleepAt: true,
+      sleepRequestedAt: true,
+      startedAt: true,
+      workerHeartbeatAt: true,
+      snapshotId: true,
+    },
+  });
+
+  if (!job) {
+    throw new Error(`Task run #${runId} was not found`);
+  }
+
+  if (!ACTIVE_SLEEP_CHECK_STATUSES.includes(job.status)) {
+    throw new Error(`Task run #${runId} is not active`);
+  }
+
+  if (!job.machineId || !job.vendor) {
+    throw new Error(`Task run #${runId} has no active machine`);
+  }
+
+  if (
+    !isResumableTaskPayloadKind(job.payloadKind) ||
+    !isTaskResumeCapableComputeProvider(job.vendor)
+  ) {
+    throw new Error(`Task run #${runId} does not support resumable sleep`);
+  }
+
+  if (job.snapshotId || job.snapshotRequestedAt || job.sleepRequestedAt) {
+    return;
+  }
+
+  const client = await createSleepCheckClient(job.vendor);
+  const { status } = await client.getInstanceStatus({
+    instanceId: job.machineId,
+  });
+
+  if (status !== 'running') {
+    throw new Error(
+      `Cannot put task run #${runId} to sleep because its instance is ${status}`,
+    );
+  }
+
+  if (isStandbyResumeCapableComputeProvider(job.vendor)) {
+    const result = await claimAndEnterStandby(job, client, 'manual_sleep');
+
+    if (result === 'error') {
+      throw new Error(`Failed to put task run #${runId} on standby`);
+    }
+
+    return;
+  }
+
+  const result = await claimAndSnapshot(job, 'manual_sleep');
+
+  if (result === 'error') {
+    throw new Error(`Failed to snapshot task run #${runId}`);
+  }
 }
 
 /**
@@ -1336,6 +1415,8 @@ function describeSleepCheckPath(path: SleepCheckPath): string {
   switch (path) {
     case 'due_sleep':
       return 'Due sleep handling';
+    case 'manual_sleep':
+      return 'Manual sleep handling';
     case 'hard_limit':
       return 'Provider-timeout backstop';
     case 'stale_worker':

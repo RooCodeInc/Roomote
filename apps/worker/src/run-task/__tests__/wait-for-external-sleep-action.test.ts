@@ -188,7 +188,7 @@ describe('waitForExternalSleepAction', () => {
     expect(findRuntimeStateByIdMock).toHaveBeenCalledWith(790);
   });
 
-  it('skips jobs on non-snapshot-capable providers', async () => {
+  it('skips jobs without a managed compute provider', async () => {
     const logger = {
       runId: 123,
       filePath: '/tmp/test.log',
@@ -202,7 +202,7 @@ describe('waitForExternalSleepAction', () => {
       taskRun: {
         id: 123,
         payloadKind: TaskPayloadKind.GithubPrReviewFollowUp,
-        vendor: 'docker',
+        vendor: null,
         machineId: 'worker-123',
       } as never,
       logger,

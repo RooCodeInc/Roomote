@@ -20,6 +20,8 @@ import type { ComputeProviderCapabilities } from '@roomote/types';
 export type { ComputeProviderCapabilities } from '@roomote/types';
 
 export interface CreateInstanceInput {
+  /** Stable caller-owned key used by providers that support idempotent create. */
+  idempotencyKey?: string;
   ports?: number[];
   metadata?: Record<string, string>;
   tags?: Record<string, string>;
@@ -293,6 +295,8 @@ export interface BlaxelConfig {
   memoryMiB?: number;
   /** Maximum sandbox lifetime in milliseconds. */
   timeoutMs?: number;
+  /** How long a stopped sandbox remains available for task standby resume. */
+  standbyTtlMs?: number;
 }
 
 export type ComputeProviderFactoryOptions = (

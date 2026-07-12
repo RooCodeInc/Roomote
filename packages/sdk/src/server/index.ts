@@ -15,6 +15,12 @@ export {
 export { finishRun } from './lib/task-runs/finish-run';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
+export {
+  enqueueTaskSleep,
+  TASK_SLEEP_QUEUE_NAME,
+  taskSleepRequestSchema,
+  type TaskSleepRequest,
+} from './lib/task-runs/enqueue-sleep';
 export { recordComputeProviderUsage } from './lib/task-runs/record-compute-provider-usage';
 export {
   recordTaskMessageEnvelope,
@@ -36,8 +42,11 @@ export {
 } from './lib/task-runs/stamp-milestone';
 
 export {
+  ARTIFACT_RAW_URL_CLOCK_SKEW_SECONDS,
+  ARTIFACT_RAW_URL_MAX_AGE_SECONDS,
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
+  isArtifactSignatureTimestampValid,
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';

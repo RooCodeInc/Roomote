@@ -4,3 +4,4 @@ export { refreshSnapshotsJob } from './refresh-snapshots';
 export { pullRequestAnalyticsSyncJob } from './pull-request-analytics-sync';
 export { instancePingJob } from './instance-ping';
 export { webhookCleanupJob } from './webhook-cleanup';
+export { standbyRetentionJob } from './standby-retention';

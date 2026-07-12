@@ -14,8 +14,9 @@ export { currentEpochSeconds };
  * Generate an HMAC-SHA256 signature for an artifact ID bound to a timestamp.
  * Uses ARTIFACT_SIGNING_KEY (dedicated to this purpose, no prefix needed).
  *
- * The signature covers `artifactId.ts` so that a future expiration check
- * can be added without regenerating URLs.
+ * The signature covers `artifactId.ts`. Verification rejects timestamps older
+ * than ARTIFACT_RAW_URL_MAX_AGE_SECONDS (default 30 days) so leaked raw URLs
+ * fail closed after the TTL.
  */
 export function signArtifactId(artifactId: string, ts: number): string {
   return signArtifactIdWithKey({
@@ -26,11 +27,11 @@ export function signArtifactId(artifactId: string, ts: number): string {
 }
 
 /**
- * Verify an HMAC signature for an artifact ID + timestamp.
+ * Verify an HMAC signature for an artifact ID + timestamp and enforce max age.
  *
  * Tries the current ARTIFACT_SIGNING_KEY first. If ARTIFACT_SIGNING_KEY_PREVIOUS
  * is set, falls back to verifying with the previous key to support graceful
- * key rotation.
+ * key rotation. Expired `ts` values are rejected even when the HMAC matches.
  */
 export function verifyArtifactSignature(
   artifactId: string,

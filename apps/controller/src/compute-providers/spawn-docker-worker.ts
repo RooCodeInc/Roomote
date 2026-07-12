@@ -41,6 +41,7 @@ import {
   prepareDockerTaskNetwork,
   processListIncludesDockerWorkerRun,
   removeDockerSandboxResources,
+  restoreDockerStandbyNetworking,
   type DockerWorkerEgressPolicy,
 } from './docker-sandbox-security';
 
@@ -72,22 +73,31 @@ export async function spawnDockerWorker(
     deploymentSlug?: string;
   },
 ): Promise<{ containerId: string }> {
-  if (
-    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
-    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
-  ) {
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
     throw new NonRetryableSpawnError(
       `Docker provider does not support ${taskRun.payloadKind} task run kinds`,
     );
   }
 
-  if (!config.localWorkerReleasePath) {
+  const isStandbyResume =
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume;
+  if (isStandbyResume && !taskRun.sourceSnapshotId) {
+    throw new NonRetryableSpawnError(
+      `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
+    );
+  }
+
+  if (!isStandbyResume && !config.localWorkerReleasePath) {
     throw new Error(
       'Docker provider requires a local worker release archive. TaskRun pnpm dev without --use-release.',
     );
   }
 
-  if (!existsSync(config.localWorkerReleasePath)) {
+  if (
+    !isStandbyResume &&
+    config.localWorkerReleasePath &&
+    !existsSync(config.localWorkerReleasePath)
+  ) {
     throw new Error(
       `Docker worker release archive does not exist: ${config.localWorkerReleasePath}`,
     );
@@ -116,29 +126,33 @@ export async function spawnDockerWorker(
       defaultPreviewDomains: Env.PREVIEW_DOMAINS,
     });
 
-  const containerName = getDockerWorkerContainerName(taskRun.id);
+  const containerName = isStandbyResume
+    ? taskRun.sourceSnapshotId!
+    : getDockerWorkerContainerName(taskRun.id);
+  const sourceRunId = getDockerSourceRunId(containerName);
   const controlNetwork = config.network?.trim();
   const portArgs = controlNetwork
     ? []
     : namedPorts.flatMap(({ port }) => ['-p', `127.0.0.1::${port}`]);
 
-  // Auto-remove the container when its worker process exits so the cloned repo
-  // and the worker's short-lived token files do not linger in a stopped
-  // container. Development keeps containers for post-mortem debugging.
+  // Retained containers are reaped by the standby retention policy instead of
+  // Docker's --rm lifecycle, so their writable layer remains resumable.
   const autoRemoveContainer = shouldAutoRemoveDockerWorkerContainer(
     resolveAppEnv(process.env),
   );
-  const dockerNetwork = await prepareDockerTaskNetwork({
-    taskRunId: taskRun.id,
-    controlNetwork,
-    egressPolicy: config.egressPolicy,
-    autoRemove: autoRemoveContainer,
-  });
+  const dockerNetwork = isStandbyResume
+    ? getDockerTaskNetworkName(sourceRunId)
+    : await prepareDockerTaskNetwork({
+        taskRunId: taskRun.id,
+        controlNetwork,
+        egressPolicy: config.egressPolicy,
+        autoRemove: autoRemoveContainer,
+      });
 
   console.log(
     `[spawnDockerWorker] Starting Docker worker container for task run #${taskRun.id} ${JSON.stringify(
       {
-        image: config.image,
+        image: isStandbyResume ? '(retained container)' : config.image,
         platform: config.platform,
         controlNetwork,
         taskNetwork: dockerNetwork,
@@ -180,58 +194,77 @@ export async function spawnDockerWorker(
     ).trim();
 
   try {
-    try {
-      containerId = await startContainer(config.diskLimit);
-    } catch (error) {
-      if (
-        !shouldRetryDockerWorkerWithoutDiskLimit({
-          diskLimit: config.diskLimit,
-          allowUnboundedDisk: config.allowUnboundedDisk,
-          error,
-        })
-      ) {
-        throw error;
+    if (isStandbyResume) {
+      await docker(['start', containerName]);
+      containerId = containerName;
+      await restoreDockerStandbyNetworking({
+        containerName,
+        taskNetwork: dockerNetwork,
+        controlNetwork,
+        egressPolicy: config.egressPolicy,
+        image: config.image,
+        platform: config.platform,
+      });
+    } else {
+      try {
+        containerId = await startContainer(config.diskLimit);
+      } catch (error) {
+        if (
+          !shouldRetryDockerWorkerWithoutDiskLimit({
+            diskLimit: config.diskLimit,
+            allowUnboundedDisk: config.allowUnboundedDisk,
+            error,
+          })
+        ) {
+          throw error;
+        }
+
+        console.warn(
+          `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
+        );
+        await docker(['rm', '-f', containerName], { allowFailure: true });
+        containerId = await startContainer();
       }
 
-      console.warn(
-        `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
-      );
-      await docker(['rm', '-f', containerName], { allowFailure: true });
-      containerId = await startContainer();
+      await attachDockerEgressPolicy({
+        containerName,
+        egressPolicy: config.egressPolicy,
+        image: config.image,
+        platform: config.platform,
+        blockDockerGateway: Boolean(controlNetwork),
+      });
+      await docker([
+        'cp',
+        `${resolveFromWorkspaceRoot('.docker/sandbox')}/.`,
+        `${containerName}:${DOCKER_WORKER_ROOT}/`,
+      ]);
+      await docker([
+        'cp',
+        config.localWorkerReleasePath!,
+        `${containerName}:${DOCKER_WORKER_ARCHIVE_PATH}`,
+      ]);
+      // docker cp preserves host-side ownership on the copied tree, which on
+      // macOS leaves /sandbox owned by the host uid instead of the image user
+      // and makes install-worker.sh unable to create /sandbox/worker.
+      const workerOwner =
+        await resolveDockerWorkerOwnershipTarget(containerName);
+      await docker([
+        'exec',
+        '-u',
+        'root',
+        containerName,
+        'chown',
+        '-R',
+        workerOwner,
+        DOCKER_WORKER_ROOT,
+      ]);
+      await docker([
+        'exec',
+        containerName,
+        'bash',
+        DOCKER_INSTALL_WORKER_SCRIPT,
+      ]);
     }
-
-    await attachDockerEgressPolicy({
-      containerName,
-      egressPolicy: config.egressPolicy,
-      image: config.image,
-      platform: config.platform,
-      blockDockerGateway: Boolean(controlNetwork),
-    });
-    await docker([
-      'cp',
-      `${resolveFromWorkspaceRoot('.docker/sandbox')}/.`,
-      `${containerName}:${DOCKER_WORKER_ROOT}/`,
-    ]);
-    await docker([
-      'cp',
-      config.localWorkerReleasePath,
-      `${containerName}:${DOCKER_WORKER_ARCHIVE_PATH}`,
-    ]);
-    // docker cp preserves host-side ownership on the copied tree, which on
-    // macOS leaves /sandbox owned by the host uid instead of the image user
-    // and makes install-worker.sh unable to create /sandbox/worker.
-    const workerOwner = await resolveDockerWorkerOwnershipTarget(containerName);
-    await docker([
-      'exec',
-      '-u',
-      'root',
-      containerName,
-      'chown',
-      '-R',
-      workerOwner,
-      DOCKER_WORKER_ROOT,
-    ]);
-    await docker(['exec', containerName, 'bash', DOCKER_INSTALL_WORKER_SCRIPT]);
 
     const portMap = controlNetwork
       ? new Map<number, string>()
@@ -239,6 +272,7 @@ export async function spawnDockerWorker(
     const sandboxServerUrl = buildDockerSandboxServerUrl({
       network: controlNetwork ? dockerNetwork : undefined,
       taskId: taskRun.taskId,
+      publicAppUrl: process.env.R_PUBLIC_URL || process.env.R_APP_URL,
       previewProxyBaseUrl:
         resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl ?? undefined,
     });
@@ -256,7 +290,7 @@ export async function spawnDockerWorker(
         environmentConfig?.ports,
       )?.name,
       sandboxServerUrl,
-      sourceSnapshotId: null,
+      sourceSnapshotId: isStandbyResume ? containerName : null,
       authBypassValue,
       authBypassHeaderName,
     });
@@ -305,6 +339,7 @@ export async function spawnDockerWorker(
       },
     });
 
+    const workerCommand = getDockerWorkerCommand(taskRun.payloadKind);
     await docker([
       'exec',
       '-d',
@@ -315,12 +350,7 @@ export async function spawnDockerWorker(
       containerName,
       'bash',
       '-lc',
-      [
-        `worker run ${taskRun.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
-        'status=$?',
-        'kill 1',
-        'exit "$status"',
-      ].join('; '),
+      `worker ${workerCommand} ${taskRun.id} > /proc/1/fd/1 2> /proc/1/fd/2`,
     ]);
 
     await assertDetachedWorkerStarted(containerName, taskRun.id);
@@ -333,14 +363,18 @@ export async function spawnDockerWorker(
 
     return { containerId: containerName };
   } catch (error) {
-    if (resolveAppEnv(process.env) === 'development' && containerId) {
+    if (isStandbyResume && containerId) {
+      await docker(['stop', '--time', '10', containerName], {
+        allowFailure: true,
+      });
+    } else if (resolveAppEnv(process.env) === 'development' && containerId) {
       console.error(
         `[spawnDockerWorker] Preserving failed Docker worker container ${containerName} for local debugging`,
       );
     } else {
       await removeDockerSandboxResources({
         containerName,
-        taskNetwork: getDockerTaskNetworkName(taskRun.id),
+        taskNetwork: dockerNetwork,
       });
     }
     throw error;
@@ -443,17 +477,26 @@ async function hasTaskRunStarted(runId: number): Promise<boolean> {
 export function buildDockerSandboxServerUrl(params: {
   network?: string;
   taskId?: string | null;
+  publicAppUrl?: string;
   previewProxyBaseUrl?: string;
 }): string | undefined {
-  if (!params.network || !params.taskId || !params.previewProxyBaseUrl) {
+  if (!params.taskId) {
     return undefined;
   }
 
-  return buildPreviewProxyUrl(
-    params.taskId,
-    portNameToSlug(SANDBOX_SERVER_NAMED_PORT.name),
-    params.previewProxyBaseUrl,
-  );
+  if (params.network && params.previewProxyBaseUrl) {
+    return buildPreviewProxyUrl(
+      params.taskId,
+      portNameToSlug(SANDBOX_SERVER_NAMED_PORT.name),
+      params.previewProxyBaseUrl,
+    );
+  }
+
+  if (!params.network && params.publicAppUrl) {
+    return `${params.publicAppUrl.replace(/\/+$/, '')}/_roomote-sandbox/${params.taskId}`;
+  }
+
+  return undefined;
 }
 
 async function getPublishedPorts(
@@ -586,14 +629,27 @@ export function resolveDockerWorkerOwnershipTargetFromLookup({
   return `${trimmedImageUser}:${groupName}`;
 }
 
-/**
- * Whether a Docker worker container should be started with `--rm` so it is
- * removed once its worker exits. Development preserves stopped containers for
- * debugging; every other environment reaps them to avoid accumulating stopped
- * containers that still hold the cloned repo and the worker's token files.
- */
+/** Retention owns cleanup, so Docker must not remove a resumable container. */
 export function shouldAutoRemoveDockerWorkerContainer(appEnv: string): boolean {
-  return appEnv !== 'development';
+  void appEnv;
+  return false;
+}
+
+function getDockerSourceRunId(containerName: string): number {
+  const match = /^roomote-worker-(\d+)$/.exec(containerName);
+  const runId = Number(match?.[1]);
+  if (!Number.isInteger(runId)) {
+    throw new NonRetryableSpawnError(
+      `Invalid Docker standby handle: ${containerName}`,
+    );
+  }
+  return runId;
+}
+
+export function getDockerWorkerCommand(
+  payloadKind: TaskPayloadKind,
+): 'resume' | 'run' {
+  return payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
 }
 
 export function toContainerReachableUrl(value: string | undefined): string {

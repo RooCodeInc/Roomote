@@ -34,7 +34,42 @@ export type SetupComputeFieldDescriptor = {
    * credentials. Managed worker artifacts are never form inputs.
    */
   advanced?: boolean;
+  /** Optional presentation and validation metadata for operator inputs. */
+  input?: {
+    type: 'number';
+    min?: number;
+    max?: number;
+    step?: number;
+    placeholder?: string;
+  };
+  /** Short guidance displayed with advanced provider settings. */
+  helpText?: string;
 };
+
+export function getComputeFieldValidationError(
+  field: SetupComputeFieldDescriptor,
+  value: string,
+): string | null {
+  if (!field.input || value.length === 0) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return `${field.label} must be a number.`;
+  }
+  if (field.input.step === 1 && !Number.isInteger(parsed)) {
+    return `${field.label} must be a whole number.`;
+  }
+  if (field.input.min !== undefined && parsed < field.input.min) {
+    return `${field.label} must be at least ${field.input.min}.`;
+  }
+  if (field.input.max !== undefined && parsed > field.input.max) {
+    return `${field.label} must be at most ${field.input.max}.`;
+  }
+
+  return null;
+}
 
 /** True for deployment-infrastructure fields (base images, template ids, snapshot names). */
 export function isComputeInfrastructureField(
@@ -199,7 +234,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Modal sandboxes with snapshot support. Requires a Modal token pair.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'MODAL_TOKEN_ID',
@@ -235,7 +269,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted E2B sandboxes with snapshot support and API-key-only onboarding.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'E2B_API_KEY',
@@ -264,7 +297,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Daytona sandboxes with snapshot support and API-key-only onboarding.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'DAYTONA_API_KEY',
@@ -298,9 +330,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     provider: 'blaxel',
     label: 'Blaxel',
     description:
-      'Hosted Blaxel perpetual sandboxes with automatic standby and fast resume.',
+      'Hosted Blaxel sandboxes with bounded standby retention and fast resume.',
     supportsSnapshots: false,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'BL_API_KEY',
@@ -325,6 +356,31 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
         advanced: true,
       },
+      {
+        envVarName: 'BLAXEL_STANDBY_MAX_COUNT',
+        label: 'Maximum retained tasks',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 0, step: 1, placeholder: '25' },
+        helpText: 'Defaults to 25. Set to 0 to disable standby retention.',
+      },
+      {
+        envVarName: 'BLAXEL_STANDBY_MAX_AGE_HOURS',
+        label: 'Retention period (hours)',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'number',
+          min: 1,
+          max: 168,
+          step: 1,
+          placeholder: '168',
+        },
+        helpText:
+          'Defaults to 168 hours (7 days), Blaxel’s maximum standby TTL.',
+      },
     ],
   },
   {
@@ -332,9 +388,34 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     label: 'Local Docker',
     comment: 'Run on this host',
     description:
-      'Runs each task in a Docker container on the host. No credentials needed, but the controller must have access to the Docker socket and tasks share the host with Roomote itself. No snapshot support.',
+      'Runs each task in a Docker container on the host with bounded stopped-container resume. No credentials needed, but the controller must have access to the Docker socket and tasks share the host with Roomote itself.',
     supportsSnapshots: false,
-    fields: [],
+    fields: [
+      {
+        envVarName: 'DOCKER_STANDBY_MAX_COUNT',
+        label: 'Maximum retained tasks',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 0, step: 1, placeholder: '10' },
+        helpText: 'Defaults to 10. Set to 0 to disable standby retention.',
+      },
+      {
+        envVarName: 'DOCKER_STANDBY_MAX_AGE_HOURS',
+        label: 'Retention period (hours)',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'number',
+          min: 1,
+          max: 168,
+          step: 1,
+          placeholder: '24',
+        },
+        helpText: 'Defaults to 24 hours.',
+      },
+    ],
   },
 ] as const satisfies readonly SetupComputeProviderDescriptor[];
 

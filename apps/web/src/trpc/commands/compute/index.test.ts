@@ -140,6 +140,10 @@ describe('compute commands', () => {
     'BL_WORKSPACE',
     'BLAXEL_IMAGE',
     'BLAXEL_REGION',
+    'BLAXEL_STANDBY_MAX_COUNT',
+    'BLAXEL_STANDBY_MAX_AGE_HOURS',
+    'DOCKER_STANDBY_MAX_COUNT',
+    'DOCKER_STANDBY_MAX_AGE_HOURS',
     'DOCKER_WORKER_IMAGE',
     'RELEASE_VERSION',
   ];
@@ -239,6 +243,36 @@ describe('compute commands', () => {
       );
       // Manual form template/snapshot overrides are ignored; provisioning still
       // runs when a registry-qualified worker image is available.
+    });
+
+    it('persists valid Docker standby retention settings', async () => {
+      await saveComputeConfigCommand(buildMockAuth(), {
+        provider: 'docker',
+        values: {
+          DOCKER_STANDBY_MAX_COUNT: '4',
+          DOCKER_STANDBY_MAX_AGE_HOURS: '12',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        {
+          userId: 'compute-test-user',
+          values: [
+            { name: 'DOCKER_STANDBY_MAX_COUNT', value: '4' },
+            { name: 'DOCKER_STANDBY_MAX_AGE_HOURS', value: '12' },
+          ],
+        },
+      );
+    });
+
+    it('rejects standby retention values outside provider limits', async () => {
+      await expect(
+        saveComputeConfigCommand(buildMockAuth(), {
+          provider: 'blaxel',
+          values: { BLAXEL_STANDBY_MAX_AGE_HOURS: '169' },
+        }),
+      ).rejects.toThrow('Retention period (hours) must be at most 168.');
     });
 
     it('uses a submitted worker image to derive Modal base image without sticky persist', async () => {
@@ -559,10 +593,22 @@ describe('compute commands', () => {
       });
     });
 
-    it('is a no-op for providers without credential fields', async () => {
+    it('deletes Docker standby retention settings', async () => {
+      const txWhere = vi.fn(async () => undefined);
+      const txDelete = vi.fn(() => ({ where: txWhere }));
+      const { inArray: txInArray } = await import('@roomote/db/server');
+
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({ delete: txDelete } as never);
+      });
+
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
 
-      expect(mockDbTransaction).not.toHaveBeenCalled();
+      expect(txInArray).toHaveBeenCalledWith('env.name', [
+        'DOCKER_STANDBY_MAX_COUNT',
+        'DOCKER_STANDBY_MAX_AGE_HOURS',
+      ]);
+      expect(txWhere).toHaveBeenCalled();
     });
   });
 

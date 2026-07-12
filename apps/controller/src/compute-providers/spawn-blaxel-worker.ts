@@ -108,6 +108,7 @@ export async function spawnBlaxelWorker(
     blaxelApiKey: config.blaxelApiKey,
     blaxelWorkspace: config.blaxelWorkspace,
     blaxelImage: config.blaxelImage,
+    idempotencyKey: `roomote-task-${taskRun.taskId}`,
     blaxelRegion: config.blaxelRegion,
     namedPorts,
     tags: config.blaxelTags,

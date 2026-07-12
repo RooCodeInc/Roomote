@@ -119,7 +119,7 @@ describe('getAuth', () => {
       adoBaseUrl: 'https://dev.azure.com',
       adoClientId: 'ado-client-id',
       adoClientSecret: 'ado-client-secret',
-      adoOrganization: 'roo-vet',
+      adoOrganization: 'ado-organization',
       adoTenantId: 'roomote-tenant-id',
       gitlabBaseUrl: undefined,
       gitlabClientId: undefined,

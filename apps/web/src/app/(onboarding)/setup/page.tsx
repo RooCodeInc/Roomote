@@ -4,10 +4,11 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import type {
-  ComputeProvider,
-  SetupAuthProviderId,
-  SourceControlProvider,
+import {
+  isComputeCredentialField,
+  type ComputeProvider,
+  type SetupAuthProviderId,
+  type SourceControlProvider,
 } from '@roomote/types';
 
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
@@ -177,7 +178,12 @@ export default function SetupPage() {
           (provider) => provider.provider === variables.provider,
         );
 
-        if (selectedProvider && selectedProvider.fields.length === 0) {
+        // Credentialless providers stay on the short path even when they
+        // expose optional advanced settings later in Settings.
+        if (
+          selectedProvider &&
+          !selectedProvider.fields.some(isComputeCredentialField)
+        ) {
           goToNextStep();
           return;
         }

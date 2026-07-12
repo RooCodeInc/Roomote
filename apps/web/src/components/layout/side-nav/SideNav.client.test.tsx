@@ -683,7 +683,7 @@ describe('SideNav quick access tasks', () => {
       { id: 'env-1', name: 'Maxolen Staging' },
       { id: 'env-2', name: 'CC Environment' },
       { id: 'env-3', name: 'Roomote Dev' },
-      { id: 'env-4', name: 'LogSharp' },
+      { id: 'env-4', name: 'Sandbox' },
       { id: 'env-5', name: 'QA' },
       { id: 'env-6', name: 'Prod' },
     ];
