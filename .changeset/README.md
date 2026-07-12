@@ -27,13 +27,24 @@ Chores, docs-only, and pure-internal refactors can skip a changeset; they ride a
 
 ## How a release ships
 
-1. Merge code to `develop`. When pending changesets exist, CI keeps a **Release Roomote** Version PR open against `develop` that bumps the root version and updates the root `CHANGELOG.md` (nothing else).
-2. Merging that Version PR (or any push to `develop` whose version is untagged) cuts a frozen `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a **Promote PR** (`release/vX.Y.Z` → `main`). Commits merged to `develop` after the version bump wait for the next release instead of riding along.
-3. Merging the Promote PR with a **merge commit** (not squash) into `main` tags `vX.Y.Z`, then GHCR builds the matching images; the GitHub Release is created only after those images exist so `releases/latest` never points at a missing image set. The `release/vX.Y.Z` branch can be deleted after the merge.
+1. Merge code to `develop`, including changesets with user-visible changes when
+   practical. Pending changesets accumulate until a maintainer cuts a release.
+2. Use the `changeset-release-pr` skill to audit changes since the last release,
+   fill any missing notes, and run `pnpm run version`. It opens one **Release
+   Roomote X.Y.Z** PR against `develop` containing the root version bump, final
+   `CHANGELOG.md` section, and consumed changeset deletions.
+3. Squash-merge that release PR. CI cuts a frozen `release/vX.Y.Z` branch at the
+   version-bump commit and opens or refreshes a **Promote PR**
+   (`release/vX.Y.Z` → `main`). Commits merged to `develop` afterward wait for
+   the next release instead of riding along.
+4. Merge the Promote PR with a **merge commit** (not squash) into `main` to tag
+   `vX.Y.Z`. GHCR builds the matching images, and the GitHub Release is created
+   only after those images exist so `releases/latest` never points at a missing
+   image set. The `release/vX.Y.Z` branch can be deleted after the merge.
 
 Branch rules (must match GitHub rulesets):
 
-- **`develop`**: squash-only merges for feature and Version PRs.
+- **`develop`**: squash-only merges for feature and release PRs.
 - **`main`**: merge-commit-only so promote PRs keep shared history with `develop`.
 
 Maintainers: product tagging requires repository secret `RELEASE_BOT_TOKEN` (see `.github/workflows/tag-release.yml`). Contributor overview: [CONTRIBUTING.md](../CONTRIBUTING.md#product-releases).

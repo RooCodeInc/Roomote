@@ -1,18 +1,30 @@
 ---
 name: changeset-release-pr
-description: 'Put together a changeset release PR for Roomote: review what merged to develop since the last release, confirm patch/minor/major with the user when unspecified, and author concise changeset release notes that drive the automated Release Roomote Version PR. Use when asked to prep a release, cut a release PR, or write release notes for the next version.'
+description: 'Prepare the next Roomote release PR: review what merged to develop, fill missing release notes, confirm patch/minor/major when unspecified, run the product version script, and open the final version-and-changelog PR. Use when asked to prep, cut, or write notes for a release.'
 ---
 
 # Changeset Release PR
 
-Use this skill to assemble the release notes that ship the next Roomote version. The deliverable is a normal PR against `develop` that adds pending changeset files under `.changeset/` — nothing else. CI does the actual version bump.
+Use this skill to prepare the single release PR that cuts the next Roomote
+version. The deliverable is a normal PR against `develop` containing the root
+version bump, final `CHANGELOG.md` entry, and deletion of every consumed pending
+changeset. Merging it makes CI open the frozen Promote PR to `main`.
 
 ## How releases work here
 
-- Roomote has a **single product version**: the root `package.json` `version` field. Workspace package versions are frozen and meaningless (all packages are private).
-- Changesets are an **authoring format only**. `pnpm run version` (`scripts/release/apply-version.mjs`) folds pending `.changeset/*.md` files into the root `CHANGELOG.md`, bumps the root version by the highest pending level, and deletes the consumed files. `changeset version` itself is never run.
-- `.github/workflows/release.yml` runs on every push to `develop`. Whenever pending changesets exist, it keeps a **"Release Roomote <version>"** Version PR open against `develop` (branch `changeset-release/develop`, force-pushed by CI). Merging that Version PR cuts a frozen `release/vX.Y.Z` branch and a Promote PR to `main`, which tags and publishes on merge.
-- Therefore "putting together a release PR" means **authoring the changeset files and opening a PR that adds them to `develop`**. Once that PR merges, CI opens or refreshes the real Version PR automatically.
+- Roomote has a **single product version**: the root `package.json` `version`
+  field. Workspace package versions are frozen and meaningless because every
+  workspace package is private.
+- Changesets are an **authoring format only**. Feature PRs may add them ahead of
+  time; this skill creates any missing notes locally before versioning.
+- `pnpm run version` (`scripts/release/apply-version.mjs`) folds all pending
+  `.changeset/*.md` files into the root `CHANGELOG.md`, bumps the root version by
+  the highest pending level, and deletes the consumed files. `changeset version`
+  itself is never run.
+- `.github/workflows/release.yml` does not create another Version PR. After the
+  release PR merges to `develop`, it freezes `release/vX.Y.Z` at that merge and
+  opens the Promote PR to `main`. Merging the Promote PR tags and publishes the
+  release.
 
 Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
@@ -20,19 +32,23 @@ Full details: `.changeset/README.md` and `CONTRIBUTING.md#product-releases`.
 
 ### 1. Establish the last release reference point
 
-Cross-check three signals; they should agree:
+Cross-check three signals; they should normally agree:
 
 ```bash
-git tag --sort=-creatordate | head -5          # e.g. v0.0.4
-node -p "require('./package.json').version"    # e.g. 0.0.4
-head -10 CHANGELOG.md                          # top section: ## 0.0.4 (YYYY-MM-DD)
+git tag --sort=-creatordate | head -5
+node -p "require('./package.json').version"
+head -10 CHANGELOG.md
 ```
 
-Use the `v<version>` tag as the diff base when it exists. If the root version is ahead of the newest tag (a Version PR merged but the Promote PR has not shipped yet), use the version-bump commit on `develop` instead — resolve it with the repo's own tool:
+Use the `v<version>` tag as the diff base when it exists. If the root version is
+ahead of the newest tag because a release PR merged but its Promote PR has not
+shipped yet, use the version-bump commit on `develop` as the next diff base:
 
 ```bash
 node scripts/release/find-version-commit.mjs <version> origin/develop
 ```
+
+Call out the unshipped release and do not merge a later Promote PR before it.
 
 ### 2. Collect what changed since then
 
@@ -43,37 +59,43 @@ git fetch origin develop
 git log v<last>..origin/develop --oneline --first-parent
 ```
 
-For anything ambiguous, pull the PR body with `gh pr view <number>` to understand the user-facing impact.
+For anything ambiguous, read the PR body with `gh pr view <number>` to identify
+the user-facing or operator-facing impact.
 
-### 3. Subtract what already has a changeset
+### 3. Subtract existing pending changesets
 
 ```bash
-ls .changeset/*.md   # ignore README.md
+find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' -print
 ```
 
-Changes already covered by a pending changeset must not get a second note. Read the pending files so wording and bump levels stay consistent with what you add.
+Read every pending file. A change already covered by a pending changeset must
+not receive a duplicate note.
 
 ### 4. Classify the remaining changes
 
-- **Include**: user-visible or operator-visible changes — new capabilities, behavior changes, fixes to visible symptoms, notable performance or UX improvements.
-- **Skip**: chores, docs-only changes, CI/infra tweaks, pure-internal refactors, and dependency bumps with no visible effect. They ride along with the release without a note.
+- **Include** user-visible or operator-visible capabilities, behavior changes,
+  fixes to visible symptoms, and notable performance or UX improvements.
+- **Skip** chores, docs-only changes, CI or infrastructure tweaks, internal
+  refactors, and dependency bumps with no visible effect. They ship without a
+  changelog bullet.
 
 ### 5. Confirm the bump level
 
-If the user already said patch/minor/major, use it. **Otherwise ask** — do not guess silently. Present the choice with a recommendation derived from the actual changes:
+If the user specified patch, minor, or major, use it. Otherwise ask and include
+a recommendation based on the actual changes:
 
 - **patch** — bug fixes and small non-breaking changes only
-- **minor** — new capabilities that stay backward compatible
+- **minor** — backward-compatible new capabilities
 - **major** — breaking behavior changes
 
-Two mechanics to state when asking:
+Explain that the highest level across all pending changesets determines the
+single product version. If an existing pending changeset is higher than the
+user's choice, say that the higher bump will win. Individual notes may carry
+different levels and are grouped by level in the changelog.
 
-- The release script applies the **highest level across all pending changesets** to the single product version. If an already-pending changeset carries a higher level than the user picks, the release will bump by that higher level anyway — say so.
-- Individual changesets may carry different levels (e.g. features as `minor`, fixes as `patch`); the CHANGELOG groups bullets under `### Major changes`, `### Minor changes`, and `### Patch changes` accordingly, and the overall bump is still the highest present.
+### 6. Author missing changesets locally
 
-### 6. Author the changeset files
-
-One file per logical release note, `.changeset/<descriptive-slug>.md`:
+Create one `.changeset/<descriptive-slug>.md` file per logical release note:
 
 ```markdown
 ---
@@ -83,27 +105,74 @@ One file per logical release note, `.changeset/<descriptive-slug>.md`:
 One concise, user-facing summary of the change.
 ```
 
-- **Frontmatter is bump-level only.** Always use exactly one package line: `'@roomote/web': <major|minor|patch>`. Do **not** list multiple packages, invent package maps from the PR diff, or try to mirror changed workspaces — workspace package versions are frozen, and `scripts/release/lib.mjs` ignores package names entirely (it only reads each note’s highest level for CHANGELOG grouping and the max level across notes for the root product bump). Listing real packages still looks like an inaccurate accounting in review.
-- Preview the next product version with standard semver/`scripts/release` math before writing the PR body: from `X.Y.Z`, **patch → X.Y.(Z+1)**, **minor → X.(Y+1).0**, **major → (X+1).0.0**. Example: `0.0.4` + minor = **`0.1.0`**, not `0.0.5`.
-- Each summary becomes **one CHANGELOG bullet**, and the release script collapses all whitespace to a single line. Write one tight paragraph; no headings, lists, or line breaks that matter.
-- Write for a user or operator reading release notes: lead with what changed or what now works, name the surface (e.g. "Settings → Sandboxes", "Slack tasks"), and mention the previous broken behavior for fixes. See any existing `.changeset/*.md` file for tone.
-- Group closely related PRs into one note when they ship a single user-facing story; otherwise keep notes separate.
+- Always use exactly one package line: `'@roomote/web': <level>`. Package names
+  are ignored by the release script; the frontmatter carries only bump level.
+- Each summary becomes one changelog bullet. Write one tight paragraph with no
+  headings or nested lists.
+- Lead with what changed or now works, name the affected product surface, and
+  mention the previous symptom when describing a fix.
+- Group closely related PRs when they form one user-facing story. Otherwise keep
+  their notes separate.
+- These newly authored files are temporary release inputs. `pnpm run version`
+  consumes them before the release branch is committed.
 
-### 7. Open the PR
+### 7. Generate and verify the release
 
-Commit only the new `.changeset/*.md` files on a feature branch and open a PR against `develop` through the normal delivery path. In the PR body include:
+Start from the current `origin/develop` tip. If `develop` advances before the
+release PR merges, rebuild the release artifacts from the new tip and repeat the
+audit; do not merely merge the new commits into an already-generated release
+branch, because their changesets and notes would not have been consumed.
 
-- the expected next version (current version bumped by the highest pending level),
-- the drafted release-note bullets grouped by level (a preview of the CHANGELOG section),
-- a note that merging this PR makes CI open or refresh the **Release Roomote <version>** Version PR, which is what actually bumps the version and updates `CHANGELOG.md`.
+Run the repository-owned version command; never hand-edit the output:
+
+```bash
+pnpm run version
+```
+
+Then verify:
+
+- `package.json` contains the expected next version using ordinary semver
+  (`patch` increments patch, `minor` increments minor and zeros patch, `major`
+  increments major and zeros minor and patch)
+- the new top `CHANGELOG.md` section contains every intended note under the
+  correct bump-level heading
+- every pending changeset was consumed and `.changeset/README.md` remains
+- workspace package versions did not change
+- the diff contains only release artifacts: root `package.json`,
+  `CHANGELOG.md`, and deletions of changesets that already existed on the base
+  branch. Locally created missing changesets normally leave no final diff because
+  they are created and consumed in the same working tree.
+
+Run the release-script tests and the repository's appropriate static checks
+before opening the PR.
+
+### 8. Open the release PR
+
+Commit the generated release artifacts on a feature branch and open a PR against
+`develop` titled **Release Roomote X.Y.Z**. The PR body should include:
+
+- the previous and next product versions
+- the final changelog bullets grouped by bump level
+- validation performed
+- a note that squash-merging the PR cuts the release and automatically opens
+  the frozen **Promote vX.Y.Z to production** PR against `main`
 
 ## Guardrails
 
-- Never edit `CHANGELOG.md` or the root `package.json` version by hand, and never commit the output of `pnpm run version` — the CI Version PR owns both.
-- Never push to `changeset-release/develop` or `release/v*` branches; CI force-pushes and freezes them.
+- Never edit `CHANGELOG.md` or the root version by hand; generate both with
+  `pnpm run version`, review the result, and commit that output in the release
+  PR.
+- Never run or commit `changeset version` output.
+- Never push to `release/v*`; CI owns frozen release branches.
+- Never merge an out-of-date release PR. Regenerate it from the latest
+  `develop` so every commit included in the cut was part of the release audit.
 - Never bump versions in workspace `package.json` files.
-- Do not create the "Release Roomote" Version PR or the Promote PR manually.
-- Ask for the bump level when it was not specified; recommend one, but let the user decide.
-- Do not write notes for changes that already have a pending changeset, and do not pad the changelog with internal noise.
-- Do not multi-package-attribute changesets or free-associate package names with PR file paths; always emit a single `'@roomote/web': <level>` frontmatter line.
-- When stating the expected next version in a release PR body or chat, use the actual scripted bump (`scripts/release/lib.mjs` `computeNextVersion` / ordinary semver: minor zeros the patch).
+- Do not create the Promote PR manually.
+- Ask for the bump level when unspecified; recommend one but let the user
+  decide.
+- Do not duplicate existing pending notes or pad the changelog with internal
+  noise.
+- Do not multi-package-attribute changesets; always emit one
+  `'@roomote/web': <level>` line.
+- Use the actual version produced by `scripts/release/lib.mjs`; do not guess
+  semver in the PR title or body.

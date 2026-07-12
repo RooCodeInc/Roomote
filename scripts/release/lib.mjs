@@ -183,7 +183,7 @@ export function extractChangelogSection(changelogMarkdown, version) {
  *
  * Walks commits that touched the root package.json from the tip of `ref`
  * backwards, and returns the oldest contiguous commit whose version equals
- * `version` — i.e. the Version PR merge commit that bumped to it. Returns
+ * `version` — i.e. the release PR merge commit that bumped to it. Returns
  * null when the tip of `ref` is not on `version` (the version is stale) or
  * the version never appears.
  *

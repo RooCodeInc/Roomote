@@ -8,7 +8,7 @@
  * consumed changeset files. Workspace package versions are never touched.
  *
  * Usage: node scripts/release/apply-version.mjs
- * Runs as `pnpm run version` from the Release workflow's Version PR job.
+ * Runs as `pnpm run version` while preparing the release PR.
  */
 
 import { dirname, join } from 'node:path';
