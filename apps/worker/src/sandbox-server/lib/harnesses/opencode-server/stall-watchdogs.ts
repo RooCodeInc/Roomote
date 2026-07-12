@@ -58,17 +58,17 @@ export function formatOpenCodeTurnStallErrorText(
   }, so the stalled turn was aborted. This is usually a transient provider stall and is safe to retry.`;
 }
 
-export type TurnStallVerificationResult =
+type TurnStallVerificationResult =
   | 'no_running_tool'
   | 'running_tool'
   | 'unverified';
 
-export interface OpenCodeStallWatchdogsLogger {
+interface OpenCodeStallWatchdogsLogger {
   warn: (message: string) => void;
   error: (message: string) => void;
 }
 
-export interface OpenCodeStallWatchdogsOptions {
+interface OpenCodeStallWatchdogsOptions {
   steerPickupTimeoutMs: number;
   turnStallTimeoutMs: number;
   logger: OpenCodeStallWatchdogsLogger;
