@@ -101,4 +101,38 @@ describe('Roomote Cloud runtime', () => {
       }),
     );
   });
+
+  it('accepts hosted E2B port URLs from Roomote Cloud', async () => {
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json(
+        {
+          id: 'lease-e2b',
+          provider: 'e2b',
+          machineId: 'sbx-1',
+          status: 'ready',
+          proxyPorts: { '4200': 4200 },
+          portUrls: { '4200': 'https://4200-sbx-1.e2b.app' },
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        },
+        { status: 201 },
+      ),
+    );
+    await expect(
+      launchRoomoteCloudCompute(
+        { baseUrl: 'http://cloud', deploymentToken: 'deployment-token' },
+        {
+          runId: 12,
+          taskId: 'task-1',
+          deploymentSlug: 'hosted',
+          timeoutSeconds: 600,
+          environment: {},
+          ports: [4200],
+        },
+        fetchFn,
+      ),
+    ).resolves.toMatchObject({
+      provider: 'e2b',
+      portUrls: { '4200': 'https://4200-sbx-1.e2b.app' },
+    });
+  });
 });

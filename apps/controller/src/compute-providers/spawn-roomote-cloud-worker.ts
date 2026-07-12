@@ -61,17 +61,22 @@ export async function spawnRoomoteCloudWorker(input: {
     ports: namedPorts.map(({ port }) => port),
   });
   const sandboxPort = lease.proxyPorts[String(SANDBOX_SERVER_PORT)];
-  if (!sandboxPort)
+  const sandboxUrl =
+    lease.portUrls?.[String(SANDBOX_SERVER_PORT)] ??
+    (sandboxPort ? `http://127.0.0.1:${sandboxPort}` : undefined);
+  if (!sandboxUrl)
     throw new Error(
       'Roomote Cloud compute lease omitted the sandbox server port',
     );
 
   await updateTaskRunMachine({
     taskRun: input.taskRun,
-    vendor: 'docker',
+    vendor: lease.provider === 'e2b' ? 'e2b' : 'docker',
     machineId: lease.machineId,
     namedPorts,
     domainFn: (port) => {
+      const hostedUrl = lease.portUrls?.[String(port)];
+      if (hostedUrl) return hostedUrl;
       const published = lease.proxyPorts[String(port)];
       if (!published)
         throw new Error(`Roomote Cloud compute lease omitted port ${port}`);
@@ -79,7 +84,7 @@ export async function spawnRoomoteCloudWorker(input: {
     },
     explicitPrimaryPortName: getPrimaryPortFromConfig(environmentConfig?.ports)
       ?.name,
-    sandboxServerUrl: `http://127.0.0.1:${sandboxPort}`,
+    sandboxServerUrl: sandboxUrl,
     authBypassValue: shouldEnableAuthBypass
       ? resolveAuthBypassValue(environmentConfig)
       : undefined,

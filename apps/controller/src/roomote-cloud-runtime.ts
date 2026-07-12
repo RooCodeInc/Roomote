@@ -16,10 +16,11 @@ export type RoomoteCloudRuntimeConfig = {
 
 type RoomoteCloudComputeLease = {
   id: string;
-  provider: 'docker';
+  provider: 'docker' | 'e2b' | 'remote';
   machineId: string;
   status: 'ready';
   proxyPorts: Record<string, number>;
+  portUrls?: Record<string, string>;
   expiresAt: string;
 };
 
