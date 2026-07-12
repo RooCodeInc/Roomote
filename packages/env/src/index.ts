@@ -87,6 +87,18 @@ const serverSchema = {
   DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
   DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
   DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),
+  DOCKER_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(10),
+  DOCKER_STANDBY_MAX_AGE_HOURS: z.coerce
+    .number()
+    .positive()
+    .max(168)
+    .default(24),
+  BLAXEL_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(25),
+  BLAXEL_STANDBY_MAX_AGE_HOURS: z.coerce
+    .number()
+    .positive()
+    .max(168)
+    .default(168),
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).

@@ -26,6 +26,7 @@ import {
   pullRequestAnalyticsSyncJob,
   instancePingJob,
   webhookCleanupJob,
+  standbyRetentionJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -81,6 +82,11 @@ async function createJobs(queue: Queue): Promise<void> {
   await queue.upsertJobScheduler(
     ScheduledJobName.SleepCheck,
     { every: 60 * 1000 }, // Every 60 seconds.
+  );
+
+  await queue.upsertJobScheduler(
+    ScheduledJobName.StandbyRetention,
+    { every: 5 * 60 * 1000 }, // Every 5 minutes.
   );
 
   await queue.upsertJobScheduler(
@@ -170,6 +176,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return instancePingJob();
     case ScheduledJobName.WebhookCleanup:
       return webhookCleanupJob();
+    case ScheduledJobName.StandbyRetention:
+      return standbyRetentionJob();
     default:
       throw new Error(`Unknown job type: ${job.name}`);
   }

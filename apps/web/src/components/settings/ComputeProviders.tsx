@@ -69,10 +69,10 @@ export function ComputeProviders() {
     trpc.compute.saveConfig.mutationOptions({
       onSuccess: async () => {
         await invalidateComputeQueries();
-        toast.success('Sandbox provider credentials saved.');
+        toast.success('Sandbox provider configuration saved.');
       },
       onError: (error) => {
-        toast.error(error.message || 'Failed to save credentials.');
+        toast.error(error.message || 'Failed to save configuration.');
       },
     }),
   );
@@ -81,10 +81,10 @@ export function ComputeProviders() {
     trpc.compute.clearConfig.mutationOptions({
       onSuccess: async () => {
         await invalidateComputeQueries();
-        toast.success('Sandbox provider credentials cleared.');
+        toast.success('Sandbox provider configuration cleared.');
       },
       onError: (error) => {
-        toast.error(error.message || 'Failed to clear credentials.');
+        toast.error(error.message || 'Failed to clear configuration.');
       },
     }),
   );

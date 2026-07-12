@@ -208,7 +208,7 @@ export function StepComputeConfig({
   // registry-qualified worker image. Missing or editable worker image values
   // live in the advanced section instead of the primary credentials step.
   const isHostedProvider =
-    selectedProvider?.fields.some(isComputeInfrastructureField) ?? false;
+    selectedProvider !== undefined && selectedProvider.provider !== 'docker';
   const workerImage = computeSetup.workerImage;
   const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
   // Local tags (e.g. roomote-worker:local) satisfy Docker but not hosted

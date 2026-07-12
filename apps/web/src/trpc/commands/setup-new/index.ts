@@ -57,8 +57,10 @@ import {
   deriveWorkerImageFromReleaseVersion,
   getSetupAuthProvider,
   getSetupComputeProvider,
+  getComputeFieldValidationError,
   getSetupModelProvider,
   isAutoProvisionedComputeArtifactField,
+  isComputeCredentialField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
   isExitedRunStatus,
@@ -1479,7 +1481,9 @@ export async function saveSetupNewComputeProviderChoiceCommand(
       throw new Error('Selected sandbox provider is unavailable.');
     }
 
-    const hasCredentialFields = providerStatus.fields.length > 0;
+    const hasCredentialFields = providerStatus.fields.some(
+      isComputeCredentialField,
+    );
     const runtimeComputeConfig = hasCredentialFields
       ? persistedRuntimeComputeConfig
       : normalizeDeploymentComputeConfig({
@@ -1667,6 +1671,13 @@ export async function saveSetupNewComputeConfigCommand(
           field.envVarName === 'MODAL_BASE_IMAGE_REF'
             ? ''
             : (input.values?.[field.envVarName]?.trim() ?? '');
+        const validationError = getComputeFieldValidationError(
+          field,
+          submitted,
+        );
+        if (validationError) {
+          throw new Error(validationError);
+        }
         const nextValue =
           submitted ||
           (isComputeInfrastructureField(field)

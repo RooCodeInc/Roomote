@@ -41,7 +41,7 @@ const STREAM_POLL_INTERVAL_MS = 1_000;
 const WORKLOAD_READY_RETRY_BUDGET_MS = 60_000;
 const WORKLOAD_READY_INITIAL_DELAY_MS = 500;
 const WORKLOAD_READY_MAX_DELAY_MS = 30_000;
-const BLAXEL_STANDBY_TTL = '7d';
+const DEFAULT_BLAXEL_STANDBY_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 
 export class BlaxelClient implements ComputeProviderClient {
   public readonly vendor: ComputeProvider = 'blaxel';
@@ -160,7 +160,12 @@ export class BlaxelClient implements ComputeProviderClient {
     throwIfAborted(input.signal);
 
     await raceWithAbort({
-      promise: SandboxInstance.updateTtl(input.instanceId, BLAXEL_STANDBY_TTL),
+      promise: SandboxInstance.updateTtl(
+        input.instanceId,
+        `${Math.ceil(
+          (this.config.standbyTtlMs ?? DEFAULT_BLAXEL_STANDBY_TTL_MS) / 1_000,
+        )}s`,
+      ),
       signal: input.signal,
       abortMessage: `Extending standby TTL for Blaxel sandbox ${input.instanceId} was aborted`,
     });

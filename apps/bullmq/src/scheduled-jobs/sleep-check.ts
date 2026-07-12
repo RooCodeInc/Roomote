@@ -157,6 +157,8 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'blaxel',
         envFallback: await resolveComputeProviderEnvValues('blaxel'),
       });
+    case 'docker':
+      return createComputeProviderClient({ provider: 'docker' });
     default:
       throw new Error(
         `Sleep check has no compute client for provider "${provider}"`,
@@ -688,7 +690,7 @@ async function claimAndEnterStandby(
     await recordSleepCheckEvent(
       job,
       'completed',
-      `Retained Blaxel sandbox ${job.machineId} on standby for task run #${job.id}.`,
+      `Retained ${job.vendor} sandbox ${job.machineId} on standby for task run #${job.id}.`,
       {
         path,
         decision: 'standby_completed',

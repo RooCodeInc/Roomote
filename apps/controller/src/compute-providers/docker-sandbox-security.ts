@@ -176,10 +176,23 @@ export function processListIncludesDockerWorkerRun(
     .split('\n')
     .some((line) =>
       [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`),
         new RegExp(
-          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`,
+          `(?:^|\\s)worker\\s+(?:run|resume)\\s+${escapedTaskRunId}(?:\\s|$)`,
         ),
+        new RegExp(
+          `(?:^|[\\s/])worker\\.js\\s+(?:run|resume)\\s+${escapedTaskRunId}(?:\\s|$)`,
+        ),
+      ].some((pattern) => pattern.test(line)),
+    );
+}
+
+function processListIncludesDockerWorkerProcess(processList: string): boolean {
+  return processList
+    .split('\n')
+    .some((line) =>
+      [
+        /(?:^|\s)worker\s+(?:run|resume)\s+\d+(?:\s|$)/,
+        /(?:^|[\s/])worker\.js\s+(?:run|resume)\s+\d+(?:\s|$)/,
       ].some((pattern) => pattern.test(line)),
     );
 }
@@ -288,6 +301,43 @@ export async function attachDockerEgressPolicy(
         : []),
     ].join(' && '),
   ]);
+}
+
+/**
+ * Restores network state that is not guaranteed to survive while a retained
+ * worker container is stopped. Egress routes live in the container network
+ * namespace, and trusted control-plane containers may have been recreated
+ * while the task was in standby.
+ */
+export async function restoreDockerStandbyNetworking(
+  params: {
+    containerName: string;
+    taskNetwork: string;
+    controlNetwork?: string;
+    egressPolicy: DockerWorkerEgressPolicy;
+    image: string;
+    platform: string;
+  },
+  runDocker: DockerCommand = docker,
+): Promise<void> {
+  await attachDockerEgressPolicy(
+    {
+      containerName: params.containerName,
+      egressPolicy: params.egressPolicy,
+      image: params.image,
+      platform: params.platform,
+      blockDockerGateway: Boolean(params.controlNetwork),
+    },
+    runDocker,
+  );
+
+  if (params.controlNetwork) {
+    await connectTrustedControlPlaneServices(
+      params.controlNetwork,
+      params.taskNetwork,
+      runDocker,
+    );
+  }
 }
 
 export async function removeDockerSandboxResources(
@@ -411,7 +461,7 @@ async function reconcileTaskNetwork(
     return;
   }
 
-  if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
+  if (!processListIncludesDockerWorkerProcess(processList)) {
     await removeDockerSandboxResources(
       { containerName, taskNetwork },
       runDocker,

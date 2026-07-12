@@ -202,6 +202,9 @@ export function createComputeProviderClient(
       const workspace = options.config?.workspace ?? envValue('BL_WORKSPACE');
       const image = options.config?.image ?? envValue('BLAXEL_IMAGE');
       const region = envValue('BLAXEL_REGION');
+      const standbyMaxAgeHours = Number(
+        envValue('BLAXEL_STANDBY_MAX_AGE_HOURS'),
+      );
 
       assertDefined(apiKey, 'Missing BL_API_KEY');
       assertDefined(workspace, 'Missing BL_WORKSPACE');
@@ -213,6 +216,11 @@ export function createComputeProviderClient(
         workspace,
         image,
         ...(options.config?.region === undefined && region ? { region } : {}),
+        ...(options.config?.standbyTtlMs === undefined &&
+        Number.isFinite(standbyMaxAgeHours) &&
+        standbyMaxAgeHours > 0
+          ? { standbyTtlMs: standbyMaxAgeHours * 60 * 60 * 1_000 }
+          : {}),
       };
       return new BlaxelClient(config);
     }

@@ -225,7 +225,10 @@ describe('compute provider adapter contracts', () => {
         commandId: 'cmd-1',
       }),
     ).resolves.toEqual({ resumeHandle: created.instanceId });
-    expect(blaxelUpdateTtlMock).toHaveBeenCalledWith(created.instanceId, '7d');
+    expect(blaxelUpdateTtlMock).toHaveBeenCalledWith(
+      created.instanceId,
+      '604800s',
+    );
     expect(sandbox.process.stop).toHaveBeenCalledWith('cmd-1');
 
     await expect(

@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest';
 import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
   buildDockerSandboxServerUrl,
+  getDockerWorkerCommand,
   resolveDockerWorkerOwnershipTargetFromLookup,
   shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
 } from '../spawn-docker-worker';
+import { TaskPayloadKind } from '@roomote/types';
 
 describe('processListIncludesDockerWorkerRun', () => {
   it('matches the shell launcher command while the Docker worker is starting', () => {
@@ -41,6 +43,24 @@ describe('processListIncludesDockerWorkerRun', () => {
         12,
       ),
     ).toBe(false);
+  });
+
+  it('matches a retained container running the resume command', () => {
+    expect(
+      processListIncludesDockerWorkerRun(
+        '/sandbox/worker/dist/worker.js resume 14',
+        14,
+      ),
+    ).toBe(true);
+  });
+});
+
+describe('getDockerWorkerCommand', () => {
+  it('uses resume only for standby resume task runs', () => {
+    expect(getDockerWorkerCommand(TaskPayloadKind.SnapshotResume)).toBe(
+      'resume',
+    );
+    expect(getDockerWorkerCommand(TaskPayloadKind.StandardTask)).toBe('run');
   });
 });
 
@@ -116,12 +136,9 @@ describe('toContainerReachableUrl', () => {
 });
 
 describe('shouldAutoRemoveDockerWorkerContainer', () => {
-  it('reaps containers in production and preview so token files do not linger', () => {
-    expect(shouldAutoRemoveDockerWorkerContainer('production')).toBe(true);
-    expect(shouldAutoRemoveDockerWorkerContainer('preview')).toBe(true);
-  });
-
-  it('preserves containers in development for post-mortem debugging', () => {
+  it('preserves containers in every environment for bounded standby retention', () => {
+    expect(shouldAutoRemoveDockerWorkerContainer('production')).toBe(false);
+    expect(shouldAutoRemoveDockerWorkerContainer('preview')).toBe(false);
     expect(shouldAutoRemoveDockerWorkerContainer('development')).toBe(false);
   });
 });

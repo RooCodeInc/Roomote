@@ -70,6 +70,10 @@ x-roomote-env: &roomote-env
   BL_WORKSPACE: ${BL_WORKSPACE:-}
   BLAXEL_IMAGE: ${BLAXEL_IMAGE:-}
   BLAXEL_REGION: ${BLAXEL_REGION:-}
+  BLAXEL_STANDBY_MAX_COUNT: ${BLAXEL_STANDBY_MAX_COUNT:-25}
+  BLAXEL_STANDBY_MAX_AGE_HOURS: ${BLAXEL_STANDBY_MAX_AGE_HOURS:-168}
+  DOCKER_STANDBY_MAX_COUNT: ${DOCKER_STANDBY_MAX_COUNT:-10}
+  DOCKER_STANDBY_MAX_AGE_HOURS: ${DOCKER_STANDBY_MAX_AGE_HOURS:-24}
   # Declarative environment provisioning: point ROOMOTE_ENVIRONMENTS_DIR at a
   # directory of environment YAML files mounted into the api container (for
   # example `- ./environments:/roomote/environments:ro` on the api service),

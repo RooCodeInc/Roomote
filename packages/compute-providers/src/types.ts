@@ -293,6 +293,8 @@ export interface BlaxelConfig {
   memoryMiB?: number;
   /** Maximum sandbox lifetime in milliseconds. */
   timeoutMs?: number;
+  /** How long a stopped sandbox remains available for task standby resume. */
+  standbyTtlMs?: number;
 }
 
 export type ComputeProviderFactoryOptions = (

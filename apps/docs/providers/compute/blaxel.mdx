@@ -38,6 +38,17 @@ You can optionally select a region:
 BLAXEL_REGION=us-pdx-1
 ```
 
+Standby retention can be bounded separately from active task timeouts:
+
+```sh
+BLAXEL_STANDBY_MAX_COUNT=25
+BLAXEL_STANDBY_MAX_AGE_HOURS=168
+```
+
+Region and standby retention are also editable under **Settings > Sandboxes >
+Blaxel > Advanced settings**. Process environment variables take precedence
+and appear as locked values in Settings.
+
 ## Runtime behavior
 
 - Roomote requests a Blaxel TTL matching the task timeout.
@@ -45,12 +56,13 @@ BLAXEL_REGION=us-pdx-1
   proxy remains the user-facing authentication layer.
 - The detached worker process uses Blaxel keep-alive while the task is active.
 - When a resumable task goes to sleep, Roomote stops its worker, extends the
-  sandbox lifetime to seven days, and lets Blaxel move the sandbox to standby.
+  sandbox lifetime to the configured standby age (seven days by default), and
+  lets Blaxel move the sandbox to standby.
   A follow-up reconnects to the same sandbox and launches a new worker without
   reinstalling the workspace.
 - Non-resumable workflows are still destroyed when their sleep deadline is
-  reached. A standby sandbox is also deleted when its seven-day resume window
-  expires.
+  reached. A five-minute retention sweep deletes standby sandboxes that exceed
+  the configured count or age. A count of `0` disables Blaxel standby retention.
 
 Blaxel standby is intentionally separate from Roomote environment snapshots.
 A standby handle reconnects to one mutable sandbox; it cannot be cloned or
