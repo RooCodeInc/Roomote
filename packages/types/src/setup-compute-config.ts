@@ -234,7 +234,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Modal sandboxes with snapshot support. Requires a Modal token pair.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'MODAL_TOKEN_ID',
@@ -270,7 +269,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted E2B sandboxes with snapshot support and API-key-only onboarding.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'E2B_API_KEY',
@@ -299,7 +297,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Daytona sandboxes with snapshot support and API-key-only onboarding.',
     supportsSnapshots: true,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'DAYTONA_API_KEY',
@@ -335,7 +332,6 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     description:
       'Hosted Blaxel sandboxes with bounded standby retention and fast resume.',
     supportsSnapshots: false,
-    comment: 'Recommended',
     fields: [
       {
         envVarName: 'BL_API_KEY',

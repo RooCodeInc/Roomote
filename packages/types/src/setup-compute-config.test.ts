@@ -217,6 +217,9 @@ describe('buildSetupComputeStatus', () => {
       'blaxel',
       'docker',
     ]);
+    expect(
+      status.providers.some((provider) => provider.comment === 'Recommended'),
+    ).toBe(false);
     // The shared worker image is not hosted-ready with no configuration.
     expect(status.workerImage.hostedReady).toBe(false);
   });
