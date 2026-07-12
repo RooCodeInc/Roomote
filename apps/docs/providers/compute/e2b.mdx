@@ -1,12 +1,11 @@
 ---
 title: E2B
 icon: '/logo/integrations/e2b.svg'
-description: Run Roomote tasks on E2B-hosted sandboxes using a Roomote worker template.
+description: Run Roomote tasks on E2B-hosted sandboxes.
 ---
 
 E2B is a hosted sandbox provider for running task sandboxes away from the
-Roomote server. Roomote uses an E2B template built from the Roomote worker
-runtime, then starts task sandboxes from that template.
+Roomote server.
 
 ## When to use E2B
 
@@ -26,14 +25,6 @@ as deployment env vars:
 E2B_API_KEY=...
 ```
 
-Roomote provisions the worker template automatically from the configured worker
-image (`DOCKER_WORKER_IMAGE` or release derivation). You can also pin the
-template as an env var:
-
-```sh
-E2B_TEMPLATE_ID=roomote-worker:<tag>
-```
-
 Optional values:
 
 ```sh
@@ -44,21 +35,9 @@ E2B_MAX_SANDBOX_TIMEOUT_MS=3600000
 Use `E2B_DOMAIN` only for self-hosted or custom E2B clusters. The default E2B
 domain is enough for standard hosted E2B.
 
-## Worker template expectations
-
-The E2B template should contain the Roomote worker runtime: system packages,
-browser tooling, language tools, command helpers, and the worker bootstrap used
-to connect back to Roomote.
-
-Settings and setup only collect the API key — not a template ID field. Roomote
-builds the template from the worker image during setup when needed. For
-production, keep the worker image or template version pinned so task startup is
-predictable.
-
 ## Verify setup
 
-1. save `E2B_API_KEY` (and let Roomote provision the template, or set
-   `E2B_TEMPLATE_ID` in the deployment env)
+1. save `E2B_API_KEY`
 2. select E2B as the default sandbox provider
 3. start a small task from an environment
 4. confirm the task starts, streams logs, and can run project commands
@@ -66,10 +45,5 @@ predictable.
 
 ## Common issues
 
-- **E2B reports a missing template.** Confirm auto-provisioning finished, or
-  that `E2B_TEMPLATE_ID` matches a template available to the configured API
-  key.
-- **Tasks start with missing tools.** Rebuild or refresh the worker template
-  from the current Roomote worker image.
 - **Preview links fail.** Confirm the deployment URL and preview proxy are
   reachable from hosted sandboxes.
