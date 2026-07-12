@@ -471,6 +471,7 @@ function buildTelegramProvider(
         acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
         label: 'Telegram Webhook Secret',
         secret: true,
+        required: false,
         runtimeSatisfied: false,
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
@@ -600,7 +601,7 @@ describe('CommsProviderSection', () => {
       ).toBeInTheDocument();
     });
 
-    it('shows numbered Telegram setup with the settings-only webhook note', () => {
+    it('shows numbered Telegram setup without exposing the managed webhook secret', () => {
       render(
         <CommsProviderSection
           provider={buildTelegramProvider()}
@@ -622,8 +623,45 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText('Webhook')).toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
       expect(
-        screen.getByText(/Roomote will generate the webhook secret/),
+        screen.getByText(/Roomote generates a webhook secret automatically/),
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Telegram Bot Token')).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText('Telegram Bot Token'),
+      ).toBeInTheDocument();
+    });
+
+    it('lets users save Telegram with only a bot token when the secret is auto-managed', () => {
+      const onSave = vi.fn();
+
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider()}
+          onSave={onSave}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByPlaceholderText('Telegram Bot Token'), {
+        target: { value: 'bot-token' },
+      });
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      expect(saveButton).not.toBeDisabled();
+      fireEvent.click(saveButton);
+
+      expect(onSave).toHaveBeenCalledWith('telegram', {
+        R_TELEGRAM_BOT_TOKEN: 'bot-token',
+      });
     });
   });
 

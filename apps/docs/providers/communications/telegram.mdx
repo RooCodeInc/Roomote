@@ -16,23 +16,23 @@ Use `<public-url>` below for your stable public Roomote URL.
 
 ## Create a Telegram bot
 
-Message `@BotFather` in Telegram and create or select a bot. Save the bot
-token and username in Roomote setup or env vars:
+Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
+(**Settings > Communications > Telegram**), enter the bot token and optional
+username, then save. Roomote generates a webhook secret and registers the Bot
+API webhook for you.
+
+For self-hosted env-var configuration instead of the UI:
 
 ```sh
 R_TELEGRAM_BOT_TOKEN=<botfather-token>
 R_TELEGRAM_BOT_USERNAME=<bot-username-without-at>
+# Optional — Roomote generates one on save when unset:
+# R_TELEGRAM_WEBHOOK_SECRET=<random-secret>
 ```
 
 `R_TELEGRAM_BOT_USERNAME` is optional for webhook delivery, but recommended so
 Roomote can show the correct `@username` and `https://t.me/<username>` link in
 setup and getting-started guidance.
-
-Generate a random webhook secret and save it too:
-
-```sh
-R_TELEGRAM_WEBHOOK_SECRET=<random-secret>
-```
 
 Restart Roomote after changing Telegram env vars. Inbound webhooks are accepted
 only when Telegram sends the matching `X-Telegram-Bot-Api-Secret-Token`
@@ -40,8 +40,12 @@ header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
 
 ## Register the webhook
 
-With Roomote running and `<public-url>` pointing at the Roomote web/API server,
-register the Telegram webhook:
+When you save Telegram credentials in Roomote, the webhook is registered
+automatically at `<public-url>/api/webhooks/telegram` with the managed secret
+token and `allowed_updates` including `message` and `callback_query`.
+
+If you are bootstrapping only from env vars and need to register manually
+before the first UI save:
 
 ```sh
 curl -sS "https://api.telegram.org/bot${R_TELEGRAM_BOT_TOKEN}/setWebhook" \
@@ -49,11 +53,12 @@ curl -sS "https://api.telegram.org/bot${R_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d '{
     "url": "<public-url>/api/webhooks/telegram",
     "secret_token": "<random-secret>",
-    "allowed_updates": ["message"]
+    "allowed_updates": ["message", "callback_query"]
   }'
 ```
 
-Use the same value for `secret_token` and `R_TELEGRAM_WEBHOOK_SECRET`.
+Use the same value for `secret_token` and `R_TELEGRAM_WEBHOOK_SECRET` when you
+pass a secret explicitly.
 
 ## Account linking
 
