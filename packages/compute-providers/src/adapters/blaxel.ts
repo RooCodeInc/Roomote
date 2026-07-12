@@ -4,6 +4,8 @@ import { SandboxInstance, settings } from '@blaxel/core';
 import {
   BLAXEL_CAPABILITIES as BLAXEL_CAPABILITIES_VALUE,
   type ComputeProvider,
+  extractErrorDetails,
+  serializeError,
 } from '@roomote/types';
 
 import { raceWithAbort, sleepWithSignal, throwIfAborted } from '../modal/abort';
@@ -376,17 +378,26 @@ export class BlaxelClient implements ComputeProviderClient {
   ): Promise<Record<string, string>> {
     const domains: Record<string, string> = {};
     for (const port of ports) {
+      const previewName = `port-${port}`;
+      if (refresh) {
+        try {
+          await raceWithAbort({
+            promise: sandbox.previews.delete(previewName),
+            signal,
+            abortMessage: `Deleting Blaxel preview for port ${port} was aborted`,
+          });
+        } catch (error) {
+          if (!isNotFound(error)) throw error;
+        }
+      }
       const preview = await raceWithAbort({
         promise: refresh
-          ? sandbox.previews.create(
-              {
-                metadata: { name: `port-${port}` },
-                spec: { port, public: true, ttl: this.ttl() },
-              },
-              true,
-            )
+          ? sandbox.previews.create({
+              metadata: { name: previewName },
+              spec: { port, public: true, ttl: this.ttl() },
+            })
           : sandbox.previews.createIfNotExists({
-              metadata: { name: `port-${port}` },
+              metadata: { name: previewName },
               spec: { port, public: true, ttl: this.ttl() },
             }),
         signal,
@@ -444,9 +455,11 @@ function shellQuote(value: string): string {
 }
 
 function isNotFound(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const value = `${error.name} ${error.message}`.toLowerCase();
-  return value.includes('404') || value.includes('not found');
+  const details = extractErrorDetails(error);
+  const value = serializeError(error).message.toLowerCase();
+  return (
+    details.code === 404 || value.includes('404') || value.includes('not found')
+  );
 }
 
 async function retryWorkloadUnavailable<T>(options: {
@@ -479,10 +492,7 @@ async function retryWorkloadUnavailable<T>(options: {
 }
 
 function isWorkloadUnavailable(error: unknown): boolean {
-  const value =
-    error instanceof Error
-      ? `${error.name} ${error.message}`.toLowerCase()
-      : String(error).toLowerCase();
+  const value = serializeError(error).message.toLowerCase();
   return (
     value.includes('workload_unavailable') ||
     value.includes('currently not available')

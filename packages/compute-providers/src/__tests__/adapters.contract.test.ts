@@ -115,6 +115,11 @@ describe('compute provider adapter contracts', () => {
       expiresIn: 120,
       wait: vi.fn().mockResolvedValue(undefined),
       previews: {
+        delete: vi.fn().mockImplementation(async (previewName) => {
+          if (previewName === 'port-4000') {
+            throw { code: 404, error: 'Resource not found' };
+          }
+        }),
         createIfNotExists: vi.fn().mockImplementation(async (preview) => ({
           spec: { url: `https://${preview.spec.port}.blaxel.test` },
         })),
@@ -226,21 +231,25 @@ describe('compute provider adapter contracts', () => {
     await expect(
       client.resumeFromStandby?.({
         resumeHandle: created.instanceId,
-        ports: [3000],
+        ports: [3000, 4000],
       }),
     ).resolves.toMatchObject({
       instanceId: created.instanceId,
       sourceSnapshotId: created.instanceId,
       status: 'running',
-      domains: { '3000': 'https://3000.blaxel.test' },
+      domains: {
+        '3000': 'https://3000.blaxel.test',
+        '4000': 'https://4000.blaxel.test',
+      },
     });
     expect(blaxelUpdateTtlMock).toHaveBeenLastCalledWith(
       created.instanceId,
       '120s',
     );
+    expect(sandbox.previews.delete).toHaveBeenCalledWith('port-3000');
+    expect(sandbox.previews.delete).toHaveBeenCalledWith('port-4000');
     expect(sandbox.previews.create).toHaveBeenCalledWith(
       expect.objectContaining({ metadata: { name: 'port-3000' } }),
-      true,
     );
     await client.destroyInstance({ instanceId: created.instanceId });
     expect(blaxelDeleteMock).toHaveBeenCalledWith(created.instanceId);

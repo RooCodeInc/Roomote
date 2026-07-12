@@ -51,4 +51,47 @@ describe('createBlaxelMachine', () => {
       sourceSnapshotId: 'roomote-blaxel-standby',
     });
   });
+
+  it('preserves messages from plain Blaxel API errors', async () => {
+    vi.useFakeTimers();
+    try {
+      const onMutation = vi.fn();
+      const resumeFromStandby = vi
+        .fn()
+        .mockRejectedValue({ code: 409, error: 'Resource already exists' });
+
+      const result = createBlaxelMachine({
+        blaxelApiKey: 'key',
+        blaxelWorkspace: 'workspace',
+        blaxelImage: 'sandbox/roomote-worker:test',
+        launchMode: 'task_standby',
+        resumeHandle: 'roomote-blaxel-standby',
+        onMutation,
+        computeClient: {
+          vendor: 'blaxel',
+          createInstance: vi.fn(),
+          resumeFromStandby,
+          writeFiles: vi.fn(),
+          runCommand: vi.fn(),
+          destroyInstance: vi.fn(),
+        },
+      });
+      const rejection = expect(result).rejects.toThrow(
+        'Resource already exists',
+      );
+
+      await vi.advanceTimersByTimeAsync(6_000);
+      await rejection;
+      expect(onMutation).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          eventType: 'failed',
+          details: expect.objectContaining({
+            error: 'Resource already exists',
+          }),
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
