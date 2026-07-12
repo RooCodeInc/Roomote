@@ -78,6 +78,56 @@ function createTelegramBotApiFetch(): typeof fetch {
 
 const TELEGRAM_WEBHOOK_ERROR_RECENCY_MS = 60 * 60 * 1000;
 
+/** Map Bot API / network failures into admin-facing webhook check copy. */
+export function classifyTelegramWebhookCheckError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  const errorName = error instanceof Error ? error.name : '';
+
+  if (
+    errorName === 'TimeoutError' ||
+    errorName === 'AbortError' ||
+    lower.includes('aborted') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out')
+  ) {
+    return 'Could not reach the Telegram Bot API to check the webhook (timed out).';
+  }
+
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('econnrefused') ||
+    lower.includes('enotfound') ||
+    lower.includes('econnreset') ||
+    lower.includes('network') ||
+    lower.includes('certificate') ||
+    lower.includes('getaddrinfo')
+  ) {
+    return 'Could not reach the Telegram Bot API to check the webhook.';
+  }
+
+  if (
+    lower.includes('unauthorized') ||
+    lower.includes('invalid token') ||
+    lower.includes('(401)')
+  ) {
+    return 'Telegram rejected the bot token. Check the token from BotFather and save again.';
+  }
+
+  const telegramApiMatch = message.match(
+    /^Telegram getWebhookInfo failed(?:\s*\(\d+\))?:\s*(.+)$/i,
+  );
+  if (telegramApiMatch?.[1]) {
+    return `Telegram API error while checking the webhook: ${telegramApiMatch[1]}`;
+  }
+
+  if (message.trim().length > 0) {
+    return `Could not check the Telegram webhook: ${message}`;
+  }
+
+  return 'Could not reach the Telegram Bot API to check the webhook.';
+}
+
 async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null> {
   const { botToken } = await resolveTelegramRuntimeCredentials();
 
@@ -131,12 +181,12 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
       expectedUrl,
       lastErrorMessage: info.lastErrorMessage,
     };
-  } catch {
+  } catch (error) {
     return {
       status: 'error',
       registeredUrl: null,
       expectedUrl,
-      lastErrorMessage: null,
+      lastErrorMessage: classifyTelegramWebhookCheckError(error),
     };
   }
 }

@@ -10,6 +10,8 @@ const {
   mockGetPersistedEnvironmentVariableNames,
   mockResolveEffectiveDeploymentEnvVars,
   mockResolveInvocationIdentities,
+  mockResolveTelegramRuntimeCredentials,
+  mockTelegramGetWebhookInfo,
 } = vi.hoisted(() => ({
   mockDbDelete: vi.fn(() => ({
     where: vi.fn(async () => undefined),
@@ -20,6 +22,12 @@ const {
   mockGetPersistedEnvironmentVariableNames: vi.fn().mockResolvedValue([]),
   mockResolveEffectiveDeploymentEnvVars: vi.fn().mockResolvedValue({}),
   mockResolveInvocationIdentities: vi.fn().mockResolvedValue([]),
+  mockResolveTelegramRuntimeCredentials: vi.fn(async () => ({
+    botToken: null as string | null,
+    webhookSecret: null as string | null,
+    botUsername: null as string | null,
+  })),
+  mockTelegramGetWebhookInfo: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -35,18 +43,17 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
   resolveInvocationIdentities: mockResolveInvocationIdentities,
-  resolveTelegramRuntimeCredentials: vi.fn(async () => ({
-    botToken: null,
-    webhookSecret: null,
-    botUsername: null,
-  })),
+  resolveTelegramRuntimeCredentials: mockResolveTelegramRuntimeCredentials,
   invalidateTelegramRuntimeCredentialsCache: vi.fn(),
   invalidateSlackSigningSecretCache: vi.fn(),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
 }));
 
 vi.mock('@roomote/communication/telegram-provider', () => ({
-  TelegramCommunicationProvider: vi.fn(),
+  TelegramCommunicationProvider: class {
+    getWebhookInfo = mockTelegramGetWebhookInfo;
+    registerWebhook = vi.fn();
+  },
 }));
 
 vi.mock('@/lib/server/env', () => ({
@@ -66,6 +73,7 @@ vi.mock('../environment-variables', () => ({
 }));
 
 import {
+  classifyTelegramWebhookCheckError,
   clearCommsAuthConfigCommand,
   getCommsStatusCommand,
   saveCommsAuthConfigCommand,
@@ -101,6 +109,34 @@ describe('comms commands', () => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+    mockResolveTelegramRuntimeCredentials.mockResolvedValue({
+      botToken: null,
+      webhookSecret: null,
+      botUsername: null,
+    });
+    mockTelegramGetWebhookInfo.mockReset();
+  });
+
+  describe('classifyTelegramWebhookCheckError', () => {
+    it('identifies rejected bot tokens instead of a generic reachability error', () => {
+      expect(
+        classifyTelegramWebhookCheckError(
+          new Error(
+            'Telegram getWebhookInfo failed (401): Unauthorized: invalid token specified',
+          ),
+        ),
+      ).toBe(
+        'Telegram rejected the bot token. Check the token from BotFather and save again.',
+      );
+    });
+
+    it('identifies connectivity timeouts', () => {
+      const timeout = new Error('The operation was aborted due to timeout');
+      timeout.name = 'TimeoutError';
+      expect(classifyTelegramWebhookCheckError(timeout)).toBe(
+        'Could not reach the Telegram Bot API to check the webhook (timed out).',
+      );
+    });
   });
 
   describe('getCommsStatusCommand', () => {
@@ -123,6 +159,30 @@ describe('comms commands', () => {
       expect(slack).toBeDefined();
       expect(slack?.savedSatisfied).toBe(true);
       expect(slack?.setupSatisfied).toBe(true);
+    });
+
+    it('surfaces rejected token reasons on Telegram webhook status', async () => {
+      mockResolveTelegramRuntimeCredentials.mockResolvedValue({
+        botToken: 'bad-token',
+        webhookSecret: 'secret',
+        botUsername: null,
+      });
+      mockTelegramGetWebhookInfo.mockRejectedValue(
+        new Error(
+          'Telegram getWebhookInfo failed (401): Unauthorized: invalid token specified',
+        ),
+      );
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const telegram = status.providers.find((p) => p.id === 'telegram');
+
+      expect(telegram?.telegramWebhook).toEqual({
+        status: 'error',
+        registeredUrl: null,
+        expectedUrl: 'https://app.example.com/api/webhooks/telegram',
+        lastErrorMessage:
+          'Telegram rejected the bot token. Check the token from BotFather and save again.',
+      });
     });
   });
 

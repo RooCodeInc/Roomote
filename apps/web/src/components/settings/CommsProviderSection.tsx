@@ -54,7 +54,7 @@ const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
     tone: 'warn',
   },
   error: {
-    label: 'Could not reach the Telegram Bot API to check the webhook',
+    label: 'Could not check the Telegram webhook status',
     tone: 'warn',
   },
 };
@@ -696,12 +696,14 @@ export function CommsProviderSection({
                     <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
                   )}
                   <p className="text-sm">
-                    {
-                      TELEGRAM_WEBHOOK_STATUS_COPY[
-                        provider.telegramWebhook.status
-                      ].label
-                    }
-                    {provider.telegramWebhook.lastErrorMessage
+                    {provider.telegramWebhook.status === 'error'
+                      ? (provider.telegramWebhook.lastErrorMessage ??
+                        TELEGRAM_WEBHOOK_STATUS_COPY.error.label)
+                      : TELEGRAM_WEBHOOK_STATUS_COPY[
+                          provider.telegramWebhook.status
+                        ].label}
+                    {provider.telegramWebhook.status !== 'error' &&
+                    provider.telegramWebhook.lastErrorMessage
                       ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
                       : ''}
                   </p>

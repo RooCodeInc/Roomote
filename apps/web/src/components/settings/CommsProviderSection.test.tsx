@@ -24,7 +24,17 @@ type CommsProviderStatus = {
   runtimeSatisfied: boolean;
   savedSatisfied: boolean;
   setupSatisfied: boolean;
-  telegramWebhook?: null;
+  telegramWebhook?: {
+    status:
+      | 'connected'
+      | 'mismatch'
+      | 'stale_updates'
+      | 'unregistered'
+      | 'error';
+    registeredUrl: string | null;
+    expectedUrl: string;
+    lastErrorMessage: string | null;
+  } | null;
 };
 
 const state = vi.hoisted(() => ({
@@ -662,6 +672,40 @@ describe('CommsProviderSection', () => {
       expect(onSave).toHaveBeenCalledWith('telegram', {
         R_TELEGRAM_BOT_TOKEN: 'bot-token',
       });
+    });
+
+    it('shows the concrete Telegram webhook check error instead of a generic reachability line', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider({
+            telegramWebhook: {
+              status: 'error',
+              registeredUrl: null,
+              expectedUrl: 'https://app.example.com/api/webhooks/telegram',
+              lastErrorMessage:
+                'Telegram rejected the bot token. Check the token from BotFather and save again.',
+            },
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.getByText(
+          'Telegram rejected the bot token. Check the token from BotFather and save again.',
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          /Could not reach the Telegram Bot API to check the webhook/,
+        ),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Last delivery error/)).not.toBeInTheDocument();
     });
   });
 
