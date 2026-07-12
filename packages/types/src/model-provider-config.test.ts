@@ -215,9 +215,14 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
   it('keeps recommended-model slugs and default models under each provider prefix', () => {
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
-      // The ChatGPT subscription serves models under the openai/ prefix.
+      // ChatGPT serves openai/ models; the Bedrock setup surface serves the
+      // worker's custom bedrock-mantle/ OpenCode provider.
       const expectedPrefix =
-        provider.id === 'chatgpt' ? 'openai/' : `${provider.id}/`;
+        provider.id === 'chatgpt'
+          ? 'openai/'
+          : provider.id === 'amazon-bedrock'
+            ? 'bedrock-mantle/'
+            : `${provider.id}/`;
 
       expect(provider.defaultRoomoteModel.startsWith(expectedPrefix)).toBe(
         true,
@@ -239,8 +244,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(bedrockProvider).toMatchObject({
       label: 'Amazon Bedrock',
       envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-      envVarLabel: 'Bedrock API key',
-      defaultRoomoteModel: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+      envVarLabel: 'Mantle API key',
+      credentialHelp: {
+        text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+        href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
+        linkLabel: 'Open AWS Bedrock API keys',
+      },
+      defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     });
     expect(bedrockProvider?.additionalEnvFields).toEqual([
       {
@@ -397,6 +407,9 @@ describe('getModelProviderEnvKeyCandidates', () => {
   it('includes every declared env var for multi-credential providers', () => {
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'amazon-bedrock' }),
+    ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
+    expect(
+      getModelProviderEnvKeyCandidates({ providerId: 'bedrock-mantle' }),
     ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'google-vertex' }),
@@ -764,10 +777,10 @@ describe('buildSetupModelStatus multi-credential providers', () => {
     });
   });
 
-  it('treats a persisted amazon-bedrock model with saved credentials as satisfied', () => {
+  it('treats a persisted Bedrock Mantle model with saved credentials as satisfied', () => {
     const status = buildSetupModelStatus({
       persistedModelConfig: {
-        roomoteModel: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+        roomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
       },
       persistedEnvVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
     });

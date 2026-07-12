@@ -37,6 +37,22 @@ in the setup wizard and from **Settings > Models**. You stay in control: you
 can disable or remove any of the added models, add more later, and reconnecting
 a provider never re-adds models you removed.
 
+### Amazon Bedrock
+
+Roomote connects Amazon Bedrock through the Bedrock Mantle endpoint used by
+AWS's current API-key console. Generate a short-term or long-term Bedrock API
+key in the AWS console, save it from **Settings > Models**, and set the AWS
+region where the key was created. Bedrock model IDs use the
+`bedrock-mantle/` prefix, for example:
+
+```text
+bedrock-mantle/anthropic.claude-haiku-4-5
+bedrock-mantle/anthropic.claude-sonnet-5
+```
+
+Short-term keys expire with the AWS console session (and after at most 12
+hours), so replace the saved key when it expires.
+
 ### ChatGPT subscription
 
 Roomote also supports connecting a **ChatGPT (subscription)** provider, which
@@ -82,6 +98,7 @@ openai/gpt-5.6-terra
 vercel/openai/gpt-5.6-terra
 baseten/moonshotai/Kimi-K2.7-Code
 togetherai/deepseek-ai/DeepSeek-V4-Pro
+bedrock-mantle/anthropic.claude-sonnet-5
 ```
 
 The prefix matters because two providers can expose similar model families with

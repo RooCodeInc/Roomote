@@ -321,16 +321,32 @@ function ProviderCredentialsDialog({
                     <span className="text-sm font-medium">
                       {primaryCredentialLabel}
                     </span>
-                    <Input
-                      secret
-                      className="font-mono"
-                      value={apiKey}
-                      onChange={(event) => setApiKey(event.target.value)}
-                      placeholder={`${primaryCredentialLabel} for ${selectedProvider.label}`}
-                      disabled={isSaving}
-                      aria-label={`${mode === 'edit' ? 'New ' : ''}${primaryCredentialLabel} for ${selectedProvider.label}`}
-                      data-1p-ignore
-                    />
+                    <div className="space-y-1.5">
+                      <Input
+                        secret
+                        className="font-mono"
+                        value={apiKey}
+                        onChange={(event) => setApiKey(event.target.value)}
+                        placeholder={`${primaryCredentialLabel} for ${selectedProvider.label}`}
+                        disabled={isSaving}
+                        aria-label={`${mode === 'edit' ? 'New ' : ''}${primaryCredentialLabel} for ${selectedProvider.label}`}
+                        data-1p-ignore
+                      />
+                      {selectedProvider.credentialHelp ? (
+                        <p className="text-xs text-muted-foreground">
+                          {selectedProvider.credentialHelp.text}{' '}
+                          <a
+                            className="font-medium underline underline-offset-2 hover:text-foreground"
+                            href={selectedProvider.credentialHelp.href}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {selectedProvider.credentialHelp.linkLabel}
+                          </a>
+                          .
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
                   {additionalEnvFields.map((field) => (
                     <div

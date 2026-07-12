@@ -40,14 +40,20 @@ describe('normalizeTaskModelId', () => {
       'opencode/big-pickle',
     );
     expect(
-      normalizeTaskModelId('amazon-bedrock/global.anthropic.claude-sonnet-5'),
-    ).toBe('amazon-bedrock/global.anthropic.claude-sonnet-5');
+      normalizeTaskModelId('bedrock-mantle/anthropic.claude-sonnet-5'),
+    ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');
     expect(normalizeTaskModelId('google-vertex/gemini-3.5-flash')).toBe(
       'google-vertex/gemini-3.5-flash',
     );
     expect(normalizeTaskModelId('google/gemini-3.5-flash')).toBe(
       'google/gemini-3.5-flash',
     );
+  });
+
+  it('migrates legacy Bedrock Runtime model ids to Bedrock Mantle', () => {
+    expect(
+      normalizeTaskModelId('amazon-bedrock/global.anthropic.claude-sonnet-5'),
+    ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');
   });
 
   it('leaves fully-qualified openrouter ids unchanged', () => {

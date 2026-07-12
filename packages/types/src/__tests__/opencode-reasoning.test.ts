@@ -36,6 +36,17 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     });
   });
 
+  it('maps Bedrock Mantle models to Anthropic extended-thinking budgets', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'bedrock-mantle/anthropic.claude-sonnet-5',
+        'high',
+      ),
+    ).toEqual({
+      thinking: { type: 'enabled', budgetTokens: 16_000 },
+    });
+  });
+
   it('uses the generic reasoningEffort option for other providers', () => {
     expect(buildOpenCodeModelReasoningOptions('openai/gpt-5.4', 'low')).toEqual(
       { reasoningEffort: 'low' },

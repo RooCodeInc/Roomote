@@ -45,6 +45,12 @@ const OPENCODE_CONFIG_DIR_NAME = 'opencode';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
+const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
+
+const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
+
+const AWS_REGION_PATTERN = /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
+
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
  * and `X-Title` request headers rather than the standard `User-Agent`.
@@ -540,6 +546,68 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
     : {};
+}
+
+function mergeBedrockMantleProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const mantleModelIds = [
+    ...new Set(
+      modelIds.flatMap((modelId) => {
+        const prefix = `${BEDROCK_MANTLE_PROVIDER_ID}/`;
+        const normalized = modelId?.trim();
+
+        return normalized?.startsWith(prefix)
+          ? [normalized.slice(prefix.length)]
+          : [];
+      }),
+    ),
+  ];
+
+  if (mantleModelIds.length === 0) {
+    return providerConfig;
+  }
+
+  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
+
+  if (!AWS_REGION_PATTERN.test(region)) {
+    throw new Error(
+      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
+    );
+  }
+
+  const existingProvider = asRecord(providerConfig[BEDROCK_MANTLE_PROVIDER_ID]);
+  const existingOptions = asRecord(existingProvider.options);
+  const existingModels = asRecord(existingProvider.models);
+  const models = Object.fromEntries(
+    mantleModelIds.map((modelId) => [
+      modelId,
+      {
+        name: modelId,
+        ...asRecord(existingModels[modelId]),
+      },
+    ]),
+  );
+
+  return {
+    ...providerConfig,
+    [BEDROCK_MANTLE_PROVIDER_ID]: {
+      ...existingProvider,
+      npm: '@ai-sdk/anthropic',
+      name: 'Amazon Bedrock',
+      options: {
+        ...existingOptions,
+        baseURL: `https://bedrock-mantle.${region}.api.aws/anthropic/v1`,
+        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      },
+      models: {
+        ...existingModels,
+        ...models,
+      },
+    },
+  };
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -1046,9 +1114,18 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeOpenRouterVariantAliasModels(
-    providerReasoningConfig,
-    variantAliases,
+  const providerConfig = mergeBedrockMantleProviderConfig(
+    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+    runtimeEnv,
+    [
+      effectiveCodingModel,
+      model,
+      smallModel,
+      visionModel,
+      codeReviewModel,
+      exploreModel,
+      planningModel,
+    ],
   );
 
   return {

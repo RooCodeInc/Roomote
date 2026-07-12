@@ -67,6 +67,12 @@ export type SetupModelProviderDescriptor = {
    * (e.g. Vertex takes a service account JSON). Defaults to "API key".
    */
   envVarLabel?: string;
+  /** Optional guidance rendered below the primary credential input. */
+  credentialHelp?: {
+    text: string;
+    href: string;
+    linkLabel: string;
+  };
   /**
    * Additional credential values collected when connecting the provider.
    * Every `required` field must be configured (saved or via runtime env)
@@ -229,14 +235,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
   },
   {
-    // Provider id matches the models.dev/opencode `amazon-bedrock` provider
-    // so `amazon-bedrock/<model>` slugs resolve at runtime. Auth uses a
-    // Bedrock API key (bearer token); operators using ambient AWS access
-    // keys can forward them with `R_MODEL_ENV_KEYS` instead.
+    // Bedrock's current console issues API keys for the Mantle endpoint. The
+    // worker registers this as a custom Anthropic-compatible OpenCode provider
+    // so these keys do not fall through to OpenCode's legacy AWS SDK provider.
     id: 'amazon-bedrock',
     label: 'Amazon Bedrock',
     envVarName: 'AWS_BEARER_TOKEN_BEDROCK',
-    envVarLabel: 'Bedrock API key',
+    envVarLabel: 'Mantle API key',
+    credentialHelp: {
+      text: 'Paste a key generated from the Bedrock Mantle API-key console. Switch the AWS console to the same region you enter below before generating it.',
+      href: 'https://us-east-1.console.aws.amazon.com/bedrock-mantle/api-keys',
+      linkLabel: 'Open AWS Bedrock API keys',
+    },
     additionalEnvFields: [
       {
         envVarName: 'AWS_REGION',
@@ -246,14 +256,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         placeholder: 'us-east-1',
       },
     ],
-    defaultRoomoteModel: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+    defaultRoomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-fable-5': 'amazon-bedrock/global.anthropic.claude-fable-5',
-      'claude-haiku-4-5':
-        'amazon-bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0',
-      'claude-opus-4-8': 'amazon-bedrock/global.anthropic.claude-opus-4-8',
-      'claude-sonnet-5': 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+      'claude-fable-5': 'bedrock-mantle/anthropic.claude-fable-5',
+      'claude-haiku-4-5': 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      'claude-opus-4-8': 'bedrock-mantle/anthropic.claude-opus-4-8',
+      'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
     }),
   },
   {
@@ -331,6 +340,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 
 const EXTRA_MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER = {
+  'bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION'],
   gemini: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
   google: ['GOOGLE_GENERATIVE_AI_API_KEY'],
   mistral: ['MISTRAL_API_KEY'],
@@ -560,7 +570,9 @@ export function getModelProviderLabel(
   }
 
   const provider = SETUP_MODEL_PROVIDER_BY_ID.get(
-    providerId as SetupModelProviderId,
+    (providerId === 'bedrock-mantle'
+      ? 'amazon-bedrock'
+      : providerId) as SetupModelProviderId,
   );
 
   if (provider) {
@@ -597,6 +609,10 @@ export function resolveSetupModelProviderIdFromModel(
 
   if (!providerId) {
     return null;
+  }
+
+  if (providerId === 'bedrock-mantle') {
+    return 'amazon-bedrock';
   }
 
   return SETUP_MODEL_PROVIDER_BY_ID.has(providerId as SetupModelProviderId)

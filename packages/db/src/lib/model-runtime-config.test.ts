@@ -540,7 +540,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
   it('forwards every declared env var for multi-credential providers', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
-        roomoteModel: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+        roomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
         roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
       },
     });
@@ -556,7 +556,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).toMatchObject({
-      R_MODEL: 'amazon-bedrock/global.anthropic.claude-sonnet-5',
+      R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
       R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
       R_MODEL_ENV_KEYS:
         'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,GOOGLE_VERTEX_PROJECT,GOOGLE_VERTEX_LOCATION',
