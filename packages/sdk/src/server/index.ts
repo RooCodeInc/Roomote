@@ -36,8 +36,11 @@ export {
 } from './lib/task-runs/stamp-milestone';
 
 export {
+  ARTIFACT_RAW_URL_CLOCK_SKEW_SECONDS,
+  ARTIFACT_RAW_URL_MAX_AGE_SECONDS,
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
+  isArtifactSignatureTimestampValid,
   signArtifactIdWithKey,
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
