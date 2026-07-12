@@ -68,8 +68,9 @@ export class RoomoteController extends BaseController {
     // Credentials resolve from the runtime env first and fall back to the
     // encrypted deployment env vars saved by the setup flow.
     const resolvedEnv = await resolveComputeProviderEnvValues(provider, {
-      // Env only holds string values for the catalog credential keys.
-      runtimeEnv: Env as unknown as Partial<Record<string, string | undefined>>,
+      // The validated env includes typed numeric policy values; the resolver
+      // normalizes scalars before combining them with saved string values.
+      runtimeEnv: Env,
     });
 
     switch (provider) {
