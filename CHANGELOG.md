@@ -2,6 +2,17 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.3.1 (2026-07-12)
+
+### Patch changes
+
+- Route Amazon Bedrock API keys through the Mantle endpoint and clarify Mantle key setup in model settings.
+- GitHub app @mention detection requires word boundaries so longer lookalike logins and emails containing the configured slug no longer falsely trigger agent replies.
+- Task filter PR-repo labels left-align correctly in the mobile filter sheet instead of sitting awkwardly centered.
+- Materialize pasted Google Vertex service-account credentials before OpenCode starts so Vertex models work across worker paths without exposing credential JSON in provider errors.
+- Visual-proof auto-post to Slack is actually gated by the SlackProofAutoPost experimental flag; when the flag is off, proof is no longer auto-posted and agents must share uploaded screenshots through explicit chat replies.
+- Task history records when a linked pull request is merged or closed as an out-of-band status message agents can resurface (GitHub, GitLab, Gitea, Bitbucket, and Azure DevOps), using provider-native PR references.
+
 ## 0.3.0 (2026-07-12)
 
 ### Minor changes
