@@ -123,7 +123,7 @@ describe('spawnBlaxelWorker', () => {
       expect.objectContaining({
         instanceId: 'roomote-blaxel-standby',
         cmd: 'worker',
-        args: ['run', '321'],
+        args: ['resume', '321'],
         detached: true,
       }),
     );

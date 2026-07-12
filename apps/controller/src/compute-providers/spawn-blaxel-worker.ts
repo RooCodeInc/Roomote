@@ -155,7 +155,9 @@ export async function spawnBlaxelWorker(
       });
     }
 
-    const args = ['run', taskRun.id.toString()];
+    const workerCommand =
+      taskRun.payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
+    const args = [workerCommand, taskRun.id.toString()];
     await recordMutation({
       provider: 'blaxel',
       operation: 'run_command',
