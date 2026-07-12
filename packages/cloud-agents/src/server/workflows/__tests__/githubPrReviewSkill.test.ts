@@ -147,7 +147,7 @@ describe('review-code GitHub workflow paths', () => {
       'If surviving or net-new code issues remain, add one unchecked markdown checkbox item (`- [ ]`) for each actionable code issue that should remain open.',
     );
     expect(skillContent).toContain(
-      'Keep the summary structured as a hidden status block plus a hidden checklist/history block.',
+      'Keep the summary structured as a hidden status block plus a hidden checklist/history block, ending with the trailing `<sub>Reviewing|Reviewed [#SHORT_SHA] ... UTC</sub>` footer.',
     );
     expect(skillContent).toContain(
       'approve the pull request by calling `mcp__roomote__manage_source_control` with `action: "submit_pull_request_review"` and `reviewEvent: "approve"`, passing no body or comment text.',
@@ -286,6 +286,12 @@ describe('review-code GitHub workflow paths', () => {
     );
     expect(skillContent).toContain(
       '`<!-- roomote-review-checklist:start -->` and `<!-- roomote-review-checklist:end -->`',
+    );
+    expect(skillContent).toContain(
+      'End the comment with a small visible status footer as the final line',
+    );
+    expect(skillContent).toContain(
+      '<sub>Reviewing [#SHORT_SHA](commit_url) at YYYY-MM-DD HH:MM:SS UTC</sub>',
     );
     expect(skillContent).not.toContain(
       'single-line clean summary is acceptable.',

@@ -463,6 +463,8 @@ export async function githubPrReview({
   const body = buildReviewSummaryBody({
     summaryMarker,
     statusContent: inProgressStatus,
+    metaPhase: 'Reviewing',
+    repositoryFullName: fullName,
   });
   let topLevelCommentId = existingReviewSummaryComment?.id;
 
@@ -489,6 +491,7 @@ export async function githubPrReview({
         existingBody: existingReviewSummaryComment.body,
         inProgressStatus,
         summaryMarker,
+        repositoryFullName: fullName,
       });
 
       await updateIssueComment(gitHubToken, {

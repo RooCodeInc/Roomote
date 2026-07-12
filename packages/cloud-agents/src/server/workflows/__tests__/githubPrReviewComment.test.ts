@@ -1,9 +1,14 @@
 // pnpm --filter @roomote/cloud-agents test src/server/workflows/__tests__/githubPrReviewComment.test.ts
 
 import {
+  buildGithubCommitHref,
+  buildInProgressReviewSummaryBody,
+  buildReviewMetaFooter,
   buildTerminalReviewStatus,
   buildTerminalReviewSummaryBody,
   buildReviewSummaryBody,
+  formatReviewMetaUtc,
+  parseReviewSummaryMarkerSha,
   REVIEW_STATUS_START_MARKER,
   REVIEW_STATUS_END_MARKER,
   REVIEW_CHECKLIST_START_MARKER,
@@ -12,6 +17,8 @@ import {
 
 const MARKER = (sha: string, mode = 'initial') =>
   `<!-- roomote-review-summary sha=${sha} mode=${mode} -->`;
+
+const FIXED_AT = new Date('2026-07-12T15:04:05.000Z');
 
 const IN_PROGRESS_INITIAL =
   'Reviewing the PR now. <a href="https://roomote.dev/task/x" target="_blank" rel="noopener noreferrer">Follow</a>';
@@ -45,6 +52,87 @@ describe('buildTerminalReviewStatus', () => {
   });
 });
 
+describe('review meta footer', () => {
+  it('formats reviewing/reviewed footer with linked SHA and UTC time', () => {
+    const commitHref = buildGithubCommitHref({
+      repositoryFullName: 'RooCodeInc/Roomote',
+      sha: 'abc1234deadbeef',
+    });
+
+    expect(
+      buildReviewMetaFooter({
+        phase: 'Reviewing',
+        sha: 'abc1234deadbeef',
+        at: FIXED_AT,
+        commitHref,
+      }),
+    ).toBe(
+      `<sub>Reviewing <a href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef" target="_blank" rel="noopener noreferrer">#abc1234</a> at ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
+    );
+
+    expect(
+      buildReviewMetaFooter({
+        phase: 'Reviewed',
+        sha: 'abc1234deadbeef',
+        at: FIXED_AT,
+      }),
+    ).toBe(`<sub>Reviewed #abc1234 at ${formatReviewMetaUtc(FIXED_AT)}</sub>`);
+  });
+
+  it('parses the marker SHA', () => {
+    expect(parseReviewSummaryMarkerSha(MARKER('abcdef0123'))).toBe(
+      'abcdef0123',
+    );
+  });
+
+  it('appends the footer at the bottom of the summary body', () => {
+    const body = buildReviewSummaryBody({
+      summaryMarker: MARKER('abc1234deadbeef'),
+      statusContent: IN_PROGRESS_INITIAL,
+      checklistContent: '- [ ] Fix the thing',
+      metaAt: FIXED_AT,
+      repositoryFullName: 'RooCodeInc/Roomote',
+    });
+
+    expect(body.endsWith(`at ${formatReviewMetaUtc(FIXED_AT)}</sub>`)).toBe(
+      true,
+    );
+    expect(body).toContain('<sub>Reviewing ');
+    expect(body).toContain('#abc1234');
+    expect(body).toContain(
+      'href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef"',
+    );
+    expect(body.indexOf(REVIEW_CHECKLIST_END_MARKER)).toBeLessThan(
+      body.indexOf('<sub>Reviewing '),
+    );
+  });
+
+  it('keeps footer label and link on the preserved marker SHA during reuse', () => {
+    const existing = buildReviewSummaryBody({
+      summaryMarker: MARKER('aaa1111deadbeef'),
+      statusContent: COMPLETION,
+      checklistContent: '- [ ] Prior finding',
+      metaAt: FIXED_AT,
+      repositoryFullName: 'RooCodeInc/Roomote',
+    });
+
+    const updated = buildInProgressReviewSummaryBody({
+      existingBody: existing,
+      inProgressStatus: IN_PROGRESS_INITIAL,
+      summaryMarker: MARKER('bbb2222cafebabe'),
+      repositoryFullName: 'RooCodeInc/Roomote',
+      metaAt: FIXED_AT,
+    });
+
+    expect(updated.startsWith(MARKER('aaa1111deadbeef'))).toBe(true);
+    expect(updated).toContain('#aaa1111');
+    expect(updated).toContain(
+      'href="https://github.com/RooCodeInc/Roomote/commit/aaa1111deadbeef"',
+    );
+    expect(updated).not.toContain('#bbb2222');
+  });
+});
+
 describe('buildTerminalReviewSummaryBody', () => {
   const terminal = 'Review complete. See task';
 
@@ -53,11 +141,13 @@ describe('buildTerminalReviewSummaryBody', () => {
       summaryMarker: MARKER('abc123'),
       statusContent: IN_PROGRESS_INITIAL,
       checklistContent: '- [ ] Fix the thing\n- [x] Already addressed',
+      metaAt: FIXED_AT,
     });
 
     const updated = buildTerminalReviewSummaryBody({
       existingBody: existing,
       terminalStatus: terminal,
+      metaAt: FIXED_AT,
     });
 
     expect(updated).not.toBeNull();
@@ -69,29 +159,36 @@ describe('buildTerminalReviewSummaryBody', () => {
     expect(updated).toContain(
       `${REVIEW_CHECKLIST_START_MARKER}\n- [ ] Fix the thing\n- [x] Already addressed\n${REVIEW_CHECKLIST_END_MARKER}`,
     );
+    expect(updated).toContain(
+      `<sub>Reviewed #abc123 at ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
+    );
   });
 
   it('finalizes an in-progress sync summary', () => {
     const existing = buildReviewSummaryBody({
       summaryMarker: MARKER('def456', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
+      metaAt: FIXED_AT,
     });
 
     const updated = buildTerminalReviewSummaryBody({
       existingBody: existing,
       terminalStatus: terminal,
+      metaAt: FIXED_AT,
     });
 
     expect(updated).not.toBeNull();
     expect(updated!.startsWith(MARKER('def456', 'sync'))).toBe(true);
     expect(updated).toContain(terminal);
     expect(updated).not.toContain(IN_PROGRESS_SYNC);
+    expect(updated).toContain('<sub>Reviewed #def456 ');
   });
 
   it('does not clobber a comment the agent already finalized', () => {
     const existing = buildReviewSummaryBody({
       summaryMarker: MARKER('abc123'),
       statusContent: COMPLETION,
+      metaAt: FIXED_AT,
     });
 
     expect(
@@ -125,11 +222,13 @@ describe('buildTerminalReviewSummaryBody', () => {
       summaryMarker: MARKER('def456', 'sync'),
       statusContent: IN_PROGRESS_SYNC,
       checklistContent: '- [ ] Surviving finding',
+      metaAt: FIXED_AT,
     });
 
     const updated = buildTerminalReviewSummaryBody({
       existingBody: existing,
       terminalStatus: terminal,
+      metaAt: FIXED_AT,
     });
 
     expect(updated).toContain('- [ ] Surviving finding');

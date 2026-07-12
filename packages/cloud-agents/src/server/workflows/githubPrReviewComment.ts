@@ -15,6 +15,8 @@ export const REVIEW_CHECKLIST_START_MARKER =
 export const REVIEW_CHECKLIST_END_MARKER =
   '<!-- roomote-review-checklist:end -->';
 
+export type ReviewMetaPhase = 'Reviewing' | 'Reviewed';
+
 export function isReviewInProgressStatusLine(line: string): boolean {
   return /^(Self-reviewing the PR(?: with fresh eyes)? now\.|Reviewing the PR now\.|Re-reviewing new commits now\.)/i.test(
     line.trim(),
@@ -46,15 +48,119 @@ export function getMarkedSection({
   return content.slice(afterStart, endIndex).trim();
 }
 
+export function parseReviewSummaryMarkerSha(
+  markerOrBody: string,
+): string | undefined {
+  const match = markerOrBody.match(
+    /<!--\s*roomote-review-summary\s+sha=([0-9a-f]+)/i,
+  );
+
+  return match?.[1];
+}
+
+export function buildGithubCommitHref({
+  repositoryFullName,
+  sha,
+}: {
+  repositoryFullName?: string | null;
+  sha: string;
+}): string | undefined {
+  const fullName = repositoryFullName?.trim();
+
+  if (!fullName || !fullName.includes('/') || sha.trim().length === 0) {
+    return undefined;
+  }
+
+  const [owner, repo] = fullName.split('/');
+
+  if (!owner || !repo) {
+    return undefined;
+  }
+
+  return `https://github.com/${owner}/${repo}/commit/${sha}`;
+}
+
+export function formatReviewMetaUtc(at: Date = new Date()): string {
+  return at
+    .toISOString()
+    .replace('T', ' ')
+    .replace(/\.\d{3}Z$/, ' UTC');
+}
+
+/**
+ * Visible trailing status footer for the main Roomote review summary comment.
+ * Example: `<sub>Reviewing <a ...>#abc1234</a> at 2026-07-12 15:04:05 UTC</sub>`
+ */
+export function buildReviewMetaFooter({
+  phase,
+  sha,
+  at = new Date(),
+  commitHref,
+}: {
+  phase: ReviewMetaPhase;
+  sha: string;
+  at?: Date;
+  commitHref?: string;
+}): string {
+  const shortSha = sha.slice(0, 7);
+  const shaLabel = `#${shortSha}`;
+  const linkedSha = commitHref
+    ? buildGithubCommentActionLink({ href: commitHref, label: shaLabel })
+    : shaLabel;
+
+  return `<sub>${phase} ${linkedSha} at ${formatReviewMetaUtc(at)}</sub>`;
+}
+
+function resolveReviewMetaPhase({
+  statusContent,
+  metaPhase,
+}: {
+  statusContent: string;
+  metaPhase?: ReviewMetaPhase;
+}): ReviewMetaPhase {
+  if (metaPhase) {
+    return metaPhase;
+  }
+
+  return isReviewInProgressStatusLine(statusContent) ? 'Reviewing' : 'Reviewed';
+}
+
 export function buildReviewSummaryBody({
   summaryMarker,
   statusContent,
   checklistContent,
+  metaPhase,
+  metaAt,
+  commitHref,
+  repositoryFullName,
+  reviewedSha,
 }: {
   summaryMarker: string;
   statusContent: string;
   checklistContent?: string;
+  metaPhase?: ReviewMetaPhase;
+  metaAt?: Date;
+  commitHref?: string;
+  repositoryFullName?: string | null;
+  reviewedSha?: string;
 }): string {
+  const sha = reviewedSha ?? parseReviewSummaryMarkerSha(summaryMarker);
+  const resolvedCommitHref =
+    (sha
+      ? buildGithubCommitHref({
+          repositoryFullName,
+          sha,
+        })
+      : undefined) ?? commitHref;
+  const metaFooter = sha
+    ? buildReviewMetaFooter({
+        phase: resolveReviewMetaPhase({ statusContent, metaPhase }),
+        sha,
+        at: metaAt,
+        commitHref: resolvedCommitHref,
+      })
+    : undefined;
+
   return [
     summaryMarker,
     REVIEW_STATUS_START_MARKER,
@@ -63,6 +169,7 @@ export function buildReviewSummaryBody({
     REVIEW_CHECKLIST_START_MARKER,
     checklistContent?.trim(),
     REVIEW_CHECKLIST_END_MARKER,
+    metaFooter,
   ]
     .filter(
       (line): line is string => typeof line === 'string' && line.length > 0,
@@ -74,10 +181,16 @@ export function buildInProgressReviewSummaryBody({
   existingBody,
   inProgressStatus,
   summaryMarker,
+  commitHref,
+  repositoryFullName,
+  metaAt,
 }: {
   existingBody: string;
   inProgressStatus: string;
   summaryMarker: string;
+  commitHref?: string;
+  repositoryFullName?: string | null;
+  metaAt?: Date;
 }): string {
   const trimmedBody = existingBody.trim();
 
@@ -85,6 +198,10 @@ export function buildInProgressReviewSummaryBody({
     return buildReviewSummaryBody({
       summaryMarker,
       statusContent: inProgressStatus,
+      metaPhase: 'Reviewing',
+      commitHref,
+      repositoryFullName,
+      metaAt,
     });
   }
 
@@ -118,6 +235,10 @@ export function buildInProgressReviewSummaryBody({
     summaryMarker: hasMarker ? firstLine : summaryMarker,
     statusContent: inProgressStatus,
     checklistContent: preservedContent,
+    metaPhase: 'Reviewing',
+    commitHref,
+    repositoryFullName,
+    metaAt,
   });
 }
 
@@ -130,9 +251,15 @@ export function buildInProgressReviewSummaryBody({
 export function buildTerminalReviewSummaryBody({
   existingBody,
   terminalStatus,
+  commitHref,
+  repositoryFullName,
+  metaAt,
 }: {
   existingBody: string;
   terminalStatus: string;
+  commitHref?: string;
+  repositoryFullName?: string | null;
+  metaAt?: Date;
 }): string | null {
   const trimmedBody = existingBody.trim();
 
@@ -168,6 +295,10 @@ export function buildTerminalReviewSummaryBody({
     summaryMarker: firstLine,
     statusContent: terminalStatus,
     checklistContent: preservedChecklist ?? undefined,
+    metaPhase: 'Reviewed',
+    commitHref,
+    repositoryFullName,
+    metaAt,
   });
 }
 
@@ -238,6 +369,7 @@ export async function finalizeGithubPrReviewComment({
   const updatedBody = buildTerminalReviewSummaryBody({
     existingBody: comment.body,
     terminalStatus,
+    repositoryFullName: fullName,
   });
 
   if (!updatedBody) {
