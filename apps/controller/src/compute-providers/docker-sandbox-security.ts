@@ -176,10 +176,23 @@ export function processListIncludesDockerWorkerRun(
     .split('\n')
     .some((line) =>
       [
-        new RegExp(`(?:^|\\s)worker\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`),
         new RegExp(
-          `(?:^|[\\s/])worker\\.js\\s+run\\s+${escapedTaskRunId}(?:\\s|$)`,
+          `(?:^|\\s)worker\\s+(?:run|resume)\\s+${escapedTaskRunId}(?:\\s|$)`,
         ),
+        new RegExp(
+          `(?:^|[\\s/])worker\\.js\\s+(?:run|resume)\\s+${escapedTaskRunId}(?:\\s|$)`,
+        ),
+      ].some((pattern) => pattern.test(line)),
+    );
+}
+
+function processListIncludesDockerWorkerProcess(processList: string): boolean {
+  return processList
+    .split('\n')
+    .some((line) =>
+      [
+        /(?:^|\s)worker\s+(?:run|resume)\s+\d+(?:\s|$)/,
+        /(?:^|[\s/])worker\.js\s+(?:run|resume)\s+\d+(?:\s|$)/,
       ].some((pattern) => pattern.test(line)),
     );
 }
@@ -411,7 +424,7 @@ async function reconcileTaskNetwork(
     return;
   }
 
-  if (!processListIncludesDockerWorkerRun(processList, taskRunId)) {
+  if (!processListIncludesDockerWorkerProcess(processList)) {
     await removeDockerSandboxResources(
       { containerName, taskNetwork },
       runDocker,

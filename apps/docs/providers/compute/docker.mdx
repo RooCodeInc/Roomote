@@ -46,6 +46,8 @@ DOCKER_WORKER_LOG_MAX_FILES=3
 # internet allows public egress but blocks private/metadata ranges
 # none disables external egress entirely
 DOCKER_WORKER_EGRESS_POLICY=internet
+DOCKER_STANDBY_MAX_COUNT=10
+DOCKER_STANDBY_MAX_AGE_HOURS=24
 ```
 
 Local development builds `roomote-worker:local` automatically. Self-hosted
@@ -74,6 +76,13 @@ consume the host disk. Configure a quota-capable Docker data root. Operators
 that enforce an equivalent host-level quota can explicitly set
 `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true`; Roomote then logs a warning and
 starts without `--storage-opt size`.
+
+Completed resumable tasks keep their stopped container and writable layer so a
+follow-up can restart the same workspace. Roomote retains at most 10 containers
+for 24 hours by default. Configure `DOCKER_STANDBY_MAX_COUNT` and
+`DOCKER_STANDBY_MAX_AGE_HOURS` to change those bounds; a count of `0` disables
+Docker standby retention. The five-minute retention sweep removes the oldest
+or expired containers and their task networks.
 
 The default `internet` egress policy allows public repository and tool access
 while installing immutable blackhole routes for private, shared-address, and

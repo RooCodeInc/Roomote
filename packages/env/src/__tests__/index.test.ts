@@ -102,6 +102,10 @@ describe('Env', () => {
       expect(env.DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
       expect(env.DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
       expect(env.DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
+      expect(env.DOCKER_STANDBY_MAX_COUNT).toBe(10);
+      expect(env.DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
+      expect(env.BLAXEL_STANDBY_MAX_COUNT).toBe(25);
+      expect(env.BLAXEL_STANDBY_MAX_AGE_HOURS).toBe(168);
       expect(env.R_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();

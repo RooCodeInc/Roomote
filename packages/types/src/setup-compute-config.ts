@@ -298,7 +298,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     provider: 'blaxel',
     label: 'Blaxel',
     description:
-      'Hosted Blaxel perpetual sandboxes with automatic standby and fast resume.',
+      'Hosted Blaxel sandboxes with bounded standby retention and fast resume.',
     supportsSnapshots: false,
     comment: 'Recommended',
     fields: [
@@ -332,7 +332,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     label: 'Local Docker',
     comment: 'Run on this host',
     description:
-      'Runs each task in a Docker container on the host. No credentials needed, but the controller must have access to the Docker socket and tasks share the host with Roomote itself. No snapshot support.',
+      'Runs each task in a Docker container on the host with bounded stopped-container resume. No credentials needed, but the controller must have access to the Docker socket and tasks share the host with Roomote itself.',
     supportsSnapshots: false,
     fields: [],
   },

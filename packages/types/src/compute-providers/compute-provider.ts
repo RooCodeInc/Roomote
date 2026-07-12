@@ -32,6 +32,7 @@ export const snapshotCapableComputeProviders = [
  * use as reusable environment templates.
  */
 export const standbyResumeCapableComputeProviders = [
+  'docker',
   'blaxel',
 ] as const satisfies readonly ComputeProvider[];
 
@@ -42,6 +43,7 @@ export const standbyResumeCapableComputeProviders = [
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
+  'docker',
   'blaxel',
 ] as const satisfies readonly ComputeProvider[];
 

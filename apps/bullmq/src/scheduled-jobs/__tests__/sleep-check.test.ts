@@ -617,6 +617,43 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('retains due Docker jobs as stopped-container standby', async () => {
+    const mockJob = {
+      id: 6627,
+      machineId: 'roomote-worker-6627',
+      sandboxCmdId: null,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'docker',
+      taskId: 'task-docker-1',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    returningFn.mockResolvedValue([{ id: 6627 }]);
+
+    await sleepCheckJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith({
+      provider: 'docker',
+    });
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'roomote-worker-6627',
+      commandId: undefined,
+    });
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: 'roomote-worker-6627',
+        status: RunStatus.Completed,
+      }),
+    );
+  });
+
   it('shuts down due non-resumable jobs', async () => {
     const mockJob = {
       id: 99,
