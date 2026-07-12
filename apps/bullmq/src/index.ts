@@ -41,6 +41,7 @@ import { teamsSuggestedTasksOnboardingFollowupJob } from './jobs/teams-suggested
 import { startSnapshotQueue } from './snapshot-queue';
 import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
+import { startTaskSleepQueue } from './task-sleep-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -75,6 +76,11 @@ const {
 
 const { snapshotQueue, snapshotWorker, snapshotQueueEvents } =
   startSnapshotQueue();
+const {
+  queue: taskSleepQueue,
+  worker: taskSleepWorker,
+  queueEvents: taskSleepQueueEvents,
+} = startTaskSleepQueue();
 const {
   slackAccountLinkEducationQueue,
   slackAccountLinkEducationWorker,
@@ -124,6 +130,7 @@ createBullBoard({
     new BullMQAdapter(schedulerQueue, { readOnlyMode: false }),
     new BullMQAdapter(sandboxOidcRefreshQueue, { readOnlyMode: false }),
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
+    new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
     new BullMQAdapter(slackSuggestedTasksOnboardingFollowupQueue, {
       readOnlyMode: false,
@@ -268,6 +275,9 @@ async function gracefulShutdown() {
     await snapshotWorker.close();
     await snapshotQueueEvents.close();
     await snapshotQueue.close();
+    await taskSleepWorker.close();
+    await taskSleepQueueEvents.close();
+    await taskSleepQueue.close();
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();

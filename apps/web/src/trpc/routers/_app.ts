@@ -155,7 +155,7 @@ import {
 import {
   createEnvironmentSnapshotCommand,
   clearEnvironmentSnapshotCommand,
-  createTaskRunSnapshotCommand,
+  requestTaskRunSleepCommand,
   restoreTaskRunSnapshotCommand,
 } from '../commands/snapshots';
 import {
@@ -1126,10 +1126,10 @@ export const appRouter = createRouter({
         clearEnvironmentSnapshotCommand(auth, input),
       ),
 
-    createTaskRun: protectedProcedure
+    requestTaskRunSleep: protectedProcedure
       .input(z.object({ runId: z.number() }))
       .mutation(({ ctx: { auth }, input }) =>
-        createTaskRunSnapshotCommand(auth, input),
+        requestTaskRunSleepCommand(auth, input),
       ),
 
     restoreTaskRun: protectedProcedure

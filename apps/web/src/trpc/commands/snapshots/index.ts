@@ -1,17 +1,19 @@
 import {
   type TaskPayload,
   activeRunStatuses,
+  runningRunStatuses,
   TaskPayloadKind,
   ORPHANED_PENDING_THRESHOLD_MS,
   populateSnapshotResumeSlackMetadata,
   EXPIRED_SNAPSHOT_RESUME_ERROR,
+  isTaskResumeCapableComputeProvider,
+  isResumableTaskPayloadKind,
   isSnapshotResumable,
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import type { ModalClient as _ModalSdkClient } from 'modal';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { createComputeProviderClient } from '@roomote/compute-providers/factory';
-import { createClient } from '@roomote/sdk/client';
+import { enqueueTaskSleep } from '@roomote/sdk/server';
 import {
   db,
   environments,
@@ -30,7 +32,6 @@ import {
   isNull,
   sql,
 } from '@roomote/db/server';
-import { createRunToken } from '@roomote/auth';
 import {
   type ComputeProvider,
   isSnapshotCapableComputeProvider,
@@ -38,7 +39,6 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 
-import { Env } from '@/lib/server';
 import {
   type ClaimedOutOfBandContext,
   claimOutOfBandContextForPrompt,
@@ -306,13 +306,11 @@ export async function clearEnvironmentSnapshotCommand(
   }
 }
 
-export async function createTaskRunSnapshotCommand(
-  auth: UserAuthSuccess,
+export async function requestTaskRunSleepCommand(
+  _auth: UserAuthSuccess,
   input: { runId: number },
 ): Promise<SimpleResult> {
   try {
-    const { userId } = auth;
-
     const taskRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, input.runId),
     });
@@ -326,78 +324,40 @@ export async function createTaskRunSnapshotCommand(
     }
 
     const provider = resolveComputeProviderTarget(taskRun.vendor);
-    const computeClient = createComputeProviderClient({ provider });
 
-    if (!computeClient.capabilities.supportsSnapshots) {
+    if (
+      !isTaskResumeCapableComputeProvider(provider) ||
+      !isResumableTaskPayloadKind(taskRun.payloadKind)
+    ) {
       return {
         success: false,
-        error: `Snapshots are not supported for ${provider} jobs`,
+        error: `Resumable sleep is not supported for this ${provider} task`,
       };
     }
 
-    const { status } = await computeClient.getInstanceStatus({
-      instanceId: taskRun.machineId,
-    });
-
-    if (status !== 'running') {
+    if (!runningRunStatuses.some((status) => status === taskRun.status)) {
       return {
         success: false,
-        error: `Cannot create snapshot: instance is ${status}`,
+        error: 'Only active task runs can be put to sleep',
       };
     }
 
     if (taskRun.snapshotId) {
-      return { success: false, error: 'Snapshot already exists for this job' };
+      return { success: false, error: 'This task is already asleep' };
     }
 
     if (taskRun.snapshotFailedAt) {
       return {
         success: false,
-        error: 'A previous snapshot attempt failed for this job',
+        error: 'A previous sleep attempt failed for this task',
       };
     }
 
-    const authToken = await createRunToken({
-      runId: input.runId,
-      userId,
-      timeoutMs: 5 * 60 * 1000,
-    });
-
-    const client = createClient({
-      url: Env.TRPC_URL,
-      headers: () => ({ Authorization: `Bearer ${authToken}` }),
-    });
-
-    const { enqueued } = await client.taskRuns.createSnapshot.mutate({
-      runId: input.runId,
-      sandboxId: taskRun.machineId,
-    });
-
-    if (!enqueued) {
-      return { success: false, error: 'Snapshot creation already requested' };
-    }
-
-    await db
-      .update(taskRuns)
-      .set({ snapshotRequestedAt: new Date() })
-      .where(eq(taskRuns.id, input.runId));
+    await enqueueTaskSleep({ runId: input.runId });
 
     return { success: true };
   } catch (error) {
-    console.error('createTaskRunSnapshot error:', error);
-
-    try {
-      await db
-        .update(taskRuns)
-        .set({
-          snapshotRequestedAt: null,
-          snapshotFailedAt: new Date(),
-          error: `Snapshot creation failed: ${error instanceof Error ? error.message : String(error)}`,
-        })
-        .where(eq(taskRuns.id, input.runId));
-    } catch (_error) {
-      // NO-OP
-    }
+    console.error('requestTaskRunSleep error:', error);
 
     return error instanceof Error
       ? { success: false, error: error.message }

@@ -171,7 +171,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 // Import after mocks are set up.
-import { sleepCheckJob } from '../sleep-check';
+import { sleepCheckJob, sleepTaskRunNow } from '../sleep-check';
 
 /**
  * Mock the sequential DB select queries in sleepCheckJob.
@@ -208,6 +208,90 @@ function mockJobQueries({
     .mockResolvedValueOnce(bootingJobs)
     .mockResolvedValueOnce(normalizedHardLimitJobs);
 }
+
+describe('sleepTaskRunNow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    transactionFn.mockImplementation(async (callback) =>
+      callback({ update: updateFn }),
+    );
+    mockCreateComputeProviderClient.mockReturnValue({
+      enterStandby: mockEnterStandby,
+      getInstanceStatus: mockGetInstanceStatus,
+    });
+    mockCreateComputeProviderMutationEventRecorder.mockReturnValue(
+      mockRecordMutation,
+    );
+    mockRecordMutation.mockResolvedValue(undefined);
+    mockRecordTaskRunEvent.mockResolvedValue(undefined);
+    mockMarkTaskStartParallelCountEndedAt.mockResolvedValue(undefined);
+    mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockEnterStandby.mockResolvedValue({ resumeHandle: 'docker-machine-1' });
+    returningFn.mockResolvedValue([{ id: 123 }]);
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      id: 123,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'executing',
+      machineId: 'docker-machine-1',
+      vendor: 'docker',
+      taskId: 'task-1',
+      snapshotRequestedAt: null,
+      sandboxCmdId: 'command-1',
+      sleepAt: new Date(Date.now() + 30_000),
+      sleepRequestedAt: null,
+      startedAt: new Date(),
+      workerHeartbeatAt: new Date(),
+      snapshotId: null,
+    });
+  });
+
+  it('puts an active Docker task directly into standby', async () => {
+    await sleepTaskRunNow(123);
+
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'docker-machine-1',
+      commandId: 'command-1',
+    });
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: 'docker-machine-1',
+        status: RunStatus.Completed,
+      }),
+    );
+  });
+
+  it('routes an active snapshot-capable task through the snapshot queue', async () => {
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      id: 123,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'executing',
+      machineId: 'modal-machine-1',
+      vendor: 'modal',
+      taskId: 'task-1',
+      snapshotRequestedAt: null,
+      sandboxCmdId: 'command-1',
+      sleepAt: new Date(Date.now() + 30_000),
+      sleepRequestedAt: null,
+      startedAt: new Date(),
+      workerHeartbeatAt: new Date(),
+      snapshotId: null,
+    });
+    mockCreateSnapshot.mockResolvedValue(true);
+
+    await sleepTaskRunNow(123);
+
+    expect(mockCreateSnapshot).toHaveBeenCalledWith({
+      runId: 123,
+      sandboxId: 'modal-machine-1',
+      snapshotIntentId: expect.stringMatching(/^manual_sleep-123-/),
+      triggerPath: 'manual_sleep',
+    });
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+});
 
 describe('sleepCheckJob', () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
