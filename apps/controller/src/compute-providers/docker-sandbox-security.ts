@@ -303,6 +303,43 @@ export async function attachDockerEgressPolicy(
   ]);
 }
 
+/**
+ * Restores network state that is not guaranteed to survive while a retained
+ * worker container is stopped. Egress routes live in the container network
+ * namespace, and trusted control-plane containers may have been recreated
+ * while the task was in standby.
+ */
+export async function restoreDockerStandbyNetworking(
+  params: {
+    containerName: string;
+    taskNetwork: string;
+    controlNetwork?: string;
+    egressPolicy: DockerWorkerEgressPolicy;
+    image: string;
+    platform: string;
+  },
+  runDocker: DockerCommand = docker,
+): Promise<void> {
+  await attachDockerEgressPolicy(
+    {
+      containerName: params.containerName,
+      egressPolicy: params.egressPolicy,
+      image: params.image,
+      platform: params.platform,
+      blockDockerGateway: Boolean(params.controlNetwork),
+    },
+    runDocker,
+  );
+
+  if (params.controlNetwork) {
+    await connectTrustedControlPlaneServices(
+      params.controlNetwork,
+      params.taskNetwork,
+      runDocker,
+    );
+  }
+}
+
 export async function removeDockerSandboxResources(
   params: { containerName: string; taskNetwork: string },
   runDocker: DockerCommand = docker,

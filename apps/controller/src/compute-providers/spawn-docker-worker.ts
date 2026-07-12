@@ -41,6 +41,7 @@ import {
   prepareDockerTaskNetwork,
   processListIncludesDockerWorkerRun,
   removeDockerSandboxResources,
+  restoreDockerStandbyNetworking,
   type DockerWorkerEgressPolicy,
 } from './docker-sandbox-security';
 
@@ -196,6 +197,14 @@ export async function spawnDockerWorker(
     if (isStandbyResume) {
       await docker(['start', containerName]);
       containerId = containerName;
+      await restoreDockerStandbyNetworking({
+        containerName,
+        taskNetwork: dockerNetwork,
+        controlNetwork,
+        egressPolicy: config.egressPolicy,
+        image: config.image,
+        platform: config.platform,
+      });
     } else {
       try {
         containerId = await startContainer(config.diskLimit);
