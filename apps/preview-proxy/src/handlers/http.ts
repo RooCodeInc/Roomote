@@ -19,7 +19,6 @@ import {
   renderUnavailablePage,
 } from '../lib/error-pages';
 import { triggerAutoResume } from './auto-resume';
-import { isLoopbackHostname } from '@roomote/types';
 import { logger, escapeForLog } from '../lib/logger';
 import { config } from '../config';
 import type { AccessLogContext } from '../lib/access-log';
@@ -98,28 +97,6 @@ function getRequestProtocol(req: IncomingMessage): string {
   }
 
   return config.NODE_ENV === 'production' ? 'https' : 'http';
-}
-
-/**
- * Determine if the Secure flag should be set on the cookie.
- * With SameSite=None, browsers silently reject cookies without Secure on
- * non-localhost HTTPS origins.
- */
-function shouldSetSecure(req: IncomingMessage): boolean {
-  const forwardedProto = req.headers['x-forwarded-proto'];
-  if (typeof forwardedProto === 'string' && forwardedProto.length > 0) {
-    const protocol = forwardedProto.split(',')[0]!.trim();
-    return protocol === 'https';
-  }
-
-  // In production, always secure. In dev, check if host is localhost.
-  if (config.NODE_ENV === 'production') {
-    return true;
-  }
-
-  const host = req.headers.host || '';
-  const hostname = host.split(':')[0] || '';
-  return !isLoopbackHostname(hostname);
 }
 
 /**
@@ -524,14 +501,15 @@ async function resolveAuthAndProxy(
       const cleanUrl = `${protocol}://${host}${requestUrl.pathname}${requestUrl.search}`;
 
       // Set preview_auth cookie (replaces old preview_session)
-      const secure = shouldSetSecure(req);
       const cookieDomain = await getCookieDomain();
       const cookieValue = buildSetCookieHeader(
         config.PREVIEW_AUTH_COOKIE_NAME,
         inlineToken,
         {
           httpOnly: true,
-          secure,
+          // SameSite=None and Partitioned cookies require Secure. Browsers
+          // treat localhost as a trustworthy origin for local development.
+          secure: true,
           sameSite: 'None',
           maxAge: parseInt(config.PREVIEW_TOKEN_TTL_SECONDS),
           path: '/',

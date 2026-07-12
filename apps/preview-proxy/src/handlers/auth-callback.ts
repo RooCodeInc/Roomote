@@ -5,32 +5,8 @@ import { buildSetCookieHeader, getCookieDomain } from '../lib/cookies';
 import { tryNestedFallback } from '../lib/nested-routing';
 import { proxyRequest } from '../lib/proxy';
 import { logger, escapeForLog } from '../lib/logger';
-import { isLoopbackHostname } from '@roomote/types';
 import { config } from '../config';
 import type { AccessLogContext } from '../lib/access-log';
-
-/**
- * Determine if the Secure flag should be set on the cookie.
- * With SameSite=None, browsers silently reject cookies without Secure on
- * non-localhost HTTPS origins. Set Secure based on request protocol, not
- * just NODE_ENV, so staging/preview deploys work correctly.
- */
-function shouldSetSecure(req: IncomingMessage): boolean {
-  const forwardedProto = req.headers['x-forwarded-proto'];
-  if (typeof forwardedProto === 'string' && forwardedProto.length > 0) {
-    const protocol = forwardedProto.split(',')[0]!.trim();
-    return protocol === 'https';
-  }
-
-  // In production, always secure. In dev, check if host is localhost.
-  if (config.NODE_ENV === 'production') {
-    return true;
-  }
-
-  const host = req.headers.host || '';
-  const hostname = host.split(':')[0] || '';
-  return !isLoopbackHostname(hostname);
-}
 
 /**
  * Handle the /auth/callback route.
@@ -133,14 +109,15 @@ export async function handleAuthCallback(
 
   // Set cookie on the base domain so it works across all preview subdomains
   const cookieDomain = await getCookieDomain();
-  const secure = shouldSetSecure(req);
 
   const setCookieValue = buildSetCookieHeader(
     config.PREVIEW_AUTH_COOKIE_NAME,
     token,
     {
       httpOnly: true,
-      secure,
+      // SameSite=None and Partitioned cookies require Secure. Browsers
+      // treat localhost as a trustworthy origin for local development.
+      secure: true,
       sameSite: 'None',
       maxAge: parseInt(config.PREVIEW_TOKEN_TTL_SECONDS),
       path: '/',
