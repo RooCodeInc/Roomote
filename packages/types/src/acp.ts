@@ -1203,9 +1203,10 @@ function normalizeCommunicationTranscriptContent(value: string): string {
 
 /**
  * Leading block prepended to a web-sent prompt to re-surface out-of-band
- * messages (e.g. PR review-feedback notifications) that were persisted to
- * task history without entering the harness session. Stripped from
- * user-visible transcript text by {@link normalizeTranscriptUserText}.
+ * messages (e.g. PR review-feedback or PR status-change notifications) that
+ * were persisted to task history without entering the harness session.
+ * Stripped from user-visible transcript text by
+ * {@link normalizeTranscriptUserText}.
  */
 const LEADING_OUT_OF_BAND_CONTEXT_BLOCK_PATTERN =
   /^\s*<out_of_band_context>\n[\s\S]*?\n<\/out_of_band_context>\s*/;

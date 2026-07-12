@@ -20,7 +20,10 @@ import {
   sql,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { updateTaskPrStatus } from '@roomote/sdk/server';
+import {
+  recordPrStatusChangeInTaskHistory,
+  updateTaskPrStatus,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
@@ -233,6 +236,30 @@ export async function handleAdoPullRequest(
       'closed',
     );
 
+    await Promise.resolve(
+      recordPrStatusChangeInTaskHistory({
+        sourceControlProvider: 'ado',
+        repository: repoFullName,
+        prNumber: pullRequest.pullRequestId,
+        prTitle: pullRequest.title,
+        prUrl: getAdoPullRequestUrl({
+          resourceContainers: payload.resourceContainers,
+          pullRequest,
+          repositoryFullName: repoFullName,
+        }),
+        status: 'closed',
+        actorLogin:
+          getAdoIdentityName(payload.resource.closedBy) ??
+          'someone in Azure DevOps',
+      }),
+    ).catch((error) => {
+      console.warn(
+        `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
     return { status: 'ok' };
   }
 
@@ -250,6 +277,31 @@ export async function handleAdoPullRequest(
       pullRequest.pullRequestId,
       'merged',
     );
+
+    await Promise.resolve(
+      recordPrStatusChangeInTaskHistory({
+        sourceControlProvider: 'ado',
+        repository: repoFullName,
+        prNumber: pullRequest.pullRequestId,
+        prTitle: pullRequest.title,
+        prUrl: getAdoPullRequestUrl({
+          resourceContainers: payload.resourceContainers,
+          pullRequest,
+          repositoryFullName: repoFullName,
+        }),
+        status: 'merged',
+        actorLogin:
+          getAdoIdentityName(payload.resource.closedBy) ??
+          'someone in Azure DevOps',
+      }),
+    ).catch((error) => {
+      console.warn(
+        `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
     await notifyMergedPullRequestThreads(payload, repoFullName);
 
     return { status: 'ok' };

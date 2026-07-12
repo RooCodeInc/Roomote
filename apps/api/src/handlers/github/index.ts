@@ -4,6 +4,7 @@ import { Webhooks } from '@octokit/webhooks';
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import { isRepoSkipped, resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import {
+  recordPrStatusChangeInTaskHistory,
   updateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook,
 } from '@roomote/sdk/server';
@@ -421,10 +422,12 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        const status = payload.pull_request.merged ? 'merged' : 'closed';
+
         syncPrStatus(
           payload.repository.full_name,
           payload.pull_request.number,
-          payload.pull_request.merged ? 'merged' : 'closed',
+          status,
         );
         syncPullRequestFact({
           githubRepoId: payload.repository.id,
@@ -442,6 +445,32 @@ github.post('/', async (c) => {
             updatedAt: payload.pull_request.updated_at,
             url: payload.pull_request.html_url,
           },
+        });
+
+        // Persist merged/closed status into linked task history so agents get
+        // the same out-of-band context path as PR review-feedback notifications.
+        void Promise.resolve(
+          recordPrStatusChangeInTaskHistory({
+            sourceControlProvider: 'github',
+            repository: payload.repository.full_name,
+            prNumber: payload.pull_request.number,
+            prTitle: payload.pull_request.title,
+            prUrl: payload.pull_request.html_url,
+            status,
+            actorLogin:
+              (payload.pull_request.merged
+                ? payload.pull_request.merged_by?.login
+                : null) || payload.sender.login,
+            eventAt: payload.pull_request.merged
+              ? payload.pull_request.merged_at
+              : payload.pull_request.closed_at,
+          }),
+        ).catch((error) => {
+          console.warn(
+            `[pull_request.closed] Failed to record PR status in task history for ${payload.repository.full_name}#${payload.pull_request.number}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
         });
 
         if (isRepoSkipped(payload.repository.full_name)) {

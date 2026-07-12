@@ -14,7 +14,10 @@ import {
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import { updateTaskPrStatus } from '@roomote/sdk/server';
+import {
+  recordPrStatusChangeInTaskHistory,
+  updateTaskPrStatus,
+} from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
@@ -123,13 +126,28 @@ export async function handleBitbucketPullRequest(
     isBitbucketPullRequestClosed(pullRequest)
   ) {
     const merged = isBitbucketPullRequestMerged(pullRequest);
+    const status = merged ? ('merged' as const) : ('closed' as const);
 
-    await updateTaskPrStatus(
-      'bitbucket',
-      repoFullName,
-      prNumber,
-      merged ? 'merged' : 'closed',
-    );
+    await updateTaskPrStatus('bitbucket', repoFullName, prNumber, status);
+
+    await Promise.resolve(
+      recordPrStatusChangeInTaskHistory({
+        sourceControlProvider: 'bitbucket',
+        repository: repoFullName,
+        prNumber,
+        prTitle: pullRequest.title,
+        prUrl: getBitbucketPullRequestUrl(payload),
+        status,
+        actorLogin:
+          getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+      }),
+    ).catch((error) => {
+      console.warn(
+        `[handleBitbucketPullRequest] Failed to record PR status in task history for ${repoFullName}#${prNumber}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
 
     if (merged) {
       await notifyMergedPullRequestThreads(payload, repoFullName);
