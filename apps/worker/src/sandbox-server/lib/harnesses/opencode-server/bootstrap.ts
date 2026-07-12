@@ -8,11 +8,7 @@ import {
   type OpenCodeConfigMcpServer,
 } from '../../../../run-task/agent-home';
 import type { HarnessLogger } from '../../../../logging';
-import {
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
-  isInlineGoogleCredentialsValue,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
-} from '@roomote/types';
+import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from '@roomote/types';
 
 import {
   parseDirectMcpConfig,
@@ -213,16 +209,6 @@ export async function prepareOpenCodeCommandEnv(options: {
     logger: options.logger,
   });
 
-  // Materialize inline Google Vertex service-account JSON (Roomote lets
-  // operators paste the JSON contents into GOOGLE_APPLICATION_CREDENTIALS)
-  // into a real file, since Google's auth library only reads the variable
-  // as a file path.
-  await materializeGoogleApplicationCredentials({
-    commandEnv,
-    homeDir,
-    logger: options.logger,
-  });
-
   options.logger.info(
     `Prepared OpenCode config overlayDir=${openCodeConfigDir} workspace=${options.workspacePath} mcpServers=${
       Object.keys(parsedMcpServers).length
@@ -285,51 +271,6 @@ async function materializeOpenCodeAuthJson(options: {
       error instanceof Error ? error.message : 'Unknown auth.json write error';
     logger.info(
       `Failed to materialize ChatGPT subscription auth.json; falling back to ${OPENCODE_AUTH_CONTENT_ENV_VAR_NAME} env var: ${message}`,
-    );
-  }
-}
-
-/**
- * When `GOOGLE_APPLICATION_CREDENTIALS` carries inline service-account JSON
- * (the Vertex connect flow stores pasted JSON contents), write it to a file
- * and point the env var at that path — Google's auth library only accepts a
- * file path. Path values are left untouched. Failures are logged but never
- * derail task startup; Vertex requests would then fail with the library's
- * own credential error.
- */
-async function materializeGoogleApplicationCredentials(options: {
-  commandEnv: Record<string, string>;
-  homeDir: string;
-  logger: HarnessLogger;
-}): Promise<void> {
-  const { commandEnv, homeDir, logger } = options;
-  const credentialsValue =
-    commandEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
-
-  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
-    return;
-  }
-
-  try {
-    const dataDir = resolveOpenCodeDataDir(homeDir, commandEnv);
-    await fs.mkdir(dataDir, { recursive: true });
-    const credentialsFilePath = path.join(
-      dataDir,
-      'google-application-credentials.json',
-    );
-    await fs.writeFile(credentialsFilePath, credentialsValue, { mode: 0o600 });
-    commandEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] =
-      credentialsFilePath;
-    logger.info(
-      `Materialized inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} JSON at ${credentialsFilePath}`,
-    );
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Unknown credentials write error';
-    logger.info(
-      `Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} JSON: ${message}`,
     );
   }
 }
