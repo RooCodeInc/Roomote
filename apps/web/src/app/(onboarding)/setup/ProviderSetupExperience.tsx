@@ -86,6 +86,10 @@ export function getSetupEffectiveFieldValue({
     return ownValue;
   }
 
+  if (field.secret !== true && field.savedValue?.trim()) {
+    return field.savedValue;
+  }
+
   if (
     provider?.id !== 'microsoft' ||
     field.runtimeSatisfied ||
@@ -230,7 +234,9 @@ function ProviderFields({
       {fields.map((field) => {
         const explicitValue = values[field.envVarName] ?? '';
         const value = getSetupEffectiveFieldValue({ provider, field, values });
+        const isSecretField = field.secret === true;
         const shouldShowSavedValueMask =
+          isSecretField &&
           !field.runtimeSatisfied &&
           field.savedSatisfied &&
           explicitValue.length === 0 &&
@@ -251,10 +257,10 @@ function ProviderFields({
             <div>
               <div className="flex items-center gap-2">
                 <Input
-                  secret={field.secret && !field.runtimeSatisfied}
+                  secret={isSecretField && !field.runtimeSatisfied}
                   className="font-mono"
                   value={
-                    field.runtimeSatisfied
+                    isSecretField && field.runtimeSatisfied
                       ? MASKED_VALUE
                       : shouldShowSavedValueMask
                         ? MASKED_VALUE
@@ -281,7 +287,9 @@ function ProviderFields({
                       );
                     }
                   }}
-                  placeholder={field.runtimeSatisfied ? '' : field.label}
+                  placeholder={
+                    isSecretField && field.runtimeSatisfied ? '' : field.label
+                  }
                   disabled={disabled || field.runtimeSatisfied}
                   data-1p-ignore
                 />

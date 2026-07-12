@@ -24,6 +24,8 @@ export type SetupAuthProviderDescriptor = {
 export type SetupAuthProviderFieldStatus = SetupAuthProviderFieldDescriptor & {
   runtimeSatisfied: boolean;
   savedSatisfied: boolean;
+  /** Plain-text value for non-secret fields; secrets never round-trip here. */
+  savedValue?: string | null;
   satisfiedByEnvVarName: string | null;
 };
 
