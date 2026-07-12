@@ -19,6 +19,7 @@ type CommsProviderStatus = {
     secret?: boolean;
     runtimeSatisfied: boolean;
     savedSatisfied: boolean;
+    savedValue?: string | null;
     satisfiedByEnvVarName: string | null;
   }>;
   runtimeSatisfied: boolean;
@@ -169,6 +170,10 @@ vi.mock('@/hooks/teams', () => ({
     isPending: state.teamsStatusIsPending,
     isError: state.teamsStatusIsError,
   }),
+}));
+
+vi.mock('./TelegramLinkAccountStep', () => ({
+  TelegramLinkAccountStep: () => <div>Telegram link step</div>,
 }));
 
 vi.mock('@/trpc/client', () => ({
@@ -706,6 +711,57 @@ describe('CommsProviderSection', () => {
         ),
       ).not.toBeInTheDocument();
       expect(screen.queryByText(/Last delivery error/)).not.toBeInTheDocument();
+    });
+
+    it('shows the saved Telegram bot username in plain text instead of a mask', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider({
+            fields: [
+              {
+                envVarName: 'R_TELEGRAM_BOT_TOKEN',
+                acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
+                label: 'Telegram Bot Token',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                satisfiedByEnvVarName: 'R_TELEGRAM_BOT_TOKEN',
+              },
+              {
+                envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
+                acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
+                label: 'Telegram Webhook Secret',
+                secret: true,
+                required: false,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                satisfiedByEnvVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
+              },
+              {
+                envVarName: 'R_TELEGRAM_BOT_USERNAME',
+                acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
+                label: 'Telegram Bot Username',
+                required: false,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: 'RoomoteBot',
+                satisfiedByEnvVarName: 'R_TELEGRAM_BOT_USERNAME',
+              },
+            ],
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('RoomoteBot')).toBeInTheDocument();
+      expect(
+        screen.queryByDisplayValue('••••••••••••••••••••••••••••'),
+      ).toBeInTheDocument(); // token still masked
     });
   });
 

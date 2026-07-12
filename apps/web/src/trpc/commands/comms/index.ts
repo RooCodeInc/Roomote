@@ -4,6 +4,7 @@ import {
   invalidateTeamsBotRuntimeCredentialsCache,
   invalidateSlackSigningSecretCache,
   resolveInvocationIdentities,
+  normalizeTelegramBotToken,
   db,
   environmentVariables,
   and,
@@ -109,7 +110,10 @@ export function classifyTelegramWebhookCheckError(error: unknown): string {
   if (
     lower.includes('unauthorized') ||
     lower.includes('invalid token') ||
-    lower.includes('(401)')
+    lower.includes('(401)') ||
+    // Malformed tokens often get HTTP 404 Not Found from Telegram.
+    lower.includes('(404)') ||
+    /(?:^|:\s*)not found\.?$/i.test(message.trim())
   ) {
     return 'Telegram rejected the bot token. Check the token from BotFather and save again.';
   }
@@ -223,7 +227,7 @@ async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegis
   } catch (error) {
     return {
       registered: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: classifyTelegramWebhookCheckError(error),
     };
   }
 }
@@ -234,10 +238,15 @@ function withTelegramProvider(
     persistedEnvVarNames: string[];
     telegramWebhook: TelegramWebhookStatus | null;
     invocationIdentities: InvocationIdentity[];
+    botUsername: string | null;
   },
 ): CommsStatus {
-  const { persistedEnvVarNames, telegramWebhook, invocationIdentities } =
-    options;
+  const {
+    persistedEnvVarNames,
+    telegramWebhook,
+    invocationIdentities,
+    botUsername,
+  } = options;
   const isSaved = (name: string) => persistedEnvVarNames.includes(name);
   const isRuntime = (name: string) => Boolean(process.env[name]?.trim());
   const isSatisfied = (name: string) => isRuntime(name) || isSaved(name);
@@ -246,6 +255,7 @@ function withTelegramProvider(
     label: string;
     secret?: boolean;
     required?: boolean;
+    savedValue?: string | null;
   }) => ({
     envVarName: input.envVarName,
     acceptedEnvVarNames: [input.envVarName],
@@ -254,6 +264,7 @@ function withTelegramProvider(
     ...(input.required === false ? { required: false as const } : {}),
     runtimeSatisfied: isRuntime(input.envVarName),
     savedSatisfied: isSaved(input.envVarName),
+    savedValue: input.secret ? null : (input.savedValue ?? null),
     satisfiedByEnvVarName: isSatisfied(input.envVarName)
       ? input.envVarName
       : null,
@@ -283,6 +294,7 @@ function withTelegramProvider(
             envVarName: 'R_TELEGRAM_BOT_USERNAME',
             label: 'Telegram Bot Username',
             required: false,
+            savedValue: botUsername,
           }),
         ],
         runtimeSatisfied: isRuntime('R_TELEGRAM_BOT_TOKEN'),
@@ -299,12 +311,17 @@ export async function getCommsStatusCommand(
 ): Promise<CommsStatus> {
   assertAdmin(auth);
 
-  const [persistedEnvVarNames, telegramWebhook, invocationIdentities] =
-    await Promise.all([
-      getPersistedEnvironmentVariableNames(),
-      getTelegramWebhookStatus(),
-      resolveInvocationIdentities(),
-    ]);
+  const [
+    persistedEnvVarNames,
+    telegramWebhook,
+    invocationIdentities,
+    telegramCredentials,
+  ] = await Promise.all([
+    getPersistedEnvironmentVariableNames(),
+    getTelegramWebhookStatus(),
+    resolveInvocationIdentities(),
+    resolveTelegramRuntimeCredentials(),
+  ]);
 
   return withTelegramProvider(
     buildSetupAuthStatus({
@@ -315,6 +332,7 @@ export async function getCommsStatusCommand(
       persistedEnvVarNames,
       telegramWebhook,
       invocationIdentities,
+      botUsername: telegramCredentials.botUsername,
     },
   );
 }
@@ -419,7 +437,13 @@ export async function saveCommsAuthConfigCommand(
     }
 
     const valuesToSave = providerStatus.fields.flatMap((field) => {
-      const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
+      const rawValue = input.values?.[field.envVarName] ?? '';
+      const nextValue =
+        field.envVarName === 'R_TELEGRAM_BOT_TOKEN'
+          ? (normalizeTelegramBotToken(rawValue) ?? '')
+          : field.envVarName === 'R_TELEGRAM_BOT_USERNAME'
+            ? rawValue.trim().replace(/^@/, '')
+            : rawValue.trim();
 
       if (!nextValue) {
         return [];

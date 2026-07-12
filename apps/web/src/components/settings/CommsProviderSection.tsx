@@ -500,7 +500,21 @@ export function CommsProviderSection({
       provider.savedSatisfied ||
       (isMicrosoftProvider && teamsBotConfigured),
   );
-  const [values, setValues] = useState<Record<string, string>>({});
+  const nonSecretValuesKey = provider.fields
+    .filter((field) => field.secret !== true)
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = Object.fromEntries(
+    provider.fields
+      .filter((field) => field.secret !== true && field.savedValue?.trim())
+      .map((field) => [field.envVarName, field.savedValue!.trim()]),
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    nonSecretInitialValues,
+  );
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
@@ -511,12 +525,19 @@ export function CommsProviderSection({
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
-    setValues({});
+    setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setClearedSavedValues({});
     setShowManualSlackValues(false);
     setRemoveDialogOpen(false);
-  }, [provider.id, provider.runtimeSatisfied, provider.savedSatisfied]);
+    // nonSecretInitialValues is content-keyed to avoid identity-only resets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+  }, [
+    provider.id,
+    provider.runtimeSatisfied,
+    provider.savedSatisfied,
+    nonSecretValuesKey,
+  ]);
 
   useEffect(() => {
     setExpanded(
@@ -538,10 +559,21 @@ export function CommsProviderSection({
   const visibleFields = getSetupVisibleFields(provider);
 
   const hasPendingValueChanges = visibleFields.some((field) => {
+    if (field.runtimeSatisfied) {
+      return false;
+    }
+
     const nextValue = values[field.envVarName]?.trim() ?? '';
+    if (field.secret !== true) {
+      const savedValue = field.savedValue?.trim() ?? '';
+      return (
+        nextValue !== savedValue ||
+        Boolean(clearedSavedValues[field.envVarName])
+      );
+    }
+
     return (
-      !field.runtimeSatisfied &&
-      (nextValue.length > 0 || Boolean(clearedSavedValues[field.envVarName]))
+      nextValue.length > 0 || Boolean(clearedSavedValues[field.envVarName])
     );
   });
 

@@ -13,11 +13,34 @@ let cachedCredentials: {
   expiresAtMs: number;
 } | null = null;
 
+/** BotFather tokens never contain whitespace; strip paste newlines/spaces. */
+export function normalizeTelegramBotToken(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.replace(/\s+/g, '');
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeTelegramBotUsername(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().replace(/^@/, '');
+  return normalized.length > 0 ? normalized : null;
+}
+
 function readProcessEnvCredentials(): TelegramRuntimeCredentials {
   return {
-    botToken: process.env.R_TELEGRAM_BOT_TOKEN?.trim() || null,
+    botToken: normalizeTelegramBotToken(process.env.R_TELEGRAM_BOT_TOKEN),
     webhookSecret: process.env.R_TELEGRAM_WEBHOOK_SECRET?.trim() || null,
-    botUsername: process.env.R_TELEGRAM_BOT_USERNAME?.trim() || null,
+    botUsername: normalizeTelegramBotUsername(
+      process.env.R_TELEGRAM_BOT_USERNAME,
+    ),
   };
 }
 
@@ -45,16 +68,14 @@ export async function resolveTelegramRuntimeCredentials(): Promise<TelegramRunti
   const value: TelegramRuntimeCredentials = {
     botToken:
       fromEnv.botToken ||
-      deploymentEnvVars.R_TELEGRAM_BOT_TOKEN?.trim() ||
-      null,
+      normalizeTelegramBotToken(deploymentEnvVars.R_TELEGRAM_BOT_TOKEN),
     webhookSecret:
       fromEnv.webhookSecret ||
       deploymentEnvVars.R_TELEGRAM_WEBHOOK_SECRET?.trim() ||
       null,
     botUsername:
       fromEnv.botUsername ||
-      deploymentEnvVars.R_TELEGRAM_BOT_USERNAME?.trim() ||
-      null,
+      normalizeTelegramBotUsername(deploymentEnvVars.R_TELEGRAM_BOT_USERNAME),
   };
 
   cachedCredentials = { value, expiresAtMs: nowMs + CACHE_TTL_MS };

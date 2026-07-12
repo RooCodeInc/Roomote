@@ -44,6 +44,13 @@ vi.mock('@roomote/db/server', () => ({
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
   resolveInvocationIdentities: mockResolveInvocationIdentities,
   resolveTelegramRuntimeCredentials: mockResolveTelegramRuntimeCredentials,
+  normalizeTelegramBotToken: (value: string | null | undefined) => {
+    if (typeof value !== 'string') {
+      return null;
+    }
+    const normalized = value.replace(/\s+/g, '');
+    return normalized.length > 0 ? normalized : null;
+  },
   invalidateTelegramRuntimeCredentialsCache: vi.fn(),
   invalidateSlackSigningSecretCache: vi.fn(),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
@@ -124,6 +131,16 @@ describe('comms commands', () => {
           new Error(
             'Telegram getWebhookInfo failed (401): Unauthorized: invalid token specified',
           ),
+        ),
+      ).toBe(
+        'Telegram rejected the bot token. Check the token from BotFather and save again.',
+      );
+    });
+
+    it('identifies 404 Not Found responses as rejected bot tokens', () => {
+      expect(
+        classifyTelegramWebhookCheckError(
+          new Error('Telegram getWebhookInfo failed (404): Not Found'),
         ),
       ).toBe(
         'Telegram rejected the bot token. Check the token from BotFather and save again.',
@@ -321,6 +338,37 @@ describe('comms commands', () => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
       );
     });
+
+    it('strips whitespace and newlines from the Telegram bot token on save', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'telegram',
+        values: {
+          R_TELEGRAM_BOT_TOKEN: ' 123:ABC\n ',
+          R_TELEGRAM_BOT_USERNAME: '@RoomoteBot',
+        },
+      });
+
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: expect.arrayContaining([
+            expect.objectContaining({
+              name: 'R_TELEGRAM_BOT_TOKEN',
+              value: '123:ABC',
+            }),
+            expect.objectContaining({
+              name: 'R_TELEGRAM_BOT_USERNAME',
+              value: 'RoomoteBot',
+            }),
+          ]),
+        }),
+      );
+    });
   });
 
   describe('telegram status', () => {
@@ -353,6 +401,37 @@ describe('comms commands', () => {
       expect(telegram?.savedSatisfied).toBe(true);
       expect(telegram?.setupSatisfied).toBe(true);
       expect(webhookSecret?.required).toBe(false);
+    });
+
+    it('returns the Telegram bot username as a plain saved value', async () => {
+      mockResolveTelegramRuntimeCredentials.mockResolvedValue({
+        botToken: 'token',
+        webhookSecret: 'secret',
+        botUsername: 'RoomoteBot',
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+        'R_TELEGRAM_BOT_TOKEN',
+        'R_TELEGRAM_BOT_USERNAME',
+      ]);
+      mockTelegramGetWebhookInfo.mockResolvedValue({
+        url: 'https://app.example.com/api/webhooks/telegram',
+        pendingUpdateCount: 0,
+        lastErrorMessage: null,
+        lastErrorAtMs: null,
+        allowedUpdates: ['message', 'callback_query'],
+      });
+
+      const status = await getCommsStatusCommand(buildMockAuth());
+      const telegram = status.providers.find((p) => p.id === 'telegram');
+      const username = telegram?.fields.find(
+        (field) => field.envVarName === 'R_TELEGRAM_BOT_USERNAME',
+      );
+      const token = telegram?.fields.find(
+        (field) => field.envVarName === 'R_TELEGRAM_BOT_TOKEN',
+      );
+
+      expect(username?.savedValue).toBe('RoomoteBot');
+      expect(token?.savedValue).toBeNull();
     });
   });
 
