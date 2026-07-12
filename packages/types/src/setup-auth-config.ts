@@ -217,29 +217,32 @@ export function buildSetupAuthStatus(input: {
               field.envVarName as TeamsBotInferredFieldEnvVarName
             ]
           : undefined;
+      const ownRuntimeMatch = field.acceptedEnvVarNames.find((envVarName) =>
+        isConfiguredEnvValue(runtimeEnv[envVarName]),
+      );
+      const ownSavedMatch = field.acceptedEnvVarNames.find((envVarName) =>
+        persistedEnvVarNameSet.has(envVarName),
+      );
       const runtimeMatch =
         (inferredMatch && isConfiguredEnvValue(runtimeEnv[inferredMatch])
           ? inferredMatch
-          : undefined) ??
-        field.acceptedEnvVarNames.find((envVarName) =>
-          isConfiguredEnvValue(runtimeEnv[envVarName]),
-        );
+          : undefined) ?? ownRuntimeMatch;
       const savedMatch =
         (inferredMatch && persistedEnvVarNameSet.has(inferredMatch)
           ? inferredMatch
-          : undefined) ??
-        field.acceptedEnvVarNames.find((envVarName) =>
-          persistedEnvVarNameSet.has(envVarName),
-        );
-      const runtimeValue = runtimeMatch
-        ? runtimeEnv[runtimeMatch]?.trim() || null
+          : undefined) ?? ownSavedMatch;
+      // Only surface plain-text values owned by this field. Inferred Microsoft
+      // single-app mappings satisfy setup but must not prefill hidden Teams bot
+      // fields, or a later save would snapshot them as explicit env vars.
+      const ownRuntimeValue = ownRuntimeMatch
+        ? runtimeEnv[ownRuntimeMatch]?.trim() || null
         : null;
-      const persistedValue = savedMatch
-        ? persistedEnvVarValues[savedMatch]?.trim() || null
+      const ownPersistedValue = ownSavedMatch
+        ? persistedEnvVarValues[ownSavedMatch]?.trim() || null
         : null;
       const savedValue = isSecretAuthField(field)
         ? null
-        : (runtimeValue ?? persistedValue);
+        : (ownRuntimeValue ?? ownPersistedValue);
 
       return {
         ...field,

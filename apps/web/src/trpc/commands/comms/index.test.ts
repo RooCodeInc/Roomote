@@ -557,5 +557,42 @@ describe('comms commands', () => {
         }),
       );
     });
+
+    it('accepts Microsoft single-app credentials without writing inferred Teams bot vars', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'microsoft',
+          values: {
+            R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+            R_MICROSOFT_CLIENT_SECRET: 'ms-client-secret',
+            R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+          },
+        }),
+      ).resolves.toEqual({ telegramWebhook: null });
+
+      const savedNames =
+        mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]?.values.map(
+          (value: { name: string }) => value.name,
+        ) ?? [];
+
+      expect(savedNames).toEqual(
+        expect.arrayContaining([
+          'R_MICROSOFT_CLIENT_ID',
+          'R_MICROSOFT_CLIENT_SECRET',
+          'R_MICROSOFT_TENANT_ID',
+        ]),
+      );
+      expect(savedNames).not.toEqual(
+        expect.arrayContaining([
+          'R_TEAMS_BOT_APP_ID',
+          'R_TEAMS_BOT_APP_PASSWORD',
+          'R_TEAMS_BOT_TENANT_ID',
+        ]),
+      );
+    });
   });
 });

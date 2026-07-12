@@ -262,6 +262,47 @@ describe('buildSetupAuthStatus', () => {
     ).toBeNull();
   });
 
+  it('does not prefill inferred Teams bot savedValue from Microsoft sign-in values', () => {
+    const status = buildSetupAuthStatus({
+      persistedEnvVarNames: [
+        'R_MICROSOFT_CLIENT_ID',
+        'R_MICROSOFT_CLIENT_SECRET',
+        'R_MICROSOFT_TENANT_ID',
+      ],
+      persistedEnvVarValues: {
+        R_MICROSOFT_CLIENT_ID: 'ms-client-id',
+        R_MICROSOFT_TENANT_ID: 'ms-tenant-id',
+      },
+    });
+    const microsoft = status.providers.find(
+      (provider) => provider.id === 'microsoft',
+    );
+
+    expect(
+      microsoft?.fields.find(
+        (field) => field.envVarName === 'R_MICROSOFT_CLIENT_ID',
+      )?.savedValue,
+    ).toBe('ms-client-id');
+    expect(
+      microsoft?.fields.find(
+        (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
+      ),
+    ).toMatchObject({
+      savedSatisfied: true,
+      savedValue: null,
+      satisfiedByEnvVarName: 'R_MICROSOFT_CLIENT_ID',
+    });
+    expect(
+      microsoft?.fields.find(
+        (field) => field.envVarName === 'R_TEAMS_BOT_TENANT_ID',
+      ),
+    ).toMatchObject({
+      savedSatisfied: true,
+      savedValue: null,
+      satisfiedByEnvVarName: 'R_MICROSOFT_TENANT_ID',
+    });
+  });
+
   it('does not ask for Slack App ID during auth setup', () => {
     const status = buildSetupAuthStatus({
       persistedEnvVarNames: [

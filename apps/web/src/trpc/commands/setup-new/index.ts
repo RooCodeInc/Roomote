@@ -76,6 +76,7 @@ import {
   normalizeSetupNewState,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
+  resolveTeamsBotCredentialEnvVarNames,
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
@@ -1891,15 +1892,40 @@ async function saveSetupAuthConfig(input: {
       ];
     });
 
+    const hasConfiguredAuthEnvVar = (name: string) =>
+      Boolean(process.env[name]?.trim()) ||
+      persistedEnvVarNames.includes(name) ||
+      Boolean(input.values?.[name]?.trim());
+
+    const microsoftTeamsBotResolution =
+      input.provider === 'microsoft'
+        ? resolveTeamsBotCredentialEnvVarNames({
+            hasConfiguredEnvVar: hasConfiguredAuthEnvVar,
+          })
+        : null;
+
     const hasMissingRequiredValue = providerStatus.fields.some((field) => {
       const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
 
-      return (
-        field.required !== false &&
-        !field.runtimeSatisfied &&
-        !field.savedSatisfied &&
-        nextValue.length === 0
-      );
+      if (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      ) {
+        return false;
+      }
+
+      if (
+        microsoftTeamsBotResolution?.source === 'microsoft_auth' &&
+        microsoftTeamsBotResolution.fieldSourceEnvVarNames[
+          field.envVarName as keyof typeof microsoftTeamsBotResolution.fieldSourceEnvVarNames
+        ]
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     if (hasMissingRequiredValue) {
