@@ -67,7 +67,7 @@ describe('review meta footer', () => {
         commitHref,
       }),
     ).toBe(
-      `<sub>Reviewing <a href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef" target="_blank" rel="noopener noreferrer">#abc1234</a> at ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
+      `<sub>Reviewing <a href="https://github.com/RooCodeInc/Roomote/commit/abc1234deadbeef" target="_blank" rel="noopener noreferrer">#abc1234</a> · ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
     );
 
     expect(
@@ -76,7 +76,7 @@ describe('review meta footer', () => {
         sha: 'abc1234deadbeef',
         at: FIXED_AT,
       }),
-    ).toBe(`<sub>Reviewed #abc1234 at ${formatReviewMetaUtc(FIXED_AT)}</sub>`);
+    ).toBe(`<sub>Reviewed #abc1234 · ${formatReviewMetaUtc(FIXED_AT)}</sub>`);
   });
 
   it('parses the marker SHA', () => {
@@ -94,7 +94,7 @@ describe('review meta footer', () => {
       repositoryFullName: 'RooCodeInc/Roomote',
     });
 
-    expect(body.endsWith(`at ${formatReviewMetaUtc(FIXED_AT)}</sub>`)).toBe(
+    expect(body.endsWith(`· ${formatReviewMetaUtc(FIXED_AT)}</sub>`)).toBe(
       true,
     );
     expect(body).toContain('<sub>Reviewing ');
@@ -160,7 +160,7 @@ describe('buildTerminalReviewSummaryBody', () => {
       `${REVIEW_CHECKLIST_START_MARKER}\n- [ ] Fix the thing\n- [x] Already addressed\n${REVIEW_CHECKLIST_END_MARKER}`,
     );
     expect(updated).toContain(
-      `<sub>Reviewed #abc123 at ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
+      `<sub>Reviewed #abc123 · ${formatReviewMetaUtc(FIXED_AT)}</sub>`,
     );
   });
 

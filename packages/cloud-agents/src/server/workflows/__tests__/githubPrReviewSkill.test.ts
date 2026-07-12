@@ -291,7 +291,7 @@ describe('review-code GitHub workflow paths', () => {
       'End the comment with a small visible status footer as the final line',
     );
     expect(skillContent).toContain(
-      '<sub>Reviewing [#SHORT_SHA](commit_url) at YYYY-MM-DD HH:MM:SS UTC</sub>',
+      '<sub>Reviewing [#SHORT_SHA](commit_url) · YYYY-MM-DD HH:MM:SS UTC</sub>',
     );
     expect(skillContent).not.toContain(
       'single-line clean summary is acceptable.',

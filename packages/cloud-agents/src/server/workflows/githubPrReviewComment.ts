@@ -89,7 +89,7 @@ export function formatReviewMetaUtc(at: Date = new Date()): string {
 
 /**
  * Visible trailing status footer for the main Roomote review summary comment.
- * Example: `<sub>Reviewing <a ...>#abc1234</a> at 2026-07-12 15:04:05 UTC</sub>`
+ * Example: `<sub>Reviewing <a ...>#abc1234</a> · 2026-07-12 15:04:05 UTC</sub>`
  */
 export function buildReviewMetaFooter({
   phase,
@@ -108,7 +108,7 @@ export function buildReviewMetaFooter({
     ? buildGithubCommentActionLink({ href: commitHref, label: shaLabel })
     : shaLabel;
 
-  return `<sub>${phase} ${linkedSha} at ${formatReviewMetaUtc(at)}</sub>`;
+  return `<sub>${phase} ${linkedSha} · ${formatReviewMetaUtc(at)}</sub>`;
 }
 
 function resolveReviewMetaPhase({
