@@ -4,7 +4,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   return {
     ...actual,
     Env: {
-      R_GITHUB_APP_SLUG: 'newmote',
+      R_GITHUB_APP_SLUG: 'octomote',
     },
   };
 });
@@ -17,12 +17,12 @@ describe('buildGitHubRoutingPrompt', () => {
   it('describes the GitHub follow-up mode classification contract', () => {
     const prompt = buildGitHubRoutingPrompt();
 
-    expect(prompt).toContain('mentions @newmote');
+    expect(prompt).toContain('mentions @octomote');
     expect(prompt).toContain(
-      'which routing mode a GitHub comment that mentions @newmote needs on the current pull request',
+      'which routing mode a GitHub comment that mentions @octomote needs on the current pull request',
     );
     expect(prompt).toContain(
-      'asking @newmote for review or follow-up work on the current pull request',
+      'asking @octomote for review or follow-up work on the current pull request',
     );
     expect(prompt).toContain('review: run or reuse the PR review workflow');
     expect(prompt).toContain(
@@ -60,7 +60,7 @@ describe('buildGitHubRoutingPrompt', () => {
       const prompt = buildGitHubRoutingPrompt();
 
       expect(prompt).toContain('mentions @acme');
-      expect(prompt).not.toContain('@newmote');
+      expect(prompt).not.toContain('@octomote');
     });
   });
 });
