@@ -252,6 +252,7 @@ export const SideNav = () => {
                 alt=""
                 width={28}
                 height={28}
+                priority
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 m-auto h-7 w-7 opacity-100 transition-opacity duration-200 group-hover:opacity-0 dark:invert"
               />
