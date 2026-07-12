@@ -2,6 +2,23 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.3.0 (2026-07-12)
+
+### Minor changes
+
+- Local Docker tasks now retain idle containers and resume them in place with bounded cleanup (default 10 retained containers, 24-hour max age; max count `0` disables retention). Blaxel standby retention is likewise bounded (defaults 25 / 168 hours), with env knobs `DOCKER_STANDBY_MAX_*` and `BLAXEL_STANDBY_MAX_*` documented for operators.
+- Tasks can go to sleep early from the task page overflow menu (Sleep above Delete). The action is available for snapshot-capable runs and for resumable Docker/Blaxel standby, so operators can release an awake environment without waiting for the keepalive timer.
+
+### Patch changes
+
+- Signed public artifact raw URLs (allowlisted images and videos used for visual proofs and PR embeds) expire 30 days after they are signed, and cache headers stay within the remaining TTL, so a leaked screenshot link cannot be fetched indefinitely.
+- Blaxel sandbox lifecycle is more resilient: deterministic external IDs with idempotent create, bounded retries on readiness-sensitive calls, reuse of preview resources across standby/resume instead of delete-and-recreate, and immediate failure on non-retryable 4xx errors.
+- Local Docker development rebuilds worker images that lack current networking tools before launching tasks, routes sandbox HTTP/WebSocket traffic through the public app edge so tunneled clients get a usable live session, and marks preview auth cookies Secure when using SameSite=None and Partitioned so iframe previews authenticate reliably.
+- PR review notification updates treat failing CI checks and live merge conflicts as high-signal blockers: triage copy names the problem and offers a fix or conflict resolution instead of burying it after a soft "looked good" wrap-up.
+- Main GitHub PR review summary comments now show a compact status footer with the review phase and short commit SHA (`Reviewing abc1234` / `Reviewed abc1234`), using a linked SHA when a commit URL can be built.
+- Docker and Blaxel standby environments can resume even when they were suspended before the first agent harness session, so early-sleep retains come back to Idle without forcing a new session create path.
+- The worker common env file (`~/.roomote/env.sh`, which holds deployment secrets such as cloud tokens) is written owner-only (`0o600`) with `~/.roomote` locked to `0o700`, so other sandbox users cannot read those secrets.
+
 ## 0.2.0 (2026-07-12)
 
 ### Minor changes
