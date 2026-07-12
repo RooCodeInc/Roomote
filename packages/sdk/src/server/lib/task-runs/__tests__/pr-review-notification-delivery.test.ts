@@ -370,10 +370,20 @@ describe('triagePrReviewActivity', () => {
       'do not omit the platform name on these self-review messages',
     );
     expect(system).toContain(
-      'when "Current pull request state" includes CI check lines',
+      'focus the message on offers to address open feedback',
     );
     expect(system).toContain(
       'when any CI check is listed as failure or error, treat it as high-signal',
+    );
+    expect(system).toContain(
+      'when open feedback is already actionable (findings, requested changes, or',
+    );
+    expect(system).toContain('do not mention that CI is passing or green');
+    expect(system).toContain(
+      'only mention successful or all-green CI when there is nothing actionable',
+    );
+    expect(system).toContain(
+      'when "Current pull request state" includes CI check lines',
     );
     expect(system).toContain(
       'when "Current pull request state" includes "- Merge conflicts: yes"',
