@@ -74,6 +74,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => ({ kind: 'eq', args })),
   inArray: vi.fn((...args: unknown[]) => ({ kind: 'inArray', args })),
   recordTaskRunEvent: (...args: unknown[]) => mockRecordTaskRunEvent(...args),
+  resolveComputeProviderEnvValues: vi.fn().mockResolvedValue({}),
   sandboxOidcTargets: {
     awsRegion: 'awsRegion',
     awsRoleArn: 'awsRoleArn',

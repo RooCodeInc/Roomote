@@ -6,7 +6,13 @@ import { SANDBOX_FILES_DIR } from './worker-runtime';
  * Determines which infrastructure vendor will execute the task run.
  */
 
-export const computeProviders = ['modal', 'docker', 'daytona', 'e2b'] as const;
+export const computeProviders = [
+  'modal',
+  'docker',
+  'daytona',
+  'e2b',
+  'blaxel',
+] as const;
 
 export type ComputeProvider = (typeof computeProviders)[number];
 
@@ -21,12 +27,22 @@ export const snapshotCapableComputeProviders = [
 ] as const satisfies readonly ComputeProvider[];
 
 /**
+ * Providers that can retain and reconnect to the same suspended instance.
+ * Unlike snapshots, standby handles are single-instance and are not safe to
+ * use as reusable environment templates.
+ */
+export const standbyResumeCapableComputeProviders = [
+  'blaxel',
+] as const satisfies readonly ComputeProvider[];
+
+/**
  * Providers whose machine lifecycle is managed by the scheduled sleep-check
- * pipeline. Snapshot-capable providers get snapshot-or-destroy handling;
- * non-snapshot managed providers are always destroyed on sleep.
+ * pipeline. Snapshot-capable providers create immutable snapshots, standby
+ * providers retain their instance, and other managed providers are destroyed.
  */
 export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
+  'blaxel',
 ] as const satisfies readonly ComputeProvider[];
 
 export const isComputeProvider = (
@@ -47,6 +63,20 @@ export const isSnapshotCapableComputeProvider = (
   snapshotCapableComputeProviders.includes(
     provider as (typeof snapshotCapableComputeProviders)[number],
   );
+
+export const isStandbyResumeCapableComputeProvider = (
+  provider: string | null | undefined,
+): provider is ComputeProvider =>
+  standbyResumeCapableComputeProviders.includes(
+    provider as (typeof standbyResumeCapableComputeProviders)[number],
+  );
+
+/** Providers that can preserve a resumable task across its sleep boundary. */
+export const isTaskResumeCapableComputeProvider = (
+  provider: string | null | undefined,
+): provider is ComputeProvider =>
+  isSnapshotCapableComputeProvider(provider) ||
+  isStandbyResumeCapableComputeProvider(provider);
 
 /**
  * Worker runtime labels. `sandbox` denotes the shared hosted-sandbox
@@ -101,6 +131,11 @@ export const E2B_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
     ...SANDBOX_WORKER_RUNTIME_PATHS,
   });
 
+export const BLAXEL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
+  Object.freeze({
+    ...SANDBOX_WORKER_RUNTIME_PATHS,
+  });
+
 export const LOCAL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
   Object.freeze({
     ...SANDBOX_WORKER_RUNTIME_PATHS,
@@ -115,6 +150,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   docker: SANDBOX_WORKER_RUNTIME_PATHS,
   daytona: DAYTONA_WORKER_RUNTIME_PATHS,
   e2b: E2B_WORKER_RUNTIME_PATHS,
+  blaxel: BLAXEL_WORKER_RUNTIME_PATHS,
   local: LOCAL_WORKER_RUNTIME_PATHS,
 };
 

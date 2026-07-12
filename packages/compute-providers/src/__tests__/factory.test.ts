@@ -6,6 +6,7 @@ const {
   dockerClientMock,
   daytonaClientMock,
   e2bClientMock,
+  blaxelClientMock,
   dockerCapabilities,
   daytonaCapabilities,
   e2bCapabilities,
@@ -15,6 +16,7 @@ const {
   dockerClientMock: vi.fn(),
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
+  blaxelClientMock: vi.fn(),
   dockerCapabilities: {
     snapshots: false,
     detachedCommands: false,
@@ -42,6 +44,7 @@ vi.mock('../adapters', () => ({
   ModalClient: modalClientMock,
   DaytonaClient: daytonaClientMock,
   E2bClient: e2bClientMock,
+  BlaxelClient: blaxelClientMock,
   DOCKER_CAPABILITIES: dockerCapabilities,
   DAYTONA_CAPABILITIES: daytonaCapabilities,
   E2B_CAPABILITIES: e2bCapabilities,
@@ -339,5 +342,58 @@ describe('createComputeProviderClient', () => {
         config: { apiKey: 'e2b-key' } as E2bConfig,
       }),
     ).toThrow('Missing E2B_TEMPLATE_ID');
+  });
+
+  it('resolves Blaxel credentials, image, and region from env', () => {
+    process.env.BL_API_KEY = 'blaxel-key';
+    process.env.BL_WORKSPACE = 'roomote';
+    process.env.BLAXEL_IMAGE = 'ghcr.io/roomote/worker:test';
+    process.env.BLAXEL_REGION = 'us-pdx-1';
+
+    try {
+      createComputeProviderClient({ provider: 'blaxel' });
+      expect(blaxelClientMock).toHaveBeenCalledWith({
+        apiKey: 'blaxel-key',
+        workspace: 'roomote',
+        image: 'ghcr.io/roomote/worker:test',
+        region: 'us-pdx-1',
+      });
+    } finally {
+      delete process.env.BL_API_KEY;
+      delete process.env.BL_WORKSPACE;
+      delete process.env.BLAXEL_IMAGE;
+      delete process.env.BLAXEL_REGION;
+    }
+  });
+
+  it('requires all Blaxel configuration', () => {
+    expect(() =>
+      createComputeProviderClient({ provider: 'blaxel', envFallback: {} }),
+    ).toThrow('Missing BL_API_KEY');
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'blaxel',
+        envFallback: { BL_API_KEY: 'key' },
+      }),
+    ).toThrow('Missing BL_WORKSPACE');
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'blaxel',
+        envFallback: { BL_API_KEY: 'key', BL_WORKSPACE: 'workspace' },
+      }),
+    ).toThrow('Missing BLAXEL_IMAGE');
+  });
+
+  it('does not treat the shared worker registry image as a Blaxel sandbox image', () => {
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'blaxel',
+        envFallback: {
+          BL_API_KEY: 'key',
+          BL_WORKSPACE: 'workspace',
+          DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:v1',
+        },
+      }),
+    ).toThrow('Missing BLAXEL_IMAGE');
   });
 });

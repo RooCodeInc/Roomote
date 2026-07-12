@@ -32,6 +32,14 @@ const COMPUTE_CREDENTIALS_HINTS: Partial<
     },
     '.',
   ],
+  blaxel: [
+    'Create an API key in the ',
+    {
+      label: 'API keys page',
+      href: 'https://app.blaxel.ai/profile/security',
+    },
+    ' and copy your workspace name from the console URL.',
+  ],
 };
 
 export function getComputeCredentialsHint(

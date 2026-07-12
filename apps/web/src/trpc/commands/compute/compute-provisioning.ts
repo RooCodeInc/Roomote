@@ -6,7 +6,9 @@ import {
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
+  buildBlaxelWorkerImage,
   buildE2bWorkerTemplate,
+  deriveBlaxelWorkerImageName,
   deriveDaytonaWorkerSnapshotName,
   deriveE2bWorkerTemplateRef,
   registerDaytonaWorkerSnapshot,
@@ -99,6 +101,28 @@ const PROVISIONING_PROVIDERS: Record<
       });
 
       return { artifactRef: registered.snapshotName };
+    },
+  },
+  blaxel: {
+    envVarName: 'BLAXEL_IMAGE',
+    deriveArtifactRef: deriveBlaxelWorkerImageName,
+    provision: async ({ resolvedEnv, imageRef, templateRef }) => {
+      const apiKey = resolvedEnv.BL_API_KEY;
+      const workspace = resolvedEnv.BL_WORKSPACE;
+
+      if (!apiKey) throw new Error('BL_API_KEY is not configured');
+      if (!workspace) throw new Error('BL_WORKSPACE is not configured');
+
+      // Blaxel's image builder currently relies on registry access configured
+      // in the workspace; it does not accept per-call registry credentials.
+      const built = await buildBlaxelWorkerImage({
+        apiKey,
+        workspace,
+        imageRef,
+        imageName: templateRef,
+      });
+
+      return { artifactRef: built.imageRef };
     },
   },
 };

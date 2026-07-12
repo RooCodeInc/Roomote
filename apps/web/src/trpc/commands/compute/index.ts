@@ -116,6 +116,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
     persistedComputeConfig,
     e2bProvisioning,
     daytonaProvisioning,
+    blaxelProvisioning,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([
@@ -124,6 +125,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
     getPersistedRuntimeComputeConfig(),
     getPersistedComputeProvisioning('e2b'),
     getPersistedComputeProvisioning('daytona'),
+    getPersistedComputeProvisioning('blaxel'),
   ]);
 
   return {
@@ -138,6 +140,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
     provisioning: {
       e2b: presentSetupNewComputeProvisioning(e2bProvisioning),
       daytona: presentSetupNewComputeProvisioning(daytonaProvisioning),
+      blaxel: presentSetupNewComputeProvisioning(blaxelProvisioning),
     },
   };
 }

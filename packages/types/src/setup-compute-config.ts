@@ -11,7 +11,8 @@ import {
  * - `infrastructure`: a deployment worker-image artifact (base image ref,
  *   template id, snapshot name, domain/region). Some infrastructure values are
  *   UI-editable advanced overrides; managed worker artifacts
- *   (`MODAL_BASE_IMAGE_REF`, `E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`) are
+ *   (`MODAL_BASE_IMAGE_REF`, `E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`,
+ *   `BLAXEL_IMAGE`) are
  *   not operator-edited in the UI — process env, derivation, or detached
  *   provisioning owns them.
  */
@@ -294,6 +295,39 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     ],
   },
   {
+    provider: 'blaxel',
+    label: 'Blaxel',
+    description:
+      'Hosted Blaxel perpetual sandboxes with automatic standby and fast resume.',
+    supportsSnapshots: false,
+    comment: 'Recommended',
+    fields: [
+      {
+        envVarName: 'BL_API_KEY',
+        label: 'Blaxel API Key',
+        secret: true,
+        category: 'credential',
+      },
+      {
+        envVarName: 'BL_WORKSPACE',
+        label: 'Blaxel Workspace',
+        category: 'credential',
+      },
+      {
+        envVarName: 'BLAXEL_IMAGE',
+        label: 'Worker Image',
+        category: 'infrastructure',
+      },
+      {
+        envVarName: 'BLAXEL_REGION',
+        label: 'Blaxel Region',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+      },
+    ],
+  },
+  {
     provider: 'docker',
     label: 'Local Docker',
     comment: 'Run on this host',
@@ -342,11 +376,12 @@ function isSecretSetupComputeField(
 const SETUP_PROVISIONABLE_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'E2B_TEMPLATE_ID',
   'DAYTONA_SNAPSHOT_NAME',
+  'BLAXEL_IMAGE',
 ]);
 
 /**
  * True for provider worker artifacts Roomote builds/registers itself
- * (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`). These are not Settings/setup
+ * (`E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, `BLAXEL_IMAGE`). These are not Settings/setup
  * UI inputs: operators satisfy them via process env or auto-provisioning
  * after credentials + a registry-qualified worker image are available.
  */
@@ -357,7 +392,7 @@ export function isAutoProvisionedComputeArtifactField(
 }
 
 /**
- * True for managed Modal / E2B / Daytona worker-image artifact env vars that
+ * True for managed Modal / E2B / Daytona / Blaxel worker-image artifact env vars that
  * Settings and setup never collect as form inputs. Process env, derivation
  * from DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
  * them.

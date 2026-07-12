@@ -5,6 +5,7 @@ const createResponseMock = vi.fn();
 const authorizeUserTokenMock = vi.fn();
 const createComputeProviderClientMock = vi.fn();
 const getComputeProviderCapabilitiesMock = vi.fn();
+const resolveComputeProviderEnvValuesMock = vi.fn();
 const streamCommandOutputMock = vi.fn();
 
 let lastSession:
@@ -32,6 +33,8 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: { id: 'id' },
   eq: vi.fn(),
   and: vi.fn(),
+  resolveComputeProviderEnvValues: (...args: unknown[]) =>
+    resolveComputeProviderEnvValuesMock(...args),
 }));
 
 vi.mock('@roomote/compute-providers/factory', () => ({
@@ -58,6 +61,7 @@ describe('GET /api/task-runs/[id]/logs', () => {
       supportsCommandOutputStreaming: false,
       supportsCommandOutputLookup: false,
     });
+    resolveComputeProviderEnvValuesMock.mockResolvedValue({});
     createComputeProviderClientMock.mockReturnValue({
       capabilities: {
         supportsCommandOutputStreaming: false,
@@ -157,6 +161,11 @@ describe('GET /api/task-runs/[id]/logs', () => {
         signal: expect.any(AbortSignal),
       }),
     );
+    expect(resolveComputeProviderEnvValuesMock).toHaveBeenCalledWith('docker');
+    expect(createComputeProviderClientMock).toHaveBeenCalledWith({
+      provider: 'docker',
+      envFallback: {},
+    });
     expect(logEvents).toHaveLength(1);
     expect(logEvents[0]?.[0]).toEqual({ stream: 'stdout', data: 'booting\n' });
     expect(disconnectEvents).toHaveLength(1);

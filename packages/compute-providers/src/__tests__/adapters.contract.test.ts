@@ -63,6 +63,33 @@ vi.mock('e2b', () => ({
   CommandExitError: E2bCommandExitError,
 }));
 
+const {
+  blaxelCreateMock,
+  blaxelGetMock,
+  blaxelListMock,
+  blaxelDeleteMock,
+  blaxelUpdateTtlMock,
+  blaxelSettingsMock,
+} = vi.hoisted(() => ({
+  blaxelCreateMock: vi.fn(),
+  blaxelGetMock: vi.fn(),
+  blaxelListMock: vi.fn(),
+  blaxelDeleteMock: vi.fn(),
+  blaxelUpdateTtlMock: vi.fn(),
+  blaxelSettingsMock: vi.fn(),
+}));
+
+vi.mock('@blaxel/core', () => ({
+  settings: { setConfig: blaxelSettingsMock },
+  SandboxInstance: {
+    create: blaxelCreateMock,
+    get: blaxelGetMock,
+    list: blaxelListMock,
+    delete: blaxelDeleteMock,
+    updateTtl: blaxelUpdateTtlMock,
+  },
+}));
+
 async function collectLogs<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const entries: T[] = [];
 
@@ -76,6 +103,242 @@ async function collectLogs<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 describe('compute provider adapter contracts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it('blaxel adapter satisfies hosted sandbox contract without snapshots', async () => {
+    const sandbox = {
+      metadata: {
+        name: 'roomote-blaxel-1',
+        createdAt: new Date().toISOString(),
+      },
+      status: 'DEPLOYED',
+      expiresIn: 120,
+      wait: vi.fn().mockResolvedValue(undefined),
+      previews: {
+        delete: vi.fn().mockImplementation(async (previewName) => {
+          if (previewName === 'port-4000') {
+            throw { code: 404, error: 'Resource not found' };
+          }
+        }),
+        createIfNotExists: vi.fn().mockImplementation(async (preview) => ({
+          spec: { url: `https://${preview.spec.port}.blaxel.test` },
+        })),
+        create: vi.fn().mockImplementation(async (preview) => ({
+          spec: { url: `https://${preview.spec.port}.blaxel.test` },
+        })),
+      },
+      process: {
+        exec: vi.fn().mockResolvedValue({
+          name: 'cmd-1',
+          status: 'completed',
+          exitCode: 0,
+          stdout: 'hello',
+          stderr: '',
+        }),
+        get: vi.fn().mockResolvedValue({
+          status: 'completed',
+          stdout: 'hello',
+          stderr: '',
+        }),
+        logs: vi.fn().mockResolvedValue('hello'),
+        stop: vi.fn().mockResolvedValue(undefined),
+      },
+      fs: { writeBinary: vi.fn().mockResolvedValue(undefined) },
+    };
+    blaxelCreateMock.mockResolvedValue(sandbox);
+    blaxelGetMock.mockResolvedValue(sandbox);
+    blaxelListMock.mockResolvedValue({
+      async *[Symbol.asyncIterator]() {
+        yield sandbox;
+      },
+    });
+    blaxelDeleteMock.mockResolvedValue(undefined);
+    blaxelUpdateTtlMock.mockResolvedValue(sandbox);
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'ghcr.io/roomote/worker:test',
+        timeoutMs: 120_000,
+      },
+    });
+    expect(blaxelSettingsMock).toHaveBeenCalledWith({
+      apiKey: 'key',
+      workspace: 'workspace',
+    });
+    expect(client.capabilities.supportsSnapshots).toBe(false);
+    expect(client.capabilities.supportsStandbyResume).toBe(true);
+    expect(client.capabilities.supportsResume).toBe(true);
+
+    const created = await client.createInstance({ ports: [3000] });
+    expect(created.domains).toEqual({
+      '3000': 'https://3000.blaxel.test',
+    });
+    expect(blaxelCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        image: 'ghcr.io/roomote/worker:test',
+        ttl: '120s',
+        ports: [{ target: 3000, protocol: 'HTTP' }],
+      }),
+    );
+
+    await expect(
+      client.runCommand({
+        instanceId: created.instanceId,
+        cmd: 'echo',
+        args: ["it's safe"],
+      }),
+    ).resolves.toMatchObject({ exitCode: 0, stdout: 'hello' });
+    expect(sandbox.process.exec).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: `'echo' 'it'"'"'s safe'`,
+        timeout: 0,
+      }),
+    );
+
+    await client.writeFiles({
+      instanceId: created.instanceId,
+      files: [{ path: '/sandbox/test', content: Buffer.from('test') }],
+    });
+    expect(sandbox.fs.writeBinary).toHaveBeenCalledWith(
+      '/sandbox/test',
+      expect.any(Buffer),
+    );
+    await expect(
+      client.getCommandOutput({
+        instanceId: created.instanceId,
+        commandId: 'cmd-1',
+      }),
+    ).resolves.toBe('hello');
+    await expect(client.listInstances({})).resolves.toHaveLength(1);
+    await expect(
+      client.getInstanceStatus({ instanceId: created.instanceId }),
+    ).resolves.toEqual({ status: 'running', timeoutRemainingMs: 120_000 });
+    await expect(
+      client.createSnapshot({ instanceId: created.instanceId }),
+    ).rejects.toThrow('does not support Roomote snapshots');
+    await expect(
+      client.enterStandby?.({
+        instanceId: created.instanceId,
+        commandId: 'cmd-1',
+      }),
+    ).resolves.toEqual({ resumeHandle: created.instanceId });
+    expect(blaxelUpdateTtlMock).toHaveBeenCalledWith(created.instanceId, '7d');
+    expect(sandbox.process.stop).toHaveBeenCalledWith('cmd-1');
+
+    await expect(
+      client.resumeFromStandby?.({
+        resumeHandle: created.instanceId,
+        ports: [3000, 4000],
+      }),
+    ).resolves.toMatchObject({
+      instanceId: created.instanceId,
+      sourceSnapshotId: created.instanceId,
+      status: 'running',
+      domains: {
+        '3000': 'https://3000.blaxel.test',
+        '4000': 'https://4000.blaxel.test',
+      },
+    });
+    expect(blaxelUpdateTtlMock).toHaveBeenLastCalledWith(
+      created.instanceId,
+      '120s',
+    );
+    expect(sandbox.previews.delete).toHaveBeenCalledWith('port-3000');
+    expect(sandbox.previews.delete).toHaveBeenCalledWith('port-4000');
+    expect(sandbox.previews.create).toHaveBeenCalledWith(
+      expect.objectContaining({ metadata: { name: 'port-3000' } }),
+    );
+    await client.destroyInstance({ instanceId: created.instanceId });
+    expect(blaxelDeleteMock).toHaveBeenCalledWith(created.instanceId);
+  });
+
+  it('cleans up a Blaxel sandbox when readiness fails after creation', async () => {
+    const sandbox = {
+      metadata: { name: 'roomote-blaxel-failed' },
+      wait: vi.fn().mockRejectedValue(new Error('deployment failed')),
+    };
+    blaxelCreateMock.mockResolvedValue(sandbox);
+    blaxelDeleteMock.mockResolvedValue(undefined);
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+
+    await expect(client.createInstance({})).rejects.toThrow(
+      'deployment failed',
+    );
+    const createdName = blaxelCreateMock.mock.calls[0]?.[0]?.name;
+    expect(createdName).toEqual(expect.any(String));
+    expect(blaxelDeleteMock).toHaveBeenCalledWith(createdName);
+  });
+
+  it('cleans up a Blaxel sandbox that resolves after create is aborted', async () => {
+    let resolveCreate!: (sandbox: { metadata: { name: string } }) => void;
+    blaxelCreateMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    blaxelDeleteMock.mockResolvedValue(undefined);
+
+    const client = createComputeProviderClient({
+      provider: 'blaxel',
+      config: {
+        apiKey: 'key',
+        workspace: 'workspace',
+        image: 'sandbox/roomote-worker:version',
+      },
+    });
+    const controller = new AbortController();
+    const createPromise = client.createInstance({ signal: controller.signal });
+
+    controller.abort();
+    await expect(createPromise).rejects.toMatchObject({ name: 'AbortError' });
+
+    resolveCreate({ metadata: { name: 'roomote-blaxel-late' } });
+    await vi.waitFor(() => {
+      expect(blaxelDeleteMock).toHaveBeenCalledWith('roomote-blaxel-late');
+    });
+  });
+
+  it('retries Blaxel file writes while the workload data plane is starting', async () => {
+    vi.useFakeTimers();
+    try {
+      const writeBinary = vi
+        .fn()
+        .mockRejectedValueOnce(
+          new Error('404 {"error":{"code":"WORKLOAD_UNAVAILABLE"}}'),
+        )
+        .mockResolvedValue(undefined);
+      blaxelGetMock.mockResolvedValue({ fs: { writeBinary } });
+      const client = createComputeProviderClient({
+        provider: 'blaxel',
+        config: {
+          apiKey: 'key',
+          workspace: 'workspace',
+          image: 'ghcr.io/roomote/worker:test',
+        },
+      });
+
+      const writePromise = client.writeFiles({
+        instanceId: 'sandbox-1',
+        files: [{ path: '/sandbox/test', content: Buffer.from('test') }],
+      });
+      await vi.advanceTimersByTimeAsync(500);
+
+      await expect(writePromise).resolves.toBeUndefined();
+      expect(writeBinary).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('daytona adapter satisfies create/run/stream/status/destroy contract', async () => {

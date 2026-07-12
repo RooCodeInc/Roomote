@@ -73,6 +73,7 @@ export function resolveConfiguredComputeProviderResources(input: {
     case 'docker':
     case 'daytona':
     case 'e2b':
+    case 'blaxel':
       return {
         configuredVcpus: null,
         configuredCpuCores: null,

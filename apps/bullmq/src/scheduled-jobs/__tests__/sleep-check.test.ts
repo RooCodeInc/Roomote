@@ -6,6 +6,7 @@ const {
   mockCreateComputeProviderClient,
   mockGetComputeProviderCapabilities,
   mockDestroyInstance,
+  mockEnterStandby,
   mockGetInstanceStatus,
   mockCreateSnapshot,
   mockFinishRun,
@@ -14,6 +15,7 @@ const {
   mockCreateComputeProviderMutationEventRecorder,
   mockRecordTaskRunEvent,
   mockMarkTaskStartParallelCountEndedAt,
+  mockSyncTaskStateFromRuns,
   mockDbQueryTaskRunsFindFirst,
   captureBullMqMessageMock,
   transactionFn,
@@ -68,6 +70,7 @@ const {
     mockCreateComputeProviderClient: vi.fn() as AnyMock,
     mockGetComputeProviderCapabilities: vi.fn() as AnyMock,
     mockDestroyInstance: vi.fn() as AnyMock,
+    mockEnterStandby: vi.fn() as AnyMock,
     mockGetInstanceStatus: vi.fn() as AnyMock,
     mockCreateSnapshot: vi.fn() as AnyMock,
     mockFinishRun: vi.fn() as AnyMock,
@@ -76,6 +79,7 @@ const {
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
     mockRecordTaskRunEvent: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
+    mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
     mockDbQueryTaskRunsFindFirst: vi.fn() as AnyMock,
     captureBullMqMessageMock: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
@@ -140,6 +144,10 @@ vi.mock('@roomote/db/server', () => ({
     status: 'status',
     snapshotId: 'snapshotId',
     snapshotRequestedAt: 'snapshotRequestedAt',
+    snapshotCreatedAt: 'snapshotCreatedAt',
+    snapshotFailedAt: 'snapshotFailedAt',
+    sandboxCmdId: 'sandboxCmdId',
+    completedAt: 'completedAt',
     vendor: 'vendor',
     id: 'id',
     taskId: 'taskId',
@@ -157,6 +165,7 @@ vi.mock('@roomote/db/server', () => ({
   createComputeProviderMutationEventRecorder:
     mockCreateComputeProviderMutationEventRecorder,
   markTaskStartParallelCountEndedAt: mockMarkTaskStartParallelCountEndedAt,
+  syncTaskStateFromRuns: mockSyncTaskStateFromRuns,
   recordTaskRunEvent: mockRecordTaskRunEvent,
   resolveComputeProviderEnvValues: vi.fn().mockResolvedValue({}),
 }));
@@ -223,11 +232,16 @@ describe('sleepCheckJob', () => {
       }),
     );
     mockMarkTaskStartParallelCountEndedAt.mockResolvedValue(undefined);
+    mockSyncTaskStateFromRuns.mockResolvedValue(undefined);
     mockCreateComputeProviderClient.mockImplementation(() => ({
       destroyInstance: mockDestroyInstance,
+      enterStandby: mockEnterStandby,
       getInstanceStatus: mockGetInstanceStatus,
     }));
     mockDestroyInstance.mockResolvedValue({});
+    mockEnterStandby.mockImplementation(({ instanceId }) =>
+      Promise.resolve({ resumeHandle: instanceId }),
+    );
     mockGetComputeProviderCapabilities.mockImplementation(() => ({
       supportsSnapshots: true,
     }));
@@ -547,6 +561,58 @@ describe('sleepCheckJob', () => {
         sandboxId: 'modal-resume',
         snapshotIntentId: expect.stringMatching(/^due_sleep-6625-/),
         triggerPath: 'due_sleep',
+      }),
+    );
+  });
+
+  it('retains due Blaxel jobs on standby without creating a snapshot', async () => {
+    const mockJob = {
+      id: 6626,
+      machineId: 'roomote-blaxel-standby',
+      sandboxCmdId: 'worker-command-1',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'blaxel',
+      taskId: 'task-blaxel-1',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 6626 }]);
+
+    await sleepCheckJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith({
+      provider: 'blaxel',
+      envFallback: {},
+    });
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'roomote-blaxel-standby',
+      commandId: 'worker-command-1',
+    });
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith({
+      snapshotId: 'roomote-blaxel-standby',
+      snapshotCreatedAt: expect.any(Date),
+      snapshotFailedAt: null,
+      sleepAt: null,
+      taskPhase: null,
+      status: RunStatus.Completed,
+      completedAt: expect.any(Date),
+    });
+    expect(mockRecordMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'blaxel',
+        operation: 'enter_standby',
+        eventType: 'completed',
       }),
     );
   });

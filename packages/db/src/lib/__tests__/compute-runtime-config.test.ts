@@ -199,4 +199,20 @@ describe('listConfiguredComputeProviders', () => {
     // Catalog order is modal, e2b, daytona, docker — not SETUP_COMPUTE_PROVIDER_IDS.
     expect(providers).toEqual(['modal', 'e2b', 'docker']);
   });
+
+  it('includes Blaxel when credentials and a Blaxel sandbox image are saved', async () => {
+    const providers = await listConfiguredComputeProviders({
+      runtimeEnv: {},
+      executor: makeExecutor([
+        { name: 'BL_API_KEY', value: 'blaxel-key' },
+        { name: 'BL_WORKSPACE', value: 'roomote' },
+        {
+          name: 'BLAXEL_IMAGE',
+          value: 'sandbox/roomote-worker:version',
+        },
+      ]),
+    });
+
+    expect(providers).toEqual(['blaxel', 'docker']);
+  });
 });

@@ -8,7 +8,12 @@ export const WORKER_CONTEXT_ENV_VARS = {
   computeProviderFingerprintKind: 'ROOMOTE_WORKER_COMPUTE_FINGERPRINT_KIND',
 } as const;
 
-export type WorkerComputeProviderLabel = 'docker' | 'modal' | 'daytona' | 'e2b';
+export type WorkerComputeProviderLabel =
+  | 'docker'
+  | 'modal'
+  | 'daytona'
+  | 'e2b'
+  | 'blaxel';
 
 export type WorkerComputeProviderFingerprintKind = 'base-image' | 'runtime';
 
@@ -20,6 +25,7 @@ export function getWorkerComputeProviderLabel(
     case 'docker':
     case 'daytona':
     case 'e2b':
+    case 'blaxel':
       return provider;
     default: {
       const _exhaustive: never = provider;

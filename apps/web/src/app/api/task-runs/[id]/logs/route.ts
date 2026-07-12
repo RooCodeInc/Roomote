@@ -10,7 +10,12 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 
-import { db, eq, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  resolveComputeProviderEnvValues,
+  taskRuns,
+} from '@roomote/db/server';
 
 import { authorizeUserToken } from '@/lib/server';
 
@@ -109,7 +114,10 @@ export async function GET(
     }
 
     try {
-      const client = createComputeProviderClient({ provider });
+      const client = createComputeProviderClient({
+        provider,
+        envFallback: await resolveComputeProviderEnvValues(provider),
+      });
 
       if (!client.capabilities.supportsCommandOutputStreaming) {
         await pushSessionError(session, UNSUPPORTED_LOG_STREAMING_ERROR);

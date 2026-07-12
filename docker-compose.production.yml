@@ -76,6 +76,10 @@ x-roomote-production-env: &roomote-production-env
   MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
   MODAL_REGIONS: ${MODAL_REGIONS:-}
+  BL_API_KEY: ${BL_API_KEY:-}
+  BL_WORKSPACE: ${BL_WORKSPACE:-}
+  BLAXEL_IMAGE: ${BLAXEL_IMAGE:-}
+  BLAXEL_REGION: ${BLAXEL_REGION:-}
 
 x-roomote-production-build-args: &roomote-production-build-args
   R_APP_ENV: production

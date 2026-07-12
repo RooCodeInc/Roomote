@@ -85,6 +85,29 @@ function NeonIcon({
   );
 }
 
+function BlaxelIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M5 3h8.2a5.2 5.2 0 0 1 3.9 8.64A5.1 5.1 0 0 1 14 21H5V3Zm4 3v4h4a2 2 0 1 0 0-4H9Zm0 7v5h4.7a2.5 2.5 0 0 0 0-5H9Z" />
+    </svg>
+  );
+}
+
 function SupermemoryIcon({
   name,
   className,
@@ -426,6 +449,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'e2b') {
     return (
       <E2BIcon name={name} className={className} isDecorative={isDecorative} />
+    );
+  }
+
+  if (icon === 'blaxel') {
+    return (
+      <BlaxelIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
     );
   }
 

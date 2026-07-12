@@ -30,6 +30,22 @@ export interface ResumeInstanceInput extends CreateInstanceInput {
   sourceSnapshotId: string;
 }
 
+export interface EnterStandbyInput {
+  instanceId: string;
+  commandId?: string;
+  signal?: AbortSignal;
+}
+
+export interface EnterStandbyResult {
+  /** Opaque single-instance handle used to reconnect to this standby. */
+  resumeHandle: string;
+  usageObservation?: ComputeUsageObservation;
+}
+
+export interface ResumeFromStandbyInput extends CreateInstanceInput {
+  resumeHandle: string;
+}
+
 export interface CreatedInstance {
   instanceId: string;
   status?: ComputeInstanceStatus;
@@ -183,6 +199,8 @@ export interface ComputeProviderClient {
     input: FindSnapshotBySourceInstanceInput,
   ): Promise<SourceInstanceSnapshot | null>;
   resumeFromSnapshot(input: ResumeInstanceInput): Promise<CreatedInstance>;
+  enterStandby?(input: EnterStandbyInput): Promise<EnterStandbyResult>;
+  resumeFromStandby?(input: ResumeFromStandbyInput): Promise<CreatedInstance>;
 }
 
 export interface ModalConfig {
@@ -262,6 +280,21 @@ export interface E2bConfig {
   timeoutMs?: number;
 }
 
+export interface BlaxelConfig {
+  /** Blaxel API key (`BL_API_KEY`). */
+  apiKey: string;
+  /** Blaxel workspace name (`BL_WORKSPACE`). */
+  workspace: string;
+  /** Worker-compatible sandbox image (`BLAXEL_IMAGE`). */
+  image: string;
+  /** Optional Blaxel deployment region (`BLAXEL_REGION`). */
+  region?: string;
+  /** Sandbox memory allocation in MiB. */
+  memoryMiB?: number;
+  /** Maximum sandbox lifetime in milliseconds. */
+  timeoutMs?: number;
+}
+
 export type ComputeProviderFactoryOptions = (
   | {
       provider: 'modal';
@@ -278,6 +311,10 @@ export type ComputeProviderFactoryOptions = (
   | {
       provider: 'e2b';
       config?: E2bConfig;
+    }
+  | {
+      provider: 'blaxel';
+      config?: BlaxelConfig;
     }
 ) & {
   /**

@@ -14,6 +14,8 @@ export interface ComputeProviderCapabilities {
   supportsCommandOutputStreaming: boolean;
   supportsCommandOutputLookup: boolean;
   supportsSnapshots: boolean;
+  /** Can retain and later reconnect to the same suspended instance. */
+  supportsStandbyResume: boolean;
   supportsResume: boolean;
   supportsFileWrite: boolean;
 }
@@ -25,6 +27,7 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: false,
   supportsCommandOutputLookup: false,
   supportsSnapshots: false,
+  supportsStandbyResume: false,
   supportsResume: false,
   supportsFileWrite: false,
 };
@@ -36,6 +39,7 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: false,
   supportsCommandOutputLookup: false,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -47,6 +51,7 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -58,6 +63,19 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
   supportsSnapshots: true,
+  supportsStandbyResume: false,
+  supportsResume: true,
+  supportsFileWrite: true,
+};
+
+export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: true,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: true,
+  supportsCommandOutputStreaming: true,
+  supportsCommandOutputLookup: true,
+  supportsSnapshots: false,
+  supportsStandbyResume: true,
   supportsResume: true,
   supportsFileWrite: true,
 };
@@ -74,6 +92,8 @@ export function getComputeProviderCapabilities(
       return DAYTONA_CAPABILITIES;
     case 'e2b':
       return E2B_CAPABILITIES;
+    case 'blaxel':
+      return BLAXEL_CAPABILITIES;
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported provider: ${_exhaustive}`);
