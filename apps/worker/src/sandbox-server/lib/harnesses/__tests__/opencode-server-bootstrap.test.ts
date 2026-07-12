@@ -212,7 +212,8 @@ describe('opencode-server bootstrap', () => {
 
     expect(content).toContain('# Connected integration: Supermemory');
     expect(content).toContain('Recall early');
-    expect(content).toContain('Save sparingly');
+    expect(content).toContain('Save durable knowledge proactively');
+    expect(content).toContain('Do not wait for the user to ask');
   });
 
   it('skips the integration usage instructions file when attached MCP servers define none', async () => {
