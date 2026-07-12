@@ -332,6 +332,36 @@ describe('preview-proxy integration', () => {
   });
 
   describe('auth callback state handling', () => {
+    it('sets a Secure partitioned auth cookie on local HTTP callbacks', async () => {
+      const { validateState, validateToken } = await import('../services/auth');
+
+      vi.mocked(validateState).mockResolvedValue({
+        redirectUri: 'http://task-web.roomotepreview.localhost:18081/',
+        runId: 1,
+      });
+      vi.mocked(validateToken).mockResolvedValue({
+        userId: 'user-1',
+        tokenType: 'pt',
+        version: 1,
+      });
+
+      const res = await request(server)
+        .get('/auth/callback?token=test-token&state=test-state')
+        .set('Host', 'task-web.roomotepreview.localhost:18081')
+        .set('x-forwarded-proto', 'http')
+        .redirects(0);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toBe(
+        'http://task-web.roomotepreview.localhost:18081/',
+      );
+      expect(res.headers['set-cookie']).toEqual([
+        expect.stringContaining(
+          'preview_auth=test-token; Path=/; Max-Age=3600; HttpOnly; Secure; SameSite=None; Partitioned',
+        ),
+      ]);
+    });
+
     it('forwards nested callback when state is missing locally', async () => {
       const { validateState } = await import('../services/auth');
       const { tryNestedFallback } = await import('../lib/nested-routing');
@@ -806,6 +836,7 @@ describe('preview-proxy integration', () => {
       expect(authCookie).toBeDefined();
       expect(authCookie).toContain('preview_auth=');
       expect(authCookie).toContain('HttpOnly');
+      expect(authCookie).toContain('Secure');
       expect(authCookie).toContain('SameSite=None');
       expect(authCookie).toContain('Partitioned');
       expect(authCookie).toContain('Path=/');
