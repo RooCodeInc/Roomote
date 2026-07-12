@@ -92,13 +92,13 @@ describe('createTaskRunGitHubToken', () => {
   it('uses the selected repositories installation for scoped multi-repo tasks', async () => {
     mockFindMany.mockResolvedValue([
       {
-        fullName: 'LogSharpDoo/ViradaBMS-BE',
-        installationId: 'install-logsharpdoo',
+        fullName: 'ExampleOrg/example-backend',
+        installationId: 'install-exampleorg',
         githubRepoId: 101,
       },
       {
-        fullName: 'LogSharpDoo/ViradaBMS-React',
-        installationId: 'install-logsharpdoo',
+        fullName: 'ExampleOrg/example-frontend',
+        installationId: 'install-exampleorg',
         githubRepoId: 102,
       },
     ]);
@@ -108,8 +108,8 @@ describe('createTaskRunGitHubToken', () => {
         buildTaskRun({
           repo: '__all_repositories__',
           selectedRepositories: [
-            'LogSharpDoo/ViradaBMS-BE',
-            'LogSharpDoo/ViradaBMS-React',
+            'ExampleOrg/example-backend',
+            'ExampleOrg/example-frontend',
           ],
         } as TaskRun['payload']),
       ),
@@ -118,7 +118,7 @@ describe('createTaskRunGitHubToken', () => {
     expect(mockFindFirst).not.toHaveBeenCalled();
     expect(mockCreateGitHubToken).toHaveBeenCalledWith({
       type: 'installationId',
-      installationId: 'install-logsharpdoo',
+      installationId: 'install-exampleorg',
       repositoryIds: [101, 102],
     });
   });

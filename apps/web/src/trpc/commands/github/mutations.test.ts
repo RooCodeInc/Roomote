@@ -207,7 +207,7 @@ describe('GitHub App manifest commands', () => {
         mode: 'github-app-manifest',
         redirect: '/setup?step=source-control-connect',
       },
-      'roovetgit',
+      'example-org',
     );
 
     expect(result.success).toBe(true);
@@ -218,7 +218,7 @@ describe('GitHub App manifest commands', () => {
 
     const postTarget = new URL(result.postTarget);
     expect(`${postTarget.origin}${postTarget.pathname}`).toBe(
-      'https://github.com/organizations/roovetgit/settings/apps/new',
+      'https://github.com/organizations/example-org/settings/apps/new',
     );
     expect(decodeRecord(postTarget.searchParams.get('state') ?? '')).toEqual({
       mode: 'github-app-manifest',
