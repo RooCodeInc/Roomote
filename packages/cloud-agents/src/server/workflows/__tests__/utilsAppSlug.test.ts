@@ -11,6 +11,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
+import { Env } from '@roomote/env';
 import { setConfiguredGitHubAppSlugCache, type Schemas } from '@roomote/github';
 
 import { DEFAULT_ROOMOTE_COMMIT_AUTHOR } from '../../commit-author';
@@ -68,6 +69,23 @@ describe('getPrBodyAttributionLine', () => {
 
     expect(line).toContain('@roomote');
     expect(line).not.toContain('@octomote');
+  });
+
+  it('advertises the deployment slug when the canonical alias is disabled', () => {
+    const mutableEnv = Env as Record<string, string | undefined>;
+    mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION = 'true';
+
+    try {
+      const line = getPrBodyAttributionLine({
+        attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+        taskUrl: 'https://app.roomote.dev/tasks/123',
+      });
+
+      expect(line).toContain('@octomote');
+      expect(line).not.toContain('@roomote ');
+    } finally {
+      delete mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION;
+    }
   });
 
   it('ignores the database-configured app slug for the advertised mention', () => {

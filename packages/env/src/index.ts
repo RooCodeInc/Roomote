@@ -134,6 +134,10 @@ const serverSchema = {
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
   R_GITHUB_APP_ID: emptyStringDefault(),
   R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  // Set to `true` to stop this deployment from answering the canonical
+  // `@roomote` GitHub mention alias (and advertising it in PR footers) —
+  // for fleets where several deployments share the same repositories.
+  R_GITHUB_DISABLE_CANONICAL_MENTION: z.string().optional(),
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),

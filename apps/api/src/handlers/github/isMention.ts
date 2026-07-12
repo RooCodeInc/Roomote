@@ -1,5 +1,6 @@
 import {
   getEffectiveGitHubAppSlug,
+  isCanonicalGitHubMentionEnabled,
   Schemas as GitHubSchemas,
 } from '@roomote/github';
 import { ROOMOTE_CANONICAL_GITHUB_MENTION } from '@roomote/types';
@@ -19,10 +20,10 @@ export const isMention = (comment: {
   // `@roomote` alias that product copy advertises. GitHub only treats `@name`
   // as a mention when it stands alone; a bare substring check would also fire
   // on longer logins (`@<slug>-fan`) and emails (`grace@<slug>.example.com`).
-  const handles = new Set([
-    ROOMOTE_CANONICAL_GITHUB_MENTION.slice(1),
-    getEffectiveGitHubAppSlug().toLowerCase(),
-  ]);
+  const handles = new Set([getEffectiveGitHubAppSlug().toLowerCase()]);
+  if (isCanonicalGitHubMentionEnabled()) {
+    handles.add(ROOMOTE_CANONICAL_GITHUB_MENTION.slice(1));
+  }
   const mentionPattern = new RegExp(
     `(^|[^\\w.-])@(?:${[...handles].map(escapeRegExp).join('|')})(?![\\w-])`,
     'i',
