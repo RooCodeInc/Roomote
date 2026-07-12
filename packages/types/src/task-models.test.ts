@@ -40,8 +40,8 @@ describe('normalizeTaskModelId', () => {
       'opencode/big-pickle',
     );
     expect(
-      normalizeTaskModelId('amazon-bedrock/global.anthropic.claude-sonnet-5'),
-    ).toBe('amazon-bedrock/global.anthropic.claude-sonnet-5');
+      normalizeTaskModelId('bedrock-mantle/anthropic.claude-sonnet-5'),
+    ).toBe('bedrock-mantle/anthropic.claude-sonnet-5');
     expect(normalizeTaskModelId('google-vertex/gemini-3.5-flash')).toBe(
       'google-vertex/gemini-3.5-flash',
     );

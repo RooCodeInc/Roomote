@@ -66,6 +66,12 @@ describe('resolveModelsDevSlug', () => {
       'zai-org/GLM-5.2',
     );
   });
+
+  it('maps Bedrock Mantle model ids to their models.dev lab slugs', () => {
+    expect(
+      resolveModelsDevSlug('bedrock-mantle/anthropic.claude-haiku-4-5'),
+    ).toBe('anthropic/claude-haiku-4-5');
+  });
 });
 
 describe('lookupModelMetadataFromCatalog', () => {
@@ -190,6 +196,40 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.metadata.inputPricePerToken).toBe(5 / 1_000_000);
     expect(result.metadata.outputPricePerToken).toBe(25 / 1_000_000);
     expect(result.displayName).toBe('Claude Opus 4.7');
+  });
+
+  it('resolves Bedrock Mantle metadata through the underlying model lab', () => {
+    const catalog = buildCatalog({
+      models: {
+        'anthropic/claude-sonnet-5': {
+          name: 'Claude Sonnet 5',
+          modalities: { input: ['text', 'image', 'pdf'] },
+          limit: { context: 200000 },
+        },
+      },
+      providers: {
+        anthropic: {
+          models: {
+            'anthropic/claude-sonnet-5': {
+              cost: { input: 3, output: 15 },
+            },
+          },
+        },
+      },
+    });
+
+    const result = lookupModelMetadataFromCatalog(
+      catalog,
+      'bedrock-mantle/anthropic.claude-sonnet-5',
+    );
+
+    expect(result.metadata).toEqual({
+      contextWindow: 200000,
+      inputTypes: ['text', 'image', 'pdf'],
+      inputPricePerToken: 3 / 1_000_000,
+      outputPricePerToken: 15 / 1_000_000,
+    });
+    expect(result.displayName).toBe('Claude Sonnet 5');
   });
 
   it('prefers the vercel gateway entry for vercel-routed models', () => {
