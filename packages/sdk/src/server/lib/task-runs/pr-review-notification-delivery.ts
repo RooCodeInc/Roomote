@@ -68,6 +68,16 @@ export type PrReviewTriageContext = {
    * triage LLM so the chat message can mention CI naturally.
    */
   ciStatus: PrReviewCiStatus | null;
+  /**
+   * Whether the PR is currently mergeable. `false` means live merge conflicts
+   * need resolution; `null` means unknown/unavailable.
+   */
+  mergeable: boolean | null;
+};
+
+type PrReviewLiveHeadState = {
+  ciStatus: PrReviewCiStatus | null;
+  mergeable: boolean | null;
 };
 
 type PrReviewTriageDecision =
@@ -213,11 +223,12 @@ export function collectCiChecks({
 }
 
 /**
- * Resolve CI check state for the PR head using GitHub check runs and the
- * classic combined commit status. Non-GitHub providers currently return null;
- * failures to fetch status are treated as unavailable, not as red CI.
+ * Resolve live PR head state for triage: CI check runs / classic commit
+ * status (GitHub only) plus mergeability. Non-GitHub providers currently
+ * skip CI; failures to fetch status are treated as unavailable, not as red
+ * CI or as merge conflicts.
  */
-async function fetchPrReviewCiStatus({
+async function fetchPrReviewLiveHeadState({
   taskRun,
   repository,
   prNumber,
@@ -227,17 +238,17 @@ async function fetchPrReviewCiStatus({
   repository: string;
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
-}): Promise<PrReviewCiStatus | null> {
+}): Promise<PrReviewLiveHeadState> {
   const provider = normalizeSourceControlProvider(sourceControlProvider);
 
   if (provider !== 'github') {
-    return null;
+    return { ciStatus: null, mergeable: null };
   }
 
   const [owner, repo] = repository.split('/');
 
   if (!owner || !repo) {
-    return null;
+    return { ciStatus: null, mergeable: null };
   }
 
   try {
@@ -251,9 +262,11 @@ async function fetchPrReviewCiStatus({
     });
     const headSha =
       typeof pullRequest.head?.sha === 'string' ? pullRequest.head.sha : null;
+    const mergeable =
+      typeof pullRequest.mergeable === 'boolean' ? pullRequest.mergeable : null;
 
     if (!headSha) {
-      return null;
+      return { ciStatus: null, mergeable };
     }
 
     let checkRuns: Array<{
@@ -313,19 +326,18 @@ async function fetchPrReviewCiStatus({
 
     const checks = collectCiChecks({ checkRuns, statusContexts });
 
-    if (checks.length === 0) {
-      return null;
-    }
-
-    return { checks };
+    return {
+      ciStatus: checks.length > 0 ? { checks } : null,
+      mergeable,
+    };
   } catch (error) {
     console.warn(
-      `[PrReviewNotification] Could not resolve CI status for ${repository}#${prNumber}: ${
+      `[PrReviewNotification] Could not resolve live PR head state for ${repository}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
 
-    return null;
+    return { ciStatus: null, mergeable: null };
   }
 }
 
@@ -343,14 +355,19 @@ would plausibly want to know or act on, for example:
 - a human reviewer approved the PR, requested changes, or dismissed a review
 - a human reviewer left review comments
 - an automated review found concrete issues worth considering
+- current pull request state shows a CI check as failure or error
+- current pull request state includes "- Merge conflicts: yes"
 
 Set "worthNotifying" to false when the activity is only noise or is already
 handled, for example:
-- automated or bot activity that found nothing actionable
-- events with no substantive content for the user
+- automated or bot activity that found nothing actionable and there is no
+  failing CI or known merge conflict
+- events with no substantive content for the user (and no failing CI or
+  merge conflict in current state)
 - the feedback appears to already be fixed or addressed, for example the
   relevant review threads are resolved or the latest automated review status
-  reports the issues as addressed
+  reports the issues as addressed, and there is no failing CI or known
+  merge conflict
 
 Exception: events marked "(this is your own review)" are results of the
 agent's own automated review of the pull request, and the user always wants
@@ -402,14 +419,27 @@ any feedback. Rules:
   use that as the single source of truth for what you flagged; when it stays
   short and concrete, mention one or two flagged items briefly instead of only
   giving a count
-- when there is nothing actionable, do not add a question or call to action
+- when there is nothing actionable (no open feedback, no failed CI, no merge
+  conflicts), do not add a question or call to action
 - never claim that any changes were made in response to the feedback, and do
   not promise follow-up actions
 - when "Current pull request state" includes CI check lines (for example
-  "- Lint: success"), use those live per-check statuses when mentioning CI;
-  keep it short (one brief sentence for green/pending/failed CI overall),
-  and name a specific failed check when one is listed as failure
-- never invent CI status when those check lines are absent
+  "- Lint: success"), use those live per-check statuses when mentioning CI
+- when any CI check is listed as failure or error, treat it as high-signal and
+  actionable: call the failure out clearly instead of burying it after a soft
+  "looked good" review wrap-up. Prefer a shape like "I reviewed
+  [owner/repo#42](pull request URL) on GitHub and the code looked good
+  overall, but a test is failing in CI. Do you want me to fix it?" Name the
+  failed check when one is listed. Pending checks may get a brief mention but
+  must not overshadow a hard failure.
+- when "Current pull request state" includes "- Merge conflicts: yes", treat
+  conflicts as high-signal and actionable with the same weight as failed CI.
+  Call them out clearly and offer to resolve them, for example: "and the PR
+  also has merge conflicts — want me to resolve those?"
+- unsuccessful CI and merge conflicts remain actionable even when the review
+  found no code issues; still end with a short question asking whether the
+  user wants you to fix or resolve them
+- never invent CI status or merge-conflict state when those lines are absent
 - do not mention this triage step or that the input was parsed
 - if "worthNotifying" is false, "summary" may be an empty string
 
@@ -455,7 +485,7 @@ async function fetchPrDiscussionSignals({
   taskRun: TaskRun;
   repository: string;
   prNumber: number;
-}): Promise<Omit<PrReviewTriageContext, 'ciStatus'>> {
+}): Promise<Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>> {
   const result = await readSourceControlPullRequestForTaskRun({
     taskRun,
     input: {
@@ -518,7 +548,7 @@ export async function gatherPrReviewTriageContext({
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
 }): Promise<PrReviewTriageContext> {
-  const [discussionResult, ciStatus] = await Promise.all([
+  const [discussionResult, liveHeadState] = await Promise.all([
     (async () => {
       try {
         return await fetchPrDiscussionSignals({
@@ -541,7 +571,7 @@ export async function gatherPrReviewTriageContext({
         };
       }
     })(),
-    fetchPrReviewCiStatus({
+    fetchPrReviewLiveHeadState({
       taskRun,
       repository,
       prNumber,
@@ -551,7 +581,8 @@ export async function gatherPrReviewTriageContext({
 
   return {
     ...discussionResult,
-    ciStatus,
+    ciStatus: liveHeadState.ciStatus,
+    mergeable: liveHeadState.mergeable,
   };
 }
 
@@ -565,12 +596,29 @@ function buildCiContextLines(context: PrReviewTriageContext): string[] {
   );
 }
 
+function buildMergeConflictContextLines(
+  context: PrReviewTriageContext,
+): string[] {
+  if (context.mergeable !== false) {
+    return [];
+  }
+
+  return ['- Merge conflicts: yes'];
+}
+
+function buildLiveStateContextLines(context: PrReviewTriageContext): string[] {
+  return [
+    ...buildMergeConflictContextLines(context),
+    ...buildCiContextLines(context),
+  ];
+}
+
 function buildContextLines(
   context: PrReviewTriageContext,
   options?: { containsSelfReviewResult?: boolean },
 ): string[] {
   const lines: string[] = [];
-  const ciLines = buildCiContextLines(context);
+  const liveStateLines = buildLiveStateContextLines(context);
 
   if (options?.containsSelfReviewResult) {
     if (context.latestReviewSummaryComment) {
@@ -581,8 +629,8 @@ function buildContextLines(
       );
     }
 
-    if (ciLines.length > 0) {
-      lines.push('', 'Current pull request state:', ...ciLines);
+    if (liveStateLines.length > 0) {
+      lines.push('', 'Current pull request state:', ...liveStateLines);
     }
 
     return lines;
@@ -602,7 +650,7 @@ function buildContextLines(
     );
   }
 
-  lines.push(...ciLines);
+  lines.push(...liveStateLines);
 
   return lines.length > 0 ? ['', 'Current pull request state:', ...lines] : [];
 }
