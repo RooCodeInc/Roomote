@@ -135,21 +135,9 @@ export function getSetupSubmitValues({
     }
   }
 
-  if (provider.id === 'microsoft') {
-    for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
-    )) {
-      if (nextValues[envVarName]?.trim()) {
-        continue;
-      }
-
-      const copiedValue = values[sourceEnvVarName];
-
-      if (copiedValue?.trim()) {
-        nextValues[envVarName] = copiedValue;
-      }
-    }
-  }
+  // Do not materialize inferred Teams bot env vars from Microsoft single-app
+  // credentials. Runtime resolution already borrows Microsoft values, and
+  // writing snapshots here locks derived config so client-id updates drift.
 
   return nextValues;
 }

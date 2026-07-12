@@ -879,6 +879,13 @@ describe('CommsProviderSection', () => {
       );
 
       expect(screen.getByText('Diagnostics channel')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Refresh Slack channels' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Refresh Slack channels' })
+          .previousElementSibling,
+      ).not.toBeNull();
     });
 
     it('hides the diagnostics channel control when Slack is not installed', () => {
@@ -896,6 +903,56 @@ describe('CommsProviderSection', () => {
       );
 
       expect(screen.queryByText('Diagnostics channel')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Slack client id display', () => {
+    it('shows the existing non-secret client id when present', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+            fields: [
+              {
+                envVarName: 'R_SLACK_CLIENT_ID',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_ID'],
+                label: 'Slack Client ID',
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: 'A123.CLIENT',
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_ID',
+              },
+              {
+                envVarName: 'R_SLACK_CLIENT_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_SECRET'],
+                label: 'Slack Client Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_SECRET',
+              },
+              {
+                envVarName: 'R_SLACK_SIGNING_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_SIGNING_SECRET'],
+                label: 'Slack Signing Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_SIGNING_SECRET',
+              },
+            ],
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('A123.CLIENT')).toBeInTheDocument();
     });
   });
 

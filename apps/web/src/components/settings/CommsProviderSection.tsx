@@ -282,8 +282,8 @@ function SlackDiagnosticsChannel() {
           Slack channel that receives routing diagnostics posts.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
           <Select
             value={draftChannelId ?? ROUTER_DEBUG_CHANNEL_NONE_VALUE}
             disabled={selectDisabled}
@@ -336,6 +336,7 @@ function SlackDiagnosticsChannel() {
           type="button"
           variant="ghost"
           size="icon"
+          className="shrink-0"
           aria-label="Refresh Slack channels"
           title="Refresh Slack channels"
           disabled={!slackConnected || slackChannelsQuery.isFetching}

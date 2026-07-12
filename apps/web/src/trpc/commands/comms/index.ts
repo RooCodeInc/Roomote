@@ -18,6 +18,8 @@ import { Env } from '@/lib/server/env';
 import {
   buildSetupAuthStatus,
   getSetupAuthProvider,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
+  resolveTeamsBotCredentialEnvVarNames,
   SETUP_AUTH_PROVIDER_IDS,
   type SetupAuthProviderId,
   type SetupAuthStatus,
@@ -29,6 +31,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   assertAdmin,
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 
@@ -313,11 +316,13 @@ export async function getCommsStatusCommand(
 
   const [
     persistedEnvVarNames,
+    nonSecretAuthEnvValues,
     telegramWebhook,
     invocationIdentities,
     telegramCredentials,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getTelegramWebhookStatus(),
     resolveInvocationIdentities(),
     resolveTelegramRuntimeCredentials(),
@@ -327,6 +332,7 @@ export async function getCommsStatusCommand(
     buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
     }),
     {
       persistedEnvVarNames,
@@ -473,15 +479,42 @@ export async function saveCommsAuthConfigCommand(
       }
     }
 
+    const hasConfiguredAuthEnvVar = (name: string) =>
+      Boolean(process.env[name]?.trim()) ||
+      persistedEnvVarNames.includes(name) ||
+      Boolean(input.values?.[name]?.trim());
+
+    const microsoftTeamsBotResolution =
+      input.provider === 'microsoft'
+        ? resolveTeamsBotCredentialEnvVarNames({
+            hasConfiguredEnvVar: hasConfiguredAuthEnvVar,
+          })
+        : null;
+
     const hasMissingRequiredValue = providerStatus.fields.some((field) => {
       const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
 
-      return (
-        field.required !== false &&
-        !field.runtimeSatisfied &&
-        !field.savedSatisfied &&
-        nextValue.length === 0
-      );
+      if (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      ) {
+        return false;
+      }
+
+      // Microsoft single-app setup can satisfy Teams bot fields from Microsoft
+      // sign-in values without writing explicit R_TEAMS_BOT_* snapshots.
+      if (
+        microsoftTeamsBotResolution?.source === 'microsoft_auth' &&
+        microsoftTeamsBotResolution.fieldSourceEnvVarNames[
+          field.envVarName as keyof typeof microsoftTeamsBotResolution.fieldSourceEnvVarNames
+        ]
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     if (hasMissingRequiredValue) {
