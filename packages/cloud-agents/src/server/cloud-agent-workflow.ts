@@ -109,6 +109,9 @@ export async function generatePrompt({
   const backgroundProofCaptureEnabled = await evaluateOrgFeatureFlag(
     FeatureFlag.BackgroundSubagents,
   );
+  const visualProofAutoPostEnabled = await evaluateOrgFeatureFlag(
+    FeatureFlag.SlackProofAutoPost,
+  );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
 
   switch (taskSpec.type) {
@@ -164,6 +167,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        visualProofAutoPostEnabled,
         prAction,
       });
     }
@@ -308,6 +312,7 @@ export async function generatePrompt({
       if (slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
+          visualProofAutoPostEnabled,
         });
         result.harnessInstructions = result.harnessInstructions
           ? `${slackInstructions}\n\n${result.harnessInstructions}`

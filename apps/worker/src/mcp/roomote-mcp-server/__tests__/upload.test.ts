@@ -15,6 +15,7 @@ describe('handleUpload', () => {
     process.env.ROOMOTE_COMMUNICATION_PROVIDER;
   const originalCommunicationChannelId =
     process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
+  const originalSlackProofAutoPost = process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
 
   const config: ArtifactConfig = {
     token: 'test-token',
@@ -31,6 +32,7 @@ describe('handleUpload', () => {
     delete process.env.ROOMOTE_SLACK_THREAD_TS;
     delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
     delete process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
+    delete process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
     resetPostedProofThreadsForTest();
   });
 
@@ -58,6 +60,11 @@ describe('handleUpload', () => {
     } else {
       process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID =
         originalCommunicationChannelId;
+    }
+    if (originalSlackProofAutoPost === undefined) {
+      delete process.env.ROOMOTE_SLACK_PROOF_AUTO_POST;
+    } else {
+      process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = originalSlackProofAutoPost;
     }
   });
 
@@ -172,6 +179,7 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
 
     const fetchMock = vi
       .fn()
@@ -236,6 +244,7 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
     process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'telegram';
     process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID = '8846357662';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
 
     const fetchMock = vi
       .fn()
@@ -283,6 +292,7 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
     const warnSpy = vi
       .spyOn(console, 'warn')
       .mockImplementation(() => undefined);
@@ -371,10 +381,48 @@ describe('handleUpload', () => {
     expect(parsed.slackAutoPosted).toBe(false);
   });
 
+  it('does not auto-post visual-proof uploads when Slack context exists but auto-post flag is off', async () => {
+    await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
+    process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
+    process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id: 'art-proof',
+          version: 1,
+          uploadUrl: 'https://s3.example.com/upload',
+          viewUrl: 'https://test-api.example.com/view',
+          artifactType: 'visual-proof',
+          rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({ ok: true });
+    global.fetch = fetchMock;
+
+    const result = await handleUpload(
+      { path: 'proof.png', taskId: 'task-1', artifactType: 'visual-proof' },
+      { ...config, workspacePath: testDir },
+      {
+        token: 'test-token',
+        platformApiUrl: 'https://test-api.example.com',
+      },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const parsed = JSON.parse(result.content[0]!.text);
+    expect(parsed.success).toBe(true);
+    expect(parsed.slackAutoPosted).toBe(false);
+  });
+
   it('does not auto-post visual-proof uploads twice in the same Slack thread', async () => {
     await writeFile(join(testDir, 'proof.png'), Buffer.from([0x89, 0x50]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
 
     const fetchMock = vi
       .fn()
@@ -454,6 +502,7 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.mp4'), Buffer.from([0x00, 0x00]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
 
     const fetchMock = vi
       .fn()
@@ -532,6 +581,7 @@ describe('handleUpload', () => {
     await writeFile(join(testDir, 'proof.mp4'), Buffer.from([0x00, 0x00]));
     process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
     process.env.ROOMOTE_SLACK_THREAD_TS = '111.222';
+    process.env.ROOMOTE_SLACK_PROOF_AUTO_POST = 'true';
 
     const fetchMock = vi
       .fn()
