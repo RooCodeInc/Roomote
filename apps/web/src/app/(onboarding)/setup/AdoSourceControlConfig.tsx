@@ -120,5 +120,3 @@ export function AdoSourceControlInstructions({
     </div>
   );
 }
-
-export type { AdoAuthMode };
