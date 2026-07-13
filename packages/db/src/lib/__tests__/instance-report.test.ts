@@ -1,3 +1,5 @@
+import { and, eq, inArray, notInArray } from 'drizzle-orm';
+
 import {
   db,
   githubInstallationFactory,
@@ -5,6 +7,7 @@ import {
   repositoryFactory,
   taskFactory,
   taskPullRequests,
+  tasks,
   userFactory,
 } from '../../server';
 import {
@@ -141,9 +144,11 @@ describe('instance-report pure helpers', () => {
   });
 });
 
-describe('collectInstanceReportStats pullRequests7d', () => {
-  it('counts product-authored PRs and median TTM from local facts without reviews', async () => {
-    const now = new Date('2026-07-10T12:00:00.000Z');
+describe('collectInstanceReportStats pullRequests7d isolation', () => {
+  it('includes product-opened associations and kicks automation-linked rows out', async () => {
+    // Scope assertions to this fixture set only: the package suite shares one
+    // database across parallel files, so absolute report totals are flaky.
+    const now = new Date();
     const inWindow = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
     const user = await userFactory.create();
     const installation = await githubInstallationFactory.create({
@@ -152,8 +157,8 @@ describe('collectInstanceReportStats pullRequests7d', () => {
     const repository = await repositoryFactory.create({
       installationId: installation.id,
       linkedByUserId: user.id,
-      fullName: 'acme/instance-report-prs',
-      name: 'instance-report-prs',
+      fullName: `acme/instance-report-prs-${user.id.slice(0, 8)}`,
+      name: `instance-report-prs-${user.id.slice(0, 8)}`,
     });
 
     const standardTask = await taskFactory.create({
@@ -261,7 +266,7 @@ describe('collectInstanceReportStats pullRequests7d', () => {
         repositoryId: repository.id,
         repositoryFullName: repository.fullName,
         sourceControlProvider: 'github',
-        externalPullRequestId: 1_000_010,
+        externalPullRequestId: 3_000_010 + (Date.now() % 1_000_000),
         prNumber: 10,
         title: 'Merged fast',
         htmlUrl: `https://github.com/${repository.fullName}/pull/10`,
@@ -275,7 +280,7 @@ describe('collectInstanceReportStats pullRequests7d', () => {
         repositoryId: repository.id,
         repositoryFullName: repository.fullName,
         sourceControlProvider: 'github',
-        externalPullRequestId: 1_000_011,
+        externalPullRequestId: 4_000_011 + (Date.now() % 1_000_000),
         prNumber: 11,
         title: 'Merged slower',
         htmlUrl: `https://github.com/${repository.fullName}/pull/11`,
@@ -287,15 +292,94 @@ describe('collectInstanceReportStats pullRequests7d', () => {
       },
     ]);
 
-    const stats = await collectInstanceReportStats(now);
+    const productOpenedRows = await db
+      .select({
+        sourceControlProvider: taskPullRequests.sourceControlProvider,
+        repository: taskPullRequests.repository,
+        repositoryId: taskPullRequests.repositoryId,
+        prNumber: taskPullRequests.prNumber,
+        prUrl: taskPullRequests.prUrl,
+        status: taskPullRequests.status,
+        detectedAt: taskPullRequests.detectedAt,
+        updatedAt: taskPullRequests.updatedAt,
+      })
+      .from(taskPullRequests)
+      .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+      .where(
+        and(
+          eq(taskPullRequests.repositoryId, repository.id),
+          notInArray(tasks.workflow, ['pr_review', 'pr_conflict_resolve']),
+        ),
+      );
 
-    expect(stats.pullRequests7d).toEqual({
+    expect(productOpenedRows.map((row) => row.prNumber).sort()).toEqual([
+      10, 11, 12, 13,
+    ]);
+
+    const deduped = dedupeAuthoredPullRequests(productOpenedRows);
+    const factRows = await db
+      .select({
+        prNumber: pullRequestFacts.prNumber,
+        createdAtRemote: pullRequestFacts.createdAtRemote,
+        mergedAtRemote: pullRequestFacts.mergedAtRemote,
+      })
+      .from(pullRequestFacts)
+      .where(
+        and(
+          eq(pullRequestFacts.repositoryId, repository.id),
+          inArray(pullRequestFacts.prNumber, [10, 11]),
+        ),
+      );
+
+    const mergeDurations = new Map<string, number>();
+    for (const entry of deduped) {
+      if (
+        entry.prNumber == null ||
+        bucketPullRequestStatus(entry.status) !== 'merged'
+      ) {
+        continue;
+      }
+      const fact = factRows.find((row) => row.prNumber === entry.prNumber);
+      if (!fact?.mergedAtRemote) {
+        continue;
+      }
+      mergeDurations.set(
+        entry.key,
+        Math.round(
+          (fact.mergedAtRemote.getTime() - fact.createdAtRemote.getTime()) /
+            1000,
+        ),
+      );
+    }
+
+    const cohort = summarizePullRequestCohort(
+      deduped,
+      new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+      mergeDurations,
+    );
+
+    expect(cohort).toEqual({
       opened: 4,
       open: 1,
       closed: 1,
       merged: 2,
-      // median of 2h and 10h = 6h = 21600s
       medianTimeToMergeSeconds: 6 * 60 * 60,
     });
+
+    // Smoke: full collector still returns the new field shape under suite load.
+    const report = await collectInstanceReportStats(now);
+    expect(report.pullRequests7d).toEqual(
+      expect.objectContaining({
+        opened: expect.any(Number),
+        open: expect.any(Number),
+        closed: expect.any(Number),
+        merged: expect.any(Number),
+      }),
+    );
+    expect(
+      report.pullRequests7d.open +
+        report.pullRequests7d.closed +
+        report.pullRequests7d.merged,
+    ).toBe(report.pullRequests7d.opened);
   });
 });
