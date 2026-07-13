@@ -90,7 +90,10 @@ describe('SlackCommunicationProvider.postMessage', () => {
 
   it('appends the actions block after caller-provided blocks without wrapping text', async () => {
     const postMessageMock = vi.fn().mockResolvedValue('111.222');
-    const callerBlock = { type: 'section', text: { type: 'mrkdwn', text: 'x' } };
+    const callerBlock = {
+      type: 'section',
+      text: { type: 'mrkdwn', text: 'x' },
+    };
 
     await buildProvider(postMessageMock).postMessage({
       channelId: 'C123',
