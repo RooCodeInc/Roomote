@@ -8,7 +8,7 @@ import {
   inArray,
 } from '@roomote/db/server';
 import {
-  buildPullRequestMergedNotificationText,
+  buildPullRequestStatusNotificationText,
   formatMarkdownLink,
 } from '@roomote/communication/chat-messages';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
@@ -22,7 +22,7 @@ import {
 
 interface NotifyTeamsPrMergeParams {
   /**
-   * Source control provider that owns the merged PR/MR. Used to scope the
+   * Source control provider that owns the terminal PR/MR. Used to scope the
    * task-link lookup so the correct provider's tracked PRs are notified.
    */
   sourceControlProvider: SourceControlProvider;
@@ -36,7 +36,10 @@ interface NotifyTeamsPrMergeParams {
   prNumber: number;
   prTitle: string;
   prUrl: string;
-  mergedBy: string;
+  status?: 'merged' | 'closed';
+  actorLogin?: string;
+  /** @deprecated Prefer `actorLogin`. */
+  mergedBy?: string;
 }
 
 type TeamsPrMergeTarget = {
@@ -72,8 +75,8 @@ function getTeamsPrMergeTarget(payload: unknown): TeamsPrMergeTarget | null {
 
 /**
  * Notifies Microsoft Teams conversations associated with a PR that the PR has
- * been merged. Mirrors the Slack PR-merge notification path using the
- * provider-neutral Teams communication metadata on task run payloads.
+ * been merged or closed. Mirrors the Slack PR-status notification path using
+ * the provider-neutral Teams communication metadata on task run payloads.
  */
 export async function notifyTeamsPrMerge({
   sourceControlProvider,
@@ -82,8 +85,12 @@ export async function notifyTeamsPrMerge({
   prNumber,
   prTitle,
   prUrl,
+  status = 'merged',
+  actorLogin,
   mergedBy,
 }: NotifyTeamsPrMergeParams): Promise<void> {
+  const resolvedActorLogin = actorLogin || mergedBy || 'someone';
+
   try {
     if (installationId !== undefined) {
       // Verify this GitHub installation is tracked.
@@ -139,17 +146,18 @@ export async function notifyTeamsPrMerge({
 
     if (!provider) {
       console.warn(
-        '[notifyTeamsPrMerge] Teams bot credentials are not configured, skipping Teams PR-merge notification',
+        '[notifyTeamsPrMerge] Teams bot credentials are not configured, skipping Teams PR-status notification',
       );
       return;
     }
 
-    const mergeNotification = buildPullRequestMergedNotificationText({
+    const statusNotification = buildPullRequestStatusNotificationText({
       prTitle,
       prUrl,
-      mergedBy,
+      status,
+      actorLogin: resolvedActorLogin,
       formatLink: formatMarkdownLink,
-      formatStatus: (status) => `**${status}**`,
+      formatStatus: (value) => `**${value}**`,
     });
 
     const notifiedConversations = new Set<string>();
@@ -171,14 +179,14 @@ export async function notifyTeamsPrMerge({
                 replyToMessageId: target.threadId,
               }
             : {}),
-          text: mergeNotification.bodyText,
+          text: statusNotification.bodyText,
           textFormat: 'markdown',
         });
 
         notifiedConversations.add(conversationKey);
 
         console.log(
-          `[notifyTeamsPrMerge] Sent notification to Teams conversation ${conversationKey} for PR ${repository}#${prNumber}`,
+          `[notifyTeamsPrMerge] Sent ${status} notification to Teams conversation ${conversationKey} for PR ${repository}#${prNumber}`,
         );
       } catch (error) {
         console.error(

@@ -6,6 +6,7 @@ const {
   mockAddReaction,
   mockRemoveReaction,
   mockResolveSlackReactionNames,
+  mockStickyFooterPost,
 } = vi.hoisted(() => ({
   mockPostMessage: vi.fn().mockResolvedValue('msg-ts-123'),
   mockAddReaction: vi.fn().mockResolvedValue(true),
@@ -15,6 +16,7 @@ const {
     completionEmoji: 'white_check_mark',
     summonEmoji: null,
   }),
+  mockStickyFooterPost: vi.fn().mockResolvedValue('msg-ts-123'),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -26,6 +28,7 @@ vi.mock('@roomote/slack', () => ({
     };
   }),
   resolveSlackReactionNames: mockResolveSlackReactionNames,
+  postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,7 +59,10 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { db } from '@roomote/db/server';
-import { notifySlackPrMerge } from '../notifySlackPrMerge';
+import {
+  notifySlackPrMerge,
+  SLACK_PR_CLOSED_REACTION_EMOJI,
+} from '../notifySlackPrMerge';
 
 const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
 const mockedTaskPullRequestsFind = vi.mocked(
@@ -73,6 +79,7 @@ describe('notifySlackPrMerge', () => {
       completionEmoji: 'white_check_mark',
       summonEmoji: null,
     });
+    mockStickyFooterPost.mockResolvedValue('msg-ts-123');
   });
 
   const baseParams = {
@@ -82,14 +89,15 @@ describe('notifySlackPrMerge', () => {
     prNumber: 42,
     prTitle: 'Test PR',
     prUrl: 'https://github.com/owner/repo/pull/42',
-    mergedBy: 'merger',
+    actorLogin: 'merger',
   };
 
-  it('posts a thread message and adds a white_check_mark reaction to the originating message', async () => {
+  it('posts a sticky-footer thread message and adds a white_check_mark reaction to the originating message', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
       {
+        id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
       },
@@ -100,11 +108,12 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    // Should post thread message
-    expect(mockPostMessage).toHaveBeenCalledWith(
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
-        thread_ts: 'thread-ts-1',
+        threadTs: 'thread-ts-1',
+        taskId: 'task-1',
+        text: 'Test PR was merged by merger',
       }),
     );
 
@@ -123,11 +132,49 @@ describe('notifySlackPrMerge', () => {
     });
   });
 
+  it('posts a sticky-footer closed message and adds heavy_multiplication_x on close', async () => {
+    mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTasksFind.mockResolvedValue([
+      {
+        id: 'task-1',
+        slackThreadTs: 'thread-ts-1',
+        slackChannelId: 'C123',
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({
+      botAccessToken: 'xoxb-token',
+    } as any);
+
+    await notifySlackPrMerge({
+      ...baseParams,
+      status: 'closed',
+      actorLogin: 'closer',
+    });
+
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Test PR was closed by closer',
+      }),
+    );
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: 'thread-ts-1',
+      name: SLACK_PR_CLOSED_REACTION_EMOJI,
+    });
+    expect(mockRemoveReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: 'thread-ts-1',
+      name: 'eyes',
+    });
+  });
+
   it('uses the configured acknowledgement and completion emoji names', async () => {
     mockedGithubFind.mockResolvedValue({ orgId: 'org-1' } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
       {
+        id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
       },
@@ -160,6 +207,7 @@ describe('notifySlackPrMerge', () => {
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
       {
+        id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C999',
       },
@@ -170,10 +218,10 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    expect(mockPostMessage).toHaveBeenCalledWith(
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C999',
-        thread_ts: 'thread-ts-1',
+        threadTs: 'thread-ts-1',
       }),
     );
     expect(mockAddReaction).toHaveBeenCalledWith({
@@ -193,7 +241,7 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockAddReaction).not.toHaveBeenCalled();
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
@@ -205,7 +253,7 @@ describe('notifySlackPrMerge', () => {
     await notifySlackPrMerge(baseParams);
 
     expect(mockedTasksFind).not.toHaveBeenCalled();
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockAddReaction).not.toHaveBeenCalled();
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
@@ -217,7 +265,7 @@ describe('notifySlackPrMerge', () => {
 
     await notifySlackPrMerge(baseParams);
 
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
     expect(mockAddReaction).not.toHaveBeenCalled();
     expect(mockRemoveReaction).not.toHaveBeenCalled();
   });
@@ -230,10 +278,12 @@ describe('notifySlackPrMerge', () => {
     ] as any);
     mockedTasksFind.mockResolvedValue([
       {
+        id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
       },
       {
+        id: 'task-2',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
       },
@@ -245,7 +295,7 @@ describe('notifySlackPrMerge', () => {
     await notifySlackPrMerge(baseParams);
 
     // Should only post once and react once despite two tasks with same thread
-    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
     expect(mockAddReaction).toHaveBeenCalledTimes(1);
     expect(mockRemoveReaction).toHaveBeenCalledTimes(1);
   });
@@ -255,6 +305,7 @@ describe('notifySlackPrMerge', () => {
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTasksFind.mockResolvedValue([
       {
+        id: 'task-1',
         slackThreadTs: 'thread-ts-1',
         slackChannelId: 'C123',
       },
@@ -267,6 +318,6 @@ describe('notifySlackPrMerge', () => {
     // Should not throw
     await expect(notifySlackPrMerge(baseParams)).resolves.toBeUndefined();
 
-    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
   });
 });

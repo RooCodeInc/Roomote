@@ -29,6 +29,7 @@ export * from './slack-thread-delivery-tracker';
 export * from './task-cancellation-blocks';
 export * from './thread-reply-details';
 export * from './thread-footer';
+export * from './thread-reply-footer-ops';
 export * from './thread-image-utils';
 export * from './video-descriptions';
 export * from './work-object-utils';

@@ -68,15 +68,28 @@ describe('handlePrMerge', () => {
     vi.clearAllMocks();
   });
 
-  it('does not notify Slack when PR is not merged', async () => {
+  it('notifies Slack, Teams, and Telegram/Linear for closed PRs', async () => {
     const payload = makePayload({ merged: false, merged_at: null });
 
     const result = await handlePrMerge(payload);
 
     expect(result.status).toBe('ok');
-    expect(mockedNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockedNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockedNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    const expectedParams = {
+      sourceControlProvider: 'github',
+      installationId: 12345,
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'Test PR',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'closed',
+      actorLogin: 'sender-user',
+    };
+    expect(mockedNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockedNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockedNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
+      ...expectedParams,
+      sourceControlProvider: 'github',
+    });
   });
 
   it('notifies Slack, Teams, and Telegram/Linear for merged PRs', async () => {
@@ -92,7 +105,8 @@ describe('handlePrMerge', () => {
       prNumber: 42,
       prTitle: 'Test PR',
       prUrl: 'https://github.com/owner/repo/pull/42',
-      mergedBy: 'merger',
+      status: 'merged',
+      actorLogin: 'merger',
     };
     expect(mockedNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
     expect(mockedNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);

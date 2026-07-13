@@ -8,6 +8,7 @@ import {
   buildAccountLinkThreadReplyText,
   buildOtherRunningTasksText,
   buildPullRequestMergedNotificationText,
+  buildPullRequestStatusNotificationText,
   buildRoutingConfirmationText,
   buildSnapshotResumeAcknowledgementText,
   buildTaskLaunchAcknowledgementText,
@@ -227,7 +228,7 @@ describe('chat message copy builders', () => {
     );
   });
 
-  it('keeps shared failure copy and PR merged copy in one place', () => {
+  it('keeps shared failure copy and PR status copy in one place', () => {
     expect(TASK_STARTUP_FAILURE_TEXT).toContain("couldn't get started");
     expect(TASK_RUNTIME_FAILURE_TEXT).toContain('while working on this task');
 
@@ -243,6 +244,21 @@ describe('chat message copy builders', () => {
       text: 'Fix auth was merged by matt',
       bodyText:
         '<https://github.com/org/repo/pull/1|Fix auth> was *merged* by matt',
+    });
+
+    expect(
+      buildPullRequestStatusNotificationText({
+        prTitle: 'Fix auth',
+        prUrl: 'https://github.com/org/repo/pull/1',
+        status: 'closed',
+        actorLogin: 'matt',
+        formatLink: (label, url) => `<${url}|${label}>`,
+        formatStatus: (status) => `*${status}*`,
+      }),
+    ).toEqual({
+      text: 'Fix auth was closed by matt',
+      bodyText:
+        '<https://github.com/org/repo/pull/1|Fix auth> was *closed* by matt',
     });
   });
 });

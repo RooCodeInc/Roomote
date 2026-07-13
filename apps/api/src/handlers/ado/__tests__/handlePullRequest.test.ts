@@ -386,7 +386,8 @@ describe('handleAdoPullRequest', () => {
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-      mergedBy: 'roomote-bot@acme.example',
+      status: 'merged',
+      actorLogin: 'roomote-bot@acme.example',
     });
     expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith({
       sourceControlProvider: 'ado',
@@ -394,14 +395,16 @@ describe('handleAdoPullRequest', () => {
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-      mergedBy: 'roomote-bot@acme.example',
+      status: 'merged',
+      actorLogin: 'roomote-bot@acme.example',
     });
     expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
       repository: 'acme/Platform/backend',
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
-      mergedBy: 'roomote-bot@acme.example',
+      status: 'merged',
+      actorLogin: 'roomote-bot@acme.example',
       sourceControlProvider: 'ado',
     });
     expect(mockEnqueueTask).not.toHaveBeenCalled();

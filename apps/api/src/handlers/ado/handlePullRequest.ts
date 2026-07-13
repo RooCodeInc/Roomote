@@ -102,7 +102,8 @@ async function notifyMergedPullRequestThreads(
       pullRequest: payload.resource,
       repositoryFullName: repoFullName,
     }),
-    mergedBy:
+    status: 'merged' as const,
+    actorLogin:
       getAdoIdentityName(payload.resource.closedBy) ??
       'someone in Azure DevOps',
   };

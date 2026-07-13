@@ -6,6 +6,7 @@ import {
   db,
   desc,
   eq,
+  slackInstallations,
   taskPullRequests,
   taskRuns,
 } from '@roomote/db/server';
@@ -22,6 +23,10 @@ import {
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
 } from '@roomote/sdk/server';
+import {
+  postSlackThreadMessageWithStickyFooter,
+  SlackNotifier,
+} from '@roomote/slack';
 import { isTaskExecutingTurn } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
@@ -57,12 +62,36 @@ function buildPrReviewNotificationPostInput(
 }
 
 async function postPrReviewNotification({
+  taskId,
   route,
   text,
 }: {
+  taskId: string;
   route: PrReviewNotificationRoute;
   text: string;
 }): Promise<string | null> {
+  if (route.provider === 'slack') {
+    const slackInstallation = await db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      columns: { botAccessToken: true },
+    });
+
+    if (!slackInstallation?.botAccessToken) {
+      console.warn('[PrReviewNotification] Slack is not connected, skipping');
+      return null;
+    }
+
+    const slack = new SlackNotifier(slackInstallation.botAccessToken);
+    return postSlackThreadMessageWithStickyFooter({
+      slack,
+      channel: route.channelId,
+      threadTs: route.threadId,
+      taskId,
+      text,
+      utmCampaign: 'slack.pr_review',
+    });
+  }
+
   const adapter = await getCommunicationProviderAdapter(route.provider);
 
   if (!adapter) {
@@ -72,11 +101,9 @@ async function postPrReviewNotification({
     return null;
   }
 
-  const result = await adapter.postMessage(
-    buildPrReviewNotificationPostInput(route, text),
-  );
+  await adapter.postMessage(buildPrReviewNotificationPostInput(route, text));
 
-  return route.provider === 'slack' ? result.messageId : null;
+  return null;
 }
 
 /**
@@ -191,6 +218,7 @@ export const prReviewNotificationJob = async (
     }
 
     const messageTs = await postPrReviewNotification({
+      taskId: data.taskId,
       route: delivery.route,
       text: delivery.text,
     });

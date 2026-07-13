@@ -9,13 +9,20 @@ import {
   inArray,
   isNotNull,
 } from '@roomote/db/server';
-import { buildPullRequestMergedNotificationText } from '@roomote/communication/chat-messages';
-import { resolveSlackReactionNames, SlackNotifier } from '@roomote/slack';
+import { buildPullRequestStatusNotificationText } from '@roomote/communication/chat-messages';
+import {
+  postSlackThreadMessageWithStickyFooter,
+  resolveSlackReactionNames,
+  SlackNotifier,
+} from '@roomote/slack';
 import { type SourceControlProvider } from '@roomote/types';
+
+/** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
+export const SLACK_PR_CLOSED_REACTION_EMOJI = 'heavy_multiplication_x';
 
 interface NotifySlackPrMergeParams {
   /**
-   * Source control provider that owns the merged PR/MR. Used to scope the
+   * Source control provider that owns the terminal PR/MR. Used to scope the
    * task-link lookup so the correct provider's tracked PRs are notified.
    */
   sourceControlProvider: SourceControlProvider;
@@ -29,14 +36,32 @@ interface NotifySlackPrMergeParams {
   prNumber: number;
   prTitle: string;
   prUrl: string;
-  mergedBy: string;
+  /**
+   * Terminal PR status. Defaults to `merged` so existing merge-only callers
+   * keep their previous notification and checkmark reaction behavior.
+   */
+  status?: 'merged' | 'closed';
+  /**
+   * Actor who merged or closed the PR (provider login).
+   */
+  actorLogin?: string;
+  /**
+   * @deprecated Prefer `actorLogin`. Kept for merge-only call sites that have
+   * not been updated yet.
+   */
+  mergedBy?: string;
 }
 
 /**
- * Notifies Slack threads associated with a PR that the PR has been merged.
- * Queries for task runs that reference the PR and have a Slack thread,
- * filtering by GitHub installation to ensure only the tracked deployment
- * receives notifications.
+ * Notifies Slack threads associated with a PR that the PR has been merged or
+ * closed. Queries for tasks that reference the PR and have a Slack thread,
+ * filtering by GitHub installation (when provided) to ensure only the tracked
+ * deployment receives notifications.
+ *
+ * Posts the status message as the sticky "Working on..." footer carrier for
+ * the thread, matching agent and review out-of-band placement. On merge, adds
+ * the configured completion emoji to the originating message; on close, adds
+ * :heavy_multiplication_x:. Both remove the acknowledgement emoji.
  */
 export async function notifySlackPrMerge({
   sourceControlProvider,
@@ -45,8 +70,12 @@ export async function notifySlackPrMerge({
   prNumber,
   prTitle,
   prUrl,
+  status = 'merged',
+  actorLogin,
   mergedBy,
 }: NotifySlackPrMergeParams): Promise<void> {
+  const resolvedActorLogin = actorLogin || mergedBy || 'someone';
+
   try {
     if (installationId !== undefined) {
       // Verify this GitHub installation is tracked.
@@ -89,6 +118,7 @@ export async function notifySlackPrMerge({
     const tasksWithSlackThreads = await db.query.tasks.findMany({
       where: and(inArray(tasks.id, taskIds), isNotNull(tasks.slackThreadTs)),
       columns: {
+        id: true,
         slackThreadTs: true,
         slackChannelId: true,
       },
@@ -119,7 +149,7 @@ export async function notifySlackPrMerge({
     const notifiedThreads = new Set<string>();
 
     for (const task of tasksWithSlackThreads) {
-      const { slackThreadTs, slackChannelId } = task;
+      const { id: taskId, slackThreadTs, slackChannelId } = task;
 
       if (!slackThreadTs) {
         continue;
@@ -143,36 +173,45 @@ export async function notifySlackPrMerge({
 
         const notifier = new SlackNotifier(slackInstallation.botAccessToken);
         const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
-        const mergeNotification = buildPullRequestMergedNotificationText({
+        const statusNotification = buildPullRequestStatusNotificationText({
           prTitle,
           prUrl,
-          mergedBy,
+          status,
+          actorLogin: resolvedActorLogin,
           formatLink: (label, url) => `<${url}|${label}>`,
-          formatStatus: (status) => `*${status}*`,
+          formatStatus: (value) => `*${value}*`,
         });
 
-        await notifier.postMessage({
+        await postSlackThreadMessageWithStickyFooter({
+          slack: notifier,
           channel,
-          thread_ts: slackThreadTs,
-          text: mergeNotification.text,
+          threadTs: slackThreadTs,
+          taskId,
+          text: statusNotification.text,
           blocks: [
             {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: mergeNotification.bodyText,
+                text: statusNotification.bodyText,
               },
             },
           ],
+          utmCampaign: 'slack.pr_status',
         });
 
-        // Add a ✅ reaction to the originating (parent) message in the thread
-        // and remove the 👀 acknowledgement reaction.
+        const terminalReaction =
+          status === 'closed'
+            ? SLACK_PR_CLOSED_REACTION_EMOJI
+            : completionEmoji;
+
+        // Add a terminal reaction to the originating (parent) message in the
+        // thread and remove the acknowledgement reaction.
         await Promise.all([
           notifier.addReaction({
             channel,
             timestamp: slackThreadTs,
-            name: completionEmoji,
+            name: terminalReaction,
           }),
           notifier.removeReaction({
             channel,
@@ -184,7 +223,7 @@ export async function notifySlackPrMerge({
         notifiedThreads.add(slackThreadTs);
 
         console.log(
-          `[notifySlackPrMerge] Sent notification to Slack thread ${slackThreadTs} for PR ${repository}#${prNumber}`,
+          `[notifySlackPrMerge] Sent ${status} notification to Slack thread ${slackThreadTs} for PR ${repository}#${prNumber}`,
         );
       } catch (error) {
         console.error(
