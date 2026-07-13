@@ -574,6 +574,21 @@ describe('buildSetupComputeStatus', () => {
     expect(status.setupSatisfied).toBe(true);
   });
 
+  it('reports the immutable development worker image used for provisioning', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        NODE_ENV: 'development',
+        ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF:
+          'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      },
+    });
+
+    expect(status.workerImage).toMatchObject({
+      hostedImageRef: 'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      hostedReady: true,
+    });
+  });
+
   it('reports provider infrastructure availability for the picker', () => {
     const withWorkerImage = buildSetupComputeStatus({
       runtimeEnv: {

@@ -729,14 +729,7 @@ export function buildSetupComputeStatus(input: {
   // are ignored so they cannot stick above release-derived images. Only a
   // registry-qualified ref is hosted-ready; a bare local tag is not pullable
   // by hosted providers.
-  const explicitWorkerImage = runtimeEnv.DOCKER_WORKER_IMAGE?.trim() || null;
-  const effectiveWorkerImage =
-    explicitWorkerImage ?? deriveWorkerImageFromReleaseVersion(runtimeEnv);
-  const hostedWorkerImageRef =
-    deriveModalBaseImageRefDefault(effectiveWorkerImage) ??
-    (isDevelopmentRuntime(runtimeEnv)
-      ? DEVELOPMENT_MODAL_BASE_IMAGE_REF
-      : null);
+  const hostedWorkerImageRef = resolveDerivedModalBaseImageRef(runtimeEnv);
   const derivedModalBaseImageRef = hostedWorkerImageRef;
 
   const workerImage: SetupComputeWorkerImageStatus = {

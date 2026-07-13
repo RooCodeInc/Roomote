@@ -31,12 +31,13 @@ async function configureHostedDevelopmentWorkerImage(): Promise<void> {
   }
 
   try {
-    const { stdout } = await execa(
-      'git',
-      ['rev-parse', '--short=8', 'origin/develop'],
-      { cwd: process.cwd() },
-    );
-    const imageRef = `${DEVELOPMENT_WORKER_IMAGE_REPOSITORY}:develop-${stdout.trim()}`;
+    const { stdout } = await execa('git', ['rev-parse', 'origin/develop'], {
+      cwd: process.cwd(),
+    });
+    // The publish workflow tags images with exactly the first eight SHA
+    // characters. Git's --short=8 means "at least eight" and may lengthen an
+    // ambiguous abbreviation, which would select a tag that was never pushed.
+    const imageRef = `${DEVELOPMENT_WORKER_IMAGE_REPOSITORY}:develop-${stdout.trim().slice(0, 8)}`;
 
     process.env.ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF = imageRef;
     // Modal consumes its base image directly instead of provisioning a named
