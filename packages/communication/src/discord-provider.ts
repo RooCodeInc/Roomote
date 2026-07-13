@@ -1010,7 +1010,10 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         overwrites.find((overwrite) => overwrite.id === input.guildId),
       );
       const roleOverwrites = overwrites.filter(
-        (overwrite) => overwrite.type === 0 && memberRoleIds.has(overwrite.id),
+        (overwrite) =>
+          overwrite.type === 0 &&
+          overwrite.id !== input.guildId &&
+          memberRoleIds.has(overwrite.id),
       );
       const roleDeny = roleOverwrites.reduce(
         (result, overwrite) => result | BigInt(overwrite.deny),

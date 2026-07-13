@@ -187,6 +187,43 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
+  it('applies the everyone overwrite separately from member role overwrites', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const sendMessages = String(1n << 11n);
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'restricted',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.guildId,
+          type: 0,
+          allow: sendMessages,
+          deny: '0',
+        },
+        {
+          id: 'role-roomote',
+          type: 0,
+          allow: '0',
+          deny: sendMessages,
+        },
+      ],
+    });
+
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: false,
+      missingPermissions: ['send_messages'],
+      permissions: { send_messages: false },
+    });
+  });
+
   it('paginates the complete guild list before setup reconciliation', async () => {
     const guilds = Array.from({ length: 201 }, (_, index) => ({
       id: String(300_000_000_000_000_000n + BigInt(index)),
