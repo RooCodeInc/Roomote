@@ -17,8 +17,8 @@ A linked user DMs `!fast <question>`.
 A linked user DMs a work request.
 
 - Inject: `message` in private chat, text `fix the flaky login test in apps/web`.
-- Expect: eyes ack; a task-started message with a follow-task URL button and a `cancel_task:<jobId>` cancel button; a new cloud job whose payload carries `communicationProvider: 'telegram'`, `communicationChannelId: '111000111'`.
-- Assert: state (started message with `reply_markup.inline_keyboard`); DB payload fields.
+- Expect: eyes ack; a task-started message with a follow-task URL button and a `cancel_task:<jobId>` cancel button; a new cloud job whose payload carries `communicationProvider: 'telegram'`, `communicationChannelId: '111000111'`. If Telegram created an implicit topic named `New Chat`, its title is replaced with Roomote's canonical early task title.
+- Assert: state (started message with `reply_markup.inline_keyboard`, implicit topic renamed); DB payload fields.
 
 ## 3. followup-to-active-job (the no-threads core case)
 

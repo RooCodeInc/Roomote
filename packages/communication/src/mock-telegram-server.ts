@@ -40,7 +40,7 @@ export type MockTelegramStoredMessage = {
   reply_to_message_id?: number;
   reply_markup?: unknown;
   link_preview_disabled?: boolean;
-  forum_topic_created?: { name: string };
+  forum_topic_created?: { name: string; is_name_implicit?: boolean };
   reactions: string[];
 };
 
@@ -615,6 +615,30 @@ export class MockTelegramServer {
           message_thread_id: messageThreadId,
           name,
         });
+        return;
+      }
+
+      case 'editForumTopic': {
+        const topic = (this.state.messages ?? []).find(
+          (message) =>
+            message.chat_id === String(body.chat_id) &&
+            message.message_thread_id === Number(body.message_thread_id) &&
+            message.forum_topic_created !== undefined,
+        );
+
+        if (!topic?.forum_topic_created) {
+          apiError(response, 400, 'Bad Request: topic not found');
+          return;
+        }
+
+        const name = String(body.name ?? '').trim();
+        if (!name || name.length > 128) {
+          apiError(response, 400, 'Bad Request: invalid topic name');
+          return;
+        }
+
+        topic.forum_topic_created = { name };
+        apiResult(response, true);
         return;
       }
 

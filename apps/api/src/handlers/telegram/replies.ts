@@ -87,6 +87,34 @@ export async function createTelegramForumTopicBestEffort(input: {
   }
 }
 
+export async function editTelegramForumTopicBestEffort(input: {
+  chatId: string;
+  threadId: string;
+  name: string;
+}): Promise<boolean> {
+  const provider = await createTelegramCommunicationProvider();
+
+  if (!provider) {
+    return false;
+  }
+
+  try {
+    await provider.editForumTopic({
+      channelId: input.chatId,
+      threadId: input.threadId,
+      name: input.name,
+    });
+    return true;
+  } catch (error) {
+    apiLogger.warn(
+      `[telegram] Failed to rename implicit task topic: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return false;
+  }
+}
+
 /** Replace the text and keyboard of a bot message (cards, status lines). */
 export async function editTelegramMessageBestEffort(input: {
   chatId: string;

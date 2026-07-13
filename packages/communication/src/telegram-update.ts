@@ -32,6 +32,15 @@ const telegramMessageEntitySchema = z
   })
   .passthrough();
 
+const telegramForumTopicCreatedSchema = z
+  .object({
+    name: z.string(),
+    icon_color: z.number().int().optional(),
+    icon_custom_emoji_id: z.string().optional(),
+    is_name_implicit: z.boolean().optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -41,6 +50,7 @@ const telegramMessageSchema = z
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
+    forum_topic_created: telegramForumTopicCreatedSchema.optional(),
   })
   .passthrough();
 
@@ -133,6 +143,12 @@ export function getTelegramMessageThreadId(
   return message.message_thread_id === undefined
     ? undefined
     : String(message.message_thread_id);
+}
+
+export function isTelegramImplicitTopicCreatedMessage(
+  message: TelegramMessage,
+): boolean {
+  return message.forum_topic_created?.is_name_implicit === true;
 }
 
 export function formatTelegramUser(message: TelegramMessage): string {

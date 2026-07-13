@@ -90,6 +90,11 @@ describe('MockTelegramServer', () => {
       threadId: topic.messageThreadId,
       text: 'Task started.',
     });
+    await providerFor(baseUrl).editForumTopic({
+      channelId: '111000111',
+      threadId: topic.messageThreadId,
+      name: 'Fix flaky login tests',
+    });
 
     expect(topic.name).toBe('Fix the flaky login test');
     expect(Number(topic.messageThreadId)).toBeGreaterThan(0);
@@ -97,7 +102,7 @@ describe('MockTelegramServer', () => {
       expect.objectContaining({
         chat_id: '111000111',
         message_thread_id: Number(topic.messageThreadId),
-        forum_topic_created: { name: 'Fix the flaky login test' },
+        forum_topic_created: { name: 'Fix flaky login tests' },
       }),
     );
     expect(server.getState().messages).toContainEqual(

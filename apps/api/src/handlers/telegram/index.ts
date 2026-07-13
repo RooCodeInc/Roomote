@@ -10,6 +10,7 @@ import {
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessage,
   getTelegramNewTaskCommand,
+  isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
@@ -64,6 +65,7 @@ import type { QueuedTelegramCommunicationMessage } from './types.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
 
@@ -134,6 +136,15 @@ telegram.post('/', async (c) => {
       `[telegram] Skipping duplicate Telegram update ${update.update_id}`,
     );
     return c.json({ ok: true, duplicate: true });
+  }
+
+  if (isTelegramImplicitTopicCreatedMessage(message)) {
+    const implicitThreadId = message.message_thread_id ?? message.message_id;
+    await rememberTelegramImplicitTopic({
+      chatId: String(message.chat.id),
+      threadId: String(implicitThreadId),
+    });
+    return c.json({ ok: true, implicitTopicRemembered: true });
   }
 
   // Account linking: a bare link code (or /start <code> from the deep link)

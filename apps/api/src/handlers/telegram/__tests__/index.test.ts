@@ -384,6 +384,33 @@ describe('Telegram webhook handler', () => {
     postMessageMock.mockResolvedValue({ messageId: 'telegram-response' });
   });
 
+  it('remembers implicit Telegram topics so the task title can replace New Chat', async () => {
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          message_thread_id: 77,
+          forum_topic_created: {
+            name: 'New Chat',
+            is_name_implicit: true,
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      implicitTopicRemembered: true,
+    });
+    expect(redisSetMock).toHaveBeenCalledWith(
+      'telegram:implicit-topic:222:77',
+      '1',
+      'EX',
+      60 * 60,
+    );
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
+  });
+
   it('nudges an unlinked sender to link and drops the message', async () => {
     const response = await postTelegramUpdate(createTelegramUpdate());
 

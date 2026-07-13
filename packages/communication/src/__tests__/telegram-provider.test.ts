@@ -51,6 +51,38 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
+  it('renames Telegram forum topics', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: true,
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      name: 'Fix flaky login tests',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/editForumTopic',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          message_thread_id: 77,
+          name: 'Fix flaky login tests',
+        }),
+      }),
+    );
+  });
+
   it('sends Telegram messages through the Bot API', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({

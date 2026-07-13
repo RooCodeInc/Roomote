@@ -437,6 +437,25 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     };
   }
 
+  /** Rename an existing forum topic, including private-chat bot topics. */
+  async editForumTopic(input: {
+    channelId: string;
+    threadId: string;
+    name: string;
+  }): Promise<void> {
+    const threadId = parsePositiveInteger(input.threadId);
+
+    if (!threadId) {
+      throw new Error('Telegram editForumTopic requires a valid thread id.');
+    }
+
+    await this.callBotApi('editForumTopic', {
+      chat_id: input.channelId,
+      message_thread_id: threadId,
+      name: input.name,
+    });
+  }
+
   /** Delete a message the bot sent (Bot API allows this within 48 hours). */
   async deleteMessage(input: {
     channelId: string;

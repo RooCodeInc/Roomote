@@ -14,8 +14,13 @@ import {
 import { buildTelegramCancelTaskCallbackData } from './callback-data.js';
 import {
   createTelegramForumTopicBestEffort,
+  editTelegramForumTopicBestEffort,
   postTelegramMessageBestEffort,
 } from './replies.js';
+import {
+  consumeTelegramImplicitTopic,
+  rememberTelegramImplicitTopic,
+} from './webhook-gate.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramWorkspaceSelection,
@@ -81,12 +86,15 @@ export async function launchTelegramTask(input: {
   workspace: TelegramWorkspaceSelection;
   createTopicForTask?: boolean;
 }) {
+  const topicName = buildTelegramTaskTopicName(input.queuedMessage.text);
   const createdTopic = input.createTopicForTask
     ? await createTelegramForumTopicBestEffort({
         chatId: input.metadata.communicationChannelId,
-        name: buildTelegramTaskTopicName(input.queuedMessage.text),
+        name: topicName,
       })
     : null;
+  const titleThreadId =
+    createdTopic?.threadId ?? input.metadata.communicationThreadId;
   const topicRootMessage = createdTopic
     ? await postTelegramMessageBestEffort({
         chatId: input.metadata.communicationChannelId,
@@ -126,6 +134,35 @@ export async function launchTelegramTask(input: {
     },
     {
       launchClass: 'human',
+      ...(titleThreadId
+        ? {
+            onEarlyTitleGenerated: async ({ title }: { title: string }) => {
+              const shouldRename =
+                Boolean(createdTopic) ||
+                (await consumeTelegramImplicitTopic({
+                  chatId: metadata.communicationChannelId,
+                  threadId: titleThreadId,
+                }));
+
+              if (!shouldRename) {
+                return;
+              }
+
+              const renamed = await editTelegramForumTopicBestEffort({
+                chatId: metadata.communicationChannelId,
+                threadId: titleThreadId,
+                name: buildTelegramTaskTopicName(title),
+              });
+
+              if (!renamed && !createdTopic) {
+                await rememberTelegramImplicitTopic({
+                  chatId: metadata.communicationChannelId,
+                  threadId: titleThreadId,
+                });
+              }
+            },
+          }
+        : {}),
     },
   );
 
