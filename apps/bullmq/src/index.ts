@@ -69,7 +69,12 @@ const redis = getRedis();
 
 initBullMqSentry();
 
-const discordGatewaySupervisor = startDiscordGatewaySupervisor(redis);
+const discordGatewaySupervisor = startDiscordGatewaySupervisor(redis, {
+  ...process.env,
+  ENCRYPTION_KEY: Env.ENCRYPTION_KEY,
+  R_DISCORD_GATEWAY_SECRET: Env.R_DISCORD_GATEWAY_SECRET,
+  TRPC_URL: Env.TRPC_URL,
+});
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   startScheduler();

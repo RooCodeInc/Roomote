@@ -38,6 +38,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
+import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
   buildSetupAuthStatus,
   getSetupAuthProvider,
@@ -218,7 +219,6 @@ export type DiscordCommsStatus = {
 const DISCORD_GATEWAY_STATUS_KEY = 'discord:gateway:status';
 const DISCORD_REQUIRED_COMMANDS = ['help', 'link', 'new'] as const;
 const DISCORD_APPLICATION_MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
-const DISCORD_INSTALL_PERMISSIONS = '309237763136';
 const DISCORD_API_TIMEOUT_MS = 5_000;
 
 function createDiscordProvider(input: {
