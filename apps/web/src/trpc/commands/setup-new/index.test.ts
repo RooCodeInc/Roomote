@@ -135,6 +135,15 @@ vi.mock('@/lib/repositories', () => ({
 
 vi.mock('@/lib/setup-new', () => ({
   appendEnvironmentDefinitionGuidance: vi.fn(),
+  buildSetupEnvironmentTaskTitle: vi.fn((repositoryFullNames: string[]) => {
+    const repositoryNames = repositoryFullNames
+      .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
+      .filter(Boolean);
+
+    return repositoryNames.length === 0
+      ? 'Set up your first environment'
+      : `Set up the ${repositoryNames.join(' + ')} environment`;
+  }),
   buildSetupNewKickoffPrompt: vi.fn(),
   buildSetupNewWorkspacePayload: vi.fn(),
   findMatchingSetupNewEnvironment: vi.fn(),
@@ -192,6 +201,7 @@ import { SlackNotifier } from '@roomote/slack';
 import { getRepositories } from '@/lib/server';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   normalizeRepositorySelection,
@@ -1070,6 +1080,10 @@ describe('setup-new onboarding task start command', () => {
 
     await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
+    expect(buildSetupEnvironmentTaskTitle).toHaveBeenCalledWith([
+      'acme/api',
+      'acme/web',
+    ]);
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         title: 'Set up the api + web environment',

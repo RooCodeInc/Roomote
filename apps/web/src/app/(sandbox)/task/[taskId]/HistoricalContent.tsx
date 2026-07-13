@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import Link from 'next/link';
 import { RunStatus } from '@roomote/types';
 import { MessageSquareWarning } from 'lucide-react';
-import { Button, Sun } from '@/components/system';
+import { Sun } from '@/components/system';
 import { Message, MessageContent, Shimmer } from '@/components/ai-elements';
 import { FramedSurface } from '@/components/layout';
 
@@ -25,6 +24,7 @@ import { Messages } from './Messages';
 import { PreviewCommand } from './PreviewCommand';
 import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { WakeTaskInput } from './WakeTaskInput';
+import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
 
 interface HistoricalContentProps {
   session: TaskSession;
@@ -113,28 +113,6 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         </div>
       </PreviewPaneProvider>
     </TaskSidePanelProvider>
-  );
-}
-
-function OnboardingCompletionMessage({
-  environmentName,
-}: {
-  environmentName: string;
-}) {
-  return (
-    <Message from="assistant">
-      <MessageContent>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span>
-            The <span className="font-medium">{environmentName}</span>{' '}
-            environment is set up. You can start your first task.
-          </span>
-          <Button asChild size="sm">
-            <Link href="/">Go</Link>
-          </Button>
-        </div>
-      </MessageContent>
-    </Message>
   );
 }
 

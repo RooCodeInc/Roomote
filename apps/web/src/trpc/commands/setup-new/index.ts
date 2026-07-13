@@ -99,6 +99,7 @@ import {
 import { areAllRepositoriesEmpty } from '@/lib/repositories';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   findMatchingSetupNewEnvironment,
@@ -163,18 +164,6 @@ type ActiveSetupQualificationBlock = {
   githubAccountType: string | null;
   lastBlockedAt: Date;
 };
-
-function buildSetupOnboardingTaskTitle(repositoryFullNames: string[]) {
-  const repositoryNames = repositoryFullNames
-    .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
-    .filter(Boolean);
-
-  if (repositoryNames.length === 0) {
-    return 'Set up your first environment';
-  }
-
-  return `Set up the ${repositoryNames.join(' + ')} environment`;
-}
 
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
@@ -2218,7 +2207,7 @@ export async function startSetupNewOnboardingTaskCommand(
     const selectedRepositoryFullNames = selectedRepositories.map(
       (repository) => repository.fullName,
     );
-    const onboardingTaskTitle = buildSetupOnboardingTaskTitle(
+    const onboardingTaskTitle = buildSetupEnvironmentTaskTitle(
       selectedRepositoryFullNames,
     );
     const workspacePayload = buildSetupNewWorkspacePayload(
