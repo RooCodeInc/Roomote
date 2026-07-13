@@ -15,6 +15,7 @@ import {
   getAdoOAuthValidationError,
   getEffectiveAdoBaseUrl,
   getEffectiveAdoOrganization,
+  isAdoOAuthReady,
 } from '@/components/source-control/AdoSourceControlConfigFields';
 import {
   ArrowLeft,
@@ -37,6 +38,7 @@ import {
 import {
   getAdoBaseUrlValidationError,
   getAdoOrganizationValidationError,
+  isAdoCloudBaseUrl,
 } from '@/lib/ado';
 
 import { StepTitle } from './StepTitle';
@@ -102,7 +104,6 @@ export function StepSourceControlConfig({
   const [adoOrganizationConfirmed, setAdoOrganizationConfirmed] =
     useState(false);
   const [adoAdvancedExpanded, setAdoAdvancedExpanded] = useState(false);
-  const [adoOauthExpanded, setAdoOauthExpanded] = useState(false);
   const adoPostSaveActionRef = useRef<'continue' | 'link'>('continue');
   const adoLinkedAccount = useAdoLinkedAccount({
     enabled: effectiveSelectedProviderId === 'ado',
@@ -182,7 +183,6 @@ export function StepSourceControlConfig({
     setGithubOrganization('');
     setAdoOrganizationConfirmed(hasConfiguredAdoOrganization);
     setAdoAdvancedExpanded(false);
-    setAdoOauthExpanded(false);
     setManifestForm(null);
   }, [
     effectiveSelectedProviderId,
@@ -248,9 +248,14 @@ export function StepSourceControlConfig({
     adoBaseUrl,
   );
   const adoBaseUrlValidationError = getAdoBaseUrlValidationError(adoBaseUrl);
-  const adoOAuthValidationError = isAdo
+  const usesAdoCloud = isAdo && isAdoCloudBaseUrl(adoBaseUrl);
+  const adoOAuthValidationError = usesAdoCloud
     ? getAdoOAuthValidationError(selectedProvider.fields, values)
     : null;
+  const adoOAuthReady = usesAdoCloud
+    ? isAdoOAuthReady(selectedProvider.fields, values)
+    : true;
+  const adoAccountLinked = Boolean(adoLinkedAccount.data?.account);
   const canConfirmAdoOrganization =
     adoOrganizationValidationError === null &&
     adoBaseUrlValidationError === null;
@@ -399,11 +404,14 @@ export function StepSourceControlConfig({
         return;
       }
 
+      adoPostSaveActionRef.current =
+        usesAdoCloud && !adoAccountLinked ? 'link' : 'continue';
       void handleContinue();
     };
     const isAdoActionDisabled = adoOrganizationConfirmed
       ? isSaveActionDisabled ||
         authenticateAdoAccount.isPending ||
+        !adoOAuthReady ||
         adoOrganizationValidationError !== null ||
         adoBaseUrlValidationError !== null ||
         adoOAuthValidationError !== null
@@ -419,11 +427,9 @@ export function StepSourceControlConfig({
           editingSavedValues={editingSavedValues}
           organizationConfirmed={adoOrganizationConfirmed}
           advancedExpanded={adoAdvancedExpanded}
-          oauthExpanded={adoOauthExpanded}
           oauthCallbackUrl={adoRedirectUri}
-          oauthAccountLinked={Boolean(adoLinkedAccount.data?.account)}
+          oauthAccountLinked={adoAccountLinked}
           oauthAccountStatePending={adoLinkedAccount.isPending}
-          oauthLinkPending={authenticateAdoAccount.isPending}
           disabled={
             saveSourceControlConfig.isPending ||
             authenticateAdoAccount.isPending
@@ -446,14 +452,6 @@ export function StepSourceControlConfig({
             setAdoOrganizationConfirmed(false);
           }}
           onAdvancedExpandedChange={setAdoAdvancedExpanded}
-          onOauthExpandedChange={setAdoOauthExpanded}
-          onLinkAccount={() =>
-            authenticateAdoAccount.mutate('/setup?step=source-control-connect')
-          }
-          onSaveAndLinkAccount={() => {
-            adoPostSaveActionRef.current = 'link';
-            void handleContinue();
-          }}
         />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -493,9 +491,13 @@ export function StepSourceControlConfig({
             {adoOrganizationConfirmed
               ? saveSourceControlConfig.isPending
                 ? 'Saving...'
-                : canContinueWithoutNewValues
-                  ? 'Continue'
-                  : 'Save and continue'
+                : usesAdoCloud && !adoAccountLinked
+                  ? canContinueWithoutNewValues
+                    ? 'Link account'
+                    : 'Save and link account'
+                  : canContinueWithoutNewValues
+                    ? 'Continue'
+                    : 'Save and continue'
               : 'Continue'}
             {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
           </Button>

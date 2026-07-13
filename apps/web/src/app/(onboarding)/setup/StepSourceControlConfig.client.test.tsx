@@ -378,7 +378,7 @@ describe('StepSourceControlConfig', () => {
       screen.getByText(/Use only letters, numbers, and hyphens/),
     ).toBeVisible();
     expect(
-      screen.getByRole('button', { name: 'Save and continue' }),
+      screen.getByRole('button', { name: 'Save and link account' }),
     ).toBeDisabled();
   });
 
@@ -489,9 +489,7 @@ describe('StepSourceControlConfig', () => {
     expect(
       screen.queryByLabelText(/Azure DevOps Base URL/),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Microsoft Entra Client ID'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Microsoft Entra Client ID')).toBeVisible();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Show advanced options' }),
@@ -499,23 +497,13 @@ describe('StepSourceControlConfig', () => {
 
     expect(screen.getByText('Azure DevOps Base URL (optional)')).toBeVisible();
     expect(screen.getByText('Azure DevOps Username (optional)')).toBeVisible();
-    expect(
-      screen.queryByText('Microsoft Entra Client ID (optional)'),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText('Microsoft Entra Client ID')).toBeVisible();
     expect(
       screen.getByText('Azure DevOps Webhook Secret (optional)'),
     ).toBeVisible();
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Set up account linking' }),
-    );
-
-    expect(
-      screen.getByText('Microsoft Entra Client ID (optional)'),
-    ).toBeVisible();
-    expect(
-      screen.getByText('Microsoft Entra Client Secret (optional)'),
-    ).toBeVisible();
+    expect(screen.getByText('Microsoft Entra Client ID')).toBeVisible();
+    expect(screen.getByText('Microsoft Entra Client Secret')).toBeVisible();
     expect(
       screen.getByText('Microsoft Entra Tenant ID (optional)'),
     ).toBeVisible();
@@ -527,7 +515,7 @@ describe('StepSourceControlConfig', () => {
     ).toBeVisible();
   });
 
-  it('saves the organization and PAT together', () => {
+  it('requires OAuth setup and saves it with the organization and PAT', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildSetupSourceControlStatus({
@@ -545,11 +533,24 @@ describe('StepSourceControlConfig', () => {
     fireEvent.change(screen.getByLabelText('Azure DevOps Access Token'), {
       target: { value: 'ado-pat' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Save and continue' }));
+    expect(
+      screen.getByRole('button', { name: 'Save and link account' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Microsoft Entra Client ID'), {
+      target: { value: 'client-id' },
+    });
+    fireEvent.change(screen.getByLabelText('Microsoft Entra Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save and link account' }),
+    );
 
     expect(mutateAsyncMock).toHaveBeenCalledWith({
       provider: 'ado',
       values: {
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
         ADO_ORGANIZATION: 'acme',
         ADO_TOKEN: 'ado-pat',
       },

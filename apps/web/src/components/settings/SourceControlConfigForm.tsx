@@ -11,11 +11,13 @@ import {
   getAdoOAuthValidationError,
   getEffectiveAdoBaseUrl,
   getEffectiveAdoOrganization,
+  isAdoOAuthReady,
 } from '@/components/source-control/AdoSourceControlConfigFields';
 import { Button, Check, Input, Spinner } from '@/components/system';
 import {
   getAdoBaseUrlValidationError,
   getAdoOrganizationValidationError,
+  isAdoCloudBaseUrl,
 } from '@/lib/ado';
 import {
   useAdoLinkedAccount,
@@ -112,7 +114,6 @@ export function SourceControlConfigForm({
   const [adoOrganizationConfirmed, setAdoOrganizationConfirmed] =
     useState(false);
   const [adoAdvancedExpanded, setAdoAdvancedExpanded] = useState(false);
-  const [adoOauthExpanded, setAdoOauthExpanded] = useState(false);
   const adoPostSaveActionRef = useRef<'save' | 'link'>('save');
   const adoLinkedAccount = useAdoLinkedAccount({ enabled: provider === 'ado' });
   const authenticateAdoAccount = useAuthenticateAdoAccount();
@@ -140,7 +141,6 @@ export function SourceControlConfigForm({
         );
         setEditingSavedValues({});
         setAdoAdvancedExpanded(false);
-        setAdoOauthExpanded(false);
         toast.success(
           saveSuccessMessage ?? 'Source-control configuration saved.',
         );
@@ -161,7 +161,6 @@ export function SourceControlConfigForm({
     setEditingSavedValues({});
     setAdoOrganizationConfirmed(hasConfiguredAdoOrganization);
     setAdoAdvancedExpanded(false);
-    setAdoOauthExpanded(false);
   }, [hasConfiguredAdoOrganization, provider, nonSecretInitialValues]);
 
   if (!providerStatus) {
@@ -191,9 +190,14 @@ export function SourceControlConfigForm({
     adoBaseUrl,
   );
   const adoBaseUrlValidationError = getAdoBaseUrlValidationError(adoBaseUrl);
-  const adoOAuthValidationError = isAdo
+  const usesAdoCloud = isAdo && isAdoCloudBaseUrl(adoBaseUrl);
+  const adoOAuthValidationError = usesAdoCloud
     ? getAdoOAuthValidationError(providerStatus.fields, values)
     : null;
+  const adoOAuthReady = usesAdoCloud
+    ? isAdoOAuthReady(providerStatus.fields, values)
+    : true;
+  const adoAccountLinked = Boolean(adoLinkedAccount.data?.account);
   const canConfirmAdoOrganization =
     adoOrganizationValidationError === null &&
     adoBaseUrlValidationError === null;
@@ -242,6 +246,8 @@ export function SourceControlConfigForm({
       return;
     }
 
+    adoPostSaveActionRef.current =
+      usesAdoCloud && !adoAccountLinked ? 'link' : 'save';
     saveConfig.mutate({ provider, values });
   };
 
@@ -255,11 +261,9 @@ export function SourceControlConfigForm({
             editingSavedValues={editingSavedValues}
             organizationConfirmed={adoOrganizationConfirmed}
             advancedExpanded={adoAdvancedExpanded}
-            oauthExpanded={adoOauthExpanded}
             oauthCallbackUrl={adoRedirectUri}
-            oauthAccountLinked={Boolean(adoLinkedAccount.data?.account)}
+            oauthAccountLinked={adoAccountLinked}
             oauthAccountStatePending={adoLinkedAccount.isPending}
-            oauthLinkPending={authenticateAdoAccount.isPending}
             disabled={saveConfig.isPending || authenticateAdoAccount.isPending}
             compact
             idPrefix="settings-ado"
@@ -280,14 +284,6 @@ export function SourceControlConfigForm({
               setAdoOrganizationConfirmed(false);
             }}
             onAdvancedExpandedChange={setAdoAdvancedExpanded}
-            onOauthExpandedChange={setAdoOauthExpanded}
-            onLinkAccount={() =>
-              authenticateAdoAccount.mutate('/settings?service=ado')
-            }
-            onSaveAndLinkAccount={() => {
-              adoPostSaveActionRef.current = 'link';
-              saveConfig.mutate({ provider, values });
-            }}
           />
         ) : (
           providerStatus.fields.map((field) => {
@@ -373,15 +369,22 @@ export function SourceControlConfigForm({
           disabled={
             isActionDisabled ||
             authenticateAdoAccount.isPending ||
-            adoOAuthValidationError !== null
+            (isAdo && adoOrganizationConfirmed && !adoOAuthReady) ||
+            (isAdo &&
+              adoOrganizationConfirmed &&
+              adoOAuthValidationError !== null)
           }
         >
           {saveConfig.isPending ? <Spinner /> : null}
           {isAdo && !adoOrganizationConfirmed
             ? 'Continue'
-            : hasNewValues
-              ? 'Save configuration'
-              : 'Save'}
+            : usesAdoCloud && !adoAccountLinked
+              ? hasNewValues
+                ? 'Save and link account'
+                : 'Link account'
+              : hasNewValues
+                ? 'Save configuration'
+                : 'Save'}
         </Button>
       </div>
     </div>

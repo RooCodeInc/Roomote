@@ -175,7 +175,7 @@ describe('buildSetupSourceControlStatus', () => {
     expect(status.lockReason).toBe('runtime_env');
   });
 
-  it('does not require optional fields to satisfy config', () => {
+  it('requires OAuth fields for Azure DevOps Services configuration', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
         ADO_ORGANIZATION: 'my-org',
@@ -184,7 +184,7 @@ describe('buildSetupSourceControlStatus', () => {
     });
 
     const ado = status.providers.find((p) => p.provider === 'ado');
-    expect(ado).toMatchObject({ configSatisfied: true });
+    expect(ado).toMatchObject({ configSatisfied: false });
     const optionalBaseUrl = ado?.fields.find(
       (f) => f.envVarName === 'ADO_BASE_URL',
     );
@@ -268,6 +268,20 @@ describe('buildSetupSourceControlStatus', () => {
     });
   });
 
+  it('does not require OAuth fields for Azure DevOps Server configuration', () => {
+    const status = buildSetupSourceControlStatus({
+      runtimeEnv: {
+        ADO_BASE_URL: 'https://ado.example.com/tfs',
+        ADO_ORGANIZATION: 'Default Collection',
+        ADO_TOKEN: 'ado-token',
+      },
+    });
+
+    expect(
+      status.providers.find((provider) => provider.provider === 'ado'),
+    ).toMatchObject({ configSatisfied: true });
+  });
+
   it('marks config unsatisfied when a required field is missing', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: { ADO_ORGANIZATION: 'my-org' },
@@ -318,12 +332,46 @@ describe('buildSetupSourceControlStatus', () => {
     expect(status.connectedProvider).toBe('github');
   });
 
-  it('does not accept env var aliases in setup fields', () => {
+  it('only accepts Microsoft app aliases for Azure DevOps OAuth fields', () => {
     for (const provider of SETUP_SOURCE_CONTROL_PROVIDER_CATALOG) {
       for (const field of provider.fields) {
-        expect(field.acceptedEnvVarNames).toEqual([field.envVarName]);
+        const expectedAliases: Partial<Record<string, string>> = {
+          ADO_CLIENT_ID: 'R_MICROSOFT_CLIENT_ID',
+          ADO_CLIENT_SECRET: 'R_MICROSOFT_CLIENT_SECRET',
+          ADO_TENANT_ID: 'R_MICROSOFT_TENANT_ID',
+        };
+        const alias = expectedAliases[field.envVarName];
+        expect(field.acceptedEnvVarNames).toEqual(
+          alias ? [field.envVarName, alias] : [field.envVarName],
+        );
       }
     }
+  });
+
+  it('recognizes existing Microsoft credentials as Azure DevOps OAuth configuration', () => {
+    const status = buildSetupSourceControlStatus({
+      runtimeEnv: {
+        R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
+        R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
+      },
+    });
+    const ado = status.providers.find(
+      (provider) => provider.provider === 'ado',
+    );
+
+    expect(
+      ado?.fields.find((field) => field.envVarName === 'ADO_CLIENT_ID'),
+    ).toMatchObject({
+      runtimeSatisfied: true,
+      satisfiedByEnvVarName: 'R_MICROSOFT_CLIENT_ID',
+    });
+    expect(
+      ado?.fields.find((field) => field.envVarName === 'ADO_CLIENT_SECRET'),
+    ).toMatchObject({
+      runtimeSatisfied: true,
+      satisfiedByEnvVarName: 'R_MICROSOFT_CLIENT_SECRET',
+    });
   });
 
   it('reports setup satisfied by runtime env when the connected provider is runtime-configured', () => {

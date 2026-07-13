@@ -99,23 +99,16 @@ export function getAdoOAuthValidationError(
     values,
   );
 
+  if (!clientIdSatisfied && !clientSecretSatisfied) {
+    return 'Enter the Microsoft Entra application (client) ID and client secret to continue.';
+  }
+
   return clientIdSatisfied !== clientSecretSatisfied
     ? 'Enter both the Microsoft Entra application (client) ID and client secret.'
     : null;
 }
 
-function isAdoOAuthConfigured(fields: readonly SourceControlField[]) {
-  return [ADO_CLIENT_ID_ENV_VAR, ADO_CLIENT_SECRET_ENV_VAR].every(
-    (envVarName) => {
-      const field = fields.find(
-        (candidate) => candidate.envVarName === envVarName,
-      );
-      return field?.runtimeSatisfied === true || field?.savedSatisfied === true;
-    },
-  );
-}
-
-function isAdoOAuthReady(
+export function isAdoOAuthReady(
   fields: readonly SourceControlField[],
   values: Record<string, string>,
 ) {
@@ -134,11 +127,9 @@ export function AdoSourceControlConfigFields({
   editingSavedValues,
   organizationConfirmed,
   advancedExpanded,
-  oauthExpanded,
   oauthCallbackUrl,
   oauthAccountLinked,
   oauthAccountStatePending,
-  oauthLinkPending,
   disabled,
   compact = false,
   idPrefix,
@@ -146,20 +137,15 @@ export function AdoSourceControlConfigFields({
   onEditingSavedValueChange,
   onEditOrganization,
   onAdvancedExpandedChange,
-  onOauthExpandedChange,
-  onLinkAccount,
-  onSaveAndLinkAccount,
 }: {
   fields: readonly SourceControlField[];
   values: Record<string, string>;
   editingSavedValues: Record<string, boolean>;
   organizationConfirmed: boolean;
   advancedExpanded: boolean;
-  oauthExpanded: boolean;
   oauthCallbackUrl: string;
   oauthAccountLinked: boolean;
   oauthAccountStatePending: boolean;
-  oauthLinkPending: boolean;
   disabled: boolean;
   compact?: boolean;
   idPrefix: string;
@@ -167,9 +153,6 @@ export function AdoSourceControlConfigFields({
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
   onEditOrganization: () => void;
   onAdvancedExpandedChange: (expanded: boolean) => void;
-  onOauthExpandedChange: (expanded: boolean) => void;
-  onLinkAccount: () => void;
-  onSaveAndLinkAccount: () => void;
 }) {
   const organizationField = fields.find(
     (field) => field.envVarName === ADO_ORGANIZATION_ENV_VAR,
@@ -182,6 +165,14 @@ export function AdoSourceControlConfigFields({
   );
   const oauthFields = fields.filter((field) =>
     ADO_OAUTH_ENV_VARS.has(field.envVarName),
+  );
+  const reusesMicrosoftApp = [
+    ADO_CLIENT_ID_ENV_VAR,
+    ADO_CLIENT_SECRET_ENV_VAR,
+  ].every((envVarName) =>
+    oauthFields
+      .find((field) => field.envVarName === envVarName)
+      ?.satisfiedByEnvVarName?.startsWith('R_MICROSOFT_'),
   );
   const advancedFields = fields.filter(
     (field) =>
@@ -204,17 +195,15 @@ export function AdoSourceControlConfigFields({
     ? buildAdoPersonalAccessTokenUrl(organization)
     : ADO_PAT_DOCUMENTATION_URL;
   const advancedContentId = `${idPrefix}-advanced-options`;
-  const oauthContentId = `${idPrefix}-oauth-options`;
   const serverContentId = `${idPrefix}-server-options`;
   const serverCollapsedErrorId = `${idPrefix}-server-options-error`;
   const advancedCollapsedErrorId = `${idPrefix}-advanced-options-error`;
   const oauthValidationError = getAdoOAuthValidationError(fields, values);
-  const oauthConfigured = isAdoOAuthConfigured(fields);
-  const oauthReady = isAdoOAuthReady(fields, values);
 
   const renderField = (
     field: SourceControlField,
     validationError: string | null = null,
+    optional = field.required === false,
   ) => {
     const value = values[field.envVarName] ?? '';
     const isSecretField = isSecretSourceControlField(field);
@@ -238,7 +227,7 @@ export function AdoSourceControlConfigFields({
       >
         <Label htmlFor={inputId} className="text-sm font-medium">
           {field.label}
-          {field.required === false ? ' (optional)' : ''}
+          {optional ? ' (optional)' : ''}
         </Label>
         <div className="space-y-1">
           <div className="flex items-center gap-2">
@@ -416,107 +405,84 @@ export function AdoSourceControlConfigFields({
       {tokenField ? renderField(tokenField) : null}
 
       {usesAdoCloud && oauthFields.length > 0 ? (
-        <div className="space-y-3 border-t pt-6">
+        <div className="space-y-4 border-t pt-6">
           <div className="space-y-1 max-w-xl">
-            <p className="font-semibold">Optional: link user accounts</p>
+            <p className="font-semibold">Set up user account linking</p>
             <p className="text-sm text-muted-foreground">
               The PAT connects this Roomote deployment to Azure DevOps. OAuth
-              separately identifies each user, which is required when they start
-              Roomote work from pull request comments.
+              separately identifies each user. Both are required to finish Azure
+              DevOps setup and let users start Roomote work from pull request
+              comments.
             </p>
           </div>
-          <button
-            type="button"
-            className="cursor-pointer text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
-            onClick={() => onOauthExpandedChange(!oauthExpanded)}
-            disabled={disabled || oauthLinkPending}
-            aria-expanded={oauthExpanded}
-            aria-controls={oauthContentId}
-          >
-            {oauthExpanded
-              ? 'Hide account linking setup'
-              : 'Set up account linking'}
-            <ChevronDown
-              className={`${oauthExpanded ? 'rotate-180' : ''} inline size-4 transition-all`}
-            />
-          </button>
-          {oauthExpanded ? (
-            <div id={oauthContentId} className="space-y-4">
-              <div className="space-y-2 max-w-xl text-sm text-muted-foreground">
-                <p>
-                  Create a Microsoft Entra app registration. If Microsoft Teams
-                  or Microsoft sign-in is already configured, you can reuse that
-                  app: add the callback below and grant the delegated Azure
-                  DevOps <code>user_impersonation</code> permission.
-                </p>
-                <Button
-                  asChild
-                  variant="outline"
-                  size={compact ? 'sm' : 'default'}
-                >
-                  <a
-                    href={ENTRA_APP_REGISTRATIONS_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Open Microsoft Entra app registrations
-                    <ExternalLink />
-                  </a>
-                </Button>
-                <p>Configure this Web redirect URI:</p>
-                <p className="flex items-center gap-1">
-                  <code className="break-all text-foreground">
-                    {oauthCallbackUrl}
-                  </code>
-                  <CopyIconButton
-                    content={oauthCallbackUrl}
-                    tooltip="Copy redirect URI"
-                  />
-                </p>
-                <p>
-                  Paste the application ID and client secret below. The tenant
-                  ID is optional; use the same tenant as Teams when applicable.
-                </p>
-              </div>
-              <div className="space-y-2">
-                {oauthFields.map((field) => renderField(field))}
-              </div>
-              {oauthValidationError ? (
-                <p className="text-sm text-destructive" role="alert">
-                  {oauthValidationError}
+          <div className="space-y-4">
+            <div className="space-y-2 max-w-xl text-sm text-muted-foreground">
+              {reusesMicrosoftApp ? (
+                <p className="rounded-md border bg-muted/40 p-3 text-foreground">
+                  Roomote found your existing Microsoft setup and will reuse its
+                  Entra app credentials. You only need to add the callback and
+                  Azure DevOps permission below, then link your account.
                 </p>
               ) : null}
-              {oauthAccountStatePending ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner /> Checking linked account…
-                </p>
-              ) : oauthAccountLinked ? (
-                <p className="flex items-center gap-2 text-sm">
-                  <Check /> Your Azure DevOps account is linked.
-                </p>
-              ) : oauthConfigured ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onLinkAccount}
-                  disabled={disabled || oauthLinkPending}
+              <p>
+                Create a Microsoft Entra app registration. If Microsoft Teams or
+                Microsoft sign-in is already configured, you can reuse that app:
+                add the callback below and grant the delegated Azure DevOps{' '}
+                <code>user_impersonation</code> permission.
+              </p>
+              <Button
+                asChild
+                variant="outline"
+                size={compact ? 'sm' : 'default'}
+              >
+                <a
+                  href={ENTRA_APP_REGISTRATIONS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
                 >
-                  {oauthLinkPending ? <Spinner /> : null}
-                  Link my Azure DevOps account
-                </Button>
-              ) : oauthReady && !oauthValidationError ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={onSaveAndLinkAccount}
-                  disabled={disabled || oauthLinkPending}
-                >
-                  {disabled || oauthLinkPending ? <Spinner /> : null}
-                  Save and link my account
-                </Button>
-              ) : null}
+                  Open Microsoft Entra app registrations
+                  <ExternalLink />
+                </a>
+              </Button>
+              <p>Configure this Web redirect URI:</p>
+              <p className="flex items-center gap-1">
+                <code className="break-all text-foreground">
+                  {oauthCallbackUrl}
+                </code>
+                <CopyIconButton
+                  content={oauthCallbackUrl}
+                  tooltip="Copy redirect URI"
+                />
+              </p>
+              <p>
+                Paste the application ID and client secret below. The tenant ID
+                is optional; use the same tenant as Teams when applicable.
+              </p>
             </div>
-          ) : null}
+            <div className="space-y-2">
+              {oauthFields.map((field) =>
+                renderField(
+                  field,
+                  null,
+                  field.envVarName === ADO_TENANT_ID_ENV_VAR,
+                ),
+              )}
+            </div>
+            {oauthValidationError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {oauthValidationError}
+              </p>
+            ) : null}
+            {oauthAccountStatePending ? (
+              <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner /> Checking linked account…
+              </p>
+            ) : oauthAccountLinked ? (
+              <p className="flex items-center gap-2 text-sm">
+                <Check /> Your Azure DevOps account is linked.
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

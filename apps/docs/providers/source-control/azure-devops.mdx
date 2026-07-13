@@ -8,8 +8,8 @@ Azure DevOps uses two separate credentials:
 
 - a deployment-owned personal access token (PAT) lets Roomote sync and work in
   repositories
-- optional Microsoft Entra OAuth identifies individual Roomote users when they
-  start work from pull request comments
+- Microsoft Entra OAuth identifies individual Roomote users when they start
+  work from pull request comments
 
 ## Create an Azure DevOps PAT
 
@@ -38,9 +38,9 @@ ADO_USERNAME=ado
 
 ## Link individual user accounts
 
-Account linking is optional for repository sync and manual tasks. It is
-required for pull request comment triggers so Roomote can verify which user
-made the comment.
+Roomote requires account linking when setting up Azure DevOps Services so the
+integration is ready for pull request comment triggers. Azure DevOps Server
+uses the PAT flow without Microsoft Entra account linking.
 
 1. Open [Microsoft Entra app registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
    and create or select an app registration.
@@ -52,14 +52,16 @@ made the comment.
 
 3. Under **API permissions**, add the Azure DevOps delegated
    `user_impersonation` permission.
-4. Create a client secret, then enter the application ID and secret in the
-   Azure DevOps account-linking section during setup or in Settings.
-5. Select **Link my Azure DevOps account** and complete Microsoft sign-in.
+4. For a new app, create a client secret, then enter the application ID and
+   secret in the Azure DevOps account-linking section during setup or in
+   Settings.
+5. Select **Save and link account** and complete Microsoft sign-in.
 
 If Microsoft Teams or Microsoft sign-in is already configured, you can reuse
 that Microsoft Entra app registration. Add the Azure DevOps redirect URI and
-permission to the existing app, then use the same client ID, client secret, and
-tenant ID for Azure DevOps.
+permission to the existing app. Roomote automatically reuses the stored
+Microsoft client ID, client secret, and tenant ID when Azure DevOps-specific
+values are not configured, so you do not need to re-enter the secret.
 
 The equivalent environment variables are:
 
@@ -69,9 +71,8 @@ ADO_CLIENT_SECRET=<microsoft-entra-client-secret>
 ADO_TENANT_ID=<microsoft-entra-tenant-id>
 ```
 
-`ADO_TENANT_ID` is optional and defaults to Microsoft&apos;s `common` tenant. If
-you reuse the Teams app registration, enter its tenant ID here when the app is
-single-tenant.
+`ADO_TENANT_ID` is optional. It reuses `R_MICROSOFT_TENANT_ID` when available,
+then defaults to Microsoft&apos;s `common` tenant.
 
 ## Sync repositories
 
@@ -97,5 +98,4 @@ credential helper instead of exporting `ADO_TOKEN` into task shells.
 2. create or update an environment from a synced repository
 3. start a small task and confirm Roomote can clone the repository
 4. confirm Roomote can push a branch when the task produces changes
-5. if account linking is enabled, link your Azure DevOps account and trigger a
-   small task from a pull request comment
+5. for Azure DevOps Services, trigger a small task from a pull request comment

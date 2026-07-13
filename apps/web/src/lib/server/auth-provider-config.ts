@@ -130,12 +130,14 @@ export async function resolveAuthProviderConfig(
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'BITBUCKET_BASE_URL') ??
     null;
   const adoClientId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_ID') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_ID') ??
+    microsoftClientId;
   const adoClientSecret =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_SECRET') ??
-    null;
+    microsoftClientSecret;
   const adoTenantId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ??
+    microsoftTenantId;
   const adoOrganization =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_ORGANIZATION') ??
     null;
