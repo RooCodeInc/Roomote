@@ -90,6 +90,8 @@ export {
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
+export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+
 export {
   findTelegramPrimaryChatId,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME,

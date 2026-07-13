@@ -1,6 +1,5 @@
 import { Job } from 'bullmq';
 
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import {
   and,
   db,
@@ -10,11 +9,11 @@ import {
   taskPullRequests,
   taskRuns,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   createTeamsCommunicationProviderFromRuntimeCredentials,
+  createTelegramCommunicationProviderFromRuntimeCredentials,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
@@ -95,16 +94,15 @@ async function postTelegramNotification({
   route: Extract<PrReviewNotificationRoute, { provider: 'telegram' }>;
   text: string;
 }): Promise<void> {
-  if (!Env.R_TELEGRAM_BOT_TOKEN) {
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials();
+
+  if (!provider) {
     console.warn(
       '[PrReviewNotification] Telegram bot token is not configured, skipping',
     );
     return;
   }
-
-  const provider = new TelegramCommunicationProvider({
-    botToken: Env.R_TELEGRAM_BOT_TOKEN,
-  });
 
   await provider.postMessage({
     channelId: route.channelId,

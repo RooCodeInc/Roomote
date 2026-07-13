@@ -12,7 +12,7 @@ import {
   isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
 import {
@@ -139,17 +139,16 @@ export function classifyTelegramWebhookCheckError(error: unknown): string {
 }
 
 async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials({
+      fetch: createTelegramBotApiFetch(),
+    });
 
-  if (!botToken) {
+  if (!provider) {
     return null;
   }
 
   const expectedUrl = buildExpectedTelegramWebhookUrl();
-  const provider = new TelegramCommunicationProvider({
-    botToken,
-    fetch: createTelegramBotApiFetch(),
-  });
 
   try {
     const rawInfo = await provider.getWebhookInfo();
@@ -217,19 +216,18 @@ type TelegramWebhookRegistrationResult = {
 async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegistrationResult> {
   invalidateTelegramRuntimeCredentialsCache();
 
-  const { botToken, webhookSecret } = await resolveTelegramRuntimeCredentials();
+  const { webhookSecret } = await resolveTelegramRuntimeCredentials();
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials({
+      fetch: createTelegramBotApiFetch(),
+    });
 
-  if (!botToken || !webhookSecret) {
+  if (!provider || !webhookSecret) {
     return {
       registered: false,
       error: 'Telegram bot token or webhook secret is not configured.',
     };
   }
-
-  const provider = new TelegramCommunicationProvider({
-    botToken,
-    fetch: createTelegramBotApiFetch(),
-  });
 
   try {
     await Promise.all([

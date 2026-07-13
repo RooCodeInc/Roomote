@@ -79,6 +79,9 @@ vi.mock('@roomote/sdk/server', () => ({
   schedulePrReviewNotificationJob: mockSchedule,
   createTeamsCommunicationProviderFromRuntimeCredentials:
     mockCreateTeamsProvider,
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(
+    async () => ({ postMessage: mockTelegramPostMessage }),
+  ),
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
 }));

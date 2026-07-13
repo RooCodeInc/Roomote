@@ -232,11 +232,16 @@ vi.mock('@roomote/communication/teams-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () => ({
-    postDirectMessage: postDirectMessageMock,
-    postMessage: postMessageMock,
-    processImageAttachments: processImageAttachmentsMock,
-  })),
+  createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
+    envMock.R_TEAMS_BOT_APP_ID && envMock.R_TEAMS_BOT_APP_PASSWORD
+      ? {
+          postDirectMessage: postDirectMessageMock,
+          postMessage: postMessageMock,
+          fetchMessageImageDataUrls: fetchMessageImageDataUrlsMock,
+          processImageAttachments: processImageAttachmentsMock,
+        }
+      : null,
+  ),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({

@@ -62,12 +62,18 @@ vi.mock('@roomote/db/server', () => ({
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
 }));
 
-vi.mock('@roomote/communication/telegram-provider', () => ({
-  TelegramCommunicationProvider: class {
-    getWebhookInfo = mockTelegramGetWebhookInfo;
-    registerWebhook = mockTelegramRegisterWebhook;
-    registerCommands = mockTelegramRegisterCommands;
-  },
+vi.mock('@roomote/sdk/server', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await mockResolveTelegramRuntimeCredentials();
+
+    return botToken
+      ? {
+          getWebhookInfo: mockTelegramGetWebhookInfo,
+          registerWebhook: mockTelegramRegisterWebhook,
+          registerCommands: mockTelegramRegisterCommands,
+        }
+      : null;
+  }),
 }));
 
 vi.mock('@/lib/server/env', () => ({
