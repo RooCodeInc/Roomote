@@ -87,6 +87,10 @@ export function configToYaml(config: EnvironmentConfig): string {
     });
   }
 
+  if (config.container_projects && config.container_projects.length > 0) {
+    cleanConfig.container_projects = config.container_projects;
+  }
+
   if (config.services && config.services.length > 0) {
     cleanConfig.services = config.services;
   }
