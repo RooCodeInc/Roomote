@@ -115,6 +115,35 @@ function toPromptImageDataUrl(input: {
     : null;
 }
 
+/**
+ * Teams has no validated outbound card renderer here, so generic message
+ * buttons degrade to trailing links: markdown links for markdown messages,
+ * `label: url` lines otherwise. Callback buttons have no Teams handler and
+ * are dropped.
+ */
+function appendTeamsButtonLinks(
+  input: CommunicationPostMessageInput,
+): string | undefined {
+  const linkButtons = (input.buttons ?? [])
+    .flat()
+    .filter((button): button is { text: string; url: string } =>
+      Boolean(button.url),
+    );
+
+  if (linkButtons.length === 0) {
+    return input.text;
+  }
+
+  const links =
+    input.textFormat === 'markdown'
+      ? linkButtons
+          .map((button) => `[${button.text}](${button.url})`)
+          .join(' · ')
+      : linkButtons.map((button) => `${button.text}: ${button.url}`).join('\n');
+
+  return input.text ? `${input.text}\n\n${links}` : links;
+}
+
 export class TeamsCommunicationProvider implements CommunicationProviderAdapter {
   readonly provider = 'teams' as const;
 
@@ -148,11 +177,12 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
         name: image.altText,
       })) ?? [];
     const attachments = [...(input.attachments ?? []), ...imageAttachments];
+    const text = appendTeamsButtonLinks(input);
 
     const result = await this.client.sendActivity({
       serviceUrl,
       conversationId: input.channelId,
-      ...(input.text !== undefined ? { text: input.text } : {}),
+      ...(text !== undefined ? { text } : {}),
       ...(input.textFormat ? { textFormat: input.textFormat } : {}),
       ...((input.replyToMessageId ?? input.threadId)
         ? { replyToActivityId: input.replyToMessageId ?? input.threadId }

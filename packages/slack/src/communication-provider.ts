@@ -1,6 +1,7 @@
 import type {
   CommunicationChannelMessagesResult,
   CommunicationMessage,
+  CommunicationMessageButton,
   CommunicationPostMessageInput,
   CommunicationPostMessageResult,
   CommunicationProviderAdapter,
@@ -40,6 +41,28 @@ function normalizeSlackMessage(
   };
 }
 
+/**
+ * Renders generic message buttons as one Block Kit actions block. Slack can
+ * only render link buttons generically; callback buttons need a registered
+ * interaction handler, so they are dropped here.
+ */
+function buildSlackButtonActionsBlock(
+  buttons: CommunicationMessageButton[][] | undefined,
+): Record<string, unknown> | null {
+  const elements = (buttons ?? [])
+    .flat()
+    .filter((button) => button.url)
+    .slice(0, 25)
+    .map((button, index) => ({
+      type: 'button',
+      action_id: `communication_link_button_${index}`,
+      text: { type: 'plain_text', text: button.text, emoji: false },
+      url: button.url,
+    }));
+
+  return elements.length > 0 ? { type: 'actions', elements } : null;
+}
+
 export class SlackCommunicationProvider implements CommunicationProviderAdapter {
   readonly provider = 'slack' as const;
 
@@ -54,7 +77,19 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
         image_url: image.url,
         alt_text: image.altText,
       })) ?? [];
-    const blocks = [...(input.blocks ?? []), ...imageBlocks];
+    const actionsBlock = buildSlackButtonActionsBlock(input.buttons);
+    // Once any block is present Slack demotes `text` to notification fallback,
+    // so a text-plus-buttons message keeps its body via a section block.
+    const bodyBlocks =
+      input.blocks ??
+      (actionsBlock && input.text
+        ? [{ type: 'section', text: { type: 'mrkdwn', text: input.text } }]
+        : []);
+    const blocks = [
+      ...bodyBlocks,
+      ...imageBlocks,
+      ...(actionsBlock ? [actionsBlock] : []),
+    ];
     const messageId = await this.slack.postMessage({
       channel: input.channelId,
       ...(input.threadId ? { thread_ts: input.threadId } : {}),

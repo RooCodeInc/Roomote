@@ -283,6 +283,7 @@ export async function handleWorkflowRunCompleted(
     // replies feed the automation's feedback context.
     try {
       await upsertBackgroundAutomationSlackThread(db, {
+        surface: 'slack',
         automationKey: 'ci_failure_triage',
         slackChannelId: channelId,
         threadTs: announcementTs,
