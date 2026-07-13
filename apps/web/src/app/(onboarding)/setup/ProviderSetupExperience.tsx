@@ -43,6 +43,7 @@ const MASKED_VALUE = '•••••••••••••••••••�
 
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   ...Object.keys(MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES),
+  'R_TEAMS_BOT_NAME',
   'R_TEAMS_BOT_TOKEN_ENDPOINT',
   'R_TEAMS_BOT_OAUTH_SCOPE',
 ]);
@@ -51,12 +52,15 @@ const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   'R_TELEGRAM_WEBHOOK_SECRET',
 ]);
 
-export function getSetupVisibleFields(provider: ProviderStatus | null) {
+export function getSetupVisibleFields(
+  provider: ProviderStatus | null,
+  options: { showMicrosoftAdvancedConfig?: boolean } = {},
+) {
   if (!provider) {
     return [];
   }
 
-  if (provider.id === 'microsoft') {
+  if (provider.id === 'microsoft' && !options.showMicrosoftAdvancedConfig) {
     return provider.fields.filter(
       (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
     );
@@ -114,9 +118,11 @@ export function getSetupEffectiveFieldValue({
 export function getSetupSubmitValues({
   provider,
   values,
+  showMicrosoftAdvancedConfig,
 }: {
   provider: ProviderStatus | null;
   values: Record<string, string>;
+  showMicrosoftAdvancedConfig?: boolean;
 }) {
   if (!provider) {
     return values;
@@ -124,7 +130,9 @@ export function getSetupSubmitValues({
 
   const nextValues = { ...values };
 
-  for (const field of getSetupVisibleFields(provider)) {
+  for (const field of getSetupVisibleFields(provider, {
+    showMicrosoftAdvancedConfig,
+  })) {
     if (nextValues[field.envVarName]?.trim()) {
       continue;
     }
@@ -303,9 +311,11 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
   envVarsInfoNote?: React.ReactNode;
   onShowManualSlackValues: () => void;
+  onToggleMicrosoftAdvancedConfig?: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
   onClearedSavedValueChange: (envVarName: string, cleared: boolean) => void;
@@ -396,7 +406,13 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
 }
 
 function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
-  const fields = getSetupVisibleFields(props.provider);
+  const fields = getSetupVisibleFields(props.provider, {
+    showMicrosoftAdvancedConfig: props.showMicrosoftAdvancedConfig,
+  });
+  const baseFields = getSetupVisibleFields(props.provider);
+  const advancedFields = props.provider.fields.filter((field) =>
+    MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+  );
   const providerSetupCopy = getProviderSetupCopy(props.provider.id);
   const webRedirectUri = `${props.publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`;
   const teamsWebhookUrl = `${props.publicOrigin}/api/webhooks/teams`;
@@ -466,7 +482,23 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           Paste the values below. For the secret, you need to create a client
           secret first.
         </p>
-        <ProviderFields fields={fields} {...props} />
+        <ProviderFields fields={baseFields} {...props} />
+        {advancedFields.length > 0 && props.onToggleMicrosoftAdvancedConfig ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
+              onClick={props.onToggleMicrosoftAdvancedConfig}
+            >
+              {props.showMicrosoftAdvancedConfig
+                ? 'Hide advanced config'
+                : 'Show advanced config'}
+            </button>
+          </div>
+        ) : null}
+        {props.showMicrosoftAdvancedConfig ? (
+          <ProviderFields fields={advancedFields} {...props} />
+        ) : null}
         {props.surface === 'settings' ? (
           <SettingsEnvVarsInfoNote
             runtimeConfigured={props.provider.runtimeSatisfied}

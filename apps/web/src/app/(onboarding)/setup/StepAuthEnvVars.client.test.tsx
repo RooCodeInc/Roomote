@@ -473,6 +473,9 @@ describe('StepAuthEnvVars', () => {
       screen.queryByPlaceholderText('Teams Bot App ID'),
     ).not.toBeInTheDocument();
     expect(
+      screen.queryByPlaceholderText('Bot display name'),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByPlaceholderText('Teams Bot App Password'),
     ).not.toBeInTheDocument();
     expect(
@@ -486,7 +489,58 @@ describe('StepAuthEnvVars', () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Teams Bot App ID (optional)')).toBeNull();
     expect(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByRole('link', { name: /create slack app/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('toggles Microsoft advanced Teams bot config fields', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: /hide advanced config/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Teams Bot App ID')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot App Password'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot Tenant ID'),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Bot display name')).toHaveValue(
+      'Roomote',
+    );
+    expect(
+      screen.getByPlaceholderText('Teams Bot Token Endpoint'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot OAuth Scope'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /hide advanced config/i }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot App ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Bot display name'),
     ).not.toBeInTheDocument();
   });
 
@@ -673,7 +727,6 @@ describe('StepAuthEnvVars', () => {
           R_MICROSOFT_CLIENT_ID: '11111111-2222-3333-4444-555555555555',
           R_MICROSOFT_CLIENT_SECRET: 'client-secret',
           R_MICROSOFT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
-          R_TEAMS_BOT_NAME: 'Roomote',
         },
       });
     });
@@ -693,6 +746,10 @@ describe('StepAuthEnvVars', () => {
         selectedProviderId="microsoft"
         onContinue={vi.fn()}
       />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /show advanced config/i }),
     );
 
     const botNameInput = screen.getByPlaceholderText('Bot display name');
