@@ -37,6 +37,7 @@ export const telegramSuggestedTasksOnboardingFollowupJob = async (
 
       await provider.postMessage({
         channelId: data.chatId,
+        ...(data.threadId ? { threadId: data.threadId } : {}),
         replyToMessageId: data.introMessageId,
         text: buildSuggestedTasksFollowupReminderText(),
         textFormat: 'markdown',

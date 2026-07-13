@@ -37,6 +37,16 @@ describe('StepAuthProvider', () => {
     expect(onContinue).not.toHaveBeenCalled();
   });
 
+  it('offers Telegram in the signed-in communication provider chooser', () => {
+    const onContinue = vi.fn();
+
+    render(<StepAuthProvider onContinue={onContinue} includeTelegram={true} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /telegram/i }));
+
+    expect(onContinue).toHaveBeenCalledWith('telegram');
+  });
+
   it('continues when clicking Slack', () => {
     const onContinue = vi.fn();
 

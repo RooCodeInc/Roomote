@@ -126,7 +126,7 @@ describe('MockTelegramServer', () => {
     ).rejects.toThrow('chat is not a forum');
   });
 
-  it('stores a bot message posted through the real provider and anchors the reply', async () => {
+  it('stores a bot message without quoting the inbound message', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -143,11 +143,11 @@ describe('MockTelegramServer', () => {
     const botMessage = messages.find((m) => m.from.is_bot);
     expect(botMessage).toBeDefined();
     expect(botMessage?.text).toBe('On it — taking a look now.');
-    expect(botMessage?.reply_to_message_id).toBe(1000);
+    expect(botMessage?.reply_to_message_id).toBeUndefined();
     expect(result.messageId).toBe(String(botMessage?.message_id));
   });
 
-  it('splits long markdown into multiple messages under the 4096 limit with reply on first and buttons on last', async () => {
+  it('splits long markdown into multiple unquoted messages with buttons on the last', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -174,9 +174,8 @@ describe('MockTelegramServer', () => {
       );
     }
 
-    expect(botMessages[0]?.reply_to_message_id).toBe(1000);
     expect(
-      botMessages.slice(1).every((m) => m.reply_to_message_id === undefined),
+      botMessages.every((message) => message.reply_to_message_id === undefined),
     ).toBe(true);
 
     const withButtons = botMessages.filter((m) => m.reply_markup !== undefined);

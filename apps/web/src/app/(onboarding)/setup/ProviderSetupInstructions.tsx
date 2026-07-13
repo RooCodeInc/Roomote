@@ -140,9 +140,6 @@ export function ProviderSetupInstructions({
           Telegram withholds a 15% fee from Stars purchases while this mode is
           enabled.
         </InstructionText>
-        <InstructionText heading="Webhook">
-          Roomote registers the webhook automatically when you save.
-        </InstructionText>
       </div>
     );
   }

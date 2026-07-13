@@ -1059,6 +1059,10 @@ describe('setup-new onboarding task start command', () => {
       channelId: '8846357662',
       messageId: '900',
     }));
+    const telegramCreateForumTopic = vi.fn(async () => ({
+      messageThreadId: '77',
+      name: 'Set up Roomote',
+    }));
 
     vi.mocked(resolveTelegramRuntimeCredentials).mockResolvedValue({
       botToken: 'bot-token',
@@ -1070,6 +1074,8 @@ describe('setup-new onboarding task start command', () => {
       this: unknown,
     ) {
       return {
+        getBotInfo: vi.fn(async () => ({ hasTopicsEnabled: true })),
+        createForumTopic: telegramCreateForumTopic,
         postMessage: telegramPostMessage,
       } as unknown as TelegramCommunicationProvider;
     });
@@ -1078,8 +1084,15 @@ describe('setup-new onboarding task start command', () => {
 
     expect(result.taskId).toBe('task-onboarding-1');
     expect(telegramPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: '8846357662' }),
+      expect.objectContaining({
+        channelId: '8846357662',
+        threadId: '77',
+      }),
     );
+    expect(telegramCreateForumTopic).toHaveBeenCalledWith({
+      channelId: '8846357662',
+      name: 'Set up Roomote',
+    });
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1091,6 +1104,8 @@ describe('setup-new onboarding task start command', () => {
             communicationProvider: 'telegram',
             communicationChannelId: '8846357662',
             communicationMessageId: '900',
+            communicationThreadId: '77',
+            telegramTaskTopic: true,
           }),
         }),
         initiator: { kind: 'user', userId: 'setup-test-user' },
@@ -1106,7 +1121,7 @@ describe('setup-new onboarding task start command', () => {
           slackChannel: null,
           chatHandoffProvider: 'telegram',
           chatHandoffChannelId: '8846357662',
-          chatHandoffThreadId: '900',
+          chatHandoffThreadId: '77',
           chatHandoffServiceUrl: null,
         }),
       }),

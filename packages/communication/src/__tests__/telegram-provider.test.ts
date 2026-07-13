@@ -104,7 +104,7 @@ describe('TelegramCommunicationProvider', () => {
     );
   });
 
-  it('sends Telegram messages through the Bot API', async () => {
+  it('sends topic messages without duplicative reply quotes', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -146,10 +146,6 @@ describe('TelegramCommunicationProvider', () => {
             is_disabled: true,
           },
           message_thread_id: 7,
-          reply_parameters: {
-            message_id: 42,
-            allow_sending_without_reply: true,
-          },
         }),
       }),
     );
@@ -262,7 +258,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: unknown };
 
-    expect(firstBody.reply_parameters).toBeDefined();
+    expect(firstBody.reply_parameters).toBeUndefined();
     expect(secondBody.reply_parameters).toBeUndefined();
   });
 
@@ -338,7 +334,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters?.message_id).toBe(42);
+    expect(photoBody.reply_parameters).toBeUndefined();
   });
 
   it('falls back to a link message when sendPhoto fails', async () => {

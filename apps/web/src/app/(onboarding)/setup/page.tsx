@@ -7,7 +7,6 @@ import { toast } from 'sonner';
 import {
   isComputeCredentialField,
   type ComputeProvider,
-  type SetupAuthProviderId,
   type SourceControlProvider,
 } from '@roomote/types';
 
@@ -29,7 +28,11 @@ import { StepAuthEnvVars } from './StepAuthEnvVars';
 import { StepBootstrapAccount } from './StepBootstrapAccount';
 import { StepBootstrapEmailPassword } from './StepBootstrapEmailPassword';
 import { StepSetupToken } from './StepSetupToken';
-import { StepAuthProvider } from './StepAuthProvider';
+import {
+  StepAuthProvider,
+  type CommunicationProviderChoice,
+} from './StepAuthProvider';
+import { StepTelegramSetup } from './StepTelegramSetup';
 import { StepInferenceProvider } from './StepInferenceProvider';
 import { StepComputeProvider } from './StepComputeProvider';
 import { StepComputeConfig } from './StepComputeConfig';
@@ -102,7 +105,7 @@ export default function SetupPage() {
     getInitialBootstrapStep,
   );
   const [pendingAuthProvider, setPendingAuthProvider] =
-    useState<SetupAuthProviderId | null>(null);
+    useState<CommunicationProviderChoice | null>(null);
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =
     useState<SourceControlProvider | null>(null);
   const [pendingComputeProvider, setPendingComputeProvider] =
@@ -151,7 +154,8 @@ export default function SetupPage() {
     isError,
   } = useSetupFlow({
     enabled: isSignedIn && isAdmin,
-    pendingAuthProvider,
+    pendingAuthProvider:
+      pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
   });
   const saveSourceControlProviderChoice = useMutation(
     trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
@@ -202,7 +206,7 @@ export default function SetupPage() {
   ).some((task) => task.suggestionId !== null);
   const bootstrapAuthProvider = getBootstrapAuthProvider(
     bootstrapStatus?.authSetup,
-    pendingAuthProvider,
+    pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
   );
   const setupRetryReason = status ? getSetupRetryReason(status) : null;
   const shouldEvaluateSetupRedirect = isSignedIn && isAdmin;
@@ -278,7 +282,7 @@ export default function SetupPage() {
 
       return getNextBootstrapStep(
         bootstrapStatus.authSetup,
-        pendingAuthProvider,
+        pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
       );
     });
   }, [bootstrapStatus, isSignedIn, pendingAuthProvider, router]);
@@ -353,6 +357,7 @@ export default function SetupPage() {
         {bootstrapStep === 'auth-provider' && (
           <StepAuthProvider
             onContinue={(provider) => {
+              if (provider === 'telegram') return;
               setPendingAuthProvider(provider);
               setBootstrapStep('auth-env-vars');
             }}
@@ -403,6 +408,7 @@ export default function SetupPage() {
       {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
       {step === 'auth-provider' && (
         <StepAuthProvider
+          includeTelegram
           onContinue={(provider) => {
             setPendingAuthProvider(provider);
             goToStep('auth-env-vars');
@@ -413,18 +419,28 @@ export default function SetupPage() {
           }}
         />
       )}
-      {step === 'auth-env-vars' && (
-        <StepAuthEnvVars
-          authSetup={status.authSetup}
-          selectedProviderId={pendingAuthProvider}
-          onContinue={() => {
-            setPendingAuthProvider(null);
-            goToNextStep();
-          }}
-          onBack={() => goToStep('auth-provider')}
-          bootstrapMode={false}
-        />
-      )}
+      {step === 'auth-env-vars' &&
+        (pendingAuthProvider === 'telegram' ? (
+          <StepTelegramSetup
+            onContinue={() => {
+              setupSession.setCommunicationStepState('completed');
+              setPendingAuthProvider(null);
+              goToNextStep();
+            }}
+            onBack={() => goToStep('auth-provider')}
+          />
+        ) : (
+          <StepAuthEnvVars
+            authSetup={status.authSetup}
+            selectedProviderId={pendingAuthProvider}
+            onContinue={() => {
+              setPendingAuthProvider(null);
+              goToNextStep();
+            }}
+            onBack={() => goToStep('auth-provider')}
+            bootstrapMode={false}
+          />
+        ))}
       {step === 'env-vars' && (
         <StepInferenceProvider
           modelSetup={status.modelSetup}

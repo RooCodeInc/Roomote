@@ -77,7 +77,7 @@ vi.mock('../primary-chat.js', () => ({
 }));
 
 vi.mock('../replies.js', () => ({
-  postTelegramMessageBestEffort: postTelegramMessageBestEffortMock,
+  postTelegramMessageInNewTopicBestEffort: postTelegramMessageBestEffortMock,
 }));
 
 import { postSetupTaskSuggestionsToTelegram } from '../setup-suggestions';
@@ -93,7 +93,10 @@ describe('postSetupTaskSuggestionsToTelegram', () => {
       onConflictDoNothing: insertOnConflictDoNothingMock,
     });
     insertOnConflictDoNothingMock.mockResolvedValue(undefined);
-    postTelegramMessageBestEffortMock.mockResolvedValue({ messageId: '900' });
+    postTelegramMessageBestEffortMock.mockResolvedValue({
+      messageId: '900',
+      threadId: '77',
+    });
     enqueueFollowupMock.mockResolvedValue({ enqueued: true, jobId: 'job-1' });
   });
 
@@ -109,12 +112,14 @@ describe('postSetupTaskSuggestionsToTelegram', () => {
 
     expect(postTelegramMessageBestEffortMock).toHaveBeenCalledTimes(1);
     const posted = postTelegramMessageBestEffortMock.mock.calls[0]![0] as {
+      topicName: string;
       text: string;
       buttons: Array<Array<{ text: string; callbackData?: string }>>;
     };
 
     expect(posted.text).toContain('First idea');
     expect(posted.text).toContain('Second idea');
+    expect(posted.topicName).toBe('Suggested tasks');
     expect(posted.buttons).toEqual([
       [{ text: '▶️ Start idea 1', callbackData: 'idea:aaa' }],
       [{ text: '▶️ Start idea 2', callbackData: 'idea:bbb' }],
@@ -170,6 +175,7 @@ describe('postSetupTaskSuggestionsToTelegram', () => {
 
     expect(enqueueFollowupMock).toHaveBeenCalledWith({
       chatId: '8846357662',
+      threadId: '77',
       introMessageId: '900',
       sourceTaskId: 'task-1',
     });

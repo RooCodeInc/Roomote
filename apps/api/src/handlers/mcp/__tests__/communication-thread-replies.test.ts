@@ -293,6 +293,18 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     );
   });
 
+  it('does not post the managed live-preview footer in Telegram', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledTimes(1);
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'done' }),
+    );
+  });
+
   it('delivers the reply even if the typing action fails', async () => {
     sendChatActionMock.mockRejectedValue(new Error('typing failed'));
 

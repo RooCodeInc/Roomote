@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { credentialsMock, findPrimaryChatMock, selectLimitMock } = vi.hoisted(
-  () => ({
-    credentialsMock: vi.fn(),
-    findPrimaryChatMock: vi.fn(),
-    selectLimitMock: vi.fn(),
-  }),
-);
+const {
+  credentialsMock,
+  findPrimaryChatMock,
+  postMessageMock,
+  selectLimitMock,
+} = vi.hoisted(() => ({
+  credentialsMock: vi.fn(),
+  findPrimaryChatMock: vi.fn(),
+  postMessageMock: vi.fn(),
+  selectLimitMock: vi.fn(),
+}));
 
 vi.mock('@roomote/db/server', () => ({
   slackInstallations: { id: 'id', isActive: 'isActive' },
@@ -26,14 +30,17 @@ vi.mock('../../../telegram/primary-chat.js', () => ({
 }));
 
 vi.mock('../../../telegram/replies.js', () => ({
-  postTelegramMessageBestEffort: vi.fn(),
+  postTelegramMessageInNewTopicBestEffort: postMessageMock,
 }));
 
 vi.mock('../../../slack/helpers/suggestion-workspace.js', () => ({
   buildSuggestionBadgePrefix: vi.fn(() => ''),
 }));
 
-import { resolveAutomationTelegramTarget } from '../telegram';
+import {
+  postLateBoundWorkItemFailureToTelegram,
+  resolveAutomationTelegramTarget,
+} from '../telegram';
 
 describe('resolveAutomationTelegramTarget', () => {
   beforeEach(() => {
@@ -71,5 +78,26 @@ describe('resolveAutomationTelegramTarget', () => {
 
     findPrimaryChatMock.mockResolvedValueOnce(null);
     await expect(resolveAutomationTelegramTarget()).resolves.toBeNull();
+  });
+
+  it('posts automation launch failures in their own topic', async () => {
+    await postLateBoundWorkItemFailureToTelegram({
+      chatId: '8846357662',
+      workItem: {
+        id: 'work-1',
+        title: 'Fix the flaky test',
+        brief: 'Investigate and fix it.',
+        category: null,
+        priority: null,
+      } as never,
+      reason: 'No environment was available.',
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: '8846357662',
+        topicName: 'Fix the flaky test',
+      }),
+    );
   });
 });
