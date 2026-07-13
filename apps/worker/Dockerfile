@@ -252,8 +252,9 @@ RUN sudo apt-get update \
   && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
   && sudo rm -rf /var/lib/apt/lists/*
 
-# Bump when local worker prerequisites change so dev startup rebuilds stale
-# cached images before launching tasks.
-LABEL dev.roomote.worker-image.schema-version="1"
+# Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
+# pass this explicitly; the default keeps direct/release Docker builds labeled.
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=1
+LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox

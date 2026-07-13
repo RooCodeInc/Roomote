@@ -2,6 +2,7 @@ import {
   db,
   deploymentSettings,
   eq,
+  sql,
   resolveComputeProviderEnvValues,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -15,16 +16,23 @@ import {
 } from '@roomote/compute-providers';
 import {
   isSetupNewComputeProvisioningStale,
+  buildSetupComputeStatus,
+  NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeSetupNewState,
   resolveDerivedModalBaseImageRef,
   SETUP_COMPUTE_PROVISIONING_STALE_MS,
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
+  WORKER_RUNTIME_SCHEMA_VERSION,
   type SetupComputeProviderStatus,
   type SetupNewComputeProvisioningState,
   type SetupProvisionableComputeProvider,
 } from '@roomote/types';
 
-import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
+import {
+  getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
+  upsertDeploymentEnvironmentVariables,
+} from '../environment-variables';
 
 /**
  * Shared worker base-image provisioning used by both the setup wizard and
@@ -146,6 +154,28 @@ export async function getPersistedComputeProvisioning(
   return state[SETUP_COMPUTE_PROVISIONING_STATE_FIELDS[provider]];
 }
 
+/** Serializes desired-state transitions and terminal result publication. */
+export async function acquireComputeProvisioningLock(
+  provider: SetupProvisionableComputeProvider,
+  executor: DatabaseOrTransaction,
+): Promise<void> {
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`compute-provisioning:${provider}`}))`,
+  );
+}
+
+function isCurrentComputeProvisioningAttempt(
+  current: SetupNewComputeProvisioningState | null,
+  expected: { imageRef: string; templateRef: string },
+): boolean {
+  return (
+    current?.status === 'building' &&
+    current.runtimeSchemaVersion === WORKER_RUNTIME_SCHEMA_VERSION &&
+    current.imageRef === expected.imageRef &&
+    current.templateRef === expected.templateRef
+  );
+}
+
 export async function persistComputeProvisioning(
   provider: SetupProvisionableComputeProvider,
   provisioning: SetupNewComputeProvisioningState,
@@ -210,12 +240,11 @@ function planComputeProvisioning({
     (field) => field.envVarName === config.envVarName,
   );
 
-  const artifactPending =
-    !!artifactField &&
-    !artifactField.runtimeSatisfied &&
-    !artifactField.savedSatisfied;
-
-  if (!artifactPending) {
+  // A process-env artifact is operator-managed and always wins. Saved
+  // artifacts are Roomote-managed, so they are current only when the
+  // persisted successful build matches both the desired worker image and the
+  // runtime schema. Missing version metadata intentionally forces one rebuild.
+  if (!artifactField || artifactField.runtimeSatisfied) {
     return { artifactPending: false, provisionable: false, runToStart: null };
   }
 
@@ -227,15 +256,33 @@ function planComputeProvisioning({
   });
 
   if (!workerImageRef) {
-    return { artifactPending: true, provisionable: false, runToStart: null };
+    return {
+      artifactPending: !artifactField.savedSatisfied,
+      provisionable: false,
+      runToStart: null,
+    };
+  }
+
+  const managedArtifactCurrent =
+    artifactField.savedSatisfied &&
+    existingState?.status === 'succeeded' &&
+    existingState.imageRef === workerImageRef &&
+    existingState.runtimeSchemaVersion === WORKER_RUNTIME_SCHEMA_VERSION;
+
+  if (managedArtifactCurrent) {
+    return { artifactPending: false, provisionable: false, runToStart: null };
   }
 
   const runInFlight =
     existingState?.status === 'building' &&
+    existingState.imageRef === workerImageRef &&
+    existingState.runtimeSchemaVersion === WORKER_RUNTIME_SCHEMA_VERSION &&
     !isSetupNewComputeProvisioningStale(existingState);
 
   return {
-    artifactPending: true,
+    // A saved artifact remains usable while its replacement builds. Only
+    // first-time provisioning blocks setup/task readiness.
+    artifactPending: !artifactField.savedSatisfied,
     provisionable: true,
     runToStart: runInFlight
       ? null
@@ -255,6 +302,7 @@ export function createPendingComputeProvisioning({
 }): SetupNewComputeProvisioningState {
   return {
     status: 'building',
+    runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
     imageRef,
     templateRef,
     error: null,
@@ -380,12 +428,15 @@ export async function runComputeProvisioning({
   templateRef,
 }: {
   provider: SetupProvisionableComputeProvider;
-  userId: string;
+  userId: string | null;
   imageRef: string;
   templateRef: string;
 }): Promise<void> {
   const config = PROVISIONING_PROVIDERS[provider];
-  const claimKey = `${provider}:${templateRef}`;
+  // The image ref is part of the desired build identity. Two registries can
+  // use the same tag/template name, and a newer desired image must not be
+  // suppressed by an older in-process build with that name.
+  const claimKey = `${provider}:${imageRef}:${templateRef}`;
 
   if (activeProvisioningClaims.has(claimKey)) {
     console.warn(
@@ -413,7 +464,19 @@ export async function runComputeProvisioning({
       templateRef,
     );
 
-    await db.transaction(async (tx) => {
+    const activated = await db.transaction(async (tx) => {
+      await acquireComputeProvisioningLock(provider, tx);
+      const current = await getPersistedComputeProvisioning(provider, tx);
+
+      if (
+        !isCurrentComputeProvisioningAttempt(current, {
+          imageRef,
+          templateRef,
+        })
+      ) {
+        return false;
+      }
+
       await upsertDeploymentEnvironmentVariables(tx, {
         userId,
         values: [{ name: config.envVarName, value: artifactRef }],
@@ -423,6 +486,7 @@ export async function runComputeProvisioning({
         provider,
         {
           status: 'succeeded',
+          runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
           imageRef,
           templateRef: artifactRef,
           error: null,
@@ -431,7 +495,18 @@ export async function runComputeProvisioning({
         },
         tx,
       );
+
+      return true;
     });
+
+    if (!activated) {
+      console.warn(
+        `[runComputeProvisioning] Ignoring superseded successful build ${JSON.stringify(
+          { provider, imageRef, templateRef, artifactRef },
+        )}`,
+      );
+      return;
+    }
 
     console.log(
       `[runComputeProvisioning] Provisioning succeeded ${JSON.stringify({
@@ -451,23 +526,123 @@ export async function runComputeProvisioning({
       })}`,
     );
 
-    await persistComputeProvisioning(provider, {
-      status: 'failed',
-      imageRef,
-      templateRef: null,
-      error: message,
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-    }).catch((persistError) => {
-      console.error(
-        `[runComputeProvisioning] Failed to persist provisioning failure: ${
-          persistError instanceof Error
-            ? persistError.message
-            : String(persistError)
-        }`,
-      );
-    });
+    await db
+      .transaction(async (tx) => {
+        await acquireComputeProvisioningLock(provider, tx);
+        const current = await getPersistedComputeProvisioning(provider, tx);
+
+        if (
+          !isCurrentComputeProvisioningAttempt(current, {
+            imageRef,
+            templateRef,
+          })
+        ) {
+          console.warn(
+            `[runComputeProvisioning] Ignoring superseded failed build ${JSON.stringify(
+              { provider, imageRef, templateRef },
+            )}`,
+          );
+          return;
+        }
+
+        await persistComputeProvisioning(
+          provider,
+          {
+            status: 'failed',
+            runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+            imageRef,
+            templateRef: null,
+            error: message,
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          },
+          tx,
+        );
+      })
+      .catch((persistError) => {
+        console.error(
+          `[runComputeProvisioning] Failed to persist provisioning failure: ${
+            persistError instanceof Error
+              ? persistError.message
+              : String(persistError)
+          }`,
+        );
+      });
   } finally {
     activeProvisioningClaims.delete(claimKey);
+  }
+}
+
+/**
+ * Reconciles Roomote-managed hosted artifacts at web-process startup. The
+ * build itself remains detached: startup only records an idempotent pending
+ * claim, and the old active artifact stays configured until the replacement
+ * succeeds. Task creation therefore continues to use the last known-good
+ * artifact during a rollout.
+ */
+export async function reconcileComputeProvisioningOnStartup(): Promise<void> {
+  const [persistedEnvVarNames, persistedEnvVarValues] = await Promise.all([
+    getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([
+      ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
+    ]),
+  ]);
+  const status = buildSetupComputeStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    persistedEnvVarValues,
+  });
+
+  for (const provider of Object.keys(
+    PROVISIONING_PROVIDERS,
+  ) as SetupProvisionableComputeProvider[]) {
+    try {
+      const providerStatus = status.providers.find(
+        (candidate) => candidate.provider === provider,
+      );
+
+      if (!providerStatus) continue;
+
+      const credentialsAvailable = providerStatus.fields
+        .filter(
+          (field) =>
+            field.category === 'credential' && field.required !== false,
+        )
+        .every((field) => field.runtimeSatisfied || field.savedSatisfied);
+
+      if (!credentialsAvailable) continue;
+
+      const start = await db.transaction(async (tx) => {
+        // Multiple web replicas can start on the same release. Serialize the
+        // read/claim transition so only one process records and launches the
+        // deterministic provider build.
+        await acquireComputeProvisioningLock(provider, tx);
+        const existingState = await getPersistedComputeProvisioning(
+          provider,
+          tx,
+        );
+        const prepared = await prepareComputeProvisioningStart({
+          provider,
+          providerStatus,
+          existingState,
+          dockerWorkerImage: process.env.DOCKER_WORKER_IMAGE,
+          runtimeEnv: process.env,
+          markPending: (nextState) =>
+            persistComputeProvisioning(provider, nextState, tx),
+        });
+
+        return prepared.start;
+      });
+
+      if (start) {
+        void runComputeProvisioning({ userId: null, ...start });
+      }
+    } catch (error) {
+      console.error(
+        `[reconcileComputeProvisioningOnStartup] Failed to reconcile ${provider}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }

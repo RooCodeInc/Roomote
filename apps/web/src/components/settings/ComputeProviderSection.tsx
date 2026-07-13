@@ -199,6 +199,7 @@ export function ComputeProviderSection({
       !field.savedSatisfied,
   );
   const provisioningRunning = provisioning?.status === 'building';
+  const provisioningRefresh = provisioningRunning && provider.configSatisfied;
   const provisioningFailed = provisioning?.status === 'failed';
   // Credentials are already satisfied when a save can still start or retry
   // auto-provisioning without retyping values (existing installs that later
@@ -523,8 +524,9 @@ export function ComputeProviderSection({
 
               {provisioningRunning && (
                 <p className="max-w-xl text-sm text-muted-foreground">
-                  Provisioning the worker base image. This can take a few
-                  minutes.
+                  {provisioningRefresh
+                    ? 'Updating the worker base image in the background. This can take several minutes; existing tasks keep using the current image until the replacement is ready.'
+                    : 'Provisioning the worker base image. This can take several minutes and must finish before this provider can run tasks.'}
                 </p>
               )}
 

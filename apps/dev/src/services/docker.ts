@@ -3,10 +3,13 @@ import path from 'path';
 import { execa } from 'execa';
 import ora from 'ora';
 import Docker from 'dockerode';
+import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 export const WORKER_IMAGE_SCHEMA_LABEL =
   'dev.roomote.worker-image.schema-version';
-export const WORKER_IMAGE_SCHEMA_VERSION = '1';
+export const WORKER_IMAGE_SCHEMA_VERSION = String(
+  WORKER_RUNTIME_SCHEMA_VERSION,
+);
 
 export class DockerService {
   private static readonly CURRENT_COMPOSE_PROJECT = 'roomote';
@@ -82,6 +85,8 @@ export class DockerService {
           'build',
           '--platform',
           platform,
+          '--build-arg',
+          `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
           '-f',
           'apps/worker/Dockerfile',
           '-t',

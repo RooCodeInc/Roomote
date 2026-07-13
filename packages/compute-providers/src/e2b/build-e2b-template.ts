@@ -1,4 +1,5 @@
 import { Template, type LogEntry } from 'e2b';
+import { WORKER_RUNTIME_SCHEMA_TAG } from '@roomote/types';
 
 /**
  * Default template name for the Roomote worker base template. The tag is
@@ -25,7 +26,7 @@ export interface BuildE2bWorkerTemplateOptions {
    * Docker tags are rejected up front.
    */
   imageRef: string;
-  /** Overrides the derived `roomote-worker:<image-tag>` template reference. */
+  /** Overrides the derived `roomote-worker:<image-tag>-r<schema>` reference. */
   templateRef?: string;
   cpuCount?: number;
   memoryMB?: number;
@@ -48,7 +49,7 @@ export function deriveE2bWorkerTemplateRef(imageRef: string): string {
     ? imageRef.slice(imageRef.lastIndexOf(':') + 1)
     : 'latest';
 
-  return `${E2B_WORKER_TEMPLATE_NAME}:${imageTag}`;
+  return `${E2B_WORKER_TEMPLATE_NAME}:${imageTag}-${WORKER_RUNTIME_SCHEMA_TAG}`;
 }
 
 /**

@@ -40,6 +40,7 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 import {
+  acquireComputeProvisioningLock,
   getPersistedComputeProvisioning,
   persistComputeProvisioning,
   prepareComputeProvisioningStart,
@@ -328,6 +329,7 @@ export async function saveComputeConfigCommand(
         );
 
       if (credentialsAvailable) {
+        await acquireComputeProvisioningLock(provisionableProvider, tx);
         const existingState = await getPersistedComputeProvisioning(
           provisionableProvider,
           tx,
