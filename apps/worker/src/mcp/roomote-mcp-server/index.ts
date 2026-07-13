@@ -1421,98 +1421,107 @@ if (shouldRegisterSlackChannelPostTool()) {
     },
   );
 
-  roomoteMcpServer.registerTool(
-    'post_to_slack_channel',
-    {
-      title: 'Post To Slack Channel',
-      description:
-        'Slack-visible: posts to a Slack channel that the Roomote Slack app is already a member of. ' +
-        'Use this only when the current user explicitly asks you to send or relay an update to a different Slack channel or thread than the originating thread. ' +
-        'Do not use it to answer a customer, third party, or linked Slack conversation just because that conversation appears in context. ' +
-        'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>. ' +
-        'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
-        'When the post mentions actionable code references, link the important ones with short-label GitHub blob permalinks at the exact inspected revision, add resolvable line anchors, and mention the file or symbol in prose rather than inventing a link. ' +
-        'The tool will not join channels for you.',
-      inputSchema: {
-        channel: z
-          .string()
-          .describe(
-            'Slack channel ID, channel name, or Slack channel mention that the app is already in',
-          ),
-        threadTs: z
-          .string()
-          .optional()
-          .describe(
-            'Optional Slack thread timestamp to post inside an existing thread in that channel',
-          ),
-        text: z
-          .string()
-          .optional()
-          .describe(
-            'Markdown text to post. ' +
-              'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
-              'Lead with the answer or takeaway, use short paragraphs with blank lines between them, and put each list item on its own line. ' +
-              'Reserve backticks for literal code, not emphasis.',
-          ),
-        imagePaths: z
-          .array(z.string())
-          .optional()
-          .describe(
-            'Optional workspace-relative or /tmp image file paths to upload and attach',
-          ),
-        imageArtifactIds: z
-          .array(z.string())
-          .optional()
-          .describe(
-            'Optional already-uploaded artifact IDs for images that should be attached',
-          ),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params): Promise<ToolResult> => {
-      const artifactConfig = getArtifactConfig();
-      if (!artifactConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const taskId = process.env.ROOMOTE_TASK_ID;
-      if (!taskId?.trim()) {
-        return errorResult('ROOMOTE_TASK_ID environment variable not set');
-      }
-
-      if (
-        hasSubmittedAutomationSlackSummary &&
-        process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
-      ) {
-        return errorResult(
-          'Automation suggestions were already submitted and posted to Slack. Do not call post_to_slack_channel for a duplicate summary.',
-        );
-      }
-
-      return handlePostToSlackChannel(
-        {
-          taskId,
-          channel: params.channel,
-          threadTs: params.threadTs,
-          text: params.text,
-          imagePaths: params.imagePaths,
-          imageArtifactIds: params.imageArtifactIds,
+  // Teams/Telegram tasks get the surface-generic post_to_channel instead;
+  // exposing the Slack-labeled tool there invites opaque conversation ids
+  // into Slack channel-name normalization, which mangles them.
+  if (!hasTeamsChatContext() && !hasTelegramChatContext()) {
+    roomoteMcpServer.registerTool(
+      'post_to_slack_channel',
+      {
+        title: 'Post To Slack Channel',
+        description:
+          'Slack-visible: posts to a Slack channel that the Roomote Slack app is already a member of. ' +
+          'Use this only when the current user explicitly asks you to send or relay an update to a different Slack channel or thread than the originating thread. ' +
+          'Do not use it to answer a customer, third party, or linked Slack conversation just because that conversation appears in context. ' +
+          'The channel can be a channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>. ' +
+          'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
+          'When the post mentions actionable code references, link the important ones with short-label GitHub blob permalinks at the exact inspected revision, add resolvable line anchors, and mention the file or symbol in prose rather than inventing a link. ' +
+          'The tool will not join channels for you.',
+        inputSchema: {
+          channel: z
+            .string()
+            .describe(
+              'Slack channel ID, channel name, or Slack channel mention that the app is already in',
+            ),
+          threadTs: z
+            .string()
+            .optional()
+            .describe(
+              'Optional Slack thread timestamp to post inside an existing thread in that channel',
+            ),
+          text: z
+            .string()
+            .optional()
+            .describe(
+              'Markdown text to post. ' +
+                'Slack messages posted by this tool render in Slack `markdown` blocks. Use modern Markdown as a readability tool when it improves scanability; headings, blockquotes, fenced code blocks, tables, links, and inline formatting are allowed when they make the reply clearer. ' +
+                'Lead with the answer or takeaway, use short paragraphs with blank lines between them, and put each list item on its own line. ' +
+                'Reserve backticks for literal code, not emphasis.',
+            ),
+          imagePaths: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Optional workspace-relative or /tmp image file paths to upload and attach',
+            ),
+          imageArtifactIds: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Optional already-uploaded artifact IDs for images that should be attached',
+            ),
         },
-        artifactConfig,
-        roomoteConfig,
-      );
-    },
-  );
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (params): Promise<ToolResult> => {
+        const artifactConfig = getArtifactConfig();
+        if (!artifactConfig) {
+          return errorResult(
+            'ROOMOTE_CLOUD_TOKEN environment variable not set',
+          );
+        }
+
+        const roomoteConfig = getRoomoteConfig();
+        if (!roomoteConfig) {
+          return errorResult(
+            'ROOMOTE_CLOUD_TOKEN environment variable not set',
+          );
+        }
+
+        const taskId = process.env.ROOMOTE_TASK_ID;
+        if (!taskId?.trim()) {
+          return errorResult('ROOMOTE_TASK_ID environment variable not set');
+        }
+
+        if (
+          hasSubmittedAutomationSlackSummary &&
+          process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan
+        ) {
+          return errorResult(
+            'Automation suggestions were already submitted and posted to Slack. Do not call post_to_slack_channel for a duplicate summary.',
+          );
+        }
+
+        return handlePostToSlackChannel(
+          {
+            taskId,
+            channel: params.channel,
+            threadTs: params.threadTs,
+            text: params.text,
+            imagePaths: params.imagePaths,
+            imageArtifactIds: params.imageArtifactIds,
+          },
+          artifactConfig,
+          roomoteConfig,
+        );
+      },
+    );
+  }
 }
 
 async function main() {

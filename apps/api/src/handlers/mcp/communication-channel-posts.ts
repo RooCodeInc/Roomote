@@ -117,13 +117,23 @@ async function sendTeamsChannelPost(params: {
     params.taskRun.payload,
   );
 
-  if (!isOwnChannel(params.parsedBody.channel, jobChannelId) || !serviceUrl) {
+  if (!isOwnChannel(params.parsedBody.channel, jobChannelId)) {
     return jsonResponse(
       {
         error:
           'Teams channel posts are only available for the conversation this task was launched from',
       },
       403,
+    );
+  }
+
+  if (!serviceUrl) {
+    return jsonResponse(
+      {
+        error:
+          'Teams channel posts require the Bot Framework serviceUrl from the task payload, which is missing for this task',
+      },
+      503,
     );
   }
 

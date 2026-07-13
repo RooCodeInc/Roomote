@@ -556,6 +556,12 @@ function parseRequestBody(body: unknown): {
   return { text, blocks, images };
 }
 
+/**
+ * Parses the channel target as-provided. Slack channel-name normalization
+ * happens later in the route, after the communication-provider dispatch, so
+ * opaque Teams conversation ids and Telegram chat ids reach the dispatch
+ * untouched (Slack normalization lowercases, which breaks Teams id matching).
+ */
 function parseChannelPostRequestBody(body: unknown): {
   channel: string;
   threadTs?: string;
@@ -576,21 +582,13 @@ function parseChannelPostRequestBody(body: unknown): {
     throw new Error('channel is required');
   }
 
-  const channelTarget = normalizeSlackChannelTarget(channel);
-  if (!channelTarget) {
-    throw new Error('channel is required');
-  }
-  if ('error' in channelTarget) {
-    throw new Error(channelTarget.error);
-  }
-
   const threadTs =
     typeof record.threadTs === 'string' && record.threadTs.trim().length > 0
       ? record.threadTs.trim()
       : undefined;
 
   return {
-    channel: channelTarget.value,
+    channel,
     threadTs,
     text: parsed.text,
     images: parsed.images,
@@ -1771,6 +1769,15 @@ slackMcp.post('/channel_post', async (c) => {
   if (communicationResponse) {
     return communicationResponse;
   }
+
+  const channelTarget = normalizeSlackChannelTarget(parsedBody.channel);
+  if (!channelTarget) {
+    return c.json({ error: 'channel is required' }, 400);
+  }
+  if ('error' in channelTarget) {
+    return c.json({ error: channelTarget.error }, 400);
+  }
+  parsedBody.channel = channelTarget.value;
 
   const slackInstallation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true },

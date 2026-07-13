@@ -40,7 +40,7 @@ const teamsTaskRun = {
   taskId: 'task-2',
   payload: {
     communicationProvider: 'teams',
-    communicationChannelId: '19:conversation@thread.v2',
+    communicationChannelId: '19:MEETING_MjJkYWJj@thread.v2',
     communicationServiceUrl: 'https://smba.trafficmanager.net/amer/',
   },
 };
@@ -66,7 +66,7 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
     teamsPostMessageMock.mockResolvedValue({
       provider: 'teams',
-      channelId: '19:conversation@thread.v2',
+      channelId: '19:MEETING_MjJkYWJj@thread.v2',
       messageId: 'activity-1',
     });
   });
@@ -124,14 +124,14 @@ describe('maybeSendCommunicationChannelPost', () => {
     const response = await maybeSendCommunicationChannelPost({
       taskRun: teamsTaskRun,
       parsedBody: {
-        channel: '19:conversation@thread.v2',
+        channel: '19:MEETING_MjJkYWJj@thread.v2',
         text: 'update',
         images: [],
       },
     });
 
     expect(teamsPostMessageMock).toHaveBeenCalledWith({
-      channelId: '19:conversation@thread.v2',
+      channelId: '19:MEETING_MjJkYWJj@thread.v2',
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
       text: 'update',
       textFormat: 'markdown',
@@ -139,7 +139,7 @@ describe('maybeSendCommunicationChannelPost', () => {
     });
     await expect(jsonBody(response!)).resolves.toEqual({
       messageTs: 'activity-1',
-      channelId: '19:conversation@thread.v2',
+      channelId: '19:MEETING_MjJkYWJj@thread.v2',
     });
   });
 
@@ -153,23 +153,23 @@ describe('maybeSendCommunicationChannelPost', () => {
     expect(teamsPostMessageMock).not.toHaveBeenCalled();
   });
 
-  it('rejects Teams posts when the task payload has no serviceUrl', async () => {
+  it('returns 503 when the task payload has no serviceUrl', async () => {
     const response = await maybeSendCommunicationChannelPost({
       taskRun: {
         ...teamsTaskRun,
         payload: {
           communicationProvider: 'teams',
-          communicationChannelId: '19:conversation@thread.v2',
+          communicationChannelId: '19:MEETING_MjJkYWJj@thread.v2',
         },
       },
       parsedBody: {
-        channel: '19:conversation@thread.v2',
+        channel: '19:MEETING_MjJkYWJj@thread.v2',
         text: 'update',
         images: [],
       },
     });
 
-    expect(response!.status).toBe(403);
+    expect(response!.status).toBe(503);
   });
 
   it('requires text or images', async () => {
