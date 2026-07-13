@@ -35,6 +35,11 @@ E2B_MAX_SANDBOX_TIMEOUT_MS=3600000
 Use `E2B_DOMAIN` only for self-hosted or custom E2B clusters. The default E2B
 domain is enough for standard hosted E2B.
 
+Roomote's provisioned E2B worker template includes Docker and Docker Compose,
+so environments can run [container projects](/environments/definition#container-projects).
+Container builds share the task's CPU and memory; use an appropriately sized
+sandbox for larger images or multi-service stacks.
+
 ## Verify setup
 
 1. save `E2B_API_KEY`

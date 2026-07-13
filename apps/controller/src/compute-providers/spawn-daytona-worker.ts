@@ -135,6 +135,12 @@ export async function spawnDaytonaWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
+  if (environmentConfig?.container_projects?.length) {
+    throw new NonRetryableSpawnError(
+      'Daytona does not support environment container projects. Use Docker, E2B, or Blaxel for this environment.',
+    );
+  }
+
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,

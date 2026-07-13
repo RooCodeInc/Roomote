@@ -11,6 +11,7 @@ import {
 import {
   Button,
   Checkbox,
+  Container,
   Database,
   GitBranch,
   Globe,
@@ -31,6 +32,7 @@ import {
 } from '@/components/system';
 
 import { KeyValueListEditor } from './KeyValueListEditor';
+import { ContainerProjectListEditor } from './ContainerProjectListEditor';
 import { PortListEditor } from './PortListEditor';
 import { RepositoryEditor } from './RepositoryEditor';
 import { FieldShell, SectionShell } from './VisualEnvironmentEditor.layout';
@@ -334,6 +336,31 @@ export function VisualEnvironmentEditor({
             />
           ))}
         </div>
+      </SectionShell>
+
+      <SectionShell
+        icon={Container}
+        title="Containers"
+        defaultOpen={Boolean(config.container_projects?.length)}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
+          Build and start an existing Docker Compose project or Dockerfile after
+          its repository is ready. Projects run inside this task&apos;s isolated
+          environment.
+        </p>
+        <ContainerProjectListEditor
+          projects={config.container_projects}
+          repositories={config.repositories}
+          ports={config.ports}
+          onChange={(next) =>
+            onChange(
+              updateEnvironmentConfig(config, (draft) => {
+                if (next) draft.container_projects = next;
+                else delete draft.container_projects;
+              }),
+            )
+          }
+        />
       </SectionShell>
 
       <SectionShell

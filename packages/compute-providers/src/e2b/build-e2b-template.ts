@@ -85,12 +85,14 @@ export async function buildE2bWorkerTemplate(
     })}`,
   );
 
-  const template = Template().fromImage(
-    imageRef,
-    registryUsername && registryPassword
-      ? { username: registryUsername, password: registryPassword }
-      : undefined,
-  );
+  const template = Template()
+    .fromImage(
+      imageRef,
+      registryUsername && registryPassword
+        ? { username: registryUsername, password: registryPassword }
+        : undefined,
+    )
+    .runCmd('sudo docker compose version');
 
   const buildInfo = await Template.build(template, templateRef, {
     apiKey,

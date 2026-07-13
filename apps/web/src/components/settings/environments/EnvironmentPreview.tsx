@@ -4,6 +4,7 @@ import type { ComponentType, ReactNode } from 'react';
 
 import {
   Badge,
+  Container,
   Database,
   GitBranch,
   Globe,
@@ -90,6 +91,31 @@ export function EnvironmentPreviewContent({
           ))}
         </div>
       </PreviewSection>
+
+      {config.container_projects?.length ? (
+        <PreviewSection icon={Container} title="Containers">
+          <div className="space-y-2">
+            {config.container_projects.map((project) => (
+              <div
+                key={project.name}
+                className="flex flex-wrap items-center gap-2 rounded border border-border/70 px-3 py-2 text-sm"
+              >
+                <span className="font-medium">{project.name}</span>
+                <Badge variant="secondary">
+                  {project.type === 'compose' ? 'Docker Compose' : 'Dockerfile'}
+                </Badge>
+                <code className="font-mono text-xs text-muted-foreground">
+                  {project.repository}
+                  {project.working_dir ? `/${project.working_dir}` : ''}
+                </code>
+                {project.required === false ? (
+                  <Badge variant="outline">optional</Badge>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </PreviewSection>
+      ) : null}
 
       {hasRecordEntries(config.env) ? (
         <PreviewSection icon={KeyRound} title="Environment Variables">

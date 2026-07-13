@@ -21,7 +21,13 @@ import {
 describe('Blaxel worker image provisioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFromRegistry.mockReturnValue({ hash: 'abc123', build: mockBuild });
+    const image = {
+      hash: 'abc123',
+      build: mockBuild,
+      runCommands: vi.fn(),
+    };
+    image.runCommands.mockReturnValue(image);
+    mockFromRegistry.mockReturnValue(image);
     mockDelete.mockResolvedValue(undefined);
   });
 

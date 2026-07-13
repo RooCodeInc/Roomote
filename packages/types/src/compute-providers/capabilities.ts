@@ -18,6 +18,8 @@ export interface ComputeProviderCapabilities {
   supportsStandbyResume: boolean;
   supportsResume: boolean;
   supportsFileWrite: boolean;
+  /** Can run customer-owned Docker Compose and Dockerfile projects. */
+  supportsContainerProjects: boolean;
 }
 
 export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
@@ -30,6 +32,7 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: true,
   supportsResume: true,
   supportsFileWrite: false,
+  supportsContainerProjects: true,
 };
 
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -42,6 +45,7 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
+  supportsContainerProjects: false,
 };
 
 export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
@@ -54,6 +58,7 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
+  supportsContainerProjects: false,
 };
 
 export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
@@ -66,6 +71,7 @@ export const E2B_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
+  supportsContainerProjects: true,
 };
 
 export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
@@ -78,6 +84,7 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: true,
   supportsResume: true,
   supportsFileWrite: true,
+  supportsContainerProjects: true,
 };
 
 export function getComputeProviderCapabilities(

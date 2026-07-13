@@ -68,6 +68,13 @@ The controller reconciles replacement API and preview-proxy containers onto
 running task networks, removes empty task networks periodically, and reaps
 stale provisioning containers after a restart.
 
+Environments that use [container projects](/environments/definition#container-projects)
+also receive a dedicated Docker daemon and workspace volume. Customer Compose
+services share the task's network namespace so configured preview ports keep
+the same task-scoped routing, while their Docker control plane is not exposed
+to other tasks. The daemon, inner containers, network, and workspace volume are
+stopped or removed with the task lifecycle.
+
 Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 512 PIDs,
 a requested 20 GiB writable-layer quota, and three 10 MiB JSON log files. The
 variables above can tune those bounds. Writable-layer quotas require a Docker

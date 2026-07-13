@@ -20,6 +20,14 @@ export interface BuiltBlaxelWorkerImage {
   imageName: string;
 }
 
+function createBlaxelWorkerImage(imageRef: string): ImageInstance {
+  return ImageInstance.fromRegistry(imageRef).runCommands(
+    'sudo update-alternatives --set iptables /usr/sbin/iptables-legacy',
+    'sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy',
+    'sudo docker compose version',
+  );
+}
+
 export function deriveBlaxelWorkerImageName(imageRef: string): string {
   if (!imageRef.includes('/')) {
     throw new Error(
@@ -27,7 +35,7 @@ export function deriveBlaxelWorkerImageName(imageRef: string): string {
     );
   }
 
-  const image = ImageInstance.fromRegistry(imageRef);
+  const image = createBlaxelWorkerImage(imageRef);
   return `${BLAXEL_WORKER_IMAGE_NAME_PREFIX}-${image.hash}`;
 }
 
@@ -41,7 +49,7 @@ export async function buildBlaxelWorkerImage(
 ): Promise<BuiltBlaxelWorkerImage> {
   const imageName =
     options.imageName ?? deriveBlaxelWorkerImageName(options.imageRef);
-  const image = ImageInstance.fromRegistry(options.imageRef);
+  const image = createBlaxelWorkerImage(options.imageRef);
 
   settings.setConfig({
     apiKey: options.apiKey,
