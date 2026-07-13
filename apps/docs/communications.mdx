@@ -1,7 +1,7 @@
 ---
 title: Communications
 icon: messages-square
-description: Connect Slack, Microsoft Teams, or Telegram so Roomote can start, continue, and summarize work from chat.
+description: Connect Slack, Microsoft Teams, Telegram, or Discord so Roomote can start, continue, and summarize work from chat.
 ---
 
 import { IntegrationName } from '/snippets/integration-name.jsx';
@@ -22,6 +22,7 @@ attention.
 | <IntegrationName href="/providers/communications/slack" icon="slack" name="Slack" /> | Teams that coordinate work in Slack channels and threads | Slack can also be used for Roomote sign-in. |
 | <IntegrationName href="/providers/communications/microsoft-teams" icon="microsoftteams" name="Microsoft Teams" /> | Teams that use Microsoft 365, Teams channels, and Microsoft Entra accounts | Microsoft can also be used for sign-in and account linking. |
 | <IntegrationName href="/providers/communications/telegram" icon="telegram" name="Telegram" /> | Lightweight personal, group, or forum-topic chat access | Telegram is a messaging provider, not a sign-in provider. |
+| <IntegrationName href="/providers/communications/discord" icon="discord" name="Discord" /> | Communities and teams that organize work in channels, threads, and forums | Discord is a messaging provider, not a sign-in provider. |
 
 Configure communications providers from **Settings > Communications**.
 
@@ -29,7 +30,7 @@ Configure communications providers from **Settings > Communications**.
 
 Before connecting a communications provider, make sure your deployment has:
 
-1. a stable public HTTPS URL that the provider can call back into
+1. a stable public HTTPS URL when the provider uses callbacks or webhooks
 2. provider app or bot credentials
 3. at least one Roomote user who can sign in
 4. an environment that tasks can run against
@@ -41,9 +42,10 @@ After connecting the provider, run a small task from chat and confirm that:
 - replies in the thread continue the same task
 - final summaries and links are posted back to chat
 
-Use the same stable public URL for every provider app setting. If you change
-that URL, update the provider callback or webhook settings and restart Roomote
-with the matching deployment URL.
+Use the same stable public URL for every provider app setting that requires a
+callback or webhook. If you change that URL, update those provider settings and
+restart Roomote with the matching deployment URL. Discord receives messages
+through its Gateway connection and does not need a public callback URL.
 
 ## Authentication and linking
 
@@ -60,6 +62,10 @@ and continue the right thread when someone replies later.
 If someone asks Roomote to do work from chat before their account is linked,
 Roomote prompts them to link the account and then continues once the link is
 complete.
+
+Telegram and Discord use one-time link codes instead of acting as sign-in
+providers. Generate a code under **Settings > Personal > Linked Accounts** and
+send the corresponding link command to the bot.
 
 ## Related setup
 

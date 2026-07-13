@@ -7,7 +7,8 @@
 # provision the managed resources, and `fly deploy`.
 #
 # Design notes:
-# - One shared `roomote-app` image runs web, api, controller, and bullmq as
+# - One shared `roomote-app` image runs web, api, controller, bullmq, and the
+#   Discord Gateway as
 #   Fly process groups; each group runs in its own Machine and selects its
 #   process through the image's entrypoint dispatcher
 #   (`.docker/app/entrypoint.sh`). Fly process commands correspond to Docker
@@ -108,6 +109,7 @@ swap_size_mb = 512
   api = 'api'
   controller = 'controller'
   bullmq = 'bullmq'
+  discord-gateway = 'discord-gateway'
 
 # The app origin users open in the browser.
 [http_service]

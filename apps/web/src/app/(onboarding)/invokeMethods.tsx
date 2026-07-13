@@ -19,7 +19,7 @@ type InvokeMethod = {
   example?: string;
 };
 
-type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
 const communicationProviderCopy: Record<
   CommunicationProviderId,
@@ -44,6 +44,12 @@ const communicationProviderCopy: Record<
     icon: 'telegram',
     title: 'Telegram',
     description: `start work from any connected chats.`,
+  },
+  discord: {
+    icon: 'discord',
+    title: 'Discord',
+    description:
+      'mention it in a server channel, use /new, or continue work in a task thread.',
   },
 };
 

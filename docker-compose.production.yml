@@ -62,6 +62,8 @@ x-roomote-production-env: &roomote-production-env
   R_SLACK_SIGNING_SECRET: ${R_SLACK_SIGNING_SECRET:-}
   R_TELEGRAM_BOT_TOKEN: ${R_TELEGRAM_BOT_TOKEN:-}
   R_TELEGRAM_WEBHOOK_SECRET: ${R_TELEGRAM_WEBHOOK_SECRET:-}
+  R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
+  R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
   R_LINEAR_CLIENT_ID: ${R_LINEAR_CLIENT_ID:-}
   R_LINEAR_CLIENT_SECRET: ${R_LINEAR_CLIENT_SECRET:-}
   R_LINEAR_WEBHOOK_SECRET: ${R_LINEAR_WEBHOOK_SECRET:-}
@@ -129,6 +131,21 @@ services:
         [
           'CMD-SHELL',
           'curl -fsS --max-time 2 http://127.0.0.1:3001/health/liveness >/dev/null',
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  discord-gateway:
+    environment:
+      <<: *roomote-production-env
+    ports: !reset []
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'curl -fsS --max-time 2 http://127.0.0.1:3003/health/liveness >/dev/null',
         ]
       interval: 5s
       timeout: 3s

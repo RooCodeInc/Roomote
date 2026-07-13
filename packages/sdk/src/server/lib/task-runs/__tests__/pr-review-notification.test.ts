@@ -275,6 +275,24 @@ describe('resolvePrReviewNotificationRoute', () => {
     });
   });
 
+  it('resolves Discord routes from provider-neutral payload fields', async () => {
+    const route = await resolvePrReviewNotificationRoute({
+      id: 1,
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+      },
+      taskId: 'task-1',
+    } as never);
+
+    expect(route).toEqual({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+  });
+
   it('resolves Slack routes through the shared Slack routing resolver', async () => {
     mockResolveSlackTaskRunRouting.mockResolvedValue({
       channel: 'C123',

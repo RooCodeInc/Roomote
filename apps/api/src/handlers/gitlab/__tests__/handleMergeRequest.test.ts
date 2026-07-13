@@ -4,6 +4,7 @@ const {
   mockUpdateTaskPrStatus,
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
+  mockNotifyDiscordPrMerge,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
   mockNotifyTelegramAndLinearPrMerge,
@@ -14,6 +15,7 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
+  mockNotifyDiscordPrMerge: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
   mockNotifyTelegramAndLinearPrMerge: vi.fn(),
@@ -50,6 +52,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../github/notifySlackPrMerge', () => ({
   notifySlackPrMerge: mockNotifySlackPrMerge,
+}));
+
+vi.mock('../../github/notifyDiscordPrMerge', () => ({
+  notifyDiscordPrMerge: mockNotifyDiscordPrMerge,
 }));
 
 vi.mock('../../github/notifyTeamsPrMerge', () => ({
@@ -101,12 +107,14 @@ describe('handleGitLabMergeRequest', () => {
     mockGetGitLabAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
+    mockNotifyDiscordPrMerge.mockReset();
     mockNotifySlackPrMerge.mockReset();
     mockNotifyTeamsPrMerge.mockReset();
     mockNotifyTelegramAndLinearPrMerge.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
 
     mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockNotifyDiscordPrMerge.mockResolvedValue(undefined);
     mockNotifySlackPrMerge.mockResolvedValue(undefined);
     mockNotifyTeamsPrMerge.mockResolvedValue(undefined);
     mockNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
@@ -261,6 +269,7 @@ describe('handleGitLabMergeRequest', () => {
 
     expect(mockNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
     expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockNotifyDiscordPrMerge).toHaveBeenCalledWith(expectedParams);
     expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
       ...expectedParams,
       sourceControlProvider: 'gitlab',
@@ -278,6 +287,7 @@ describe('handleGitLabMergeRequest', () => {
     );
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
   });
 
@@ -288,6 +298,7 @@ describe('handleGitLabMergeRequest', () => {
 
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
   });
 });

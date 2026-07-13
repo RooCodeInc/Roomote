@@ -40,11 +40,17 @@ describe('StepAuthProvider', () => {
   it('offers Telegram in the signed-in communication provider chooser', () => {
     const onContinue = vi.fn();
 
-    render(<StepAuthProvider onContinue={onContinue} includeTelegram={true} />);
+    render(
+      <StepAuthProvider
+        onContinue={onContinue}
+        additionalProviders={['telegram', 'discord']}
+      />,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /telegram/i }));
 
     expect(onContinue).toHaveBeenCalledWith('telegram');
+    expect(screen.getByRole('button', { name: /discord/i })).toBeVisible();
   });
 
   it('continues when clicking Slack', () => {

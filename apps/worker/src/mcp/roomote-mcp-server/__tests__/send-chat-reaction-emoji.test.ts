@@ -49,7 +49,7 @@ describe('handleSendChatReactionEmoji', () => {
     expect(JSON.parse(result.content[0]!.text)).toEqual({
       success: false,
       error:
-        'no chat channel is configured for this task (ROOMOTE_SLACK_CHANNEL or Telegram/Teams communication context)',
+        'no chat channel is configured for this task (ROOMOTE_SLACK_CHANNEL or communication provider context)',
     });
   });
 
@@ -162,6 +162,33 @@ describe('handleSendChatReactionEmoji', () => {
       success: true,
       channelId: '19:conversation@thread.v2;messageid=activity-root',
       messageTs: 'activity-followup',
+      name: 'eyes',
+    });
+  });
+
+  it('reacts to the active Discord turn using the task thread context', async () => {
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'discord';
+    process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID = 'channel-1';
+    process.env.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = writeState({
+      currentTurnMessageTs: 'message-1',
+    });
+    vi.mocked(addReactionToChatMessage).mockResolvedValueOnce({
+      channelId: 'channel-1',
+      messageTs: 'message-1',
+      name: 'eyes',
+    });
+
+    const result = await handleSendChatReactionEmoji({ name: 'eyes' }, config);
+
+    expect(addReactionToChatMessage).toHaveBeenCalledWith(config, {
+      channel: 'channel-1',
+      messageTs: 'message-1',
+      name: 'eyes',
+    });
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: true,
+      channelId: 'channel-1',
+      messageTs: 'message-1',
       name: 'eyes',
     });
   });

@@ -11,6 +11,7 @@ import { launchActWorkItems, type AutomationChatTarget } from './launch.js';
 import { resolveAutomationTelegramTarget } from './telegram.js';
 import { resolveAutomationTeamsTarget } from './teams.js';
 import { resolveAutomationSlackTarget } from './slack.js';
+import { resolveAutomationDiscordTarget } from './discord.js';
 import type { AutomationKey } from './source.js';
 import type {
   PersistedAutomationWorkItem,
@@ -183,7 +184,8 @@ export async function submitAutoActWorkItems(params: {
         threadTs: sourceThreadTs ?? null,
       } satisfies AutomationChatTarget)
     : launchableActItems.length > 0
-      ? ((await resolveAutomationTelegramTarget()) ??
+      ? ((await resolveAutomationDiscordTarget()) ??
+        (await resolveAutomationTelegramTarget()) ??
         (await resolveAutomationTeamsTarget()))
       : null;
   const launchResult = await launchActWorkItems({

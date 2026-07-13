@@ -5,6 +5,7 @@ const {
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
   mockDedupSelect,
+  mockNotifyDiscordPrMerge,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
   mockNotifyTelegramAndLinearPrMerge,
@@ -17,6 +18,7 @@ const {
   // Resolves the rows for each `db.select().from(tasks).innerJoin(...)`
   // dedup lookup, in call order.
   mockDedupSelect: vi.fn(),
+  mockNotifyDiscordPrMerge: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
   mockNotifyTelegramAndLinearPrMerge: vi.fn(),
@@ -92,6 +94,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../../github/notifySlackPrMerge', () => ({
   notifySlackPrMerge: mockNotifySlackPrMerge,
+}));
+
+vi.mock('../../github/notifyDiscordPrMerge', () => ({
+  notifyDiscordPrMerge: mockNotifyDiscordPrMerge,
 }));
 
 vi.mock('../../github/notifyTeamsPrMerge', () => ({
@@ -171,12 +177,14 @@ describe('handleAdoPullRequest', () => {
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
     mockDedupSelect.mockReset();
+    mockNotifyDiscordPrMerge.mockReset();
     mockNotifySlackPrMerge.mockReset();
     mockNotifyTeamsPrMerge.mockReset();
     mockNotifyTelegramAndLinearPrMerge.mockReset();
 
     mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
     mockDedupSelect.mockReturnValue([]);
+    mockNotifyDiscordPrMerge.mockResolvedValue(undefined);
     mockNotifySlackPrMerge.mockResolvedValue(undefined);
     mockNotifyTeamsPrMerge.mockResolvedValue(undefined);
     mockNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
@@ -396,6 +404,14 @@ describe('handleAdoPullRequest', () => {
       prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
       mergedBy: 'roomote-bot@acme.example',
     });
+    expect(mockNotifyDiscordPrMerge).toHaveBeenCalledWith({
+      sourceControlProvider: 'ado',
+      repository: 'acme/Platform/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      mergedBy: 'roomote-bot@acme.example',
+    });
     expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
       repository: 'acme/Platform/backend',
       prNumber: 42,
@@ -420,6 +436,7 @@ describe('handleAdoPullRequest', () => {
     expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
@@ -438,6 +455,7 @@ describe('handleAdoPullRequest', () => {
     );
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
   });
 });

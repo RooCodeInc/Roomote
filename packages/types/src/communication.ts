@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-export const communicationProviders = ['slack', 'teams', 'telegram'] as const;
+export const communicationProviders = [
+  'slack',
+  'teams',
+  'telegram',
+  'discord',
+] as const;
 
 export const communicationProviderSchema = z.enum(communicationProviders);
 
@@ -10,6 +15,7 @@ export const communicationProviderQueuePrefixes = {
   slack: 'slack:messages:',
   teams: 'teams:messages:',
   telegram: 'telegram:messages:',
+  discord: 'discord:messages:',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderQueuePrefix(
@@ -22,6 +28,7 @@ export const communicationProviderDisplayNames = {
   slack: 'Slack',
   teams: 'Microsoft Teams',
   telegram: 'Telegram',
+  discord: 'Discord',
 } as const satisfies Record<CommunicationProvider, string>;
 
 export function getCommunicationProviderDisplayName(

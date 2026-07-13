@@ -166,9 +166,14 @@ export function createCommunicationMessageInterval({
           return;
         }
 
-        if (provider === 'telegram' || provider === 'teams') {
-          // Telegram and Teams turns feed the same satisfaction machinery as
-          // Slack so ack/closeout enforcement and current-turn reactions work.
+        if (
+          provider === 'telegram' ||
+          provider === 'teams' ||
+          provider === 'discord'
+        ) {
+          // Telegram, Teams, and Discord turns feed the same satisfaction
+          // machinery as Slack so ack/closeout enforcement and current-turn
+          // reactions work.
           recordChatTurnStart({
             turnMessageTs: message.ts,
             allowReaction: message.turnPolicy?.reactionsAllowed,

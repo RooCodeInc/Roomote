@@ -5,9 +5,6 @@ const config: KnipConfig = {
     // ── Root ──────────────────────────────────────────────
     '.': {
       project: ['scripts/**/*.ts'],
-      // Used from package.json `changeset` / `version` scripts, not imported.
-      ignoreDependencies: ['@changesets/cli'],
-      ignoreBinaries: ['changeset'],
     },
 
     // ── Apps ──────────────────────────────────────────────

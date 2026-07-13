@@ -153,6 +153,38 @@ describe('OIDC middleware composition', () => {
     expect(middlewareState.tokenRequestPaths).toEqual([]);
   });
 
+  it('lets the Discord Gateway route perform its own shared-secret validation', async () => {
+    const previousSecret = process.env.R_DISCORD_GATEWAY_SECRET;
+    process.env.R_DISCORD_GATEWAY_SECRET = 'expected-discord-secret';
+    try {
+      const response = await createApiApp().request(
+        'http://localhost/api/internal/discord/events',
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer unexpected-client-token',
+            'content-type': 'application/json',
+            'x-roomote-discord-gateway-secret': 'wrong-secret',
+          },
+          body: JSON.stringify({}),
+        },
+      );
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'discord_gateway_unauthorized',
+      });
+      expect(middlewareState.tokenRequestPaths).toEqual([]);
+    } finally {
+      if (previousSecret === undefined) {
+        delete process.env.R_DISCORD_GATEWAY_SECRET;
+      } else {
+        process.env.R_DISCORD_GATEWAY_SECRET = previousSecret;
+      }
+    }
+  });
+
   it('continues to run token auth middleware for non-public API routes', async () => {
     await createApiApp().request('http://localhost/api/task-runs/123/logs');
 

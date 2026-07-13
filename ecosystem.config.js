@@ -34,6 +34,7 @@ const localPorts = {
   web: Number(process.env.ROOMOTE_WEB_PORT || 13000),
   api: Number(process.env.ROOMOTE_API_PORT || 13001),
   bullmq: Number(process.env.ROOMOTE_BULLMQ_PORT || 13002),
+  discordGateway: Number(process.env.ROOMOTE_DISCORD_GATEWAY_PORT || 13003),
   previewProxy: Number(process.env.ROOMOTE_PREVIEW_PROXY_PORT || 18081),
 };
 const publicUrl = process.env.R_PUBLIC_URL;
@@ -86,6 +87,10 @@ const defaultEnv = {
   SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
   R_SLACK_SIGNING_SECRET: process.env.R_SLACK_SIGNING_SECRET,
 
+  // Discord bot credentials and the gateway-to-API authentication secret:
+  R_DISCORD_BOT_TOKEN: process.env.R_DISCORD_BOT_TOKEN,
+  R_DISCORD_GATEWAY_SECRET: process.env.R_DISCORD_GATEWAY_SECRET,
+
   // Linear app credentials:
   R_LINEAR_CLIENT_ID: process.env.R_LINEAR_CLIENT_ID,
   R_LINEAR_CLIENT_SECRET: process.env.R_LINEAR_CLIENT_SECRET,
@@ -126,6 +131,9 @@ const app = (name, opts = {}) => ({
 
 const apps = [
   app('api', { env: { ...env, PORT: String(localPorts.api) } }),
+  app('discord-gateway', {
+    env: { ...env, PORT: String(localPorts.discordGateway) },
+  }),
   app('web', {
     env: {
       ...env,

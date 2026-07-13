@@ -36,6 +36,7 @@ interface PM2Process {
 
 const LOCAL_SERVICES = [
   'roomote-api',
+  'roomote-discord-gateway',
   'roomote-web',
   'roomote-preview-proxy',
   'roomote-bullmq',
@@ -49,6 +50,7 @@ const OWNED_NGROK_SERVICES = [
 ];
 const LEGACY_LOCAL_SERVICES = [
   'api',
+  'discord-gateway',
   'web',
   'preview-proxy',
   'bullmq',

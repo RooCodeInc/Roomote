@@ -44,6 +44,7 @@ import {
   linear,
   teams,
   telegram,
+  discord,
   mcp,
   mcpRouting,
   taskRunsRouter,
@@ -69,6 +70,7 @@ const PUBLIC_OIDC_PATHS = new Set([
 const SELF_AUTHENTICATING_WEBHOOK_PATHS = new Set([
   '/api/webhooks/teams',
   '/api/webhooks/telegram',
+  '/api/internal/discord/events',
 ]);
 
 type ListenOptions = {
@@ -189,6 +191,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/linear', linear);
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
+  app.route('/api/internal/discord', discord);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
   app.route('/api/task-runs', taskRunsRouter);

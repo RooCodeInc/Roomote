@@ -1,5 +1,3 @@
-import { db, eq, slackInstallations } from '@roomote/db/server';
-
 import {
   findTeamsPrimaryConversation,
   postTeamsAutomationMessageBestEffort,
@@ -8,29 +6,14 @@ import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-works
 import type { PersistedAutomationWorkItem } from './types.js';
 
 /**
- * Teams destination for automation execution output when the deployment has
- * neither a Slack installation nor a Telegram destination: the primary
- * Teams conversation. Callers try Slack, then Telegram, then this.
+ * Resolves the Teams primary conversation. The caller applies provider
+ * precedence before invoking this fallback.
  */
 export async function resolveAutomationTeamsTarget(): Promise<{
   provider: 'teams';
   conversationId: string;
   serviceUrl: string;
 } | null> {
-  // Match the other automation paths' gate: Slack-installed deployments
-  // keep automation output on Slack even when a channel is temporarily
-  // unresolvable, so summaries and execution closeouts never split across
-  // surfaces.
-  const [slackInstallation] = await db
-    .select({ id: slackInstallations.id })
-    .from(slackInstallations)
-    .where(eq(slackInstallations.isActive, true))
-    .limit(1);
-
-  if (slackInstallation) {
-    return null;
-  }
-
   const conversation = await findTeamsPrimaryConversation();
 
   if (!conversation) {

@@ -5,17 +5,22 @@ import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PRODUCT_NAME } from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
+import {
+  Button,
+  Loader2,
+  ArrowRight,
+  Checkbox,
+  CornerDownRight,
+} from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
-import { CornerDownRight } from 'lucide-react';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
-type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
 export function StepInvoke({
   onTryItOut,
@@ -37,11 +42,12 @@ export function StepInvoke({
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const effectiveCommunicationProviders = [
     ...communicationProviders,
-    ...(commsStatus.data?.providers?.some(
-      (provider) => provider.id === 'telegram' && provider.setupSatisfied,
-    ) && !communicationProviders.includes('telegram')
-      ? (['telegram'] as const)
-      : []),
+    ...(['telegram', 'discord'] as const).filter(
+      (providerId) =>
+        commsStatus.data?.providers?.some(
+          (provider) => provider.id === providerId && provider.setupSatisfied,
+        ) && !communicationProviders.includes(providerId),
+    ),
   ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);

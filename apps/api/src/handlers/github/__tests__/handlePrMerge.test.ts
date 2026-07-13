@@ -4,6 +4,10 @@ vi.mock('../notifySlackPrMerge', () => ({
   notifySlackPrMerge: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../notifyDiscordPrMerge', () => ({
+  notifyDiscordPrMerge: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../notifyTeamsPrMerge', () => ({
   notifyTeamsPrMerge: vi.fn().mockResolvedValue(undefined),
 }));
@@ -13,6 +17,7 @@ vi.mock('../notifyTelegramAndLinearPrMerge', () => ({
 }));
 
 import { handlePrMerge } from '../handlePrMerge';
+import { notifyDiscordPrMerge } from '../notifyDiscordPrMerge';
 import { notifySlackPrMerge } from '../notifySlackPrMerge';
 import { notifyTeamsPrMerge } from '../notifyTeamsPrMerge';
 import { notifyTelegramAndLinearPrMerge } from '../notifyTelegramAndLinearPrMerge';
@@ -20,6 +25,7 @@ import { notifyTelegramAndLinearPrMerge } from '../notifyTelegramAndLinearPrMerg
 import type { WebhookPullRequestClosed } from '../types';
 
 const mockedNotifySlackPrMerge = vi.mocked(notifySlackPrMerge);
+const mockedNotifyDiscordPrMerge = vi.mocked(notifyDiscordPrMerge);
 const mockedNotifyTeamsPrMerge = vi.mocked(notifyTeamsPrMerge);
 const mockedNotifyTelegramAndLinearPrMerge = vi.mocked(
   notifyTelegramAndLinearPrMerge,
@@ -66,6 +72,10 @@ function makePayload(
 describe('handlePrMerge', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedNotifySlackPrMerge.mockResolvedValue(undefined);
+    mockedNotifyDiscordPrMerge.mockResolvedValue(undefined);
+    mockedNotifyTeamsPrMerge.mockResolvedValue(undefined);
+    mockedNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
   });
 
   it('does not notify Slack when PR is not merged', async () => {
@@ -75,11 +85,12 @@ describe('handlePrMerge', () => {
 
     expect(result.status).toBe('ok');
     expect(mockedNotifySlackPrMerge).not.toHaveBeenCalled();
+    expect(mockedNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockedNotifyTeamsPrMerge).not.toHaveBeenCalled();
     expect(mockedNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
   });
 
-  it('notifies Slack, Teams, and Telegram/Linear for merged PRs', async () => {
+  it('fans merged PRs out to every communication notifier', async () => {
     const payload = makePayload();
 
     const result = await handlePrMerge(payload);
@@ -95,6 +106,7 @@ describe('handlePrMerge', () => {
       mergedBy: 'merger',
     };
     expect(mockedNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockedNotifyDiscordPrMerge).toHaveBeenCalledWith(expectedParams);
     expect(mockedNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);
     expect(mockedNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
       ...expectedParams,
@@ -109,6 +121,7 @@ describe('handlePrMerge', () => {
 
     expect(result.status).toBe('ok');
     expect(mockedNotifySlackPrMerge).not.toHaveBeenCalled();
+    expect(mockedNotifyDiscordPrMerge).not.toHaveBeenCalled();
     expect(mockedNotifyTeamsPrMerge).not.toHaveBeenCalled();
     expect(mockedNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
   });
@@ -130,6 +143,14 @@ describe('handlePrMerge', () => {
 
     // Should not throw because the notification is fire-and-forget
     const result = await handlePrMerge(payload);
+    expect(result.status).toBe('ok');
+  });
+
+  it('does not throw when notifyDiscordPrMerge rejects', async () => {
+    mockedNotifyDiscordPrMerge.mockRejectedValue(new Error('Discord is down'));
+
+    const result = await handlePrMerge(makePayload());
+
     expect(result.status).toBe('ok');
   });
 });

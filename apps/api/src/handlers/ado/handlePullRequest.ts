@@ -26,6 +26,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
+import { notifyDiscordPrMerge } from '../github/notifyDiscordPrMerge';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
 import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
 import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
@@ -118,6 +119,14 @@ async function notifyMergedPullRequestThreads(
   notifyTeamsPrMerge(notificationParams).catch((error) => {
     console.error(
       `[handleAdoPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+
+  notifyDiscordPrMerge(notificationParams).catch((error) => {
+    console.error(
+      `[handleAdoPullRequest] Failed to notify Discord for PR #${notificationParams.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

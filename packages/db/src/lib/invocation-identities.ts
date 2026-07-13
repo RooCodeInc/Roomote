@@ -1,4 +1,5 @@
 import {
+  buildDiscordInvocationIdentity,
   buildGenericInvocationIdentity,
   buildGitHubInvocationIdentity,
   buildSlackInvocationIdentity,
@@ -10,6 +11,7 @@ import { desc, eq } from 'drizzle-orm';
 
 import { db } from '../db';
 import { slackInstallations, teamsInstallations } from '../schema';
+import { resolveDiscordRuntimeCredentials } from './discord-runtime-credentials';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 import { resolveTelegramRuntimeCredentials } from './telegram-runtime-credentials';
 
@@ -26,26 +28,31 @@ export async function resolveInvocationIdentities(): Promise<
   InvocationIdentity[]
 > {
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
-  const [slackInstallation, teamsInstallation, telegramCredentials] =
-    await Promise.all([
-      db.query.slackInstallations.findFirst({
-        where: eq(slackInstallations.isActive, true),
-        orderBy: [desc(slackInstallations.updatedAt)],
-        columns: {
-          botUserId: true,
-          botName: true,
-          appName: true,
-        },
-      }),
-      db.query.teamsInstallations.findFirst({
-        where: eq(teamsInstallations.isActive, true),
-        orderBy: [desc(teamsInstallations.updatedAt)],
-        columns: {
-          botName: true,
-        },
-      }),
-      resolveTelegramRuntimeCredentials(),
-    ]);
+  const [
+    slackInstallation,
+    teamsInstallation,
+    telegramCredentials,
+    discordCredentials,
+  ] = await Promise.all([
+    db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      orderBy: [desc(slackInstallations.updatedAt)],
+      columns: {
+        botUserId: true,
+        botName: true,
+        appName: true,
+      },
+    }),
+    db.query.teamsInstallations.findFirst({
+      where: eq(teamsInstallations.isActive, true),
+      orderBy: [desc(teamsInstallations.updatedAt)],
+      columns: {
+        botName: true,
+      },
+    }),
+    resolveTelegramRuntimeCredentials(),
+    resolveDiscordRuntimeCredentials(),
+  ]);
 
   const githubSlug = readConfiguredValue(
     'R_GITHUB_APP_SLUG',
@@ -71,6 +78,11 @@ export async function resolveInvocationIdentities(): Promise<
       configured: Boolean(configuredTeamsBotName || teamsInstallation?.botName),
     }),
     buildTelegramInvocationIdentity(telegramCredentials.botUsername),
+    buildDiscordInvocationIdentity({
+      botUserId: discordCredentials.botUserId,
+      username: discordCredentials.botUsername,
+      displayName: discordCredentials.botDisplayName,
+    }),
     buildGitHubInvocationIdentity(githubSlug),
     buildGenericInvocationIdentity('linear', 'Linear'),
     buildGenericInvocationIdentity('gitlab', 'GitLab'),

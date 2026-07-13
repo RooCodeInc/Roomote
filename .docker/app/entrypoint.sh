@@ -59,6 +59,10 @@ case "$service" in
     cd /roomote/apps/bullmq
     exec /roomote/.docker/run-with-dotenvx.sh node dist/index.js "$@"
     ;;
+  discord-gateway)
+    cd /roomote/apps/discord-gateway
+    exec /roomote/.docker/run-with-dotenvx.sh node dist/index.js "$@"
+    ;;
   preview-proxy)
     exec /entrypoint.sh "$@"
     ;;
@@ -67,7 +71,7 @@ case "$service" in
     ;;
   *)
     echo "roomote-app: unknown service '${service}'." >&2
-    echo "Usage: <web|api|controller|bullmq|preview-proxy|db-migrate> [args...]" >&2
+    echo "Usage: <web|api|controller|bullmq|discord-gateway|preview-proxy|db-migrate> [args...]" >&2
     exit 64
     ;;
 esac

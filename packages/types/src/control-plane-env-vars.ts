@@ -33,12 +33,14 @@ export const SOURCE_CONTROL_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set(
 
 /**
  * Bot / messaging integration secrets that are not covered by a shared setup
- * catalog (Telegram, Microsoft Teams bot, Linear).
+ * catalog (Telegram, Discord, Microsoft Teams bot, Linear).
  */
 export const INTEGRATION_BOT_SECRET_ENV_VAR_NAMES: ReadonlySet<string> =
   new Set([
     'R_TELEGRAM_BOT_TOKEN',
     'R_TELEGRAM_WEBHOOK_SECRET',
+    'R_DISCORD_BOT_TOKEN',
+    'R_DISCORD_GATEWAY_SECRET',
     'R_TEAMS_BOT_APP_ID',
     'R_TEAMS_BOT_APP_PASSWORD',
     'R_TEAMS_BOT_TENANT_ID',

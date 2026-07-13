@@ -96,6 +96,7 @@ export type RoutingSource =
   | SlackRoutingSource
   | TeamsRoutingSource
   | TelegramRoutingSource
+  | DiscordRoutingSource
   | LinearRoutingSource
   | GitHubRoutingSource;
 
@@ -118,6 +119,14 @@ export interface TeamsRoutingSource {
 export interface TelegramRoutingSource {
   type: 'telegram';
   chatName?: string;
+  threadMessages?: Array<{ text: string; user: string }>;
+  images?: string[];
+}
+
+export interface DiscordRoutingSource {
+  type: 'discord';
+  guildName?: string;
+  channelName?: string;
   threadMessages?: Array<{ text: string; user: string }>;
   images?: string[];
 }

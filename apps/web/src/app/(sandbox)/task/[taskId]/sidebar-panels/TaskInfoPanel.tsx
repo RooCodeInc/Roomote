@@ -101,6 +101,7 @@ type StartedFromBrandIcon =
   | 'bitbucket'
   | 'ado'
   | 'telegram'
+  | 'discord'
   | 'teams';
 
 const SOURCE_CONTROL_BRAND_ICONS: Record<
@@ -156,6 +157,10 @@ function getStartedFrom(
 
   if (task.surface === 'telegram' || communicationProvider === 'telegram') {
     return { label: 'Telegram', brandIcon: 'telegram' };
+  }
+
+  if (task.surface === 'discord' || communicationProvider === 'discord') {
+    return { label: 'Discord', brandIcon: 'discord' };
   }
 
   if (task.surface === 'teams' || communicationProvider === 'teams') {

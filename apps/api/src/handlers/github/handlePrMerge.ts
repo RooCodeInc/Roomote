@@ -1,6 +1,7 @@
 import type { WebhookResponse } from '../../types';
 
 import type { WebhookPullRequestClosed } from './types';
+import { notifyDiscordPrMerge } from './notifyDiscordPrMerge';
 import { notifySlackPrMerge } from './notifySlackPrMerge';
 import { notifyTeamsPrMerge } from './notifyTeamsPrMerge';
 import { notifyTelegramAndLinearPrMerge } from './notifyTelegramAndLinearPrMerge';
@@ -16,8 +17,8 @@ export const handlePrMerge = async ({
     return { status: 'ok' };
   }
 
-  // Notify Slack, Teams, Telegram, and Linear threads/sessions associated
-  // with this PR (fire-and-forget).
+  // Notify communication threads/sessions associated with this PR
+  // (fire-and-forget).
   if (installation?.id) {
     const notificationParams = {
       sourceControlProvider: 'github' as const,
@@ -40,6 +41,14 @@ export const handlePrMerge = async ({
     notifyTeamsPrMerge(notificationParams).catch((error) => {
       console.error(
         `[handlePrMerge] Failed to notify Teams for PR #${pull_request.number}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
+    notifyDiscordPrMerge(notificationParams).catch((error) => {
+      console.error(
+        `[handlePrMerge] Failed to notify Discord for PR #${pull_request.number}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

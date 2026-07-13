@@ -50,8 +50,8 @@ Have these ready before the wizard asks for them:
 - a source-control provider account with permission to install or configure the
   app for the repositories Roomote should reach
 - an inference provider API key, such as OpenRouter, Anthropic, or OpenAI
-- a communications provider workspace, such as Slack, Microsoft Teams, or
-  Telegram, if your team wants to start work from chat
+- a communications provider workspace, such as Slack, Microsoft Teams,
+  Telegram, or Discord, if your team wants to start work from chat
 - at least one repository that can become the first Roomote environment
 
 ## Day-2 operations
@@ -127,8 +127,9 @@ every backup bundle's manifest.
 
 - An inference provider API key (OpenRouter, Anthropic, OpenAI, and others).
 - A GitHub account — the setup wizard creates the GitHub App for you.
-- For Slack, Microsoft Teams, and Telegram: a workspace where you can install
-  an app; the setup wizard prefills the Slack app manifest for you.
+- For Slack, Microsoft Teams, Telegram, and Discord: a workspace or server where
+  you can install an app or bot; the setup wizard prefills the Slack app
+  manifest and creates Discord's installation link for you.
 
 ## Verify the deployment
 
@@ -144,8 +145,9 @@ deployment should let you:
 
 ## Common issues
 
-- **Callbacks fail.** Confirm the deployment has a public HTTPS URL and that
-  the source-control or communications provider is using that exact URL.
+- **Callbacks fail.** For providers that use callbacks or webhooks, confirm the
+  deployment has a public HTTPS URL and that the provider is using that exact
+  URL. Discord uses its Gateway service instead of a public callback.
 - **The first task cannot clone a repository.** Check source-control
   installation scope and repository permissions.
 - **The agent cannot run useful commands.** Add missing services, environment

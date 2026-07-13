@@ -4,6 +4,7 @@ import {
   buildSlackThreadPermalink,
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
+  buildDiscordMessagePermalink,
   getGitHubAppMention,
   resolveTaskWorkspace,
 } from '@roomote/types';
@@ -51,6 +52,9 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
+  discordGuildId,
+  discordChannelId,
+  discordMessageId,
   githubAppSlug = getEffectiveGitHubAppSlug(),
   escapeDoubleQuotes = false,
 }: {
@@ -61,6 +65,7 @@ export function getPrBodyAttributionLine({
     | 'slack'
     | 'teams'
     | 'telegram'
+    | 'discord'
     | 'linear'
     | 'github'
     | 'gitlab'
@@ -80,6 +85,9 @@ export function getPrBodyAttributionLine({
   teamsMessageId?: string;
   teamsTenantId?: string;
   teamsBotAppId?: string;
+  discordGuildId?: string;
+  discordChannelId?: string;
+  discordMessageId?: string;
   githubAppSlug?: string | null;
   escapeDoubleQuotes?: boolean;
 }) {
@@ -90,7 +98,8 @@ export function getPrBodyAttributionLine({
     !(telegramChatId && telegramMessageId) &&
     !telegramBotUsername &&
     !(teamsConversationId && teamsMessageId) &&
-    !teamsBotAppId
+    !teamsBotAppId &&
+    !(discordChannelId && discordMessageId)
   ) {
     return null;
   }
@@ -112,6 +121,9 @@ export function getPrBodyAttributionLine({
     teamsMessageId,
     teamsTenantId,
     teamsBotAppId,
+    discordGuildId,
+    discordChannelId,
+    discordMessageId,
     githubAppSlug,
     escapeDoubleQuotes,
   });
@@ -134,6 +146,9 @@ function buildPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
+  discordGuildId,
+  discordChannelId,
+  discordMessageId,
   githubAppSlug,
   escapeDoubleQuotes = false,
 }: {
@@ -144,6 +159,7 @@ function buildPrBodyAttributionLine({
     | 'slack'
     | 'teams'
     | 'telegram'
+    | 'discord'
     | 'linear'
     | 'github'
     | 'gitlab'
@@ -163,6 +179,9 @@ function buildPrBodyAttributionLine({
   teamsMessageId?: string;
   teamsTenantId?: string;
   teamsBotAppId?: string;
+  discordGuildId?: string;
+  discordChannelId?: string;
+  discordMessageId?: string;
   githubAppSlug?: string | null;
   escapeDoubleQuotes?: boolean;
 }) {
@@ -186,7 +205,8 @@ function buildPrBodyAttributionLine({
   const isChatSurface =
     taskSurface === 'slack' ||
     taskSurface === 'teams' ||
-    taskSurface === 'telegram';
+    taskSurface === 'telegram' ||
+    taskSurface === 'discord';
   const taskLinkLabel = isChatSurface ? 'the web UI' : 'View the task';
   const taskLink = safeTaskUrl
     ? `[${taskLinkLabel}](${safeTaskUrl})`
@@ -219,6 +239,15 @@ function buildPrBodyAttributionLine({
     });
     conversationLink = teamsUrl
       ? `[Teams](${escapeValue(teamsUrl)})`
+      : undefined;
+  } else if (taskSurface === 'discord') {
+    const discordUrl = buildDiscordMessagePermalink({
+      guildId: discordGuildId,
+      channelId: discordChannelId,
+      messageId: discordMessageId,
+    });
+    conversationLink = discordUrl
+      ? `[Discord](${escapeValue(discordUrl)})`
       : undefined;
   }
 

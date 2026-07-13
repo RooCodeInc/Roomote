@@ -1,0 +1,334 @@
+const mocks = vi.hoisted(() => ({
+  getAvailableEnvironments: vi.fn(),
+  getTaskUrl: vi.fn(),
+  findMappedUser: vi.fn(),
+  findSourceRun: vi.fn(),
+  launchTask: vi.fn(),
+  resolveWorkspace: vi.fn(),
+  reply: vi.fn(),
+  redisSet: vi.fn(),
+  redisGetdel: vi.fn(),
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  getAvailableEnvironments: mocks.getAvailableEnvironments,
+  getTaskUrl: mocks.getTaskUrl,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  findDiscordMappedUserId: mocks.findMappedUser,
+}));
+
+vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
+  findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
+}));
+
+vi.mock('../task-launch.js', () => ({
+  launchDiscordTask: mocks.launchTask,
+  resolveDiscordWorkspace: mocks.resolveWorkspace,
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ set: mocks.redisSet, getdel: mocks.redisGetdel }),
+}));
+
+vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
+
+import {
+  handleDiscordRoutingCallback,
+  requestDiscordRoutingConfirmation,
+  shouldAutoConfirmDiscordRoute,
+} from '../routing-confirmation.js';
+
+describe('Discord routing confirmation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getAvailableEnvironments.mockResolvedValue([
+      { id: 'env-1', name: 'Sunny Acres', repositoryNames: ['acme/game'] },
+      { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
+    ]);
+    mocks.redisSet.mockResolvedValue('OK');
+    mocks.findMappedUser.mockResolvedValue('user-1');
+    mocks.findSourceRun.mockResolvedValue(null);
+    mocks.getTaskUrl.mockReturnValue('https://roomote.example/task/task-1');
+    mocks.resolveWorkspace.mockResolvedValue({
+      environmentId: 'env-1',
+      repoForPayload: 'acme/game',
+      workspaceDisplayName: 'Sunny Acres',
+    });
+    mocks.launchTask.mockResolvedValue({
+      createdThread: { channelId: 'thread-1' },
+      taskUrl: 'https://roomote.example/task/task-1',
+    });
+    mocks.reply.mockResolvedValue({ messageId: 'confirmation-1' });
+  });
+
+  it('auto-confirms only high-confidence, unremapped routes', () => {
+    expect(
+      shouldAutoConfirmDiscordRoute({
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'match',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.95,
+          },
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldAutoConfirmDiscordRoute({
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'weak match',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.94,
+          },
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('persists a pending route and posts workspace buttons', async () => {
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: {
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'likely',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.7,
+          },
+        },
+      },
+    });
+
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      expect.stringMatching(/^discord:pending_route:/u),
+      expect.stringContaining('Fix matchmaking'),
+      'EX',
+      900,
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('Sunny Acres'),
+        buttons: expect.arrayContaining([
+          [
+            expect.objectContaining({
+              text: 'Sunny Acres',
+              callbackData: expect.stringMatching(/^discord:route:/u),
+            }),
+          ],
+        ]),
+      }),
+    );
+  });
+
+  it('keeps every stored route visible within Discord action-row limits', async () => {
+    mocks.getAvailableEnvironments.mockResolvedValue(
+      Array.from({ length: 6 }, (_, index) => ({
+        id: `env-${index + 1}`,
+        name: `Environment ${index + 1}`,
+        repositoryNames: [`acme/repo-${index + 1}`],
+      })),
+    );
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: { status: 'fallback', reason: 'ambiguous' },
+    });
+
+    const buttons = mocks.reply.mock.lastCall?.[0]?.buttons as Array<
+      Array<{ text: string }>
+    >;
+    expect(buttons).toHaveLength(5);
+    expect(buttons.flat().map((button) => button.text)).toContain(
+      'All repositories',
+    );
+    expect(buttons.at(-1)).toEqual([
+      expect.objectContaining({ text: 'Nevermind' }),
+    ]);
+  });
+
+  it('does not launch again when a retried route click already created the task', async () => {
+    mocks.redisGetdel.mockResolvedValue(
+      JSON.stringify({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        options: [
+          {
+            label: 'Sunny Acres',
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+          },
+        ],
+      }),
+    );
+    mocks.findSourceRun.mockResolvedValue({ id: 41, taskId: 'task-1' });
+
+    await handleDiscordRoutingCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        channel_id: 'channel-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'discord:route:abcdefghijkl:0' },
+      },
+      interactionDeferred: true,
+      callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
+    });
+
+    expect(mocks.launchTask).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('task-1') }),
+    );
+  });
+
+  it('restores the route choice when launching fails so delivery can retry', async () => {
+    const pending = {
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      options: [
+        {
+          label: 'Sunny Acres',
+          workspace: {
+            type: 'environment',
+            id: 'env-1',
+            name: 'Sunny Acres',
+          },
+        },
+      ],
+    };
+    mocks.redisGetdel.mockResolvedValue(JSON.stringify(pending));
+    mocks.launchTask.mockRejectedValue(new Error('queue unavailable'));
+
+    await expect(
+      handleDiscordRoutingCallback({
+        provider: {} as never,
+        applicationId: 'app-1',
+        interaction: {
+          id: 'interaction-1',
+          application_id: 'app-1',
+          type: 3,
+          token: 'token-1',
+          channel_id: 'channel-1',
+          user: { id: 'discord-user-1', username: 'matt' },
+          data: { custom_id: 'discord:route:abcdefghijkl:0' },
+        },
+        interactionDeferred: true,
+        callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
+      }),
+    ).rejects.toThrow('queue unavailable');
+
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:pending_route:abcdefghijkl',
+      JSON.stringify(pending),
+      'EX',
+      900,
+    );
+  });
+});

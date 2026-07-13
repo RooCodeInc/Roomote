@@ -24,7 +24,7 @@ Roomote prizes flexibility while optimizing for user experience:
 - Quick setup and a consumer-grade web UI
 - Model-agnostic inference provider setup with bring-your-own-key support
 - Source control via GitHub, GitLab, Gitea, and Azure DevOps
-- Agent interactions via Slack, Microsoft Teams, Telegram, and the web
+- Agent interactions via Slack, Microsoft Teams, Telegram, Discord, and the web
 - Sandbox compute via Modal, E2B, Daytona, and Docker
 - Self-configuring agent development environments
 - Live web previews of agent changes from sandboxes
@@ -34,7 +34,7 @@ Roomote prizes flexibility while optimizing for user experience:
 
 - A model provider API key, such as OpenRouter, Anthropic, OpenAI, etc
 - A source-control service, such as GitHub, GitLab, Gitea, or Azure DevOps
-- A communications provider, such as Slack, Microsoft Teams, or Telegram
+- A communications provider, such as Slack, Microsoft Teams, Telegram, or Discord
   (optional but strongly recommended)
 - Somewhere to run it: a single Ubuntu/Debian host, Railway, Coolify, Fly.io,
   etc

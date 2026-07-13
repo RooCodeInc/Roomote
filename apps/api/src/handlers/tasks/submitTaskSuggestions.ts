@@ -64,6 +64,8 @@ import {
 } from './setup-suggestion-lifecycle';
 import { postScheduledSuggestionsToTelegram } from '../telegram/automation-suggestions';
 import { postScheduledSuggestionsToTeams } from '../teams/automation-suggestions';
+import { postScheduledSuggestionsToDiscord } from '../discord/automation-suggestions';
+import { postSetupTaskSuggestionsToDiscord } from '../discord/setup-suggestions';
 import { postSetupTaskSuggestionsToTelegram } from '../telegram/setup-suggestions';
 import { postSetupTaskSuggestionsToTeams } from '../teams/setup-suggestions';
 import { logHandlerError } from '../utils';
@@ -107,7 +109,7 @@ type PersistedTaskSuggestion = {
 /**
  * Suggestion work_items always insert a non-empty brief (the payload requires
  * `min(1)`), but the merged `work_items.brief` column is nullable. Normalize on
- * read so downstream Slack/Telegram/Teams formatting keeps a plain string.
+ * read so downstream communication-provider formatting keeps a plain string.
  */
 function toPersistedTaskSuggestion(row: {
   id: string;
@@ -764,18 +766,18 @@ async function postSetupTaskSuggestionsToSlack(params: {
   slackChannel: string | null;
   createdByUserId: string | null;
   suggestions: PersistedTaskSuggestion[];
-}): Promise<void> {
+}): Promise<boolean> {
   const { sourceTaskId, slackChannel, createdByUserId, suggestions } = params;
 
   if (!slackChannel || !createdByUserId || suggestions.length === 0) {
-    return;
+    return false;
   }
 
   if (await hasTrackedSetupSuggestionMessages(sourceTaskId)) {
     apiLogger.debug(
       `[SetupSuggestionLifecycle] Skip Slack suggestion post because tracked messages already exist for sourceTaskId=${sourceTaskId}`,
     );
-    return;
+    return true;
   }
 
   const [slackInstallation] = await db
@@ -788,7 +790,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
     .limit(1);
 
   if (!slackInstallation) {
-    return;
+    return false;
   }
 
   const [creatorSlackMapping] = await db
@@ -827,7 +829,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
     apiLogger.debug(
       `[SetupSuggestionLifecycle] No setup suggestion messages were posted for sourceTaskId=${sourceTaskId} channel=${slackChannel}`,
     );
-    return;
+    return false;
   }
 
   apiLogger.debug(
@@ -835,7 +837,7 @@ async function postSetupTaskSuggestionsToSlack(params: {
   );
 
   if (!creatorSlackMapping?.slackUserId) {
-    return;
+    return true;
   }
 
   const creatorSlackUserId = creatorSlackMapping.slackUserId;
@@ -852,14 +854,15 @@ async function postSetupTaskSuggestionsToSlack(params: {
         sourceTaskId,
       }),
   });
+  return true;
 }
 
 /**
  * Posts the scheduled-automation suggestion summary to Slack. Returns whether
  * Slack actually DELIVERED the summary (root message posted/persisted, or a
- * prior run already delivered it). The caller keys its Telegram/Teams fallback
+ * prior run already delivered it). The caller keys its other-provider fallback
  * on delivery, not on mere Slack-installation existence, so a Slack-installed
- * deployment that cannot resolve a channel still falls through to Telegram.
+ * deployment that cannot resolve a channel still falls through to another provider.
  */
 async function postSuggestedTasksSummaryToSlack(params: {
   sourceTaskId: string;
@@ -1259,38 +1262,44 @@ export async function submitTaskSuggestions(
     });
 
     if (isOnboardingTrigger) {
-      await postSetupTaskSuggestionsToSlack({
+      const slackDelivered = await postSetupTaskSuggestionsToSlack({
         sourceTaskId: taskId,
         slackChannel: setupNewState.slackChannel,
         createdByUserId,
         suggestions: persistedSuggestions,
       });
 
-      // Deployments without a Slack destination fall back to the captured
-      // Telegram primary chat (one message with start buttons per idea).
-      if (!setupNewState.slackChannel) {
-        await postSetupTaskSuggestionsToTelegram({
+      if (!slackDelivered) {
+        const discordDelivered = await postSetupTaskSuggestionsToDiscord({
           sourceTaskId: taskId,
           createdByUserId,
           suggestions: persistedSuggestions,
         });
 
-        // Teams is the last onboarding fallback (Telegram outranks it;
-        // checked inside).
-        await postSetupTaskSuggestionsToTeams({
-          sourceTaskId: taskId,
-          createdByUserId,
-          suggestions: persistedSuggestions,
-        });
+        if (!discordDelivered) {
+          await postSetupTaskSuggestionsToTelegram({
+            sourceTaskId: taskId,
+            createdByUserId,
+            suggestions: persistedSuggestions,
+          });
+
+          // Teams checks the shared tracked-message registry, so it only
+          // delivers when Telegram did not claim this setup suggestion set.
+          await postSetupTaskSuggestionsToTeams({
+            sourceTaskId: taskId,
+            createdByUserId,
+            suggestions: persistedSuggestions,
+          });
+        }
       }
     }
 
     if (payload.notifySlack) {
-      // Surface precedence (Slack > Telegram > Teams) is enforced HERE via the
+      // Surface precedence (Slack > Discord > Telegram > Teams) is enforced HERE via the
       // delivered-boolean chain — each fallback fires only when the higher-
       // precedence surface did not actually deliver. The fallbacks no longer
       // self-suppress on Slack-installation existence, so a Slack-installed
-      // deployment that cannot resolve a channel still reaches Telegram/Teams.
+      // deployment that cannot resolve a channel still reaches another provider.
       const slackDelivered = await postSuggestedTasksSummaryToSlack({
         sourceTaskId: taskId,
         createdByUserId,
@@ -1301,23 +1310,29 @@ export async function submitTaskSuggestions(
       });
 
       if (!slackDelivered) {
-        // Telegram fallback: the captured primary chat gets one message with
-        // start buttons per suggestion.
-        const telegramDelivered = await postScheduledSuggestionsToTelegram({
+        const discordDelivered = await postScheduledSuggestionsToDiscord({
           sourceTaskId: taskId,
           createdByUserId,
           suggestionSource: payload.suggestionSource,
           suggestions: persistedSuggestions,
         });
 
-        if (!telegramDelivered) {
-          // Teams is the last fallback.
-          await postScheduledSuggestionsToTeams({
+        if (!discordDelivered) {
+          const telegramDelivered = await postScheduledSuggestionsToTelegram({
             sourceTaskId: taskId,
             createdByUserId,
             suggestionSource: payload.suggestionSource,
             suggestions: persistedSuggestions,
           });
+
+          if (!telegramDelivered) {
+            await postScheduledSuggestionsToTeams({
+              sourceTaskId: taskId,
+              createdByUserId,
+              suggestionSource: payload.suggestionSource,
+              suggestions: persistedSuggestions,
+            });
+          }
         }
       }
     }

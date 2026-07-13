@@ -64,11 +64,16 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
   TelegramCommunicationProvider: vi.fn(),
 }));
 
+vi.mock('@roomote/communication/discord-provider', () => ({
+  DiscordCommunicationProvider: vi.fn(),
+}));
+
 vi.mock('@roomote/sdk/server', () => ({
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
   ),
   findTelegramPrimaryChatId: vi.fn(async () => null),
+  findDiscordDefaultDestination: vi.fn(async () => null),
   findTeamsPrimaryConversation: vi.fn(async () => null),
   recordSlackConversationMessageBestEffort: vi.fn(),
 }));
@@ -100,6 +105,16 @@ vi.mock('@roomote/db/server', () => ({
     botToken: null,
     webhookSecret: null,
     botUsername: null,
+  })),
+  resolveDiscordRuntimeCredentials: vi.fn(async () => ({
+    botToken: null,
+    applicationId: null,
+    applicationName: null,
+    botUserId: null,
+    botUsername: null,
+    botDisplayName: null,
+    identitySource: null,
+    identityErrorCode: null,
   })),
   slackInstallations: {},
   slackUserMappings: {},
@@ -182,10 +197,15 @@ import {
 import { TaskPayloadKind } from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import {
+  resolveDiscordRuntimeCredentials,
+  resolveTelegramRuntimeCredentials,
+} from '@roomote/db/server';
 import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findTelegramPrimaryChatId,
+  findDiscordDefaultDestination,
   findTeamsPrimaryConversation,
 } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
@@ -1004,6 +1024,17 @@ describe('setup-new onboarding task start command', () => {
       webhookSecret: null,
       botUsername: null,
     } as Awaited<ReturnType<typeof resolveTelegramRuntimeCredentials>>);
+    vi.mocked(resolveDiscordRuntimeCredentials).mockResolvedValue({
+      botToken: null,
+      applicationId: null,
+      applicationName: null,
+      botUserId: null,
+      botUsername: null,
+      botDisplayName: null,
+      identitySource: null,
+      identityErrorCode: null,
+    });
+    vi.mocked(findDiscordDefaultDestination).mockResolvedValue(null);
     vi.mocked(findTelegramPrimaryChatId).mockResolvedValue(null);
     vi.mocked(findTeamsPrimaryConversation).mockResolvedValue(null);
     vi.mocked(
@@ -1122,6 +1153,70 @@ describe('setup-new onboarding task start command', () => {
           chatHandoffProvider: 'telegram',
           chatHandoffChannelId: '8846357662',
           chatHandoffThreadId: '77',
+          chatHandoffServiceUrl: null,
+        }),
+      }),
+    );
+  });
+
+  it('creates a Discord task thread for the setup kickoff and persists handoff metadata', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+    const createTaskThread = vi.fn(async () => ({
+      channelId: 'thread-1',
+      parentChannelId: 'channel-1',
+      name: 'Set up Roomote',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    }));
+    vi.mocked(resolveDiscordRuntimeCredentials).mockResolvedValue({
+      botToken: 'discord-token',
+      applicationId: 'app-1',
+      applicationName: 'Roomote',
+      botUserId: 'bot-1',
+      botUsername: 'roomote',
+      botDisplayName: 'Roomote',
+      identitySource: 'live',
+      identityErrorCode: null,
+    });
+    vi.mocked(findDiscordDefaultDestination).mockResolvedValue({
+      installationId: 'installation-1',
+      guildId: 'guild-1',
+      guildName: 'Acme',
+      channelId: 'channel-1',
+      channelName: 'roomote',
+      channelType: 0,
+    });
+    vi.mocked(DiscordCommunicationProvider).mockImplementation(function () {
+      return { createTaskThread } as unknown as DiscordCommunicationProvider;
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(createTaskThread).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      name: 'Set up Roomote',
+      initialText: expect.any(String),
+    });
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'discord',
+            communicationGuildId: 'guild-1',
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+            discordTaskThread: true,
+            communicationMessageId: 'message-1',
+          }),
+        }),
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        setupNewState: expect.objectContaining({
+          chatHandoffProvider: 'discord',
+          chatHandoffChannelId: 'channel-1',
+          chatHandoffThreadId: 'thread-1',
           chatHandoffServiceUrl: null,
         }),
       }),

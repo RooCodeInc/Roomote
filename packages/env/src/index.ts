@@ -165,6 +165,9 @@ const serverSchema = {
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
+  R_DISCORD_BOT_TOKEN: z.string().min(1).optional(),
+  R_DISCORD_GATEWAY_SECRET: z.string().min(1).optional(),
+  DISCORD_API_BASE_URL: z.string().url().default('https://discord.com/api/v10'),
   R_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
   R_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
   R_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
@@ -257,6 +260,7 @@ export const ROOMOTE_SERVICE_VALUES = [
   'controller',
   'bullmq',
   'preview-proxy',
+  'discord-gateway',
   'db-migrate',
 ] as const;
 
@@ -316,6 +320,13 @@ export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
     'ENCRYPTION_KEY',
   ],
   'preview-proxy': ['R_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
+  'discord-gateway': [
+    'R_APP_URL',
+    'TRPC_URL',
+    'DATABASE_URL',
+    'REDIS_URL',
+    'ENCRYPTION_KEY',
+  ],
   'db-migrate': ['DATABASE_URL'],
 } as const satisfies Record<RoomoteService, readonly ServerEnvKey[]>;
 
@@ -377,6 +388,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
   'R_TELEGRAM_BOT_TOKEN',
   'R_TELEGRAM_WEBHOOK_SECRET',
+  'R_DISCORD_BOT_TOKEN',
+  'R_DISCORD_GATEWAY_SECRET',
+  'DISCORD_API_BASE_URL',
   'R_SLACK_CLIENT_ID',
   'R_SLACK_CLIENT_SECRET',
   'R_SLACK_SIGNING_SECRET',
@@ -573,6 +587,7 @@ const SERVICE_AUTH_KEYPAIR_ENV_KEYS = {
   api: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   controller: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   bullmq: [],
+  'discord-gateway': [],
   'preview-proxy': ['JOB_AUTH_PUBLIC_KEY', 'PREVIEW_AUTH_PUBLIC_KEY'],
   'db-migrate': [],
 } as const satisfies Record<RoomoteService, readonly AuthKeypairEnvKey[]>;

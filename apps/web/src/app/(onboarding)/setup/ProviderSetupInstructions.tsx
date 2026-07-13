@@ -10,7 +10,10 @@ import {
 } from '@/lib/slack-callback-paths';
 import { cn } from '@/lib/utils';
 
-type ProviderSetupInstructionsProviderId = SetupAuthProviderId | 'telegram';
+type ProviderSetupInstructionsProviderId =
+  | SetupAuthProviderId
+  | 'telegram'
+  | 'discord';
 
 function InstructionText({
   heading,
@@ -139,6 +142,26 @@ export function ProviderSetupInstructions({
           lets Roomote create a separate private-chat topic for every task.
           Telegram withholds a 15% fee from Stars purchases while this mode is
           enabled.
+        </InstructionText>
+      </div>
+    );
+  }
+
+  if (providerId === 'discord') {
+    return (
+      <div className={cn('space-y-3 max-w-xl', className)}>
+        <InstructionText heading="Create bot">
+          Create an application in the Discord Developer Portal. Open its Bot
+          page, add a bot, then reset and copy its token.
+        </InstructionText>
+        <InstructionText heading="Message Content intent">
+          On the Bot page, enable Message Content Intent under Privileged
+          Gateway Intents. Roomote needs it to understand ordinary messages and
+          follow-ups in task threads.
+        </InstructionText>
+        <InstructionText heading="Bot token">
+          Paste the token below. Roomote derives the bot and application names
+          from it, so there is no separate name or application ID to enter.
         </InstructionText>
       </div>
     );

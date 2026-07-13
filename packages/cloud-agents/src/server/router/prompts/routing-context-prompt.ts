@@ -215,6 +215,36 @@ export function buildSourceContext(source: RoutingSource): string {
       return telegramContext + '\n';
     }
 
+    case 'discord': {
+      let discordContext = '**Source**: Discord\n';
+      if (source.guildName) {
+        discordContext += `**Server**: ${source.guildName}\n`;
+      }
+      if (source.channelName) {
+        discordContext += `**Channel**: ${source.channelName}\n`;
+      }
+      if (source.images?.length) {
+        const includedImageCount = Math.min(
+          source.images.length,
+          MAX_ROUTING_IMAGE_ATTACHMENTS,
+        );
+        const remainingImageCount = source.images.length - includedImageCount;
+        discordContext += `**Image Attachments**: ${includedImageCount} attached`;
+        if (remainingImageCount > 0) {
+          discordContext += ` (${remainingImageCount} more omitted from routing input)`;
+        }
+        discordContext += '\n';
+      }
+      if (source.threadMessages?.length) {
+        discordContext += `**Thread Context**:\n`;
+        const messages = source.threadMessages.slice(-MAX_THREAD_MESSAGES);
+        for (const msg of messages) {
+          discordContext += `- ${msg.user}: ${truncateText(msg.text, 200)}\n`;
+        }
+      }
+      return discordContext + '\n';
+    }
+
     case 'linear': {
       let linearContext = '**Source**: Linear\n';
       linearContext += `**Issue**: ${source.issueIdentifier} - ${source.issueTitle}\n`;
@@ -302,7 +332,8 @@ function getRoutingImageParts(source: RoutingSource): ImagePart[] {
   if (
     (source.type !== 'slack' &&
       source.type !== 'teams' &&
-      source.type !== 'telegram') ||
+      source.type !== 'telegram' &&
+      source.type !== 'discord') ||
     !source.images?.length
   ) {
     return [];

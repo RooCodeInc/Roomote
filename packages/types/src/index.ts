@@ -53,6 +53,7 @@ export * from './slack';
 export * from './teams';
 export * from './teams-bot-credentials';
 export * from './telegram';
+export * from './discord';
 export * from './task-env-var-requests';
 export * from './task-events';
 export * from './task-artifacts';

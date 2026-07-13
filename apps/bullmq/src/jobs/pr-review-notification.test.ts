@@ -13,6 +13,8 @@ const {
   mockTeamsPostMessage,
   mockCreateTeamsProvider,
   mockTelegramPostMessage,
+  mockDiscordPostMessage,
+  mockResolveDiscordRuntimeCredentials,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -26,6 +28,8 @@ const {
   mockTeamsPostMessage: vi.fn(),
   mockCreateTeamsProvider: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
+  mockDiscordPostMessage: vi.fn(),
+  mockResolveDiscordRuntimeCredentials: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -54,6 +58,8 @@ vi.mock('@roomote/db/server', () => ({
     prNumber: 'prNumber',
   },
   slackInstallations: { isActive: 'isActive' },
+  resolveDiscordRuntimeCredentials: (...args: unknown[]) =>
+    mockResolveDiscordRuntimeCredentials(...args),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -92,6 +98,12 @@ vi.mock('@roomote/slack', () => ({
 vi.mock('@roomote/communication/telegram-provider', () => ({
   TelegramCommunicationProvider: class MockTelegramProvider {
     postMessage = mockTelegramPostMessage;
+  },
+}));
+
+vi.mock('@roomote/communication/discord-provider', () => ({
+  DiscordCommunicationProvider: class MockDiscordProvider {
+    postMessage = mockDiscordPostMessage;
   },
 }));
 
@@ -149,6 +161,12 @@ describe('prReviewNotificationJob', () => {
     });
     mockTeamsPostMessage.mockResolvedValue({ provider: 'teams' });
     mockTelegramPostMessage.mockResolvedValue({ provider: 'telegram' });
+    mockDiscordPostMessage.mockResolvedValue({ provider: 'discord' });
+    mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+      botToken: 'discord-token',
+      applicationId: 'application-1',
+      botUserId: 'bot-1',
+    });
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {
@@ -241,6 +259,37 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts to Discord task threads with markdown formatting', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'formatted-message',
+      textFormat: 'markdown',
+    });
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+    });
   });
 
   it('defers while the task is actively running', async () => {

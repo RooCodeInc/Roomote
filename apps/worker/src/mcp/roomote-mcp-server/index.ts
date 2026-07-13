@@ -354,7 +354,19 @@ function hasTeamsChatContext(): boolean {
   );
 }
 
-function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
+function hasDiscordChatContext(): boolean {
+  return (
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim() === 'discord' &&
+    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  );
+}
+
+function getChatReplySurfaceLabel():
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'chat' {
   const provider = process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
 
   if (provider === 'teams') {
@@ -363,6 +375,10 @@ function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
 
   if (provider === 'telegram') {
     return 'Telegram';
+  }
+
+  if (provider === 'discord') {
+    return 'Discord';
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
@@ -1216,7 +1232,8 @@ if (shouldRegisterSlackChannelPostTool()) {
   if (
     hasSlackChatContext() ||
     hasTelegramChatContext() ||
-    hasTeamsChatContext()
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 

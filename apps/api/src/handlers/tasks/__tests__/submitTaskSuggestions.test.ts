@@ -8,6 +8,7 @@ import { submitTaskSuggestions } from '../submitTaskSuggestions';
 import { getAutomationRuntime } from '@roomote/db/server';
 import { postScheduledSuggestionsToTelegram } from '../../telegram/automation-suggestions';
 import { postScheduledSuggestionsToTeams } from '../../teams/automation-suggestions';
+import { postScheduledSuggestionsToDiscord } from '../../discord/automation-suggestions';
 
 const {
   mockTaskRunFindFirst,
@@ -161,6 +162,14 @@ vi.mock('../../teams/automation-suggestions', () => ({
   postScheduledSuggestionsToTeams: vi.fn(),
 }));
 
+vi.mock('../../discord/automation-suggestions', () => ({
+  postScheduledSuggestionsToDiscord: vi.fn(),
+}));
+
+vi.mock('../../discord/setup-suggestions', () => ({
+  postSetupTaskSuggestionsToDiscord: vi.fn(),
+}));
+
 vi.mock('../../telegram/setup-suggestions', () => ({
   postSetupTaskSuggestionsToTelegram: vi.fn(),
 }));
@@ -251,6 +260,8 @@ describe('submitTaskSuggestions', () => {
     } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
     vi.mocked(postScheduledSuggestionsToTelegram).mockReset();
     vi.mocked(postScheduledSuggestionsToTeams).mockReset();
+    vi.mocked(postScheduledSuggestionsToDiscord).mockReset();
+    vi.mocked(postScheduledSuggestionsToDiscord).mockResolvedValue(false);
 
     let ts = 0;
     mockPostMessage.mockImplementation(async () => `ts-${++ts}`);
@@ -336,7 +347,7 @@ describe('submitTaskSuggestions', () => {
     });
   });
 
-  it('falls back to Telegram when Slack is installed but no channel resolves', async () => {
+  it('falls through Discord to Telegram when Slack has no destination', async () => {
     mockTaskFindFirst.mockResolvedValue({
       initiatorUserId: null,
       initiatorAutomation: 'suggest_ideas',
@@ -365,9 +376,36 @@ describe('submitTaskSuggestions', () => {
     expect(response.status).toBe(200);
     // Slack never posted a root message (no channel).
     expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(postScheduledSuggestionsToDiscord).toHaveBeenCalledTimes(1);
     // Telegram fallback fired despite the active Slack installation.
     expect(postScheduledSuggestionsToTelegram).toHaveBeenCalledTimes(1);
     // Telegram delivered, so Teams is suppressed.
+    expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
+  });
+
+  it('stops fallback delivery when Discord accepts the suggestions', async () => {
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'suggest_ideas',
+    });
+    vi.mocked(getAutomationRuntime).mockResolvedValue({
+      slackChannelId: undefined,
+    } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+    slackInstallationChannelRows = [];
+    vi.mocked(postScheduledSuggestionsToDiscord).mockResolvedValue(true);
+
+    const app = createApp({
+      runId: 1,
+      userId: null,
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+    const response = await requestSuggestions(app);
+
+    expect(response.status).toBe(200);
+    expect(postScheduledSuggestionsToDiscord).toHaveBeenCalledTimes(1);
+    expect(postScheduledSuggestionsToTelegram).not.toHaveBeenCalled();
     expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,6 @@
 export * from './chat-messages';
+export * from './discord-event';
+export * from './discord-provider';
 export * from './messages';
 export * from './provider';
 export * from './teams-activity';

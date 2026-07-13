@@ -566,6 +566,8 @@ describe('Env', () => {
       R_TEAMS_BOT_OAUTH_SCOPE: '',
       R_TELEGRAM_BOT_TOKEN: '',
       R_TELEGRAM_WEBHOOK_SECRET: '',
+      R_DISCORD_BOT_TOKEN: '',
+      R_DISCORD_GATEWAY_SECRET: '',
       R_SLACK_CLIENT_ID: '',
       R_SLACK_CLIENT_SECRET: '',
       R_SLACK_SIGNING_SECRET: '',
@@ -588,6 +590,8 @@ describe('Env', () => {
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
       expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
+      expect(env.R_DISCORD_BOT_TOKEN).toBeUndefined();
+      expect(env.R_DISCORD_GATEWAY_SECRET).toBeUndefined();
       expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
       expect(env.R_SLACK_SIGNING_SECRET).toBeUndefined();
       expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();
@@ -601,6 +605,21 @@ describe('Env', () => {
         process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
       }
     }
+  });
+
+  it('exposes Discord runtime configuration to control-plane services', () => {
+    const env = createRoomoteEnv({
+      ...productionCoreEnv,
+      R_DISCORD_BOT_TOKEN: 'discord-bot-token',
+      R_DISCORD_GATEWAY_SECRET: 'discord-gateway-secret',
+      DISCORD_API_BASE_URL: 'https://discord.example.test/api/v10',
+    });
+
+    expect(env.R_DISCORD_BOT_TOKEN).toBe('discord-bot-token');
+    expect(env.R_DISCORD_GATEWAY_SECRET).toBe('discord-gateway-secret');
+    expect(env.DISCORD_API_BASE_URL).toBe(
+      'https://discord.example.test/api/v10',
+    );
   });
 
   it('requires a tenant when Microsoft auth credentials are configured', () => {

@@ -28,7 +28,7 @@ import { getProviderSetupCopy } from './providerSetupCopy';
 type ProviderSetupExperienceProvider =
   | SetupAuthStatus['providers'][number]
   | {
-      id: SetupAuthStatus['providers'][number]['id'] | 'telegram';
+      id: SetupAuthStatus['providers'][number]['id'] | 'telegram' | 'discord';
       label: string;
       fields: SetupAuthStatus['providers'][number]['fields'];
       runtimeSatisfied: boolean;

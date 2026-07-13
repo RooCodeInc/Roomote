@@ -120,6 +120,9 @@ import {
   getLinkedTelegramAccountCommand,
   createTelegramLinkCodeCommand,
   unlinkLinkedTelegramAccountCommand,
+  getLinkedDiscordAccountCommand,
+  createDiscordLinkCodeCommand,
+  unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
@@ -237,7 +240,13 @@ import {
   getCommsStatusCommand,
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
+  diagnoseDiscordPermissionsCommand,
+  listDiscordChannelsCommand,
+  listDiscordGuildsCommand,
+  registerDiscordCommandsCommand,
+  repairDiscordCommand,
   repairTelegramWebhookCommand,
+  selectDiscordDestinationCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
@@ -925,6 +934,18 @@ export const appRouter = createRouter({
     unlinkTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedTelegramAccountCommand(auth),
     ),
+
+    discord: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedDiscordAccountCommand(auth),
+    ),
+
+    createDiscordLinkCode: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      createDiscordLinkCodeCommand(auth),
+    ),
+
+    unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedDiscordAccountCommand(auth),
+    ),
   }),
 
   preferences: createRouter({
@@ -1314,6 +1335,46 @@ export const appRouter = createRouter({
 
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
+    ),
+
+    listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
+      listDiscordGuildsCommand(auth),
+    ),
+
+    listDiscordChannels: protectedProcedure
+      .input(z.object({ guildId: z.string().trim().min(1).max(32) }))
+      .query(({ ctx: { auth }, input }) =>
+        listDiscordChannelsCommand(auth, input),
+      ),
+
+    selectDiscordDestination: protectedProcedure
+      .input(
+        z.object({
+          guildId: z.string().trim().min(1).max(32),
+          channelId: z.string().trim().min(1).max(32),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        selectDiscordDestinationCommand(auth, input),
+      ),
+
+    diagnoseDiscordPermissions: protectedProcedure
+      .input(
+        z.object({
+          guildId: z.string().trim().min(1).max(32),
+          channelId: z.string().trim().min(1).max(32),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        diagnoseDiscordPermissionsCommand(auth, input),
+      ),
+
+    registerDiscordCommands: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      registerDiscordCommandsCommand(auth),
+    ),
+
+    repairDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      repairDiscordCommand(auth),
     ),
   }),
 

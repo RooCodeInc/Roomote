@@ -99,6 +99,14 @@ const state = vi.hoisted(() => ({
     configured: boolean;
     mapping: { telegramUserId: string; telegramUsername: string | null } | null;
   } | null,
+  discordAccount: null as {
+    configured: boolean;
+    mapping: {
+      discordUserId: string;
+      discordUsername: string | null;
+      discordGlobalName: string | null;
+    } | null;
+  } | null,
   slackInstallation: null as { teamName: string } | null,
   slackInstallationIsPending: false,
   slackAccount: null as {
@@ -152,6 +160,7 @@ const mutations = vi.hoisted(() => ({
   unlinkSlack: vi.fn(),
   unlinkLinear: vi.fn(),
   unlinkMicrosoftTeams: vi.fn(),
+  unlinkDiscord: vi.fn(),
   connectMcp: vi.fn(),
   disconnectMcp: vi.fn(),
 }));
@@ -434,6 +443,19 @@ vi.mock('@/hooks/linked-accounts', () => ({
     mutate: vi.fn(),
     isPending: false,
   }),
+  useDiscordLinkedAccount: () => ({
+    data: state.discordAccount,
+    isPending: false,
+    refetch: vi.fn(),
+  }),
+  useUnlinkDiscordLinkedAccount: () => ({
+    mutate: mutations.unlinkDiscord,
+    isPending: false,
+  }),
+  useCreateDiscordLinkCode: () => ({
+    mutate: vi.fn(),
+    isPending: false,
+  }),
   useLinearLinkedAccount: () => ({
     data: state.linearAccount,
     isPending: false,
@@ -545,6 +567,10 @@ vi.mock('./Section', () => ({
   ),
 }));
 
+vi.mock('./DiscordLinkAccountStep', () => ({
+  DiscordLinkAccountStep: () => <div>Discord link step</div>,
+}));
+
 import { LinkedAccounts } from './LinkedAccounts';
 
 describe('LinkedAccounts settings', () => {
@@ -582,6 +608,7 @@ describe('LinkedAccounts settings', () => {
     state.adoAccount = { configured: false, account: null };
     state.adoAccountIsPending = false;
     state.telegramAccount = null;
+    state.discordAccount = null;
     state.slackInstallation = null;
     state.slackInstallationIsPending = false;
     state.slackAccount = null;
@@ -969,5 +996,37 @@ describe('LinkedAccounts settings', () => {
     render(<LinkedAccounts />);
 
     expect(screen.queryByText('Telegram')).not.toBeInTheDocument();
+  });
+
+  it('links Discord with a one-time slash command', () => {
+    state.discordAccount = { configured: true, mapping: null };
+
+    render(<LinkedAccounts />);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Link Discord account' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Link your Discord account' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Discord link step')).toBeInTheDocument();
+  });
+
+  it('shows the linked Discord display name', () => {
+    state.discordAccount = {
+      configured: true,
+      mapping: {
+        discordUserId: '222',
+        discordUsername: 'ada',
+        discordGlobalName: 'Ada Lovelace',
+      },
+    };
+
+    render(<LinkedAccounts />);
+
+    expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Unlink Discord account' }),
+    ).toBeInTheDocument();
   });
 });

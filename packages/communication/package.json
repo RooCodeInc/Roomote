@@ -6,7 +6,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./chat-messages": "./src/chat-messages.ts",
+    "./discord-event": "./src/discord-event.ts",
+    "./discord-provider": "./src/discord-provider.ts",
     "./messages": "./src/messages.ts",
+    "./mock-discord-server": "./src/mock-discord-server.ts",
     "./provider": "./src/provider.ts",
     "./teams-activity": "./src/teams-activity.ts",
     "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",

@@ -33,6 +33,7 @@ describe('ecosystem.config.js', () => {
 
     expect(apps.map((app) => app.name)).toEqual([
       'roomote-api',
+      'roomote-discord-gateway',
       'roomote-web',
       'roomote-preview-proxy',
       'roomote-bullmq',
@@ -56,6 +57,9 @@ describe('ecosystem.config.js', () => {
       '13002',
     );
     expect(
+      apps.find((app) => app.name === 'roomote-discord-gateway')?.env?.PORT,
+    ).toBe('13003');
+    expect(
       apps.find((app) => app.name === 'roomote-preview-proxy')?.env?.PORT,
     ).toBe('18081');
   });
@@ -72,6 +76,12 @@ describe('ecosystem.config.js', () => {
     expect(webApp).toMatchObject({
       script: 'mise',
       args: 'exec -- pnpm --filter @roomote/web dev',
+    });
+    expect(
+      apps.find((app) => app.name === 'roomote-discord-gateway'),
+    ).toMatchObject({
+      script: 'mise',
+      args: 'exec -- pnpm --filter @roomote/discord-gateway dev',
     });
     expect(workerReleaseWatcher).toMatchObject({
       script: 'mise',

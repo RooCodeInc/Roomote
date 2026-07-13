@@ -1,6 +1,7 @@
 import { Job } from 'bullmq';
 
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
   and,
   db,
@@ -9,6 +10,7 @@ import {
   slackInstallations,
   taskPullRequests,
   taskRuns,
+  resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import {
@@ -113,6 +115,31 @@ async function postTelegramNotification({
   });
 }
 
+async function postDiscordNotification({
+  route,
+  text,
+}: {
+  route: Extract<PrReviewNotificationRoute, { provider: 'discord' }>;
+  text: string;
+}): Promise<void> {
+  const { botToken, applicationId } = await resolveDiscordRuntimeCredentials();
+  if (!botToken) {
+    console.warn(
+      '[PrReviewNotification] Discord bot token is not configured, skipping',
+    );
+    return;
+  }
+  await new DiscordCommunicationProvider({
+    botToken,
+    ...(applicationId ? { applicationId } : {}),
+  }).postMessage({
+    channelId: route.channelId,
+    ...(route.threadId ? { threadId: route.threadId } : {}),
+    text,
+    textFormat: 'markdown',
+  });
+}
+
 async function postPrReviewNotification({
   route,
   text,
@@ -129,12 +156,15 @@ async function postPrReviewNotification({
     case 'telegram':
       await postTelegramNotification({ route, text });
       return null;
+    case 'discord':
+      await postDiscordNotification({ route, text });
+      return null;
   }
 }
 
 /**
  * Posts an informational message about new PR review feedback into the owning
- * task's originating conversation (Slack, Teams, or Telegram) once that task
+ * task's originating conversation once that task
  * is idle. This never starts an agent turn or changes any code on its own.
  */
 export const prReviewNotificationJob = async (

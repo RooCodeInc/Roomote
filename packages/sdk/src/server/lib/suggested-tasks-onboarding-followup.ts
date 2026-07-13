@@ -5,7 +5,7 @@ import { getRedis } from '@roomote/redis';
 
 /**
  * Shared enqueue pipeline for the per-surface suggested-tasks onboarding
- * follow-ups (Slack, Telegram, Teams). Every surface uses the same delayed
+ * follow-ups (Slack, Telegram, Teams, Discord). Every surface uses the same delayed
  * BullMQ job shape: a Redis `SET NX` claim plus a deterministic jobId keep
  * the follow-up to one send per destination and source task.
  *
@@ -176,6 +176,33 @@ export const enqueueTeamsSuggestedTasksOnboardingFollowup =
     requestSchema: teamsSuggestedTasksOnboardingFollowupRequestSchema,
     buildJobIdParts: (request) => [
       request.conversationId,
+      request.sourceTaskId,
+    ],
+  });
+
+export const DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME =
+  'discord-suggested-tasks-onboarding-followup-jobs';
+
+export const discordSuggestedTasksOnboardingFollowupRequestSchema = z.object({
+  guildId: z.string(),
+  channelId: z.string(),
+  threadId: z.string(),
+  introMessageId: z.string(),
+  sourceTaskId: z.string(),
+});
+
+export type DiscordSuggestedTasksOnboardingFollowupRequest = z.infer<
+  typeof discordSuggestedTasksOnboardingFollowupRequestSchema
+>;
+
+export const enqueueDiscordSuggestedTasksOnboardingFollowup =
+  createSuggestedTasksOnboardingFollowupEnqueuer({
+    queueName: DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
+    jobIdPrefix: 'discord-suggested-tasks-onboarding-followup',
+    requestSchema: discordSuggestedTasksOnboardingFollowupRequestSchema,
+    buildJobIdParts: (request) => [
+      request.guildId,
+      request.threadId,
       request.sourceTaskId,
     ],
   });

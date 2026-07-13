@@ -177,6 +177,7 @@ describe('PM2Service.validateServices', () => {
 
     const services = [
       'roomote-api',
+      'roomote-discord-gateway',
       'roomote-web',
       'roomote-preview-proxy',
       'roomote-bullmq',
@@ -215,6 +216,7 @@ describe('PM2Service.validateServices', () => {
 
     const services = [
       'roomote-api',
+      'roomote-discord-gateway',
       'roomote-web',
       'roomote-preview-proxy',
       'roomote-bullmq',

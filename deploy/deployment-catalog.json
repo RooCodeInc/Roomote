@@ -60,6 +60,10 @@
     "bullmq": {
       "command": "bullmq",
       "healthPath": "/admin/health"
+    },
+    "discord-gateway": {
+      "command": "discord-gateway",
+      "healthPath": "/health/liveness"
     }
   },
   "sharedPlatformEnvironment": [

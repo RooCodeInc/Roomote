@@ -38,6 +38,10 @@ import type {
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
+  discordInstallations,
+  discordInstallationChannels,
+  discordUserMappings,
+  discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
   slackQuickAnswers,
@@ -293,6 +297,35 @@ export type SlackUserMapping = typeof slackUserMappings.$inferSelect;
 export type CreateSlackUserMapping = Omit<
   typeof slackUserMappings.$inferInsert,
   Generated
+>;
+
+/**
+ * Discord communication state
+ */
+
+export type DiscordInstallation = typeof discordInstallations.$inferSelect;
+export type CreateDiscordInstallation = Omit<
+  typeof discordInstallations.$inferInsert,
+  Generated
+>;
+
+export type DiscordInstallationChannel =
+  typeof discordInstallationChannels.$inferSelect;
+export type CreateDiscordInstallationChannel = Omit<
+  typeof discordInstallationChannels.$inferInsert,
+  Generated
+>;
+
+export type DiscordUserMapping = typeof discordUserMappings.$inferSelect;
+export type CreateDiscordUserMapping = Omit<
+  typeof discordUserMappings.$inferInsert,
+  Generated
+>;
+
+export type DiscordGatewaySession = typeof discordGatewaySessions.$inferSelect;
+export type CreateDiscordGatewaySession = Omit<
+  typeof discordGatewaySessions.$inferInsert,
+  Timestamp
 >;
 
 /**

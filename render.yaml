@@ -182,6 +182,15 @@ services:
     envVars: *roomote-app-env
 
   - type: worker
+    name: roomote-discord-gateway
+    runtime: image
+    image:
+      url: ghcr.io/roocodeinc/roomote-app:main
+    plan: starter
+    dockerCommand: /roomote/.docker/app/entrypoint.sh discord-gateway
+    envVars: *roomote-app-env
+
+  - type: worker
     name: roomote-bullmq
     runtime: image
     image:
@@ -209,6 +218,12 @@ envVarGroups:
       - key: R_AUTO_GENERATE_KEYS
         value: 'true'
       - key: ENCRYPTION_KEY
+        generateValue: true
+      # Optional process-env override. The setup UI stores the token encrypted
+      # in Postgres when this is left blank.
+      - key: R_DISCORD_BOT_TOKEN
+        value: ''
+      - key: R_DISCORD_GATEWAY_SECRET
         generateValue: true
       - key: ARTIFACT_SIGNING_KEY
         generateValue: true

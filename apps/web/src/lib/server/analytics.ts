@@ -65,6 +65,10 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { getUserDisplayName } from '@/lib/user-display-name';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
+import {
+  getTaskSurfaceLabel,
+  TASK_SOURCE_ORDER,
+} from '@/lib/task-surface-label';
 
 import { getLatestTaskRunsByTaskId } from './task-runs';
 import { getRepositories } from './source-control';
@@ -85,20 +89,7 @@ const DAYS_PER_WEEK = 7;
 const DAYS_PER_MONTH = 30;
 const DAYS_PER_YEAR = 365;
 
-const SOURCE_ORDER = [
-  'Slack',
-  'Teams',
-  'Telegram',
-  'GitHub',
-  'GitLab',
-  'Gitea',
-  'Bitbucket',
-  'Azure DevOps',
-  'Linear',
-  'Web',
-  'API',
-  SYSTEM_SOURCE,
-];
+const SOURCE_ORDER = TASK_SOURCE_ORDER;
 const PR_STATUS_ORDER = ['Closed', 'Draft', 'Open', 'Merged'] as const;
 
 type AnalyticsDimensionValue = {
@@ -401,33 +392,7 @@ function formatRepositoryLabel(repositoryName: string) {
 }
 
 function mapTaskSource(surface: TaskSurface | null | undefined) {
-  switch (surface) {
-    case 'slack':
-      return 'Slack';
-    case 'teams':
-      return 'Teams';
-    case 'telegram':
-      return 'Telegram';
-    case 'github':
-      return 'GitHub';
-    case 'gitlab':
-      return 'GitLab';
-    case 'gitea':
-      return 'Gitea';
-    case 'bitbucket':
-      return 'Bitbucket';
-    case 'ado':
-      return 'Azure DevOps';
-    case 'linear':
-      return 'Linear';
-    case 'web':
-      return 'Web';
-    case 'api':
-      return 'API';
-    case 'system':
-    default:
-      return SYSTEM_SOURCE;
-  }
+  return getTaskSurfaceLabel(surface) ?? SYSTEM_SOURCE;
 }
 
 type ProjectNameMatch = {

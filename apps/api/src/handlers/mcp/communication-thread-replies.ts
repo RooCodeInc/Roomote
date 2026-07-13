@@ -1,10 +1,14 @@
 import {
   TeamsCommunicationProvider,
   TelegramCommunicationProvider,
+  DiscordCommunicationProvider,
   UnsupportedCommunicationOperationError,
   getLatestInboundMessageId,
 } from '@roomote/communication';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
+import {
+  resolveDiscordRuntimeCredentials,
+  resolveTelegramRuntimeCredentials,
+} from '@roomote/db/server';
 import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -74,6 +78,15 @@ async function createTelegramCommunicationProvider(): Promise<TelegramCommunicat
   }
 
   return new TelegramCommunicationProvider({ botToken });
+}
+
+async function createDiscordCommunicationProvider(): Promise<DiscordCommunicationProvider | null> {
+  const { botToken, applicationId } = await resolveDiscordRuntimeCredentials();
+  if (!botToken) return null;
+  return new DiscordCommunicationProvider({
+    botToken,
+    ...(applicationId ? { applicationId } : {}),
+  });
 }
 
 async function sendTeamsThreadReply(params: {
@@ -310,6 +323,113 @@ async function sendTelegramThreadReply(params: {
   });
 }
 
+async function sendDiscordThreadReply(params: {
+  taskRun: CommunicationReplyTaskRun;
+  parsedBody: ParsedThreadReplyBody;
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  const threadId = getCommunicationThreadIdFromTaskPayload(
+    params.taskRun.payload,
+  );
+  if (!channelId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Discord thread reply is only available for jobs with Discord channel context',
+      }),
+      { status: 403 },
+    );
+  }
+
+  const provider = await createDiscordCommunicationProvider();
+  if (!provider) {
+    return new Response(
+      JSON.stringify({
+        error: 'Discord bot token is not configured for outbound replies',
+      }),
+      { status: 503 },
+    );
+  }
+  const { images, errorResponse } = await getCommunicationReplyImages({
+    taskRun: { id: params.taskRun.id, taskId: params.taskRun.taskId },
+    parsedBody: params.parsedBody,
+  });
+  if (errorResponse) return errorResponse;
+  const text = params.parsedBody.text?.trim();
+  if (!text && images.length === 0) {
+    return new Response(
+      JSON.stringify({
+        error: 'Discord thread replies require text or image attachments',
+      }),
+      { status: 400 },
+    );
+  }
+
+  const reply = await provider.postMessage({
+    channelId,
+    ...(threadId ? { threadId } : {}),
+    ...(text ? { text } : {}),
+    textFormat: 'markdown',
+    images,
+  });
+  return new Response(JSON.stringify({ messageTs: reply.messageId }), {
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+async function addDiscordReaction(params: {
+  taskRun: { id: number; payload: unknown };
+  parsedBody: { channel: string; messageTs: string; name: string };
+}): Promise<Response> {
+  const channelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+  const destinationId =
+    getCommunicationThreadIdFromTaskPayload(params.taskRun.payload) ??
+    channelId;
+  const requestedChannelId = params.parsedBody.channel.replace(/^#/, '');
+  if (!destinationId || !channelId || requestedChannelId !== channelId) {
+    return new Response(
+      JSON.stringify({
+        error:
+          'Discord reactions are only available for the channel this task was launched from',
+      }),
+      { status: 403 },
+    );
+  }
+  const provider = await createDiscordCommunicationProvider();
+  if (!provider) {
+    return new Response(
+      JSON.stringify({ error: 'Discord bot token is not configured' }),
+      { status: 503 },
+    );
+  }
+  try {
+    const result = await provider.addReaction({
+      channelId: destinationId,
+      messageId: params.parsedBody.messageTs,
+      name: params.parsedBody.name,
+    });
+    return new Response(
+      JSON.stringify({
+        channelId: result.channelId,
+        messageTs: result.messageId,
+        name: result.name,
+      }),
+      { headers: { 'content-type': 'application/json' } },
+    );
+  } catch (error) {
+    return new Response(
+      JSON.stringify({
+        error: `Discord reaction failed: ${error instanceof Error ? error.message : String(error)}`,
+      }),
+      { status: 502 },
+    );
+  }
+}
+
 async function addTelegramReaction(params: {
   taskRun: { id: number; payload: unknown };
   parsedBody: { channel: string; messageTs: string; name: string };
@@ -462,6 +582,8 @@ export async function maybeSendCommunicationThreadReply(params: {
       return sendTeamsThreadReply(params);
     case 'telegram':
       return sendTelegramThreadReply(params);
+    case 'discord':
+      return sendDiscordThreadReply(params);
     default:
       return null;
   }
@@ -476,6 +598,8 @@ export async function maybeAddCommunicationReaction(params: {
       return addTeamsReaction(params);
     case 'telegram':
       return addTelegramReaction(params);
+    case 'discord':
+      return addDiscordReaction(params);
     default:
       return null;
   }

@@ -1,0 +1,185 @@
+import type { CommunicationMessageButton } from '@roomote/communication';
+import { buildSetupSuggestionsInlineIntroText } from '@roomote/communication/chat-messages';
+import {
+  and,
+  claimWorkItem,
+  db,
+  eq,
+  trackedMessages,
+} from '@roomote/db/server';
+import {
+  enqueueDiscordSuggestedTasksOnboardingFollowup,
+  findDiscordDefaultDestination,
+  type DiscordDefaultDestination,
+} from '@roomote/sdk/server';
+
+import { apiLogger } from '../../logging.js';
+import {
+  buildInlineSuggestionIdeaLines,
+  buildSharedMessageSuggestionRows,
+  hasTrackedSetupSuggestionMessages,
+  insertSetupSuggestionMessageRows,
+  MAX_SETUP_SUGGESTIONS,
+  scheduleSuggestedTasksFollowupBestEffort,
+  type SetupSuggestionSummary,
+} from '../tasks/setup-suggestion-lifecycle.js';
+import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { resolveDiscordProvider } from './provider.js';
+
+const SUGGESTION_CALLBACK_PREFIX = 'idea:';
+const DISCORD_MAX_INITIAL_POST_LENGTH = 2_000;
+const DISCORD_SETUP_START_INSTRUCTION =
+  'Choose a Start button below, or just describe your own.';
+
+function buildDiscordSuggestionCallbackData(suggestionId: string): string {
+  return `${SUGGESTION_CALLBACK_PREFIX}${suggestionId}`;
+}
+
+function fitDiscordInitialPost(text: string): string {
+  if (text.length <= DISCORD_MAX_INITIAL_POST_LENGTH) {
+    return text;
+  }
+  return `${text.slice(0, DISCORD_MAX_INITIAL_POST_LENGTH - 1).trimEnd()}…`;
+}
+
+type DiscordSuggestionLaunchClaim = {
+  id: string;
+  title: string;
+  brief: string | null;
+  investigationContext: string | null;
+  targetRepositoryFullName: string | null;
+  launchClaimedAt: Date;
+};
+
+/**
+ * Posts setup suggestions to their own Discord thread/forum post. The
+ * destination may be pinned to the setup handoff; otherwise the deployment's
+ * selected Discord default is used.
+ */
+export async function postSetupTaskSuggestionsToDiscord(params: {
+  sourceTaskId: string;
+  createdByUserId: string | null;
+  suggestions: SetupSuggestionSummary[];
+  destination?: DiscordDefaultDestination | null;
+}): Promise<boolean> {
+  const { sourceTaskId, createdByUserId, suggestions } = params;
+  if (!createdByUserId || suggestions.length === 0) {
+    return false;
+  }
+
+  const destination =
+    params.destination ?? (await findDiscordDefaultDestination());
+  if (!destination) {
+    return false;
+  }
+
+  if (await hasTrackedSetupSuggestionMessages(sourceTaskId)) {
+    apiLogger.debug(
+      `[SetupSuggestionLifecycle] Skip Discord suggestion post because tracked messages already exist for sourceTaskId=${sourceTaskId}`,
+    );
+    return true;
+  }
+
+  let provider: Awaited<ReturnType<typeof resolveDiscordProvider>>['provider'];
+  try {
+    ({ provider } = await resolveDiscordProvider());
+  } catch {
+    return false;
+  }
+
+  const limitedSuggestions = suggestions.slice(0, MAX_SETUP_SUGGESTIONS);
+  const introLines = [
+    buildSetupSuggestionsInlineIntroText({
+      startInstruction: DISCORD_SETUP_START_INSTRUCTION,
+    }),
+    '',
+    ...buildInlineSuggestionIdeaLines(limitedSuggestions),
+  ];
+  const buttons: CommunicationMessageButton[][] = limitedSuggestions.map(
+    (suggestion, index) => [
+      {
+        text: `▶️ Start idea ${index + 1}`,
+        callbackData: buildDiscordSuggestionCallbackData(suggestion.id),
+      },
+    ],
+  );
+  const thread = await provider.createTaskThread({
+    channelId: destination.channelId,
+    name: buildCommunicationTaskThreadName('Suggested tasks'),
+    initialText: fitDiscordInitialPost(introLines.join('\n')),
+    buttons,
+  });
+
+  const introMessageId = thread.messageId;
+  if (!introMessageId) {
+    return false;
+  }
+
+  await insertSetupSuggestionMessageRows(
+    buildSharedMessageSuggestionRows({
+      surface: 'discord',
+      messageId: introMessageId,
+      channelId: thread.channelId,
+      sourceTaskId,
+      createdByUserId,
+      suggestions: limitedSuggestions,
+    }),
+  );
+
+  apiLogger.debug(
+    `[SetupSuggestionLifecycle] Published ${limitedSuggestions.length} setup suggestions to Discord thread ${thread.channelId} for sourceTaskId=${sourceTaskId}`,
+  );
+
+  await scheduleSuggestedTasksFollowupBestEffort({
+    surfaceLabel: 'Discord',
+    sourceTaskId,
+    enqueue: () =>
+      enqueueDiscordSuggestedTasksOnboardingFollowup({
+        guildId: destination.guildId,
+        channelId: destination.channelId,
+        threadId: thread.channelId,
+        introMessageId,
+        sourceTaskId,
+      }),
+  });
+
+  return true;
+}
+
+/**
+ * Claims a Discord suggestion button only when the backing card was posted in
+ * the interaction's current thread. This prevents copied component ids from
+ * launching work from another channel or guild.
+ */
+export async function claimDiscordSuggestionLaunch(input: {
+  suggestionId: string;
+  channelId: string;
+}): Promise<DiscordSuggestionLaunchClaim | null> {
+  const trackedCard = await db.query.trackedMessages.findFirst({
+    where: and(
+      eq(trackedMessages.surface, 'discord'),
+      eq(trackedMessages.kind, 'suggestion_card'),
+      eq(trackedMessages.channelId, input.channelId),
+      eq(trackedMessages.workItemId, input.suggestionId),
+    ),
+    columns: { id: true },
+  });
+
+  if (!trackedCard) {
+    return null;
+  }
+
+  const claimed = await claimWorkItem(db, { id: input.suggestionId });
+  if (!claimed) {
+    return null;
+  }
+
+  return {
+    id: claimed.id,
+    title: claimed.title,
+    brief: claimed.brief,
+    investigationContext: claimed.investigationContext,
+    targetRepositoryFullName: claimed.targetRepositoryFullName,
+    launchClaimedAt: claimed.launchClaimedAt,
+  };
+}

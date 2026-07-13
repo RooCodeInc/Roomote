@@ -21,6 +21,7 @@ shared libraries under `packages/`.
 | `apps/controller`    | Worker-dispatch control plane: dequeues jobs and launches sandbox workers.           |
 | `apps/worker`        | Task runtime that runs inside each sandbox and executes the agent.                   |
 | `apps/bullmq`        | Background workers and scheduled jobs on BullMQ.                                     |
+| `apps/discord-gateway` | Durable Discord Gateway connection and inbound event delivery.                     |
 | `apps/preview-proxy` | Reverse proxy that exposes live previews from task sandboxes.                        |
 | `apps/dev`           | Local dev CLI that orchestrates the PM2-managed services (`pnpm dev`).               |
 

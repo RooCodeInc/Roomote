@@ -21,7 +21,7 @@ import {
   ProviderSetupExperience,
 } from '@/app/(onboarding)/setup/ProviderSetupExperience';
 
-type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram';
+type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram' | 'discord';
 type TelegramWebhookStatus = {
   status: 'connected' | 'mismatch' | 'stale_updates' | 'unregistered' | 'error';
   registeredUrl: string | null;
@@ -30,10 +30,11 @@ type TelegramWebhookStatus = {
   pendingUpdateCount?: number;
   lastErrorAtMs?: number | null;
 };
-type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
+type CommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
+  discord?: import('@/trpc/commands/comms').DiscordCommsStatus | null;
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -87,6 +88,7 @@ import {
 } from '@/components/system';
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
+import { DiscordSetupStatus } from './DiscordSetupStatus';
 
 const MICROSOFT_APP_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -476,7 +478,7 @@ function TeamsBotStatus() {
 }
 
 type CommsProviderSectionProps = {
-  provider: TelegramCommsProviderStatus;
+  provider: CommsProviderStatus;
   onSave: (provider: CommsProviderId, values: Record<string, string>) => void;
   onClear: (provider: CommsProviderId) => void;
   savePending: boolean;
@@ -715,7 +717,9 @@ export function CommsProviderSection({
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
                   ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
-                  : undefined
+                  : !provider.runtimeSatisfied && provider.id === 'discord'
+                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
+                    : undefined
               }
               onShowManualSlackValues={() => setShowManualSlackValues(true)}
               onValueChange={(envVarName, value) =>
@@ -778,6 +782,9 @@ export function CommsProviderSection({
               )}
               {provider.id === 'telegram' && hasConfiguredValues && (
                 <TelegramLinkAccountStep />
+              )}
+              {provider.id === 'discord' && provider.discord && (
+                <DiscordSetupStatus status={provider.discord} />
               )}
               {provider.id === 'microsoft' &&
                 (hasConfiguredValues || teamsBotConfigured) && (
