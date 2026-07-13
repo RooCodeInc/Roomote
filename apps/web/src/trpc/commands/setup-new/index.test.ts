@@ -11,6 +11,7 @@ const {
   mockGetSetupBootstrapState,
   mockSetupTokenState,
   mockRunComputeProvisioning,
+  mockAcquireComputeProvisioningLock,
   mockResolveSavedWorkerImage,
   mockResolveGiteaBaseUrl,
   mockValidateGiteaToken,
@@ -26,6 +27,7 @@ const {
     inviteCookieToken: null as string | null,
   },
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
+  mockAcquireComputeProvisioningLock: vi.fn().mockResolvedValue(undefined),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockResolveGiteaBaseUrl: vi
     .fn()
@@ -39,6 +41,7 @@ vi.mock('../compute/compute-provisioning', async (importOriginal) => {
 
   return {
     ...actual,
+    acquireComputeProvisioningLock: mockAcquireComputeProvisioningLock,
     runComputeProvisioning: mockRunComputeProvisioning,
   };
 });

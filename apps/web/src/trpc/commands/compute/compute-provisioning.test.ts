@@ -7,10 +7,16 @@ const {
   mockDbTransaction,
   mockGetPersistedEnvironmentVariableNames,
   mockGetPersistedEnvironmentVariableValues,
+  mockBuildE2bWorkerTemplate,
+  mockResolveComputeProviderEnvValues,
+  mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn(),
   mockGetPersistedEnvironmentVariableValues: vi.fn(),
+  mockBuildE2bWorkerTemplate: vi.fn(),
+  mockResolveComputeProviderEnvValues: vi.fn(),
+  mockUpsertDeploymentEnvironmentVariables: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -21,12 +27,12 @@ vi.mock('@roomote/db/server', () => ({
     strings,
     values,
   })),
-  resolveComputeProviderEnvValues: vi.fn(),
+  resolveComputeProviderEnvValues: mockResolveComputeProviderEnvValues,
 }));
 
 vi.mock('@roomote/compute-providers', () => ({
   buildBlaxelWorkerImage: vi.fn(),
-  buildE2bWorkerTemplate: vi.fn(),
+  buildE2bWorkerTemplate: mockBuildE2bWorkerTemplate,
   registerDaytonaWorkerSnapshot: vi.fn(),
   deriveBlaxelWorkerImageName: (imageRef: string) =>
     `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
@@ -41,13 +47,15 @@ vi.mock('../environment-variables', () => ({
     mockGetPersistedEnvironmentVariableNames,
   getPersistedEnvironmentVariableValues:
     mockGetPersistedEnvironmentVariableValues,
-  upsertDeploymentEnvironmentVariables: vi.fn(),
+  upsertDeploymentEnvironmentVariables:
+    mockUpsertDeploymentEnvironmentVariables,
 }));
 
 import {
   persistComputeProvisioning,
   prepareComputeProvisioningStart,
   reconcileComputeProvisioningOnStartup,
+  runComputeProvisioning,
 } from './compute-provisioning';
 
 function createExecutorMock(existingState: Partial<SetupNewState>) {
@@ -516,5 +524,45 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     await reconcileComputeProvisioningOnStartup();
 
     expect(execute).toHaveBeenCalledOnce();
+  });
+});
+
+describe('runComputeProvisioning', () => {
+  it('does not activate an artifact after a newer desired build supersedes it', async () => {
+    mockResolveComputeProviderEnvValues.mockResolvedValue({
+      E2B_API_KEY: 'key',
+    });
+    mockBuildE2bWorkerTemplate.mockResolvedValue({
+      templateRef: 'roomote-worker:old-r1',
+      templateId: 'template-id',
+      buildId: 'build-id',
+      tags: [],
+    });
+    const execute = vi.fn();
+    const { captured, executor } = createExecutorMock({
+      e2bTemplateBuild: {
+        status: 'building',
+        runtimeSchemaVersion: 1,
+        imageRef: 'registry.example.com/worker:new',
+        templateRef: 'roomote-worker:new-r1',
+        error: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      },
+    });
+    const tx = executor as unknown as { execute: typeof execute };
+    tx.execute = execute;
+    mockDbTransaction.mockImplementation(async (callback) => callback(tx));
+
+    await runComputeProvisioning({
+      provider: 'e2b',
+      userId: null,
+      imageRef: 'registry.example.com/worker:old',
+      templateRef: 'roomote-worker:old-r1',
+    });
+
+    expect(execute).toHaveBeenCalledOnce();
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    expect(captured.setupNewState).toBeUndefined();
   });
 });

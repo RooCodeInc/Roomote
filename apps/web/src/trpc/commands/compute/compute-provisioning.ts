@@ -154,6 +154,28 @@ export async function getPersistedComputeProvisioning(
   return state[SETUP_COMPUTE_PROVISIONING_STATE_FIELDS[provider]];
 }
 
+/** Serializes desired-state transitions and terminal result publication. */
+export async function acquireComputeProvisioningLock(
+  provider: SetupProvisionableComputeProvider,
+  executor: DatabaseOrTransaction,
+): Promise<void> {
+  await executor.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext(${`compute-provisioning:${provider}`}))`,
+  );
+}
+
+function isCurrentComputeProvisioningAttempt(
+  current: SetupNewComputeProvisioningState | null,
+  expected: { imageRef: string; templateRef: string },
+): boolean {
+  return (
+    current?.status === 'building' &&
+    current.runtimeSchemaVersion === WORKER_RUNTIME_SCHEMA_VERSION &&
+    current.imageRef === expected.imageRef &&
+    current.templateRef === expected.templateRef
+  );
+}
+
 export async function persistComputeProvisioning(
   provider: SetupProvisionableComputeProvider,
   provisioning: SetupNewComputeProvisioningState,
@@ -411,7 +433,10 @@ export async function runComputeProvisioning({
   templateRef: string;
 }): Promise<void> {
   const config = PROVISIONING_PROVIDERS[provider];
-  const claimKey = `${provider}:${templateRef}`;
+  // The image ref is part of the desired build identity. Two registries can
+  // use the same tag/template name, and a newer desired image must not be
+  // suppressed by an older in-process build with that name.
+  const claimKey = `${provider}:${imageRef}:${templateRef}`;
 
   if (activeProvisioningClaims.has(claimKey)) {
     console.warn(
@@ -439,7 +464,19 @@ export async function runComputeProvisioning({
       templateRef,
     );
 
-    await db.transaction(async (tx) => {
+    const activated = await db.transaction(async (tx) => {
+      await acquireComputeProvisioningLock(provider, tx);
+      const current = await getPersistedComputeProvisioning(provider, tx);
+
+      if (
+        !isCurrentComputeProvisioningAttempt(current, {
+          imageRef,
+          templateRef,
+        })
+      ) {
+        return false;
+      }
+
       await upsertDeploymentEnvironmentVariables(tx, {
         userId,
         values: [{ name: config.envVarName, value: artifactRef }],
@@ -458,7 +495,18 @@ export async function runComputeProvisioning({
         },
         tx,
       );
+
+      return true;
     });
+
+    if (!activated) {
+      console.warn(
+        `[runComputeProvisioning] Ignoring superseded successful build ${JSON.stringify(
+          { provider, imageRef, templateRef, artifactRef },
+        )}`,
+      );
+      return;
+    }
 
     console.log(
       `[runComputeProvisioning] Provisioning succeeded ${JSON.stringify({
@@ -478,23 +526,48 @@ export async function runComputeProvisioning({
       })}`,
     );
 
-    await persistComputeProvisioning(provider, {
-      status: 'failed',
-      runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
-      imageRef,
-      templateRef: null,
-      error: message,
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
-    }).catch((persistError) => {
-      console.error(
-        `[runComputeProvisioning] Failed to persist provisioning failure: ${
-          persistError instanceof Error
-            ? persistError.message
-            : String(persistError)
-        }`,
-      );
-    });
+    await db
+      .transaction(async (tx) => {
+        await acquireComputeProvisioningLock(provider, tx);
+        const current = await getPersistedComputeProvisioning(provider, tx);
+
+        if (
+          !isCurrentComputeProvisioningAttempt(current, {
+            imageRef,
+            templateRef,
+          })
+        ) {
+          console.warn(
+            `[runComputeProvisioning] Ignoring superseded failed build ${JSON.stringify(
+              { provider, imageRef, templateRef },
+            )}`,
+          );
+          return;
+        }
+
+        await persistComputeProvisioning(
+          provider,
+          {
+            status: 'failed',
+            runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+            imageRef,
+            templateRef: null,
+            error: message,
+            startedAt: new Date().toISOString(),
+            finishedAt: new Date().toISOString(),
+          },
+          tx,
+        );
+      })
+      .catch((persistError) => {
+        console.error(
+          `[runComputeProvisioning] Failed to persist provisioning failure: ${
+            persistError instanceof Error
+              ? persistError.message
+              : String(persistError)
+          }`,
+        );
+      });
   } finally {
     activeProvisioningClaims.delete(claimKey);
   }
@@ -543,9 +616,7 @@ export async function reconcileComputeProvisioningOnStartup(): Promise<void> {
         // Multiple web replicas can start on the same release. Serialize the
         // read/claim transition so only one process records and launches the
         // deterministic provider build.
-        await tx.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtext(${`compute-provisioning:${provider}`}))`,
-        );
+        await acquireComputeProvisioningLock(provider, tx);
         const existingState = await getPersistedComputeProvisioning(
           provider,
           tx,

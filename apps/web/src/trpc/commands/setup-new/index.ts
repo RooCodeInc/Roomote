@@ -126,6 +126,7 @@ import {
   savePersistedRuntimeComputeConfig,
 } from '../compute';
 import {
+  acquireComputeProvisioningLock,
   createPendingComputeProvisioning,
   prepareComputeProvisioningStart,
   runComputeProvisioning,
@@ -1539,6 +1540,10 @@ export async function saveSetupNewComputeConfigCommand(
         imageRef: string;
         templateRef: string;
       } | null = null;
+
+      if (isSetupProvisionableComputeProvider(input.provider)) {
+        await acquireComputeProvisioningLock(input.provider, tx);
+      }
 
       await purgeSavedDeploymentWorkerImage(tx);
 
