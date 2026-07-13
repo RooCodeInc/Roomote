@@ -64,6 +64,8 @@ type TelegramWebhookStatus = {
   registeredUrl: string | null;
   expectedUrl: string;
   lastErrorMessage: string | null;
+  pendingUpdateCount: number;
+  lastErrorAtMs: number | null;
 };
 
 const TELEGRAM_WEBHOOK_REQUIRED_UPDATES = ['message', 'callback_query'];
@@ -167,6 +169,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
         registeredUrl: null,
         expectedUrl,
         lastErrorMessage: info.lastErrorMessage,
+        pendingUpdateCount: info.pendingUpdateCount,
+        lastErrorAtMs: info.lastErrorAtMs,
       };
     }
 
@@ -176,6 +180,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
         registeredUrl: info.url,
         expectedUrl,
         lastErrorMessage: info.lastErrorMessage,
+        pendingUpdateCount: info.pendingUpdateCount,
+        lastErrorAtMs: info.lastErrorAtMs,
       };
     }
 
@@ -188,6 +194,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
       registeredUrl: info.url,
       expectedUrl,
       lastErrorMessage: info.lastErrorMessage,
+      pendingUpdateCount: info.pendingUpdateCount,
+      lastErrorAtMs: info.lastErrorAtMs,
     };
   } catch (error) {
     return {
@@ -195,6 +203,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
       registeredUrl: null,
       expectedUrl,
       lastErrorMessage: classifyTelegramWebhookCheckError(error),
+      pendingUpdateCount: 0,
+      lastErrorAtMs: null,
     };
   }
 }
@@ -222,10 +232,13 @@ async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegis
   });
 
   try {
-    await provider.registerWebhook({
-      url: buildExpectedTelegramWebhookUrl(),
-      secretToken: webhookSecret,
-    });
+    await Promise.all([
+      provider.registerWebhook({
+        url: buildExpectedTelegramWebhookUrl(),
+        secretToken: webhookSecret,
+      }),
+      provider.registerCommands(),
+    ]);
 
     return { registered: true, error: null };
   } catch (error) {
@@ -234,6 +247,15 @@ async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegis
       error: classifyTelegramWebhookCheckError(error),
     };
   }
+}
+
+export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const result = await registerTelegramWebhookBestEffort();
+  if (!result.registered) {
+    throw new Error(result.error ?? 'Could not repair Telegram connection.');
+  }
+  return { repaired: true };
 }
 
 function withTelegramProvider(

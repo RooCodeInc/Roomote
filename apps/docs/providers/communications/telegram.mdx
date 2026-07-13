@@ -17,9 +17,10 @@ Use `<public-url>` below for your stable public Roomote URL.
 ## Create a Telegram bot
 
 Message `@BotFather` in Telegram and create or select a bot. In the Roomote UI
-(**Settings > Communications > Telegram**), enter the bot token and optional
-username, then save. Roomote generates a webhook secret and registers the Bot
-API webhook for you.
+(**Settings > Communications > Telegram**), enter the bot token, then save.
+Roomote reads the bot identity from Telegram, generates a webhook secret,
+registers the Bot API webhook, and adds `/start` and `/new` to the bot's command
+menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
 then create a separate topic in your private bot chat for each new task. If
@@ -55,6 +56,8 @@ header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
 When you save Telegram credentials in Roomote, the webhook is registered
 automatically at `<public-url>/api/webhooks/telegram` with the managed secret
 token and `allowed_updates` including `message` and `callback_query`.
+If the connection check reports a mismatch, delivery error, or stale update
+configuration, use **Repair** in Telegram settings to re-register it.
 
 If you are bootstrapping only from env vars and need to register manually
 before the first UI save:
@@ -87,6 +90,10 @@ up on tasks on their behalf.
 2. confirm Roomote starts a task and posts a Telegram reply with the task link
 3. confirm a new task opens in its own topic when Threaded Mode is enabled
 4. reply in that topic to send a follow-up
+
+Photos are passed to the task as image input. Supported text documents are
+downloaded server-side and their extracted content is added to the request;
+the bot token is never included in the task prompt or attachment URL.
 
 ## Local URL changes
 

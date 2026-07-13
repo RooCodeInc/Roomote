@@ -75,6 +75,18 @@ describe('MockTelegramServer', () => {
     cleanups.push(fn);
   }
 
+  it('stores the configured slash command menu', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    await providerFor(baseUrl).registerCommands();
+
+    expect(server.getState().botCommands).toEqual([
+      { command: 'start', description: 'Show welcome and command help' },
+      { command: 'new', description: 'Start a fresh task' },
+    ]);
+  });
+
   it('creates topics in private chats when the bot has Threaded Mode enabled', async () => {
     const state = baseState();
     state.bot = { ...state.bot!, has_topics_enabled: true };

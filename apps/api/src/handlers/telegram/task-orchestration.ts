@@ -157,6 +157,9 @@ export async function startNewTelegramTask(input: {
         text: input.queuedMessage.text,
       },
     ],
+    ...(input.queuedMessage.images?.length
+      ? { images: input.queuedMessage.images }
+      : {}),
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
   });
   const routingDecision = await routeTask(routingContext);

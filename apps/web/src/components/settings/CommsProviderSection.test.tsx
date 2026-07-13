@@ -136,7 +136,10 @@ vi.mock('@tanstack/react-query', () => ({
       });
     },
   }),
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+  useQueryClient: () => ({
+    setQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
 }));
 
 vi.mock('@/hooks/slack', () => ({
@@ -181,6 +184,12 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       installation: { queryKey: () => ['slack', 'installation'] },
+    },
+    comms: {
+      status: { queryKey: () => ['comms', 'status'] },
+      repairTelegram: {
+        mutationOptions: (options: unknown) => options,
+      },
     },
     routerDebug: {
       getSettings: {

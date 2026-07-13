@@ -9,6 +9,7 @@ const {
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
   createForumTopicMock,
+  downloadFileMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
@@ -43,6 +44,7 @@ const {
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   createForumTopicMock: vi.fn(),
+  downloadFileMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
@@ -247,6 +249,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
       addReaction: addReactionMock,
       answerCallbackQuery: answerCallbackQueryMock,
       createForumTopic: createForumTopicMock,
+      downloadFile: downloadFileMock,
       getBotInfo: getBotInfoMock,
       editMessageReplyMarkup: editMessageReplyMarkupMock,
       editMessageText: editMessageTextMock,
@@ -333,6 +336,11 @@ describe('Telegram webhook handler', () => {
     // later tests do not inherit stale values when the whole suite runs.
     authUsersFindFirstMock.mockReset();
     usersFindFirstMock.mockReset();
+    downloadFileMock.mockResolvedValue({
+      bytes: new Uint8Array([1, 2, 3]),
+      filePath: 'photos/example.jpg',
+      contentType: 'image/jpeg',
+    });
     taskRunsFindFirstMock.mockReset();
     telegramMappingsFindFirstMock.mockReset();
     consumeLinkCodeMock.mockReset();
@@ -647,6 +655,48 @@ describe('Telegram webhook handler', () => {
       runId: 77,
       userId: 'launch-owner-1',
     });
+  });
+
+  it('queues a captioned photo as an active-run follow-up', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'What can you see here?',
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-1',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'telegram',
+      77,
+      expect.objectContaining({
+        text: 'What can you see here?',
+        images: ['data:image/jpeg;base64,AQID'],
+      }),
+    );
   });
 
   it('starts new Telegram tasks as the linked sender', async () => {
@@ -1699,7 +1749,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('launches immediately when routing confidence is high', async () => {
+  it('launches immediately from a captioned photo when routing confidence is high', async () => {
     mockTelegramLinkedSender('launch-owner-22');
     getAvailableEnvironmentsMock.mockResolvedValue([
       { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
@@ -1720,7 +1770,20 @@ describe('Telegram webhook handler', () => {
     });
 
     const response = await postTelegramUpdate(
-      createTelegramUpdate({ message: { text: 'fix the login bug' } }),
+      createTelegramUpdate({
+        message: {
+          text: undefined,
+          caption: 'fix the login bug',
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-1',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }),
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -1728,12 +1791,16 @@ describe('Telegram webhook handler', () => {
       started: true,
       runId: 88,
     });
+    expect(buildTelegramRoutingContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ images: ['data:image/jpeg;base64,AQID'] }),
+    );
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
           payload: expect.objectContaining({
             repo: 'org/web',
             environmentId: 'env-1',
+            images: ['data:image/jpeg;base64,AQID'],
           }),
         }),
       }),

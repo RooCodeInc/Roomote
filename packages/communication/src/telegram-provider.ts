@@ -19,6 +19,8 @@ export type TelegramCommunicationProviderOptions = {
   botToken: string;
   apiBaseUrl?: string;
   fetch?: typeof fetch;
+  timeoutMs?: number;
+  maxRetries?: number;
 };
 
 export type TelegramForumTopic = {
@@ -42,7 +44,12 @@ type TelegramApiResponse =
       ok: false;
       description?: string;
       error_code?: number;
+      parameters?: { retry_after?: number };
     };
+
+const DEFAULT_TELEGRAM_TIMEOUT_MS = 10_000;
+const DEFAULT_TELEGRAM_MAX_RETRIES = 2;
+const TELEGRAM_RETRY_BASE_DELAY_MS = 250;
 
 function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) {
@@ -84,10 +91,14 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
 
   private readonly apiBaseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly timeoutMs: number;
+  private readonly maxRetries: number;
 
   constructor(private readonly options: TelegramCommunicationProviderOptions) {
     this.apiBaseUrl = options.apiBaseUrl ?? getTelegramApiBaseUrl();
     this.fetchImpl = options.fetch ?? fetch;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TELEGRAM_TIMEOUT_MS;
+    this.maxRetries = options.maxRetries ?? DEFAULT_TELEGRAM_MAX_RETRIES;
   }
 
   async postMessage(
@@ -176,7 +187,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     replyToMessageId?: number;
     replyMarkup?: TelegramInlineKeyboardMarkup;
   }): Promise<{ message_id: number; message_thread_id?: number }> {
-    const response = await this.fetchImpl(
+    const response = await this.fetchWithRetry(
       `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/sendPhoto`,
       {
         method: 'POST',
@@ -197,6 +208,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
             : {}),
         }),
       },
+      { method: 'sendPhoto', retryNetworkErrors: false },
     );
     const parsed = (await response
       .json()
@@ -258,13 +270,14 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
             }
           : {}),
       };
-      const response = await this.fetchImpl(
+      const response = await this.fetchWithRetry(
         `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/sendMessage`,
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
         },
+        { method: 'sendMessage', retryNetworkErrors: false },
       );
       const parsed = (await response
         .json()
@@ -336,7 +349,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     let lastError: Error | null = null;
 
     for (const attempt of attempts) {
-      const response = await this.fetchImpl(
+      const response = await this.fetchWithRetry(
         `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/editMessageText`,
         {
           method: 'POST',
@@ -352,6 +365,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
             },
           }),
         },
+        { method: 'editMessageText', retryNetworkErrors: true },
       );
       const parsed = (await response.json().catch(() => null)) as {
         ok?: boolean;
@@ -501,6 +515,52 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     });
   }
 
+  /** Keep Telegram's slash-command picker in sync with supported commands. */
+  async registerCommands(): Promise<void> {
+    await this.callBotApi('setMyCommands', {
+      commands: [
+        { command: 'start', description: 'Show welcome and command help' },
+        { command: 'new', description: 'Start a fresh task' },
+      ],
+    });
+  }
+
+  /** Resolve and download a Telegram-hosted file without exposing the token. */
+  async downloadFile(
+    fileId: string,
+    maxBytes: number,
+  ): Promise<{
+    bytes: Uint8Array;
+    filePath: string;
+    contentType: string | null;
+  }> {
+    const file = (await this.callBotApi('getFile', {
+      file_id: fileId,
+    })) as { file_path?: string; file_size?: number };
+    if (!file.file_path) throw new Error('Telegram getFile returned no path.');
+    if (file.file_size && file.file_size > maxBytes) {
+      throw new Error(`Telegram file exceeds the ${maxBytes} byte limit.`);
+    }
+
+    const response = await this.fetchWithRetry(
+      `${this.apiBaseUrl.replace(/\/bot$/u, '').replace(/\/$/u, '')}/file/bot${this.options.botToken}/${file.file_path}`,
+      { method: 'GET' },
+      { method: 'downloadFile', retryNetworkErrors: true },
+    );
+    if (!response.ok) {
+      throw new Error(`Telegram downloadFile failed (${response.status}).`);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > maxBytes) {
+      throw new Error(`Telegram file exceeds the ${maxBytes} byte limit.`);
+    }
+    return {
+      bytes,
+      filePath: file.file_path,
+      contentType: response.headers.get('content-type'),
+    };
+  }
+
   async getWebhookInfo(): Promise<{
     url: string;
     pendingUpdateCount: number;
@@ -531,13 +591,14 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     method: string,
     body: Record<string, unknown>,
   ): Promise<unknown> {
-    const response = await this.fetchImpl(
+    const response = await this.fetchWithRetry(
       `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/${method}`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       },
+      { method, retryNetworkErrors: this.isIdempotentMethod(method) },
     );
     const parsed = (await response.json().catch(() => null)) as {
       ok?: boolean;
@@ -554,6 +615,65 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     }
 
     return parsed.result;
+  }
+
+  private isIdempotentMethod(method: string): boolean {
+    return [
+      'getMe',
+      'getFile',
+      'getWebhookInfo',
+      'setWebhook',
+      'setMyCommands',
+      'sendChatAction',
+      'editMessageText',
+      'editMessageReplyMarkup',
+      'editForumTopic',
+      'deleteMessage',
+      'setMessageReaction',
+      'answerCallbackQuery',
+    ].includes(method);
+  }
+
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    options: { method: string; retryNetworkErrors: boolean },
+  ): Promise<Response> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      try {
+        const response = await this.fetchImpl(url, {
+          ...init,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        });
+        if (
+          attempt < this.maxRetries &&
+          (response.status === 429 ||
+            (options.retryNetworkErrors && response.status >= 500))
+        ) {
+          const body = (await response
+            .clone()
+            .json()
+            .catch(() => null)) as {
+            parameters?: { retry_after?: number };
+          } | null;
+          const delayMs = body?.parameters?.retry_after
+            ? body.parameters.retry_after * 1000
+            : TELEGRAM_RETRY_BASE_DELAY_MS * 2 ** attempt;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (!options.retryNetworkErrors || attempt >= this.maxRetries)
+          throw error;
+        await new Promise((resolve) =>
+          setTimeout(resolve, TELEGRAM_RETRY_BASE_DELAY_MS * 2 ** attempt),
+        );
+      }
+    }
+    throw lastError ?? new Error(`Telegram ${options.method} failed.`);
   }
 
   async fetchThreadMessages(_input: {
@@ -599,7 +719,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       });
     }
 
-    const response = await this.fetchImpl(
+    const response = await this.fetchWithRetry(
       `${this.apiBaseUrl.replace(/\/$/, '')}/bot${this.options.botToken}/setMessageReaction`,
       {
         method: 'POST',
@@ -610,6 +730,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
           reaction: [{ type: 'emoji', emoji }],
         }),
       },
+      { method: 'setMessageReaction', retryNetworkErrors: true },
     );
     const parsed = (await response.json().catch(() => null)) as {
       ok?: boolean;

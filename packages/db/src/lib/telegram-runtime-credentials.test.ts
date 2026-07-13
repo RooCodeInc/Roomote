@@ -1,7 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { resolveEffectiveDeploymentEnvVarsMock } = vi.hoisted(() => ({
+const {
+  deploymentSettingsFindFirstMock,
+  deploymentSettingsUpdateSetMock,
+  deploymentSettingsUpdateWhereMock,
+  resolveEffectiveDeploymentEnvVarsMock,
+} = vi.hoisted(() => ({
+  deploymentSettingsFindFirstMock: vi.fn(),
+  deploymentSettingsUpdateSetMock: vi.fn(),
+  deploymentSettingsUpdateWhereMock: vi.fn(),
   resolveEffectiveDeploymentEnvVarsMock: vi.fn(),
+}));
+
+vi.mock('../db', () => ({
+  db: {
+    query: {
+      deploymentSettings: { findFirst: deploymentSettingsFindFirstMock },
+    },
+    update: vi.fn(() => ({ set: deploymentSettingsUpdateSetMock })),
+  },
 }));
 
 vi.mock('./model-runtime-config', () => ({
@@ -22,6 +39,11 @@ describe('resolveTelegramRuntimeCredentials', () => {
     process.env.R_TELEGRAM_WEBHOOK_SECRET = 'secret';
     process.env.TELEGRAM_API_BASE_URL = 'https://telegram.example.test';
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
+    deploymentSettingsFindFirstMock.mockResolvedValue({ metadata: {} });
+    deploymentSettingsUpdateSetMock.mockReturnValue({
+      where: deploymentSettingsUpdateWhereMock,
+    });
+    deploymentSettingsUpdateWhereMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -50,6 +72,7 @@ describe('resolveTelegramRuntimeCredentials', () => {
       'https://telegram.example.test/bot123:token/getMe',
       expect.objectContaining({ method: 'POST' }),
     );
+    expect(deploymentSettingsUpdateSetMock).toHaveBeenCalledOnce();
   });
 
   it('keeps credentials usable when Telegram cannot resolve the username', async () => {
