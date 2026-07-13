@@ -749,18 +749,25 @@ export type TeamsBotEnvConfig = {
   R_TEAMS_BOT_OAUTH_SCOPE?: string;
 };
 
+export type TeamsCommunicationProviderExtraOptions = Pick<
+  TeamsCommunicationProviderOptions,
+  'graphTokenProvider' | 'serviceUrl' | 'graphBaseUrl'
+>;
+
 /**
  * Builds a `TeamsCommunicationProvider` from Teams bot env configuration, or
  * returns `null` when the required bot credentials are not configured.
  */
 export function createTeamsCommunicationProviderFromEnv(
   env: TeamsBotEnvConfig,
+  extraOptions?: TeamsCommunicationProviderExtraOptions,
 ): TeamsCommunicationProvider | null {
   if (!env.R_TEAMS_BOT_APP_ID || !env.R_TEAMS_BOT_APP_PASSWORD) {
     return null;
   }
 
   return new TeamsCommunicationProvider({
+    ...extraOptions,
     appId: env.R_TEAMS_BOT_APP_ID,
     appPassword: env.R_TEAMS_BOT_APP_PASSWORD,
     ...(env.R_TEAMS_BOT_TENANT_ID

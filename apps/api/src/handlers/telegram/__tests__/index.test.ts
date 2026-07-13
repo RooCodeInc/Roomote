@@ -234,6 +234,20 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
+    envMock.R_TELEGRAM_BOT_TOKEN
+      ? {
+          addReaction: addReactionMock,
+          answerCallbackQuery: answerCallbackQueryMock,
+          createForumTopic: createForumTopicMock,
+          downloadFile: downloadFileMock,
+          getBotInfo: getBotInfoMock,
+          editMessageReplyMarkup: editMessageReplyMarkupMock,
+          editMessageText: editMessageTextMock,
+          postMessage: postMessageMock,
+        }
+      : null,
+  ),
   enqueueTelegramSuggestedTasksOnboardingFollowup: vi.fn(),
   consumeTelegramLinkCode: consumeLinkCodeMock,
   restoreTelegramLinkCode: restoreLinkCodeMock,
