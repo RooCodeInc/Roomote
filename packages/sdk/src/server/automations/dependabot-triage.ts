@@ -8,6 +8,10 @@ import { ALL_REPOSITORIES } from '@roomote/types';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
+  buildDestinationPromptContext,
+  type ResolvedAutomationDestination,
+} from './destination';
+import {
   getActiveRepositoryFullNames,
   hasActiveGitHubInstallation,
 } from './github-deployment-scope';
@@ -15,17 +19,20 @@ import { createScheduledTriageJob } from './scheduled-triage-runner';
 
 function buildDependabotTriagePrompt({
   channelId,
+  destination,
   repositoryFullNames,
   repositoryCoverage,
   manualTrigger,
   recentThreadFeedback,
 }: {
   channelId: string;
+  destination: ResolvedAutomationDestination;
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
   manualTrigger: boolean;
   recentThreadFeedback?: string | null;
 }): string {
+  const promptContext = buildDestinationPromptContext(destination);
   const repositoryScope =
     repositoryFullNames.length > 0
       ? repositoryFullNames.map((fullName) => `- ${fullName}`).join('\n')
@@ -43,9 +50,9 @@ Each submitted act item must:
 - include \`executionPrompt\` that starts with \`$update-dependencies\`
 - include investigationContext with the alert URL or number, alert summary, package, ecosystem, manifest path, severity, vulnerable range, first patched version, the exact GitHub CLI commands used during triage, and the validation the execution task must perform before opening a PR
 
-If \`submit_automation_work_items\` succeeds for one or more act items, do not call \`post_to_slack_channel\` and do not post a launch announcement. Each execution task starts silently and creates Slack output only later if it needs input, hits a blocker, or finishes with a result. End the task response with a terse internal note that action items were submitted.
+If \`submit_automation_work_items\` succeeds for one or more act items, do not call \`${promptContext.postToolName}\` and do not post a launch announcement. Each execution task starts silently and creates ${promptContext.surfaceLabel} output only later if it needs input, hits a blocker, or finishes with a result. End the task response with a terse internal note that action items were submitted.
 
-If there are no actionable alerts, no eligible configured-environment candidates, or no configured environment coverage, do not post to Slack; end with a terse internal note. Treat repository-level gaps such as Dependabot alerts being disabled for a repository, a repository returning zero open alerts, or a repository falling outside configured environment coverage as non-blocking no-op findings for this run, not as GitHub setup/auth blockers worth a Slack post. A clean read-only run is not worth a channel message. Post a concise report to the configured Slack channel with \`post_to_slack_channel\` only for GitHub setup/auth blockers (for example missing or suspended Dependabot alert access), so configuration failures do not disappear silently. Keep any such report plain-language and manager-readable, and do not paste the raw GitHub CLI commands, \`gh api\` invocations, or command transcripts into Slack; the exact commands belong only in work item \`investigationContext\`.`;
+If there are no actionable alerts, no eligible configured-environment candidates, or no configured environment coverage, do not post to ${promptContext.surfaceLabel}; end with a terse internal note. Treat repository-level gaps such as Dependabot alerts being disabled for a repository, a repository returning zero open alerts, or a repository falling outside configured environment coverage as non-blocking no-op findings for this run, not as GitHub setup/auth blockers worth a ${promptContext.surfaceLabel} post. A clean read-only run is not worth a channel message. Post a concise report to the configured ${promptContext.surfaceLabel} channel with \`${promptContext.postToolName}\` only for GitHub setup/auth blockers (for example missing or suspended Dependabot alert access), so configuration failures do not disappear silently. Keep any such report plain-language and manager-readable, and do not paste the raw GitHub CLI commands, \`gh api\` invocations, or command transcripts into ${promptContext.surfaceLabel}; the exact commands belong only in work item \`investigationContext\`.`;
 
   return `$dependabot-triage
 
@@ -54,7 +61,7 @@ If there are no actionable alerts, no eligible configured-environment candidates
   <run_mode>read_only</run_mode>
   <trigger>${manualTrigger ? 'manual' : 'scheduled'}</trigger>
   <alert_scope>current_open_dependabot_alerts</alert_scope>
-  <slack_channel_id>${channelId}</slack_channel_id>
+  <${promptContext.channelTag}>${channelId}</${promptContext.channelTag}>
   <repository_scope>
 ${repositoryScope}
   </repository_scope>
@@ -71,7 +78,7 @@ ${recentThreadFeedback?.trim() ? `Recent feedback from earlier Dependabot triage
 
 export const dependabotTriageJob = createScheduledTriageJob({
   automationKey: 'dependabot_triage',
-  async buildScanTask({ channelId, manualTrigger }) {
+  async buildScanTask({ channelId, destination, manualTrigger }) {
     if (!(await hasActiveGitHubInstallation())) {
       return { kind: 'skip', reason: 'GitHub is not configured' };
     }
@@ -87,6 +94,7 @@ export const dependabotTriageJob = createScheduledTriageJob({
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'dependabot_triage',
       slackChannelId: channelId,
+      surface: destination.provider,
     });
 
     return {
@@ -98,13 +106,16 @@ export const dependabotTriageJob = createScheduledTriageJob({
           : {}),
         description: buildDependabotTriagePrompt({
           channelId,
+          destination,
           repositoryFullNames: environmentBackedRepositories,
           repositoryCoverage,
           manualTrigger,
           recentThreadFeedback,
         }),
         trigger: 'scheduled',
-        notifySlack: true,
+        ...(destination.provider === 'slack'
+          ? { notifySlack: true, slackChannel: channelId }
+          : {}),
         suggestionSource: 'dependabot_triage',
         visibleInTranscript: false,
       },

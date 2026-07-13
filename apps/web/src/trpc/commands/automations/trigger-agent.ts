@@ -1,10 +1,12 @@
 import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   isTriggerableBackgroundAutomationKey,
+  type CommunicationProvider,
   type TriggerableBackgroundAutomationKey,
 } from '@roomote/types';
 import { getAutomationRuntime } from '@roomote/db/server';
 import {
+  resolveAutomationRuntimeDestination,
   runAutomationNow,
   type AutomationRunNowResult,
 } from '@roomote/sdk/server';
@@ -37,16 +39,38 @@ async function assertManualTriggerIsRunnable(
     );
   }
 
-  if (descriptor.usesManagerChannel && !runtime.slackChannelId) {
-    throw new Error(
-      `Set a Manager Channel before running ${descriptor.label}.`,
-    );
+  const slackConnected = await hasActiveSlackInstallation();
+  const destination = descriptor.usesManagerChannel
+    ? await resolveAutomationRuntimeDestination({ runtime, slackConnected })
+    : null;
+
+  if (descriptor.usesManagerChannel) {
+    if (!destination) {
+      throw new Error(
+        `Set a Manager Channel before running ${descriptor.label}.`,
+      );
+    }
+
+    const supportedProviders: readonly CommunicationProvider[] =
+      descriptor.supportedCommunicationProviders;
+
+    if (!supportedProviders.includes(destination.provider)) {
+      throw new Error(
+        `${descriptor.label} cannot report to ${destination.provider} yet. Choose a Slack channel or the shared Manager Channel.`,
+      );
+    }
   }
 
   for (const requirement of descriptor.manualTriggerRequirements) {
     switch (requirement) {
       case 'slack':
-        if (!(await hasActiveSlackInstallation())) {
+        // A supported non-Slack destination satisfies the comms requirement;
+        // the Slack connection itself is only needed when the report goes to
+        // Slack.
+        if (destination && destination.provider !== 'slack') {
+          break;
+        }
+        if (!slackConnected) {
           throw new Error(`Connect Slack before running ${descriptor.label}.`);
         }
         break;

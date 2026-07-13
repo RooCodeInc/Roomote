@@ -224,6 +224,46 @@ export function resolveAutomationSlackChannelId(
   return getAutomationSlackChannelTarget(automation) ?? managerSlackChannelId;
 }
 
+/** Provider-neutral resolved destination an automation reports to. */
+export type AutomationDestination = {
+  provider: 'slack' | 'teams' | 'telegram';
+  channelId: string;
+};
+
+const DESTINATION_TARGET_KINDS = [
+  ['slack', 'slack_channel'],
+  ['teams', 'teams_channel'],
+  ['telegram', 'telegram_chat'],
+] as const;
+
+/**
+ * Provider-neutral destination waterfall: the automation's own channel
+ * target wins (Slack first when several providers are targeted), otherwise
+ * the deployment-wide Slack manager channel. The primary-conversation
+ * fallbacks for Teams/Telegram deployments without any Slack live in the
+ * sdk runner layer, which owns those surfaces' installation lookups.
+ */
+export function resolveAutomationDestination(
+  automation: Pick<Automation, 'targets'> | undefined,
+  managerSlackChannelId: string | null,
+): AutomationDestination | null {
+  for (const [provider, targetKind] of DESTINATION_TARGET_KINDS) {
+    const channelId = getAutomationTargetRefs(
+      automation,
+      provider,
+      targetKind,
+    )[0];
+
+    if (channelId) {
+      return { provider, channelId };
+    }
+  }
+
+  return managerSlackChannelId
+    ? { provider: 'slack', channelId: managerSlackChannelId }
+    : null;
+}
+
 function getChannelAutoStartTargets(
   automation: Automation | undefined,
 ): BackgroundAgentSettings['channelAutoStartSlackChannels'] {
@@ -546,6 +586,12 @@ export type AutomationRuntime = {
   /** Automation slack_channel target, falling back to the manager channel. */
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
+  /**
+   * Provider-neutral destination waterfall result (own target on any comms
+   * provider, else the Slack manager channel). Null when neither is set;
+   * runners may still fall back to a primary Teams/Telegram conversation.
+   */
+  destination: AutomationDestination | null;
 };
 
 export async function getAutomationRuntime(
@@ -576,6 +622,10 @@ export async function getAutomationRuntime(
       managerSlackChannelId,
     ),
     managerSlackChannelId,
+    destination: resolveAutomationDestination(
+      automation ?? undefined,
+      managerSlackChannelId,
+    ),
   };
 }
 
