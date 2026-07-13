@@ -88,7 +88,6 @@ x-roomote-web-env: &roomote-web-env
   R_TELEGRAM_BOT_TOKEN: ${R_TELEGRAM_BOT_TOKEN:-}
   R_TELEGRAM_WEBHOOK_SECRET: ${R_TELEGRAM_WEBHOOK_SECRET:-}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
-  R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
   R_LINEAR_CLIENT_ID: ${R_LINEAR_CLIENT_ID:-}
   R_LINEAR_CLIENT_SECRET: ${R_LINEAR_CLIENT_SECRET:-}
   R_LINEAR_WEBHOOK_SECRET: ${R_LINEAR_WEBHOOK_SECRET:-}
@@ -208,6 +207,7 @@ x-roomote-bullmq-env: &roomote-bullmq-env
   DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
   R_TELEGRAM_BOT_TOKEN: ${R_TELEGRAM_BOT_TOKEN:-}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
+  R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
   MODAL_TOKEN_ID: ${MODAL_TOKEN_ID:-}
   MODAL_TOKEN_SECRET: ${MODAL_TOKEN_SECRET:-}
   MODAL_ENDPOINT: ${MODAL_ENDPOINT:-}
@@ -219,14 +219,6 @@ x-roomote-bullmq-env: &roomote-bullmq-env
   MODAL_ECR_OIDC_ROLE_ARN: ${MODAL_ECR_OIDC_ROLE_ARN:-}
   MODAL_ECR_REGION: ${MODAL_ECR_REGION:-}
   MODAL_REGIONS: ${MODAL_REGIONS:-}
-
-x-roomote-discord-gateway-env: &roomote-discord-gateway-env
-  <<: *roomote-base-env
-  DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
-  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
-  R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
-  R_DISCORD_GATEWAY_SECRET: ${R_DISCORD_GATEWAY_SECRET:-}
 
 x-roomote-preview-proxy-env: &roomote-preview-proxy-env
   <<: *roomote-base-env
@@ -391,32 +383,6 @@ services:
         [
           'CMD-SHELL',
           'curl -fsS --max-time 2 http://127.0.0.1:3001/health/liveness >/dev/null',
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 20s
-
-  discord-gateway:
-    <<: *roomote-service
-    image: *roomote-app-image
-    command: ['discord-gateway']
-    depends_on:
-      redis:
-        condition: service_started
-      db-migrate:
-        condition: service_completed_successfully
-      api:
-        condition: service_started
-    environment:
-      <<: *roomote-discord-gateway-env
-      ROOMOTE_SERVICE: discord-gateway
-      PORT: 3003
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -fsS --max-time 2 http://127.0.0.1:3003/health/liveness >/dev/null',
         ]
       interval: 5s
       timeout: 3s

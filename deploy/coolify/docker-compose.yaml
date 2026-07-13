@@ -63,7 +63,6 @@ x-roomote-shared-env: &roomote-shared-env
   R_PUBLIC_URL: ${SERVICE_URL_WEB}
   TRPC_URL: ${SERVICE_URL_API}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
-  R_DISCORD_GATEWAY_SECRET: ${SERVICE_PASSWORD_DISCORDGATEWAY}
   S3_ENDPOINT: http://minio:9000
   S3_PRESIGN_ENDPOINT: ${SERVICE_URL_MINIO}
 
@@ -173,31 +172,6 @@ services:
         [
           'CMD-SHELL',
           'curl -fsS --max-time 2 http://127.0.0.1:3001/health/liveness >/dev/null',
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 20s
-
-  discord-gateway:
-    image: *roomote-app-image
-    restart: unless-stopped
-    command: discord-gateway
-    depends_on:
-      redis:
-        condition: service_started
-      db-migrate:
-        condition: service_completed_successfully
-      api:
-        condition: service_started
-    environment:
-      <<: *roomote-shared-env
-      PORT: 3003
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -fsS --max-time 2 http://127.0.0.1:3003/health/liveness >/dev/null',
         ]
       interval: 5s
       timeout: 3s

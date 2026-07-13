@@ -25,6 +25,7 @@ import {
   buildRoomoteDeployMarker,
   formatRoomoteDeployMarker,
 } from '@roomote/types';
+import { startDiscordGatewaySupervisor } from '@roomote/discord-gateway';
 
 import {
   createAdminDashboardMiddleware,
@@ -67,6 +68,8 @@ try {
 const redis = getRedis();
 
 initBullMqSentry();
+
+const discordGatewaySupervisor = startDiscordGatewaySupervisor(redis);
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   startScheduler();
@@ -309,6 +312,7 @@ async function gracefulShutdown() {
     await prReviewNotificationWorker.close();
     await prReviewNotificationQueueEvents.close();
     await prReviewNotificationQueue.close();
+    await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {
     console.error('[Shutdown] Error during shutdown:', error);

@@ -113,9 +113,8 @@ fly secrets set --app "$APP" \
   DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
   SETUP_TOKEN="$(openssl rand -hex 16)"
 
-# One Machine per process group (web, api, controller, bullmq, and
-# discord-gateway). The db-migrate release command runs schema migrations
-# first.
+# One Machine per process group (web, api, controller, and bullmq). The
+# db-migrate release command runs schema migrations first.
 fly deploy --ha=false
 ```
 
@@ -130,7 +129,6 @@ Then open `https://$APP.fly.dev/setup?token=<SETUP_TOKEN>` and continue with
 | `api`         | `api`                      | yes — port 8443                 | `/health/liveness` |
 | `controller`  | `controller`               | no                              | —                  |
 | `bullmq`      | `bullmq`                   | no                              | —                  |
-| `discord-gateway` | `discord-gateway`       | no                              | —                  |
 
 Postgres, Redis, and object storage are managed resources (Fly Managed
 Postgres, Upstash Redis, Tigris), not process groups. Every process group

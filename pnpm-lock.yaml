@@ -251,6 +251,9 @@ importers:
       '@roomote/db':
         specifier: workspace:^
         version: link:../../packages/db
+      '@roomote/discord-gateway':
+        specifier: workspace:^
+        version: link:../discord-gateway
       '@roomote/env':
         specifier: workspace:^
         version: link:../../packages/env

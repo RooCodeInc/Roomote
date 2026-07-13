@@ -170,11 +170,7 @@ const renderServices = new Map(
   ]),
 );
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
-  if (
-    name === 'controller' ||
-    name === 'bullmq' ||
-    name === 'discord-gateway'
-  ) {
+  if (name === 'controller' || name === 'bullmq') {
     assert(renderServices.has(name), `render: missing ${name}`);
   } else {
     assert(

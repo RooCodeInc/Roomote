@@ -13,12 +13,26 @@ import { DiscordLoginBackoff } from './login-backoff';
 import { GatewayStatusStore } from './status';
 
 const LEADER_LEASE_KEY = 'discord:gateway:leader';
-const sleep = (milliseconds: number) =>
-  new Promise((resolve) => setTimeout(resolve, milliseconds));
+const sleep = (milliseconds: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    if (signal.aborted) {
+      resolve();
+      return;
+    }
+
+    const finish = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const timeout = setTimeout(finish, milliseconds);
+    signal.addEventListener('abort', finish, { once: true });
+  });
 
 export class DiscordGatewayService {
   readonly status: GatewayStatusStore;
   private stopped = false;
+  private readonly stopController = new AbortController();
   private activeSession: DiscordGatewaySession | null = null;
   private activeDeliveryAbort: AbortController | null = null;
 
@@ -31,45 +45,66 @@ export class DiscordGatewayService {
 
   async run(): Promise<void> {
     while (!this.stopped) {
-      const releaseLease = await acquireRedisLock(LEADER_LEASE_KEY, {
-        redis: this.redis,
-        ttlSeconds: this.config.leaderLeaseTtlSeconds,
-      });
-
-      if (!releaseLease) {
-        await this.status.update(
-          {
-            phase: 'standby',
-            leader: false,
-            ready: false,
-            connected: false,
-          },
-          { publish: false },
-        );
-        await sleep(this.config.standbyPollMs);
-        continue;
-      }
+      let releaseLease: Awaited<ReturnType<typeof acquireRedisLock>> = null;
 
       try {
+        releaseLease = await acquireRedisLock(LEADER_LEASE_KEY, {
+          redis: this.redis,
+          ttlSeconds: this.config.leaderLeaseTtlSeconds,
+        });
+
+        if (!releaseLease) {
+          await this.status.update(
+            {
+              phase: 'standby',
+              leader: false,
+              ready: false,
+              connected: false,
+            },
+            { publish: false },
+          );
+          await sleep(this.config.standbyPollMs, this.stopController.signal);
+          continue;
+        }
+
+        const activeLease = releaseLease;
         await this.runAsLeader(async () =>
-          releaseLease.renew(this.config.leaderLeaseTtlSeconds),
+          activeLease.renew(this.config.leaderLeaseTtlSeconds),
         );
+      } catch (error) {
+        if (!this.stopped) {
+          console.error(
+            `[discord-gateway] supervisor cycle failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          await this.status
+            .update({
+              phase: 'error',
+              ready: false,
+              connected: false,
+              lastError: error instanceof Error ? error.message : String(error),
+            })
+            .catch(() => undefined);
+          await sleep(this.config.standbyPollMs, this.stopController.signal);
+        }
       } finally {
-        await releaseLease();
+        await releaseLease?.().catch(() => undefined);
       }
     }
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.stopController.abort();
     this.activeDeliveryAbort?.abort();
-    await this.activeSession?.disconnect();
-    await this.status.update({
-      phase: 'stopping',
-      live: false,
-      ready: false,
-      connected: false,
-    });
+    await this.activeSession?.disconnect().catch(() => undefined);
+    await this.status
+      .update({
+        phase: 'stopping',
+        live: false,
+        ready: false,
+        connected: false,
+      })
+      .catch(() => undefined);
   }
 
   private async runAsLeader(renewLease: () => Promise<boolean>): Promise<void> {
@@ -156,7 +191,7 @@ export class DiscordGatewayService {
           await this.status.update({
             lastError: `Discord credential lookup failed: ${error instanceof Error ? error.message : String(error)}`,
           });
-          await sleep(this.config.credentialPollMs);
+          await sleep(this.config.credentialPollMs, this.stopController.signal);
           continue;
         }
 
@@ -211,7 +246,7 @@ export class DiscordGatewayService {
           }
         }
 
-        await sleep(this.config.credentialPollMs);
+        await sleep(this.config.credentialPollMs, this.stopController.signal);
       }
     } finally {
       clearInterval(leaseTimer);

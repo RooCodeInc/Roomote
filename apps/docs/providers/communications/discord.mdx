@@ -91,18 +91,21 @@ environment variable instead, set:
 R_DISCORD_BOT_TOKEN=<discord-bot-token>
 ```
 
-The Discord Gateway service is included in Roomote's supported Docker Compose
-and deployment templates. It uses Redis for durable event delivery and shares
-the deployment encryption key by default. Operators that want a dedicated
-internal service secret can also set the same value for
-`R_DISCORD_GATEWAY_SECRET` on the API and Discord Gateway services.
+The Discord Gateway runs as an opt-in subsystem inside Roomote's existing
+BullMQ process, so enabling Discord does not add another container, process, or
+port. It stays dormant until a token is saved, uses Redis to elect a single
+active replica, and disconnects if Discord is removed. Durable event delivery
+uses Redis and the deployment encryption key by default. Operators that want a
+dedicated internal secret can set the same `R_DISCORD_GATEWAY_SECRET` value on
+the API and BullMQ processes.
 
 Gateway session state is stored in the Roomote database. On a service restart
 or leader handoff, Roomote asks Discord to resume the previous session and
 replay any missed events; Discord can fall back to a fresh session when the old
 one has expired.
 
-Restart the affected services after changing either variable.
+Restart BullMQ after changing either environment variable. Tokens saved in the
+setup UI are detected automatically without a restart.
 
 ## Verify setup
 

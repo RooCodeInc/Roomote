@@ -109,7 +109,6 @@ swap_size_mb = 512
   api = 'api'
   controller = 'controller'
   bullmq = 'bullmq'
-  discord-gateway = 'discord-gateway'
 
 # The app origin users open in the browser.
 [http_service]

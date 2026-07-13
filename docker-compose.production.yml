@@ -137,21 +137,6 @@ services:
       retries: 12
       start_period: 20s
 
-  discord-gateway:
-    environment:
-      <<: *roomote-production-env
-    ports: !reset []
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -fsS --max-time 2 http://127.0.0.1:3003/health/liveness >/dev/null',
-        ]
-      interval: 5s
-      timeout: 3s
-      retries: 12
-      start_period: 20s
-
   controller:
     environment:
       <<: *roomote-production-env

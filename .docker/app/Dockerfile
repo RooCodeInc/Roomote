@@ -2,8 +2,7 @@
 #
 # Shared application image for the Roomote control plane.
 #
-# One image ships web, api, controller, bullmq, discord-gateway, and
-# preview-proxy (plus the
+# One image ships web, api, controller, bullmq, and preview-proxy (plus the
 # db-migrate one-shot). Each Compose service selects its process through the
 # `.docker/app/entrypoint.sh` dispatcher:
 #
@@ -230,17 +229,6 @@ RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
     "@bull-board/ui@$(cd /roomote/apps/bullmq && node -p "require('@bull-board/ui/package.json').version")"
 
 # ---------------------------------------------------------------------------
-# discord-gateway: persistent Discord Gateway client and durable API forwarder.
-# ---------------------------------------------------------------------------
-FROM base AS build-discord-gateway
-
-ENV NODE_ENV=production
-WORKDIR /roomote/apps/discord-gateway
-RUN pnpm build
-
-RUN find dist -type f -name '*.map' -delete
-
-# ---------------------------------------------------------------------------
 # preview-proxy: bundled dist plus the pino transports tsup keeps external.
 # ---------------------------------------------------------------------------
 FROM base AS build-preview-proxy
@@ -368,8 +356,6 @@ COPY --from=build-controller /runtime-deps/node_modules ./apps/controller/node_m
 COPY --from=build-bullmq /roomote/apps/bullmq/package.json ./apps/bullmq/
 COPY --from=build-bullmq /roomote/apps/bullmq/dist ./apps/bullmq/dist/
 COPY --from=build-bullmq /runtime-deps/node_modules ./apps/bullmq/node_modules/
-COPY --from=build-discord-gateway /roomote/apps/discord-gateway/package.json ./apps/discord-gateway/
-COPY --from=build-discord-gateway /roomote/apps/discord-gateway/dist ./apps/discord-gateway/dist/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/package.json ./apps/preview-proxy/
 COPY --from=build-preview-proxy /roomote/apps/preview-proxy/dist ./apps/preview-proxy/dist/
 COPY --from=build-preview-proxy /runtime-deps/node_modules ./apps/preview-proxy/node_modules/
@@ -377,4 +363,4 @@ COPY --from=github-cli /usr/bin/gh /usr/local/bin/gh
 RUN command -v gh >/dev/null && command -v opencode >/dev/null
 
 USER roomote-app:roomote-app
-EXPOSE 3000 3001 3002 3003 8081
+EXPOSE 3000 3001 3002 8081

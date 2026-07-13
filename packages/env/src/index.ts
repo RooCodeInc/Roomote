@@ -260,7 +260,6 @@ export const ROOMOTE_SERVICE_VALUES = [
   'controller',
   'bullmq',
   'preview-proxy',
-  'discord-gateway',
   'db-migrate',
 ] as const;
 
@@ -320,13 +319,6 @@ export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
     'ENCRYPTION_KEY',
   ],
   'preview-proxy': ['R_APP_URL', 'DATABASE_URL', 'REDIS_URL'],
-  'discord-gateway': [
-    'R_APP_URL',
-    'TRPC_URL',
-    'DATABASE_URL',
-    'REDIS_URL',
-    'ENCRYPTION_KEY',
-  ],
   'db-migrate': ['DATABASE_URL'],
 } as const satisfies Record<RoomoteService, readonly ServerEnvKey[]>;
 
@@ -587,7 +579,6 @@ const SERVICE_AUTH_KEYPAIR_ENV_KEYS = {
   api: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   controller: ['JOB_AUTH_PRIVATE_KEY', 'JOB_AUTH_PUBLIC_KEY'],
   bullmq: [],
-  'discord-gateway': [],
   'preview-proxy': ['JOB_AUTH_PUBLIC_KEY', 'PREVIEW_AUTH_PUBLIC_KEY'],
   'db-migrate': [],
 } as const satisfies Record<RoomoteService, readonly AuthKeypairEnvKey[]>;

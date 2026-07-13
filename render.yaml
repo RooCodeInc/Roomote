@@ -182,15 +182,6 @@ services:
     envVars: *roomote-app-env
 
   - type: worker
-    name: roomote-discord-gateway
-    runtime: image
-    image:
-      url: ghcr.io/roocodeinc/roomote-app:main
-    plan: starter
-    dockerCommand: /roomote/.docker/app/entrypoint.sh discord-gateway
-    envVars: *roomote-app-env
-
-  - type: worker
     name: roomote-bullmq
     runtime: image
     image:
@@ -223,8 +214,6 @@ envVarGroups:
       # in Postgres when this is left blank.
       - key: R_DISCORD_BOT_TOKEN
         value: ''
-      - key: R_DISCORD_GATEWAY_SECRET
-        generateValue: true
       - key: ARTIFACT_SIGNING_KEY
         generateValue: true
       - key: DASHBOARD_PASSWORD

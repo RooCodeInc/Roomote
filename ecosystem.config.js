@@ -34,7 +34,6 @@ const localPorts = {
   web: Number(process.env.ROOMOTE_WEB_PORT || 13000),
   api: Number(process.env.ROOMOTE_API_PORT || 13001),
   bullmq: Number(process.env.ROOMOTE_BULLMQ_PORT || 13002),
-  discordGateway: Number(process.env.ROOMOTE_DISCORD_GATEWAY_PORT || 13003),
   previewProxy: Number(process.env.ROOMOTE_PREVIEW_PROXY_PORT || 18081),
 };
 const publicUrl = process.env.R_PUBLIC_URL;
@@ -131,9 +130,6 @@ const app = (name, opts = {}) => ({
 
 const apps = [
   app('api', { env: { ...env, PORT: String(localPorts.api) } }),
-  app('discord-gateway', {
-    env: { ...env, PORT: String(localPorts.discordGateway) },
-  }),
   app('web', {
     env: {
       ...env,
