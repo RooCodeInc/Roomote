@@ -1,3 +1,7 @@
+import {
+  WORKER_RUNTIME_SCHEMA_TAG,
+  WORKER_RUNTIME_SCHEMA_VERSION,
+} from '@roomote/types';
 import type {
   SetupNewComputeProvisioningState,
   SetupNewState,
@@ -30,16 +34,13 @@ vi.mock('@roomote/db/server', () => ({
   resolveComputeProviderEnvValues: mockResolveComputeProviderEnvValues,
 }));
 
-vi.mock('@roomote/compute-providers', () => ({
+// Keep the real templateRef derivations (they embed WORKER_RUNTIME_SCHEMA_TAG)
+// and mock only the provider-side build/register calls.
+vi.mock('@roomote/compute-providers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/compute-providers')>()),
   buildBlaxelWorkerImage: vi.fn(),
   buildE2bWorkerTemplate: mockBuildE2bWorkerTemplate,
   registerDaytonaWorkerSnapshot: vi.fn(),
-  deriveBlaxelWorkerImageName: (imageRef: string) =>
-    `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
-  deriveE2bWorkerTemplateRef: (imageRef: string) =>
-    `roomote-worker:${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
-  deriveDaytonaWorkerSnapshotName: (imageRef: string) =>
-    `roomote-worker-${imageRef.slice(imageRef.lastIndexOf(':') + 1)}`,
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -225,14 +226,14 @@ describe('prepareComputeProvisioningStart', () => {
       start: {
         provider: 'e2b',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
       },
     });
     expect(markPending).toHaveBeenCalledWith(
       expect.objectContaining({
         status: 'building',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
       }),
     );
   });
@@ -277,9 +278,9 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker-tag',
+        templateRef: `roomote-worker-tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
         error: null,
         startedAt,
         finishedAt: null,
@@ -414,9 +415,9 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
         error: null,
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
@@ -483,13 +484,13 @@ describe('prepareComputeProvisioningStart', () => {
       start: {
         provider: 'e2b',
         imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
-        templateRef: 'roomote-worker:develop',
+        templateRef: `roomote-worker:develop-${WORKER_RUNTIME_SCHEMA_TAG}`,
       },
     });
     expect(markPending).toHaveBeenCalledWith(
       expect.objectContaining({
         imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
-        templateRef: 'roomote-worker:develop',
+        templateRef: `roomote-worker:develop-${WORKER_RUNTIME_SCHEMA_TAG}`,
       }),
     );
   });
@@ -503,15 +504,15 @@ describe('reconcileComputeProvisioningOnStartup', () => {
       'E2B_TEMPLATE_ID',
     ]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
-      E2B_TEMPLATE_ID: 'roomote-worker:tag',
+      E2B_TEMPLATE_ID: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
     });
     const execute = vi.fn();
-    const { executor } = createExecutorMock({
+    const { captured, executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
         error: null,
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
@@ -524,6 +525,9 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     await reconcileComputeProvisioningOnStartup();
 
     expect(execute).toHaveBeenCalledOnce();
+    // Current artifact: no pending claim written, no detached run started.
+    expect(captured.setupNewState).toBeUndefined();
+    expect(mockResolveComputeProviderEnvValues).not.toHaveBeenCalled();
   });
 });
 
@@ -542,9 +546,9 @@ describe('runComputeProvisioning', () => {
     const { captured, executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
-        templateRef: 'roomote-worker:new-r2',
+        templateRef: `roomote-worker:new-${WORKER_RUNTIME_SCHEMA_TAG}`,
         error: null,
         startedAt: new Date().toISOString(),
         finishedAt: null,

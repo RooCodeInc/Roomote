@@ -191,7 +191,11 @@ import {
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupNewOnboardingTaskCommand,
 } from './index';
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  WORKER_RUNTIME_SCHEMA_TAG,
+  WORKER_RUNTIME_SCHEMA_VERSION,
+} from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
@@ -834,12 +838,12 @@ describe('setup-new compute config commands', () => {
       provider: 'e2b',
       userId: 'setup-test-user',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
     });
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
     });
   });
 
@@ -863,9 +867,9 @@ describe('setup-new compute config commands', () => {
               setupNewState: {
                 e2bTemplateBuild: {
                   status: 'building',
-                  runtimeSchemaVersion: 2,
+                  runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
                   imageRef: 'registry.example.com/worker:tag',
-                  templateRef: 'roomote-worker:tag-r2',
+                  templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
                   error: null,
                   startedAt: new Date().toISOString(),
                   finishedAt: null,
@@ -891,7 +895,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-${WORKER_RUNTIME_SCHEMA_TAG}`,
     });
   });
 
