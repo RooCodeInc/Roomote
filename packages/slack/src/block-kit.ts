@@ -19,6 +19,8 @@ import {
   buildAccountLinkConnectCopy,
   buildAccountLinkThreadReplyText as buildSharedAccountLinkThreadReplyText,
   buildRoutingConfirmationText,
+  getUserRequestedModelDisplayName,
+  resolveUserFacingModelDisplayName,
 } from '@roomote/communication/chat-messages';
 import {
   type SlackInstallation,
@@ -1082,7 +1084,9 @@ export async function showTaskConfiguration({
             threadMessages: routingThreadMessages,
             latestOwnBotReply,
             modelId: routingResult.model?.id,
-            modelDisplayName: routingResult.model?.displayName,
+            modelDisplayName: getUserRequestedModelDisplayName(
+              routingResult.model,
+            ),
             reasoning: routingResult.reasoning,
             routingDebug: routingResult.debug,
             routingDurationMs: suggestedRoutingDurationMs,
@@ -1116,7 +1120,7 @@ export async function showTaskConfiguration({
       const confirmNonce = randomUUID();
       const confirmBlocks: SlackBlock[] = buildRoutingConfirmBlocks(
         workspaceDisplayName,
-        routingResult.model?.displayName,
+        getUserRequestedModelDisplayName(routingResult.model),
         { threadId, confirmNonce },
       );
 
@@ -1136,7 +1140,7 @@ export async function showTaskConfiguration({
         workspaceValue,
         workspaceDisplayName,
         modelId: routingResult.model?.id,
-        modelDisplayName: routingResult.model?.displayName,
+        modelDisplayName: getUserRequestedModelDisplayName(routingResult.model),
         workspaceType: routingResult.workspace.type,
         teamId: slackInstallation.teamId,
         teamDomain: slackInstallation.teamDomain ?? undefined,
@@ -2518,6 +2522,10 @@ export async function handleSlackRoutingCorrection({
 
       // Store new confirmation with fresh nonce.
       const correctionNonce = randomUUID();
+      const modelDisplayName = resolveUserFacingModelDisplayName({
+        model: result.model,
+        previousDisplayName: oldPrefill.modelDisplayName,
+      });
 
       const newPrefill: RoutingPrefillData = {
         agentName: newAgentName,
@@ -2525,8 +2533,7 @@ export async function handleSlackRoutingCorrection({
         workspaceValue: newWorkspaceValue,
         workspaceDisplayName: newWorkspaceDisplayName,
         modelId: result.model?.id ?? oldPrefill.modelId,
-        modelDisplayName:
-          result.model?.displayName ?? oldPrefill.modelDisplayName,
+        modelDisplayName,
         workspaceType: result.workspace.type,
         teamId: slackInstallation.teamId,
         teamDomain: slackInstallation.teamDomain ?? oldPrefill.teamDomain,
@@ -2552,7 +2559,7 @@ export async function handleSlackRoutingCorrection({
           message: {
             blocks: buildRoutingConfirmBlocks(
               newWorkspaceDisplayName,
-              result.model?.displayName ?? oldPrefill.modelDisplayName,
+              modelDisplayName,
               {
                 threadId,
                 confirmNonce: correctionNonce,
@@ -2572,7 +2579,7 @@ export async function handleSlackRoutingCorrection({
           thread_ts: threadId,
           blocks: buildRoutingConfirmBlocks(
             newWorkspaceDisplayName,
-            result.model?.displayName ?? oldPrefill.modelDisplayName,
+            modelDisplayName,
             {
               threadId,
               confirmNonce: correctionNonce,

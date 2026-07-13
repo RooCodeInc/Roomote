@@ -681,7 +681,7 @@ describe('Slack deleted-mention suppression', () => {
         blocks: expect.arrayContaining([
           expect.objectContaining({
             text: expect.objectContaining({
-              text: 'Getting started on your task in `all repos`',
+              text: 'Getting started on your task in all repos',
             }),
           }),
         ]),
