@@ -2,6 +2,21 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.4.0 (2026-07-13)
+
+### Minor changes
+
+- Onboarding communication setup includes Telegram alongside Slack and Microsoft Teams, with guided BotFather and token-only setup that registers the webhook without treating Telegram as an authentication provider.
+- Telegram tasks open in their own forum topic when Threaded Mode or a forum supergroup is available, isolating each task conversation and preserving topic context across resumes and callbacks, with a fallback to the existing chat flow when topics cannot be created.
+- Telegram setup no longer asks for a bot username: Roomote derives it from the configured bot token for group routing, deep links, invocation identity, and task conversation links.
+
+### Patch changes
+
+- Onboarding environment setup auto-selects the only available GitHub repository when nothing is already selected, while keeping explicit unchecks sticky so a solo repo is not re-checked after the user clears it.
+- Slack Settings and setup now show an already-configured Client ID, place the diagnostics channel refresh control beside the channel dropdown, and avoid freezing inferred Microsoft Teams bot client or tenant IDs when saving Microsoft single-app setup.
+- When Supermemory is connected, agents proactively save durable shared preferences, decisions, conventions, and recurring gotchas across tasks instead of waiting for an explicit remember request, while still excluding secrets, code dumps, task status, and repo-derivable content.
+- Telegram Settings and setup no longer block save on an empty webhook secret (Roomote generates it), show clearer webhook check failures, display a saved bot username in plain text, and strip token paste whitespace that previously caused Telegram 401s.
+
 ## 0.3.1 (2026-07-12)
 
 ### Patch changes
