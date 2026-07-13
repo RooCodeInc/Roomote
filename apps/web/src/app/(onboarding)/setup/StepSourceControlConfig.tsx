@@ -31,6 +31,7 @@ import {
 } from '@/hooks/linked-accounts';
 
 import { StepTitle } from './StepTitle';
+import { NumberedStep } from './NumberedStep';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -443,108 +444,94 @@ export function StepSourceControlConfig({
     <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
       <StepTitle text={`Configure ${providerSetupLabel}`} />
 
-      <div className="flex gap-2 items-start mt-6">
-        <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0 mt-1">
-          1
-        </span>
-        <div>
-          <p className="font-semibold">
-            {providerSetupCopy ? (
-              <>
-                Create a new {providerSetupCopy.setupLabel}.
-                <Button variant="outline" className="ml-2" asChild>
-                  <a
-                    href={providerSetupCopy.creationHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                  </a>
-                </Button>
-              </>
-            ) : (
-              <>Create a new {providerSetupLabel}.</>
-            )}
-          </p>
-          {providerSetupCopy?.creationHint ? (
-            <p className="text-sm text-muted-foreground">
-              {providerSetupCopy.creationHint}
-            </p>
-          ) : null}
-          <p className="text-sm text-muted-foreground">
-            Optionally,{' '}
-            <Link
-              className="underline underline-offset-4 hover:text-foreground"
-              href="/api/setup/roomote-logo"
-            >
-              download our logo
-            </Link>{' '}
-            to use as the app or bot account&apos;s avatar so Roomote&apos;s
-            activity is easy to recognize.
-          </p>
-        </div>
-      </div>
-
-      {isGitLab ? (
-        <div className="flex gap-2 items-start">
-          <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0 mt-1">
-            2
-          </span>
-          <div>
-            <p className="font-semibold">
-              Recommended: create a GitLab OAuth application.
+      <NumberedStep number={1} className="mt-6">
+        <p className="font-semibold">
+          {providerSetupCopy ? (
+            <>
+              Create a new {providerSetupCopy.setupLabel}.
               <Button variant="outline" className="ml-2" asChild>
                 <a
-                  href={gitlabApplicationsUrl}
+                  href={providerSetupCopy.creationHref}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
                 </a>
               </Button>
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Teammates can trigger Roomote from merge request comments only
-              after linking their GitLab account, and that linking flow needs an
-              OAuth application. Create one on the bot account (or as a group or
-              instance-wide application), mark it confidential, select the{' '}
-              <code>read_user</code> scope, and use this redirect URI:
-            </p>
-            <p className="flex items-center gap-1 text-sm text-muted-foreground">
-              <code className="break-all text-foreground">
-                {gitlabRedirectUri}
-              </code>
-              <CopyIconButton
-                content={gitlabRedirectUri}
-                tooltip="Copy redirect URI"
-              />
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Then paste the generated Application ID and Secret into the OAuth
-              fields below.
-            </p>
-          </div>
-        </div>
+            </>
+          ) : (
+            <>Create a new {providerSetupLabel}.</>
+          )}
+        </p>
+        {providerSetupCopy?.creationHint ? (
+          <p className="text-sm text-muted-foreground">
+            {providerSetupCopy.creationHint}
+          </p>
+        ) : null}
+        <p className="text-sm text-muted-foreground">
+          If you need it,{' '}
+          <Link
+            className="underline underline-offset-4 hover:text-foreground"
+            href="/api/setup/roomote-logo"
+          >
+            here's our logo
+          </Link>
+          .
+        </p>
+      </NumberedStep>
+
+      {isGitLab ? (
+        <NumberedStep number={2}>
+          <p className="font-semibold">
+            Recommended: create a GitLab OAuth application.
+            <Button variant="outline" className="ml-2" asChild>
+              <a
+                href={gitlabApplicationsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
+              </a>
+            </Button>
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Teammates can trigger Roomote from merge request comments only after
+            linking their GitLab account, and that linking flow needs an OAuth
+            application. Create one on the bot account (or as a group or
+            instance-wide application), mark it confidential, select the{' '}
+            <code>read_user</code> scope, and use this redirect URI:
+          </p>
+          <p className="flex items-center gap-1 text-sm text-muted-foreground">
+            <code className="break-all text-foreground">
+              {gitlabRedirectUri}
+            </code>
+            <CopyIconButton
+              content={gitlabRedirectUri}
+              tooltip="Copy redirect URI"
+            />
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Then paste the generated Application ID and Secret into the OAuth
+            fields below.
+          </p>
+        </NumberedStep>
       ) : null}
 
-      <div className="flex gap-2 items-start">
-        <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
-          {valuesStepNumber}
-        </span>
+      <NumberedStep number={valuesStepNumber}>
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
           integration.
         </p>
-      </div>
+      </NumberedStep>
 
       {isAdo ? (
         <div className="space-y-2 pl-10">
           <Label>How should Roomote connect?</Label>
-          <div className="grid max-w-xl gap-2 sm:grid-cols-3">
+          <div className="w-full flex flex-col gap-1">
             <button
               type="button"
               aria-pressed={adoAuthMode === 'pat'}
-              className={`rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-border'}`}
+              className={`cursor-pointer rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
               onClick={() => {
                 setAdoAuthMode('pat');
                 setShowAdoAdvancedConfig(false);
@@ -558,10 +545,9 @@ export function StepSourceControlConfig({
             <button
               type="button"
               aria-pressed={adoAuthMode === 'entra'}
-              className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
+              className={`cursor-pointer rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
               onClick={() => {
                 setAdoAuthMode('entra');
-                setShowAdoAdvancedConfig(true);
               }}
             >
               <span className="block font-medium">Microsoft Entra app</span>
@@ -572,10 +558,9 @@ export function StepSourceControlConfig({
             <button
               type="button"
               aria-pressed={adoAuthMode === 'delegated'}
-              className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
+              className={`cursor-pointer rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
               onClick={() => {
                 setAdoAuthMode('delegated');
-                setShowAdoAdvancedConfig(true);
               }}
             >
               <span className="block font-medium">Connect with Microsoft</span>

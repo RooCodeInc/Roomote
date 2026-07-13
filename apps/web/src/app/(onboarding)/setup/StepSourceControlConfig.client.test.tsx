@@ -311,6 +311,35 @@ describe('StepSourceControlConfig', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps advanced Azure DevOps fields closed when switching auth modes', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Microsoft Entra Client ID/),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getAllByRole('button', { name: /Connect with Microsoft/ })[0]!,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    ).toBeInTheDocument();
+  });
+
   it('does not block continue on hidden optional Azure DevOps fields', () => {
     render(
       <StepSourceControlConfig
@@ -383,6 +412,9 @@ describe('StepSourceControlConfig', () => {
     });
     fireEvent.click(
       screen.getByRole('button', { name: /Microsoft Entra app/ }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show advanced config' }),
     );
     fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
       target: { value: 'https://ado.example.com' },
