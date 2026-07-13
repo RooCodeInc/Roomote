@@ -25,7 +25,7 @@
 
 	handle @api {
 		uri strip_prefix /_roomote-api
-		reverse_proxy host.docker.internal:13101 {
+		reverse_proxy host.docker.internal:13001 {
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}
@@ -48,7 +48,7 @@
 	}
 
 	handle {
-		reverse_proxy host.docker.internal:13100 {
+		reverse_proxy host.docker.internal:13000 {
 			lb_try_duration 10s
 			lb_try_interval 250ms
 		}
