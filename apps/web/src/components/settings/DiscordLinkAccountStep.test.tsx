@@ -40,6 +40,10 @@ describe('DiscordLinkAccountStep', () => {
       screen.getByText('/link code:link-example-code'),
     ).toBeInTheDocument();
     expect(
+      screen.getByText(/run this command in a DM with the bot/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/enable Direct Messages/i)).toBeInTheDocument();
+    expect(
       screen.getByRole('button', { name: 'Copy Discord link command' }),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open Discord/i })).toHaveAttribute(

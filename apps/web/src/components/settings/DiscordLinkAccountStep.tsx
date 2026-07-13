@@ -75,7 +75,7 @@ export function DiscordLinkAccountStep({
         <>
           <p className="text-sm">
             Within {Math.round(link.expiresInSeconds / 60)} minutes, run this
-            command in a server with Roomote or in a DM with the bot:
+            command in a DM with the bot:
           </p>
           <div className="flex h-10 w-full items-center gap-2 rounded-md border border-black px-3">
             <code className="min-w-0 grow truncate font-mono text-sm select-all ph-no-capture">
@@ -98,6 +98,10 @@ export function DiscordLinkAccountStep({
               Open Discord
             </a>
           </Button>
+          <p className="text-xs text-muted-foreground">
+            If Discord blocks the DM, open the server&apos;s Privacy Settings
+            and enable Direct Messages.
+          </p>
         </>
       ) : createLinkCode.isPending ? (
         <p className="text-sm">Generating your Discord link…</p>
