@@ -845,10 +845,7 @@ export function buildSetupComputeStatus(input: {
     providers,
     workerImage,
     setupSatisfied,
-<<<<<<< HEAD
     excludedProviders: Array.from(excludedProviders),
-=======
     setupSatisfiedByRuntimeEnv,
->>>>>>> 9a4d685 (Skip sandbox setup for env configured providers)
   };
 }
