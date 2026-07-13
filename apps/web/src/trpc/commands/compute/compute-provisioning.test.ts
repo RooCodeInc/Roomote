@@ -277,7 +277,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: 3,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker-tag',
         error: null,
@@ -414,7 +414,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: 3,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -509,7 +509,7 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     const { executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: 3,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
