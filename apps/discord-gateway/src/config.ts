@@ -10,6 +10,14 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function withoutTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 export type DiscordGatewayConfig = {
   port: number;
   apiEventsUrl: string;
@@ -35,7 +43,7 @@ export function resolveDiscordGatewayConfig(
 
   return {
     port: positiveInteger(env.PORT, DEFAULT_PORT),
-    apiEventsUrl: `${apiBaseUrl.replace(/\/+$/u, '')}/api/internal/discord/events`,
+    apiEventsUrl: `${withoutTrailingSlashes(apiBaseUrl)}/api/internal/discord/events`,
     // ENCRYPTION_KEY is already shared between API/control-plane processes.
     // A dedicated secret is preferred, while this fallback keeps existing
     // self-hosted and local deployments bootable during the rollout.
