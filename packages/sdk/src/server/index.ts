@@ -92,6 +92,8 @@ export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/te
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
 
+export { getCommunicationProviderAdapter } from './lib/communication-providers';
+
 export {
   findTelegramPrimaryChatId,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME,
