@@ -1020,7 +1020,9 @@ async function resolveGiteaWriteContext(
 
   const baseUrl = await resolveGiteaBaseUrl();
   if (!baseUrl) {
-    throw new Error('GITEA_BASE_URL is required to write Gitea pull requests.');
+    throw new Error(
+      'R_GITEA_BASE_URL is required to write Gitea pull requests.',
+    );
   }
 
   const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
@@ -1270,7 +1272,7 @@ async function resolveBitbucketWriteContext(
   const username = await resolveBitbucketUsername();
   if (!username) {
     throw new Error(
-      'BITBUCKET_USERNAME is required to write Bitbucket pull requests.',
+      'R_BITBUCKET_USERNAME is required to write Bitbucket pull requests.',
     );
   }
 

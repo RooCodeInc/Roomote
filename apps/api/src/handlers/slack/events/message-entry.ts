@@ -1556,7 +1556,7 @@ function startFastAgentResponse(params: {
 
   processFastAgentMessage({
     ...fastAgentParams,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+    apiBaseUrl: Env.R_TRPC_URL ?? Env.R_APP_URL,
   }).catch((error) => {
     console.error(
       errorLogPrefix,

@@ -189,10 +189,10 @@ function getGitHubCallbackUrl() {
 }
 
 function getGitHubWebhookUrl() {
-  const trpcUrl = new URL(Env.TRPC_URL);
+  const trpcUrl = new URL(Env.R_TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
     ? Env.R_APP_URL
-    : Env.TRPC_URL;
+    : Env.R_TRPC_URL;
 
   return new URL('/api/webhooks/github', webhookBaseUrl).toString();
 }
@@ -462,7 +462,7 @@ async function revertPrCommit(
     });
 
     const client = createClient({
-      url: Env.TRPC_URL,
+      url: Env.R_TRPC_URL,
       headers: () => ({ Authorization: `Bearer ${authToken}` }),
     });
 

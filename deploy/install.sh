@@ -486,7 +486,7 @@ else
   set_env_value ENCRYPTION_KEY "$(openssl rand -base64 32 | tr -d '\n')"
   set_env_value ARTIFACT_SIGNING_KEY "$(openssl rand -base64 32 | tr -d '\n')"
   set_env_value DASHBOARD_PASSWORD "$(openssl rand -base64 24 | tr -d '\n')"
-  set_env_value DEFAULT_COMPUTE_PROVIDER docker
+  set_env_value R_DEFAULT_COMPUTE_PROVIDER docker
   set_env_value COMPOSE_PROFILES local-postgres
 fi
 
@@ -503,7 +503,7 @@ worker_image="$image_registry/$image_namespace/roomote-worker:$roomote_version"
 # the previously configured worker image, so operators who pick Modal in the
 # setup wizard only need their Modal token pair. A different non-empty value
 # is an operator override and is left untouched.
-previous_worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
+previous_worker_image="$(read_env_value R_DOCKER_WORKER_IMAGE)"
 modal_base_image_ref="$(read_env_value MODAL_BASE_IMAGE_REF)"
 if [ -z "$modal_base_image_ref" ] || [ "$modal_base_image_ref" = "$previous_worker_image" ]; then
   set_env_value MODAL_BASE_IMAGE_REF "$worker_image"
@@ -513,17 +513,17 @@ set_env_value ROOMOTE_VERSION "$roomote_version"
 set_env_value ROOMOTE_REPO "$repo"
 set_env_value ROOMOTE_APP_DOMAIN "$domain"
 set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
-set_env_value TRPC_URL "https://$domain/_roomote-api"
+set_env_value R_TRPC_URL "https://$domain/_roomote-api"
 set_env_value IMAGE_REGISTRY "$image_registry"
 set_env_value IMAGE_NAMESPACE "$image_namespace"
-set_env_value DOCKER_WORKER_IMAGE "$worker_image"
-set_env_value DOCKER_WORKER_PLATFORM "$worker_platform"
-set_env_value DOCKER_WORKER_NETWORK 'roomote_worker'
+set_env_value R_DOCKER_WORKER_IMAGE "$worker_image"
+set_env_value R_DOCKER_WORKER_PLATFORM "$worker_platform"
+set_env_value R_DOCKER_WORKER_NETWORK 'roomote_worker'
 # worker-current.tar.gz is baked into every app image alongside the
 # worker-v<version> archive and always matches the running image, including
 # for mutable channel tags like develop where the env version and the image's
 # baked RELEASE_VERSION differ.
-set_env_value DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
+set_env_value R_DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
 
 chown root:root "$env_file"
 chmod 600 "$env_file"

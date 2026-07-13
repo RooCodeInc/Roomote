@@ -250,25 +250,25 @@ printf '\n' >>"$tmp_env"
 worker_image="$image_registry/$image_namespace/roomote-worker:$roomote_version"
 # worker-current.tar.gz always matches the running image (see install.sh).
 worker_release_path="/roomote/releases/worker-current.tar.gz"
-previous_worker_image="$(read_env_value "$tmp_env" DOCKER_WORKER_IMAGE)"
+previous_worker_image="$(read_env_value "$tmp_env" R_DOCKER_WORKER_IMAGE)"
 
 set_env_value "$tmp_env" ROOMOTE_VERSION "$roomote_version"
 set_env_value "$tmp_env" ROOMOTE_APP_DOMAIN "$domain"
 set_env_value "$tmp_env" ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
-set_env_value "$tmp_env" TRPC_URL "https://$domain/_roomote-api"
+set_env_value "$tmp_env" R_TRPC_URL "https://$domain/_roomote-api"
 remove_env_key "$tmp_env" ROOMOTE_API_DOMAIN
 set_env_value "$tmp_env" IMAGE_REGISTRY "$image_registry"
 set_env_value "$tmp_env" IMAGE_NAMESPACE "$image_namespace"
-set_env_value "$tmp_env" DOCKER_WORKER_IMAGE "$worker_image"
+set_env_value "$tmp_env" R_DOCKER_WORKER_IMAGE "$worker_image"
 # The V1 deployer provisions amd64 DigitalOcean droplets only.
-set_env_value "$tmp_env" DOCKER_WORKER_PLATFORM "linux/amd64"
-set_env_value "$tmp_env" DOCKER_WORKER_NETWORK "roomote_worker"
-set_env_value "$tmp_env" DOCKER_WORKER_RELEASE_PATH "$worker_release_path"
+set_env_value "$tmp_env" R_DOCKER_WORKER_PLATFORM "linux/amd64"
+set_env_value "$tmp_env" R_DOCKER_WORKER_NETWORK "roomote_worker"
+set_env_value "$tmp_env" R_DOCKER_WORKER_RELEASE_PATH "$worker_release_path"
 set_env_value "$tmp_env" ROOMOTE_DATABASE_MODE "$database_mode"
 
 # Keep the deployer-managed Modal base image ref in sync with the worker
 # image. The wizard stores the selected sandbox provider in the database, not
-# in the env file, so this must not gate on DEFAULT_COMPUTE_PROVIDER. A
+# in the env file, so this must not gate on R_DEFAULT_COMPUTE_PROVIDER. A
 # different non-empty value is an operator override and is left untouched.
 modal_base_image_ref="$(read_env_value "$tmp_env" MODAL_BASE_IMAGE_REF)"
 if [ -z "$modal_base_image_ref" ] || [ "$modal_base_image_ref" = "$previous_worker_image" ]; then

@@ -137,7 +137,7 @@ export type SetupComputeProviderStatus = Omit<
 };
 
 /**
- * Status of the shared hosted-compute worker image (`DOCKER_WORKER_IMAGE`).
+ * Status of the shared hosted-compute worker image (`R_DOCKER_WORKER_IMAGE`).
  * Hosted providers (Modal, E2B, Daytona) derive or provision their worker
  * base image from this value, so it is surfaced once, above the provider
  * sections, rather than per provider.
@@ -145,7 +145,7 @@ export type SetupComputeProviderStatus = Omit<
 export type SetupComputeWorkerImageStatus = {
   envVarName: typeof SHARED_WORKER_IMAGE_ENV_VAR;
   label: string;
-  /** Satisfied by the process env (`DOCKER_WORKER_IMAGE`), which locks the UI field. */
+  /** Satisfied by the process env (`R_DOCKER_WORKER_IMAGE`), which locks the UI field. */
   runtimeSatisfied: boolean;
   /** Satisfied by a saved deployment env var. */
   savedSatisfied: boolean;
@@ -184,7 +184,7 @@ export const DEFAULT_LOCAL_DOCKER_WORKER_IMAGE = 'roomote-worker:local';
  * provision their worker base image from this value, so it is configured
  * once for the whole deployment rather than per provider.
  */
-export const SHARED_WORKER_IMAGE_ENV_VAR = 'DOCKER_WORKER_IMAGE';
+export const SHARED_WORKER_IMAGE_ENV_VAR = 'R_DOCKER_WORKER_IMAGE';
 
 export function parseExcludedComputeProviders(
   value: string | null | undefined,
@@ -357,7 +357,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         advanced: true,
       },
       {
-        envVarName: 'BLAXEL_STANDBY_MAX_COUNT',
+        envVarName: 'R_BLAXEL_STANDBY_MAX_COUNT',
         label: 'Maximum retained tasks',
         required: false,
         category: 'infrastructure',
@@ -366,7 +366,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         helpText: 'Defaults to 25. Set to 0 to disable standby retention.',
       },
       {
-        envVarName: 'BLAXEL_STANDBY_MAX_AGE_HOURS',
+        envVarName: 'R_BLAXEL_STANDBY_MAX_AGE_HOURS',
         label: 'Retention period (hours)',
         required: false,
         category: 'infrastructure',
@@ -392,7 +392,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     supportsSnapshots: false,
     fields: [
       {
-        envVarName: 'DOCKER_STANDBY_MAX_COUNT',
+        envVarName: 'R_DOCKER_STANDBY_MAX_COUNT',
         label: 'Maximum retained tasks',
         required: false,
         category: 'infrastructure',
@@ -401,7 +401,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         helpText: 'Defaults to 10. Set to 0 to disable standby retention.',
       },
       {
-        envVarName: 'DOCKER_STANDBY_MAX_AGE_HOURS',
+        envVarName: 'R_DOCKER_STANDBY_MAX_AGE_HOURS',
         label: 'Retention period (hours)',
         required: false,
         category: 'infrastructure',
@@ -475,7 +475,7 @@ export function isAutoProvisionedComputeArtifactField(
 /**
  * True for managed Modal / E2B / Daytona / Blaxel worker-image artifact env vars that
  * Settings and setup never collect as form inputs. Process env, derivation
- * from DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
+ * from R_DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
  * them.
  */
 export function isManagedComputeArtifactField(
@@ -586,14 +586,14 @@ export function deriveWorkerImageFromReleaseVersion(
 
 /**
  * The worker image the deployment effectively uses: an explicit
- * DOCKER_WORKER_IMAGE always wins; otherwise the ref derived from the baked
+ * R_DOCKER_WORKER_IMAGE always wins; otherwise the ref derived from the baked
  * RELEASE_VERSION. Null when neither is available (local dev, where the
  * bare local-worker fallback applies at the env-loader layer).
  */
 export function resolveEffectiveDockerWorkerImage(
   runtimeEnv: Partial<Record<string, string | undefined>>,
 ): string | null {
-  const explicit = runtimeEnv.DOCKER_WORKER_IMAGE?.trim();
+  const explicit = runtimeEnv.R_DOCKER_WORKER_IMAGE?.trim();
 
   if (explicit) {
     return explicit;
@@ -675,7 +675,7 @@ export function buildSetupComputeStatus(input: {
   persistedComputeConfig?: Partial<DeploymentComputeConfig> | null;
   selectedProvider?: ComputeProvider | null;
   /**
-   * Raw saved deployment `DOCKER_WORKER_IMAGE` value, when the caller has
+   * Raw saved deployment `R_DOCKER_WORKER_IMAGE` value, when the caller has
    * resolved it. Process env still wins; this lets a worker image saved
    * through the UI count toward hosted readiness before the process restarts.
    */
@@ -690,9 +690,9 @@ export function buildSetupComputeStatus(input: {
     input.persistedComputeConfig,
   );
 
-  const runtimeDefaultValue = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
+  const runtimeDefaultValue = runtimeEnv.R_DEFAULT_COMPUTE_PROVIDER?.trim();
   const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+    runtimeEnv.R_EXCLUDED_COMPUTE_PROVIDERS,
   );
   const runtimeDefaultProvider =
     runtimeDefaultValue &&
@@ -703,11 +703,11 @@ export function buildSetupComputeStatus(input: {
 
   // Worker image resolution is deploy/runtime-managed only: process env wins,
   // then the ref derived from the baked RELEASE_VERSION. Legacy saved
-  // deployment DOCKER_WORKER_IMAGE rows (from the removed Settings section)
+  // deployment R_DOCKER_WORKER_IMAGE rows (from the removed Settings section)
   // are ignored so they cannot stick above release-derived images. Only a
   // registry-qualified ref is hosted-ready; a bare local tag is not pullable
   // by hosted providers.
-  const explicitWorkerImage = runtimeEnv.DOCKER_WORKER_IMAGE?.trim() || null;
+  const explicitWorkerImage = runtimeEnv.R_DOCKER_WORKER_IMAGE?.trim() || null;
   const effectiveWorkerImage =
     explicitWorkerImage ?? deriveWorkerImageFromReleaseVersion(runtimeEnv);
   const hostedWorkerImageRef =
@@ -720,7 +720,7 @@ export function buildSetupComputeStatus(input: {
   const workerImage: SetupComputeWorkerImageStatus = {
     envVarName: SHARED_WORKER_IMAGE_ENV_VAR,
     label: 'Worker image',
-    runtimeSatisfied: isConfiguredEnvValue(runtimeEnv.DOCKER_WORKER_IMAGE),
+    runtimeSatisfied: isConfiguredEnvValue(runtimeEnv.R_DOCKER_WORKER_IMAGE),
     // Legacy DB-backed worker images are no longer part of readiness/status.
     savedSatisfied: false,
     hostedImageRef: hostedWorkerImageRef,

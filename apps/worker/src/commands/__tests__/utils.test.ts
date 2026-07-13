@@ -56,7 +56,7 @@ const originalPath = process.env.PATH;
 const originalAuthBypassValue = process.env.ROOMOTE_AUTH_BYPASS_VALUE;
 const originalAuthBypassHeaderName =
   process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
-const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
+const originalPreviewProxyBaseUrl = process.env.R_PREVIEW_PROXY_BASE_URL;
 const originalPreviewProxySubdomainSuffix =
   process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
 
@@ -66,7 +66,7 @@ beforeEach(() => {
   process.env.PATH = DEFAULT_PATH;
   delete process.env.ROOMOTE_AUTH_BYPASS_VALUE;
   delete process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
-  delete process.env.PREVIEW_PROXY_BASE_URL;
+  delete process.env.R_PREVIEW_PROXY_BASE_URL;
   delete process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
 });
 
@@ -85,9 +85,9 @@ afterEach(() => {
   }
 
   if (originalPreviewProxyBaseUrl === undefined) {
-    delete process.env.PREVIEW_PROXY_BASE_URL;
+    delete process.env.R_PREVIEW_PROXY_BASE_URL;
   } else {
-    process.env.PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
+    process.env.R_PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
   }
 
   if (originalPreviewProxySubdomainSuffix === undefined) {
@@ -170,15 +170,15 @@ describe('injectEnvVars', () => {
     );
   });
 
-  describe('PREVIEW_DOMAINS derivation', () => {
-    it('derives PREVIEW_DOMAINS from the preview-proxy base URL hostname', async () => {
+  describe('R_PREVIEW_DOMAINS derivation', () => {
+    it('derives R_PREVIEW_DOMAINS from the preview-proxy base URL hostname', async () => {
       const envVars: Record<string, string> = {};
 
       await injectEnvVars(envVars, undefined, {
         previewProxyBaseUrl: 'https://preview.octomote.run',
       });
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('preview.octomote.run');
+      expect(envVars.R_PREVIEW_DOMAINS).toBe('preview.octomote.run');
     });
 
     it('strips the port from the derived preview domain', async () => {
@@ -188,37 +188,37 @@ describe('injectEnvVars', () => {
         previewProxyBaseUrl: 'http://roomotepreview.localhost:18081',
       });
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('roomotepreview.localhost');
+      expect(envVars.R_PREVIEW_DOMAINS).toBe('roomotepreview.localhost');
     });
 
-    it('keeps a deployment-provided PREVIEW_DOMAINS value', async () => {
+    it('keeps a deployment-provided R_PREVIEW_DOMAINS value', async () => {
       const envVars: Record<string, string> = {
-        PREVIEW_DOMAINS: 'custom.example.com',
+        R_PREVIEW_DOMAINS: 'custom.example.com',
       };
 
       await injectEnvVars(envVars, undefined, {
         previewProxyBaseUrl: 'https://preview.octomote.run',
       });
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('custom.example.com');
+      expect(envVars.R_PREVIEW_DOMAINS).toBe('custom.example.com');
     });
 
     it('falls back to the process env preview-proxy base URL', async () => {
       const envVars: Record<string, string> = {};
 
-      process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.dev';
+      process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.dev';
 
       await injectEnvVars(envVars);
 
-      expect(envVars.PREVIEW_DOMAINS).toBe('preview.roomote.dev');
+      expect(envVars.R_PREVIEW_DOMAINS).toBe('preview.roomote.dev');
     });
 
-    it('does not set PREVIEW_DOMAINS without a preview-proxy base URL', async () => {
+    it('does not set R_PREVIEW_DOMAINS without a preview-proxy base URL', async () => {
       const envVars: Record<string, string> = {};
 
       await injectEnvVars(envVars);
 
-      expect(envVars.PREVIEW_DOMAINS).toBeUndefined();
+      expect(envVars.R_PREVIEW_DOMAINS).toBeUndefined();
     });
 
     it('ignores an invalid preview-proxy base URL', async () => {
@@ -228,7 +228,7 @@ describe('injectEnvVars', () => {
         previewProxyBaseUrl: 'not-a-url',
       });
 
-      expect(envVars.PREVIEW_DOMAINS).toBeUndefined();
+      expect(envVars.R_PREVIEW_DOMAINS).toBeUndefined();
     });
   });
 

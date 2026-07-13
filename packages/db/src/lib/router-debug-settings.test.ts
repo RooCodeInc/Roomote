@@ -47,7 +47,7 @@ describe('router debug settings', () => {
     await expect(
       getRouterDebugSettings({
         runtimeEnv: {
-          ROUTER_DEBUG_CHANNEL_ID: 'CENV123456',
+          R_ROUTER_DEBUG_CHANNEL_ID: 'CENV123456',
         },
       }),
     ).resolves.toMatchObject({
@@ -66,7 +66,7 @@ describe('router debug settings', () => {
     await expect(
       getConfiguredRouterDebugSlackChannelId({
         runtimeEnv: {
-          ROUTER_DEBUG_CHANNEL_ID: ' cenv123456 ',
+          R_ROUTER_DEBUG_CHANNEL_ID: ' cenv123456 ',
         },
       }),
     ).resolves.toBe('CENV123456');

@@ -2,7 +2,7 @@ import { getBetterAuthBaseUrlConfig } from '../better-auth-base-url';
 
 describe('getBetterAuthBaseUrlConfig', () => {
   const originalAppEnv = process.env.R_APP_ENV;
-  const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
+  const originalPreviewDomains = process.env.R_PREVIEW_DOMAINS;
 
   afterEach(() => {
     if (originalAppEnv === undefined) {
@@ -12,9 +12,9 @@ describe('getBetterAuthBaseUrlConfig', () => {
     }
 
     if (originalPreviewDomains === undefined) {
-      delete process.env.PREVIEW_DOMAINS;
+      delete process.env.R_PREVIEW_DOMAINS;
     } else {
-      process.env.PREVIEW_DOMAINS = originalPreviewDomains;
+      process.env.R_PREVIEW_DOMAINS = originalPreviewDomains;
     }
   });
 

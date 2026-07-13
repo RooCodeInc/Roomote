@@ -78,7 +78,7 @@ describe('worker sentry monitoring', () => {
     delete process.env.APP_ENV;
     delete process.env.NODE_ENV;
     delete process.env.WORKER_RELEASE_TAG;
-    delete process.env.WORKER_RELEASE_CHANNEL;
+    delete process.env.R_WORKER_RELEASE_CHANNEL;
     delete process.env.VERCEL_GIT_COMMIT_SHA;
     delete process.env.GITHUB_SHA;
     delete process.env.RELEASE_VERSION;

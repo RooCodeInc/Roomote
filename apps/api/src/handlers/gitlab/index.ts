@@ -39,8 +39,8 @@ gitlab.post('/', async (c) => {
     // encrypted environment_variables by /setup or Settings verify without
     // also being copied into the process environment.
     const [secretToken, signingToken] = await Promise.all([
-      resolveDeploymentEnvVar('GITLAB_WEBHOOK_SECRET'),
-      resolveDeploymentEnvVar('GITLAB_WEBHOOK_SIGNING_TOKEN'),
+      resolveDeploymentEnvVar('R_GITLAB_WEBHOOK_SECRET'),
+      resolveDeploymentEnvVar('R_GITLAB_WEBHOOK_SIGNING_TOKEN'),
     ]);
 
     const verified = verifyGitLabWebhook({

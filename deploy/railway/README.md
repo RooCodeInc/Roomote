@@ -22,14 +22,14 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 
 - **No Caddy edge.** Railway terminates HTTPS and gives every service its own
   public domain. The web app and the API run on separate origins, so
-  `TRPC_URL` points at the api service's public domain with no
+  `R_TRPC_URL` points at the api service's public domain with no
   `/_roomote-api` path prefix. GitHub webhooks and hosted-sandbox workers
   call that API origin directly, and Slack webhooks arrive at the web origin
   and are proxied to the API internally.
 - **No Docker socket.** The `docker` sandbox provider cannot run on Railway.
   Task execution must use a hosted sandbox provider: Modal (template
   default), E2B, or Daytona. Those only need outbound HTTPS plus API
-  credentials. The template sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
+  credentials. The template sets `R_EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The template sets
   `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
@@ -88,10 +88,10 @@ moves on every matching build:
 Nothing else in either template encodes a version:
 
 - The images bake `RELEASE_VERSION` at build time, and the app derives
-  `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
+  `R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
   unset. Set them only to override the derived worker image.
 - The controller reads the worker release version from the `VERSION` file
-  inside `worker-current.tar.gz`, so `DOCKER_WORKER_RELEASE_PATH` is a
+  inside `worker-current.tar.gz`, so `R_DOCKER_WORKER_RELEASE_PATH` is a
   constant.
 
 To pin instead (recommended for production deployments): put the same
@@ -155,15 +155,15 @@ S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
 SETUP_TOKEN=${{secret(32)}}
 R_PING_BASE_URL=https://ping.roomote.dev
-PREVIEW_PROXY_BASE_URL=
+R_PREVIEW_PROXY_BASE_URL=
 NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=
-PREVIEW_DOMAINS=
-DEFAULT_COMPUTE_PROVIDER=modal
-EXCLUDED_COMPUTE_PROVIDERS=docker
+R_PREVIEW_DOMAINS=
+R_DEFAULT_COMPUTE_PROVIDER=modal
+R_EXCLUDED_COMPUTE_PROVIDERS=docker
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
 R_APP_URL=https://${{web.RAILWAY_PUBLIC_DOMAIN}}
-TRPC_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}
+R_TRPC_URL=https://${{api.RAILWAY_PUBLIC_DOMAIN}}
 S3_ENDPOINT=http://${{minio.RAILWAY_PRIVATE_DOMAIN}}:9000
 S3_PRESIGN_ENDPOINT=https://${{minio.RAILWAY_PUBLIC_DOMAIN}}
 ```
@@ -183,15 +183,15 @@ S3_REGION=${{api.S3_REGION}}
 S3_BUCKET_ARTIFACTS=${{api.S3_BUCKET_ARTIFACTS}}
 SETUP_TOKEN=${{api.SETUP_TOKEN}}
 R_PING_BASE_URL=${{api.R_PING_BASE_URL}}
-PREVIEW_PROXY_BASE_URL=${{api.PREVIEW_PROXY_BASE_URL}}
+R_PREVIEW_PROXY_BASE_URL=${{api.R_PREVIEW_PROXY_BASE_URL}}
 NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=${{api.NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL}}
-PREVIEW_DOMAINS=${{api.PREVIEW_DOMAINS}}
-DEFAULT_COMPUTE_PROVIDER=${{api.DEFAULT_COMPUTE_PROVIDER}}
-EXCLUDED_COMPUTE_PROVIDERS=${{api.EXCLUDED_COMPUTE_PROVIDERS}}
+R_PREVIEW_DOMAINS=${{api.R_PREVIEW_DOMAINS}}
+R_DEFAULT_COMPUTE_PROVIDER=${{api.R_DEFAULT_COMPUTE_PROVIDER}}
+R_EXCLUDED_COMPUTE_PROVIDERS=${{api.R_EXCLUDED_COMPUTE_PROVIDERS}}
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 REDIS_URL=${{Redis.REDIS_URL}}
 R_APP_URL=${{api.R_APP_URL}}
-TRPC_URL=${{api.TRPC_URL}}
+R_TRPC_URL=${{api.R_TRPC_URL}}
 S3_ENDPOINT=${{api.S3_ENDPOINT}}
 S3_PRESIGN_ENDPOINT=${{api.S3_PRESIGN_ENDPOINT}}
 ```
@@ -199,14 +199,14 @@ S3_PRESIGN_ENDPOINT=${{api.S3_PRESIGN_ENDPOINT}}
 controller: the same block **plus**
 
 ```sh
-DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+R_DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 ```
 
 The worker release archive is baked into the app image, and the controller
 uploads it into hosted sandboxes at spawn time — no shared volume is
 needed. The version-less `worker-current.tar.gz` name works because the
 controller reads the release version from the `VERSION` file inside the
-archive. Do not leave `DOCKER_WORKER_RELEASE_PATH` unset: without it the
+archive. Do not leave `R_DOCKER_WORKER_RELEASE_PATH` unset: without it the
 controller falls back to fetching GitHub worker releases, which only exist
 for tagged `v*` releases — not for `develop` or `main` branch builds.
 
@@ -227,7 +227,7 @@ Notes:
   entered before first boot. Do not set `R_PUBLIC_URL` — it is
   optional and the app falls back to `R_APP_URL` everywhere it would
   apply. See [Attaching a custom domain](#attaching-a-custom-domain).
-- Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
+- Leave `R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
   they always match the deployed build. Setting them explicitly overrides
   the derivation and silently pins the worker to whatever version the value
@@ -302,7 +302,7 @@ logs a warning when creation fails).
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `R_TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -356,10 +356,10 @@ GitHub App created by the wizard) keep the callback URLs they were created
 with, so reconnect or update those in their provider settings if you change
 the domain after onboarding.
 
-Leave `TRPC_URL` on the api service's own domain — hosted-sandbox workers
+Leave `R_TRPC_URL` on the api service's own domain — hosted-sandbox workers
 and webhooks call it directly, and it never needs to match the domain users
 browse. (A custom domain on the api or MinIO services works the same way if
-you want one: they are separate values on api, `TRPC_URL` and
+you want one: they are separate values on api, `R_TRPC_URL` and
 `S3_PRESIGN_ENDPOINT`.)
 
 ## Enabling live previews (optional)
@@ -372,9 +372,9 @@ domain, which requires a domain you control:
    as custom domains on the preview-proxy service, following Railway's
    wildcard-domain docs.
 2. Fill in the three empty `PREVIEW_*` values on **api**:
-   `PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
+   `R_PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
    `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`, and
-   `PREVIEW_DOMAINS=previews.<your-domain>`, then redeploy the app
+   `R_PREVIEW_DOMAINS=previews.<your-domain>`, then redeploy the app
    services. The other services already reference `${{api.*}}` for all
    three; the `NEXT_PUBLIC_` variant is what the web client uses to build
    preview links, so it must reach the `web` service.

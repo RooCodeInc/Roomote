@@ -119,7 +119,7 @@ export async function handleAuthCallback(
       // treat localhost as a trustworthy origin for local development.
       secure: true,
       sameSite: 'None',
-      maxAge: parseInt(config.PREVIEW_TOKEN_TTL_SECONDS),
+      maxAge: parseInt(config.R_PREVIEW_TOKEN_TTL_SECONDS),
       path: '/',
       domain: cookieDomain,
       partitioned: true,

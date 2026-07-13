@@ -134,11 +134,11 @@ export class PM2Service {
         }),
         USE_WORKER_RELEASE: options.useRelease ? 'true' : 'false',
         ...(options.useRelease && {
-          WORKER_RELEASE_CHANNEL: options.workerReleaseChannel,
+          R_WORKER_RELEASE_CHANNEL: options.workerReleaseChannel,
         }),
         ...(options.useRelease &&
           options.workerReleaseVersion && {
-            WORKER_RELEASE_VERSION: options.workerReleaseVersion,
+            R_WORKER_RELEASE_VERSION: options.workerReleaseVersion,
           }),
       },
     });

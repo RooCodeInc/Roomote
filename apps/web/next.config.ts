@@ -62,11 +62,11 @@ const nextConfig: NextConfig = {
     ],
   },
   devIndicators: false,
-  // When running inside a sandbox, PREVIEW_DOMAINS lists the base domains
+  // When running inside a sandbox, R_PREVIEW_DOMAINS lists the base domains
   // used by preview-proxy (e.g. "preview-john.ngrok.app"). HMR WebSocket
   // connections arrive with Origin set to the full preview subdomain
   // (e.g. "taskid-web.preview-john.ngrok.app"), so we need *.domain entries.
-  allowedDevOrigins: getAllowedDevOrigins(process.env.PREVIEW_DOMAINS),
+  allowedDevOrigins: getAllowedDevOrigins(process.env.R_PREVIEW_DOMAINS),
   async redirects() {
     // Public product docs now live at the standalone Mintlify site
     // (https://docs.roomote.dev). Preserve old in-app /docs URLs by

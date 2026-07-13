@@ -55,7 +55,7 @@ async function forwardWebhookRequest(
 ) {
   const env = await bootstrapWebRuntimeEnv();
   const path = await resolvePath(context);
-  const targetUrl = resolveApiUrl(env.TRPC_URL, `/api/webhooks/${path}`);
+  const targetUrl = resolveApiUrl(env.R_TRPC_URL, `/api/webhooks/${path}`);
   targetUrl.search = request.nextUrl.search;
 
   const headers = removeHopByHopHeaders(request.headers);

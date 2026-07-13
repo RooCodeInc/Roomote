@@ -40,7 +40,7 @@ describe('normalizeDeploymentComputeConfig', () => {
 describe('buildSetupComputeStatus', () => {
   it('is unsatisfied without an explicit provider choice', () => {
     const status = buildSetupComputeStatus({
-      runtimeEnv: { DEFAULT_COMPUTE_PROVIDER: 'docker' },
+      runtimeEnv: { R_DEFAULT_COMPUTE_PROVIDER: 'docker' },
     });
 
     expect(status.selectedProvider).toBeNull();
@@ -131,12 +131,12 @@ describe('buildSetupComputeStatus', () => {
     expect(infrastructureByProvider.blaxel).toEqual([
       'BLAXEL_IMAGE',
       'BLAXEL_REGION',
-      'BLAXEL_STANDBY_MAX_COUNT',
-      'BLAXEL_STANDBY_MAX_AGE_HOURS',
+      'R_BLAXEL_STANDBY_MAX_COUNT',
+      'R_BLAXEL_STANDBY_MAX_AGE_HOURS',
     ]);
     expect(infrastructureByProvider.docker).toEqual([
-      'DOCKER_STANDBY_MAX_COUNT',
-      'DOCKER_STANDBY_MAX_AGE_HOURS',
+      'R_DOCKER_STANDBY_MAX_COUNT',
+      'R_DOCKER_STANDBY_MAX_AGE_HOURS',
     ]);
 
     // Advanced infrastructure fields are surfaced behind an advanced area.
@@ -227,7 +227,7 @@ describe('buildSetupComputeStatus', () => {
   it('reports the shared worker image status', () => {
     const notReady = buildSetupComputeStatus({});
     expect(notReady.workerImage).toMatchObject({
-      envVarName: 'DOCKER_WORKER_IMAGE',
+      envVarName: 'R_DOCKER_WORKER_IMAGE',
       runtimeSatisfied: false,
       savedSatisfied: false,
       hostedImageRef: null,
@@ -236,7 +236,7 @@ describe('buildSetupComputeStatus', () => {
 
     const runtimeReady = buildSetupComputeStatus({
       runtimeEnv: {
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
     expect(runtimeReady.workerImage).toMatchObject({
@@ -248,7 +248,7 @@ describe('buildSetupComputeStatus', () => {
 
   it('does not treat a local worker tag as hosted-ready', () => {
     const status = buildSetupComputeStatus({
-      runtimeEnv: { DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
+      runtimeEnv: { R_DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
     });
 
     expect(status.workerImage.runtimeSatisfied).toBe(true);
@@ -258,7 +258,7 @@ describe('buildSetupComputeStatus', () => {
 
   it('ignores a registry-qualified saved worker image for hosted readiness', () => {
     const status = buildSetupComputeStatus({
-      persistedEnvVarNames: ['DOCKER_WORKER_IMAGE'],
+      persistedEnvVarNames: ['R_DOCKER_WORKER_IMAGE'],
       savedWorkerImage: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
     });
 
@@ -269,7 +269,7 @@ describe('buildSetupComputeStatus', () => {
       hostedReady: false,
     });
 
-    // Legacy saved DOCKER_WORKER_IMAGE rows no longer satisfy hosted readiness.
+    // Legacy saved R_DOCKER_WORKER_IMAGE rows no longer satisfy hosted readiness.
     // Release derivation / process env must provide a registry-qualified image.
     const modal = status.providers.find(
       (provider) => provider.provider === 'modal',
@@ -331,7 +331,7 @@ describe('buildSetupComputeStatus', () => {
 
     const provisionable = buildSetupComputeStatus({
       runtimeEnv: {
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
 
@@ -351,7 +351,7 @@ describe('buildSetupComputeStatus', () => {
     expect(e2bStatus?.configSatisfied).toBe(false);
 
     const localImage = buildSetupComputeStatus({
-      runtimeEnv: { DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
+      runtimeEnv: { R_DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
     });
 
     expect(findTemplateField(localImage)?.setupProvisionable).toBe(false);
@@ -367,7 +367,7 @@ describe('buildSetupComputeStatus', () => {
 
     const provisionable = buildSetupComputeStatus({
       runtimeEnv: {
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
 
@@ -380,7 +380,7 @@ describe('buildSetupComputeStatus', () => {
     expect(daytonaStatus?.configSatisfied).toBe(false);
 
     const localImage = buildSetupComputeStatus({
-      runtimeEnv: { DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
+      runtimeEnv: { R_DOCKER_WORKER_IMAGE: 'roomote-worker:local' },
     });
 
     expect(findSnapshotField(localImage)?.setupProvisionable).toBe(false);
@@ -388,7 +388,7 @@ describe('buildSetupComputeStatus', () => {
 
   it('prefers the wizard selection over the persisted default for preselection', () => {
     const status = buildSetupComputeStatus({
-      runtimeEnv: { DEFAULT_COMPUTE_PROVIDER: 'docker' },
+      runtimeEnv: { R_DEFAULT_COMPUTE_PROVIDER: 'docker' },
       persistedComputeConfig: { defaultProvider: 'modal' },
       selectedProvider: 'e2b',
     });
@@ -401,8 +401,8 @@ describe('buildSetupComputeStatus', () => {
   it('skips excluded runtime defaults when preselecting a provider', () => {
     const status = buildSetupComputeStatus({
       runtimeEnv: {
-        DEFAULT_COMPUTE_PROVIDER: 'docker',
-        EXCLUDED_COMPUTE_PROVIDERS: 'docker',
+        R_DEFAULT_COMPUTE_PROVIDER: 'docker',
+        R_EXCLUDED_COMPUTE_PROVIDERS: 'docker',
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
         MODAL_BASE_IMAGE_REF: 'registry/image:tag',
@@ -418,7 +418,7 @@ describe('buildSetupComputeStatus', () => {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
       persistedComputeConfig: { defaultProvider: 'modal' },
     });
@@ -494,7 +494,7 @@ describe('buildSetupComputeStatus', () => {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+        R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       },
       persistedComputeConfig: { defaultProvider: 'modal' },
     });
@@ -516,7 +516,7 @@ describe('buildSetupComputeStatus', () => {
         NODE_ENV: 'development',
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+        R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       },
       persistedComputeConfig: { defaultProvider: 'modal' },
     });
@@ -540,7 +540,7 @@ describe('buildSetupComputeStatus', () => {
   it('reports provider infrastructure availability for the picker', () => {
     const withWorkerImage = buildSetupComputeStatus({
       runtimeEnv: {
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
 
@@ -618,7 +618,7 @@ describe('buildSetupComputeStatus', () => {
 
 describe('getComputeFieldValidationError', () => {
   const field = {
-    envVarName: 'BLAXEL_STANDBY_MAX_AGE_HOURS',
+    envVarName: 'R_BLAXEL_STANDBY_MAX_AGE_HOURS',
     label: 'Retention period (hours)',
     required: false,
     category: 'infrastructure' as const,
@@ -695,10 +695,10 @@ describe('deriveWorkerImageFromReleaseVersion', () => {
 });
 
 describe('resolveEffectiveDockerWorkerImage', () => {
-  it('prefers an explicit DOCKER_WORKER_IMAGE over the derived default', () => {
+  it('prefers an explicit R_DOCKER_WORKER_IMAGE over the derived default', () => {
     expect(
       resolveEffectiveDockerWorkerImage({
-        DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:pinned',
+        R_DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:pinned',
         RELEASE_VERSION: 'v1.2.3',
       }),
     ).toBe('registry.example.com/custom/worker:pinned');
@@ -710,7 +710,7 @@ describe('resolveEffectiveDockerWorkerImage', () => {
     ).toBe('ghcr.io/roocodeinc/roomote-worker:v1.2.3');
     expect(
       resolveEffectiveDockerWorkerImage({
-        DOCKER_WORKER_IMAGE: '   ',
+        R_DOCKER_WORKER_IMAGE: '   ',
         RELEASE_VERSION: 'v1.2.3',
       }),
     ).toBe('ghcr.io/roocodeinc/roomote-worker:v1.2.3');
@@ -748,7 +748,7 @@ describe('resolveDerivedModalBaseImageRef', () => {
     );
     expect(
       resolveDerivedModalBaseImageRef({
-        DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:tag',
+        R_DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:tag',
         RELEASE_VERSION: 'v1.2.3',
       }),
     ).toBe('registry.example.com/custom/worker:tag');
@@ -761,7 +761,7 @@ describe('resolveDerivedModalBaseImageRef', () => {
     expect(
       resolveDerivedModalBaseImageRef({
         APP_ENV: 'development',
-        DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+        R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       }),
     ).toBe(DEVELOPMENT_MODAL_BASE_IMAGE_REF);
   });

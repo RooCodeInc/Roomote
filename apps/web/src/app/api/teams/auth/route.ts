@@ -190,7 +190,7 @@ export async function GET(request: NextRequest) {
 
   const resumeResult = await resumePendingTeamsRequest({
     stateToken,
-    trpcUrl: env.TRPC_URL,
+    trpcUrl: env.R_TRPC_URL,
   });
   const resumeBody = resumeResult.body;
 

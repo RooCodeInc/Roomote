@@ -100,7 +100,7 @@ export function buildBaseWorkerEnv({
   sandboxExpiresAtMs,
   extraEnv,
 }: BuildWorkerEnvOptions): Record<string, string> {
-  const previewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
+  const previewProxyBaseUrl = process.env.R_PREVIEW_PROXY_BASE_URL;
 
   return {
     AUTH_TOKEN: authToken,
@@ -124,7 +124,7 @@ export function buildBaseWorkerEnv({
     // rename run a worker build that requires ROOMOTE_APP_URL at startup.
     // Remove once pre-rename snapshots have aged out.
     ROOMOTE_APP_URL: Env.R_APP_URL,
-    TRPC_URL: Env.TRPC_URL,
+    R_TRPC_URL: Env.R_TRPC_URL,
     SKIP_ENV_VALIDATION: '1',
     // These are launcher-to-worker transport values. Keep them tied to the
     // current process env instead of the shared Env snapshot because the worker
@@ -138,7 +138,7 @@ export function buildBaseWorkerEnv({
       PREVIEW_AUTH_PUBLIC_KEY: process.env.PREVIEW_AUTH_PUBLIC_KEY,
     }),
     ...(previewProxyBaseUrl && {
-      PREVIEW_PROXY_BASE_URL: previewProxyBaseUrl,
+      R_PREVIEW_PROXY_BASE_URL: previewProxyBaseUrl,
     }),
     ...(process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX && {
       PREVIEW_PROXY_SUBDOMAIN_SUFFIX:

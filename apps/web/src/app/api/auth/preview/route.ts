@@ -14,19 +14,19 @@ export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
-    // CRITICAL: Require PREVIEW_DOMAINS to be configured - fail closed for security
+    // CRITICAL: Require R_PREVIEW_DOMAINS to be configured - fail closed for security
     // Supports comma-separated list: "roomote-preview.dev,preview-john.ngrok.app,127.0.0.1.sslip.io"
     const resolvedPreviewRuntimeConfig =
       await resolveEffectivePreviewRuntimeConfig({
         runtimeEnv: process.env,
-        defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-        defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+        defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+        defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
       });
     const previewDomainsRaw =
       resolvedPreviewRuntimeConfig.effective.previewDomains;
 
     if (!previewDomainsRaw) {
-      console.error('PREVIEW_DOMAINS environment variable is not configured');
+      console.error('R_PREVIEW_DOMAINS environment variable is not configured');
 
       return NextResponse.json(
         { error: 'Service misconfigured' },
@@ -114,7 +114,7 @@ export async function GET(request: NextRequest) {
     // Generate the preview auth token.
     const token = await createPreviewToken({
       userId,
-      timeoutSeconds: Env.PREVIEW_TOKEN_TTL_SECONDS,
+      timeoutSeconds: Env.R_PREVIEW_TOKEN_TTL_SECONDS,
     });
 
     // Create the callback URL with the token.

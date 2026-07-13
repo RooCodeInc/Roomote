@@ -148,8 +148,8 @@ export async function resolveThreadReplyLivePreviewUrl(
   )?.initial_path;
 
   const previewRuntimeConfig = await resolveEffectivePreviewRuntimeConfig({
-    defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-    defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+    defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+    defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
   });
   const previewProxyBaseUrl =
     previewRuntimeConfig.effective.previewProxyBaseUrl;

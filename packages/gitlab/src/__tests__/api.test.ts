@@ -91,24 +91,24 @@ function makeTaskRun(payload: TaskRun['payload']): TaskRun {
 }
 
 describe('resolveGitLabBaseUrl', () => {
-  const originalBaseUrl = process.env.GITLAB_BASE_URL;
+  const originalBaseUrl = process.env.R_GITLAB_BASE_URL;
 
   afterEach(() => {
     if (originalBaseUrl === undefined) {
-      delete process.env.GITLAB_BASE_URL;
+      delete process.env.R_GITLAB_BASE_URL;
     } else {
-      process.env.GITLAB_BASE_URL = originalBaseUrl;
+      process.env.R_GITLAB_BASE_URL = originalBaseUrl;
     }
   });
 
-  it('defaults to gitlab.com when GITLAB_BASE_URL is not set', async () => {
-    delete process.env.GITLAB_BASE_URL;
+  it('defaults to gitlab.com when R_GITLAB_BASE_URL is not set', async () => {
+    delete process.env.R_GITLAB_BASE_URL;
 
     await expect(resolveGitLabBaseUrl()).resolves.toBe('https://gitlab.com');
   });
 
-  it('normalizes a self-managed GITLAB_BASE_URL by trimming trailing slashes', async () => {
-    process.env.GITLAB_BASE_URL = 'https://gitlab.example.com/';
+  it('normalizes a self-managed R_GITLAB_BASE_URL by trimming trailing slashes', async () => {
+    process.env.R_GITLAB_BASE_URL = 'https://gitlab.example.com/';
 
     await expect(resolveGitLabBaseUrl()).resolves.toBe(
       'https://gitlab.example.com',
@@ -131,13 +131,13 @@ describe('buildGitLabApiBaseUrl', () => {
 });
 
 describe('listGitLabProjects', () => {
-  const originalBaseUrl = process.env.GITLAB_BASE_URL;
+  const originalBaseUrl = process.env.R_GITLAB_BASE_URL;
 
   afterEach(() => {
     if (originalBaseUrl === undefined) {
-      delete process.env.GITLAB_BASE_URL;
+      delete process.env.R_GITLAB_BASE_URL;
     } else {
-      process.env.GITLAB_BASE_URL = originalBaseUrl;
+      process.env.R_GITLAB_BASE_URL = originalBaseUrl;
     }
   });
 
@@ -202,8 +202,8 @@ describe('listGitLabProjects', () => {
     );
   });
 
-  it('derives the API base from GITLAB_BASE_URL for self-managed instances', async () => {
-    process.env.GITLAB_BASE_URL = 'https://gitlab.example.com';
+  it('derives the API base from R_GITLAB_BASE_URL for self-managed instances', async () => {
+    process.env.R_GITLAB_BASE_URL = 'https://gitlab.example.com';
 
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -279,12 +279,12 @@ describe('buildGitLabRepositoryValues', () => {
 
 describe('createTaskRunScopedGitLabTokens', () => {
   const originalGitLabToken = process.env.GITLAB_TOKEN;
-  const originalGitLabBaseUrl = process.env.GITLAB_BASE_URL;
+  const originalGitLabBaseUrl = process.env.R_GITLAB_BASE_URL;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GITLAB_TOKEN = 'glpat_deployment_token';
-    delete process.env.GITLAB_BASE_URL;
+    delete process.env.R_GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -303,9 +303,9 @@ describe('createTaskRunScopedGitLabTokens', () => {
     }
 
     if (originalGitLabBaseUrl === undefined) {
-      delete process.env.GITLAB_BASE_URL;
+      delete process.env.R_GITLAB_BASE_URL;
     } else {
-      process.env.GITLAB_BASE_URL = originalGitLabBaseUrl;
+      process.env.R_GITLAB_BASE_URL = originalGitLabBaseUrl;
     }
   });
 
@@ -363,8 +363,8 @@ describe('createTaskRunScopedGitLabTokens', () => {
     );
   });
 
-  it('mints scoped tokens against a self-managed GITLAB_BASE_URL with the self-managed credential host', async () => {
-    process.env.GITLAB_BASE_URL = 'https://gitlab.example.com';
+  it('mints scoped tokens against a self-managed R_GITLAB_BASE_URL with the self-managed credential host', async () => {
+    process.env.R_GITLAB_BASE_URL = 'https://gitlab.example.com';
 
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

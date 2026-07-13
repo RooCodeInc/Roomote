@@ -9,7 +9,7 @@ describe('roomote mcp config helpers', () => {
     delete process.env.AUTH_TOKEN;
     delete process.env.ROOMOTE_CLOUD_TOKEN;
     delete process.env.ROOMOTE_PLATFORM_API_URL;
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
     delete process.env.ROOMOTE_WORKSPACE_PATH;
     delete process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
     delete process.env.ROOMOTE_AUTH_BYPASS_VALUE;
@@ -36,7 +36,7 @@ describe('roomote mcp config helpers', () => {
 
   it('uses the configured platform API URL for roomote requests', () => {
     process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
-    process.env.TRPC_URL = 'https://trpc.example.com';
+    process.env.R_TRPC_URL = 'https://trpc.example.com';
 
     expect(getRoomoteConfig()).toEqual({
       token: 'run-token',
@@ -72,7 +72,7 @@ describe('roomote mcp config helpers', () => {
 
   it('falls back to AUTH_TOKEN when ROOMOTE_CLOUD_TOKEN is unavailable', () => {
     process.env.AUTH_TOKEN = 'worker-run-token';
-    process.env.TRPC_URL = 'https://trpc.example.com';
+    process.env.R_TRPC_URL = 'https://trpc.example.com';
     process.env.ROOMOTE_WORKSPACE_PATH = '/workspace';
 
     expect(getArtifactConfig()).toEqual({

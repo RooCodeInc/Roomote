@@ -88,17 +88,17 @@ chmod 600 /opt/roomote/.env
 ```
 
 Deployment-owned image metadata includes the control-plane image tag, worker
-image, and the controller-local `DOCKER_WORKER_RELEASE_PATH`. The release path is
+image, and the controller-local `R_DOCKER_WORKER_RELEASE_PATH`. The release path is
 versioned as `/roomote/releases/worker-v<version>.tar.gz` so hosted providers
 such as Modal can derive worker release metadata from the archive filename.
 The installer and deployer also keep `MODAL_BASE_IMAGE_REF` aligned with
-`DOCKER_WORKER_IMAGE` if the Modal image is blank or still points at the
+`R_DOCKER_WORKER_IMAGE` if the Modal image is blank or still points at the
 previously deployed worker image, so picking Modal in the setup wizard only
 requires the Modal token pair. A different non-empty Modal image is treated
 as an explicit operator override.
 
 Both worker-image variables are optional on published app images:
-when `DOCKER_WORKER_IMAGE` (and, for Modal, `MODAL_BASE_IMAGE_REF`) are
+when `R_DOCKER_WORKER_IMAGE` (and, for Modal, `MODAL_BASE_IMAGE_REF`) are
 unset, the app derives `<worker repo>:${RELEASE_VERSION}` from the release
 version baked into the app image — the publish workflow tags the app and
 worker images in lockstep. The worker repository defaults to
@@ -191,18 +191,24 @@ base64.
 Operator-facing environment variables follow three naming categories:
 
 1. **`R_*` for Roomote-owned configuration.** Anything Roomote itself defines
-   and an operator is expected to set — app URLs, model role overrides,
-   Roomote's own registered integration-app credentials (GitHub App, Slack app,
-   Microsoft/Teams app, Telegram bot, Linear app), allowed emails, and boot
-   knobs such as `R_AUTO_GENERATE_KEYS`.
+   and an operator is expected to set — app URLs (`R_APP_URL`, `R_TRPC_URL`,
+   `R_PREVIEW_*`), compute selection and worker/policy knobs
+   (`R_DEFAULT_COMPUTE_PROVIDER`, `R_DOCKER_*`, `R_BLAXEL_STANDBY_*`), model
+   role overrides, Roomote-registered integration/app credentials (GitHub App,
+   Slack app, Microsoft/Teams app, Telegram bot, Linear app, plus non-token
+   GitLab/Gitea/ADO/Bitbucket app settings), allowed emails, and boot knobs
+   such as `R_AUTO_GENERATE_KEYS`.
 2. **Conventional infrastructure names stay conventional.** `DATABASE_URL`,
-   `REDIS_URL`, `S3_*`, `NODE_ENV`, `HOST`, `PORT`, and similar
-   ecosystem-standard names are not prefixed; tooling and platforms expect
-   them as-is.
+   `REDIS_URL`, `S3_*`, `NODE_ENV`, `HOST`, `PORT`, signing keypairs
+   (`JOB_AUTH_*`, `PREVIEW_AUTH_*`, `ENCRYPTION_KEY`, …), and similar
+   ecosystem-standard or operational secret names are not prefixed; tooling
+   and platforms expect them as-is.
 3. **Third-party provider credentials keep the provider's standard names.**
-   `MODAL_*`, `E2B_*`, `DAYTONA_*`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and
-   other keys issued by an external service keep the names that service's own
-   documentation uses.
+   Compute SDK credentials (`MODAL_*`, `E2B_*`, `DAYTONA_*`, `BL_*`),
+   per-repo source-control access tokens (`GITLAB_TOKEN`, `GITEA_TOKEN`, …),
+   model API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …), and other keys
+   issued by an external service keep the names that service's own
+   documentation or sandbox tooling uses.
 
 **Internal-plumbing carve-out:** variables Roomote sets for its own processes
 — and that operators never configure — are not part of the naming contract and
@@ -322,8 +328,8 @@ running:
 cd /opt/roomote
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
 docker compose --env-file .env -f docker-compose.prod.yml stop controller || true
-DOCKER_WORKER_IMAGE="$(awk -F= '/^(export[[:space:]]+)?DOCKER_WORKER_IMAGE=/ { sub(/^[^=]*=/, ""); print; exit }' .env)"
-docker pull "$DOCKER_WORKER_IMAGE"
+R_DOCKER_WORKER_IMAGE="$(awk -F= '/^(export[[:space:]]+)?R_DOCKER_WORKER_IMAGE=/ { sub(/^[^=]*=/, ""); print; exit }' .env)"
+docker pull "$R_DOCKER_WORKER_IMAGE"
 docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml run --rm db-migrate
 docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600

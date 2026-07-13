@@ -31,7 +31,7 @@ describe('GET /api/teams/auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     bootstrapWebRuntimeEnvMock.mockResolvedValue({
-      TRPC_URL: 'https://api.example.com',
+      R_TRPC_URL: 'https://api.example.com',
     });
     authorizeMock.mockResolvedValue({
       success: true,

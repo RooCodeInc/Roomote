@@ -17,19 +17,19 @@ vi.mock('@slack/web-api', () => ({
 import { createSlackWebClient } from '../web-client';
 
 describe('createSlackWebClient', () => {
-  const originalBaseUrl = process.env.SLACK_API_BASE_URL;
+  const originalBaseUrl = process.env.R_SLACK_API_BASE_URL;
 
   beforeEach(() => {
-    process.env.SLACK_API_BASE_URL = 'https://slack.com/api/';
+    process.env.R_SLACK_API_BASE_URL = 'https://slack.com/api/';
     apiCallMock.mockReset();
     WebClientMock.mockClear();
   });
 
   afterEach(() => {
     if (originalBaseUrl === undefined) {
-      delete process.env.SLACK_API_BASE_URL;
+      delete process.env.R_SLACK_API_BASE_URL;
     } else {
-      process.env.SLACK_API_BASE_URL = originalBaseUrl;
+      process.env.R_SLACK_API_BASE_URL = originalBaseUrl;
     }
     vi.restoreAllMocks();
   });
@@ -65,13 +65,13 @@ describe('createSlackWebClient', () => {
       operation: 'apiCall(chat.postMessage)',
       method: 'POST',
       url: 'https://slack.com/api/chat.postMessage',
-      timeoutMs: Env.SLACK_API_TIMEOUT_MS,
+      timeoutMs: Env.R_SLACK_API_TIMEOUT_MS,
     });
     expect(isObservedTimeoutError(caughtError)).toBe(true);
 
     expect(WebClientMock).toHaveBeenCalledWith('xoxb-test', {
       slackApiUrl: 'https://slack.com/api/',
-      timeout: Env.SLACK_API_TIMEOUT_MS,
+      timeout: Env.R_SLACK_API_TIMEOUT_MS,
     });
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       '[Slack Web API Timeout]',
@@ -80,7 +80,7 @@ describe('createSlackWebClient', () => {
         operation: 'apiCall(chat.postMessage)',
         method: 'POST',
         url: 'https://slack.com/api/chat.postMessage',
-        timeoutMs: Env.SLACK_API_TIMEOUT_MS,
+        timeoutMs: Env.R_SLACK_API_TIMEOUT_MS,
       }),
     );
   });

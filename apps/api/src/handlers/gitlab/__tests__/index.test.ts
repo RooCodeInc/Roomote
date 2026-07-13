@@ -47,7 +47,7 @@ describe('gitlab webhook router', () => {
     // Secrets resolve through encrypted deployment env vars, matching
     // values saved by /setup rather than the process environment.
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITLAB_WEBHOOK_SECRET' ? 'gitlab-secret' : null,
+      name === 'R_GITLAB_WEBHOOK_SECRET' ? 'gitlab-secret' : null,
     );
     mockHandleGitLabMergeRequest.mockResolvedValue({ status: 'ok' });
     mockHandleGitLabNote.mockResolvedValue({ status: 'ok' });

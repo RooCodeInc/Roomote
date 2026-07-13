@@ -692,7 +692,7 @@ async function createOrUpdateGiteaPullRequest({
   const baseUrl = await resolveGiteaBaseUrl();
   if (!baseUrl) {
     throw new Error(
-      'GITEA_BASE_URL is required to create Gitea pull requests.',
+      'R_GITEA_BASE_URL is required to create Gitea pull requests.',
     );
   }
 
@@ -806,7 +806,7 @@ async function createOrUpdateBitbucketPullRequest({
   const username = await resolveBitbucketUsername();
   if (!username) {
     throw new Error(
-      'BITBUCKET_USERNAME is required to create Bitbucket pull requests.',
+      'R_BITBUCKET_USERNAME is required to create Bitbucket pull requests.',
     );
   }
 

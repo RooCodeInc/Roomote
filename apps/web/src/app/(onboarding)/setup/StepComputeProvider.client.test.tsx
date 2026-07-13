@@ -59,7 +59,7 @@ describe('StepComputeProvider', () => {
       persistedDefaultProvider: null,
       setupSatisfied: false,
       workerImage: {
-        envVarName: 'DOCKER_WORKER_IMAGE',
+        envVarName: 'R_DOCKER_WORKER_IMAGE',
         label: 'Worker Image',
         runtimeSatisfied: false,
         savedSatisfied: false,

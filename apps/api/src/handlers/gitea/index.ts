@@ -46,7 +46,7 @@ gitea.post('/', async (c) => {
   try {
     const headers = c.req.header();
     const body = await c.req.text();
-    const secretToken = await resolveDeploymentEnvVar('GITEA_WEBHOOK_SECRET');
+    const secretToken = await resolveDeploymentEnvVar('R_GITEA_WEBHOOK_SECRET');
     const verified = verifyGiteaWebhook({
       body,
       headers,

@@ -292,7 +292,7 @@ function normalizeGitLabBaseUrl(baseUrl: string | null | undefined) {
 }
 
 // Unlike GitLab there is no default Gitea host: Gitea is always
-// instance-specific, so the provider stays disabled without GITEA_BASE_URL.
+// instance-specific, so the provider stays disabled without R_GITEA_BASE_URL.
 function normalizeBitbucketBaseUrl(baseUrl: string | null | undefined) {
   const trimmed = baseUrl?.trim();
 
@@ -817,7 +817,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
   return betterAuth({
     appName: 'Roomote',
     baseURL: getBetterAuthBaseUrlConfig({
-      previewDomainsRaw: process.env.PREVIEW_DOMAINS,
+      previewDomainsRaw: process.env.R_PREVIEW_DOMAINS,
       roomoteAppUrl: Env.R_APP_URL,
     }),
     secret: getBetterAuthSecret(),

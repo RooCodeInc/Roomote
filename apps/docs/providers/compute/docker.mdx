@@ -31,24 +31,24 @@ from **Settings > Sandboxes**.
 Common env vars:
 
 ```sh
-DEFAULT_COMPUTE_PROVIDER=docker
-DOCKER_WORKER_IMAGE=roomote-worker:local
+R_DEFAULT_COMPUTE_PROVIDER=docker
+R_DOCKER_WORKER_IMAGE=roomote-worker:local
 # Optional: defaults to the host architecture (linux/amd64 or linux/arm64)
-DOCKER_WORKER_PLATFORM=linux/amd64
-DOCKER_WORKER_NETWORK=roomote_worker
-DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
-DOCKER_WORKER_CPU_LIMIT=2
-DOCKER_WORKER_MEMORY_LIMIT=4g
-DOCKER_WORKER_PIDS_LIMIT=512
-DOCKER_WORKER_DISK_LIMIT=20g
-DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false
-DOCKER_WORKER_LOG_MAX_SIZE=10m
-DOCKER_WORKER_LOG_MAX_FILES=3
+R_DOCKER_WORKER_PLATFORM=linux/amd64
+R_DOCKER_WORKER_NETWORK=roomote_worker
+R_DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+R_DOCKER_WORKER_CPU_LIMIT=2
+R_DOCKER_WORKER_MEMORY_LIMIT=4g
+R_DOCKER_WORKER_PIDS_LIMIT=512
+R_DOCKER_WORKER_DISK_LIMIT=20g
+R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false
+R_DOCKER_WORKER_LOG_MAX_SIZE=10m
+R_DOCKER_WORKER_LOG_MAX_FILES=3
 # internet allows public egress but blocks private/metadata ranges
 # none disables external egress entirely
-DOCKER_WORKER_EGRESS_POLICY=internet
-DOCKER_STANDBY_MAX_COUNT=10
-DOCKER_STANDBY_MAX_AGE_HOURS=24
+R_DOCKER_WORKER_EGRESS_POLICY=internet
+R_DOCKER_STANDBY_MAX_COUNT=10
+R_DOCKER_STANDBY_MAX_AGE_HOURS=24
 ```
 
 Local development builds `roomote-worker:local` automatically. Self-hosted
@@ -75,13 +75,13 @@ storage driver that supports `--storage-opt size`. When the driver rejects that
 option, Roomote refuses to start the task rather than allowing untrusted code to
 consume the host disk. Configure a quota-capable Docker data root. Operators
 that enforce an equivalent host-level quota can explicitly set
-`DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true`; Roomote then logs a warning and
+`R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true`; Roomote then logs a warning and
 starts without `--storage-opt size`.
 
 Completed resumable tasks keep their stopped container and writable layer so a
 follow-up can restart the same workspace. Roomote retains at most 10 containers
-for 24 hours by default. Configure `DOCKER_STANDBY_MAX_COUNT` and
-`DOCKER_STANDBY_MAX_AGE_HOURS` to change those bounds; a count of `0` disables
+for 24 hours by default. Configure `R_DOCKER_STANDBY_MAX_COUNT` and
+`R_DOCKER_STANDBY_MAX_AGE_HOURS` to change those bounds; a count of `0` disables
 Docker standby retention. The five-minute retention sweep removes the oldest
 or expired containers and their task networks.
 
@@ -98,7 +98,7 @@ Docker bridge gateway are also blocked without disrupting its use as the
 public-egress next hop. Local development blocks metadata ranges but retains
 private and gateway access because its API runs on the host. The worker never
 receives the network-administration capability needed to remove the policy. Set
-`DOCKER_WORKER_EGRESS_POLICY=none` for tasks that need only the Roomote API and
+`R_DOCKER_WORKER_EGRESS_POLICY=none` for tasks that need only the Roomote API and
 preview proxy.
 
 ## Security notes
@@ -123,9 +123,9 @@ repositories.
 
 - **The worker image is missing.** Run the local dev server again, or publish
   and configure a worker image for self-hosted production.
-- **The task cannot reach Roomote services.** Check `DOCKER_WORKER_NETWORK` and
+- **The task cannot reach Roomote services.** Check `R_DOCKER_WORKER_NETWORK` and
   the Compose network used by the API and controller.
 - **A worker reports that its disk limit is unsupported.** Configure a Docker
   storage driver with per-container writable-layer quota support. Only set
-  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` when an equivalent host-level quota
+  `R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` when an equivalent host-level quota
   is already enforced.

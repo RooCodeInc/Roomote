@@ -8,7 +8,7 @@ project_name="${COMPOSE_PROJECT_NAME:-roomote-deployment-ci}"
 postgres_port="${DEPLOYMENT_CI_POSTGRES_PORT:-55432}"
 redis_port="${DEPLOYMENT_CI_REDIS_PORT:-56379}"
 default_network="${ROOMOTE_DEFAULT_NETWORK:-${project_name}_default}"
-worker_network="${DOCKER_WORKER_NETWORK:-${project_name}_worker}"
+worker_network="${R_DOCKER_WORKER_NETWORK:-${project_name}_worker}"
 temporary_directory="$(mktemp -d)"
 env_file="$temporary_directory/deployment.env"
 backup_file="$temporary_directory/roomote.sql"
@@ -106,17 +106,17 @@ CADDY_HTTPS_PORT=18443
 COMPOSE_PROFILES=local-postgres
 DASHBOARD_PASSWORD=$dashboard_password
 DATABASE_URL=postgres://postgres:roomote-postgres-password@postgres:5432/roomote
-DEFAULT_COMPUTE_PROVIDER=docker
+R_DEFAULT_COMPUTE_PROVIDER=docker
 DEPLOYMENT_CI_POSTGRES_PORT=$postgres_port
 DEPLOYMENT_CI_REDIS_PORT=$redis_port
 # CI runners are ephemeral and their Docker storage drivers cannot enforce
 # --storage-opt size quotas, so accept unbounded writable layers here. Real
 # deployments keep the fail-closed default.
-DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true
-DOCKER_WORKER_IMAGE=localhost/roomote/roomote-worker:$version
-DOCKER_WORKER_NETWORK=$worker_network
-DOCKER_WORKER_PLATFORM=$platform
-DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true
+R_DOCKER_WORKER_IMAGE=localhost/roomote/roomote-worker:$version
+R_DOCKER_WORKER_NETWORK=$worker_network
+R_DOCKER_WORKER_PLATFORM=$platform
+R_DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 ENCRYPTION_KEY=$encryption_key
 IMAGE_NAMESPACE=roomote
 IMAGE_REGISTRY=localhost
@@ -141,7 +141,7 @@ S3_PRESIGN_ENDPOINT=http://minio:9000
 S3_REGION=us-east-1
 S3_SECRET_ACCESS_KEY=$s3_password
 SETUP_TOKEN=$setup_token
-TRPC_URL=http://api:3001
+R_TRPC_URL=http://api:3001
 EOF
 }
 

@@ -59,9 +59,11 @@ export const INTEGRATION_BOT_SECRET_ENV_VAR_NAMES: ReadonlySet<string> =
 export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_GITHUB_APP_ID',
   'R_GITHUB_CLIENT_ID',
-  'GITLAB_CLIENT_ID',
-  'GITEA_CLIENT_ID',
-  'SLACK_APP_ID',
+  'R_GITLAB_CLIENT_ID',
+  'R_GITEA_CLIENT_ID',
+  'R_ADO_CLIENT_ID',
+  'R_BITBUCKET_CLIENT_ID',
+  'R_SLACK_APP_ID',
 ]);
 
 /**

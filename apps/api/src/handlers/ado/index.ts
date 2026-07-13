@@ -81,7 +81,7 @@ ado.post('/', async (c) => {
   try {
     const headers = c.req.header();
     const body = await c.req.text();
-    const secretToken = await resolveDeploymentEnvVar('ADO_WEBHOOK_SECRET');
+    const secretToken = await resolveDeploymentEnvVar('R_ADO_WEBHOOK_SECRET');
     const verified = verifyAdoWebhook({
       headers,
       secretToken: secretToken ?? undefined,

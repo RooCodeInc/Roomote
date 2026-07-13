@@ -647,7 +647,7 @@ export function LivePreviewsSettings() {
                       {previewOriginManagedByEnv && (
                         <p className="text-sm text-muted-foreground">
                           <Info className="size-4 inline mr-1" />
-                          Currently defined by PREVIEW_PROXY_BASE_URL,
+                          Currently defined by R_PREVIEW_PROXY_BASE_URL,
                           can&apos;t be changed here.
                         </p>
                       )}

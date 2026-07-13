@@ -20,7 +20,7 @@ type MockConfig = {
   PORT: string;
   NODE_ENV: 'test';
   R_APP_URL: string;
-  PREVIEW_TOKEN_TTL_SECONDS: string;
+  R_PREVIEW_TOKEN_TTL_SECONDS: string;
   PREVIEW_AUTH_COOKIE_NAME: string;
   PREVIEW_PROXY_SUBDOMAIN_SUFFIX: string | undefined;
 };
@@ -29,7 +29,7 @@ export const mockConfig: MockConfig = {
   PORT: '0',
   NODE_ENV: 'test',
   R_APP_URL: 'https://api.example.com',
-  PREVIEW_TOKEN_TTL_SECONDS: '3600',
+  R_PREVIEW_TOKEN_TTL_SECONDS: '3600',
   PREVIEW_AUTH_COOKIE_NAME: 'preview_auth',
   PREVIEW_PROXY_SUBDOMAIN_SUFFIX: undefined,
 };

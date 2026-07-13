@@ -57,7 +57,7 @@ function isSlackTimeoutError(error: unknown): error is SlackRequestError {
 }
 
 export function createSlackWebClient(token: string): WebClient {
-  const timeoutMs = Env.SLACK_API_TIMEOUT_MS;
+  const timeoutMs = Env.R_SLACK_API_TIMEOUT_MS;
   const slackApiUrl = getSlackApiBaseUrl();
 
   const client = new WebClient(token, {

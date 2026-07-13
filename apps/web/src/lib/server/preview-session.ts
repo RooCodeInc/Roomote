@@ -47,14 +47,14 @@ async function validatePreviewUrlDomain(previewUrl: URL): Promise<void> {
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
       runtimeEnv: process.env,
-      defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-      defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+      defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+      defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
     });
   const previewDomainsRaw =
     resolvedPreviewRuntimeConfig.effective.previewDomains;
 
   if (!previewDomainsRaw) {
-    console.error('PREVIEW_DOMAINS environment variable is not configured');
+    console.error('R_PREVIEW_DOMAINS environment variable is not configured');
     throw new PreviewSessionError(500, 'Service misconfigured');
   }
 
@@ -106,7 +106,7 @@ export async function createPreviewSession(params: {
 
   const token = await createPreviewToken({
     userId: authResult.userId,
-    timeoutSeconds: Env.PREVIEW_TOKEN_TTL_SECONDS,
+    timeoutSeconds: Env.R_PREVIEW_TOKEN_TTL_SECONDS,
   });
 
   return {

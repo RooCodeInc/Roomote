@@ -42,8 +42,8 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/env', () => ({
   Env: {
-    PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
-    PREVIEW_DOMAINS: 'preview.example.com',
+    R_PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
+    R_PREVIEW_DOMAINS: 'preview.example.com',
   },
 }));
 

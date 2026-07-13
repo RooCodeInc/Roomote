@@ -12,8 +12,8 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'E2B_API_KEY',
       'R_GITHUB_APP_PRIVATE_KEY',
       'R_GITHUB_WEBHOOK_SECRET',
-      'GITLAB_WEBHOOK_SECRET',
-      'GITLAB_CLIENT_SECRET',
+      'R_GITLAB_WEBHOOK_SECRET',
+      'R_GITLAB_CLIENT_SECRET',
       'R_MICROSOFT_CLIENT_SECRET',
       'R_SLACK_SIGNING_SECRET',
       'R_TEAMS_BOT_APP_PASSWORD',
@@ -33,8 +33,8 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     for (const name of [
       'R_GITHUB_APP_ID',
       'R_GITHUB_CLIENT_ID',
-      'GITLAB_CLIENT_ID',
-      'SLACK_APP_ID',
+      'R_GITLAB_CLIENT_ID',
+      'R_SLACK_APP_ID',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }

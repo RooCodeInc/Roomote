@@ -40,7 +40,7 @@ function buildPollingTransportErrorContext({
   string,
   string | number | boolean | null
 > {
-  const trpcUrl = env.TRPC_URL?.trim() || null;
+  const trpcUrl = env.R_TRPC_URL?.trim() || null;
 
   try {
     const parsedTrpcUrl = trpcUrl ? new URL(trpcUrl) : null;

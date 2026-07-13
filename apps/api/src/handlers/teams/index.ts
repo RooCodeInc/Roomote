@@ -1253,7 +1253,7 @@ async function startNewTeamsTask(input: {
     ...(input.queuedMessage.images?.length
       ? { images: input.queuedMessage.images }
       : {}),
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+    apiBaseUrl: Env.R_TRPC_URL ?? Env.R_APP_URL,
   });
   const routingDecision = await routeTask(routingContext);
 

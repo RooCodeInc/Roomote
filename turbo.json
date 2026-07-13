@@ -7,7 +7,7 @@
     "MISE_CACHE_DIR",
     "SKIP_ENV_VALIDATION",
     "PREVIEW_ALLOWED_ORG_IDS",
-    "ROUTER_DEBUG_CHANNEL_ID"
+    "R_ROUTER_DEBUG_CHANNEL_ID"
   ],
   "tasks": {
     "format": {},

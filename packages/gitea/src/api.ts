@@ -104,7 +104,7 @@ function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
-    throw new Error('GITEA_BASE_URL cannot be empty.');
+    throw new Error('R_GITEA_BASE_URL cannot be empty.');
   }
 
   return new URL(trimmed).toString().replace(/\/+$/, '');
@@ -121,12 +121,12 @@ let cachedGiteaDeploymentUser: {
 } | null = null;
 
 export async function resolveGiteaBaseUrl(): Promise<string | null> {
-  const baseUrl = await resolveDeploymentEnvVar('GITEA_BASE_URL');
+  const baseUrl = await resolveDeploymentEnvVar('R_GITEA_BASE_URL');
   return baseUrl ? normalizeBaseUrl(baseUrl) : null;
 }
 
 export async function resolveGiteaUsername(): Promise<string | null> {
-  return resolveDeploymentEnvVar('GITEA_USERNAME');
+  return resolveDeploymentEnvVar('R_GITEA_USERNAME');
 }
 
 export function buildGiteaApiBaseUrl(baseUrl: string): string {
@@ -279,7 +279,7 @@ export async function listGiteaRepositories({
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
 
   if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
-    throw new Error('GITEA_BASE_URL is required to sync Gitea repositories.');
+    throw new Error('R_GITEA_BASE_URL is required to sync Gitea repositories.');
   }
 
   const resolvedApiBaseUrl =
@@ -389,7 +389,7 @@ export async function syncGiteaRepositories({
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
 
   if (!resolvedBaseUrl?.trim()) {
-    throw new Error('GITEA_BASE_URL is required to sync Gitea repositories.');
+    throw new Error('R_GITEA_BASE_URL is required to sync Gitea repositories.');
   }
 
   const existingIds = (
@@ -580,7 +580,7 @@ export async function getGiteaAuthenticatedUser({
 
   if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
     throw new Error(
-      'GITEA_BASE_URL is required for Gitea source control jobs.',
+      'R_GITEA_BASE_URL is required for Gitea source control jobs.',
     );
   }
 
@@ -685,7 +685,7 @@ export async function createGiteaPullRequestComment({
 
   if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
     throw new Error(
-      'GITEA_BASE_URL is required to create Gitea pull request comments.',
+      'R_GITEA_BASE_URL is required to create Gitea pull request comments.',
     );
   }
 
@@ -855,7 +855,9 @@ export async function ensureGiteaWebhooksForRepositories({
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
 
   if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
-    throw new Error('GITEA_BASE_URL is required to configure Gitea webhooks.');
+    throw new Error(
+      'R_GITEA_BASE_URL is required to configure Gitea webhooks.',
+    );
   }
 
   const resolvedApiBaseUrl =
@@ -989,7 +991,9 @@ export async function removeGiteaWebhooksForRepositories({
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
 
   if (!resolvedBaseUrl?.trim() && !apiBaseUrl?.trim()) {
-    throw new Error('GITEA_BASE_URL is required to configure Gitea webhooks.');
+    throw new Error(
+      'R_GITEA_BASE_URL is required to configure Gitea webhooks.',
+    );
   }
 
   const resolvedApiBaseUrl =
@@ -1055,7 +1059,7 @@ export async function createTaskRunGiteaCredentials(
 
   if (!baseUrl?.trim()) {
     throw new Error(
-      'GITEA_BASE_URL is required for Gitea source control jobs.',
+      'R_GITEA_BASE_URL is required for Gitea source control jobs.',
     );
   }
 

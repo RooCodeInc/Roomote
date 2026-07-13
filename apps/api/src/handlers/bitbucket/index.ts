@@ -53,7 +53,7 @@ bitbucket.post('/', async (c) => {
     const headers = c.req.header();
     const body = await c.req.text();
     const secretToken = await resolveDeploymentEnvVar(
-      'BITBUCKET_WEBHOOK_SECRET',
+      'R_BITBUCKET_WEBHOOK_SECRET',
     );
     const verified = verifyBitbucketWebhook({
       body,

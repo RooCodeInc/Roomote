@@ -200,7 +200,7 @@ export function StepSourceControlConfig({
       : window.location.origin;
   const gitlabRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/gitlab`;
   const typedGitLabBaseUrl =
-    values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
+    values['R_GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
   const configuredGitLabBaseUrl =
     sourceControlSetup.gitlabBaseUrl?.trim().replace(/\/+$/, '') ?? '';
   const effectiveGitLabBaseUrl = /^https?:\/\//.test(typedGitLabBaseUrl)

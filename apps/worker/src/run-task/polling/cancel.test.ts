@@ -74,14 +74,14 @@ function createListenerOptions(overrides?: {
 }
 
 describe('createCancelInterval', () => {
-  const originalTrpcUrl = process.env.TRPC_URL;
+  const originalTrpcUrl = process.env.R_TRPC_URL;
   const originalAuthToken = process.env.AUTH_TOKEN;
   const originalBypassValue = process.env.ROOMOTE_AUTH_BYPASS_VALUE;
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    process.env.TRPC_URL = 'http://127.0.0.1:3001';
+    process.env.R_TRPC_URL = 'http://127.0.0.1:3001';
     process.env.AUTH_TOKEN = 'worker-auth-token';
     process.env.ROOMOTE_AUTH_BYPASS_VALUE = 'bypass-token';
   });
@@ -90,9 +90,9 @@ describe('createCancelInterval', () => {
     vi.useRealTimers();
 
     if (originalTrpcUrl === undefined) {
-      delete process.env.TRPC_URL;
+      delete process.env.R_TRPC_URL;
     } else {
-      process.env.TRPC_URL = originalTrpcUrl;
+      process.env.R_TRPC_URL = originalTrpcUrl;
     }
 
     if (originalAuthToken === undefined) {

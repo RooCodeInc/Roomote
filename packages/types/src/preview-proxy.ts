@@ -17,13 +17,13 @@ export const DEFAULT_AUTH_BYPASS_HEADER_NAME = 'x-bypass-roomote-auth';
  * Environment variable for the preview proxy base URL.
  * Contains full protocol, host, and optional port (e.g., 'https://preview.example.com' or 'http://roomotepreview.localhost:18081').
  */
-export const PREVIEW_PROXY_BASE_URL_ENV_VAR = 'PREVIEW_PROXY_BASE_URL';
+export const PREVIEW_PROXY_BASE_URL_ENV_VAR = 'R_PREVIEW_PROXY_BASE_URL';
 
 /**
  * Environment variable for the preview domain allowlist.
  * Supports comma-separated list, used for redirect_uri validation.
  */
-export const PREVIEW_DOMAIN_ENV_VAR = 'PREVIEW_DOMAINS';
+export const PREVIEW_DOMAIN_ENV_VAR = 'R_PREVIEW_DOMAINS';
 
 /**
  * Cookie that disables preview widget injection for a request.
@@ -42,7 +42,7 @@ export const HIDE_PREVIEW_WIDGET_COOKIE = 'roomote_hide_preview_widget';
 export function getPreviewProxyBaseUrl(baseUrlRaw: string | undefined): string {
   if (!baseUrlRaw) {
     throw new Error(
-      'PREVIEW_PROXY_BASE_URL environment variable is required but not configured',
+      'R_PREVIEW_PROXY_BASE_URL environment variable is required but not configured',
     );
   }
 
@@ -50,7 +50,9 @@ export function getPreviewProxyBaseUrl(baseUrlRaw: string | undefined): string {
   try {
     new URL(baseUrlRaw);
   } catch {
-    throw new Error(`PREVIEW_PROXY_BASE_URL is not a valid URL: ${baseUrlRaw}`);
+    throw new Error(
+      `R_PREVIEW_PROXY_BASE_URL is not a valid URL: ${baseUrlRaw}`,
+    );
   }
 
   return baseUrlRaw;
@@ -116,7 +118,7 @@ export function getPreviewDomain(
 ): string {
   if (!previewDomainsRaw) {
     throw new Error(
-      'PREVIEW_DOMAINS environment variable is required but not configured',
+      'R_PREVIEW_DOMAINS environment variable is required but not configured',
     );
   }
 
@@ -127,7 +129,9 @@ export function getPreviewDomain(
   const domain = domains[0];
 
   if (!domain) {
-    throw new Error('PREVIEW_DOMAINS environment variable is empty or invalid');
+    throw new Error(
+      'R_PREVIEW_DOMAINS environment variable is empty or invalid',
+    );
   }
 
   return domain;

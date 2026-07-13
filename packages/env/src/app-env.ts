@@ -80,7 +80,7 @@ export function getDefaultTrpcUrl(appEnv: AppEnv): string {
     return 'http://localhost:13001';
   }
 
-  throw new Error(`TRPC_URL must be configured explicitly for ${appEnv}`);
+  throw new Error(`R_TRPC_URL must be configured explicitly for ${appEnv}`);
 }
 
 export function getDefaultDocsUrl(
@@ -96,6 +96,6 @@ export function getDefaultPreviewProxyBaseUrl(appEnv: AppEnv): string {
   }
 
   throw new Error(
-    `PREVIEW_PROXY_BASE_URL must be configured explicitly for ${appEnv}`,
+    `R_PREVIEW_PROXY_BASE_URL must be configured explicitly for ${appEnv}`,
   );
 }

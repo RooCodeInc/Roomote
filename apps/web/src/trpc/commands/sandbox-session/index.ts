@@ -629,8 +629,8 @@ export async function getSandboxSessionByTaskIdCommand(
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
       runtimeEnv: process.env,
-      defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-      defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+      defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+      defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
     });
 
   // Dynamically shorten the poll interval when a snapshot is in progress

@@ -57,7 +57,7 @@ export const sdk = {
 export interface CreateClientOptions {
   /**
    * The base URL for the tRPC API.
-   * Defaults to TRPC_URL env var or http://localhost:3001
+   * Defaults to R_TRPC_URL env var or http://localhost:3001
    */
   url?: string;
   /**
@@ -323,7 +323,7 @@ export function createWorkerFetchWithRetry(
  * });
  */
 export function createClient(options: CreateClientOptions = {}) {
-  const { url = process.env.TRPC_URL ?? 'http://localhost:3001', headers } =
+  const { url = process.env.R_TRPC_URL ?? 'http://localhost:3001', headers } =
     options;
 
   return createTRPCProxyClient<AppRouter>({
@@ -340,7 +340,7 @@ export function createClient(options: CreateClientOptions = {}) {
 function createWorkerLinkOptions() {
   return {
     url: resolveApiUrl(
-      process.env.TRPC_URL ?? 'http://localhost:3001',
+      process.env.R_TRPC_URL ?? 'http://localhost:3001',
       '/trpc',
     ),
     transformer: superjson,

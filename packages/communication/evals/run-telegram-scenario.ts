@@ -6,7 +6,7 @@
  * scripts/judge-criteria.ts).
  *
  * Prerequisites: local dev stack running (pnpm dev) with
- * TELEGRAM_API_BASE_URL pointing at the mock port used here, and the mock
+ * R_TELEGRAM_API_BASE_URL pointing at the mock port used here, and the mock
  * Telegram user mapping seeded (see
  * .agents/skills/mock-telegram-testing/SKILL.md).
  *
@@ -109,11 +109,11 @@ const baseUrl = await server.start(Number.parseInt(values.port!, 10));
 console.log(`mock telegram listening at ${baseUrl} -> ${values.webhook}`);
 
 if (
-  process.env.TELEGRAM_API_BASE_URL &&
-  process.env.TELEGRAM_API_BASE_URL.replace(/\/+$/, '') !== baseUrl
+  process.env.R_TELEGRAM_API_BASE_URL &&
+  process.env.R_TELEGRAM_API_BASE_URL.replace(/\/+$/, '') !== baseUrl
 ) {
   console.warn(
-    `WARNING: TELEGRAM_API_BASE_URL=${process.env.TELEGRAM_API_BASE_URL} does not match ${baseUrl}; ` +
+    `WARNING: R_TELEGRAM_API_BASE_URL=${process.env.R_TELEGRAM_API_BASE_URL} does not match ${baseUrl}; ` +
       `the API server may post replies somewhere else.`,
   );
 }

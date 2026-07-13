@@ -4,8 +4,8 @@ const DEFAULT_SLACK_API_BASE_URL = 'https://slack.com/api/';
 
 export function getSlackApiBaseUrl(): string {
   const configuredUrl = (
-    process.env.SLACK_API_BASE_URL ??
-    Env.SLACK_API_BASE_URL ??
+    process.env.R_SLACK_API_BASE_URL ??
+    Env.R_SLACK_API_BASE_URL ??
     DEFAULT_SLACK_API_BASE_URL
   ).trim();
 

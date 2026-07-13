@@ -35,7 +35,7 @@ const {
 vi.mock('@roomote/env', () => ({
   Env: {
     R_APP_URL: 'https://app.example.com',
-    TRPC_URL: 'https://api.example.com',
+    R_TRPC_URL: 'https://api.example.com',
   },
 }));
 

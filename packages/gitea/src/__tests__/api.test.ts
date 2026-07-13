@@ -89,14 +89,14 @@ function makeTaskRun(payload: TaskRun['payload']): TaskRun {
 
 describe('Gitea API helpers', () => {
   const originalGiteaToken = process.env.GITEA_TOKEN;
-  const originalGiteaBaseUrl = process.env.GITEA_BASE_URL;
-  const originalGiteaUsername = process.env.GITEA_USERNAME;
+  const originalGiteaBaseUrl = process.env.R_GITEA_BASE_URL;
+  const originalGiteaUsername = process.env.R_GITEA_USERNAME;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.GITEA_TOKEN = 'gitea_deployment_token';
-    process.env.GITEA_BASE_URL = 'https://git.example.com/';
-    delete process.env.GITEA_USERNAME;
+    process.env.R_GITEA_BASE_URL = 'https://git.example.com/';
+    delete process.env.R_GITEA_USERNAME;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -114,15 +114,15 @@ describe('Gitea API helpers', () => {
     }
 
     if (originalGiteaBaseUrl === undefined) {
-      delete process.env.GITEA_BASE_URL;
+      delete process.env.R_GITEA_BASE_URL;
     } else {
-      process.env.GITEA_BASE_URL = originalGiteaBaseUrl;
+      process.env.R_GITEA_BASE_URL = originalGiteaBaseUrl;
     }
 
     if (originalGiteaUsername === undefined) {
-      delete process.env.GITEA_USERNAME;
+      delete process.env.R_GITEA_USERNAME;
     } else {
-      process.env.GITEA_USERNAME = originalGiteaUsername;
+      process.env.R_GITEA_USERNAME = originalGiteaUsername;
     }
   });
 
@@ -208,7 +208,9 @@ describe('Gitea API helpers', () => {
         token: 'gitea_test',
         baseUrl: '',
       }),
-    ).rejects.toThrow('GITEA_BASE_URL is required to sync Gitea repositories.');
+    ).rejects.toThrow(
+      'R_GITEA_BASE_URL is required to sync Gitea repositories.',
+    );
   });
 
   it('maps Gitea repository fields into provider-tagged repository rows', () => {

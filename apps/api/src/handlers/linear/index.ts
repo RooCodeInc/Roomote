@@ -928,7 +928,7 @@ async function handleAgentSessionEvent(
         body: c.body,
         username: c.user?.name,
       })),
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+      apiBaseUrl: Env.R_TRPC_URL ?? Env.R_APP_URL,
     });
 
     // Attempt LLM routing

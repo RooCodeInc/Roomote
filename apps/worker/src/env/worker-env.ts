@@ -45,7 +45,7 @@ const SYSTEM_KEYS = [
 const WORKER_INTERNAL_CONFIG_KEYS = ['R_APP_ENV', 'APP_ENV', 'ROOMOTE_APP_ENV'];
 const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'AUTH_TOKEN',
-  'TRPC_URL',
+  'R_TRPC_URL',
   'R_APP_URL',
   // Legacy alias the controller injects for pre-rename snapshot workers;
   // scrub it from task processes the same as R_APP_URL.
@@ -54,7 +54,7 @@ const BLOCKED_USER_FACING_ENV_KEYS = new Set([
   'JOB_AUTH_PUBLIC_KEY',
   'PREVIEW_AUTH_PUBLIC_KEY',
   'PREVIEW_AUTH_COOKIE_NAME',
-  'PREVIEW_PROXY_BASE_URL',
+  'R_PREVIEW_PROXY_BASE_URL',
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
@@ -203,7 +203,7 @@ export class WorkerEnv {
     }
 
     // Extract worker infrastructure secrets.
-    const requiredVars = ['AUTH_TOKEN', 'TRPC_URL', 'R_APP_URL'] as const;
+    const requiredVars = ['AUTH_TOKEN', 'R_TRPC_URL', 'R_APP_URL'] as const;
 
     for (const key of requiredVars) {
       if (!processEnv[key]) {
@@ -213,9 +213,9 @@ export class WorkerEnv {
 
     const workerConfig: WorkerConfig = {
       authToken: processEnv.AUTH_TOKEN!,
-      trpcUrl: processEnv.TRPC_URL!,
+      trpcUrl: processEnv.R_TRPC_URL!,
       jobAuthPublicKey: processEnv.JOB_AUTH_PUBLIC_KEY,
-      previewProxyBaseUrl: processEnv.PREVIEW_PROXY_BASE_URL,
+      previewProxyBaseUrl: processEnv.R_PREVIEW_PROXY_BASE_URL,
       previewProxySubdomainSuffix: processEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
       previewAuthPublicKey: processEnv.PREVIEW_AUTH_PUBLIC_KEY,
       previewAuthCookieName: processEnv.PREVIEW_AUTH_COOKIE_NAME,
@@ -243,7 +243,7 @@ export class WorkerEnv {
       'PREVIEW_AUTH_PUBLIC_KEY',
       'PREVIEW_AUTH_COOKIE_NAME',
       'JOB_AUTH_PUBLIC_KEY',
-      'PREVIEW_PROXY_BASE_URL',
+      'R_PREVIEW_PROXY_BASE_URL',
       'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
     ];
 

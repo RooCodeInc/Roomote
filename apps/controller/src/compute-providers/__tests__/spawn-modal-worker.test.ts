@@ -87,7 +87,7 @@ describe('spawnModalWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockShouldEnableAuthBypassForTaskRun.mockReturnValue(true);
-    delete process.env.PREVIEW_PROXY_BASE_URL;
+    delete process.env.R_PREVIEW_PROXY_BASE_URL;
 
     mockCreateModalMachine.mockResolvedValue({
       machineId: 'modal-machine-123',

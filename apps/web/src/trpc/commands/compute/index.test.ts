@@ -140,11 +140,11 @@ describe('compute commands', () => {
     'BL_WORKSPACE',
     'BLAXEL_IMAGE',
     'BLAXEL_REGION',
-    'BLAXEL_STANDBY_MAX_COUNT',
-    'BLAXEL_STANDBY_MAX_AGE_HOURS',
-    'DOCKER_STANDBY_MAX_COUNT',
-    'DOCKER_STANDBY_MAX_AGE_HOURS',
-    'DOCKER_WORKER_IMAGE',
+    'R_BLAXEL_STANDBY_MAX_COUNT',
+    'R_BLAXEL_STANDBY_MAX_AGE_HOURS',
+    'R_DOCKER_STANDBY_MAX_COUNT',
+    'R_DOCKER_STANDBY_MAX_AGE_HOURS',
+    'R_DOCKER_WORKER_IMAGE',
     'RELEASE_VERSION',
   ];
   const originalComputeEnv: Record<string, string | undefined> = {};
@@ -249,8 +249,8 @@ describe('compute commands', () => {
       await saveComputeConfigCommand(buildMockAuth(), {
         provider: 'docker',
         values: {
-          DOCKER_STANDBY_MAX_COUNT: '4',
-          DOCKER_STANDBY_MAX_AGE_HOURS: '12',
+          R_DOCKER_STANDBY_MAX_COUNT: '4',
+          R_DOCKER_STANDBY_MAX_AGE_HOURS: '12',
         },
       });
 
@@ -259,8 +259,8 @@ describe('compute commands', () => {
         {
           userId: 'compute-test-user',
           values: [
-            { name: 'DOCKER_STANDBY_MAX_COUNT', value: '4' },
-            { name: 'DOCKER_STANDBY_MAX_AGE_HOURS', value: '12' },
+            { name: 'R_DOCKER_STANDBY_MAX_COUNT', value: '4' },
+            { name: 'R_DOCKER_STANDBY_MAX_AGE_HOURS', value: '12' },
           ],
         },
       );
@@ -270,7 +270,7 @@ describe('compute commands', () => {
       await expect(
         saveComputeConfigCommand(buildMockAuth(), {
           provider: 'blaxel',
-          values: { BLAXEL_STANDBY_MAX_AGE_HOURS: '169' },
+          values: { R_BLAXEL_STANDBY_MAX_AGE_HOURS: '169' },
         }),
       ).rejects.toThrow('Retention period (hours) must be at most 168.');
     });
@@ -281,7 +281,7 @@ describe('compute commands', () => {
         values: {
           MODAL_TOKEN_ID: 'token-id',
           MODAL_TOKEN_SECRET: 'token-secret',
-          DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+          R_DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
         },
       });
 
@@ -296,7 +296,7 @@ describe('compute commands', () => {
         ]),
       );
       expect(values.map((entry) => entry.name)).not.toContain(
-        'DOCKER_WORKER_IMAGE',
+        'R_DOCKER_WORKER_IMAGE',
       );
     });
 
@@ -402,7 +402,7 @@ describe('compute commands', () => {
     });
 
     it('starts the E2B template build when credentials are saved and a worker image is available', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
+      process.env.R_DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
 
       try {
         await saveComputeConfigCommand(buildMockAuth(), {
@@ -410,7 +410,7 @@ describe('compute commands', () => {
           values: { E2B_API_KEY: 'e2b-key' },
         });
       } finally {
-        delete process.env.DOCKER_WORKER_IMAGE;
+        delete process.env.R_DOCKER_WORKER_IMAGE;
       }
 
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
@@ -428,7 +428,7 @@ describe('compute commands', () => {
     });
 
     it('starts the Daytona snapshot registration when credentials are saved and a worker image is available', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
+      process.env.R_DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
 
       try {
         await saveComputeConfigCommand(buildMockAuth(), {
@@ -436,7 +436,7 @@ describe('compute commands', () => {
           values: { DAYTONA_API_KEY: 'daytona-key' },
         });
       } finally {
-        delete process.env.DOCKER_WORKER_IMAGE;
+        delete process.env.R_DOCKER_WORKER_IMAGE;
       }
 
       expect(mockRunComputeProvisioning).toHaveBeenCalledWith({
@@ -452,7 +452,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         values: {
           E2B_API_KEY: 'e2b-key',
-          DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+          R_DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
         },
       });
 
@@ -474,7 +474,7 @@ describe('compute commands', () => {
     });
 
     it('derives and persists the Modal base image ref from the worker image', async () => {
-      process.env.DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
+      process.env.R_DOCKER_WORKER_IMAGE = 'registry.example.com/worker:tag';
 
       try {
         await saveComputeConfigCommand(buildMockAuth(), {
@@ -485,7 +485,7 @@ describe('compute commands', () => {
           },
         });
       } finally {
-        delete process.env.DOCKER_WORKER_IMAGE;
+        delete process.env.R_DOCKER_WORKER_IMAGE;
       }
 
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
@@ -605,8 +605,8 @@ describe('compute commands', () => {
       await clearComputeConfigCommand(buildMockAuth(), { provider: 'docker' });
 
       expect(txInArray).toHaveBeenCalledWith('env.name', [
-        'DOCKER_STANDBY_MAX_COUNT',
-        'DOCKER_STANDBY_MAX_AGE_HOURS',
+        'R_DOCKER_STANDBY_MAX_COUNT',
+        'R_DOCKER_STANDBY_MAX_AGE_HOURS',
       ]);
       expect(txWhere).toHaveBeenCalled();
     });

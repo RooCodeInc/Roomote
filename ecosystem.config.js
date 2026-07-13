@@ -56,19 +56,20 @@ const openCodeEnv = Object.fromEntries(
 const defaultEnv = {
   PORT: undefined,
   USE_WORKER_RELEASE: process.env.USE_WORKER_RELEASE,
-  DEFAULT_COMPUTE_PROVIDER: process.env.DEFAULT_COMPUTE_PROVIDER || 'docker',
-  DOCKER_WORKER_IMAGE:
-    process.env.DOCKER_WORKER_IMAGE || 'roomote-worker:local',
+  R_DEFAULT_COMPUTE_PROVIDER:
+    process.env.R_DEFAULT_COMPUTE_PROVIDER || 'docker',
+  R_DOCKER_WORKER_IMAGE:
+    process.env.R_DOCKER_WORKER_IMAGE || 'roomote-worker:local',
   // Host arch, so Apple Silicon dev machines run the worker natively.
-  DOCKER_WORKER_PLATFORM:
-    process.env.DOCKER_WORKER_PLATFORM ||
+  R_DOCKER_WORKER_PLATFORM:
+    process.env.R_DOCKER_WORKER_PLATFORM ||
     (process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   R_PUBLIC_URL: publicUrl,
   R_APP_URL: publicUrl,
   // Set by `pnpm dev` to `<public-url>/_roomote-api` so workers on hosted
   // compute providers reach the API through the Caddy dev edge, matching
-  // the deployed TRPC_URL contract.
-  TRPC_URL: process.env.TRPC_URL,
+  // the deployed R_TRPC_URL contract.
+  R_TRPC_URL: process.env.R_TRPC_URL,
 
   // GitHub app credentials:
   R_GITHUB_APP_SLUG: process.env.R_GITHUB_APP_SLUG,
@@ -79,11 +80,13 @@ const defaultEnv = {
   R_GITHUB_WEBHOOK_SECRET: process.env.R_GITHUB_WEBHOOK_SECRET,
 
   // Slack app credentials:
-  SLACK_APP_ID: process.env.SLACK_APP_ID,
+  R_SLACK_APP_ID: process.env.R_SLACK_APP_ID,
   R_SLACK_CLIENT_ID: process.env.R_SLACK_CLIENT_ID,
   R_SLACK_CLIENT_SECRET: process.env.R_SLACK_CLIENT_SECRET,
-  SLACK_REDIRECT_URI: publicUrl ? `${publicUrl}/api/slack/callback` : undefined,
-  SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
+  R_SLACK_REDIRECT_URI: publicUrl
+    ? `${publicUrl}/api/slack/callback`
+    : undefined,
+  R_SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
   R_SLACK_SIGNING_SECRET: process.env.R_SLACK_SIGNING_SECRET,
 
   // Linear app credentials:

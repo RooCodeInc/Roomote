@@ -14,7 +14,7 @@ export function assessBrowserOriginCommand(input: {
 }): BrowserOriginAssessment {
   return assessBrowserOrigin({
     browserOrigin: input.browserOrigin,
-    previewDomainsRaw: Env.PREVIEW_DOMAINS,
+    previewDomainsRaw: Env.R_PREVIEW_DOMAINS,
     roomoteAppUrl: Env.R_APP_URL,
   });
 }

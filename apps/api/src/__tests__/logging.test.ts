@@ -2,14 +2,14 @@ const { envMock } = vi.hoisted(() => ({
   envMock: {
     APP_ENV: 'production',
     NODE_ENV: 'production',
-    API_DEBUG_LOGS: undefined as string | undefined,
+    R_API_DEBUG_LOGS: undefined as string | undefined,
   },
 }));
 
 async function importLoggingModule(envOverrides?: {
   APP_ENV?: string;
   NODE_ENV?: string;
-  API_DEBUG_LOGS?: string | undefined;
+  R_API_DEBUG_LOGS?: string | undefined;
 }) {
   vi.resetModules();
   vi.doMock('@roomote/env', async (importOriginal) => {
@@ -20,7 +20,7 @@ async function importLoggingModule(envOverrides?: {
       Env: Object.assign(envMock, {
         APP_ENV: 'production',
         NODE_ENV: 'production',
-        API_DEBUG_LOGS: undefined,
+        R_API_DEBUG_LOGS: undefined,
         ...envOverrides,
       }),
     };
@@ -81,7 +81,7 @@ describe('API logging helpers', () => {
     const baselineCallCount = debugSpy.mock.calls.length;
 
     apiLogger.debug('[GitHub] disabled');
-    envMock.API_DEBUG_LOGS = '1';
+    envMock.R_API_DEBUG_LOGS = '1';
     apiLogger.debug('[GitHub] enabled later');
 
     const newCalls = debugSpy.mock.calls.slice(baselineCallCount);

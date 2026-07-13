@@ -191,7 +191,7 @@ export async function injectEnvVars(
 ): Promise<void> {
   const identity = resolvePreviewIdentity(taskRun);
   const previewProxyBaseUrl =
-    options?.previewProxyBaseUrl ?? process.env.PREVIEW_PROXY_BASE_URL;
+    options?.previewProxyBaseUrl ?? process.env.R_PREVIEW_PROXY_BASE_URL;
   const previewProxySubdomainSuffix =
     options?.previewProxySubdomainSuffix ??
     process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
@@ -222,13 +222,13 @@ export async function injectEnvVars(
   // Dev servers running in the sandbox (e.g. Next.js) reject cross-origin
   // requests to internal dev resources (fonts, HMR, overlay assets) unless the
   // preview hostname is allowlisted; apps derive that allowlist from
-  // PREVIEW_DOMAINS. Deployment env vars only include PREVIEW_DOMAINS when the
+  // R_PREVIEW_DOMAINS. Deployment env vars only include R_PREVIEW_DOMAINS when the
   // deployment persisted preview settings, so fall back to deriving it from
   // the preview-proxy base URL the worker already has. An explicit
   // deployment-provided value always wins.
-  if (previewProxyBaseUrl && !envVars.PREVIEW_DOMAINS) {
+  if (previewProxyBaseUrl && !envVars.R_PREVIEW_DOMAINS) {
     try {
-      envVars.PREVIEW_DOMAINS = new URL(previewProxyBaseUrl).hostname;
+      envVars.R_PREVIEW_DOMAINS = new URL(previewProxyBaseUrl).hostname;
     } catch {
       // Ignore invalid base URLs; preview host construction above would have
       // been skipped or failed for the same reason.

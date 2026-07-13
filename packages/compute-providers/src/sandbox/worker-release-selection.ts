@@ -238,8 +238,8 @@ export function extractWorkerReleaseVersionFromArchivePath(
 export function resolveWorkerReleaseSelectionFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): WorkerReleaseSelection {
-  const rawChannel = env.WORKER_RELEASE_CHANNEL?.trim();
-  const rawVersion = env.WORKER_RELEASE_VERSION?.trim();
+  const rawChannel = env.R_WORKER_RELEASE_CHANNEL?.trim();
+  const rawVersion = env.R_WORKER_RELEASE_VERSION?.trim();
   let channel: WorkerReleaseChannel =
     resolveAppEnv(env) === 'preview'
       ? 'preview'
@@ -248,7 +248,7 @@ export function resolveWorkerReleaseSelectionFromEnv(
   if (rawChannel) {
     if (!isWorkerReleaseChannel(rawChannel)) {
       throw new Error(
-        `Unsupported WORKER_RELEASE_CHANNEL: ${rawChannel}. Expected "stable" or "preview".`,
+        `Unsupported R_WORKER_RELEASE_CHANNEL: ${rawChannel}. Expected "stable" or "preview".`,
       );
     }
 

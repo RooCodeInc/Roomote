@@ -12,15 +12,18 @@ describe('substituteEnvVars', () => {
 
   it('should resolve ${VAR} references', () => {
     const result = substituteEnvVars(
-      { TRPC_URL: '${ROOMOTE_API_HOST}' },
+      { R_TRPC_URL: '${ROOMOTE_API_HOST}' },
       lookup,
     );
-    expect(result.TRPC_URL).toBe('https://api.example.com');
+    expect(result.R_TRPC_URL).toBe('https://api.example.com');
   });
 
   it('should resolve bare $VAR references', () => {
-    const result = substituteEnvVars({ TRPC_URL: '$ROOMOTE_API_HOST' }, lookup);
-    expect(result.TRPC_URL).toBe('https://api.example.com');
+    const result = substituteEnvVars(
+      { R_TRPC_URL: '$ROOMOTE_API_HOST' },
+      lookup,
+    );
+    expect(result.R_TRPC_URL).toBe('https://api.example.com');
   });
 
   it('should handle multiple substitutions in one value', () => {

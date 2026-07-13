@@ -9,7 +9,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { WEBHOOK_RETENTION_DAYS: 30 },
+  Env: { R_WEBHOOK_RETENTION_DAYS: 30 },
 }));
 
 import { webhookCleanupJob } from '../webhook-cleanup';
@@ -22,7 +22,7 @@ describe('webhookCleanupJob', () => {
     mockDeleteExpiredWebhooks.mockResolvedValue(0);
   });
 
-  it('deletes rows older than WEBHOOK_RETENTION_DAYS', async () => {
+  it('deletes rows older than R_WEBHOOK_RETENTION_DAYS', async () => {
     const before = Date.now();
     await webhookCleanupJob();
     const after = Date.now();

@@ -41,8 +41,8 @@ vi.mock('@roomote/env', async (importOriginal) => {
     Env: {
       R_LINEAR_WEBHOOK_SECRET: 'test-linear-secret',
       R_APP_URL: 'https://app.roomote.example',
-      PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example',
-      TRPC_URL: 'https://api.roomote.example',
+      R_PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example',
+      R_TRPC_URL: 'https://api.roomote.example',
     },
   };
 });

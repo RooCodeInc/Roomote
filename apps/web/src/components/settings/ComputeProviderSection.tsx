@@ -429,7 +429,7 @@ export function ComputeProviderSection({
                   <p className="max-w-xl text-sm text-muted-foreground mt-1">
                     Configure a registry-qualified worker image via{' '}
                     <code className="font-mono text-xs">
-                      DOCKER_WORKER_IMAGE
+                      R_DOCKER_WORKER_IMAGE
                     </code>{' '}
                     before selecting {provider.label} as the default.
                   </p>

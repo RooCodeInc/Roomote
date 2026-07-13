@@ -2,16 +2,16 @@ const { envMock } = vi.hoisted(() => ({
   envMock: {
     APP_ENV: 'production',
     NODE_ENV: 'production',
-    API_DEBUG_LOGS: undefined as string | undefined,
-    SLACK_DEBUG_LOGS: undefined as string | undefined,
+    R_API_DEBUG_LOGS: undefined as string | undefined,
+    R_SLACK_DEBUG_LOGS: undefined as string | undefined,
   },
 }));
 
 async function importLoggingModule(envOverrides?: {
   APP_ENV?: string;
   NODE_ENV?: string;
-  API_DEBUG_LOGS?: string | undefined;
-  SLACK_DEBUG_LOGS?: string | undefined;
+  R_API_DEBUG_LOGS?: string | undefined;
+  R_SLACK_DEBUG_LOGS?: string | undefined;
 }) {
   vi.resetModules();
   vi.doMock('@roomote/env', async (importOriginal) => {
@@ -22,8 +22,8 @@ async function importLoggingModule(envOverrides?: {
       Env: Object.assign(envMock, {
         APP_ENV: 'production',
         NODE_ENV: 'production',
-        API_DEBUG_LOGS: undefined,
-        SLACK_DEBUG_LOGS: undefined,
+        R_API_DEBUG_LOGS: undefined,
+        R_SLACK_DEBUG_LOGS: undefined,
         ...envOverrides,
       }),
     };
@@ -43,10 +43,10 @@ describe('logging helpers', () => {
     vi.restoreAllMocks();
   });
 
-  it('enables slackDebug in production when SLACK_DEBUG_LOGS is set', async () => {
+  it('enables slackDebug in production when R_SLACK_DEBUG_LOGS is set', async () => {
     const debugSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { slackDebug } = await importLoggingModule({
-      SLACK_DEBUG_LOGS: '1',
+      R_SLACK_DEBUG_LOGS: '1',
     });
 
     slackDebug('[queueSlackMessage] enabled');
@@ -54,10 +54,10 @@ describe('logging helpers', () => {
     expect(debugSpy).toHaveBeenCalledWith('[queueSlackMessage] enabled');
   });
 
-  it('keeps API_DEBUG_LOGS as a production fallback for shared Slack traces in api processes', async () => {
+  it('keeps R_API_DEBUG_LOGS as a production fallback for shared Slack traces in api processes', async () => {
     const debugSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const { slackDebug } = await importLoggingModule({
-      API_DEBUG_LOGS: 'true',
+      R_API_DEBUG_LOGS: 'true',
     });
 
     slackDebug('[queueSlackMessage] enabled');
@@ -79,7 +79,7 @@ describe('logging helpers', () => {
     const { slackDebug } = await importLoggingModule();
 
     slackDebug('[queueSlackMessage] disabled');
-    envMock.SLACK_DEBUG_LOGS = '1';
+    envMock.R_SLACK_DEBUG_LOGS = '1';
     slackDebug('[queueSlackMessage] enabled later');
 
     expect(debugSpy).toHaveBeenCalledTimes(1);

@@ -71,6 +71,13 @@
       "when": 1783820516382,
       "tag": "0009_abnormal_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783935000000,
+      "tag": "0010_more_canonical_r_env_vars",
+      "breakpoints": true
     }
   ]
 }

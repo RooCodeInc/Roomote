@@ -51,7 +51,7 @@ describe('gitea webhook router', () => {
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'GITEA_WEBHOOK_SECRET' ? 'gitea-secret' : null,
+      name === 'R_GITEA_WEBHOOK_SECRET' ? 'gitea-secret' : null,
     );
     mockHandleGiteaPullRequest.mockResolvedValue({ status: 'ok' });
     mockHandleGiteaComment.mockResolvedValue({ status: 'ok' });

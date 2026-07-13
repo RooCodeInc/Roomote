@@ -101,16 +101,16 @@ function observedFetchImpl(
 export function installApiObservedFetch(): void {
   installGlobalObservedFetch({
     serviceName: 'api',
-    slowRequestThresholdMs: Env.API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS,
+    slowRequestThresholdMs: Env.R_API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS,
     fetchImpl: observedFetchImpl,
     log: createSingleLineWarnLogger(),
     internalHosts: buildInternalRequestHosts([
       Env.R_APP_URL,
-      Env.TRPC_URL,
-      Env.PREVIEW_PROXY_BASE_URL,
+      Env.R_TRPC_URL,
+      Env.R_PREVIEW_PROXY_BASE_URL,
     ]),
     internalDomainSuffixes: parseInternalRequestDomainSuffixes(
-      Env.PREVIEW_DOMAINS,
+      Env.R_PREVIEW_DOMAINS,
     ),
   });
 }

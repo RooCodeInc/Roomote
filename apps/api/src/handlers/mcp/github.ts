@@ -36,7 +36,7 @@ export function createGithubMcp(options?: {
 }) {
   return createMcpProxy({
     name: 'GitHub',
-    upstream: Env.GITHUB_MCP_SERVER_URL ?? DEFAULT_GITHUB_MCP_URL,
+    upstream: Env.R_GITHUB_MCP_SERVER_URL ?? DEFAULT_GITHUB_MCP_URL,
     allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: options?.allowedToolNames,
     resolveCredentials: async () => {

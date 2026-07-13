@@ -529,7 +529,7 @@ cmd_upgrade() {
   image_namespace="$(read_env_value IMAGE_NAMESPACE)"
   image_registry="${image_registry:-ghcr.io}"
   image_namespace="${image_namespace:-roocodeinc}"
-  previous_worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
+  previous_worker_image="$(read_env_value R_DOCKER_WORKER_IMAGE)"
   worker_image="$image_registry/$image_namespace/roomote-worker:$version"
   app_domain="$(read_env_value ROOMOTE_APP_DOMAIN)"
   [ -n "$app_domain" ] || die "ROOMOTE_APP_DOMAIN is not set in $env_file"
@@ -550,18 +550,18 @@ cmd_upgrade() {
   if [ -n "$previous_version" ] && [ "$previous_version" != "$version" ]; then
     set_env_value ROOMOTE_PREVIOUS_VERSION "$previous_version"
   fi
-  set_env_value TRPC_URL "https://$app_domain/_roomote-api"
+  set_env_value R_TRPC_URL "https://$app_domain/_roomote-api"
   set_env_value IMAGE_REGISTRY "$image_registry"
   set_env_value IMAGE_NAMESPACE "$image_namespace"
-  set_env_value DOCKER_WORKER_IMAGE "$worker_image"
+  set_env_value R_DOCKER_WORKER_IMAGE "$worker_image"
   # worker-current.tar.gz always matches the running image (see install.sh);
   # also repairs older installs that stored a version-derived path.
-  set_env_value DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
+  set_env_value R_DOCKER_WORKER_RELEASE_PATH '/roomote/releases/worker-current.tar.gz'
 
   # Keep the installer/deployer-managed Modal base image ref in sync with the
   # new worker image. The wizard stores the selected sandbox provider in the
   # database, not in the env file, so this must not gate on
-  # DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
+  # R_DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
   # override and is left untouched.
   modal_base_image_ref="$(read_env_value MODAL_BASE_IMAGE_REF)"
   if [ -z "$modal_base_image_ref" ] || [ "$modal_base_image_ref" = "$previous_worker_image" ]; then
@@ -615,7 +615,7 @@ cmd_rollback() {
 
 stop_task_workers() {
   local worker_ids worker_network
-  worker_network="$(read_env_value DOCKER_WORKER_NETWORK)"
+  worker_network="$(read_env_value R_DOCKER_WORKER_NETWORK)"
   worker_network="${worker_network:-roomote_worker}"
   worker_ids="$(docker ps --filter "network=$worker_network" --format '{{.ID}} {{.Names}}' | awk '$2 ~ /^roomote-worker-/ { print $1 }')"
   if [ -n "$worker_ids" ]; then
@@ -631,7 +631,7 @@ collect_image_identities() {
   references_file="$(mktemp)"
 
   compose config --images >"$references_file"
-  worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
+  worker_image="$(read_env_value R_DOCKER_WORKER_IMAGE)"
   [ -z "$worker_image" ] || printf '%s\n' "$worker_image" >>"$references_file"
 
   : >"$output_file"

@@ -47,7 +47,7 @@ function parseWorkerVersionFromReleaseTag(
 function resolveWorkerReleaseChannel(
   env: NodeJS.ProcessEnv,
 ): WorkerReleaseChannel {
-  const explicitChannel = env.WORKER_RELEASE_CHANNEL?.trim();
+  const explicitChannel = env.R_WORKER_RELEASE_CHANNEL?.trim();
 
   if (explicitChannel === 'preview' || explicitChannel === 'stable') {
     return explicitChannel;

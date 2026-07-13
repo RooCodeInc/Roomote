@@ -143,7 +143,7 @@ healthy upgrade remains in place and the command prints a warning.
 
 The domain is baked into OAuth apps created during setup (GitHub App, Slack
 app, sign-in provider redirects). To move a deployment to a new domain: update
-DNS, set `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`, and `TRPC_URL` in
+DNS, set `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`, and `R_TRPC_URL` in
 `/opt/roomote/.env`, run `roomote up`, then re-create or update the GitHub App
 and Slack app (both use manifest flows, so this is a few clicks) and update
 your sign-in provider's redirect URLs.
@@ -215,7 +215,7 @@ For production, set domains in `.env.production`:
 ```sh
 ROOMOTE_APP_DOMAIN=roomote.example.com
 ROOMOTE_PREVIEW_DOMAIN=preview.roomote.example.com
-TRPC_URL=https://roomote.example.com/_roomote-api
+R_TRPC_URL=https://roomote.example.com/_roomote-api
 ```
 
 The production Compose overlay derives these runtime URLs:
@@ -224,9 +224,9 @@ The production Compose overlay derives these runtime URLs:
 | ------------------------ | ------------------------------------------ |
 | `R_PUBLIC_URL`           | `https://$ROOMOTE_APP_DOMAIN`              |
 | `R_APP_URL`              | `https://$ROOMOTE_APP_DOMAIN`              |
-| `TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
-| `PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
-| `PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
+| `R_TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
+| `R_PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
+| `R_PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
 
 On production Caddy, `ROOMOTE_APP_DOMAIN` serves both the web app and the
 worker-facing API. Caddy routes the explicit `/_roomote-api/*` prefix to
@@ -445,7 +445,7 @@ R_SLACK_CLIENT_SECRET=...
 R_SLACK_SIGNING_SECRET=...
 ```
 
-`SLACK_APP_ID` is optional for manual preconfiguration. Roomote saves Slack's
+`R_SLACK_APP_ID` is optional for manual preconfiguration. Roomote saves Slack's
 `app_id` from the OAuth installation response after the workspace install flow
 completes.
 
@@ -518,7 +518,7 @@ auth as user `admin`. This is gated on the password, not on `NODE_ENV`, so the
 `DASHBOARD_PASSWORD`, `/admin` returns `503` and the dashboard is disabled while
 the queue workers keep running.
 
-`PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` no longer block startup when
+`R_PREVIEW_PROXY_BASE_URL` and `R_PREVIEW_DOMAINS` no longer block startup when
 unset: live previews simply report as not configured until you set the values
 via env or from **Settings → Live Previews**.
 
@@ -562,33 +562,33 @@ docker compose --env-file .env.production \
 
 ## Compute Provider
 
-`DEFAULT_COMPUTE_PROVIDER=docker` runs task workers as sibling Docker
+`R_DEFAULT_COMPUTE_PROVIDER=docker` runs task workers as sibling Docker
 containers on the same host. Include `docker-compose.compute-docker.yml` when
 using Docker sandboxes. That overlay:
 
-- builds the `DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
+- builds the `R_DOCKER_WORKER_IMAGE` from `apps/worker/Dockerfile`;
 - mounts `/var/run/docker.sock` into the controller;
-- sets `DOCKER_WORKER_NETWORK=roomote_worker` as the trusted-service discovery
+- sets `R_DOCKER_WORKER_NETWORK=roomote_worker` as the trusted-service discovery
   network; each worker receives its own network containing only that worker,
   the API, and the optional preview proxy when enabled, never sibling tasks,
   Postgres, Redis, or MinIO;
 - enforces CPU, memory, PID, supported writable-layer quotas, and log limits
   and blocks private and cloud metadata ranges under the default `internet`
   egress policy;
-- points `DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
+- points `R_DOCKER_WORKER_RELEASE_PATH` at the controller image's packaged worker
   release archive.
 
 Docker tasks fail closed when the host storage driver cannot enforce
-`DOCKER_WORKER_DISK_LIMIT`. Set `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` only
+`R_DOCKER_WORKER_DISK_LIMIT`. Set `R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true` only
 when the host already provides an equivalent storage quota outside Docker.
 
 Docker sandboxes are the simplest single-host deployment path:
 
 ```sh
-DEFAULT_COMPUTE_PROVIDER=docker
-DOCKER_WORKER_IMAGE=roomote-worker:local
+R_DEFAULT_COMPUTE_PROVIDER=docker
+R_DOCKER_WORKER_IMAGE=roomote-worker:local
 # Optional: defaults to the host architecture (linux/amd64 or linux/arm64)
-DOCKER_WORKER_PLATFORM=linux/amd64
+R_DOCKER_WORKER_PLATFORM=linux/amd64
 ```
 
 If you do not want the controller to access the host Docker socket, choose a
@@ -596,24 +596,24 @@ hosted provider instead and omit `docker-compose.compute-docker.yml`:
 
 ```sh
 # Modal
-DEFAULT_COMPUTE_PROVIDER=modal
+R_DEFAULT_COMPUTE_PROVIDER=modal
 MODAL_TOKEN_ID=...
 MODAL_TOKEN_SECRET=...
 # Optional on published app images — see the worker image note below.
 MODAL_BASE_IMAGE_REF=...
 
 # E2B
-DEFAULT_COMPUTE_PROVIDER=e2b
+R_DEFAULT_COMPUTE_PROVIDER=e2b
 E2B_API_KEY=...
 E2B_TEMPLATE_ID=...
 
 # Daytona
-DEFAULT_COMPUTE_PROVIDER=daytona
+R_DEFAULT_COMPUTE_PROVIDER=daytona
 DAYTONA_API_KEY=...
 DAYTONA_SNAPSHOT_NAME=...
 
 # Blaxel
-DEFAULT_COMPUTE_PROVIDER=blaxel
+R_DEFAULT_COMPUTE_PROVIDER=blaxel
 BL_API_KEY=...
 BL_WORKSPACE=...
 # Optional prebuilt Blaxel image override
@@ -621,18 +621,18 @@ BLAXEL_IMAGE=sandbox/roomote-worker:<version>
 ```
 
 `E2B_TEMPLATE_ID`, `DAYTONA_SNAPSHOT_NAME`, and `BLAXEL_IMAGE` can also be provisioned
-automatically during setup when a registry-qualified `DOCKER_WORKER_IMAGE`
+automatically during setup when a registry-qualified `R_DOCKER_WORKER_IMAGE`
 is configured — the setup wizard and the Settings → Sandboxes page build the
 worker base artifact in your provider account after credentials are saved.
 
 For quick-install and V1 deployer-managed hosts, leave `MODAL_BASE_IMAGE_REF`
 blank unless you need a custom Modal image. The installer and deployer sync it
-to the matching `DOCKER_WORKER_IMAGE` (the published worker image doubles as
+to the matching `R_DOCKER_WORKER_IMAGE` (the published worker image doubles as
 the Modal base image) and preserve a different non-empty value as an explicit
 override.
 
 When running the published `ghcr.io/roocodeinc/roomote-app` image, both
-`DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` are optional: if unset, the
+`R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` are optional: if unset, the
 app derives `ghcr.io/roocodeinc/roomote-worker:<version>` from the release
 version baked into the app image, which the publish workflow tags in lockstep
 with the worker image. Set `ROOMOTE_WORKER_IMAGE_REPO` to derive from a

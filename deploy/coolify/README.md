@@ -16,7 +16,7 @@ instead. For a managed PaaS with no server of your own, see
 - **Coolify's proxy is the HTTPS edge.** There is no bundled Caddy and no
   `/_roomote-api` path routing. The web app, the API, and MinIO each get
   their own public domain through `SERVICE_FQDN_*` declarations in the
-  compose file, so `TRPC_URL` points at the api service's domain directly.
+  compose file, so `R_TRPC_URL` points at the api service's domain directly.
   GitHub webhooks and sandbox workers call that API origin, and Slack
   webhooks arrive at the web origin and are proxied to the API internally.
 - **The Docker socket is available.** Unlike Railway, the Coolify host runs
@@ -69,7 +69,7 @@ registry login is needed.
 The template tracks the mutable **`:develop`** alias, which the publish
 workflow moves to every new develop build (releases also move `:latest`).
 Nothing else in the template encodes a version: the images bake
-`RELEASE_VERSION`, the app derives `DOCKER_WORKER_IMAGE` from it when unset,
+`RELEASE_VERSION`, the app derives `R_DOCKER_WORKER_IMAGE` from it when unset,
 and the controller reads the worker release version from the `VERSION` file
 inside `worker-current.tar.gz`.
 
@@ -118,7 +118,7 @@ resource's environment variables panel in Coolify, where you can read
 
 Notes:
 
-- Leave `DOCKER_WORKER_IMAGE` **unset**. The app derives it from the
+- Leave `R_DOCKER_WORKER_IMAGE` **unset**. The app derives it from the
   `RELEASE_VERSION` baked into the running image, so it always matches the
   deployed build. Setting it explicitly silently pins the worker to whatever
   version the value encodes.
@@ -129,18 +129,18 @@ Notes:
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
-- Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
+- Leave `R_PREVIEW_PROXY_BASE_URL` and `R_PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
 
 ## Task execution
 
-The template defaults to `DEFAULT_COMPUTE_PROVIDER=docker`: the controller
+The template defaults to `R_DEFAULT_COMPUTE_PROVIDER=docker`: the controller
 mounts the host Docker socket and starts one worker container per task on
 the same server. Two things matter in this mode:
 
 - **Worker network.** The controller uses the network named by
-  `DOCKER_WORKER_NETWORK` (`roomote_default`, declared at the bottom of the
+  `R_DOCKER_WORKER_NETWORK` (`roomote_default`, declared at the bottom of the
   compose file) to discover the labeled API and optional preview-proxy
   containers. It creates a separate bridge network for each task and attaches
   only the API plus the preview proxy when enabled, so workers do not join
@@ -150,8 +150,8 @@ the same server. Two things matter in this mode:
   the standard Compose service labels.
 
   Docker task writable layers fail closed when the host storage driver cannot
-  enforce `DOCKER_WORKER_DISK_LIMIT`. Keep
-  `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false` unless the host already enforces an
+  enforce `R_DOCKER_WORKER_DISK_LIMIT`. Keep
+  `R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false` unless the host already enforces an
   equivalent quota outside Docker.
 
 - **Trust boundary.** Mounting the Docker socket gives the controller
@@ -161,10 +161,10 @@ the same server. Two things matter in this mode:
 To use hosted sandboxes instead (no socket access, task execution bills
 through the provider):
 
-1. Set `DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add
-   `EXCLUDED_COMPUTE_PROVIDERS=docker` to the shared env block.
+1. Set `R_DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add
+   `R_EXCLUDED_COMPUTE_PROVIDERS=docker` to the shared env block.
 2. Remove the `/var/run/docker.sock` volume from the controller service.
-3. Keep `DOCKER_WORKER_RELEASE_PATH` — the controller uploads the baked-in
+3. Keep `R_DOCKER_WORKER_RELEASE_PATH` — the controller uploads the baked-in
    worker release archive into hosted sandboxes at spawn time.
 4. Enter the provider credentials in the `/setup` wizard after first boot.
 
@@ -192,7 +192,7 @@ addressing, and `S3_PRESIGN_ENDPOINT` must be reachable from workers.
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `R_TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the model provider key when the wizard asks. With the default
    Docker provider there are no sandbox credentials to enter; with hosted
@@ -207,8 +207,8 @@ Live previews need a wildcard domain, which requires DNS you control and a
 wildcard-capable TLS setup on the Coolify proxy:
 
 1. Uncomment the `preview-proxy` service in the compose file and set
-   `PREVIEW_PROXY_BASE_URL`, `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and
-   `PREVIEW_DOMAINS` to your preview domain. The `NEXT_PUBLIC_` variant must
+   `R_PREVIEW_PROXY_BASE_URL`, `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and
+   `R_PREVIEW_DOMAINS` to your preview domain. The `NEXT_PUBLIC_` variant must
    also be set on the `web` service — the web client builds preview links
    from it.
 2. Point `previews.<your-domain>` and `*.previews.<your-domain>` at the

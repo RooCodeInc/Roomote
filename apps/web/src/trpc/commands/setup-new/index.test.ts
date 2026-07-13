@@ -514,7 +514,7 @@ describe('setup-new source-control config commands', () => {
       {
         provider: 'gitea',
         values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
+          R_GITEA_BASE_URL: 'https://gitea.example.com',
           GITEA_TOKEN: 'gitea-token',
         },
       },
@@ -530,7 +530,7 @@ describe('setup-new source-control config commands', () => {
       expect.objectContaining({
         userId: 'setup-test-user',
         values: expect.arrayContaining([
-          expect.objectContaining({ name: 'GITEA_BASE_URL' }),
+          expect.objectContaining({ name: 'R_GITEA_BASE_URL' }),
           expect.objectContaining({ name: 'GITEA_TOKEN' }),
         ]),
       }),
@@ -548,14 +548,14 @@ describe('setup-new source-control config commands', () => {
     await saveSetupNewSourceControlConfigCommand(buildMockAuth(), {
       provider: 'gitea',
       values: {
-        GITEA_BASE_URL: 'https://gitea.example.com',
+        R_GITEA_BASE_URL: 'https://gitea.example.com',
       },
     });
 
     expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        values: [expect.objectContaining({ name: 'GITEA_BASE_URL' })],
+        values: [expect.objectContaining({ name: 'R_GITEA_BASE_URL' })],
       }),
     );
   });
@@ -565,7 +565,7 @@ describe('setup-new source-control config commands', () => {
       saveSetupNewSourceControlConfigCommand(buildMockAuth(), {
         provider: 'gitea',
         values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
+          R_GITEA_BASE_URL: 'https://gitea.example.com',
         },
       }),
     ).rejects.toThrow(
@@ -585,7 +585,7 @@ describe('setup-new source-control config commands', () => {
       saveSetupNewSourceControlConfigCommand(buildMockAuth(), {
         provider: 'gitea',
         values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
+          R_GITEA_BASE_URL: 'https://gitea.example.com',
           GITEA_TOKEN: 'gitea-token',
         },
       }),
@@ -648,7 +648,7 @@ describe('setup-new compute config commands', () => {
 
   it('persists a Modal base image derived from the worker image', async () => {
     vi.stubEnv(
-      'DOCKER_WORKER_IMAGE',
+      'R_DOCKER_WORKER_IMAGE',
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
     vi.stubEnv('MODAL_BASE_IMAGE_REF', '');
@@ -706,7 +706,7 @@ describe('setup-new compute config commands', () => {
   });
 
   it('rejects Modal when no base image default can be derived', async () => {
-    vi.stubEnv('DOCKER_WORKER_IMAGE', 'roomote-worker:local');
+    vi.stubEnv('R_DOCKER_WORKER_IMAGE', 'roomote-worker:local');
     vi.stubEnv('MODAL_BASE_IMAGE_REF', '');
 
     await expect(
@@ -725,7 +725,7 @@ describe('setup-new compute config commands', () => {
   });
 
   it('ignores a form-submitted MODAL_BASE_IMAGE_REF when no derivable image exists', async () => {
-    vi.stubEnv('DOCKER_WORKER_IMAGE', 'roomote-worker:local');
+    vi.stubEnv('R_DOCKER_WORKER_IMAGE', 'roomote-worker:local');
     vi.stubEnv('MODAL_BASE_IMAGE_REF', '');
 
     await expect(
@@ -746,7 +746,7 @@ describe('setup-new compute config commands', () => {
 
   it('does not override a runtime-configured base image ref', async () => {
     vi.stubEnv(
-      'DOCKER_WORKER_IMAGE',
+      'R_DOCKER_WORKER_IMAGE',
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
     vi.stubEnv('MODAL_BASE_IMAGE_REF', 'ghcr.io/custom/base-image:pinned');
@@ -772,7 +772,7 @@ describe('setup-new compute config commands', () => {
 
   it('does not override an already persisted base image ref', async () => {
     vi.stubEnv(
-      'DOCKER_WORKER_IMAGE',
+      'R_DOCKER_WORKER_IMAGE',
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
     vi.stubEnv('MODAL_BASE_IMAGE_REF', '');
@@ -800,7 +800,7 @@ describe('setup-new compute config commands', () => {
   });
 
   it('starts shared E2B provisioning after saving wizard credentials', async () => {
-    vi.stubEnv('DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
+    vi.stubEnv('R_DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
 
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
       provider: 'e2b',
@@ -831,7 +831,7 @@ describe('setup-new compute config commands', () => {
   });
 
   it('keeps the wizard pending when a fresh provisioning run is already in flight', async () => {
-    vi.stubEnv('DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
+    vi.stubEnv('R_DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
 
     mockDbTransaction.mockImplementationOnce(async (callback) => {
       const tx = {
@@ -882,7 +882,7 @@ describe('setup-new compute config commands', () => {
   });
 
   it('ignores manual E2B template submissions and auto-provisions instead', async () => {
-    vi.stubEnv('DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
+    vi.stubEnv('R_DOCKER_WORKER_IMAGE', 'registry.example.com/worker:tag');
 
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
       provider: 'e2b',
@@ -904,13 +904,13 @@ describe('setup-new compute config commands', () => {
     });
   });
 
-  it('uses a submitted worker image without sticky DOCKER_WORKER_IMAGE persist', async () => {
+  it('uses a submitted worker image without sticky R_DOCKER_WORKER_IMAGE persist', async () => {
     const result = await saveSetupNewComputeConfigCommand(buildMockAuth(), {
       provider: 'modal',
       values: {
         MODAL_TOKEN_ID: 'token-id',
         MODAL_TOKEN_SECRET: 'token-secret',
-        DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
+        R_DOCKER_WORKER_IMAGE: 'registry.example.com/worker:tag',
       },
     });
 
@@ -926,7 +926,7 @@ describe('setup-new compute config commands', () => {
       ]),
     );
     expect(values.map((entry) => entry.name)).not.toContain(
-      'DOCKER_WORKER_IMAGE',
+      'R_DOCKER_WORKER_IMAGE',
     );
   });
 });

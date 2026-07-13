@@ -410,7 +410,7 @@ describe('LivePreviewsSettings', () => {
     expect(input).toHaveAttribute('readonly');
     expect(
       screen.getByText(
-        /Currently defined by PREVIEW_PROXY_BASE_URL, can't be changed here\./i,
+        /Currently defined by R_PREVIEW_PROXY_BASE_URL, can't be changed here\./i,
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('env-preview.roomote.test')).toBeInTheDocument();
@@ -485,7 +485,7 @@ describe('LivePreviewsSettings', () => {
       status: 'fail',
       reason: 'missing_runtime_config',
       summary: 'Preview runtime config is incomplete.',
-      details: ['PREVIEW_PROXY_BASE_URL is not configured.'],
+      details: ['R_PREVIEW_PROXY_BASE_URL is not configured.'],
       checkedHostname: null,
     };
 

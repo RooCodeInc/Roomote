@@ -83,7 +83,7 @@ export async function listConfiguredComputeProviders(
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
   const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+    runtimeEnv.R_EXCLUDED_COMPUTE_PROVIDERS,
   );
 
   // Preserve setup-catalog display order so callers that fall back to the first
@@ -110,7 +110,7 @@ export async function listConfiguredComputeProviders(
 
 /**
  * Resolves the deployment default compute provider. The persisted setup
- * choice wins over the DEFAULT_COMPUTE_PROVIDER env value because compose and
+ * choice wins over the R_DEFAULT_COMPUTE_PROVIDER env value because compose and
  * PM2 stacks always inject an env default; the admin's explicit setup choice
  * is the stronger signal.
  */
@@ -129,9 +129,9 @@ export async function resolveDefaultComputeProvider(
     return persistedComputeConfig.defaultProvider;
   }
 
-  const runtimeDefault = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
+  const runtimeDefault = runtimeEnv.R_DEFAULT_COMPUTE_PROVIDER?.trim();
   const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+    runtimeEnv.R_EXCLUDED_COMPUTE_PROVIDERS,
   );
 
   if (
@@ -167,7 +167,7 @@ export async function resolveDefaultComputeProvider(
  * the process env and falling back to encrypted deployment environment
  * variables saved during setup. For Modal, a still-missing base image ref
  * falls back to the deployment's effective worker image (the explicit
- * DOCKER_WORKER_IMAGE or the ref derived from the baked RELEASE_VERSION),
+ * R_DOCKER_WORKER_IMAGE or the ref derived from the baked RELEASE_VERSION),
  * then the development-only GHCR latest image. The published worker image
  * doubles as the Modal base image.
  */
@@ -231,19 +231,19 @@ export async function resolveComputeProviderEnvValues(
   }
 
   // Effective worker image is deploy/runtime-managed only: process env
-  // DOCKER_WORKER_IMAGE, then the ref derived from the baked RELEASE_VERSION.
+  // R_DOCKER_WORKER_IMAGE, then the ref derived from the baked RELEASE_VERSION.
   // Legacy deployment-env rows from the removed Settings worker-image UI are
   // intentionally ignored so a sticky saved value cannot pin release-derived
   // workers back to a stale image. Development falls back to the public
   // latest image when no hosted image is derivable.
   if (provider === 'modal' && !resolvedValues.MODAL_BASE_IMAGE_REF) {
     const effectiveWorkerImage =
-      runtimeEnv.DOCKER_WORKER_IMAGE?.trim() ||
+      runtimeEnv.R_DOCKER_WORKER_IMAGE?.trim() ||
       deriveWorkerImageFromReleaseVersion(runtimeEnv) ||
       undefined;
     const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
       ...runtimeEnv,
-      DOCKER_WORKER_IMAGE: effectiveWorkerImage,
+      R_DOCKER_WORKER_IMAGE: effectiveWorkerImage,
     });
 
     if (derivedBaseImageRef) {
@@ -266,7 +266,7 @@ export async function resolveSavedWorkerImage(
 }
 
 /**
- * Deletes any deployment-scoped `DOCKER_WORKER_IMAGE` rows left from the
+ * Deletes any deployment-scoped `R_DOCKER_WORKER_IMAGE` rows left from the
  * removed Settings worker-image editor so they cannot linger as reserved,
  * hidden, sticky configuration.
  */

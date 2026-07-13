@@ -1,6 +1,6 @@
 ---
 name: mock-telegram-testing
-description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, the `/new` command, callback buttons, outbound Telegram posts, reply footers, message chunking, `TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, the `/new` command, callback buttons, outbound Telegram posts, reply footers, message chunking, `R_TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Telegram Testing
@@ -15,7 +15,7 @@ Telegram continuity is inferred from **chat id (+ forum topic id) → active clo
 | ----------------------------- | ----------------------------------------------------------- |
 | Harness port                  | `3013`                                                      |
 | Harness base URL              | `http://127.0.0.1:3013`                                     |
-| Telegram API base for Roomote | `TELEGRAM_API_BASE_URL=http://127.0.0.1:3013`               |
+| Telegram API base for Roomote | `R_TELEGRAM_API_BASE_URL=http://127.0.0.1:3013`               |
 | API webhook endpoint          | `http://localhost:3001/api/webhooks/telegram`               |
 | Mock state endpoint           | `http://127.0.0.1:3013/mock/state`                          |
 | Mock event replay endpoint    | `http://127.0.0.1:3013/mock/events`                         |
@@ -54,7 +54,7 @@ The API resolves Telegram credentials from real env vars first (`resolveTelegram
 ```bash
 R_TELEGRAM_BOT_TOKEN=7000000001:mock-telegram-token   # any value; the harness accepts all tokens unless acceptedBotTokens is set
 R_TELEGRAM_WEBHOOK_SECRET=<any-shared-secret>         # harness reads the same var via dotenvx, so signatures match automatically
-TELEGRAM_API_BASE_URL=http://127.0.0.1:3013           # reroutes ALL outbound Bot API calls to the harness
+R_TELEGRAM_API_BASE_URL=http://127.0.0.1:3013           # reroutes ALL outbound Bot API calls to the harness
 ```
 
 Roomote resolves `roomote_mock_bot` from the harness's `getMe` response using

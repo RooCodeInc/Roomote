@@ -51,8 +51,8 @@ describe('WorkerEnv', () => {
       const env = workerEnv.buildSetupEnv();
 
       expect(env).not.toHaveProperty('AUTH_TOKEN');
-      expect(env).not.toHaveProperty('TRPC_URL');
-      expect(env).not.toHaveProperty('PREVIEW_PROXY_BASE_URL');
+      expect(env).not.toHaveProperty('R_TRPC_URL');
+      expect(env).not.toHaveProperty('R_PREVIEW_PROXY_BASE_URL');
       expect(env).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
       expect(env).not.toHaveProperty('R_APP_URL');
     });
@@ -71,7 +71,7 @@ describe('WorkerEnv', () => {
       const env = workerEnv.buildServiceInstallEnv();
 
       expect(env).not.toHaveProperty('AUTH_TOKEN');
-      expect(env).not.toHaveProperty('TRPC_URL');
+      expect(env).not.toHaveProperty('R_TRPC_URL');
     });
   });
 
@@ -112,9 +112,9 @@ describe('WorkerEnv', () => {
       const env = workerEnv.buildUserFacingEnv();
 
       expect(env).not.toHaveProperty('AUTH_TOKEN');
-      expect(env).not.toHaveProperty('TRPC_URL');
+      expect(env).not.toHaveProperty('R_TRPC_URL');
       expect(env).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
-      expect(env).not.toHaveProperty('PREVIEW_PROXY_BASE_URL');
+      expect(env).not.toHaveProperty('R_PREVIEW_PROXY_BASE_URL');
       expect(env).not.toHaveProperty('R_APP_URL');
     });
 
@@ -123,7 +123,7 @@ describe('WorkerEnv', () => {
         HOME: '/home/worker',
         PATH: '/usr/bin',
         AUTH_TOKEN: 'secret-token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         R_MODEL: 'openrouter/openai/gpt-5.4',
         R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
@@ -270,10 +270,10 @@ describe('WorkerEnv', () => {
         PATH: '/usr/bin',
         LC_ALL: 'C.UTF-8',
         AUTH_TOKEN: 'my-auth-token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         JOB_AUTH_PRIVATE_KEY: 'job-private-key-data',
         JOB_AUTH_PUBLIC_KEY: 'job-pk-data',
-        PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
+        R_PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
         PREVIEW_AUTH_PUBLIC_KEY: 'pk-data',
         R_APP_URL: 'https://api.example.com',
         R_APP_ENV: 'production',
@@ -288,7 +288,7 @@ describe('WorkerEnv', () => {
       // But NOT present in any child process env
       const userEnv = env.buildUserFacingEnv();
       expect(userEnv).not.toHaveProperty('AUTH_TOKEN');
-      expect(userEnv).not.toHaveProperty('TRPC_URL');
+      expect(userEnv).not.toHaveProperty('R_TRPC_URL');
       expect(userEnv).not.toHaveProperty('PREVIEW_AUTH_PUBLIC_KEY');
       expect(userEnv).not.toHaveProperty('R_APP_URL');
 
@@ -314,13 +314,13 @@ describe('WorkerEnv', () => {
         NODE_ENV: 'test',
         SKIP_ENV_VALIDATION: '1',
         AUTH_TOKEN: 'secret-token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         R_APP_ENV: 'preview',
         JOB_AUTH_PRIVATE_KEY: Buffer.from(privateKey).toString('base64'),
         JOB_AUTH_PUBLIC_KEY: Buffer.from(publicKey).toString('base64'),
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-preview-key',
-        PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
+        R_PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
       };
 
       const env = WorkerEnv.fromProcessEnv(fakeProcessEnv as NodeJS.ProcessEnv);
@@ -328,7 +328,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
       expect(fakeProcessEnv.JOB_AUTH_PUBLIC_KEY).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_AUTH_PUBLIC_KEY).toBeUndefined();
-      expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
+      expect(fakeProcessEnv.R_PREVIEW_PROXY_BASE_URL).toBeUndefined();
       expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
 
       expect(env.jobAuthPublicKey).toBe(
@@ -394,7 +394,7 @@ describe('WorkerEnv', () => {
         HOME: '/home/worker',
         PATH: '/usr/bin',
         AUTH_TOKEN: 'my-auth-token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         APP_ENV: 'preview',
       } as NodeJS.ProcessEnv;
@@ -421,14 +421,14 @@ describe('WorkerEnv', () => {
           PATH: '/usr/bin',
           AUTH_TOKEN: 'token',
         } as NodeJS.ProcessEnv),
-      ).toThrow('TRPC_URL is not set');
+      ).toThrow('R_TRPC_URL is not set');
 
       expect(() =>
         WorkerEnv.fromProcessEnv({
           HOME: '/home/worker',
           PATH: '/usr/bin',
           AUTH_TOKEN: 'token',
-          TRPC_URL: 'https://trpc.example.com',
+          R_TRPC_URL: 'https://trpc.example.com',
         } as NodeJS.ProcessEnv),
       ).toThrow('R_APP_URL is not set');
     });
@@ -438,7 +438,7 @@ describe('WorkerEnv', () => {
         HOME: '/home/worker',
         PATH: '/usr/bin',
         AUTH_TOKEN: 'token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         MISE_DATA_DIR: '/home/worker/.local/share/mise',
         MISE_CACHE_DIR: '/home/worker/.cache/mise',
@@ -454,7 +454,7 @@ describe('WorkerEnv', () => {
         HOME: '/home/worker',
         PATH: '/usr/bin:/usr/local/bin',
         AUTH_TOKEN: 'token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
       } as NodeJS.ProcessEnv);
 
@@ -470,7 +470,7 @@ describe('WorkerEnv', () => {
         HOME: '/home/worker',
         PATH: '/usr/bin',
         AUTH_TOKEN: 'secret-token',
-        TRPC_URL: 'https://trpc.example.com',
+        R_TRPC_URL: 'https://trpc.example.com',
         R_APP_URL: 'https://api.example.com',
         R_APP_ENV: 'production',
         ROOMOTE_APP_ENV: 'production',
@@ -478,7 +478,7 @@ describe('WorkerEnv', () => {
         PREVIEW_AUTH_PUBLIC_KEY: 'outer-public-key',
         PREVIEW_AUTH_COOKIE_NAME: 'preview_auth',
         JOB_AUTH_PUBLIC_KEY: 'outer-job-key',
-        PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
+        R_PREVIEW_PROXY_BASE_URL: 'https://preview.example.com',
         PREVIEW_PROXY_SUBDOMAIN_SUFFIX: '.outer.example.com',
       };
 
@@ -497,7 +497,7 @@ describe('WorkerEnv', () => {
       expect(fakeProcessEnv.PREVIEW_AUTH_COOKIE_NAME).toBeUndefined();
       expect(fakeProcessEnv.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
       expect(fakeProcessEnv.JOB_AUTH_PUBLIC_KEY).toBeUndefined();
-      expect(fakeProcessEnv.PREVIEW_PROXY_BASE_URL).toBeUndefined();
+      expect(fakeProcessEnv.R_PREVIEW_PROXY_BASE_URL).toBeUndefined();
       expect(fakeProcessEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX).toBeUndefined();
       expect(fakeProcessEnv.R_APP_ENV).toBeUndefined();
       expect(fakeProcessEnv.ROOMOTE_APP_ENV).toBeUndefined();
@@ -509,26 +509,26 @@ describe('WorkerEnv', () => {
       // Other keys are also kept
       expect(fakeProcessEnv.HOME).toBe('/home/worker');
       expect(fakeProcessEnv.PATH).toBeDefined();
-      expect(fakeProcessEnv.TRPC_URL).toBe('https://trpc.example.com');
+      expect(fakeProcessEnv.R_TRPC_URL).toBe('https://trpc.example.com');
       expect(fakeProcessEnv.R_APP_URL).toBe('https://api.example.com');
     });
   });
 
   describe('environment isolation (dogfooding scenario)', () => {
-    it('should prevent worker TRPC_URL from appearing in user-facing env', () => {
+    it('should prevent worker R_TRPC_URL from appearing in user-facing env', () => {
       const env = WorkerEnv.fromProcessEnv({
         HOME: '/home/worker',
         PATH: '/usr/bin',
         AUTH_TOKEN: 'token',
-        TRPC_URL: 'https://internal-worker-trpc.example.com',
+        R_TRPC_URL: 'https://internal-worker-trpc.example.com',
         R_APP_URL: 'https://internal-api.example.com',
       } as NodeJS.ProcessEnv);
 
-      // User project can set its own TRPC_URL without conflict
-      env.addUserEnv({ TRPC_URL: 'https://my-project-trpc.example.com' });
+      // User project can set its own R_TRPC_URL without conflict
+      env.addUserEnv({ R_TRPC_URL: 'https://my-project-trpc.example.com' });
 
       const userEnv = env.buildUserFacingEnv();
-      expect(userEnv.TRPC_URL).toBe('https://my-project-trpc.example.com');
+      expect(userEnv.R_TRPC_URL).toBe('https://my-project-trpc.example.com');
 
       // Worker's internal URL is only available via accessor
       expect(env.roomoteAppUrl).toBe('https://internal-api.example.com');

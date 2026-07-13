@@ -7,7 +7,7 @@ function normalizeApiBaseUrl(url: string): string {
 function resolvePlatformApiUrl(): string {
   return normalizeApiBaseUrl(
     process.env.ROOMOTE_PLATFORM_API_URL ||
-      process.env.TRPC_URL ||
+      process.env.R_TRPC_URL ||
       'http://localhost:13001',
   );
 }

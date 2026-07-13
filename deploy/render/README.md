@@ -17,14 +17,14 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
 
 - **No Caddy edge.** Render terminates HTTPS and gives every web service its
   own public `onrender.com` domain. The web app and the API run on separate
-  origins, so `TRPC_URL` points at the api service's public domain with no
+  origins, so `R_TRPC_URL` points at the api service's public domain with no
   `/_roomote-api` path prefix. GitHub webhooks and hosted-sandbox workers
   call that API origin directly, and Slack webhooks arrive at the web origin
   and are proxied to the API internally.
 - **No Docker socket.** The `docker` sandbox provider cannot run on Render.
   Task execution must use a hosted sandbox provider: Modal (Blueprint
   default), E2B, or Daytona. Those only need outbound HTTPS plus API
-  credentials. The Blueprint sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
+  credentials. The Blueprint sets `R_EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **No openssl provisioning step.** The Blueprint sets
   `R_AUTO_GENERATE_KEYS=true`, so Roomote generates the `JOB_AUTH_*` /
@@ -43,7 +43,7 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
   `https://<hostname>` string, so each app service receives host-only
   references (`ROOMOTE_WEB_HOST`, `ROOMOTE_API_HOST`, `ROOMOTE_MINIO_HOST`,
   `ROOMOTE_MINIO_HOSTPORT`) and the image's entrypoint dispatcher derives
-  the URL-shaped variables (`R_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`,
+  the URL-shaped variables (`R_APP_URL`, `R_TRPC_URL`, `S3_ENDPOINT`,
   `S3_PRESIGN_ENDPOINT`) from them when they are unset.
 - **The setup wizard is token-gated by default.** `onrender.com` domains are
   publicly reachable, so the Blueprint generates `SETUP_TOKEN`. Copy it from
@@ -121,10 +121,10 @@ the Railway deploy button. Nothing else in the Blueprint encodes a
 version:
 
 - The images bake `RELEASE_VERSION` at build time, and the app derives
-  `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
+  `R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` from it when those are
   unset. Set them only to override the derived worker image.
 - The controller reads the worker release version from the `VERSION` file
-  inside `worker-current.tar.gz`, so `DOCKER_WORKER_RELEASE_PATH` is a
+  inside `worker-current.tar.gz`, so `R_DOCKER_WORKER_RELEASE_PATH` is a
   constant.
 
 Render does not redeploy when a mutable alias moves. To pick up a new
@@ -190,9 +190,9 @@ S3_ACCESS_KEY_ID=roomote
 S3_REGION=us-east-1
 S3_BUCKET_ARTIFACTS=roomote-artifacts
 S3_AUTO_CREATE_BUCKET=true
-DEFAULT_COMPUTE_PROVIDER=modal
-EXCLUDED_COMPUTE_PROVIDERS=docker
-DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
+R_DEFAULT_COMPUTE_PROVIDER=modal
+R_EXCLUDED_COMPUTE_PROVIDERS=docker
+R_DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 ```
 
 Each app service additionally references:
@@ -212,13 +212,13 @@ those host references at startup (explicitly set values always win):
 
 ```sh
 R_APP_URL=https://$ROOMOTE_WEB_HOST
-TRPC_URL=https://$ROOMOTE_API_HOST
+R_TRPC_URL=https://$ROOMOTE_API_HOST
 S3_ENDPOINT=http://$ROOMOTE_MINIO_HOSTPORT
 S3_PRESIGN_ENDPOINT=https://$ROOMOTE_MINIO_HOST
 ```
 
 The `roomote-shared` group also sets
-`DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz`, which
+`R_DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz`, which
 only the controller reads. The worker release archive is baked into the app
 image, and the controller uploads it into hosted sandboxes at spawn
 time — no shared volume is needed. The version-less `worker-current.tar.gz`
@@ -233,7 +233,7 @@ Notes:
   origin users browse. Do not set `R_PUBLIC_URL` — it is optional and
   the app falls back to `R_APP_URL` everywhere it would apply. See
   [Attaching a custom domain](#attaching-a-custom-domain).
-- Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
+- Leave `R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
   they always match the deployed build. Setting them explicitly overrides
   the derivation and silently pins the worker to whatever version the value
@@ -246,7 +246,7 @@ Notes:
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
-- Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
+- Leave `R_PREVIEW_PROXY_BASE_URL` and `R_PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
 
@@ -279,7 +279,7 @@ allowed to create buckets (the api only logs a warning when creation fails).
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `R_TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -333,9 +333,9 @@ Live previews need a wildcard domain, which requires a domain you control:
 2. Point `previews.<your-domain>` and `*.previews.<your-domain>` at Render
    as custom domains on that service, following Render's wildcard custom
    domain docs.
-3. Add `PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
+3. Add `R_PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`,
    `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL=https://previews.<your-domain>`, and
-   `PREVIEW_DOMAINS=previews.<your-domain>` to the `roomote-shared`
+   `R_PREVIEW_DOMAINS=previews.<your-domain>` to the `roomote-shared`
    environment group. The `NEXT_PUBLIC_` variant is what the web client uses
    to build preview links, so the `roomote-web` service must have it.
 4. Opt in from **Settings → Live Previews**, which validates the wildcard

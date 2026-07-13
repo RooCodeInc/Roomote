@@ -66,7 +66,7 @@ export async function getSourceControlConfigStatusCommand(
       getPersistedEnvironmentVariableValues([
         ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
       ]),
-      resolveDeploymentEnvVar('GITLAB_BASE_URL'),
+      resolveDeploymentEnvVar('R_GITLAB_BASE_URL'),
     ]);
 
   return buildSetupSourceControlStatus({
@@ -211,13 +211,13 @@ async function configureScopedProviderWebhooks<
 function getSourceControlWebhookUrl(
   provider: 'gitlab' | 'gitea' | 'bitbucket' | 'ado',
 ): string | null {
-  // Match the GitHub App manifest behavior: prefer TRPC_URL, but fall back
-  // to R_APP_URL when TRPC_URL is a loopback address that token-backed
+  // Match the GitHub App manifest behavior: prefer R_TRPC_URL, but fall back
+  // to R_APP_URL when R_TRPC_URL is a loopback address that token-backed
   // source-control providers cannot reach.
-  const trpcUrl = new URL(Env.TRPC_URL);
+  const trpcUrl = new URL(Env.R_TRPC_URL);
   const webhookBaseUrl = isLoopbackHostname(trpcUrl.hostname)
     ? Env.R_APP_URL
-    : Env.TRPC_URL;
+    : Env.R_TRPC_URL;
 
   if (isLoopbackHostname(new URL(webhookBaseUrl).hostname)) {
     return null;
@@ -229,7 +229,9 @@ function getSourceControlWebhookUrl(
 async function resolveOrCreateGitLabWebhookSecret(
   actorUserId: string,
 ): Promise<string> {
-  const existingSecret = await resolveDeploymentEnvVar('GITLAB_WEBHOOK_SECRET');
+  const existingSecret = await resolveDeploymentEnvVar(
+    'R_GITLAB_WEBHOOK_SECRET',
+  );
 
   if (existingSecret?.trim()) {
     return existingSecret.trim();
@@ -239,7 +241,7 @@ async function resolveOrCreateGitLabWebhookSecret(
 
   await upsertDeploymentEnvironmentVariables(db, {
     userId: actorUserId,
-    values: [{ name: 'GITLAB_WEBHOOK_SECRET', value: generatedSecret }],
+    values: [{ name: 'R_GITLAB_WEBHOOK_SECRET', value: generatedSecret }],
   });
 
   return generatedSecret;
@@ -296,7 +298,9 @@ async function configureGitLabWebhooks(
 async function resolveOrCreateGiteaWebhookSecret(
   actorUserId: string,
 ): Promise<string> {
-  const existingSecret = await resolveDeploymentEnvVar('GITEA_WEBHOOK_SECRET');
+  const existingSecret = await resolveDeploymentEnvVar(
+    'R_GITEA_WEBHOOK_SECRET',
+  );
 
   if (existingSecret?.trim()) {
     return existingSecret.trim();
@@ -306,7 +310,7 @@ async function resolveOrCreateGiteaWebhookSecret(
 
   await upsertDeploymentEnvironmentVariables(db, {
     userId: actorUserId,
-    values: [{ name: 'GITEA_WEBHOOK_SECRET', value: generatedSecret }],
+    values: [{ name: 'R_GITEA_WEBHOOK_SECRET', value: generatedSecret }],
   });
 
   return generatedSecret;
@@ -352,7 +356,7 @@ async function resolveOrCreateBitbucketWebhookSecret(
   actorUserId: string,
 ): Promise<string> {
   const existingSecret = await resolveDeploymentEnvVar(
-    'BITBUCKET_WEBHOOK_SECRET',
+    'R_BITBUCKET_WEBHOOK_SECRET',
   );
 
   if (existingSecret?.trim()) {
@@ -363,7 +367,7 @@ async function resolveOrCreateBitbucketWebhookSecret(
 
   await upsertDeploymentEnvironmentVariables(db, {
     userId: actorUserId,
-    values: [{ name: 'BITBUCKET_WEBHOOK_SECRET', value: generatedSecret }],
+    values: [{ name: 'R_BITBUCKET_WEBHOOK_SECRET', value: generatedSecret }],
   });
 
   return generatedSecret;
@@ -408,7 +412,7 @@ async function configureBitbucketWebhooks(
 async function resolveOrCreateAdoWebhookSecret(
   actorUserId: string,
 ): Promise<string> {
-  const existingSecret = await resolveDeploymentEnvVar('ADO_WEBHOOK_SECRET');
+  const existingSecret = await resolveDeploymentEnvVar('R_ADO_WEBHOOK_SECRET');
 
   if (existingSecret?.trim()) {
     return existingSecret.trim();
@@ -418,7 +422,7 @@ async function resolveOrCreateAdoWebhookSecret(
 
   await upsertDeploymentEnvironmentVariables(db, {
     userId: actorUserId,
-    values: [{ name: 'ADO_WEBHOOK_SECRET', value: generatedSecret }],
+    values: [{ name: 'R_ADO_WEBHOOK_SECRET', value: generatedSecret }],
   });
 
   return generatedSecret;
@@ -711,7 +715,7 @@ export async function assertValidSourceControlConfigInput(params: {
 
   if (nextGiteaToken) {
     const nextGiteaBaseUrl =
-      params.values?.['GITEA_BASE_URL']?.trim() ??
+      params.values?.['R_GITEA_BASE_URL']?.trim() ??
       (await Gitea.resolveGiteaBaseUrl());
 
     if (!nextGiteaBaseUrl) {
@@ -730,19 +734,19 @@ export async function assertValidSourceControlConfigInput(params: {
 
   if (nextBitbucketToken) {
     const nextBitbucketUsername =
-      params.values?.['BITBUCKET_USERNAME']?.trim() ??
+      params.values?.['R_BITBUCKET_USERNAME']?.trim() ??
       (await Bitbucket.resolveBitbucketUsername());
 
     if (!nextBitbucketUsername) {
       throw new Error(
-        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
+        'R_BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
       );
     }
 
     const validation = await Bitbucket.validateBitbucketToken({
       token: nextBitbucketToken,
       username: nextBitbucketUsername,
-      baseUrl: params.values?.['BITBUCKET_BASE_URL']?.trim() || undefined,
+      baseUrl: params.values?.['R_BITBUCKET_BASE_URL']?.trim() || undefined,
     });
 
     if (validation.status === 'invalid') {
@@ -752,7 +756,7 @@ export async function assertValidSourceControlConfigInput(params: {
 
   if (nextAdoToken) {
     const nextAdoOrganization =
-      params.values?.['ADO_ORGANIZATION']?.trim() ??
+      params.values?.['R_ADO_ORGANIZATION']?.trim() ??
       (await Ado.resolveAdoOrganization());
 
     if (!nextAdoOrganization) {
@@ -762,7 +766,7 @@ export async function assertValidSourceControlConfigInput(params: {
     const validation = await Ado.validateAdoToken({
       token: nextAdoToken,
       organization: nextAdoOrganization,
-      baseUrl: params.values?.['ADO_BASE_URL']?.trim() || undefined,
+      baseUrl: params.values?.['R_ADO_BASE_URL']?.trim() || undefined,
     });
 
     if (validation.status === 'invalid') {

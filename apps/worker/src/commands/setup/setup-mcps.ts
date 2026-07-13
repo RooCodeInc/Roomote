@@ -128,10 +128,10 @@ function normalizeApiBaseUrl(raw: string | undefined): string | undefined {
 function resolveApiBaseUrl(
   taskEnv: Record<string, string> | undefined,
 ): string | undefined {
-  // Prefer TRPC_URL (API origin) when available. R_APP_URL may point
+  // Prefer R_TRPC_URL (API origin) when available. R_APP_URL may point
   // at the web app domain in some environments.
   return (
-    normalizeApiBaseUrl(process.env.TRPC_URL) ??
+    normalizeApiBaseUrl(process.env.R_TRPC_URL) ??
     normalizeApiBaseUrl(taskEnv?.R_APP_URL)
   );
 }

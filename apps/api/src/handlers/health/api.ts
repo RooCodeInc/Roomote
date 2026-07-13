@@ -20,7 +20,7 @@ export const apiHealth = new Hono<{ Variables: Variables }>();
 
 apiHealth.get('/', async (c) => {
   const requestStartedAt = Date.now();
-  const slowThresholdMs = Env.API_SLOW_REQUEST_THRESHOLD_MS;
+  const slowThresholdMs = Env.R_API_SLOW_REQUEST_THRESHOLD_MS;
 
   const dbCheck = await runTimedHealthCheck('db', async () => {
     try {

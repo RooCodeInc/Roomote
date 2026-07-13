@@ -1,7 +1,7 @@
 import { getCachedPreviewRuntimeConfig } from '../services/runtime-config';
 
 /**
- * Extracts the base domain from the PREVIEW_PROXY_BASE_URL for setting cookies.
+ * Extracts the base domain from the R_PREVIEW_PROXY_BASE_URL for setting cookies.
  * The cookie is set on the base domain so it works across all preview subdomains.
  *
  * Examples:

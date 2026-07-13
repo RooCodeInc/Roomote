@@ -178,8 +178,8 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
-  it('adds proxied Linear MCP from shared user MCP servers and preserves the TRPC_URL path prefix', () => {
-    process.env.TRPC_URL = 'https://app.test.com/_roomote-api';
+  it('adds proxied Linear MCP from shared user MCP servers and preserves the R_TRPC_URL path prefix', () => {
+    process.env.R_TRPC_URL = 'https://app.test.com/_roomote-api';
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -215,8 +215,8 @@ describe('resolveBuiltInMcpServers', () => {
     expect(linearConfig.headers.Authorization).toBe('Bearer test-cloud-token');
   });
 
-  it('falls back to R_APP_URL for proxied Linear MCP when TRPC_URL is not set', () => {
-    delete process.env.TRPC_URL;
+  it('falls back to R_APP_URL for proxied Linear MCP when R_TRPC_URL is not set', () => {
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -286,7 +286,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user Notion MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -325,7 +325,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('adds the preview proxy bypass header for proxied integration MCPs when present in task env', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -357,7 +357,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user Sentry MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -401,7 +401,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user Snowflake MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -438,7 +438,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('adds the preview proxy bypass header for proxied Snowflake MCPs when present in task env', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -472,7 +472,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user PostHog MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -518,7 +518,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user Neon MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(
@@ -557,7 +557,7 @@ describe('resolveBuiltInMcpServers', () => {
   });
 
   it('rewrites user Supabase MCP to the Roomote proxy with run token auth', () => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
 
     const parsed = {
       mcpServers: resolveBuiltInMcpServers(

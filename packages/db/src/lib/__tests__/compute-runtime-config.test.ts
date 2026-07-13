@@ -79,7 +79,7 @@ describe('resolveComputeProviderEnvValues', () => {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+        R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
       executor: makeExecutor([]),
     });
@@ -113,7 +113,7 @@ describe('resolveComputeProviderEnvValues', () => {
       },
       executor: makeExecutor([
         {
-          name: 'DOCKER_WORKER_IMAGE',
+          name: 'R_DOCKER_WORKER_IMAGE',
           value: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
         },
       ]),
@@ -130,7 +130,7 @@ describe('resolveComputeProviderEnvValues', () => {
         NODE_ENV: 'development',
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+        R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       },
       executor: makeExecutor([]),
     });
@@ -145,7 +145,7 @@ describe('resolveComputeProviderEnvValues', () => {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
-        DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+        R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
         RELEASE_VERSION: 'self-host-production',
       },
       executor: makeExecutor([]),
@@ -156,15 +156,15 @@ describe('resolveComputeProviderEnvValues', () => {
 
   it('normalizes typed Docker standby settings with runtime values taking precedence', async () => {
     const values = await resolveComputeProviderEnvValues('docker', {
-      runtimeEnv: { DOCKER_STANDBY_MAX_COUNT: 7 },
+      runtimeEnv: { R_DOCKER_STANDBY_MAX_COUNT: 7 },
       executor: makeExecutor([
-        { name: 'DOCKER_STANDBY_MAX_AGE_HOURS', value: '18' },
+        { name: 'R_DOCKER_STANDBY_MAX_AGE_HOURS', value: '18' },
       ]),
     });
 
     expect(values).toEqual({
-      DOCKER_STANDBY_MAX_COUNT: '7',
-      DOCKER_STANDBY_MAX_AGE_HOURS: '18',
+      R_DOCKER_STANDBY_MAX_COUNT: '7',
+      R_DOCKER_STANDBY_MAX_AGE_HOURS: '18',
     });
   });
 });
@@ -181,7 +181,7 @@ describe('listConfiguredComputeProviders', () => {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
         MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
-        EXCLUDED_COMPUTE_PROVIDERS: 'docker',
+        R_EXCLUDED_COMPUTE_PROVIDERS: 'docker',
       },
       executor: makeExecutor([]),
     });

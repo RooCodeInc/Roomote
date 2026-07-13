@@ -23,7 +23,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
   `/_roomote-api` path routing. A Fly app has one public hostname and Fly
   Proxy routes by port, not hostname or process group, so the web app owns
   port 443 and the API is exposed on port **8443** of the same hostname:
-  `TRPC_URL` is `https://<app>.fly.dev:8443`. Fly's `*.fly.dev` certificate
+  `R_TRPC_URL` is `https://<app>.fly.dev:8443`. Fly's `*.fly.dev` certificate
   covers TLS-handled ports other than 443, and GitHub webhooks and
   hosted-sandbox workers call that origin directly (both support explicit
   ports in URLs). Slack webhooks arrive at the web origin and are proxied to
@@ -35,7 +35,7 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
 - **No Docker socket.** The `docker` sandbox provider cannot run on Fly
   Machines. Task execution must use a hosted sandbox provider: Modal
   (default), E2B, or Daytona. Those only need outbound HTTPS plus API
-  credentials. The config sets `EXCLUDED_COMPUTE_PROVIDERS=docker` so the
+  credentials. The config sets `R_EXCLUDED_COMPUTE_PROVIDERS=docker` so the
   unusable provider never appears in setup or sandbox selection.
 - **Managed data services replace the bundled datastores.** Fly Managed
   Postgres provides `DATABASE_URL`, Upstash Redis (via `fly redis create`)
@@ -166,7 +166,7 @@ Notes:
   users browse. Do not set `R_PUBLIC_URL` — it is optional and the app
   falls back to `R_APP_URL` everywhere it would apply. See
   [Attaching a custom domain](#attaching-a-custom-domain).
-- Leave `DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
+- Leave `R_DOCKER_WORKER_IMAGE` and `MODAL_BASE_IMAGE_REF` **unset**. The app
   derives both from the `RELEASE_VERSION` baked into the running image, so
   they always match the deployed build. Setting them explicitly overrides
   the derivation and silently pins the worker to whatever version the value
@@ -179,7 +179,7 @@ Notes:
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit values, they take precedence over the persisted keypairs.
-- Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
+- Leave `R_PREVIEW_PROXY_BASE_URL` and `R_PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in **Settings → Live Previews** until set.
 - Changing secrets on a deployed app restarts its Machines; `fly secrets
@@ -211,7 +211,7 @@ workers. Pre-create the bucket, or set `S3_AUTO_CREATE_BUCKET=true` in
 3. Create the founding admin account (email/password works immediately;
    Slack or Microsoft sign-in can be added later).
 4. Connect GitHub with **Create GitHub App** — the manifest flow derives the
-   callback and webhook URLs from `R_APP_URL` and `TRPC_URL`, so no
+   callback and webhook URLs from `R_APP_URL` and `R_TRPC_URL`, so no
    manual URL entry is needed.
 5. Enter the sandbox provider credentials (Modal token pair for the default)
    and the model provider key when the wizard asks. When swapping to E2B or
@@ -241,7 +241,7 @@ GitHub App created by the wizard) keep the callback URLs they were created
 with, so reconnect or update those in their provider settings if you change
 the domain after onboarding.
 
-`TRPC_URL` can stay on `https://<app>.fly.dev:8443` — hosted-sandbox workers
+`R_TRPC_URL` can stay on `https://<app>.fly.dev:8443` — hosted-sandbox workers
 and webhooks call it directly, and it never needs to match the domain users
 browse. If you move it onto the custom domain, keep the `:8443` port; the
 certificate from `fly certs add` covers TLS-handled ports other than 443.
@@ -298,8 +298,8 @@ preview proxy cannot share it. Run the proxy as a second Fly app instead:
 previews.<your-domain>` and `fly certs add -a <app>-previews
 '*.previews.<your-domain>'`; the wildcard needs the DNS challenge from
    Fly's certificate docs).
-3. On the **main** app, set `PREVIEW_PROXY_BASE_URL`,
-   `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and `PREVIEW_DOMAINS` to
+3. On the **main** app, set `R_PREVIEW_PROXY_BASE_URL`,
+   `NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL`, and `R_PREVIEW_DOMAINS` to
    `https://previews.<your-domain>` (the `NEXT_PUBLIC_` variant is what the
    web client uses to build preview links), add the same three values to the
    previews app, and redeploy both.

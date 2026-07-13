@@ -101,7 +101,7 @@ repositories:
         detached: true
         logfile: /tmp/roomote-bullmq.log
       - name: Start controller
-        run: R_APP_ENV=development TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" R_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
+        run: R_APP_ENV=development R_TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" R_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
         timeout: 600
         continue_on_error: true
         detached: true
