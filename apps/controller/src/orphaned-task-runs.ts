@@ -2,6 +2,7 @@ import {
   RunStatus,
   ORPHANED_AFTER_DEQUEUE_THRESHOLD_MS,
   ORPHANED_PENDING_THRESHOLD_MS,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 import { type TaskRun, db, taskRuns, eq, sql } from '@roomote/db/server';
 import { releaseTaskRun } from '@roomote/cloud-agents/server';
@@ -25,6 +26,7 @@ async function claimOrphanedTaskRun(): Promise<TaskRun | null> {
         WHERE (
           (
             status = ${RunStatus.Pending}
+            AND task_phase IS DISTINCT FROM ${WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE}
             AND created_at < NOW() - (${ORPHANED_PENDING_THRESHOLD_MS} * INTERVAL '1 millisecond')
             AND created_at > NOW() - (${24 * HOUR} * INTERVAL '1 millisecond')
           )

@@ -78,6 +78,8 @@ export function StepRepoSelection({
   initialSetupGuidance = '',
   initialSelectedModelId = null,
   retryReason = null,
+  computeProvisioningError = null,
+  onRetryComputeProvisioning,
 }: {
   onContinue: (onboardingTaskId: string) => void;
   onSkip: () => void;
@@ -86,6 +88,8 @@ export function StepRepoSelection({
   initialSetupGuidance?: string;
   initialSelectedModelId?: string | null;
   retryReason?: SetupRetryReason | null;
+  computeProvisioningError?: string | null;
+  onRetryComputeProvisioning?: () => void;
 }) {
   const pathname = usePathname();
   const trpc = useTRPC();
@@ -423,6 +427,26 @@ export function StepRepoSelection({
                   </button>
                   .
                 </>
+              ) : null}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {computeProvisioningError ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            <p>
+              Sandbox provider provisioning failed: {computeProvisioningError}{' '}
+              {onRetryComputeProvisioning ? (
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-4"
+                  onClick={onRetryComputeProvisioning}
+                >
+                  Retry provisioning
+                </button>
               ) : null}
             </p>
           </AlertDescription>

@@ -1,6 +1,7 @@
-import type {
-  SetupNewComputeProvisioningState,
-  SetupNewState,
+import {
+  WORKER_RUNTIME_SCHEMA_VERSION,
+  type SetupNewComputeProvisioningState,
+  type SetupNewState,
 } from '@roomote/types';
 
 const {
@@ -10,6 +11,9 @@ const {
   mockBuildE2bWorkerTemplate,
   mockResolveComputeProviderEnvValues,
   mockUpsertDeploymentEnvironmentVariables,
+  mockQueuePersistedTaskRun,
+  mockDbUpdateSet,
+  mockWaitingRuns,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
   mockGetPersistedEnvironmentVariableNames: vi.fn(),
@@ -17,10 +21,23 @@ const {
   mockBuildE2bWorkerTemplate: vi.fn(),
   mockResolveComputeProviderEnvValues: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
+  mockQueuePersistedTaskRun: vi.fn().mockResolvedValue(undefined),
+  mockDbUpdateSet: vi.fn(),
+  mockWaitingRuns: { current: [] as unknown[] },
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  queuePersistedTaskRun: mockQueuePersistedTaskRun,
 }));
 
 vi.mock('@roomote/db/server', () => ({
-  db: { transaction: mockDbTransaction },
+  and: vi.fn(),
+  db: {
+    transaction: mockDbTransaction,
+    update: vi.fn(() => ({
+      set: mockDbUpdateSet,
+    })),
+  },
   deploymentSettings: { id: 'deployment_settings.id' },
   eq: vi.fn(),
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -28,6 +45,11 @@ vi.mock('@roomote/db/server', () => ({
     values,
   })),
   resolveComputeProviderEnvValues: mockResolveComputeProviderEnvValues,
+  taskRuns: {
+    vendor: 'task_runs.vendor',
+    status: 'task_runs.status',
+    taskPhase: 'task_runs.task_phase',
+  },
 }));
 
 vi.mock('@roomote/compute-providers', () => ({
@@ -85,7 +107,7 @@ const STALE_STARTED_AT = '2026-07-03T00:00:00.000Z';
 
 const staleBuildingEntry: SetupNewComputeProvisioningState = {
   status: 'building',
-  runtimeSchemaVersion: 2,
+  runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
   imageRef: 'registry.example.com/worker:old',
   templateRef: 'roomote-worker-old',
   error: null,
@@ -105,7 +127,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker-new',
         error: null,
@@ -130,7 +152,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'failed',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:old',
         templateRef: null,
         error: 'boom',
@@ -158,7 +180,7 @@ describe('persistComputeProvisioning', () => {
       'e2b',
       {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker:new',
         error: null,
@@ -277,7 +299,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker-tag',
         error: null,
@@ -325,7 +347,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:old',
         templateRef: 'roomote-worker:old',
         error: null,
@@ -414,7 +436,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -509,7 +531,7 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     const { executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -528,6 +550,16 @@ describe('reconcileComputeProvisioningOnStartup', () => {
 });
 
 describe('runComputeProvisioning', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWaitingRuns.current = [];
+    mockDbUpdateSet.mockImplementation(() => ({
+      where: vi.fn(() => ({
+        returning: vi.fn(async () => mockWaitingRuns.current),
+      })),
+    }));
+  });
+
   it('does not activate an artifact after a newer desired build supersedes it', async () => {
     mockResolveComputeProviderEnvValues.mockResolvedValue({
       E2B_API_KEY: 'key',
@@ -542,7 +574,7 @@ describe('runComputeProvisioning', () => {
     const { captured, executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker:new-r2',
         error: null,
@@ -564,5 +596,95 @@ describe('runComputeProvisioning', () => {
     expect(execute).toHaveBeenCalledOnce();
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
     expect(captured.setupNewState).toBeUndefined();
+  });
+
+  it('dispatches queued onboarding runs after first-time provisioning succeeds', async () => {
+    mockResolveComputeProviderEnvValues.mockResolvedValue({
+      E2B_API_KEY: 'key',
+    });
+    mockBuildE2bWorkerTemplate.mockResolvedValue({
+      templateRef: 'roomote-worker:tag-r2',
+      templateId: 'template-id',
+      buildId: 'build-id',
+      tags: [],
+    });
+    const execute = vi.fn();
+    const { executor } = createExecutorMock({
+      e2bTemplateBuild: {
+        status: 'building',
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+        imageRef: 'registry.example.com/worker:tag',
+        templateRef: 'roomote-worker:tag-r2',
+        error: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      },
+    });
+    const tx = executor as unknown as { execute: typeof execute };
+    tx.execute = execute;
+    mockDbTransaction.mockImplementation(async (callback) => callback(tx));
+    const waitingRun = {
+      id: 42,
+      taskId: 'task-onboarding',
+      status: 'pending',
+      taskPhase: null,
+      error: null,
+    };
+    mockWaitingRuns.current = [waitingRun];
+
+    await runComputeProvisioning({
+      provider: 'e2b',
+      userId: null,
+      imageRef: 'registry.example.com/worker:tag',
+      templateRef: 'roomote-worker:tag-r2',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        values: [{ name: 'E2B_TEMPLATE_ID', value: 'roomote-worker:tag-r2' }],
+      }),
+    );
+    expect(mockQueuePersistedTaskRun).toHaveBeenCalledWith(waitingRun);
+  });
+
+  it('publishes provisioning failures to queued tasks and clears them on retry', async () => {
+    mockResolveComputeProviderEnvValues.mockResolvedValue({
+      E2B_API_KEY: 'key',
+    });
+    mockBuildE2bWorkerTemplate.mockRejectedValue(new Error('Access denied'));
+    const execute = vi.fn();
+    const { executor } = createExecutorMock({
+      e2bTemplateBuild: {
+        status: 'building',
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+        imageRef: 'registry.example.com/worker:tag',
+        templateRef: 'roomote-worker:tag-r2',
+        error: null,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+      },
+    });
+    const tx = executor as unknown as { execute: typeof execute };
+    tx.execute = execute;
+    mockDbTransaction.mockImplementation(async (callback) => callback(tx));
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await runComputeProvisioning({
+        provider: 'e2b',
+        userId: null,
+        imageRef: 'registry.example.com/worker:tag',
+        templateRef: 'roomote-worker:tag-r2',
+      });
+
+      expect(mockDbUpdateSet).toHaveBeenNthCalledWith(1, { error: null });
+      expect(mockDbUpdateSet).toHaveBeenCalledWith({
+        error:
+          'Sandbox provider provisioning failed: Access denied Retry provisioning in Settings → Sandboxes.',
+      });
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

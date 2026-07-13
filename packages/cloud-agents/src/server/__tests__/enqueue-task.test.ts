@@ -108,6 +108,30 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('persists an intentional pre-dispatch phase and error', async () => {
+    const userId = await createUser();
+
+    const run = await enqueueTask(
+      {
+        task: standardTaskInput(),
+        title: 'Set up your first environment',
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      },
+      {
+        enqueue: false,
+        initialTaskPhase: 'waiting_for_sandbox_provider',
+        initialError: 'Provisioning needs attention.',
+      },
+    );
+    createdTaskIds.push(run.taskId);
+
+    expect(run.taskPhase).toBe('waiting_for_sandbox_provider');
+    expect(run.error).toBe('Provisioning needs attention.');
+  });
+
   it('persists and locks an explicit title at task creation', async () => {
     const userId = await createUser();
 

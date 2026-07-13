@@ -84,6 +84,7 @@ import {
   type SetupProvisionableComputeProvider,
   type SourceControlProvider,
   type TaskModelSettings,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -531,6 +532,63 @@ async function getOnboardingTaskState(taskId: string | null) {
     taskPhase: latestRun?.taskPhase ?? null,
     firstAssistantOutputAt: latestRun?.firstAssistantOutputAt ?? null,
   };
+}
+
+type SetupOnboardingComputeGate = {
+  waiting: boolean;
+  error: string | null;
+};
+
+async function getSetupOnboardingComputeGate(
+  setupNewState: PersistedSetupNewState,
+  executor: DatabaseOrTransaction,
+): Promise<SetupOnboardingComputeGate> {
+  const provider = setupNewState.computeProvider;
+
+  if (!provider || !isSetupProvisionableComputeProvider(provider)) {
+    return { waiting: false, error: null };
+  }
+
+  const persistedEnvVarNames =
+    await getPersistedEnvironmentVariableNames(executor);
+  const providerStatus = buildSetupComputeStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    selectedProvider: provider,
+  }).providers.find((candidate) => candidate.provider === provider);
+
+  // A configured artifact means this is a non-blocking replacement. The old
+  // artifact remains active while provisioning publishes its successor.
+  if (providerStatus?.configSatisfied) {
+    return { waiting: false, error: null };
+  }
+
+  const provisioning = presentSetupNewComputeProvisioning(
+    getSetupNewComputeProvisioningState(setupNewState, provider),
+  );
+  const error =
+    provisioning?.status === 'failed'
+      ? `Sandbox provider provisioning failed: ${
+          provisioning.error ?? 'The worker artifact could not be prepared.'
+        } Retry provisioning in Settings → Sandboxes.`
+      : null;
+
+  return { waiting: true, error };
+}
+
+function enqueueSetupOnboardingTask(
+  input: Parameters<typeof enqueueTask>[0],
+  computeGate: SetupOnboardingComputeGate,
+) {
+  if (!computeGate.waiting) {
+    return enqueueTask(input);
+  }
+
+  return enqueueTask(input, {
+    enqueue: false,
+    initialTaskPhase: WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
+    initialError: computeGate.error,
+  });
 }
 
 async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
@@ -1299,6 +1357,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     ),
     daytonaSnapshotBuild: presentSetupNewComputeProvisioning(
       setupNewState.daytonaSnapshotBuild,
+    ),
+    blaxelImageBuild: presentSetupNewComputeProvisioning(
+      setupNewState.blaxelImageBuild,
     ),
   };
 
@@ -2241,6 +2302,8 @@ export async function startSetupNewOnboardingTaskCommand(
       throw new Error(modelSelection.error);
     }
 
+    const computeGate = await getSetupOnboardingComputeGate(currentState, tx);
+
     const handoffTarget = await resolveSetupSlackHandoffTarget(
       {
         userId,
@@ -2327,48 +2390,51 @@ export async function startSetupNewOnboardingTaskCommand(
 
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
-          const launchResult = await enqueueTask({
-            title: onboardingTaskTitle,
-            task: {
-              ...(modelSelection.harness
-                ? { harness: modelSelection.harness }
-                : {}),
-              type: TaskPayloadKind.StandardTask,
-              payload: {
-                ...workspacePayload,
-                ...(setupSourceControlProvider
-                  ? { sourceControlProvider: setupSourceControlProvider }
+          const launchResult = await enqueueSetupOnboardingTask(
+            {
+              title: onboardingTaskTitle,
+              task: {
+                ...(modelSelection.harness
+                  ? { harness: modelSelection.harness }
                   : {}),
-                description: prompt,
-                visibleInTranscript: false,
-                communicationProvider: fallbackTarget.provider,
-                communicationChannelId: kickoffChannelId,
-                communicationMessageId: kickoffMessageId,
-                ...(kickoffThreadId
-                  ? {
-                      communicationThreadId: kickoffThreadId,
-                      telegramTaskTopic: true,
-                    }
-                  : {}),
-                ...(fallbackTarget.provider === 'teams'
-                  ? {
-                      communicationThreadId: kickoffMessageId,
-                      communicationServiceUrl: fallbackTarget.serviceUrl,
-                    }
-                  : {}),
-                ...(modelSelection.harnessModelOverrides
-                  ? {
-                      harnessModelOverrides:
-                        modelSelection.harnessModelOverrides,
-                    }
-                  : {}),
+                type: TaskPayloadKind.StandardTask,
+                payload: {
+                  ...workspacePayload,
+                  ...(setupSourceControlProvider
+                    ? { sourceControlProvider: setupSourceControlProvider }
+                    : {}),
+                  description: prompt,
+                  visibleInTranscript: false,
+                  communicationProvider: fallbackTarget.provider,
+                  communicationChannelId: kickoffChannelId,
+                  communicationMessageId: kickoffMessageId,
+                  ...(kickoffThreadId
+                    ? {
+                        communicationThreadId: kickoffThreadId,
+                        telegramTaskTopic: true,
+                      }
+                    : {}),
+                  ...(fallbackTarget.provider === 'teams'
+                    ? {
+                        communicationThreadId: kickoffMessageId,
+                        communicationServiceUrl: fallbackTarget.serviceUrl,
+                      }
+                    : {}),
+                  ...(modelSelection.harnessModelOverrides
+                    ? {
+                        harnessModelOverrides:
+                          modelSelection.harnessModelOverrides,
+                      }
+                    : {}),
+                },
               },
+              initiator: { kind: 'user', userId },
+              workflow: 'setup_onboarding',
+              surface: 'web',
+              trigger: 'manual',
             },
-            initiator: { kind: 'user', userId },
-            workflow: 'setup_onboarding',
-            surface: 'web',
-            trigger: 'manual',
-          });
+            computeGate,
+          );
 
           await savePersistedSetupNewState(
             normalizeSetupNewState({
@@ -2403,32 +2469,35 @@ export async function startSetupNewOnboardingTaskCommand(
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueTask({
-        title: onboardingTaskTitle,
-        task: {
-          ...(modelSelection.harness
-            ? { harness: modelSelection.harness }
-            : {}),
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            ...workspacePayload,
-            ...(setupSourceControlProvider
-              ? { sourceControlProvider: setupSourceControlProvider }
+      const launchResult = await enqueueSetupOnboardingTask(
+        {
+          title: onboardingTaskTitle,
+          task: {
+            ...(modelSelection.harness
+              ? { harness: modelSelection.harness }
               : {}),
-            description: prompt,
-            visibleInTranscript: false,
-            ...(modelSelection.harnessModelOverrides
-              ? {
-                  harnessModelOverrides: modelSelection.harnessModelOverrides,
-                }
-              : {}),
+            type: TaskPayloadKind.StandardTask,
+            payload: {
+              ...workspacePayload,
+              ...(setupSourceControlProvider
+                ? { sourceControlProvider: setupSourceControlProvider }
+                : {}),
+              description: prompt,
+              visibleInTranscript: false,
+              ...(modelSelection.harnessModelOverrides
+                ? {
+                    harnessModelOverrides: modelSelection.harnessModelOverrides,
+                  }
+                : {}),
+            },
           },
+          initiator: { kind: 'user', userId },
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
         },
-        initiator: { kind: 'user', userId },
-        workflow: 'setup_onboarding',
-        surface: 'web',
-        trigger: 'manual',
-      });
+        computeGate,
+      );
 
       await savePersistedSetupNewState(
         normalizeSetupNewState({
@@ -2481,41 +2550,44 @@ export async function startSetupNewOnboardingTaskCommand(
     let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
     try {
-      launchResult = await enqueueTask({
-        title: onboardingTaskTitle,
-        task: {
-          ...(modelSelection.harness
-            ? { harness: modelSelection.harness }
-            : {}),
-          type: TaskPayloadKind.SlackAppMention,
-          payload: {
-            ...workspacePayload,
-            ...(setupSourceControlProvider
-              ? { sourceControlProvider: setupSourceControlProvider }
+      launchResult = await enqueueSetupOnboardingTask(
+        {
+          title: onboardingTaskTitle,
+          task: {
+            ...(modelSelection.harness
+              ? { harness: modelSelection.harness }
               : {}),
-            channel: slackChannel,
-            user: handoffTarget.slackUserId,
-            text: prompt,
-            ts: slackThreadTs,
-            thread_ts: slackThreadTs,
-            webPath: '/setup',
-            visibleInTranscript: false,
-            ...(modelSelection.harnessModelOverrides
-              ? {
-                  harnessModelOverrides: modelSelection.harnessModelOverrides,
-                }
-              : {}),
+            type: TaskPayloadKind.SlackAppMention,
+            payload: {
+              ...workspacePayload,
+              ...(setupSourceControlProvider
+                ? { sourceControlProvider: setupSourceControlProvider }
+                : {}),
+              channel: slackChannel,
+              user: handoffTarget.slackUserId,
+              text: prompt,
+              ts: slackThreadTs,
+              thread_ts: slackThreadTs,
+              webPath: '/setup',
+              visibleInTranscript: false,
+              ...(modelSelection.harnessModelOverrides
+                ? {
+                    harnessModelOverrides: modelSelection.harnessModelOverrides,
+                  }
+                : {}),
+            },
+          },
+          initiator: { kind: 'user', userId },
+          workflow: 'setup_onboarding',
+          surface: 'slack',
+          trigger: 'manual',
+          channels: {
+            slackChannelId: slackChannel,
+            slackThreadTs,
           },
         },
-        initiator: { kind: 'user', userId },
-        workflow: 'setup_onboarding',
-        surface: 'slack',
-        trigger: 'manual',
-        channels: {
-          slackChannelId: slackChannel,
-          slackThreadTs,
-        },
-      });
+        computeGate,
+      );
     } catch (error) {
       await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
       throw error;
