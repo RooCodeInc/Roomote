@@ -124,10 +124,15 @@ export function isBackgroundAutomationKey(
   return (BACKGROUND_AUTOMATION_KEYS as readonly string[]).includes(value);
 }
 
-export type BackgroundAutomationProvider = 'slack' | 'telegram' | 'sentry';
+export type BackgroundAutomationProvider =
+  | 'slack'
+  | 'teams'
+  | 'telegram'
+  | 'sentry';
 
 export type BackgroundAutomationTargetKind =
   | 'slack_channel'
+  | 'teams_channel'
   | 'telegram_chat'
   | 'sentry_project';
 

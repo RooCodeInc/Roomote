@@ -791,6 +791,7 @@ export async function updateBackgroundAgentSettingsCommand(
           ...(row.launchCriteria ? { launchCriteria: row.launchCriteria } : {}),
         },
       })),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -799,6 +800,7 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: effectiveManagerStatsFrequency !== 'off',
       schedule: { mode: effectiveManagerStatsFrequency },
       targets: buildSlackChannelTargets(managerStatsChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -816,6 +818,7 @@ export async function updateBackgroundAgentSettingsCommand(
           }),
         ),
       ],
+      managedTargetKinds: ['slack_channel', 'sentry_project'],
       updatedAt: now,
     });
 
@@ -826,6 +829,7 @@ export async function updateBackgroundAgentSettingsCommand(
       targets: buildSlackChannelTargets(
         dependabotTriageChannelResult.channelId,
       ),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -834,6 +838,7 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: securityAuditorFrequency !== 'off',
       schedule: { mode: securityAuditorFrequency },
       targets: buildSlackChannelTargets(securityAuditorChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -844,6 +849,7 @@ export async function updateBackgroundAgentSettingsCommand(
       targets: buildSlackChannelTargets(
         codeQualityAuditorChannelResult.channelId,
       ),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -852,6 +858,7 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
       targets: buildSlackChannelTargets(ciFailureTriageChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -864,6 +871,7 @@ export async function updateBackgroundAgentSettingsCommand(
       instructions: effectiveSuggesterInstructions,
       settings: suggesterAutomationSettings,
       targets: buildSlackChannelTargets(suggesterChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -875,6 +883,7 @@ export async function updateBackgroundAgentSettingsCommand(
       },
       instructions: normalizeOptionalText(input.announcerInstructions),
       targets: buildSlackChannelTargets(announcerChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
 
@@ -882,6 +891,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'platform_issue_alerts',
       enabled: platformIssueChannelResult.channelId != null,
       targets: buildSlackChannelTargets(platformIssueChannelResult.channelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt: now,
     });
   });
