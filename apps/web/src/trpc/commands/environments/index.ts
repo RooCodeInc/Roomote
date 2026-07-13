@@ -32,6 +32,7 @@ import {
   type EnvironmentConfig,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
+  getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
   normalizeRepositorySelection,
 } from '@roomote/types';
@@ -372,14 +373,22 @@ export async function createEnvironmentCommand(
   }
 
   const configRepos = parseResult.data.repositories ?? [];
-  const repositoryRows = await getEnvironmentRepositoryRows(
-    getConfiguredRepositoryNames(parseResult.data),
-  );
+  const repositoryNames = getConfiguredRepositoryNames(parseResult.data);
+  const repositoryRows = await getEnvironmentRepositoryRows(repositoryNames);
   const repositoryConfigError =
     getEnvironmentRepositoryConfigError(repositoryRows);
 
   if (repositoryConfigError) {
     return { success: false, error: repositoryConfigError };
+  }
+
+  const missingRepositoryError = getMissingEnvironmentRepositoryError(
+    repositoryNames,
+    repositoryRows,
+  );
+
+  if (missingRepositoryError) {
+    return { success: false, error: missingRepositoryError };
   }
 
   const repoMap = new Map(repositoryRows.map((r) => [r.fullName, r.id]));
@@ -504,16 +513,25 @@ export async function updateEnvironmentCommand(
   }
 
   const configRepos = nextConfig?.repositories ?? [];
+  const repositoryNames =
+    input.config && nextConfig ? getConfiguredRepositoryNames(nextConfig) : [];
   const repositoryRows = input.config
-    ? await getEnvironmentRepositoryRows(
-        nextConfig ? getConfiguredRepositoryNames(nextConfig) : [],
-      )
+    ? await getEnvironmentRepositoryRows(repositoryNames)
     : [];
   const repositoryConfigError =
     getEnvironmentRepositoryConfigError(repositoryRows);
 
   if (repositoryConfigError) {
     return { success: false, error: repositoryConfigError };
+  }
+
+  const missingRepositoryError = getMissingEnvironmentRepositoryError(
+    repositoryNames,
+    repositoryRows,
+  );
+
+  if (missingRepositoryError) {
+    return { success: false, error: missingRepositoryError };
   }
 
   const repoMap = new Map(repositoryRows.map((r) => [r.fullName, r.id]));

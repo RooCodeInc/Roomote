@@ -108,6 +108,7 @@ describe('declarative environments', () => {
     definitionsDir = await mkdtemp(
       path.join(tmpdir(), 'roomote-declarative-envs-'),
     );
+    await createLinkedRepository();
   });
 
   afterEach(async () => {
@@ -117,7 +118,6 @@ describe('declarative environments', () => {
 
   it('creates an environment from a directory file', async () => {
     const name = environmentName('create');
-    const repository = await createLinkedRepository();
 
     await writeFile(
       path.join(definitionsDir, 'create.yaml'),
@@ -130,7 +130,6 @@ describe('declarative environments', () => {
 
     expect(summary.created).toEqual([name]);
     expect(summary.skipped).toEqual([]);
-    expect(summary.missingRepositories).toEqual([]);
 
     const environment = await db.query.environments.findFirst({
       where: eq(environments.name, name),
@@ -154,9 +153,7 @@ describe('declarative environments', () => {
       where: eq(environmentRepositoryMappings.environmentId, environment!.id),
     });
 
-    expect(mappings.map((mapping) => mapping.repositoryId)).toEqual([
-      repository.id,
-    ]);
+    expect(mappings).toHaveLength(1);
   });
 
   it('applies inline multi-document YAML and dedupes by name against directory files', async () => {
@@ -231,9 +228,6 @@ describe('declarative environments', () => {
     const environment = await db.query.environments.findFirst({
       where: eq(environments.name, name),
     });
-
-    testUserId = randomUUID();
-    await userFactory.create({ id: testUserId });
 
     const editedConfig = environmentConfigSchema.parse({
       name,
@@ -374,9 +368,6 @@ describe('declarative environments', () => {
   });
 
   it('never touches user-owned or eval environments with the same name', async () => {
-    testUserId = randomUUID();
-    await userFactory.create({ id: testUserId });
-
     const userOwnedName = environmentName('user-owned');
     const evalName = environmentName('eval');
 
@@ -428,32 +419,46 @@ describe('declarative environments', () => {
     expect(userOwned?.declarativeSource).toBeNull();
   });
 
-  it('backfills repository mappings once a configured repository is linked', async () => {
+  it('skips definitions until every configured repository is linked', async () => {
     const name = environmentName('backfill');
+    await db
+      .delete(repositories)
+      .where(eq(repositories.fullName, 'declarative-test/example'));
     await writeFile(
       path.join(definitionsDir, 'backfill.yaml'),
       definitionYaml(name),
     );
 
     const first = await applyDeclarativeEnvironments({ dir: definitionsDir });
-    expect(first.missingRepositories).toEqual(['declarative-test/example']);
+    expect(first.created).toEqual([]);
+    expect(first.skipped).toEqual([
+      {
+        source: 'backfill.yaml',
+        reason:
+          'Repositories are not linked to this deployment: declarative-test/example',
+      },
+    ]);
+
+    const missingEnvironment = await db.query.environments.findFirst({
+      where: eq(environments.name, name),
+    });
+    expect(missingEnvironment).toBeUndefined();
+
+    const repository = await repositoryFactory.create({
+      fullName: 'declarative-test/example',
+      installationId: testInstallationId!,
+      linkedByUserId: testUserId,
+    });
+
+    const second = await applyDeclarativeEnvironments({ dir: definitionsDir });
+    expect(second.created).toEqual([name]);
+    expect(second.skipped).toEqual([]);
 
     const environment = await db.query.environments.findFirst({
       where: eq(environments.name, name),
     });
 
-    let mappings = await db.query.environmentRepositoryMappings.findMany({
-      where: eq(environmentRepositoryMappings.environmentId, environment!.id),
-    });
-    expect(mappings).toHaveLength(0);
-
-    const repository = await createLinkedRepository();
-
-    const second = await applyDeclarativeEnvironments({ dir: definitionsDir });
-    expect(second.updated).toEqual([name]);
-    expect(second.missingRepositories).toEqual([]);
-
-    mappings = await db.query.environmentRepositoryMappings.findMany({
+    const mappings = await db.query.environmentRepositoryMappings.findMany({
       where: eq(environmentRepositoryMappings.environmentId, environment!.id),
     });
     expect(mappings.map((mapping) => mapping.repositoryId)).toEqual([
@@ -478,7 +483,6 @@ describe('declarative environments', () => {
         skipped: [],
         orphaned: [],
         orphaningDeferred: false,
-        missingRepositories: [],
       };
 
       const apply = vi

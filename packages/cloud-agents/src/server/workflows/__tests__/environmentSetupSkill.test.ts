@@ -53,6 +53,23 @@ describe('environment-setup guidance', () => {
     );
   });
 
+  it('preserves exact repository identifiers including Azure DevOps segments', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Use each provided repository identifier exactly as supplied by the task.',
+    );
+    expect(skillContent).toContain(
+      'Azure DevOps uses `organization/project/repository`.',
+    );
+    expect(skillContent).toContain(
+      'Copy each task-provided repository identifier verbatim into its matching `repositories[].repository` field.',
+    );
+    expect(skillContent).not.toContain(
+      'Use the provided repository identifier in `owner/repo` format',
+    );
+  });
+
   it('tells the agent how to discover and start supported worker services', () => {
     const skillContent = readSkillContent();
 
