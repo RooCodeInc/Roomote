@@ -375,6 +375,13 @@ export type UpsertAutomationInput = {
   instructions?: string | null;
   settings?: Record<string, unknown>;
   targets?: AutomationTarget[];
+  /**
+   * Target kinds this write fully owns. When set alongside `targets`,
+   * existing targets of OTHER kinds are preserved instead of being replaced
+   * wholesale — so a Slack-only settings save cannot clobber teams/telegram
+   * targets configured elsewhere. Omit to keep full-replacement semantics.
+   */
+  managedTargetKinds?: readonly BackgroundAutomationTargetKind[];
   updatedAt?: Date;
 };
 
@@ -384,6 +391,20 @@ export async function upsertAutomation(
 ): Promise<void> {
   const now = input.updatedAt ?? new Date();
   const schedule = input.enabled ? (input.schedule ?? {}) : {};
+
+  let targets = input.targets;
+  if (input.targets !== undefined && input.managedTargetKinds !== undefined) {
+    const managedKinds = new Set(input.managedTargetKinds);
+    const existing = await tx.query.automations.findFirst({
+      columns: { targets: true },
+      where: eq(automations.key, input.key),
+    });
+    const preserved = (existing?.targets ?? []).filter(
+      (target) => !managedKinds.has(target.targetKind),
+    );
+    targets = [...preserved, ...input.targets];
+  }
+
   const values: typeof automations.$inferInsert = {
     key: input.key,
     internal: isInternalAutomationKey(input.key),
@@ -407,9 +428,9 @@ export async function upsertAutomation(
     set.instructions = input.instructions;
   }
 
-  if (input.targets !== undefined) {
-    values.targets = input.targets;
-    set.targets = input.targets;
+  if (targets !== undefined) {
+    values.targets = targets;
+    set.targets = targets;
   }
 
   await tx.insert(automations).values(values).onConflictDoUpdate({
