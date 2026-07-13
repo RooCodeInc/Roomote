@@ -3,23 +3,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   buildRowsMock,
   claimWorkItemMock,
+  createDirectMessageMock,
   createTaskThreadMock,
   enqueueFollowupMock,
   findDestinationMock,
+  findUserMappingMock,
   findTrackedCardMock,
   hasTrackedMock,
   insertRowsMock,
+  postMessageMock,
   resolveProviderMock,
   scheduleFollowupMock,
 } = vi.hoisted(() => ({
   buildRowsMock: vi.fn(),
   claimWorkItemMock: vi.fn(),
+  createDirectMessageMock: vi.fn(),
   createTaskThreadMock: vi.fn(),
   enqueueFollowupMock: vi.fn(),
   findDestinationMock: vi.fn(),
+  findUserMappingMock: vi.fn(),
   findTrackedCardMock: vi.fn(),
   hasTrackedMock: vi.fn(),
   insertRowsMock: vi.fn(),
+  postMessageMock: vi.fn(),
   resolveProviderMock: vi.fn(),
   scheduleFollowupMock: vi.fn(),
 }));
@@ -44,6 +50,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   enqueueDiscordSuggestedTasksOnboardingFollowup: enqueueFollowupMock,
   findDiscordDefaultDestination: findDestinationMock,
+  findDiscordUserMappingByRoomoteUserId: findUserMappingMock,
 }));
 
 vi.mock('../../tasks/setup-suggestion-lifecycle.js', () => ({
@@ -78,6 +85,7 @@ describe('Discord setup suggestions', () => {
       channelId: 'channel-1',
       channelType: 0,
     });
+    findUserMappingMock.mockResolvedValue(null);
     hasTrackedMock.mockResolvedValue(false);
     createTaskThreadMock.mockResolvedValue({
       channelId: 'thread-1',
@@ -87,7 +95,11 @@ describe('Discord setup suggestions', () => {
       name: 'Suggested tasks',
     });
     resolveProviderMock.mockResolvedValue({
-      provider: { createTaskThread: createTaskThreadMock },
+      provider: {
+        createDirectMessage: createDirectMessageMock,
+        createTaskThread: createTaskThreadMock,
+        postMessage: postMessageMock,
+      },
     });
     buildRowsMock.mockReturnValue([{ id: 'tracked-1' }]);
     enqueueFollowupMock.mockResolvedValue({ enqueued: true, jobId: 'job-1' });
@@ -102,6 +114,54 @@ describe('Discord setup suggestions', () => {
       investigationContext: null,
       targetRepositoryFullName: 'owner/repo',
       launchClaimedAt: new Date('2026-07-12T12:00:00.000Z'),
+    });
+  });
+
+  it('sends setup suggestions to the linked user by DM when no server destination exists', async () => {
+    findDestinationMock.mockResolvedValue(null);
+    findUserMappingMock.mockResolvedValue({
+      discordUserId: 'discord-user-1',
+    });
+    createDirectMessageMock.mockResolvedValue({
+      id: 'dm-channel-1',
+      name: 'Direct message',
+      type: 1,
+    });
+    postMessageMock.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'dm-channel-1',
+      messageId: 'dm-message-1',
+    });
+
+    const delivered = await postSetupTaskSuggestionsToDiscord({
+      sourceTaskId: 'setup-task-1',
+      createdByUserId: 'user-1',
+      suggestions: [
+        { id: 'suggestion-1', title: 'Fix tests', brief: 'Repair it.' },
+      ],
+    });
+
+    expect(delivered).toBe(true);
+    expect(createDirectMessageMock).toHaveBeenCalledWith('discord-user-1');
+    expect(findDestinationMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-channel-1',
+        buttons: expect.any(Array),
+      }),
+    );
+    expect(buildRowsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'dm-message-1',
+        channelId: 'dm-channel-1',
+      }),
+    );
+    expect(enqueueFollowupMock).toHaveBeenCalledWith({
+      guildId: null,
+      channelId: 'dm-channel-1',
+      threadId: 'dm-channel-1',
+      introMessageId: 'dm-message-1',
+      sourceTaskId: 'setup-task-1',
     });
   });
 

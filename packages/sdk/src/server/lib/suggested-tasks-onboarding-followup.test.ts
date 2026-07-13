@@ -65,4 +65,30 @@ describe('enqueueDiscordSuggestedTasksOnboardingFollowup', () => {
       },
     );
   });
+
+  it('uses a deterministic DM job id when no guild is involved', async () => {
+    const request = {
+      guildId: null,
+      channelId: 'dm-channel-1',
+      threadId: 'dm-channel-1',
+      introMessageId: 'message-1',
+      sourceTaskId: 'task-1',
+    };
+
+    await expect(
+      enqueueDiscordSuggestedTasksOnboardingFollowup(request),
+    ).resolves.toEqual({
+      enqueued: true,
+      jobId:
+        'discord-suggested-tasks-onboarding-followup-dm-dm-channel-1-task-1',
+    });
+    expect(addMock).toHaveBeenCalledWith(
+      'send-suggested-tasks-onboarding-followup',
+      request,
+      expect.objectContaining({
+        jobId:
+          'discord-suggested-tasks-onboarding-followup-dm-dm-channel-1-task-1',
+      }),
+    );
+  });
 });

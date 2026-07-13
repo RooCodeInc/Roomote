@@ -57,7 +57,7 @@ export const discordSuggestedTasksOnboardingFollowupJob = async (
       });
 
       console.log(
-        `[DiscordSuggestedTasksOnboardingFollowup] Posted follow-up to thread ${data.threadId} in guild ${data.guildId} for sourceTaskId=${data.sourceTaskId}`,
+        `[DiscordSuggestedTasksOnboardingFollowup] Posted follow-up to ${data.guildId ? `thread ${data.threadId} in guild ${data.guildId}` : `DM ${data.channelId}`} for sourceTaskId=${data.sourceTaskId}`,
       );
     },
   });

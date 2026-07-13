@@ -184,7 +184,7 @@ export const DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME =
   'discord-suggested-tasks-onboarding-followup-jobs';
 
 export const discordSuggestedTasksOnboardingFollowupRequestSchema = z.object({
-  guildId: z.string(),
+  guildId: z.string().nullable(),
   channelId: z.string(),
   threadId: z.string(),
   introMessageId: z.string(),
@@ -201,7 +201,7 @@ export const enqueueDiscordSuggestedTasksOnboardingFollowup =
     jobIdPrefix: 'discord-suggested-tasks-onboarding-followup',
     requestSchema: discordSuggestedTasksOnboardingFollowupRequestSchema,
     buildJobIdParts: (request) => [
-      request.guildId,
+      request.guildId ?? 'dm',
       request.threadId,
       request.sourceTaskId,
     ],

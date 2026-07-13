@@ -42,6 +42,7 @@ import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findTelegramPrimaryChatId,
   findDiscordDefaultDestination,
+  findDiscordUserMappingByRoomoteUserId,
   findTeamsPrimaryConversation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
@@ -450,7 +451,7 @@ type SetupChatFallbackHandoffTarget =
   | {
       provider: 'discord';
       channelId: string;
-      guildId: string;
+      guildId?: string;
       botToken: string;
       applicationId: string;
     }
@@ -470,11 +471,41 @@ type SetupChatFallbackHandoffTarget =
  * captured primary conversation and resolvable bot credentials exist, so a
  * half-configured Teams deployment never blocks onboarding.
  */
-async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbackHandoffTarget | null> {
-  const [discordCredentials, discordDestination] = await Promise.all([
-    resolveDiscordRuntimeCredentials(),
-    findDiscordDefaultDestination(),
-  ]);
+async function resolveSetupChatFallbackHandoffTarget(
+  userId: string,
+): Promise<SetupChatFallbackHandoffTarget | null> {
+  const [discordCredentials, discordDestination, discordUserMapping] =
+    await Promise.all([
+      resolveDiscordRuntimeCredentials(),
+      findDiscordDefaultDestination(),
+      findDiscordUserMappingByRoomoteUserId(userId),
+    ]);
+  if (
+    discordCredentials.botToken &&
+    discordCredentials.applicationId &&
+    discordUserMapping
+  ) {
+    try {
+      const discord = new DiscordCommunicationProvider({
+        botToken: discordCredentials.botToken,
+        applicationId: discordCredentials.applicationId,
+      });
+      const directMessage = await discord.createDirectMessage(
+        discordUserMapping.discordUserId,
+      );
+      return {
+        provider: 'discord',
+        channelId: directMessage.id,
+        botToken: discordCredentials.botToken,
+        applicationId: discordCredentials.applicationId,
+      };
+    } catch (error) {
+      console.warn(
+        '[setup-new] Failed to open a Discord DM with the linked setup user; trying another chat destination.',
+        error,
+      );
+    }
+  }
   if (
     discordCredentials.botToken &&
     discordCredentials.applicationId &&
@@ -2271,7 +2302,8 @@ export async function startSetupNewOnboardingTaskCommand(
       // so the kickoff still gets a real conversation thread; only when no
       // chat surface exists does onboarding run as a web-only task whose
       // progress stays visible in the setup wizard's task panel.
-      const fallbackTarget = await resolveSetupChatFallbackHandoffTarget();
+      const fallbackTarget =
+        await resolveSetupChatFallbackHandoffTarget(userId);
 
       if (fallbackTarget) {
         const kickoffMessage = buildSetupKickoffText();
@@ -2285,16 +2317,29 @@ export async function startSetupNewOnboardingTaskCommand(
             applicationId: fallbackTarget.applicationId,
           });
           try {
-            const thread = await discord.createTaskThread({
-              channelId: fallbackTarget.channelId,
-              name: 'Set up Roomote',
-              initialText: kickoffMessage,
-            });
-            if (thread.messageId) {
-              kickoffMessageId = thread.messageId;
-              kickoffChannelId = thread.parentChannelId;
-              kickoffThreadId = thread.channelId;
+            if (fallbackTarget.guildId) {
+              const thread = await discord.createTaskThread({
+                channelId: fallbackTarget.channelId,
+                name: 'Set up Roomote',
+                initialText: kickoffMessage,
+              });
+              if (thread.messageId) {
+                kickoffMessageId = thread.messageId;
+                kickoffChannelId = thread.parentChannelId;
+                kickoffThreadId = thread.channelId;
+              }
             } else {
+              const posted = await discord.postMessage({
+                channelId: fallbackTarget.channelId,
+                text: kickoffMessage,
+                textFormat: 'markdown',
+              });
+              kickoffMessageId = posted.messageId ?? null;
+              kickoffChannelId = posted.messageId
+                ? fallbackTarget.channelId
+                : null;
+            }
+            if (!kickoffMessageId) {
               console.warn(
                 '[setup-new] The Discord setup kickoff returned no message id; onboarding continues as a web-only task.',
               );
@@ -2397,7 +2442,8 @@ export async function startSetupNewOnboardingTaskCommand(
                         : {}),
                     }
                   : {}),
-                ...(fallbackTarget.provider === 'discord'
+                ...(fallbackTarget.provider === 'discord' &&
+                fallbackTarget.guildId
                   ? { communicationGuildId: fallbackTarget.guildId }
                   : {}),
                 ...(fallbackTarget.provider === 'teams'

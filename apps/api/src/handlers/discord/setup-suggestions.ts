@@ -10,6 +10,7 @@ import {
 import {
   enqueueDiscordSuggestedTasksOnboardingFollowup,
   findDiscordDefaultDestination,
+  findDiscordUserMappingByRoomoteUserId,
   type DiscordDefaultDestination,
 } from '@roomote/sdk/server';
 
@@ -67,12 +68,6 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
     return false;
   }
 
-  const destination =
-    params.destination ?? (await findDiscordDefaultDestination());
-  if (!destination) {
-    return false;
-  }
-
   if (await hasTrackedSetupSuggestionMessages(sourceTaskId)) {
     apiLogger.debug(
       `[SetupSuggestionLifecycle] Skip Discord suggestion post because tracked messages already exist for sourceTaskId=${sourceTaskId}`,
@@ -84,6 +79,28 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
   try {
     ({ provider } = await resolveDiscordProvider());
   } catch {
+    return false;
+  }
+
+  let destination = params.destination ?? null;
+  let directMessage: Awaited<
+    ReturnType<typeof provider.createDirectMessage>
+  > | null = null;
+  if (!destination) {
+    try {
+      const mapping =
+        await findDiscordUserMappingByRoomoteUserId(createdByUserId);
+      directMessage = mapping
+        ? await provider.createDirectMessage(mapping.discordUserId)
+        : null;
+    } catch {
+      return false;
+    }
+  }
+  if (!destination && !directMessage) {
+    destination = await findDiscordDefaultDestination();
+  }
+  if (!destination && !directMessage) {
     return false;
   }
 
@@ -103,15 +120,26 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
       },
     ],
   );
-  const thread = await provider.createTaskThread({
-    channelId: destination.channelId,
-    name: buildCommunicationTaskThreadName('Suggested tasks'),
-    initialText: fitDiscordInitialPost(introLines.join('\n')),
-    buttons,
-  });
-
-  const introMessageId = thread.messageId;
-  if (!introMessageId) {
+  const initialText = fitDiscordInitialPost(introLines.join('\n'));
+  const thread = destination
+    ? await provider.createTaskThread({
+        channelId: destination.channelId,
+        name: buildCommunicationTaskThreadName('Suggested tasks'),
+        initialText,
+        buttons,
+      })
+    : null;
+  const directMessagePost = directMessage
+    ? await provider.postMessage({
+        channelId: directMessage.id,
+        text: initialText,
+        textFormat: 'markdown',
+        buttons,
+      })
+    : null;
+  const deliveryChannelId = thread?.channelId ?? directMessage?.id;
+  const introMessageId = thread?.messageId ?? directMessagePost?.messageId;
+  if (!introMessageId || !deliveryChannelId) {
     return false;
   }
 
@@ -119,7 +147,7 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
     buildSharedMessageSuggestionRows({
       surface: 'discord',
       messageId: introMessageId,
-      channelId: thread.channelId,
+      channelId: deliveryChannelId,
       sourceTaskId,
       createdByUserId,
       suggestions: limitedSuggestions,
@@ -127,7 +155,7 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
   );
 
   apiLogger.debug(
-    `[SetupSuggestionLifecycle] Published ${limitedSuggestions.length} setup suggestions to Discord thread ${thread.channelId} for sourceTaskId=${sourceTaskId}`,
+    `[SetupSuggestionLifecycle] Published ${limitedSuggestions.length} setup suggestions to Discord ${destination ? `thread ${deliveryChannelId}` : `DM ${deliveryChannelId}`} for sourceTaskId=${sourceTaskId}`,
   );
 
   await scheduleSuggestedTasksFollowupBestEffort({
@@ -135,9 +163,9 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
     sourceTaskId,
     enqueue: () =>
       enqueueDiscordSuggestedTasksOnboardingFollowup({
-        guildId: destination.guildId,
-        channelId: destination.channelId,
-        threadId: thread.channelId,
+        guildId: destination?.guildId ?? null,
+        channelId: destination?.channelId ?? deliveryChannelId,
+        threadId: deliveryChannelId,
         introMessageId,
         sourceTaskId,
       }),

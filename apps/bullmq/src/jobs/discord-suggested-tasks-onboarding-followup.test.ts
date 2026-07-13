@@ -23,7 +23,7 @@ vi.mock('@roomote/sdk/server', async () => {
 
   return {
     discordSuggestedTasksOnboardingFollowupRequestSchema: z.object({
-      guildId: z.string(),
+      guildId: z.string().nullable(),
       channelId: z.string(),
       threadId: z.string(),
       introMessageId: z.string(),
@@ -88,6 +88,24 @@ describe('discordSuggestedTasksOnboardingFollowupJob', () => {
     });
     expect(postMessageMock.mock.calls[0]?.[0]).not.toHaveProperty(
       'replyToMessageId',
+    );
+  });
+
+  it('posts the follow-up in the linked user DM', async () => {
+    await discordSuggestedTasksOnboardingFollowupJob(
+      buildJob({
+        ...JOB_DATA,
+        guildId: null,
+        channelId: 'dm-channel-1',
+        threadId: 'dm-channel-1',
+      }),
+    );
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-channel-1',
+        threadId: 'dm-channel-1',
+      }),
     );
   });
 

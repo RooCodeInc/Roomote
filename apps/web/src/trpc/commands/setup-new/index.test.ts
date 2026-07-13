@@ -74,6 +74,7 @@ vi.mock('@roomote/sdk/server', () => ({
   ),
   findTelegramPrimaryChatId: vi.fn(async () => null),
   findDiscordDefaultDestination: vi.fn(async () => null),
+  findDiscordUserMappingByRoomoteUserId: vi.fn(async () => null),
   findTeamsPrimaryConversation: vi.fn(async () => null),
   recordSlackConversationMessageBestEffort: vi.fn(),
 }));
@@ -206,6 +207,7 @@ import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findTelegramPrimaryChatId,
   findDiscordDefaultDestination,
+  findDiscordUserMappingByRoomoteUserId,
   findTeamsPrimaryConversation,
 } from '@roomote/sdk/server';
 import { SlackNotifier } from '@roomote/slack';
@@ -1035,6 +1037,7 @@ describe('setup-new onboarding task start command', () => {
       identityErrorCode: null,
     });
     vi.mocked(findDiscordDefaultDestination).mockResolvedValue(null);
+    vi.mocked(findDiscordUserMappingByRoomoteUserId).mockResolvedValue(null);
     vi.mocked(findTelegramPrimaryChatId).mockResolvedValue(null);
     vi.mocked(findTeamsPrimaryConversation).mockResolvedValue(null);
     vi.mocked(
@@ -1221,6 +1224,70 @@ describe('setup-new onboarding task start command', () => {
         }),
       }),
     );
+  });
+
+  it('sends the setup kickoff to the linked Discord user without requiring a server destination', async () => {
+    mockOnboardingTransaction({ slackInstallation: null });
+    const createDirectMessage = vi.fn(async () => ({
+      id: 'dm-channel-1',
+      name: 'Direct message',
+      type: 1,
+    }));
+    const postMessage = vi.fn(async () => ({
+      provider: 'discord' as const,
+      channelId: 'dm-channel-1',
+      messageId: 'dm-message-1',
+    }));
+    vi.mocked(resolveDiscordRuntimeCredentials).mockResolvedValue({
+      botToken: 'discord-token',
+      applicationId: 'app-1',
+      applicationName: 'Roomote',
+      botUserId: 'bot-1',
+      botUsername: 'roomote',
+      botDisplayName: 'Roomote',
+      identitySource: 'live',
+      identityErrorCode: null,
+    });
+    vi.mocked(findDiscordUserMappingByRoomoteUserId).mockResolvedValue({
+      id: 'mapping-1',
+      userId: 'setup-test-user',
+      discordUserId: 'discord-user-1',
+      discordUsername: 'setup-user',
+      discordGlobalName: 'Setup User',
+      discordDmChannelId: null,
+      createdAt: new Date('2026-07-13T00:00:00.000Z'),
+      updatedAt: new Date('2026-07-13T00:00:00.000Z'),
+    });
+    vi.mocked(DiscordCommunicationProvider).mockImplementation(function () {
+      return {
+        createDirectMessage,
+        postMessage,
+      } as unknown as DiscordCommunicationProvider;
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(postMessage).toHaveBeenCalledWith({
+      channelId: 'dm-channel-1',
+      text: expect.any(String),
+      textFormat: 'markdown',
+    });
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'discord',
+            communicationChannelId: 'dm-channel-1',
+            communicationMessageId: 'dm-message-1',
+          }),
+        }),
+      }),
+    );
+    const payload = vi.mocked(enqueueTask).mock.calls[0]?.[0].task.payload;
+    expect(payload).not.toHaveProperty('communicationGuildId');
+    expect(payload).not.toHaveProperty('communicationThreadId');
+    expect(payload).not.toHaveProperty('discordTaskThread');
   });
 
   it('falls back to a Teams kickoff when no Slack or Telegram destination exists but a primary conversation was captured', async () => {
