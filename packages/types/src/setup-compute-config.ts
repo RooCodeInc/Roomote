@@ -571,6 +571,9 @@ const DEFAULT_WORKER_IMAGE_REPOSITORY = 'ghcr.io/roocodeinc/roomote-worker';
 export const DEVELOPMENT_MODAL_BASE_IMAGE_REF =
   'ghcr.io/roocodeinc/roomote-worker:develop';
 
+const ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF =
+  'ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF';
+
 /**
  * Derives the published worker image ref for the running app release:
  * `<repo>:${RELEASE_VERSION}`, where the repo defaults to the official GHCR
@@ -638,9 +641,14 @@ export function resolveDerivedModalBaseImageRef(
     return derivedFromWorkerImage;
   }
 
-  return isDevelopmentRuntime(runtimeEnv)
-    ? DEVELOPMENT_MODAL_BASE_IMAGE_REF
-    : null;
+  if (!isDevelopmentRuntime(runtimeEnv)) {
+    return null;
+  }
+
+  return (
+    runtimeEnv[ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF]?.trim() ||
+    DEVELOPMENT_MODAL_BASE_IMAGE_REF
+  );
 }
 
 /**

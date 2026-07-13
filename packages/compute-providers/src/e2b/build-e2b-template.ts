@@ -93,7 +93,14 @@ export async function buildE2bWorkerTemplate(
         ? { username: registryUsername, password: registryPassword }
         : undefined,
     )
-    .runCmd('sudo docker compose version');
+    // E2B doesn't preserve a custom image's Dockerfile USER for template
+    // steps, and its build environment can reject sudo even for an image user
+    // that has passwordless sudo. Validate the baked-in Docker CLI directly as
+    // root, then restore Roomote's intended runtime identity.
+    .setUser('root')
+    .runCmd('/usr/bin/docker compose version')
+    .setUser('roomote')
+    .setWorkdir('/home/roomote');
 
   const buildInfo = await Template.build(template, templateRef, {
     apiKey,

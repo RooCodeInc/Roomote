@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { execa } from 'execa';
 import ora from 'ora';
 
 import { PRODUCT_NAME } from '@roomote/types';
@@ -22,6 +23,32 @@ import {
 // routing in deploy/caddy/Caddyfile.
 const CADDY_DEV_PORT = 18080;
 
+const DEVELOPMENT_WORKER_IMAGE_REPOSITORY = 'ghcr.io/roocodeinc/roomote-worker';
+
+async function configureHostedDevelopmentWorkerImage(): Promise<void> {
+  if (process.env.ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF) {
+    return;
+  }
+
+  try {
+    const { stdout } = await execa(
+      'git',
+      ['rev-parse', '--short=8', 'origin/develop'],
+      { cwd: process.cwd() },
+    );
+    const imageRef = `${DEVELOPMENT_WORKER_IMAGE_REPOSITORY}:develop-${stdout.trim()}`;
+
+    process.env.ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF = imageRef;
+    // Modal consumes its base image directly instead of provisioning a named
+    // artifact. Preserve an operator override, otherwise pin it to the same
+    // immutable development image as E2B, Daytona, and Blaxel.
+    process.env.MODAL_BASE_IMAGE_REF ||= imageRef;
+  } catch {
+    // Source archives and shallow checkouts may not have origin/develop. The
+    // shared resolver retains the mutable :develop fallback for those cases.
+  }
+}
+
 class LocalDevStarter {
   static async run(options: ScriptOptions): Promise<void> {
     try {
@@ -34,6 +61,8 @@ class LocalDevStarter {
       );
 
       await EnvService.checkEnvVars();
+
+      await configureHostedDevelopmentWorkerImage();
 
       await WatchmanService.checkInstalled();
       await PM2Service.checkInstalled();

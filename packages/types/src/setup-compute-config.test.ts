@@ -802,6 +802,16 @@ describe('resolveDerivedModalBaseImageRef', () => {
       }),
     ).toBe(DEVELOPMENT_MODAL_BASE_IMAGE_REF);
   });
+
+  it('uses the immutable development worker image selected by the dev launcher', () => {
+    expect(
+      resolveDerivedModalBaseImageRef({
+        NODE_ENV: 'development',
+        ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF:
+          'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      }),
+    ).toBe('ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7');
+  });
 });
 
 describe('resolveEffectiveModalBaseImageRef', () => {
