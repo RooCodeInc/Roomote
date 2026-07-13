@@ -133,7 +133,7 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it('uses Modal VM sandboxes for environments with container projects', async () => {
+  it('rejects environments with container projects before starting Modal', async () => {
     mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
@@ -149,28 +149,27 @@ describe('spawnModalWorker', () => {
       },
     });
 
-    await spawnModalWorker(
-      mockTaskRun({
-        payloadKind: TaskPayloadKind.StandardTask,
-        payload: { repo: 'test/repo', environmentId: 'env_123' },
-      }),
-      'auth_token',
-      {
-        deploymentSlug: 'roomote',
-        modalTokenId: 'token-id',
-        modalTokenSecret: 'token-secret',
-        modalBaseImageRef: 'image-ref',
-        modalTimeoutMs: 60_000,
-      },
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_123' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'image-ref',
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow(
+      'Modal does not currently support Docker Compose or Dockerfile projects',
     );
 
-    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'modal',
-        config: expect.objectContaining({ vmRuntime: true }),
-      }),
-    );
-    expect(mockCreateModalMachine).toHaveBeenCalled();
+    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
+    expect(mockCreateModalMachine).not.toHaveBeenCalled();
   });
 
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {

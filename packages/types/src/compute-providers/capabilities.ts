@@ -45,7 +45,7 @@ export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
-  supportsContainerProjects: true,
+  supportsContainerProjects: false,
 };
 
 export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
