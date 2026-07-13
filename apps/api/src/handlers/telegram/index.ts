@@ -42,7 +42,14 @@ import {
 
 const TELEGRAM_WELCOME_MESSAGE = [
   "👋 Hi, I'm Roomote. Message me here to start tasks in your connected repos — I'll route your request, reply with progress, and post results (including screenshots) right in this chat.",
-  'Try something like *"Fix the flaky auth test"* or *"What changed in the repo this week?"*. While a task is running you can send follow-ups here, and every started task has a cancel button. Telegram has no threads, so after a task finishes send `/new <request>` (or `/done <request>`) to start a fresh task instead of resuming the previous one.',
+  'Try something like *"Fix the flaky auth test"* or *"What changed in the repo this week?"*. While a task is running you can send follow-ups in its chat or topic, and every started task has a cancel button.',
+  [
+    '*Available commands*',
+    '`/start` — show this welcome message.',
+    '`/start <request>` — start a task with the request.',
+    '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+    '`/done <request>` — alias for `/new`.',
+  ].join('\n'),
 ].join('\n\n');
 
 const TELEGRAM_WELCOME_LINK_NUDGE =
