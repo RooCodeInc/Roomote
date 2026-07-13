@@ -1,8 +1,7 @@
 const {
   mockEnqueueTask,
   mockGetGitLabAutomationTargets,
-  mockUpdateTaskPrStatus,
-  mockRecordPrStatusChangeInTaskHistory,
+  mockMarkTaskPullRequestTerminal,
   mockRepositoriesFindFirst,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
@@ -11,8 +10,7 @@ const {
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetGitLabAutomationTargets: vi.fn(),
-  mockUpdateTaskPrStatus: vi.fn(),
-  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  mockMarkTaskPullRequestTerminal: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
@@ -25,8 +23,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  updateTaskPrStatus: mockUpdateTaskPrStatus,
-  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  markTaskPullRequestTerminal: mockMarkTaskPullRequestTerminal,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -99,7 +96,7 @@ describe('handleGitLabMergeRequest', () => {
   beforeEach(() => {
     mockEnqueueTask.mockReset();
     mockGetGitLabAutomationTargets.mockReset();
-    mockUpdateTaskPrStatus.mockReset();
+    mockMarkTaskPullRequestTerminal.mockReset();
     mockRepositoriesFindFirst.mockReset();
     mockNotifySlackPrMerge.mockReset();
     mockNotifyTeamsPrMerge.mockReset();
@@ -238,11 +235,17 @@ describe('handleGitLabMergeRequest', () => {
       handleGitLabMergeRequest(makePayload('merge')),
     ).resolves.toEqual({ status: 'ok' });
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'gitlab',
-      'acme/backend',
-      42,
-      'merged',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitlab',
+        repository: 'acme/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        status: 'merged',
+        actorLogin: 'roomote-bot',
+      },
+      { logLabel: 'handleGitLabMergeRequest' },
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
@@ -270,11 +273,17 @@ describe('handleGitLabMergeRequest', () => {
   it('does not notify merge threads for closed merge requests', async () => {
     await handleGitLabMergeRequest(makePayload('close'));
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'gitlab',
-      'acme/backend',
-      42,
-      'closed',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitlab',
+        repository: 'acme/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        status: 'closed',
+        actorLogin: 'roomote-bot',
+      },
+      { logLabel: 'handleGitLabMergeRequest' },
     );
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();

@@ -18,7 +18,7 @@ const {
   mockResolveDeploymentEnvVar,
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
-  mockRecordPrStatusChangeInTaskHistory,
+  mockMarkTaskPullRequestTerminal,
   mockVerifyAndReceive,
   webhooksConstructorParams,
 } = vi.hoisted(() => ({
@@ -46,7 +46,7 @@ const {
   mockResolveDeploymentEnvVar: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
-  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  mockMarkTaskPullRequestTerminal: vi.fn(),
   mockVerifyAndReceive: vi.fn(),
   webhooksConstructorParams: [] as unknown[],
 }));
@@ -98,7 +98,7 @@ vi.mock('@roomote/sdk/server', () => ({
   updateTaskPrStatus: mockUpdateTaskPrStatus,
   upsertGitHubPullRequestFactFromWebhook:
     mockUpsertGitHubPullRequestFactFromWebhook,
-  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  markTaskPullRequestTerminal: mockMarkTaskPullRequestTerminal,
 }));
 
 vi.mock('../../logging', () => ({
@@ -177,6 +177,7 @@ describe('github webhook router', () => {
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
+    mockMarkTaskPullRequestTerminal.mockReset();
     mockVerifyAndReceive.mockReset();
 
     mockIsRepoSkipped.mockReturnValue(false);
