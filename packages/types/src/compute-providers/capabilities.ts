@@ -58,7 +58,7 @@ export const DAYTONA_CAPABILITIES: ComputeProviderCapabilities = {
   supportsStandbyResume: false,
   supportsResume: true,
   supportsFileWrite: true,
-  supportsContainerProjects: false,
+  supportsContainerProjects: true,
 };
 
 export const E2B_CAPABILITIES: ComputeProviderCapabilities = {

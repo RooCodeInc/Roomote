@@ -163,7 +163,7 @@ export async function spawnModalWorker(
 
   if (environmentConfig?.container_projects?.length) {
     throw new NonRetryableSpawnError(
-      'Modal does not support environment container projects. Use Docker, E2B, or Blaxel for this environment.',
+      'Modal does not support environment container projects. Use Docker, Daytona, E2B, or Blaxel for this environment.',
     );
   }
 
