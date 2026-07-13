@@ -20,7 +20,17 @@ const MANUAL_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const ciFailureTriageJob = createScheduledTriageJob({
   automationKey: 'ci_failure_triage',
-  async buildScanTask({ channelId, manualTrigger }) {
+  async buildScanTask({ channelId, destination, manualTrigger }) {
+    // CI failure triage's prompt and webhook announcements are still
+    // Slack-shaped; skip rather than launch a Slack-worded task at a
+    // Teams/Telegram destination.
+    if (destination.provider !== 'slack') {
+      return {
+        kind: 'skip',
+        reason: 'CI failure triage reports to Slack only for now.',
+      };
+    }
+
     if (!(await hasActiveGitHubInstallation())) {
       return { kind: 'skip', reason: 'GitHub is not configured' };
     }
