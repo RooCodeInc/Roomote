@@ -1,23 +1,26 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
-const { createGitHubAppManifestMock, saveMutationOptionsRef } = vi.hoisted(
-  () => ({
+const { createGitHubAppManifestMock, saveMutationOptionsRef, mutateAsyncMock } =
+  vi.hoisted(() => ({
     createGitHubAppManifestMock: vi.fn(),
+    mutateAsyncMock: vi.fn(async () => undefined),
     saveMutationOptionsRef: {
       current: null as {
         mutationFn?: (variables: unknown) => Promise<unknown>;
       } | null,
     },
-  }),
-);
+  }));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: typeof saveMutationOptionsRef.current) => {
     saveMutationOptionsRef.current = options;
 
     return {
-      mutateAsync: vi.fn(),
+      mutateAsync: mutateAsyncMock,
       isPending: false,
     };
   },
@@ -215,5 +218,194 @@ describe('StepSourceControlConfig', () => {
     expect(
       screen.queryByRole('button', { name: 'Create GitHub App' }),
     ).not.toBeInTheDocument();
+  });
+
+  function buildAdoSourceControlSetup(
+    fieldOverrides: Partial<
+      SetupSourceControlStatus['providers'][number]['fields'][number]
+    >[] = [],
+  ): SetupSourceControlStatus {
+    const catalog = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+      (provider) => provider.provider === 'ado',
+    )!;
+    const fields = catalog.fields.map((field, index) => ({
+      ...field,
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      satisfiedByEnvVarName: null,
+      ...fieldOverrides[index],
+    }));
+
+    return buildSourceControlSetup({
+      preselectedProvider: 'ado',
+      providers: [
+        {
+          provider: 'ado',
+          label: 'Azure DevOps',
+          connectionMode: 'token',
+          runtimeConfigSatisfied: false,
+          savedConfigSatisfied: false,
+          configSatisfied: false,
+          configSatisfiedByRuntimeEnv: false,
+          connected: false,
+          repositoryCount: 0,
+          fields,
+        },
+      ],
+    });
+  }
+
+  it('shows only Azure DevOps organization and PAT by default', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
+    expect(screen.getByText('Azure DevOps Access Token')).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Azure DevOps Base URL/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Azure DevOps Username/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Microsoft Entra Client ID/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Azure DevOps Webhook Secret/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('reveals advanced Azure DevOps fields without showing the webhook secret', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    );
+
+    expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Microsoft Entra Client Secret/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Tenant ID/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Azure DevOps Webhook Secret/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not block continue on hidden optional Azure DevOps fields', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
+      target: { value: 'my-org' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
+      target: { value: 'ado-pat' },
+    });
+
+    expect(
+      screen.getByRole('button', { name: /Save and continue/i }),
+    ).toBeEnabled();
+  });
+
+  it('submits only visible Azure DevOps values when advanced config is closed', async () => {
+    const setup = buildAdoSourceControlSetup();
+    const provider = setup.providers[0]!;
+    const baseUrlField = provider.fields.find(
+      (field) => field.envVarName === 'ADO_BASE_URL',
+    )!;
+    baseUrlField.savedSatisfied = true;
+    baseUrlField.savedValue = 'https://ado.example.com';
+    baseUrlField.satisfiedByEnvVarName = 'ADO_BASE_URL';
+
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={setup}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
+      target: { value: 'my-org' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
+      target: { value: 'ado-pat' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save and continue/i }));
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_ORGANIZATION: 'my-org',
+        ADO_TOKEN: 'ado-pat',
+      },
+    });
+  });
+
+  it('includes advanced Azure DevOps values when the advanced section is open', async () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
+      target: { value: 'my-org' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
+      target: { value: 'ado-pat' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    );
+    fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
+      target: { value: 'https://ado.example.com' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_USERNAME'), {
+      target: { value: 'service-user' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_ID'), {
+      target: { value: 'client-id' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_CLIENT_SECRET'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('ADO_TENANT_ID'), {
+      target: { value: 'tenant-id' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Save and continue/i }));
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_ORGANIZATION: 'my-org',
+        ADO_TOKEN: 'ado-pat',
+        ADO_BASE_URL: 'https://ado.example.com',
+        ADO_USERNAME: 'service-user',
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_TENANT_ID: 'tenant-id',
+      },
+    });
   });
 });

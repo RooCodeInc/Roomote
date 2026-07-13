@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import type {
-  SetupSourceControlStatus,
-  SourceControlProvider,
+import {
+  getSetupSourceControlVisibleFields,
+  type SetupSourceControlStatus,
+  type SourceControlProvider,
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
@@ -56,6 +57,21 @@ function getNonSecretFieldInitialValues(
   return next;
 }
 
+function filterValuesToFields(
+  fields: readonly SourceControlField[],
+  values: Record<string, string>,
+): Record<string, string> {
+  const next: Record<string, string> = {};
+
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(values, field.envVarName)) {
+      next[field.envVarName] = values[field.envVarName] ?? '';
+    }
+  }
+
+  return next;
+}
+
 type GitHubAppManifestForm = {
   postTarget: string;
   values: {
@@ -84,6 +100,7 @@ export function StepSourceControlConfig({
     Record<string, boolean>
   >({});
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
+  const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
   const [githubOrganization, setGithubOrganization] = useState('');
   const [manifestForm, setManifestForm] =
     useState<GitHubAppManifestForm | null>(null);
@@ -120,10 +137,33 @@ export function StepSourceControlConfig({
       ),
     [sourceControlSetup.providers, effectiveSelectedProviderId],
   );
+  const isAdo = selectedProvider?.provider === 'ado';
+  const providerFields = useMemo(
+    () => selectedProvider?.fields ?? [],
+    [selectedProvider],
+  );
+  const baseFields = useMemo(
+    () => getSetupSourceControlVisibleFields(providerFields),
+    [providerFields],
+  );
+  const advancedFields = useMemo(
+    () =>
+      providerFields.filter(
+        (field) => field.advanced === true && field.setupHidden !== true,
+      ),
+    [providerFields],
+  );
+  const visibleFields = useMemo(
+    () =>
+      getSetupSourceControlVisibleFields(providerFields, {
+        showAdvancedConfig: isAdo && showAdoAdvancedConfig,
+      }),
+    [providerFields, isAdo, showAdoAdvancedConfig],
+  );
 
   // Key off field content, not array identity — parent refreshes create a new
   // fields array each time and must not wipe in-progress edits.
-  const nonSecretInitialValuesKey = (selectedProvider?.fields ?? [])
+  const nonSecretInitialValuesKey = providerFields
     .filter((field) => !isSecretSourceControlField(field))
     .map(
       (field) =>
@@ -131,7 +171,7 @@ export function StepSourceControlConfig({
     )
     .join('|');
   const nonSecretInitialValues = useMemo(
-    () => getNonSecretFieldInitialValues(selectedProvider?.fields ?? []),
+    () => getNonSecretFieldInitialValues(providerFields),
     // fields array identity is intentionally omitted; content key drives updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
     [nonSecretInitialValuesKey],
@@ -144,6 +184,7 @@ export function StepSourceControlConfig({
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setShowManualGitHubValues(false);
+    setShowAdoAdvancedConfig(false);
     setGithubOrganization('');
     setManifestForm(null);
   }, [effectiveSelectedProviderId, nonSecretInitialValues]);
@@ -154,7 +195,7 @@ export function StepSourceControlConfig({
     }
   }, [manifestForm]);
   const canContinueWithoutNewValues =
-    selectedProvider?.fields.every(
+    visibleFields.every(
       (field) =>
         field.required === false ||
         field.runtimeSatisfied ||
@@ -164,7 +205,7 @@ export function StepSourceControlConfig({
   const isActionDisabled =
     saveSourceControlConfig.isPending ||
     !selectedProvider ||
-    selectedProvider.fields.some((field) => {
+    visibleFields.some((field) => {
       const nextValue = values[field.envVarName]?.trim() ?? '';
 
       return (
@@ -182,7 +223,7 @@ export function StepSourceControlConfig({
 
     await saveSourceControlConfig.mutateAsync({
       provider: selectedProvider.provider,
-      values,
+      values: filterValuesToFields(visibleFields, values),
     });
   };
 
@@ -411,83 +452,77 @@ export function StepSourceControlConfig({
       </div>
 
       <div className="space-y-2 pl-10">
-        {selectedProvider?.fields.map((field) => {
-          const value = values[field.envVarName] ?? '';
-          const isSecretField = isSecretSourceControlField(field);
-          const shouldShowSavedValueMask =
-            isSecretField &&
-            !field.runtimeSatisfied &&
-            field.savedSatisfied &&
-            value.length === 0 &&
-            !editingSavedValues[field.envVarName];
-
-          return (
-            <div
-              key={field.envVarName}
-              className="grid gap-2 md:grid-cols-[200px_minmax(0,1fr)] md:items-center max-w-xl"
+        {(isAdo ? baseFields : visibleFields).map((field) => (
+          <SourceControlFieldInput
+            key={field.envVarName}
+            field={field}
+            value={values[field.envVarName] ?? ''}
+            isEditingSavedValue={Boolean(editingSavedValues[field.envVarName])}
+            disabled={saveSourceControlConfig.isPending}
+            onChange={(nextValue) =>
+              setValues((current) => ({
+                ...current,
+                [field.envVarName]: nextValue,
+              }))
+            }
+            onStartEditingSavedValue={() =>
+              setEditingSavedValues((current) => ({
+                ...current,
+                [field.envVarName]: true,
+              }))
+            }
+            onStopEditingSavedValue={() =>
+              setEditingSavedValues((current) => ({
+                ...current,
+                [field.envVarName]: false,
+              }))
+            }
+          />
+        ))}
+        {isAdo && advancedFields.length > 0 ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
+              onClick={() => setShowAdoAdvancedConfig((current) => !current)}
             >
-              <div className="space-y-1">
-                <div className="text-sm font-medium">
-                  {field.label}
-                  {field.required === false ? ' (optional)' : ''}
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <Input
-                    secret={isSecretField && !field.runtimeSatisfied}
-                    type={isSecretField ? undefined : 'text'}
-                    className="font-mono"
-                    value={
-                      isSecretField && field.runtimeSatisfied
-                        ? MASKED_VALUE
-                        : shouldShowSavedValueMask
-                          ? MASKED_VALUE
-                          : field.runtimeSatisfied && !isSecretField
-                            ? (field.savedValue ?? value)
-                            : value
-                    }
-                    onFocus={() => {
-                      if (shouldShowSavedValueMask) {
-                        setEditingSavedValues((current) => ({
-                          ...current,
-                          [field.envVarName]: true,
-                        }));
-                      }
-                    }}
-                    onBlur={() => {
-                      if (
-                        isSecretField &&
-                        field.savedSatisfied &&
-                        value.length === 0
-                      ) {
-                        setEditingSavedValues((current) => ({
-                          ...current,
-                          [field.envVarName]: false,
-                        }));
-                      }
-                    }}
-                    onChange={(event) =>
-                      setValues((current) => ({
-                        ...current,
-                        [field.envVarName]: event.target.value,
-                      }))
-                    }
-                    placeholder={field.runtimeSatisfied ? '' : field.envVarName}
-                    disabled={
-                      saveSourceControlConfig.isPending ||
-                      field.runtimeSatisfied
-                    }
-                    data-1p-ignore
-                  />
-                  {(field.runtimeSatisfied || field.savedSatisfied) && (
-                    <Check />
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+              {showAdoAdvancedConfig
+                ? 'Hide advanced config'
+                : 'Show advanced config'}
+            </button>
+          </div>
+        ) : null}
+        {isAdo && showAdoAdvancedConfig
+          ? advancedFields.map((field) => (
+              <SourceControlFieldInput
+                key={field.envVarName}
+                field={field}
+                value={values[field.envVarName] ?? ''}
+                isEditingSavedValue={Boolean(
+                  editingSavedValues[field.envVarName],
+                )}
+                disabled={saveSourceControlConfig.isPending}
+                onChange={(nextValue) =>
+                  setValues((current) => ({
+                    ...current,
+                    [field.envVarName]: nextValue,
+                  }))
+                }
+                onStartEditingSavedValue={() =>
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: true,
+                  }))
+                }
+                onStopEditingSavedValue={() =>
+                  setEditingSavedValues((current) => ({
+                    ...current,
+                    [field.envVarName]: false,
+                  }))
+                }
+              />
+            ))
+          : null}
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
@@ -514,6 +549,76 @@ export function StepSourceControlConfig({
               : 'Save and continue'}
           {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function SourceControlFieldInput({
+  field,
+  value,
+  isEditingSavedValue,
+  disabled,
+  onChange,
+  onStartEditingSavedValue,
+  onStopEditingSavedValue,
+}: {
+  field: SourceControlField;
+  value: string;
+  isEditingSavedValue: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onStartEditingSavedValue: () => void;
+  onStopEditingSavedValue: () => void;
+}) {
+  const isSecretField = isSecretSourceControlField(field);
+  const shouldShowSavedValueMask =
+    isSecretField &&
+    !field.runtimeSatisfied &&
+    field.savedSatisfied &&
+    value.length === 0 &&
+    !isEditingSavedValue;
+
+  return (
+    <div className="grid gap-2 md:grid-cols-[200px_minmax(0,1fr)] md:items-center max-w-xl">
+      <div className="space-y-1">
+        <div className="text-sm font-medium">
+          {field.label}
+          {field.required === false ? ' (optional)' : ''}
+        </div>
+      </div>
+      <div>
+        <div className="flex items-center gap-2">
+          <Input
+            secret={isSecretField && !field.runtimeSatisfied}
+            type={isSecretField ? undefined : 'text'}
+            className="font-mono"
+            value={
+              isSecretField && field.runtimeSatisfied
+                ? MASKED_VALUE
+                : shouldShowSavedValueMask
+                  ? MASKED_VALUE
+                  : field.runtimeSatisfied && !isSecretField
+                    ? (field.savedValue ?? value)
+                    : value
+            }
+            onFocus={() => {
+              if (shouldShowSavedValueMask) {
+                onStartEditingSavedValue();
+              }
+            }}
+            onBlur={() => {
+              if (isSecretField && field.savedSatisfied && value.length === 0) {
+                onStopEditingSavedValue();
+              }
+            }}
+            onChange={(event) => onChange(event.target.value)}
+            placeholder={field.runtimeSatisfied ? '' : field.envVarName}
+            disabled={disabled || field.runtimeSatisfied}
+            data-1p-ignore
+          />
+          {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
+        </div>
       </div>
     </div>
   );

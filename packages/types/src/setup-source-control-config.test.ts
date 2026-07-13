@@ -1,6 +1,7 @@
 import {
   SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
   buildSetupSourceControlStatus,
+  getSetupSourceControlVisibleFields,
 } from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
@@ -202,28 +203,33 @@ describe('buildSetupSourceControlStatus', () => {
     );
     expect(optionalBaseUrl).toMatchObject({
       required: false,
+      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoWebhookSecret).toMatchObject({
       required: false,
       secret: true,
+      setupHidden: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoTenantId).toMatchObject({
       required: false,
+      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoClientId).toMatchObject({
       required: false,
+      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoClientSecret).toMatchObject({
       required: false,
       secret: true,
+      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
@@ -347,5 +353,43 @@ describe('buildSetupSourceControlStatus', () => {
 
     expect(status.setupSatisfied).toBe(true);
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+  });
+});
+
+describe('getSetupSourceControlVisibleFields', () => {
+  const ado = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (provider) => provider.provider === 'ado',
+  );
+
+  it('defaults Azure DevOps setup to organization and PAT only', () => {
+    expect(
+      getSetupSourceControlVisibleFields(ado?.fields ?? []).map(
+        (field) => field.envVarName,
+      ),
+    ).toEqual(['ADO_ORGANIZATION', 'ADO_TOKEN']);
+  });
+
+  it('includes advanced Azure DevOps fields when advanced config is open', () => {
+    expect(
+      getSetupSourceControlVisibleFields(ado?.fields ?? [], {
+        showAdvancedConfig: true,
+      }).map((field) => field.envVarName),
+    ).toEqual([
+      'ADO_ORGANIZATION',
+      'ADO_TOKEN',
+      'ADO_BASE_URL',
+      'ADO_USERNAME',
+      'ADO_CLIENT_ID',
+      'ADO_CLIENT_SECRET',
+      'ADO_TENANT_ID',
+    ]);
+  });
+
+  it('never returns the Azure DevOps webhook secret during setup', () => {
+    const names = getSetupSourceControlVisibleFields(ado?.fields ?? [], {
+      showAdvancedConfig: true,
+    }).map((field) => field.envVarName);
+
+    expect(names).not.toContain('ADO_WEBHOOK_SECRET');
   });
 });

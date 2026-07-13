@@ -17,22 +17,31 @@ for that identity with Code read/write permissions appropriate for cloning,
 branch creation, and commits.
 
 Save the organization and token in setup, deployment env vars, or local
-`.env.local`:
+`.env.local`. Onboarding only asks for those two values by default:
 
 ```sh
 ADO_ORGANIZATION=<azure-devops-organization>
 ADO_TOKEN=<azure-devops-pat>
 ```
 
-Optional values:
+Optional advanced values (self-hosted Azure DevOps, custom Git username,
+Azure DevOps OAuth/account linking, or an explicit tenant override):
 
 ```sh
 ADO_BASE_URL=https://dev.azure.com
 ADO_USERNAME=ado
+ADO_CLIENT_ID=<microsoft-entra-client-id>
+ADO_CLIENT_SECRET=<microsoft-entra-client-secret>
+ADO_TENANT_ID=<microsoft-entra-tenant-id>
 ```
 
 `ADO_BASE_URL` defaults to `https://dev.azure.com`. `ADO_USERNAME` defaults to
 `ado` and is used as the Git-over-HTTPS username paired with the PAT.
+`ADO_TENANT_ID` is an optional override for Azure DevOps OAuth; when unset,
+Roomote falls back to `R_MICROSOFT_TENANT_ID` if Microsoft sign-in is
+configured. Service hook webhook secrets are generated automatically when
+Roomote configures service hooks—operators do not enter them during setup.
+Advanced values remain editable later in Settings → Source Control.
 
 ## Sync repositories
 

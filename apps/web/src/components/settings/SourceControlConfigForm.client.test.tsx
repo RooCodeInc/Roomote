@@ -5,7 +5,10 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
 const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
   () => ({
@@ -214,5 +217,59 @@ describe('SourceControlConfigForm', () => {
       expect(screen.getByDisplayValue(MASKED_VALUE)).toBeInTheDocument();
       expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
     });
+  });
+
+  it('still renders the full Azure DevOps field set including advanced and webhook secret', () => {
+    const ado = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+      (provider) => provider.provider === 'ado',
+    )!;
+    const fields = ado.fields.map((field) => ({
+      ...field,
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      savedValue: null,
+      satisfiedByEnvVarName: null,
+    }));
+
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={{
+          selectedProvider: 'ado',
+          preselectedProvider: 'ado',
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          lockReason: null,
+          connectedProvider: null,
+          setupSatisfied: false,
+          setupSatisfiedByRuntimeEnv: false,
+          providers: [
+            {
+              provider: 'ado',
+              label: 'Azure DevOps',
+              connectionMode: 'token',
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: false,
+              configSatisfied: false,
+              configSatisfiedByRuntimeEnv: false,
+              connected: false,
+              repositoryCount: 0,
+              fields,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
+    expect(screen.getByText('Azure DevOps Access Token')).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Microsoft Entra Client Secret/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Tenant ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Webhook Secret/)).toBeInTheDocument();
   });
 });

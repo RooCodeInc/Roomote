@@ -39,7 +39,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'Azure DevOps personal access token',
     setupLabelArticle: 'an',
     creationHint:
-      'Create the PAT with Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. Prefer a bot or service account that is a member of those projects; Roomote syncs repositories and configures pull request service hooks automatically. The organization is the slug from your https://dev.azure.com/<organization> URL.',
+      'Create the PAT with Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. Prefer a bot or service account that is a member of those projects; Roomote syncs repositories and configures pull request service hooks automatically. The organization is the slug from your https://dev.azure.com/<organization> URL. Most setups only need the organization and PAT—open advanced config for self-hosted Azure DevOps, custom OAuth/account linking, or non-default credentials. Webhook secrets are generated automatically when service hooks are configured.',
   },
 };
 

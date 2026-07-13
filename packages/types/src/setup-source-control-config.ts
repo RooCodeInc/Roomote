@@ -13,6 +13,10 @@ export type SetupSourceControlFieldDescriptor = {
   label: string;
   required?: boolean;
   secret?: boolean;
+  /** Hidden in onboarding until “Show advanced config” is opened. */
+  advanced?: boolean;
+  /** Never shown in onboarding; remaining available in Settings/backend. */
+  setupHidden?: boolean;
 };
 
 export type SetupSourceControlProviderDescriptor = {
@@ -67,6 +71,29 @@ export const SETUP_SOURCE_CONTROL_PROVIDER_IDS = sourceControlProviders;
 
 export function isRequiredField(field: SetupSourceControlFieldDescriptor) {
   return field.required !== false;
+}
+
+/**
+ * Fields shown during `/setup` source-control configuration.
+ * Settings continues to use the full field list for every provider.
+ */
+export function getSetupSourceControlVisibleFields<
+  TField extends SetupSourceControlFieldDescriptor,
+>(
+  fields: readonly TField[],
+  options: { showAdvancedConfig?: boolean } = {},
+): TField[] {
+  return fields.filter((field) => {
+    if (field.setupHidden) {
+      return false;
+    }
+
+    if (field.advanced && !options.showAdvancedConfig) {
+      return false;
+    }
+
+    return true;
+  });
 }
 
 function isSecretSourceControlField(
@@ -272,18 +299,21 @@ function buildProviderFields(
           acceptedEnvVarNames: ['ADO_BASE_URL'],
           label: 'Azure DevOps Base URL',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_USERNAME',
           acceptedEnvVarNames: ['ADO_USERNAME'],
           label: 'Azure DevOps Username',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_CLIENT_ID',
           acceptedEnvVarNames: ['ADO_CLIENT_ID'],
           label: 'Microsoft Entra Client ID',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_CLIENT_SECRET',
@@ -291,12 +321,14 @@ function buildProviderFields(
           label: 'Microsoft Entra Client Secret',
           secret: true,
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_TENANT_ID',
           acceptedEnvVarNames: ['ADO_TENANT_ID'],
           label: 'Microsoft Entra Tenant ID',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_WEBHOOK_SECRET',
@@ -304,6 +336,7 @@ function buildProviderFields(
           label: 'Azure DevOps Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'bitbucket':
