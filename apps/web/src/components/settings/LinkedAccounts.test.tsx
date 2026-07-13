@@ -1009,6 +1009,7 @@ describe('LinkedAccounts settings', () => {
     expect(
       screen.getByRole('heading', { name: 'Link your Discord account' }),
     ).toBeInTheDocument();
+    expect(screen.getByText(/in a DM with the bot/i)).toBeInTheDocument();
     expect(screen.getByText('Discord link step')).toBeInTheDocument();
   });
 

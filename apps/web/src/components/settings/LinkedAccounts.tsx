@@ -909,8 +909,8 @@ export function LinkedAccounts() {
             <DialogTitle>Link your Discord account</DialogTitle>
             <DialogDescription>
               Run the one-time <span className="font-mono">/link</span> command
-              in Discord. Once the bot confirms, tasks you start there are
-              attributed to you.
+              in a DM with the bot. Once the bot confirms, tasks you start in
+              Discord are attributed to you.
             </DialogDescription>
           </DialogHeader>
           <DiscordLinkAccountStep autoGenerate pollUntilLinked />
