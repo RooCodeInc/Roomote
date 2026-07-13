@@ -3,10 +3,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PRODUCT_NAME } from '@roomote/types';
+import {
+  PRODUCT_NAME,
+  type SetupNewComputeProvisioningState,
+} from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
 import {
   Button,
+  Alert,
+  AlertCircle,
+  AlertDescription,
   Loader2,
   ArrowRight,
   Checkbox,
@@ -29,6 +35,8 @@ export function StepInvoke({
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
+  computeProvisioning = null,
+  onRetryComputeProvisioning,
 }: {
   onTryItOut?: () => void;
   onboardingTaskId?: string | null;
@@ -36,6 +44,8 @@ export function StepInvoke({
   communicationProviders?: readonly CommunicationProviderId[];
   sourceControlProviders?: readonly SourceControlProvider[];
   includeLinear?: boolean;
+  computeProvisioning?: SetupNewComputeProvisioningState | null;
+  onRetryComputeProvisioning?: () => void;
 } = {}) {
   const router = useRouter();
   const trpc = useTRPC();
@@ -143,6 +153,33 @@ export function StepInvoke({
           ? `Once your environment is ready, you can work with ${PRODUCT_NAME} in these ways:`
           : `How to work with ${PRODUCT_NAME}:`}
       </p>
+      {computeProvisioning?.status === 'building' ? (
+        <p className="text-sm text-muted-foreground">
+          The sandbox provider is still being prepared. Your environment task is
+          queued and will start automatically when it is ready.
+        </p>
+      ) : null}
+      {computeProvisioning?.status === 'failed' ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>
+            <p>
+              Sandbox provider provisioning failed:{' '}
+              {computeProvisioning.error ??
+                'The worker artifact could not be prepared.'}{' '}
+              {onRetryComputeProvisioning ? (
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-4"
+                  onClick={onRetryComputeProvisioning}
+                >
+                  Retry provisioning
+                </button>
+              ) : null}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="space-y-5">
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">

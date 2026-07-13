@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { SetupAuthProviderId } from '@roomote/types';
+import {
+  getSetupNewComputeProvisioningState,
+  isSetupProvisionableComputeProvider,
+  type SetupAuthProviderId,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { useUser } from '@/hooks/useUser';
@@ -221,6 +225,17 @@ export function useSetupFlow(
     trpc.setupNew.status.queryOptions(undefined, {
       enabled: queryEnabled,
       staleTime: 5_000,
+      refetchInterval: (query) => {
+        const setupNewState = query.state.data?.setupNewState;
+        const provider = setupNewState?.computeProvider;
+
+        return provider &&
+          isSetupProvisionableComputeProvider(provider) &&
+          getSetupNewComputeProvisioningState(setupNewState, provider)
+            ?.status === 'building'
+          ? 2_000
+          : false;
+      },
     }),
   );
   const ensureDefaultAgents = useMutation(
@@ -373,6 +388,16 @@ export function useSetupFlow(
           const computeProviderStatus = status.computeSetup.providers.find(
             (provider) => provider.provider === selectedComputeProvider,
           );
+
+          if (
+            isSetupProvisionableComputeProvider(selectedComputeProvider) &&
+            getSetupNewComputeProvisioningState(
+              status.setupNewState,
+              selectedComputeProvider,
+            )?.status === 'building'
+          ) {
+            return true;
+          }
 
           return computeProviderStatus?.configSatisfied ?? false;
         }

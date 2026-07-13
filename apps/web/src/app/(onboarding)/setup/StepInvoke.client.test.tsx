@@ -99,6 +99,11 @@ vi.mock('./StepCompletedBadge', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  Alert: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertCircle: () => <span>AlertCircle</span>,
+  AlertDescription: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   Button: ({
     children,
     onClick,
@@ -163,6 +168,31 @@ describe('Setup StepInvoke', () => {
       setupNewState: { onboardingTaskId: null },
     });
     environmentState.environments = [{ id: 'env-1' }];
+  });
+
+  it('shows an actionable retry when sandbox provisioning fails', () => {
+    const onRetryComputeProvisioning = vi.fn();
+
+    render(
+      <StepInvoke
+        computeProvisioning={{
+          status: 'failed',
+          runtimeSchemaVersion: 3,
+          imageRef: 'registry.example.com/worker:tag',
+          templateRef: null,
+          error: 'Access denied',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }}
+        onRetryComputeProvisioning={onRetryComputeProvisioning}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Sandbox provider provisioning failed/),
+    ).toHaveTextContent('Access denied');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry provisioning' }));
+    expect(onRetryComputeProvisioning).toHaveBeenCalledOnce();
   });
 
   it('optimistically completes setup and onboarding before routing away', async () => {

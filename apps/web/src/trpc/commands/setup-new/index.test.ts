@@ -192,7 +192,11 @@ import {
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupNewOnboardingTaskCommand,
 } from './index';
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  WORKER_RUNTIME_SCHEMA_VERSION,
+  type SetupNewState,
+} from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
@@ -256,6 +260,7 @@ describe('setup-new auth config commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     process.env.E2B_TEMPLATE_ID = '';
     process.env.DAYTONA_SNAPSHOT_NAME = '';
     process.env.BLAXEL_IMAGE = '';
@@ -960,11 +965,7 @@ describe('setup-new onboarding task start command', () => {
   }: {
     slackInstallation: { botAccessToken: string; teamId: string } | null;
     slackUserMapping?: { slackUserId: string } | null;
-    setupNewState?: {
-      selectedModelId?: string | null;
-      selectedRepositoryIds?: string[];
-      version?: number;
-    };
+    setupNewState?: Partial<SetupNewState>;
   }) {
     mockDbTransaction.mockImplementation(async (callback) => {
       const tx = {
@@ -1002,6 +1003,7 @@ describe('setup-new onboarding task start command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
 
     vi.mocked(getRepositories).mockResolvedValue([
       { id: 'repo-1', fullName: 'acme/api' },
@@ -1028,6 +1030,10 @@ describe('setup-new onboarding task start command', () => {
       taskId: 'task-onboarding-1',
       id: 'task-run-1',
     } as unknown as Awaited<ReturnType<typeof enqueueTask>>);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('launches a web onboarding task when no Slack workspace is connected', async () => {
@@ -1064,6 +1070,40 @@ describe('setup-new onboarding task start command', () => {
           slackThreadTs: null,
         }),
       }),
+    );
+  });
+
+  it('creates the onboarding task without dispatching while first-time E2B provisioning is running', async () => {
+    vi.stubEnv('E2B_TEMPLATE_ID', '');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['E2B_API_KEY']);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        computeProvider: 'e2b',
+        e2bTemplateBuild: {
+          status: 'building',
+          runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+          imageRef: 'registry.example.com/worker:tag',
+          templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
+          error: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        },
+      },
+    });
+
+    const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(result.taskId).toBe('task-onboarding-1');
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'setup_onboarding',
+      }),
+      {
+        enqueue: false,
+        initialTaskPhase: 'waiting_for_sandbox_provider',
+        initialError: null,
+      },
     );
   });
 

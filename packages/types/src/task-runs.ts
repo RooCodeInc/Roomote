@@ -1962,10 +1962,11 @@ export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
 
 /**
- * Task phases reported by the worker's HarnessManager.
- * These represent the internal state of the agent within a running container.
+ * Task phases reported by the worker's HarnessManager, plus control-plane
+ * phases used before a worker can start.
  *
  * - idle: No task is running yet (initial state).
+ * - waiting_for_sandbox_provider: The task is persisted but compute is not ready.
  * - running: Agent is actively working.
  * - waiting_for_prompt: Task completed, waiting for user follow-up.
  * - waiting_for_user_input: Agent is waiting for user input.
@@ -1974,6 +1975,7 @@ export const isExitedRunStatus = (status?: RunStatus): boolean =>
  */
 export type TaskPhase =
   | 'idle'
+  | 'waiting_for_sandbox_provider'
   | 'waiting_for_prompt'
   | 'waiting_for_user_input'
   | 'running'
@@ -1982,6 +1984,7 @@ export type TaskPhase =
 
 export const TASK_PHASES: readonly TaskPhase[] = [
   'idle',
+  'waiting_for_sandbox_provider',
   'waiting_for_prompt',
   'waiting_for_user_input',
   'running',

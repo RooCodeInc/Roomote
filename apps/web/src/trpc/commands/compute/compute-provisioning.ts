@@ -1,11 +1,14 @@
 import {
+  and,
   db,
   deploymentSettings,
   eq,
   sql,
+  taskRuns,
   resolveComputeProviderEnvValues,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
+import { queuePersistedTaskRun } from '@roomote/cloud-agents/server';
 import {
   buildBlaxelWorkerImage,
   buildE2bWorkerTemplate,
@@ -19,6 +22,7 @@ import {
   buildSetupComputeStatus,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   normalizeSetupNewState,
+  RunStatus,
   resolveDerivedModalBaseImageRef,
   SETUP_COMPUTE_PROVISIONING_STALE_MS,
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
@@ -26,6 +30,7 @@ import {
   type SetupComputeProviderStatus,
   type SetupNewComputeProvisioningState,
   type SetupProvisionableComputeProvider,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 
 import {
@@ -413,6 +418,76 @@ async function withProvisioningTimeout<T>(
   }
 }
 
+function getProvisioningFailureTaskMessage(message: string): string {
+  return `Sandbox provider provisioning failed: ${message} Retry provisioning in Settings → Sandboxes.`;
+}
+
+async function clearWaitingTaskProvisioningErrors(
+  provider: SetupProvisionableComputeProvider,
+): Promise<void> {
+  await db
+    .update(taskRuns)
+    .set({ error: null })
+    .where(
+      and(
+        eq(taskRuns.vendor, provider),
+        eq(taskRuns.status, RunStatus.Pending),
+        eq(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
+      ),
+    );
+}
+
+async function failWaitingTasksForProvisioning(
+  provider: SetupProvisionableComputeProvider,
+  message: string,
+): Promise<void> {
+  await db
+    .update(taskRuns)
+    .set({ error: getProvisioningFailureTaskMessage(message) })
+    .where(
+      and(
+        eq(taskRuns.vendor, provider),
+        eq(taskRuns.status, RunStatus.Pending),
+        eq(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
+      ),
+    );
+}
+
+async function dispatchWaitingTasksForProvisioning(
+  provider: SetupProvisionableComputeProvider,
+): Promise<void> {
+  // Clearing the wait phase is the durable release. If this process exits
+  // before Redis enqueue completes, the normal pending-run orphan recovery
+  // will pick the run up instead of leaving it blocked indefinitely.
+  const waitingRuns = await db
+    .update(taskRuns)
+    .set({ taskPhase: null, error: null })
+    .where(
+      and(
+        eq(taskRuns.vendor, provider),
+        eq(taskRuns.status, RunStatus.Pending),
+        eq(taskRuns.taskPhase, WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE),
+      ),
+    )
+    .returning();
+
+  const dispatches = await Promise.allSettled(
+    waitingRuns.map((taskRun) => queuePersistedTaskRun(taskRun)),
+  );
+
+  for (const [index, dispatch] of dispatches.entries()) {
+    if (dispatch.status === 'rejected') {
+      console.error(
+        `[dispatchWaitingTasksForProvisioning] Failed to queue run ${waitingRuns[index]?.id}: ${
+          dispatch.reason instanceof Error
+            ? dispatch.reason.message
+            : String(dispatch.reason)
+        }`,
+      );
+    }
+  }
+}
+
 /**
  * Detached provisioning run. Executes in the web process after the
  * initiating save commits; progress is persisted on the provider's
@@ -448,6 +523,14 @@ export async function runComputeProvisioning({
   activeProvisioningClaims.add(claimKey);
 
   try {
+    await clearWaitingTaskProvisioningErrors(provider).catch((error) => {
+      console.error(
+        `[runComputeProvisioning] Failed to clear queued-task provisioning errors: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+
     console.log(
       `[runComputeProvisioning] Provisioning worker base image ${JSON.stringify(
         { provider, imageRef, templateRef },
@@ -514,6 +597,14 @@ export async function runComputeProvisioning({
         artifactRef,
       })}`,
     );
+
+    await dispatchWaitingTasksForProvisioning(provider).catch((error) => {
+      console.error(
+        `[runComputeProvisioning] Provisioning succeeded but queued task dispatch failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -526,7 +617,7 @@ export async function runComputeProvisioning({
       })}`,
     );
 
-    await db
+    const failurePersisted = await db
       .transaction(async (tx) => {
         await acquireComputeProvisioningLock(provider, tx);
         const current = await getPersistedComputeProvisioning(provider, tx);
@@ -542,7 +633,7 @@ export async function runComputeProvisioning({
               { provider, imageRef, templateRef },
             )}`,
           );
-          return;
+          return false;
         }
 
         await persistComputeProvisioning(
@@ -558,6 +649,8 @@ export async function runComputeProvisioning({
           },
           tx,
         );
+
+        return true;
       })
       .catch((persistError) => {
         console.error(
@@ -567,7 +660,20 @@ export async function runComputeProvisioning({
               : String(persistError)
           }`,
         );
+        return false;
       });
+
+    if (failurePersisted) {
+      await failWaitingTasksForProvisioning(provider, message).catch(
+        (taskError) => {
+          console.error(
+            `[runComputeProvisioning] Failed to publish provisioning failure to queued tasks: ${
+              taskError instanceof Error ? taskError.message : String(taskError)
+            }`,
+          );
+        },
+      );
+    }
   } finally {
     activeProvisioningClaims.delete(claimKey);
   }

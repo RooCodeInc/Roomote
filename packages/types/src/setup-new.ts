@@ -8,6 +8,15 @@ import {
 import type { SourceControlProvider } from './source-control';
 
 /**
+ * Pre-runtime task phase used while first-time hosted compute provisioning is
+ * still creating the selected provider's deployment-wide worker artifact.
+ * Runs in this phase are persisted but deliberately not placed on the
+ * controller queue until provisioning succeeds.
+ */
+export const WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE =
+  'waiting_for_sandbox_provider' as const;
+
+/**
  * Progress of a setup-time worker base-image provisioning run (an E2B
  * template build, Daytona snapshot registration, or Blaxel image build). The run
  * executes detached in the web process after the provider's config is

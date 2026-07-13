@@ -5,7 +5,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
+  getSetupNewComputeProvisioningState,
   isComputeCredentialField,
+  isSetupProvisionableComputeProvider,
   type ComputeProvider,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -208,6 +210,16 @@ export default function SetupPage() {
     pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
   );
   const setupRetryReason = status ? getSetupRetryReason(status) : null;
+  const selectedComputeProvider = status?.setupNewState.computeProvider;
+  const computeProvisioning =
+    status &&
+    selectedComputeProvider &&
+    isSetupProvisionableComputeProvider(selectedComputeProvider)
+      ? getSetupNewComputeProvisioningState(
+          status.setupNewState,
+          selectedComputeProvider,
+        )
+      : null;
   const shouldEvaluateSetupRedirect = isSignedIn && isAdmin;
   const setupRedirectPath =
     shouldEvaluateSetupRedirect && !isSetupStatusError && setupStatus != null
@@ -527,6 +539,14 @@ export default function SetupPage() {
           initialSetupGuidance={status.setupNewState.setupGuidance ?? ''}
           initialSelectedModelId={status.setupNewState.selectedModelId}
           retryReason={setupRetryReason}
+          computeProvisioningError={
+            computeProvisioning?.status === 'failed'
+              ? computeProvisioning.error
+              : null
+          }
+          onRetryComputeProvisioning={() =>
+            goToStep('compute-config', { revisit: true })
+          }
           onReviewComputeProvider={() =>
             goToStep('compute-provider', { revisit: true })
           }
@@ -558,6 +578,10 @@ export default function SetupPage() {
           }
           includeLinear={status.hasLinear}
           linkSuggestedTasks={hasPersistedSelectedSuggestedTasks}
+          computeProvisioning={computeProvisioning}
+          onRetryComputeProvisioning={() =>
+            goToStep('compute-config', { revisit: true })
+          }
           onTryItOut={() => undefined}
         />
       )}

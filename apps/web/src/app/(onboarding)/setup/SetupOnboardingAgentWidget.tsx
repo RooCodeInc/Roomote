@@ -236,6 +236,7 @@ export function SetupOnboardingAgentWidget({
               <TaskStatusIndicator
                 status={session.taskRun?.status}
                 phase={session.taskRun?.taskPhase}
+                lastErrorMessage={session.taskRun?.error}
                 compact={true}
                 className="relative top-1.5"
               />
