@@ -12,6 +12,7 @@ import type {
 import { useTRPC } from '@/trpc/client';
 import {
   AdoSourceControlConfigFields,
+  getAdoOAuthValidationError,
   getEffectiveAdoBaseUrl,
   getEffectiveAdoOrganization,
 } from '@/components/source-control/AdoSourceControlConfigFields';
@@ -29,6 +30,10 @@ import {
   Spinner,
 } from '@/components/system';
 import { useCreateGitHubAppManifest } from '@/hooks/github';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 import {
   getAdoBaseUrlValidationError,
   getAdoOrganizationValidationError,
@@ -97,6 +102,12 @@ export function StepSourceControlConfig({
   const [adoOrganizationConfirmed, setAdoOrganizationConfirmed] =
     useState(false);
   const [adoAdvancedExpanded, setAdoAdvancedExpanded] = useState(false);
+  const [adoOauthExpanded, setAdoOauthExpanded] = useState(false);
+  const adoPostSaveActionRef = useRef<'continue' | 'link'>('continue');
+  const adoLinkedAccount = useAdoLinkedAccount({
+    enabled: effectiveSelectedProviderId === 'ado',
+  });
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
   const [manifestForm, setManifestForm] =
     useState<GitHubAppManifestForm | null>(null);
   const manifestFormRef = useRef<HTMLFormElement | null>(null);
@@ -106,7 +117,12 @@ export function StepSourceControlConfig({
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });
-        onContinue();
+        if (adoPostSaveActionRef.current === 'link') {
+          adoPostSaveActionRef.current = 'continue';
+          authenticateAdoAccount.mutate('/setup?step=source-control-connect');
+        } else {
+          onContinue();
+        }
       },
       onError: (error) => {
         toast.error(error.message);
@@ -166,6 +182,7 @@ export function StepSourceControlConfig({
     setGithubOrganization('');
     setAdoOrganizationConfirmed(hasConfiguredAdoOrganization);
     setAdoAdvancedExpanded(false);
+    setAdoOauthExpanded(false);
     setManifestForm(null);
   }, [
     effectiveSelectedProviderId,
@@ -231,6 +248,9 @@ export function StepSourceControlConfig({
     adoBaseUrl,
   );
   const adoBaseUrlValidationError = getAdoBaseUrlValidationError(adoBaseUrl);
+  const adoOAuthValidationError = isAdo
+    ? getAdoOAuthValidationError(selectedProvider.fields, values)
+    : null;
   const canConfirmAdoOrganization =
     adoOrganizationValidationError === null &&
     adoBaseUrlValidationError === null;
@@ -239,6 +259,7 @@ export function StepSourceControlConfig({
       ? 'https://your-deployment-url'
       : window.location.origin;
   const gitlabRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/gitlab`;
+  const adoRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/ado`;
   const typedGitLabBaseUrl =
     values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
   const configuredGitLabBaseUrl =
@@ -382,8 +403,10 @@ export function StepSourceControlConfig({
     };
     const isAdoActionDisabled = adoOrganizationConfirmed
       ? isSaveActionDisabled ||
+        authenticateAdoAccount.isPending ||
         adoOrganizationValidationError !== null ||
-        adoBaseUrlValidationError !== null
+        adoBaseUrlValidationError !== null ||
+        adoOAuthValidationError !== null
       : saveSourceControlConfig.isPending || !canConfirmAdoOrganization;
 
     return (
@@ -396,7 +419,15 @@ export function StepSourceControlConfig({
           editingSavedValues={editingSavedValues}
           organizationConfirmed={adoOrganizationConfirmed}
           advancedExpanded={adoAdvancedExpanded}
-          disabled={saveSourceControlConfig.isPending}
+          oauthExpanded={adoOauthExpanded}
+          oauthCallbackUrl={adoRedirectUri}
+          oauthAccountLinked={Boolean(adoLinkedAccount.data?.account)}
+          oauthAccountStatePending={adoLinkedAccount.isPending}
+          oauthLinkPending={authenticateAdoAccount.isPending}
+          disabled={
+            saveSourceControlConfig.isPending ||
+            authenticateAdoAccount.isPending
+          }
           idPrefix="setup-ado"
           onValueChange={(envVarName, value) =>
             setValues((current) => ({
@@ -415,6 +446,14 @@ export function StepSourceControlConfig({
             setAdoOrganizationConfirmed(false);
           }}
           onAdvancedExpandedChange={setAdoAdvancedExpanded}
+          onOauthExpandedChange={setAdoOauthExpanded}
+          onLinkAccount={() =>
+            authenticateAdoAccount.mutate('/setup?step=source-control-connect')
+          }
+          onSaveAndLinkAccount={() => {
+            adoPostSaveActionRef.current = 'link';
+            void handleContinue();
+          }}
         />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -434,7 +473,10 @@ export function StepSourceControlConfig({
                   onBack?.();
                 }
               }}
-              disabled={saveSourceControlConfig.isPending}
+              disabled={
+                saveSourceControlConfig.isPending ||
+                authenticateAdoAccount.isPending
+              }
             >
               <ArrowLeft />
               Back
@@ -442,7 +484,10 @@ export function StepSourceControlConfig({
           ) : null}
           <Button
             type="button"
-            onClick={handleAdoAction}
+            onClick={() => {
+              adoPostSaveActionRef.current = 'continue';
+              handleAdoAction();
+            }}
             disabled={isAdoActionDisabled}
           >
             {adoOrganizationConfirmed

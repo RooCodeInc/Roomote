@@ -10,18 +10,22 @@ import {
   type SetupSourceControlStatus,
 } from '@roomote/types';
 
-const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
-  () => ({
-    mutateMock: vi.fn(),
-    mutationOptionsRef: {
-      current: null as {
-        onSuccess?: () => Promise<void> | void;
-        onError?: (error: Error) => void;
-      } | null,
-    },
-    invalidateQueriesMock: vi.fn(async () => undefined),
-  }),
-);
+const {
+  authenticateAdoAccountMock,
+  mutateMock,
+  mutationOptionsRef,
+  invalidateQueriesMock,
+} = vi.hoisted(() => ({
+  authenticateAdoAccountMock: vi.fn(),
+  mutateMock: vi.fn(),
+  mutationOptionsRef: {
+    current: null as {
+      onSuccess?: () => Promise<void> | void;
+      onError?: (error: Error) => void;
+    } | null,
+  },
+  invalidateQueriesMock: vi.fn(async () => undefined),
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: typeof mutationOptionsRef.current) => {
@@ -53,6 +57,17 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['sourceControl.repositories'],
       },
     },
+  }),
+}));
+
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => ({
+    data: { configured: false, account: null },
+    isPending: false,
+  }),
+  useAuthenticateAdoAccount: () => ({
+    mutate: authenticateAdoAccountMock,
+    isPending: false,
   }),
 }));
 
@@ -342,5 +357,86 @@ describe('SourceControlConfigForm', () => {
         ADO_TOKEN: 'ado-pat',
       },
     });
+  });
+
+  it('saves OAuth credentials and immediately starts account linking', async () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(screen.getByLabelText('Azure DevOps Access Token'), {
+      target: { value: 'ado-pat' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set up account linking' }),
+    );
+
+    fireEvent.change(screen.getByLabelText(/Microsoft Entra Client ID/), {
+      target: { value: 'client-id' },
+    });
+    expect(
+      screen.getByText(/Enter both the Microsoft Entra application/),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/Microsoft Entra Client Secret/), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save and link my account' }),
+    );
+
+    expect(mutateMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_ORGANIZATION: 'acme',
+        ADO_TOKEN: 'ado-pat',
+      },
+    });
+
+    await act(async () => {
+      await mutationOptionsRef.current?.onSuccess?.();
+    });
+
+    expect(authenticateAdoAccountMock).toHaveBeenCalledWith(
+      '/settings?service=ado',
+    );
+  });
+
+  it('links directly when Azure DevOps OAuth is already configured', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: {
+            ADO_CLIENT_ID: 'client-id',
+            ADO_CLIENT_SECRET: 'client-secret',
+            ADO_ORGANIZATION: 'acme',
+            ADO_TOKEN: 'ado-pat',
+          },
+        })}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set up account linking' }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Link my Azure DevOps account' }),
+    );
+
+    expect(authenticateAdoAccountMock).toHaveBeenCalledWith(
+      '/settings?service=ado',
+    );
   });
 });

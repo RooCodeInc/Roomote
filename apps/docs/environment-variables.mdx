@@ -264,7 +264,7 @@ as per-task auth tokens or workspace paths.
 | `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                           |
 | `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps OAuth.                                                |
 | `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps OAuth.                                            |
-| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. `R_MICROSOFT_TENANT_ID` is also accepted.      |
+| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. Defaults to the `common` tenant.               |
 | `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret.                                                                     |
 
 ### Communications and sign-in
@@ -294,7 +294,7 @@ as per-task auth tokens or workspace paths.
 | `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.           |
 | `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                       |
 | `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
-| `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.       |
+| `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID.                                                             |
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
 
 ### Integrations

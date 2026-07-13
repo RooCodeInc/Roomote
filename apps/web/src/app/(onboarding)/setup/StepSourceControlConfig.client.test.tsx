@@ -4,16 +4,21 @@ import {
   type SetupSourceControlStatus,
 } from '@roomote/types';
 
-const { createGitHubAppManifestMock, mutateAsyncMock, saveMutationOptionsRef } =
-  vi.hoisted(() => ({
-    createGitHubAppManifestMock: vi.fn(),
-    mutateAsyncMock: vi.fn(),
-    saveMutationOptionsRef: {
-      current: null as {
-        mutationFn?: (variables: unknown) => Promise<unknown>;
-      } | null,
-    },
-  }));
+const {
+  authenticateAdoAccountMock,
+  createGitHubAppManifestMock,
+  mutateAsyncMock,
+  saveMutationOptionsRef,
+} = vi.hoisted(() => ({
+  authenticateAdoAccountMock: vi.fn(),
+  createGitHubAppManifestMock: vi.fn(),
+  mutateAsyncMock: vi.fn(),
+  saveMutationOptionsRef: {
+    current: null as {
+      mutationFn?: (variables: unknown) => Promise<unknown>;
+    } | null,
+  },
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: typeof saveMutationOptionsRef.current) => {
@@ -45,6 +50,17 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@/hooks/github', () => ({
   useCreateGitHubAppManifest: () => ({
     mutate: createGitHubAppManifestMock,
+    isPending: false,
+  }),
+}));
+
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => ({
+    data: { configured: false, account: null },
+    isPending: false,
+  }),
+  useAuthenticateAdoAccount: () => ({
+    mutate: authenticateAdoAccountMock,
     isPending: false,
   }),
 }));
@@ -454,7 +470,7 @@ describe('StepSourceControlConfig', () => {
     },
   );
 
-  it('keeps optional Azure DevOps fields behind advanced options', () => {
+  it('separates Azure DevOps account linking from advanced options', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildSetupSourceControlStatus({
@@ -484,6 +500,17 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText('Azure DevOps Base URL (optional)')).toBeVisible();
     expect(screen.getByText('Azure DevOps Username (optional)')).toBeVisible();
     expect(
+      screen.queryByText('Microsoft Entra Client ID (optional)'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Azure DevOps Webhook Secret (optional)'),
+    ).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Set up account linking' }),
+    );
+
+    expect(
       screen.getByText('Microsoft Entra Client ID (optional)'),
     ).toBeVisible();
     expect(
@@ -493,7 +520,10 @@ describe('StepSourceControlConfig', () => {
       screen.getByText('Microsoft Entra Tenant ID (optional)'),
     ).toBeVisible();
     expect(
-      screen.getByText('Azure DevOps Webhook Secret (optional)'),
+      screen.getByText(/If Microsoft Teams or Microsoft sign-in/),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/\/api\/auth\/oauth2\/callback\/ado$/),
     ).toBeVisible();
   });
 

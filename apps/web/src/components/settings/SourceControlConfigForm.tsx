@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SetupSourceControlStatus } from '@roomote/types';
@@ -8,6 +8,7 @@ import type { SetupSourceControlStatus } from '@roomote/types';
 import { useTRPC } from '@/trpc/client';
 import {
   AdoSourceControlConfigFields,
+  getAdoOAuthValidationError,
   getEffectiveAdoBaseUrl,
   getEffectiveAdoOrganization,
 } from '@/components/source-control/AdoSourceControlConfigFields';
@@ -16,6 +17,10 @@ import {
   getAdoBaseUrlValidationError,
   getAdoOrganizationValidationError,
 } from '@/lib/ado';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
@@ -107,6 +112,10 @@ export function SourceControlConfigForm({
   const [adoOrganizationConfirmed, setAdoOrganizationConfirmed] =
     useState(false);
   const [adoAdvancedExpanded, setAdoAdvancedExpanded] = useState(false);
+  const [adoOauthExpanded, setAdoOauthExpanded] = useState(false);
+  const adoPostSaveActionRef = useRef<'save' | 'link'>('save');
+  const adoLinkedAccount = useAdoLinkedAccount({ enabled: provider === 'ado' });
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
   const hasConfiguredAdoOrganization =
     provider === 'ado' &&
     providerStatus?.fields.some(
@@ -131,10 +140,15 @@ export function SourceControlConfigForm({
         );
         setEditingSavedValues({});
         setAdoAdvancedExpanded(false);
+        setAdoOauthExpanded(false);
         toast.success(
           saveSuccessMessage ?? 'Source-control configuration saved.',
         );
         onSaved?.();
+        if (adoPostSaveActionRef.current === 'link') {
+          adoPostSaveActionRef.current = 'save';
+          authenticateAdoAccount.mutate('/settings?service=ado');
+        }
       },
       onError: (error) => {
         toast.error(error.message);
@@ -147,6 +161,7 @@ export function SourceControlConfigForm({
     setEditingSavedValues({});
     setAdoOrganizationConfirmed(hasConfiguredAdoOrganization);
     setAdoAdvancedExpanded(false);
+    setAdoOauthExpanded(false);
   }, [hasConfiguredAdoOrganization, provider, nonSecretInitialValues]);
 
   if (!providerStatus) {
@@ -176,6 +191,9 @@ export function SourceControlConfigForm({
     adoBaseUrl,
   );
   const adoBaseUrlValidationError = getAdoBaseUrlValidationError(adoBaseUrl);
+  const adoOAuthValidationError = isAdo
+    ? getAdoOAuthValidationError(providerStatus.fields, values)
+    : null;
   const canConfirmAdoOrganization =
     adoOrganizationValidationError === null &&
     adoBaseUrlValidationError === null;
@@ -186,6 +204,11 @@ export function SourceControlConfigForm({
         (isAdo &&
           (adoOrganizationValidationError !== null ||
             adoBaseUrlValidationError !== null));
+  const publicOrigin =
+    typeof window === 'undefined'
+      ? 'https://your-deployment-url'
+      : window.location.origin;
+  const adoRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/ado`;
 
   const hasNewValues = providerStatus.fields.some((field) => {
     if (field.runtimeSatisfied) {
@@ -232,7 +255,12 @@ export function SourceControlConfigForm({
             editingSavedValues={editingSavedValues}
             organizationConfirmed={adoOrganizationConfirmed}
             advancedExpanded={adoAdvancedExpanded}
-            disabled={saveConfig.isPending}
+            oauthExpanded={adoOauthExpanded}
+            oauthCallbackUrl={adoRedirectUri}
+            oauthAccountLinked={Boolean(adoLinkedAccount.data?.account)}
+            oauthAccountStatePending={adoLinkedAccount.isPending}
+            oauthLinkPending={authenticateAdoAccount.isPending}
+            disabled={saveConfig.isPending || authenticateAdoAccount.isPending}
             compact
             idPrefix="settings-ado"
             onValueChange={(envVarName, value) =>
@@ -252,6 +280,14 @@ export function SourceControlConfigForm({
               setAdoOrganizationConfirmed(false);
             }}
             onAdvancedExpandedChange={setAdoAdvancedExpanded}
+            onOauthExpandedChange={setAdoOauthExpanded}
+            onLinkAccount={() =>
+              authenticateAdoAccount.mutate('/settings?service=ado')
+            }
+            onSaveAndLinkAccount={() => {
+              adoPostSaveActionRef.current = 'link';
+              saveConfig.mutate({ provider, values });
+            }}
           />
         ) : (
           providerStatus.fields.map((field) => {
@@ -330,8 +366,15 @@ export function SourceControlConfigForm({
         <Button
           type="button"
           size="sm"
-          onClick={handleAction}
-          disabled={isActionDisabled}
+          onClick={() => {
+            adoPostSaveActionRef.current = 'save';
+            handleAction();
+          }}
+          disabled={
+            isActionDisabled ||
+            authenticateAdoAccount.isPending ||
+            adoOAuthValidationError !== null
+          }
         >
           {saveConfig.isPending ? <Spinner /> : null}
           {isAdo && !adoOrganizationConfirmed
