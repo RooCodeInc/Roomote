@@ -257,6 +257,7 @@ function buildProviderFields(
           acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
           label: 'GitLab OAuth Client ID',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_CLIENT_SECRET',
@@ -264,6 +265,7 @@ function buildProviderFields(
           label: 'GitLab OAuth Client Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SIGNING_TOKEN',
@@ -271,6 +273,7 @@ function buildProviderFields(
           label: 'GitLab Webhook Signing Token',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SECRET',
@@ -278,6 +281,7 @@ function buildProviderFields(
           label: 'GitLab Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'gitea':
@@ -298,12 +302,14 @@ function buildProviderFields(
           acceptedEnvVarNames: ['GITEA_USERNAME'],
           label: 'Gitea Username',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITEA_CLIENT_ID',
           acceptedEnvVarNames: ['GITEA_CLIENT_ID'],
           label: 'Gitea OAuth Client ID',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITEA_CLIENT_SECRET',
@@ -311,6 +317,7 @@ function buildProviderFields(
           label: 'Gitea OAuth Client Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITEA_WEBHOOK_SECRET',
@@ -318,6 +325,7 @@ function buildProviderFields(
           label: 'Gitea Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'ado':
@@ -410,12 +418,14 @@ function buildProviderFields(
           acceptedEnvVarNames: ['BITBUCKET_BASE_URL'],
           label: 'Bitbucket Base URL',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_ID',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
           label: 'Bitbucket OAuth Client ID',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_SECRET',
@@ -423,6 +433,7 @@ function buildProviderFields(
           label: 'Bitbucket OAuth Client Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_WEBHOOK_SECRET',
@@ -430,6 +441,7 @@ function buildProviderFields(
           label: 'Bitbucket Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
   }

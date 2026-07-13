@@ -17,11 +17,11 @@ Create a dedicated GitLab bot or service-account user and add it to the groups
 or projects Roomote should access. Create an access token for that identity
 with scopes that match the behavior you want:
 
-| Scope | Needed for |
-| ----- | ---------- |
-| `api` | project listing and repository sync through REST |
-| `read_repository` | cloning private repositories over Git-over-HTTPS |
-| `write_repository` | pushing branches or commits from Roomote tasks |
+| Scope              | Needed for                                       |
+| ------------------ | ------------------------------------------------ |
+| `api`              | project listing and repository sync through REST |
+| `read_repository`  | cloning private repositories over Git-over-HTTPS |
+| `write_repository` | pushing branches or commits from Roomote tasks   |
 
 Save the token in setup, deployment env vars, or local `.env.local`:
 
@@ -30,6 +30,10 @@ GITLAB_TOKEN=<gitlab-token>
 ```
 
 For self-managed GitLab, also set `GITLAB_BASE_URL`.
+
+The setup flow asks only for the access token and, when needed, the self-managed
+GitLab base URL. OAuth and webhook verification settings remain available under
+Settings for deployments that need them.
 
 ## Sync repositories
 

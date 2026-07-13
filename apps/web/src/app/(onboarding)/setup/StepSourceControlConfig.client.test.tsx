@@ -127,6 +127,35 @@ function buildSourceControlSetup(
   };
 }
 
+function buildCatalogProviderSetup(
+  provider: 'gitlab' | 'gitea' | 'bitbucket',
+): SetupSourceControlStatus {
+  const descriptor = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (candidate) => candidate.provider === provider,
+  )!;
+
+  return buildSourceControlSetup({
+    preselectedProvider: provider,
+    providers: [
+      {
+        ...descriptor,
+        runtimeConfigSatisfied: false,
+        savedConfigSatisfied: false,
+        configSatisfied: false,
+        configSatisfiedByRuntimeEnv: false,
+        connected: false,
+        repositoryCount: 0,
+        fields: descriptor.fields.map((field) => ({
+          ...field,
+          runtimeSatisfied: false,
+          savedSatisfied: false,
+          satisfiedByEnvVarName: null,
+        })),
+      },
+    ],
+  });
+}
+
 describe('StepSourceControlConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -210,10 +239,10 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps token-backed providers on the existing config form', () => {
+  it('guides GitLab token creation without showing OAuth configuration', () => {
     render(
       <StepSourceControlConfig
-        sourceControlSetup={buildSourceControlSetup()}
+        sourceControlSetup={buildCatalogProviderSetup('gitlab')}
         selectedProviderId="gitlab"
         onContinue={vi.fn()}
       />,
@@ -222,8 +251,68 @@ describe('StepSourceControlConfig', () => {
     expect(
       screen.getByText('GitLab Personal Access Token'),
     ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
+      'href',
+      'https://gitlab.com/-/user_settings/personal_access_tokens',
+    );
+    expect(
+      screen.getByText(/avatar → Edit profile → Access tokens/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/GitLab OAuth Client ID/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText(/GitLab Webhook Secret/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Create GitHub App' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('guides Gitea token creation without optional credentials', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildCatalogProviderSetup('gitea')}
+        selectedProviderId="gitea"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Gitea Base URL')).toBeInTheDocument();
+    expect(screen.getByText('Gitea Access Token')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /View Gitea guide/ }),
+    ).toHaveAttribute('href', 'https://docs.gitea.com/development/api-usage');
+    expect(
+      screen.getByText(/Settings → Applications → Manage Access Tokens/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Gitea Username')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gitea OAuth Client ID')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
+  });
+
+  it('guides Bitbucket token creation without optional credentials', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
+        selectedProviderId="bitbucket"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Bitbucket API Token')).toBeInTheDocument();
+    expect(screen.getByText('Atlassian Account Email')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
+      'href',
+      'https://id.atlassian.com/manage-profile/security/api-tokens',
+    );
+    expect(
+      screen.getByText(/Create API token with scopes → Bitbucket/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Bitbucket OAuth Client ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Bitbucket Webhook Secret'),
     ).not.toBeInTheDocument();
   });
 

@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   getSetupSourceControlVisibleFields,
@@ -29,7 +28,6 @@ import {
   DEFAULT_ADO_AUTH_MODE,
 } from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
-import { GitLabSourceControlConfig } from './GitLabSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -281,12 +279,10 @@ export function StepSourceControlConfig({
     ? getSourceControlSetupCopy(selectedProvider.provider)
     : null;
   const providerSetupLabel = providerSetupCopy?.setupLabel ?? 'source control';
-  const isGitLab = selectedProvider?.provider === 'gitlab';
   const publicOrigin =
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const gitlabRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/gitlab`;
   const typedGitLabBaseUrl =
     values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
   const configuredGitLabBaseUrl =
@@ -296,8 +292,10 @@ export function StepSourceControlConfig({
     : /^https?:\/\//.test(configuredGitLabBaseUrl)
       ? configuredGitLabBaseUrl
       : 'https://gitlab.com';
-  const gitlabApplicationsUrl = `${effectiveGitLabBaseUrl}/-/user_settings/applications`;
-  const valuesStepNumber = isGitLab ? 3 : 2;
+  const creationHref =
+    selectedProvider?.provider === 'gitlab'
+      ? `${effectiveGitLabBaseUrl}/-/user_settings/personal_access_tokens`
+      : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
     return (
@@ -323,11 +321,12 @@ export function StepSourceControlConfig({
                 Create a new {providerSetupCopy.setupLabel}.
                 <Button variant="outline" className="ml-2" asChild>
                   <a
-                    href={providerSetupCopy.creationHref}
+                    href={creationHref ?? providerSetupCopy.creationHref}
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                    {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
+                    <ExternalLink className="inline size-4 -mt-1 ml-1" />
                   </a>
                 </Button>
               </>
@@ -340,16 +339,6 @@ export function StepSourceControlConfig({
               {providerSetupCopy.creationHint}
             </p>
           ) : null}
-          <p className="text-sm text-muted-foreground">
-            If you need it,{' '}
-            <Link
-              className="underline underline-offset-4 hover:text-foreground"
-              href="/api/setup/roomote-logo"
-            >
-              here&apos;s our logo
-            </Link>
-            .
-          </p>
         </NumberedStep>
       ) : (
         <NumberedStep number={1} className="mt-6">
@@ -372,16 +361,7 @@ export function StepSourceControlConfig({
         </NumberedStep>
       ) : null}
 
-      {isGitLab ? (
-        <NumberedStep number={2}>
-          <GitLabSourceControlConfig
-            applicationsUrl={gitlabApplicationsUrl}
-            redirectUri={gitlabRedirectUri}
-          />
-        </NumberedStep>
-      ) : null}
-
-      <NumberedStep number={isAdo ? 3 : valuesStepNumber}>
+      <NumberedStep number={isAdo ? 3 : 2}>
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
           integration.

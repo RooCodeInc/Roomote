@@ -429,4 +429,23 @@ describe('getSetupSourceControlVisibleFields', () => {
 
     expect(names).not.toContain('ADO_WEBHOOK_SECRET');
   });
+
+  it.each([
+    ['gitlab', ['GITLAB_TOKEN', 'GITLAB_BASE_URL']],
+    ['gitea', ['GITEA_BASE_URL', 'GITEA_TOKEN']],
+    ['bitbucket', ['BITBUCKET_TOKEN', 'BITBUCKET_USERNAME']],
+  ] as const)(
+    'keeps %s setup focused on required connection values',
+    (provider, expected) => {
+      const descriptor = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+        (candidate) => candidate.provider === provider,
+      );
+
+      expect(
+        getSetupSourceControlVisibleFields(descriptor?.fields ?? []).map(
+          (field) => field.envVarName,
+        ),
+      ).toEqual(expected);
+    },
+  );
 });

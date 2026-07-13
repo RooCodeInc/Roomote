@@ -42,6 +42,10 @@ GITEA_WEBHOOK_SECRET=<webhook-secret>
 When `GITEA_USERNAME` is omitted, Roomote resolves the token owner through the
 Gitea API and uses that login for Git-over-HTTPS credentials.
 
+The setup flow asks only for the Gitea instance URL and access token. Roomote
+generates the webhook secret during repository sync; optional username and OAuth
+settings remain available under Settings.
+
 ## Sync repositories
 
 After the Gitea values are available, open Settings, go to the Environments
