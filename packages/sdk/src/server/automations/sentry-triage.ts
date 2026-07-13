@@ -155,6 +155,7 @@ export const sentryTriageJob = createScheduledTriageJob({
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
       automationKey: 'sentry_triage',
       slackChannelId: channelId,
+      surface: destination.provider,
     });
 
     return {

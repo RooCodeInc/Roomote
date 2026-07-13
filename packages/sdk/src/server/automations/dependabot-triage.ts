@@ -94,6 +94,7 @@ export const dependabotTriageJob = createScheduledTriageJob({
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'dependabot_triage',
       slackChannelId: channelId,
+      surface: destination.provider,
     });
 
     return {

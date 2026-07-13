@@ -98,7 +98,7 @@ export function createScheduledTriageJob(
     const eligibleDeployments = await findEligibleDeploymentContexts();
 
     if (eligibleDeployments.length === 0) {
-      result.skippedReason = 'No active Slack installation.';
+      result.skippedReason = 'No connected communication provider.';
     }
 
     let processed = 0;

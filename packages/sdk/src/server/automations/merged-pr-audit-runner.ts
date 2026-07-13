@@ -417,6 +417,7 @@ async function processDeployment(
     const recentThreadFeedback = await loadAutomationThreadFeedbackReport({
       automationKey: config.automationKey,
       slackChannelId: channelId,
+      surface: destination.provider,
       now,
     });
     const selectedRepositories = getSelectedRepositories(mergedPullRequests);
