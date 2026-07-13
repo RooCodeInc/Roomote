@@ -54,9 +54,11 @@ The API resolves Telegram credentials from real env vars first (`resolveTelegram
 ```bash
 R_TELEGRAM_BOT_TOKEN=7000000001:mock-telegram-token   # any value; the harness accepts all tokens unless acceptedBotTokens is set
 R_TELEGRAM_WEBHOOK_SECRET=<any-shared-secret>         # harness reads the same var via dotenvx, so signatures match automatically
-R_TELEGRAM_BOT_USERNAME=roomote_mock_bot              # required for group-mention and /new@bot gating scenarios
 TELEGRAM_API_BASE_URL=http://127.0.0.1:3013           # reroutes ALL outbound Bot API calls to the harness
 ```
+
+Roomote resolves `roomote_mock_bot` from the harness's `getMe` response using
+the configured token; no separate username variable is needed.
 
 Without `R_TELEGRAM_WEBHOOK_SECRET` the webhook returns 503; with a mismatched secret it returns 401.
 

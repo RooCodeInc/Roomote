@@ -53,7 +53,6 @@ const {
   envMock: {
     R_APP_URL: 'https://app.example.com',
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
-    R_TELEGRAM_BOT_USERNAME: 'roomote_bot' as string | undefined,
     R_TELEGRAM_WEBHOOK_SECRET: 'secret' as string | undefined,
     TRPC_URL: 'https://api.example.com' as string | undefined,
   },
@@ -223,7 +222,7 @@ vi.mock('@roomote/db/server', () => ({
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: envMock.R_TELEGRAM_BOT_TOKEN ?? null,
     webhookSecret: envMock.R_TELEGRAM_WEBHOOK_SECRET ?? null,
-    botUsername: envMock.R_TELEGRAM_BOT_USERNAME ?? null,
+    botUsername: 'roomote_bot',
   })),
 }));
 
@@ -340,7 +339,6 @@ describe('Telegram webhook handler', () => {
 
     envMock.R_APP_URL = 'https://app.example.com';
     envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';
-    envMock.R_TELEGRAM_BOT_USERNAME = 'roomote_bot';
     envMock.R_TELEGRAM_WEBHOOK_SECRET = 'secret';
     envMock.TRPC_URL = 'https://api.example.com';
     redisSetMock.mockResolvedValue('OK');

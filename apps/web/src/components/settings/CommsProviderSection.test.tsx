@@ -36,6 +36,7 @@ type CommsProviderStatus = {
     expectedUrl: string;
     lastErrorMessage: string | null;
   } | null;
+  telegramBotUsername?: string | null;
 };
 
 const state = vi.hoisted(() => ({
@@ -491,20 +492,12 @@ function buildTelegramProvider(
         savedSatisfied: false,
         satisfiedByEnvVarName: null,
       },
-      {
-        envVarName: 'R_TELEGRAM_BOT_USERNAME',
-        acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
-        label: 'Telegram Bot Username',
-        required: false,
-        runtimeSatisfied: false,
-        savedSatisfied: false,
-        satisfiedByEnvVarName: null,
-      },
     ],
     runtimeSatisfied: false,
     savedSatisfied: false,
     setupSatisfied: false,
     telegramWebhook: null,
+    telegramBotUsername: null,
     ...overrides,
   };
 }
@@ -714,43 +707,17 @@ describe('CommsProviderSection', () => {
       expect(screen.queryByText(/Last delivery error/)).not.toBeInTheDocument();
     });
 
-    it('shows the saved Telegram bot username in plain text instead of a mask', () => {
+    it('shows the connected Telegram bot username', () => {
       render(
         <CommsProviderSection
           provider={buildTelegramProvider({
-            fields: [
-              {
-                envVarName: 'R_TELEGRAM_BOT_TOKEN',
-                acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
-                label: 'Telegram Bot Token',
-                secret: true,
-                runtimeSatisfied: false,
-                savedSatisfied: true,
-                satisfiedByEnvVarName: 'R_TELEGRAM_BOT_TOKEN',
-              },
-              {
-                envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
-                acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
-                label: 'Telegram Webhook Secret',
-                secret: true,
-                required: false,
-                runtimeSatisfied: false,
-                savedSatisfied: true,
-                satisfiedByEnvVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
-              },
-              {
-                envVarName: 'R_TELEGRAM_BOT_USERNAME',
-                acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
-                label: 'Telegram Bot Username',
-                required: false,
-                runtimeSatisfied: false,
-                savedSatisfied: true,
-                savedValue: 'RoomoteBot',
-                satisfiedByEnvVarName: 'R_TELEGRAM_BOT_USERNAME',
-              },
-            ],
-            savedSatisfied: true,
-            setupSatisfied: true,
+            telegramBotUsername: 'RoomoteBot',
+            telegramWebhook: {
+              status: 'connected',
+              registeredUrl: 'https://app.example.com/api/webhooks/telegram',
+              expectedUrl: 'https://app.example.com/api/webhooks/telegram',
+              lastErrorMessage: null,
+            },
           })}
           onSave={vi.fn()}
           onClear={vi.fn()}
@@ -759,10 +726,10 @@ describe('CommsProviderSection', () => {
         />,
       );
 
-      expect(screen.getByDisplayValue('RoomoteBot')).toBeInTheDocument();
-      expect(
-        screen.queryByDisplayValue('••••••••••••••••••••••••••••'),
-      ).toBeInTheDocument(); // token still masked
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(screen.getByText('Connected to @RoomoteBot')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook connected')).not.toBeInTheDocument();
     });
   });
 

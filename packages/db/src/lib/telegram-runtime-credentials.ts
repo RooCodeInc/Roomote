@@ -24,24 +24,40 @@ export function normalizeTelegramBotToken(
   return normalized.length > 0 ? normalized : null;
 }
 
-function normalizeTelegramBotUsername(
-  value: string | null | undefined,
-): string | null {
-  if (typeof value !== 'string') {
-    return null;
-  }
-  const normalized = value.trim().replace(/^@/, '');
-  return normalized.length > 0 ? normalized : null;
-}
-
-function readProcessEnvCredentials(): TelegramRuntimeCredentials {
+function readProcessEnvCredentials(): Omit<
+  TelegramRuntimeCredentials,
+  'botUsername'
+> {
   return {
     botToken: normalizeTelegramBotToken(process.env.R_TELEGRAM_BOT_TOKEN),
     webhookSecret: process.env.R_TELEGRAM_WEBHOOK_SECRET?.trim() || null,
-    botUsername: normalizeTelegramBotUsername(
-      process.env.R_TELEGRAM_BOT_USERNAME,
-    ),
   };
+}
+
+async function resolveTelegramBotUsername(
+  botToken: string | null,
+): Promise<string | null> {
+  if (!botToken) return null;
+
+  try {
+    const apiBaseUrl =
+      process.env.TELEGRAM_API_BASE_URL?.replace(/\/$/u, '') ??
+      'https://api.telegram.org';
+    const response = await fetch(`${apiBaseUrl}/bot${botToken}/getMe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    const body = (await response.json().catch(() => null)) as {
+      ok?: boolean;
+      result?: { username?: string };
+    } | null;
+    const username = body?.result?.username?.trim().replace(/^@/u, '');
+
+    return response.ok && body?.ok && username ? username : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -54,28 +70,31 @@ function readProcessEnvCredentials(): TelegramRuntimeCredentials {
 export async function resolveTelegramRuntimeCredentials(): Promise<TelegramRuntimeCredentials> {
   const fromEnv = readProcessEnvCredentials();
 
-  if (fromEnv.botToken && fromEnv.webhookSecret && fromEnv.botUsername) {
-    return fromEnv;
-  }
-
   const nowMs = Date.now();
 
   if (cachedCredentials && cachedCredentials.expiresAtMs > nowMs) {
     return cachedCredentials.value;
   }
 
-  const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
+  const deploymentEnvVars =
+    fromEnv.botToken && fromEnv.webhookSecret
+      ? {}
+      : await resolveEffectiveDeploymentEnvVars();
+  const botToken =
+    fromEnv.botToken ||
+    normalizeTelegramBotToken(deploymentEnvVars.R_TELEGRAM_BOT_TOKEN);
+  const lastKnownBotUsername =
+    cachedCredentials?.value.botToken === botToken
+      ? cachedCredentials.value.botUsername
+      : null;
   const value: TelegramRuntimeCredentials = {
-    botToken:
-      fromEnv.botToken ||
-      normalizeTelegramBotToken(deploymentEnvVars.R_TELEGRAM_BOT_TOKEN),
+    botToken,
     webhookSecret:
       fromEnv.webhookSecret ||
       deploymentEnvVars.R_TELEGRAM_WEBHOOK_SECRET?.trim() ||
       null,
     botUsername:
-      fromEnv.botUsername ||
-      normalizeTelegramBotUsername(deploymentEnvVars.R_TELEGRAM_BOT_USERNAME),
+      (await resolveTelegramBotUsername(botToken)) ?? lastKnownBotUsername,
   };
 
   cachedCredentials = { value, expiresAtMs: nowMs + CACHE_TTL_MS };

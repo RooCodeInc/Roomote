@@ -40,7 +40,8 @@ After a task completes, the next plain message resumes its snapshot; `/new` must
 
 ## 5. group-mention-gating
 
-Groups only enter tasks on explicit address. Requires `R_TELEGRAM_BOT_USERNAME=roomote_mock_bot` on the API.
+Groups only enter tasks on explicit address. The API resolves
+`roomote_mock_bot` from the mock Bot API's `getMe` response.
 
 - Inject: `message` in supergroup `-100222000222` without any mention → expect **silence** (no ack, no reply, no job).
 - Inject: `@roomote_mock_bot <request>` in the same group → expect ack + task entry.
