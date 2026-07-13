@@ -36,7 +36,7 @@ export function InstructionUrl({
 }) {
   return (
     <div className="space-y-1 flex gap-2 items-center">
-      <p className="font-semibold text-foreground text-sm w-45 shrink-0">
+      <p className="font-semibold text-foreground text-sm w-50 shrink-0">
         {heading}
       </p>
       <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">

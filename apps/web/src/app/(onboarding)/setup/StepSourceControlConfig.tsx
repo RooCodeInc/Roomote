@@ -381,6 +381,21 @@ export function StepSourceControlConfig({
         </p>
 
         <div className="space-y-2">
+          {isAdo && adoAuthMode === 'delegated' && (
+            <p className="text-sm text-muted-foreground">
+              Create a client secret, grant the Azure DevOps delegated
+              permissions required by your organization, and grant admin consent
+              if your tenant requires it.
+            </p>
+          )}
+          {isAdo && adoAuthMode === 'entra' && (
+            <p className="text-sm text-muted-foreground">
+              Create a client secret, add the application to the Azure DevOps
+              organization, and grant it access to the projects and repositories
+              Roomote should use.
+            </p>
+          )}
+
           {(isAdo ? baseFields : visibleFields).map((field) => (
             <SourceControlFieldInput
               key={field.envVarName}
@@ -516,7 +531,7 @@ function SourceControlFieldInput({
       <div className="space-y-1">
         <div className="text-sm font-medium">
           {field.label}
-          {field.required === false ? ' (optional)' : ''}
+          {field.required && '*'}
         </div>
       </div>
       <div>

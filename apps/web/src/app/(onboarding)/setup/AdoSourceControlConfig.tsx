@@ -1,3 +1,4 @@
+import { Blocks, PlugZap, UserKey } from 'lucide-react';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
@@ -12,45 +13,54 @@ export function AdoSourceControlConfig({
   return (
     <div className="space-y-2">
       <p className="font-semibold text-foreground">
-        How should Roomote connect?
+        How should Roomote connect to ADO?
       </p>
       <div className="w-full flex flex-col gap-1">
         <button
           type="button"
           aria-pressed={authMode === 'delegated'}
-          className={`cursor-pointer rounded-md border p-3 text-left ${authMode === 'delegated' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
+          className={`flex gap-2 items-start cursor-pointer rounded-md border px-4 py-3 text-left ${authMode === 'delegated' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
           onClick={() => onAuthModeChange('delegated')}
         >
-          <span className="block font-medium">
-            Connect with your Microsoft account
-          </span>
-          <span className="text-sm text-muted-foreground">
-            Use a delegated Azure DevOps account.
-          </span>
+          <PlugZap className="size-6 shrink-0 mt-1" />
+          <div>
+            <span className="block font-medium">
+              Connect with your Microsoft account
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Easiest to start.
+            </span>
+          </div>
         </button>
         <button
           type="button"
           aria-pressed={authMode === 'pat'}
-          className={`cursor-pointer rounded-md border p-3 text-left ${authMode === 'pat' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
+          className={`flex gap-2 items-start cursor-pointer rounded-md border px-4 py-3 text-left ${authMode === 'pat' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
           onClick={() => onAuthModeChange('pat')}
         >
-          <span className="block font-medium">Personal access token</span>
-          <span className="text-sm text-muted-foreground">
-            Fast setup, with the option to switch later.
-          </span>
+          <UserKey className="size-6 shrink-0 mt-1" />
+          <div>
+            <span className="block font-medium">Personal access token</span>
+            <span className="text-sm text-muted-foreground">
+              Also quick, but tied to you, may need to change later.
+            </span>
+          </div>
         </button>
         <button
           type="button"
           aria-pressed={authMode === 'entra'}
-          className={`cursor-pointer rounded-md border p-3 text-left ${authMode === 'entra' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
+          className={`flex gap-2 items-start cursor-pointer rounded-md border px-4 py-3 text-left ${authMode === 'entra' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
           onClick={() => onAuthModeChange('entra')}
         >
-          <span className="block font-medium">
-            Microsoft Entra service principal
-          </span>
-          <span className="text-sm text-muted-foreground">
-            Most long-lasting, but more complex.
-          </span>
+          <Blocks className="size-6 shrink-0 mt-1" />
+          <div>
+            <span className="block font-medium">
+              Microsoft Entra service principal
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Long-lasting, but more complex.
+            </span>
+          </div>
         </button>
       </div>
     </div>
@@ -66,22 +76,22 @@ export function AdoSourceControlInstructions({
 }) {
   if (authMode === 'pat') {
     return (
-      <div className="max-w-xl space-y-3 text-sm text-muted-foreground">
-        <p>
-          Create a PAT for the Azure DevOps identity Roomote should use. Open
-          Azure DevOps token settings:
+      <div className="max-w-xl space-y-3 text-muted-foreground">
+        <p className="font-semibold text-foreground">
+          Create a personal access token (PAT)
         </p>
-        <a
-          href="https://dev.azure.com/_usersSettings/tokens"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="font-semibold text-foreground underline"
-        >
-          Create an Azure DevOps personal access token
-        </a>
-        <p>
-          Grant Code read and write access, plus permission to manage service
-          hook subscriptions for the projects Roomote should access.
+        <p className="text-sm">
+          <a
+            href="https://dev.azure.com/_usersSettings/tokens"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-foreground underline"
+          >
+            Go to your personal Azure settings
+          </a>{' '}
+          → Create a PAT → Grant Code read and write access, plus permission to
+          manage service hook subscriptions for the projects Roomote should
+          access.
         </p>
       </div>
     );
@@ -101,30 +111,18 @@ export function AdoSourceControlInstructions({
           className="font-semibold text-foreground underline"
         >
           Azure App registrations
-        </a>
-        , choose <strong>New registration</strong>, and create an app in the
-        Microsoft tenant that can access your Azure DevOps organization.
+        </a>{' '}
+        → New registration → Create an app in the Microsoft tenant that can
+        access your Azure DevOps organization. IF you've created an app for
+        Teams, you can reuse it.
+        <br />
+        Make sure to add this Web Redirect URI:
       </p>
 
-      {authMode === 'delegated' ? (
-        <>
-          <InstructionUrl
-            heading="Web redirect URI"
-            url={`${publicOrigin}/api/auth/oauth2/callback/ado`}
-          />
-          <p>
-            Create a client secret, grant the Azure DevOps delegated permissions
-            required by your organization, and grant admin consent if your
-            tenant requires it.
-          </p>
-        </>
-      ) : (
-        <p>
-          Create a client secret, add the application to the Azure DevOps
-          organization, and grant it access to the projects and repositories
-          Roomote should use.
-        </p>
-      )}
+      <InstructionUrl
+        heading="Web redirect URI"
+        url={`${publicOrigin}/api/auth/oauth2/callback/ado`}
+      />
     </div>
   );
 }

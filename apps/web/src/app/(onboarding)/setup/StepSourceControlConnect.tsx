@@ -10,7 +10,7 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { Button, Github, Spinner } from '@/components/system';
+import { BrandIcon, Button, Github, Spinner } from '@/components/system';
 import { useCreateGitHubInstallation } from '@/hooks/github/useCreateGitHubInstallation';
 import {
   useAdoLinkedAccount,
@@ -222,7 +222,11 @@ export function StepSourceControlConnect({
               }
               disabled={authenticateAdoAccount.isPending}
             >
-              {authenticateAdoAccount.isPending ? <Spinner /> : null}
+              {authenticateAdoAccount.isPending ? (
+                <Spinner />
+              ) : (
+                <BrandIcon name="ADO" icon="ado" />
+              )}
               Connect with your Microsoft account
             </Button>
           )}
