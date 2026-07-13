@@ -4,6 +4,14 @@ This file provides a quick-start guide for AI agents working with the Roomote co
 
 Roomote is a product centered on **Roomote agents**. Those agents are the core user-facing product: they can be configured in the web app, triggered from the web UI, and interacted with through integrations such as Slack, Teams, Telegram, Linear, and GitHub.
 
+## Open source and public surfaces
+
+This repository is open source. Treat GitHub and other public surfaces as fully public:
+
+- Do not put customer names, customer data, private deployment details, secrets, credentials, or internal maintainer discussion into commits, PR titles/bodies, PR/issue comments, review replies, or other public artifacts.
+- Prefer private channels (for example Slack or the task UI) for anything that is customer-specific, confidential, or only meaningful as internal discussion.
+- When writing public text, keep it general enough for an open-source audience and omit private context even when it was available in the private task thread.
+
 ## Setup
 
 - `mise install && pnpm install` (requires mise for repo tool versions)
