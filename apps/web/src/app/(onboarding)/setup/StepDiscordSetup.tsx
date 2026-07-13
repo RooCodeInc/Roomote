@@ -62,11 +62,6 @@ export function StepDiscordSetup({
     }),
   );
   const isConfigured = credentialsSaved || provider?.setupSatisfied === true;
-  const hasDestination = Boolean(
-    provider?.discord?.installations.some(
-      (installation) => installation.defaultChannelId,
-    ),
-  );
   const isActionDisabled =
     save.isPending ||
     status.isLoading ||
@@ -137,9 +132,7 @@ export function StepDiscordSetup({
         <Button
           type="button"
           disabled={
-            isConfigured
-              ? !hasDestination || !discordAccount.data?.mapping
-              : isActionDisabled
+            isConfigured ? !discordAccount.data?.mapping : isActionDisabled
           }
           onClick={() => {
             if (isConfigured) {

@@ -1,9 +1,11 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
-const { invalidateQueriesMock, toastWarningMock } = vi.hoisted(() => ({
-  invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
-  toastWarningMock: vi.fn(),
-}));
+const { invalidateQueriesMock, linkedAccountState, toastWarningMock } =
+  vi.hoisted(() => ({
+    invalidateQueriesMock: vi.fn().mockResolvedValue(undefined),
+    linkedAccountState: { mapping: null as { discordUserId: string } | null },
+    toastWarningMock: vi.fn(),
+  }));
 
 vi.mock('sonner', () => ({
   toast: { error: vi.fn(), warning: toastWarningMock },
@@ -68,7 +70,7 @@ vi.mock('@/trpc/client', () => ({
 }));
 
 vi.mock('@/hooks/linked-accounts', () => ({
-  useDiscordLinkedAccount: () => ({ data: { mapping: null } }),
+  useDiscordLinkedAccount: () => ({ data: linkedAccountState }),
 }));
 
 vi.mock('@/components/settings/DiscordSetupStatus', () => ({
@@ -85,6 +87,10 @@ vi.mock('./ProviderSetupExperience', () => ({
 import { StepDiscordSetup } from './StepDiscordSetup';
 
 describe('StepDiscordSetup', () => {
+  beforeEach(() => {
+    linkedAccountState.mapping = null;
+  });
+
   it('warns when connection finishing fails and refreshes setup state', async () => {
     render(<StepDiscordSetup onContinue={vi.fn()} onBack={vi.fn()} />);
 
@@ -104,5 +110,22 @@ describe('StepDiscordSetup', () => {
       queryKey: ['linkedAccounts.discord'],
     });
     expect(screen.getByText('Connect Discord server')).toBeInTheDocument();
+  });
+
+  it('continues after account linking without requiring a destination', async () => {
+    linkedAccountState.mapping = { discordUserId: 'discord-user-1' };
+    const onContinue = vi.fn();
+    render(<StepDiscordSetup onContinue={onContinue} onBack={vi.fn()} />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save and connect Discord' }),
+    );
+
+    const continueButton = await screen.findByRole('button', {
+      name: 'Continue',
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+    expect(onContinue).toHaveBeenCalledOnce();
   });
 });

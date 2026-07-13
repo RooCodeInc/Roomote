@@ -220,23 +220,7 @@ describe('DiscordSetupStatus', () => {
     expect(repairMock).toHaveBeenCalledOnce();
   });
 
-  it('disables required-tag forums and explains how to make them compatible', () => {
-    queryState.channels = [
-      {
-        id: 'channel-1',
-        name: 'tasks',
-        type: 15,
-        kind: 'forum',
-        requiresTag: true,
-        supported: false,
-      },
-    ];
-    queryState.permissions = {
-      canUseChannel: false,
-      missingPermissions: [],
-      unsupportedReason: 'forum_requires_tag',
-    };
-
+  it('does not include automation destination setup', () => {
     render(
       <DiscordSetupStatus
         status={{
@@ -249,32 +233,19 @@ describe('DiscordSetupStatus', () => {
             identitySource: 'live',
             errorCode: null,
           },
-          inviteUrl: null,
+          inviteUrl: 'https://discord.com/oauth2/authorize?client_id=app-1',
           gateway: null,
           gatewaySession: null,
           messageContentIntent: 'enabled',
-          commands: {
-            status: 'registered',
-            names: ['help', 'link', 'new'],
-          },
-          installations: [
-            {
-              guildId: 'guild-1',
-              guildName: 'Acme',
-              defaultChannelId: 'channel-1',
-              defaultChannelName: 'tasks',
-              defaultChannelType: 15,
-            },
-          ],
+          commands: { status: 'registered', names: ['help', 'link', 'new'] },
+          installations: [],
         }}
       />,
     );
 
     expect(
-      screen.getByText('Forum: tasks (requires a tag — unsupported)'),
-    ).toHaveAttribute('aria-disabled', 'true');
-    expect(
-      screen.getByText(/This forum requires a tag for every post/),
-    ).toBeInTheDocument();
+      screen.queryByText('Default Discord destination'),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Discord account linking')).toBeInTheDocument();
   });
 });
