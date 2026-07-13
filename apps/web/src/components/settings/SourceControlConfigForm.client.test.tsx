@@ -273,7 +273,7 @@ describe('SourceControlConfigForm', () => {
     expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+      screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
     );
     expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
     expect(

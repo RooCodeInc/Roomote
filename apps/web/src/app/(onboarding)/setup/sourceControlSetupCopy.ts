@@ -39,7 +39,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'Azure DevOps connection',
     setupLabelArticle: 'an',
     creationHint:
-      'Choose a PAT for the fastest setup, or connect a Microsoft Entra app for short-lived service-principal tokens. PATs should use Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. The organization is the slug from your https://dev.azure.com/<organization> URL. Webhook secrets are generated automatically when service hooks are configured.',
+      'Choose a PAT for the fastest setup, connect your Microsoft account for delegated access, or use a Microsoft Entra service principal for short-lived app-only tokens. PATs should use Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. The organization is the slug from your https://dev.azure.com/<organization> URL. Webhook secrets are generated automatically when service hooks are configured.',
   },
 };
 

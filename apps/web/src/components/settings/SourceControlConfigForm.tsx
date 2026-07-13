@@ -255,7 +255,9 @@ export function SourceControlConfigForm({
             className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
             onClick={() => setAdoAuthMode('entra')}
           >
-            <span className="block font-medium">Microsoft Entra app</span>
+            <span className="block font-medium">
+              Microsoft Entra service principal
+            </span>
             <span className="text-sm text-muted-foreground">
               Use short-lived service-principal tokens.
             </span>
@@ -266,7 +268,9 @@ export function SourceControlConfigForm({
             className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
             onClick={() => setAdoAuthMode('delegated')}
           >
-            <span className="block font-medium">Connect with Microsoft</span>
+            <span className="block font-medium">
+              Connect with your Microsoft account
+            </span>
             <span className="text-sm text-muted-foreground">
               Use a delegated Azure DevOps account.
             </span>
@@ -299,7 +303,7 @@ export function SourceControlConfigForm({
             {adoLinkedAccount.data?.account
               ? 'Reconnect with Microsoft'
               : adoLinkedAccount.data?.configured === true
-                ? 'Connect with Microsoft'
+                ? 'Connect with your Microsoft account'
                 : 'Save app settings first'}
           </Button>
         </div>

@@ -209,8 +209,8 @@ export function StepSourceControlConnect({
             <Spinner />
           ) : adoLinkedAccount.data?.configured === false ? (
             <p className="text-sm text-destructive">
-              The Microsoft Entra app settings are not ready yet. Go back and
-              save the Azure DevOps app credentials first.
+              The Microsoft Entra service-principal settings are not ready yet.
+              Go back and save the Azure DevOps app credentials first.
             </p>
           ) : (
             <Button
@@ -223,7 +223,7 @@ export function StepSourceControlConnect({
               disabled={authenticateAdoAccount.isPending}
             >
               {authenticateAdoAccount.isPending ? <Spinner /> : null}
-              Connect with Microsoft
+              Connect with your Microsoft account
             </Button>
           )}
         </div>

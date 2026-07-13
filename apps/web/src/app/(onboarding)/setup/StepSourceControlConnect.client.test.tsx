@@ -326,7 +326,9 @@ describe('StepSourceControlConnect', () => {
       screen.getByText(/before syncing repositories/i),
     ).toBeInTheDocument();
     fireEvent.click(
-      screen.getByRole('button', { name: /Connect with Microsoft/i }),
+      screen.getByRole('button', {
+        name: /Connect with your Microsoft account/i,
+      }),
     );
 
     expect(authenticateAdoMutateMock).toHaveBeenCalledWith(

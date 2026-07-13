@@ -302,7 +302,7 @@ describe('StepSourceControlConfig', () => {
     ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+      screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
     );
     expect(
       screen.getByText('Create a Microsoft Entra app.'),
@@ -312,7 +312,9 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Connect with Microsoft/ }),
+      screen.getByRole('button', {
+        name: /Connect with your Microsoft account/,
+      }),
     );
     expect(screen.getByText(/Web redirect URI/)).toBeInTheDocument();
     expect(
@@ -355,7 +357,7 @@ describe('StepSourceControlConfig', () => {
     );
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+      screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
     );
 
     expect(
@@ -364,7 +366,9 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Connect with Microsoft/ }),
+      screen.getByRole('button', {
+        name: /Connect with your Microsoft account/,
+      }),
     );
 
     expect(
@@ -453,7 +457,7 @@ describe('StepSourceControlConfig', () => {
       target: { value: 'my-org' },
     });
     fireEvent.click(
-      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+      screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
     );
     fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
       target: { value: 'https://ado.example.com' },

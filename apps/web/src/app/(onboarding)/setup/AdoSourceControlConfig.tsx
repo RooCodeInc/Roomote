@@ -1,5 +1,3 @@
-import { Label } from '@/components/system';
-
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
 
 export function AdoSourceControlConfig({
@@ -21,7 +19,9 @@ export function AdoSourceControlConfig({
           className={`cursor-pointer rounded-md border p-3 text-left ${authMode === 'delegated' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
           onClick={() => onAuthModeChange('delegated')}
         >
-          <span className="block font-medium">Connect with Microsoft</span>
+          <span className="block font-medium">
+            Connect with your Microsoft account
+          </span>
           <span className="text-sm text-muted-foreground">
             Use a delegated Azure DevOps account.
           </span>
@@ -43,7 +43,9 @@ export function AdoSourceControlConfig({
           className={`cursor-pointer rounded-md border p-3 text-left ${authMode === 'entra' ? 'border-foreground' : 'border-foreground/30 hover:border-foreground/60'}`}
           onClick={() => onAuthModeChange('entra')}
         >
-          <span className="block font-medium">Microsoft Entra app</span>
+          <span className="block font-medium">
+            Microsoft Entra service principal
+          </span>
           <span className="text-sm text-muted-foreground">
             Most long-lasting, but more complex.
           </span>
