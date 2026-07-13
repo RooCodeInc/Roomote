@@ -253,10 +253,16 @@ export function StepAuthEnvVars({
     selectedProvider.runtimeSatisfied;
   const selectedProviderHasEditableFields =
     visibleFields.some((field) => !field.runtimeSatisfied) ?? false;
+  // Slack "owns" the step actions only while its intro screen is shown, which
+  // is the same condition SlackSetupExperience uses to render that intro. If a
+  // saved (or runtime) config is being edited instead, the intro is hidden and
+  // this step must render its own action button — otherwise there is no way to
+  // continue. Keep this in sync with SlackSetupExperience's intro guard.
   const providerOwnsActions =
     selectedProvider?.id === 'slack' &&
     !showManualSlackValues &&
-    !selectedProvider.runtimeSatisfied;
+    !selectedProvider.runtimeSatisfied &&
+    !selectedProvider.savedSatisfied;
 
   if (bootstrapMode && selectedProviderRuntimeConfigured) {
     return (

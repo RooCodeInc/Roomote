@@ -457,6 +457,51 @@ describe('StepAuthEnvVars', () => {
     ).toHaveAttribute('href', '/api/setup/roomote-logo');
   });
 
+  it('offers a continue action when a saved Slack config is revisited', () => {
+    const authSetup = buildAuthSetup('slack');
+    const savedSlackAuthSetup: SetupAuthStatus = {
+      ...authSetup,
+      providers: authSetup.providers.map((provider) =>
+        provider.id === 'slack'
+          ? {
+              ...provider,
+              savedSatisfied: true,
+              setupSatisfied: true,
+              fields: provider.fields.map((field) => ({
+                ...field,
+                savedSatisfied: true,
+                savedValue:
+                  field.envVarName === 'R_SLACK_CLIENT_ID'
+                    ? '11040692082085.11578538885334'
+                    : field.savedValue,
+              })),
+            }
+          : provider,
+      ),
+    };
+
+    render(
+      <StepAuthEnvVars
+        authSetup={savedSlackAuthSetup}
+        selectedProviderId="slack"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    // Saved Slack skips the "Create Slack app" intro and shows the value form.
+    expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /create slack app/i }),
+    ).not.toBeInTheDocument();
+
+    // The intro is what "owns" the Slack action buttons, so once it is hidden
+    // the step itself must still render an action button — otherwise the user
+    // is stranded on a page with no way to continue.
+    expect(
+      screen.getByRole('button', { name: /continue/i }),
+    ).toBeInTheDocument();
+  });
+
   it('keeps Microsoft setup focused on the single app values', () => {
     render(
       <StepAuthEnvVars
