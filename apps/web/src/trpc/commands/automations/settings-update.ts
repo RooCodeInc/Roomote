@@ -14,10 +14,12 @@ import {
   db,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   deploymentSettings,
+  getAutomationRuntime,
   getBackgroundAgentSettingsForDeployment,
   MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS,
   upsertAutomation,
 } from '@roomote/db/server';
+import { resolveAutomationRuntimeDestination } from '@roomote/sdk/server';
 import { validateSuggestionRoutingInstructions } from '@roomote/cloud-agents/server';
 import { FeatureFlag } from '@roomote/feature-flags';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
@@ -29,6 +31,7 @@ import {
   hasActiveGitHubInstallation,
   hasActiveRepository,
   hasActiveSentryIntegration,
+  hasActiveSlackInstallation,
 } from './automation-requirements';
 import {
   mergeLegacySingleChannelAutoStartRows,
@@ -679,9 +682,31 @@ export async function updateBackgroundAgentSettingsCommand(
     }
 
     if (!validation.channelId && !sharedManagerChannelId) {
-      const label =
-        getTriggerableBackgroundAutomationDescriptorByKey(validation.key)
-          ?.label ?? validation.key;
+      // Without any Slack-level channel, the automation can still run when
+      // its runner supports another connected comms surface and a
+      // destination resolves there (an existing teams/telegram target, or
+      // the primary-conversation fallback on Slack-less deployments).
+      const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+        validation.key,
+      );
+      const nonSlackProviders =
+        descriptor?.supportedCommunicationProviders.filter(
+          (provider) => provider !== 'slack',
+        ) ?? [];
+
+      if (nonSlackProviders.length > 0) {
+        const runtime = await getAutomationRuntime(validation.key);
+        const destination = await resolveAutomationRuntimeDestination({
+          runtime,
+          slackConnected: await hasActiveSlackInstallation(),
+        });
+
+        if (destination && nonSlackProviders.includes(destination.provider)) {
+          continue;
+        }
+      }
+
+      const label = descriptor?.label ?? validation.key;
       fieldErrors[validation.field] =
         fieldErrors[validation.field] ||
         `Choose a Slack channel before enabling ${label}.`;
