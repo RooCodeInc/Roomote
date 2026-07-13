@@ -451,6 +451,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   // stamp (tasks.initiator_automation).
   const [trackedThread, boundTask] = await Promise.all([
     findBackgroundAutomationSlackThread({
+      surface: 'slack',
       slackChannelId: params.channel,
       threadTs: params.threadTs,
     }),

@@ -111,6 +111,7 @@ async function loadAutomationThreadFeedbackEntries(params: {
   );
 
   return listRecentBackgroundAutomationThreadFeedback({
+    surface: 'slack',
     automationKey: params.automationKey,
     slackChannelId: params.slackChannelId,
     since,

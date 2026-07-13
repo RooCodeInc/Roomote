@@ -332,6 +332,7 @@ export async function announcerJob(
       }
 
       await upsertBackgroundAutomationSlackThread(db, {
+        surface: 'slack',
         automationKey: 'announcer',
         slackChannelId: channelId,
         threadTs: ts,
