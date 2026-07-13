@@ -46,6 +46,7 @@ export async function submitAutomationWorkItems(
     const [run, task] = await Promise.all([
       db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, taskId),
+        orderBy: (table, { desc }) => desc(table.id),
         columns: {
           payloadKind: true,
           actingUserId: true,
