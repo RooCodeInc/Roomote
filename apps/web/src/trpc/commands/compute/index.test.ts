@@ -636,7 +636,14 @@ describe('compute commands', () => {
 
       mockDbTransaction.mockImplementation(async (callback) => {
         return callback({
-          select: createSelectChain(),
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: null,
+                excludedProviders: ['docker'],
+              },
+            },
+          ]),
           insert: txInsert,
         } as never);
       });
@@ -651,7 +658,7 @@ describe('compute commands', () => {
 
       expect(result.runtimeComputeConfig).toEqual({
         defaultProvider: 'e2b',
-        excludedProviders: [],
+        excludedProviders: ['docker'],
       });
       expect(txInsert).toHaveBeenCalledWith(expect.anything());
     });
