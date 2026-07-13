@@ -6,9 +6,11 @@ const { isTaskRunAsleepMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  ArrowRight: () => <svg aria-hidden="true" />,
   Button: ({ children }: { children: ReactNode }) => (
     <button>{children}</button>
   ),
+  Check: () => <svg aria-hidden="true" />,
   Sun: () => <svg aria-hidden="true" />,
 }));
 
@@ -222,11 +224,10 @@ describe('HistoricalContent', () => {
     );
 
     expect(
-      screen.getByText(
-        (_, element) =>
-          element?.textContent ===
-          'The Satanama environment is set up. You can start your first task.',
-      ),
+      screen.getByText('The Satanama environment is set up.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('You can start your first task now.'),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Go' })).toHaveAttribute(
       'href',
