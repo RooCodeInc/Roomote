@@ -16,7 +16,7 @@ describe('POST /api/webhooks/[...path]', () => {
 
   it('forwards to a pathful API base URL without dropping the prefix', async () => {
     mockBootstrapWebRuntimeEnv.mockResolvedValue({
-      TRPC_URL: 'https://app.roomote.test/_roomote-api',
+      R_TRPC_URL: 'https://app.roomote.test/_roomote-api',
     });
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('accepted', {
@@ -67,7 +67,7 @@ describe('POST /api/webhooks/[...path]', () => {
 
   it('drops the Expect header Azure DevOps sends before forwarding', async () => {
     mockBootstrapWebRuntimeEnv.mockResolvedValue({
-      TRPC_URL: 'https://app.roomote.test/_roomote-api',
+      R_TRPC_URL: 'https://app.roomote.test/_roomote-api',
     });
     const fetchMock = vi
       .spyOn(globalThis, 'fetch')

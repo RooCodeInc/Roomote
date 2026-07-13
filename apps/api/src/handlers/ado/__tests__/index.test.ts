@@ -45,7 +45,7 @@ describe('ado webhook router', () => {
     mockRecordWebhook.mockReset();
     mockResolveDeploymentEnvVar.mockReset();
     mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'ADO_WEBHOOK_SECRET' ? 'ado-secret' : null,
+      name === 'R_ADO_WEBHOOK_SECRET' ? 'ado-secret' : null,
     );
     mockHandleAdoComment.mockResolvedValue({ status: 'ok' });
     mockHandleAdoPullRequest.mockResolvedValue({ status: 'ok' });

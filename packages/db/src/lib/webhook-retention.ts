@@ -20,7 +20,7 @@ export interface DeleteExpiredWebhooksOptions {
 /**
  * Deletes recorded webhook rows older than the cutoff, in batches, and
  * returns the number of rows removed. Used by the WebhookCleanup scheduled
- * job (apps/bullmq) with a cutoff derived from WEBHOOK_RETENTION_DAYS.
+ * job (apps/bullmq) with a cutoff derived from R_WEBHOOK_RETENTION_DAYS.
  */
 export async function deleteExpiredWebhooks(
   database: DatabaseOrTransaction,

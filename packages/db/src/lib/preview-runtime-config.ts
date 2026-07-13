@@ -52,7 +52,7 @@ function readPersistedFields(
   deploymentEnvVars: Record<string, string>,
 ): PreviewRuntimeConfigFields {
   const previewProxyBaseUrl = normalizeConfiguredValue(
-    deploymentEnvVars.PREVIEW_PROXY_BASE_URL,
+    deploymentEnvVars.R_PREVIEW_PROXY_BASE_URL,
   );
 
   return {
@@ -102,7 +102,7 @@ function buildOverrideState(params: {
   const overriddenFields: PreviewRuntimeOverrideField[] = [];
 
   const runtimeBaseUrl = normalizeConfiguredValue(
-    params.runtimeEnv.PREVIEW_PROXY_BASE_URL,
+    params.runtimeEnv.R_PREVIEW_PROXY_BASE_URL,
   );
   if (
     runtimeBaseUrl &&
@@ -114,7 +114,7 @@ function buildOverrideState(params: {
   }
 
   const runtimeDomains = normalizeConfiguredValue(
-    params.runtimeEnv.PREVIEW_DOMAINS,
+    params.runtimeEnv.R_PREVIEW_DOMAINS,
   );
   if (
     runtimeDomains &&
@@ -160,19 +160,19 @@ export async function resolveEffectivePreviewRuntimeConfig(
     (await resolveEffectiveDeploymentEnvVars({ executor }));
   const persisted = readPersistedFields(deploymentEnvVars);
   const effectivePreviewProxyBaseUrl = resolveEffectiveValue({
-    runtimeValue: runtimeEnv.PREVIEW_PROXY_BASE_URL,
+    runtimeValue: runtimeEnv.R_PREVIEW_PROXY_BASE_URL,
     persistedValue: persisted.previewProxyBaseUrl,
     defaultValue: options.defaultPreviewProxyBaseUrl,
   });
   const previewProxyBaseUrlSource = resolvePreviewProxyBaseUrlSource({
-    runtimeValue: runtimeEnv.PREVIEW_PROXY_BASE_URL,
+    runtimeValue: runtimeEnv.R_PREVIEW_PROXY_BASE_URL,
     persistedValue: persisted.previewProxyBaseUrl,
     defaultValue: options.defaultPreviewProxyBaseUrl,
   });
   const effective: PreviewRuntimeConfigFields = {
     previewProxyBaseUrl: effectivePreviewProxyBaseUrl,
     previewDomains:
-      normalizeConfiguredValue(runtimeEnv.PREVIEW_DOMAINS) ??
+      normalizeConfiguredValue(runtimeEnv.R_PREVIEW_DOMAINS) ??
       derivePreviewDomains(effectivePreviewProxyBaseUrl) ??
       normalizeConfiguredValue(options.defaultPreviewDomains),
     roomotePreviewDomain:

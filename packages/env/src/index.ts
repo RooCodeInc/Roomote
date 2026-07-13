@@ -61,11 +61,11 @@ function optInBoolean() {
 const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
-  DEFAULT_COMPUTE_PROVIDER: z
+  R_DEFAULT_COMPUTE_PROVIDER: z
     .enum(['modal', 'docker', 'daytona', 'e2b'])
     .default('docker'),
-  EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
-  DOCKER_WORKER_IMAGE: z
+  R_EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
+  R_DOCKER_WORKER_IMAGE: z
     .string()
     .min(1)
     .default(DEFAULT_LOCAL_DOCKER_WORKER_IMAGE),
@@ -73,28 +73,30 @@ const serverSchema = {
   // arm servers) run the native worker-image variant instead of emulating
   // amd64. Only the Docker compute provider consumes this; hosted providers
   // (Modal/E2B/Daytona) run amd64 and resolve it from the image manifest.
-  DOCKER_WORKER_PLATFORM: z
+  R_DOCKER_WORKER_PLATFORM: z
     .string()
     .min(1)
     .default(process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
-  DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
-  DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
-  DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
-  DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
-  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
-  DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
-  DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
-  DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
-  DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
-  DOCKER_WORKER_EGRESS_POLICY: z.enum(['internet', 'none']).default('internet'),
-  DOCKER_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(10),
-  DOCKER_STANDBY_MAX_AGE_HOURS: z.coerce
+  R_DOCKER_WORKER_NETWORK: z.string().min(1).optional(),
+  R_DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
+  R_DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
+  R_DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
+  R_DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  R_DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
+  R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
+  R_DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
+  R_DOCKER_WORKER_LOG_MAX_FILES: z.coerce.number().int().positive().default(3),
+  R_DOCKER_WORKER_EGRESS_POLICY: z
+    .enum(['internet', 'none'])
+    .default('internet'),
+  R_DOCKER_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(10),
+  R_DOCKER_STANDBY_MAX_AGE_HOURS: z.coerce
     .number()
     .positive()
     .max(168)
     .default(24),
-  BLAXEL_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(25),
-  BLAXEL_STANDBY_MAX_AGE_HOURS: z.coerce
+  R_BLAXEL_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().default(25),
+  R_BLAXEL_STANDBY_MAX_AGE_HOURS: z.coerce
     .number()
     .positive()
     .max(168)
@@ -108,7 +110,7 @@ const serverSchema = {
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
   // Release tag baked into published app images by the publish workflow.
   RELEASE_VERSION: z.string().min(1).optional(),
-  TRPC_URL: z.string().min(1),
+  R_TRPC_URL: z.string().min(1),
   R_MODEL: z.string().min(1).optional(),
   R_SMALL_MODEL: z.string().min(1).optional(),
   R_VISION_MODEL: z.string().min(1).optional(),
@@ -137,21 +139,21 @@ const serverSchema = {
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
-  GITHUB_MCP_SERVER_URL: z.string().min(1).optional(),
+  R_GITHUB_MCP_SERVER_URL: z.string().min(1).optional(),
   R_GITHUB_WEBHOOK_SECRET: emptyStringDefault(),
-  GITLAB_WEBHOOK_SECRET: emptyStringDefault(),
-  GITLAB_WEBHOOK_SIGNING_TOKEN: emptyStringDefault(),
-  WORKER_RELEASE_CHANNEL: z.enum(['stable', 'preview']).optional(),
-  WORKER_RELEASE_VERSION: z.string().min(1).optional(),
-  SLACK_APP_ID: emptyStringDefault(),
+  R_GITLAB_WEBHOOK_SECRET: emptyStringDefault(),
+  R_GITLAB_WEBHOOK_SIGNING_TOKEN: emptyStringDefault(),
+  R_WORKER_RELEASE_CHANNEL: z.enum(['stable', 'preview']).optional(),
+  R_WORKER_RELEASE_VERSION: z.string().min(1).optional(),
+  R_SLACK_APP_ID: emptyStringDefault(),
   R_SLACK_CLIENT_ID: z.string().min(1).optional(),
   R_SLACK_CLIENT_SECRET: z.string().min(1).optional(),
-  SLACK_REDIRECT_URI: emptyStringDefault(),
-  SLACK_AUTH_URI: emptyStringDefault(),
+  R_SLACK_REDIRECT_URI: emptyStringDefault(),
+  R_SLACK_AUTH_URI: emptyStringDefault(),
   R_SLACK_SIGNING_SECRET: z.string().min(1).optional(),
-  SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
-  SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
-  ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
+  R_SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api/'),
+  R_SLACK_UNFURL_ALLOWED_DOMAINS: z.string().optional(),
+  R_ROUTER_DEBUG_CHANNEL_ID: z.string().optional(),
   // When adding an integration/instance secret below, also add it to
   // CONTROL_PLANE_ENV_VAR_NAMES (packages/types/src/control-plane-env-vars.ts)
   // unless it is already a `secret` field in a setup catalog, or it leaks into
@@ -164,7 +166,7 @@ const serverSchema = {
   R_TEAMS_BOT_OAUTH_SCOPE: z.string().min(1).optional(),
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
-  TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
+  R_TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
   R_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
   R_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
   R_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
@@ -180,8 +182,8 @@ const serverSchema = {
   ENCRYPTION_KEY: z.string().min(32),
   ARTIFACT_SIGNING_KEY: z.string().min(32),
   ARTIFACT_SIGNING_KEY_PREVIOUS: z.string().min(32).optional(),
-  API_DEBUG_LOGS: z.string().optional(),
-  SLACK_DEBUG_LOGS: z.string().optional(),
+  R_API_DEBUG_LOGS: z.string().optional(),
+  R_SLACK_DEBUG_LOGS: z.string().optional(),
   S3_ENDPOINT: z.string().min(1),
   S3_PRESIGN_ENDPOINT: z.string().min(1).optional(),
   S3_REGION: z.string().min(1),
@@ -189,7 +191,7 @@ const serverSchema = {
   S3_SECRET_ACCESS_KEY: z.string().min(1),
   S3_BUCKET_ARTIFACTS: z.string().min(1),
   S3_AUTO_CREATE_BUCKET: z.string().optional(),
-  PREVIEW_PROXY_BASE_URL: emptyStringDefault(),
+  R_PREVIEW_PROXY_BASE_URL: emptyStringDefault(),
   WEB_DEV_LOGIN_EMAIL: z.string().optional(),
   // Explicit opt-in for the /auth/dev-login backdoor. Required in addition to
   // a development app env so implicit-development deployments never expose it.
@@ -225,26 +227,26 @@ const serverSchema = {
     .int()
     .positive()
     .default(3_600_000),
-  GITHUB_AUTOMATED_SKIP_REPOS: z.string().optional(),
-  GITHUB_AUTOMATED_SKIP_OWNERS: z.string().optional(),
-  PREVIEW_DOMAINS: emptyStringDefault(),
+  R_GITHUB_AUTOMATED_SKIP_REPOS: z.string().optional(),
+  R_GITHUB_AUTOMATED_SKIP_OWNERS: z.string().optional(),
+  R_PREVIEW_DOMAINS: emptyStringDefault(),
   R_ALLOWED_EMAILS: z.string().optional(),
-  PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
-  SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+  R_PREVIEW_TOKEN_TTL_SECONDS: z.coerce.number().int().positive().default(3600),
+  R_SLACK_API_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
   // How long recorded webhook payloads are kept before the WebhookCleanup
   // scheduled job (apps/bullmq) deletes them.
-  WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
-  API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
+  R_WEBHOOK_RETENTION_DAYS: z.coerce.number().int().positive().default(30),
+  R_API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .positive()
     .default(10_000),
-  API_SLOW_REQUEST_THRESHOLD_MS: z.coerce
+  R_API_SLOW_REQUEST_THRESHOLD_MS: z.coerce
     .number()
     .int()
     .positive()
     .default(5_000),
-  API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS: z.coerce
+  R_API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS: z.coerce
     .number()
     .int()
     .positive()
@@ -266,7 +268,7 @@ type ServerEnvKey = keyof typeof serverSchema;
 
 const REQUIRED_SERVER_ENV_KEYS = new Set<ServerEnvKey>([
   'R_APP_URL',
-  'TRPC_URL',
+  'R_TRPC_URL',
   'DATABASE_URL',
   'REDIS_URL',
   'DASHBOARD_PASSWORD',
@@ -289,7 +291,7 @@ export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
   web: [...REQUIRED_SERVER_ENV_KEYS],
   api: [
     'R_APP_URL',
-    'TRPC_URL',
+    'R_TRPC_URL',
     'DATABASE_URL',
     'REDIS_URL',
     'ENCRYPTION_KEY',
@@ -303,7 +305,7 @@ export const SERVICE_REQUIRED_SERVER_ENV_KEYS = {
   ],
   controller: [
     'R_APP_URL',
-    'TRPC_URL',
+    'R_TRPC_URL',
     'DATABASE_URL',
     'REDIS_URL',
     'ENCRYPTION_KEY',
@@ -350,10 +352,14 @@ function buildServiceServerSchema(
 const clientSchema = {};
 
 /** Keys whose runtime resolution requires more than a plain `resolve(key)`. */
-const OVERRIDE_KEYS = new Set(['NODE_ENV', 'APP_ENV', 'SLACK_API_TIMEOUT_MS']);
+const OVERRIDE_KEYS = new Set([
+  'NODE_ENV',
+  'APP_ENV',
+  'R_SLACK_API_TIMEOUT_MS',
+]);
 
 const OPTIONAL_NON_EMPTY_KEYS = new Set([
-  'DOCKER_WORKER_IMAGE',
+  'R_DOCKER_WORKER_IMAGE',
   'R_APP_ENV',
   'R_PUBLIC_URL',
   'R_APP_URL',
@@ -362,13 +368,13 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'SANDBOX_OIDC_PRIVATE_KEY',
   'SANDBOX_OIDC_PUBLIC_KEY',
   'SANDBOX_OIDC_PUBLIC_KEY_SECONDARY',
-  'GITHUB_MCP_SERVER_URL',
-  'WORKER_RELEASE_CHANNEL',
-  'WORKER_RELEASE_VERSION',
+  'R_GITHUB_MCP_SERVER_URL',
+  'R_WORKER_RELEASE_CHANNEL',
+  'R_WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
   'R_PING_BASE_URL',
-  'SLACK_UNFURL_ALLOWED_DOMAINS',
-  'ROUTER_DEBUG_CHANNEL_ID',
+  'R_SLACK_UNFURL_ALLOWED_DOMAINS',
+  'R_ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
   'R_TEAMS_BOT_APP_PASSWORD',
   'R_TEAMS_BOT_TENANT_ID',
@@ -389,8 +395,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_LINEAR_REDIRECT_URI',
   'ARTIFACT_SIGNING_KEY_PREVIOUS',
   'SETUP_TOKEN',
-  'API_DEBUG_LOGS',
-  'SLACK_DEBUG_LOGS',
+  'R_API_DEBUG_LOGS',
+  'R_SLACK_DEBUG_LOGS',
   'S3_ENDPOINT',
   'S3_PRESIGN_ENDPOINT',
   'S3_REGION',
@@ -422,10 +428,41 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'E2B_DOMAIN',
   'E2B_TEMPLATE_ID',
   'E2B_MAX_SANDBOX_TIMEOUT_MS',
-  'DOCKER_WORKER_NETWORK',
-  'DOCKER_WORKER_RELEASE_PATH',
-  'GITHUB_AUTOMATED_SKIP_REPOS',
-  'GITHUB_AUTOMATED_SKIP_OWNERS',
+  'R_DOCKER_WORKER_NETWORK',
+  'R_DOCKER_WORKER_RELEASE_PATH',
+  'R_EXCLUDED_COMPUTE_PROVIDERS',
+  'R_PREVIEW_PROXY_BASE_URL',
+  'R_PREVIEW_DOMAINS',
+  'R_PREVIEW_TOKEN_TTL_SECONDS',
+  'R_SLACK_APP_ID',
+  'R_SLACK_REDIRECT_URI',
+  'R_SLACK_AUTH_URI',
+  'R_SLACK_API_BASE_URL',
+  'R_TELEGRAM_API_BASE_URL',
+  'R_GITLAB_BASE_URL',
+  'R_GITLAB_CLIENT_ID',
+  'R_GITLAB_CLIENT_SECRET',
+  'R_GITLAB_WEBHOOK_SIGNING_TOKEN',
+  'R_GITLAB_WEBHOOK_SECRET',
+  'R_GITEA_BASE_URL',
+  'R_GITEA_USERNAME',
+  'R_GITEA_CLIENT_ID',
+  'R_GITEA_CLIENT_SECRET',
+  'R_GITEA_WEBHOOK_SECRET',
+  'R_ADO_ORGANIZATION',
+  'R_ADO_BASE_URL',
+  'R_ADO_USERNAME',
+  'R_ADO_CLIENT_ID',
+  'R_ADO_CLIENT_SECRET',
+  'R_ADO_TENANT_ID',
+  'R_ADO_WEBHOOK_SECRET',
+  'R_BITBUCKET_USERNAME',
+  'R_BITBUCKET_BASE_URL',
+  'R_BITBUCKET_CLIENT_ID',
+  'R_BITBUCKET_CLIENT_SECRET',
+  'R_BITBUCKET_WEBHOOK_SECRET',
+  'R_GITHUB_AUTOMATED_SKIP_REPOS',
+  'R_GITHUB_AUTOMATED_SKIP_OWNERS',
   'R_MODEL',
   'R_SMALL_MODEL',
   'R_VISION_MODEL',
@@ -652,15 +689,15 @@ function buildRoomoteRuntimeEnv(
   // Published app images bake RELEASE_VERSION, and the publish workflow
   // pushes the worker image with the identical tag. Deriving the worker
   // image from it spares self-host operators a manual multi-place version
-  // bump on every upgrade; an explicit DOCKER_WORKER_IMAGE always wins, and
+  // bump on every upgrade; an explicit R_DOCKER_WORKER_IMAGE always wins, and
   // local/self-host builds fall through to the schema default.
   const resolvedDockerWorkerImage = resolveEffectiveDockerWorkerImage({
-    DOCKER_WORKER_IMAGE: resolve('DOCKER_WORKER_IMAGE'),
+    R_DOCKER_WORKER_IMAGE: resolve('R_DOCKER_WORKER_IMAGE'),
     RELEASE_VERSION: resolve('RELEASE_VERSION'),
     ROOMOTE_WORKER_IMAGE_REPO: resolve('ROOMOTE_WORKER_IMAGE_REPO'),
   });
 
-  env.DOCKER_WORKER_IMAGE =
+  env.R_DOCKER_WORKER_IMAGE =
     resolvedDockerWorkerImage ?? DEFAULT_LOCAL_DOCKER_WORKER_IMAGE;
 
   // Keys with non-trivial resolution logic:
@@ -668,15 +705,15 @@ function buildRoomoteRuntimeEnv(
   env.NODE_ENV = nodeEnv;
   // APP_ENV is derived from multiple Vercel env vars, not a single key lookup.
   env.APP_ENV = resolveAppEnv(processEnv);
-  env.SLACK_API_TIMEOUT_MS =
-    resolve('SLACK_API_TIMEOUT_MS') ??
-    resolve('API_EXTERNAL_REQUEST_TIMEOUT_MS');
+  env.R_SLACK_API_TIMEOUT_MS =
+    resolve('R_SLACK_API_TIMEOUT_MS') ??
+    resolve('R_API_EXTERNAL_REQUEST_TIMEOUT_MS');
 
   const appEnv = resolveAppEnv(processEnv);
 
   if (nodeEnv !== 'production' && appEnv === 'development') {
     env.R_APP_URL ??= getDefaultRoomoteAppUrl(appEnv);
-    env.TRPC_URL ??= getDefaultTrpcUrl(appEnv);
+    env.R_TRPC_URL ??= getDefaultTrpcUrl(appEnv);
     env.DATABASE_URL ??=
       nodeEnv === 'test'
         ? 'postgres://postgres:password@localhost:15432/roomote_test'
@@ -686,8 +723,8 @@ function buildRoomoteRuntimeEnv(
     env.DASHBOARD_PASSWORD ??= LOCAL_DASHBOARD_PASSWORD;
     env.ENCRYPTION_KEY ??= LOCAL_ENCRYPTION_KEY;
     env.ARTIFACT_SIGNING_KEY ??= LOCAL_ARTIFACT_SIGNING_KEY;
-    env.PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
-    env.PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
+    env.R_PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
+    env.R_PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
     env.S3_ENDPOINT ??= LOCAL_S3_ENDPOINT;
     env.S3_PRESIGN_ENDPOINT ??= LOCAL_S3_PRESIGN_ENDPOINT;
     env.S3_REGION ??= LOCAL_S3_REGION;
@@ -697,10 +734,10 @@ function buildRoomoteRuntimeEnv(
   }
 
   // Slack rejects the whole account-linking DM (invalid_blocks) when the
-  // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
+  // "Link accounts" button URL is not absolute, so an unset R_SLACK_AUTH_URI
   // must fall back to the web app's linking route rather than empty string.
-  if (!env.SLACK_AUTH_URI && env.R_APP_URL) {
-    env.SLACK_AUTH_URI = `${env.R_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+  if (!env.R_SLACK_AUTH_URI && env.R_APP_URL) {
+    env.R_SLACK_AUTH_URI = `${env.R_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
   }
 
   return env;

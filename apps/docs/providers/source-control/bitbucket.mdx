@@ -35,21 +35,21 @@ or local `.env.local`:
 
 ```sh
 BITBUCKET_TOKEN=<atlassian-api-token>
-BITBUCKET_USERNAME=<atlassian-account-email>
+R_BITBUCKET_USERNAME=<atlassian-account-email>
 ```
 
 Optional values:
 
 ```sh
-BITBUCKET_BASE_URL=https://bitbucket.org
-BITBUCKET_WEBHOOK_SECRET=<webhook-secret>
+R_BITBUCKET_BASE_URL=https://bitbucket.org
+R_BITBUCKET_WEBHOOK_SECRET=<webhook-secret>
 ```
 
-`BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` and holds the Atlassian
+`R_BITBUCKET_USERNAME` is required with `BITBUCKET_TOKEN` and holds the Atlassian
 account email that owns the token (Bitbucket pairs the two for REST auth). For
 git-over-HTTPS, Roomote automatically uses Bitbucket's static
 `x-bitbucket-api-token-auth` user, so no extra configuration is needed.
-`BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
+`R_BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
 is accepted; other hosts are rejected.
 
 ## Sync repositories
@@ -70,7 +70,7 @@ webhook for each synced Bitbucket repository. The webhook target is:
 ```
 
 If only loopback Roomote URLs are configured, webhook setup is skipped and
-repository sync still succeeds. If `BITBUCKET_WEBHOOK_SECRET` is missing,
+repository sync still succeeds. If `R_BITBUCKET_WEBHOOK_SECRET` is missing,
 Roomote generates and persists one as an encrypted deployment environment
 variable.
 
@@ -92,8 +92,8 @@ Users can link their personal Bitbucket account for comment-triggered work when
 a Bitbucket OAuth consumer is configured:
 
 ```sh
-BITBUCKET_CLIENT_ID=<oauth-client-id>
-BITBUCKET_CLIENT_SECRET=<oauth-client-secret>
+R_BITBUCKET_CLIENT_ID=<oauth-client-id>
+R_BITBUCKET_CLIENT_SECRET=<oauth-client-secret>
 ```
 
 These credentials are optional. Without them, deployment-token repository sync,

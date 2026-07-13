@@ -116,7 +116,7 @@ describe('buildSetupSourceControlStatus', () => {
   it('preselects the runtime-configured provider when nothing is connected', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITEA_BASE_URL: 'https://gitea.example.com',
+        R_GITEA_BASE_URL: 'https://gitea.example.com',
         GITEA_TOKEN: 'gitea-token',
       },
     });
@@ -178,7 +178,7 @@ describe('buildSetupSourceControlStatus', () => {
   it('does not require optional fields to satisfy config', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        ADO_ORGANIZATION: 'my-org',
+        R_ADO_ORGANIZATION: 'my-org',
         ADO_TOKEN: 'ado-token',
       },
     });
@@ -186,19 +186,19 @@ describe('buildSetupSourceControlStatus', () => {
     const ado = status.providers.find((p) => p.provider === 'ado');
     expect(ado).toMatchObject({ configSatisfied: true });
     const optionalBaseUrl = ado?.fields.find(
-      (f) => f.envVarName === 'ADO_BASE_URL',
+      (f) => f.envVarName === 'R_ADO_BASE_URL',
     );
     const optionalAdoWebhookSecret = ado?.fields.find(
-      (f) => f.envVarName === 'ADO_WEBHOOK_SECRET',
+      (f) => f.envVarName === 'R_ADO_WEBHOOK_SECRET',
     );
     const optionalAdoClientId = ado?.fields.find(
-      (f) => f.envVarName === 'ADO_CLIENT_ID',
+      (f) => f.envVarName === 'R_ADO_CLIENT_ID',
     );
     const optionalAdoClientSecret = ado?.fields.find(
-      (f) => f.envVarName === 'ADO_CLIENT_SECRET',
+      (f) => f.envVarName === 'R_ADO_CLIENT_SECRET',
     );
     const optionalAdoTenantId = ado?.fields.find(
-      (f) => f.envVarName === 'ADO_TENANT_ID',
+      (f) => f.envVarName === 'R_ADO_TENANT_ID',
     );
     expect(optionalBaseUrl).toMatchObject({
       required: false,
@@ -235,20 +235,20 @@ describe('buildSetupSourceControlStatus', () => {
     });
     const gitlab = gitlabStatus.providers.find((p) => p.provider === 'gitlab');
     const optionalGitLabClientId = gitlab?.fields.find(
-      (field) => field.envVarName === 'GITLAB_CLIENT_ID',
+      (field) => field.envVarName === 'R_GITLAB_CLIENT_ID',
     );
     const optionalGitLabClientSecret = gitlab?.fields.find(
-      (field) => field.envVarName === 'GITLAB_CLIENT_SECRET',
+      (field) => field.envVarName === 'R_GITLAB_CLIENT_SECRET',
     );
     const giteaStatus = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITEA_BASE_URL: 'https://gitea.example.com',
+        R_GITEA_BASE_URL: 'https://gitea.example.com',
         GITEA_TOKEN: 'gitea-token',
       },
     });
     const gitea = giteaStatus.providers.find((p) => p.provider === 'gitea');
     const optionalGiteaWebhookSecret = gitea?.fields.find(
-      (field) => field.envVarName === 'GITEA_WEBHOOK_SECRET',
+      (field) => field.envVarName === 'R_GITEA_WEBHOOK_SECRET',
     );
 
     expect(optionalGitLabClientId).toMatchObject({
@@ -270,7 +270,7 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('marks config unsatisfied when a required field is missing', () => {
     const status = buildSetupSourceControlStatus({
-      runtimeEnv: { ADO_ORGANIZATION: 'my-org' },
+      runtimeEnv: { R_ADO_ORGANIZATION: 'my-org' },
     });
 
     const ado = status.providers.find((p) => p.provider === 'ado');

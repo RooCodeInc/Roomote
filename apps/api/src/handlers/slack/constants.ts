@@ -1,7 +1,7 @@
 import { Env } from '@roomote/env';
 
 const UNFURL_ALLOWED_DOMAIN_SUFFIXES = new Set(
-  (Env.SLACK_UNFURL_ALLOWED_DOMAINS ?? new URL(Env.R_APP_URL).hostname)
+  (Env.R_SLACK_UNFURL_ALLOWED_DOMAINS ?? new URL(Env.R_APP_URL).hostname)
     .split(',')
     .map((domain) => domain.trim())
     .filter((domain) => domain.length > 0),

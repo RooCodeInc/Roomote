@@ -31,7 +31,7 @@ const {
   mockValidateGiteaToken: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
-    TRPC_URL: 'http://localhost:3000/trpc',
+    R_TRPC_URL: 'http://localhost:3000/trpc',
   },
 }));
 
@@ -120,7 +120,7 @@ describe('source-control commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnv.R_APP_URL = 'https://roomote.example.com';
-    mockEnv.TRPC_URL = 'http://localhost:3000/trpc';
+    mockEnv.R_TRPC_URL = 'http://localhost:3000/trpc';
     mockResolveDeploymentEnvVar.mockResolvedValue(null);
     mockEnvironmentMappingRows.rows = [
       { repositoryId: 'ado-repo-row-1' },
@@ -172,7 +172,7 @@ describe('source-control commands', () => {
         userId: 'source-control-user',
         values: [
           expect.objectContaining({
-            name: 'GITEA_WEBHOOK_SECRET',
+            name: 'R_GITEA_WEBHOOK_SECRET',
             value: expect.stringMatching(/^[a-f0-9]{64}$/),
           }),
         ],
@@ -276,7 +276,7 @@ describe('source-control commands', () => {
         userId: 'source-control-user',
         values: [
           expect.objectContaining({
-            name: 'ADO_WEBHOOK_SECRET',
+            name: 'R_ADO_WEBHOOK_SECRET',
             value: expect.stringMatching(/^[a-f0-9]{64}$/),
           }),
         ],
@@ -316,7 +316,7 @@ describe('source-control commands', () => {
       assertValidSourceControlConfigInput({
         provider: 'ado',
         values: {
-          ADO_ORGANIZATION: 'acme',
+          R_ADO_ORGANIZATION: 'acme',
           ADO_TOKEN: 'ado-token',
         },
       }),
@@ -363,7 +363,7 @@ describe('source-control commands', () => {
       assertValidSourceControlConfigInput({
         provider: 'gitea',
         values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
+          R_GITEA_BASE_URL: 'https://gitea.example.com',
           GITEA_TOKEN: 'gitea-token',
         },
       }),

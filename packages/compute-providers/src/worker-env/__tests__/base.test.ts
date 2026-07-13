@@ -1,7 +1,7 @@
 vi.mock('@roomote/env', () => ({
   Env: {
     R_APP_URL: 'https://web.roomote.example.com',
-    TRPC_URL: 'https://api.roomote.example.com',
+    R_TRPC_URL: 'https://api.roomote.example.com',
   },
 }));
 
@@ -12,7 +12,7 @@ describe('buildBaseWorkerEnv', () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    delete process.env.PREVIEW_PROXY_BASE_URL;
+    delete process.env.R_PREVIEW_PROXY_BASE_URL;
     delete process.env.JOB_AUTH_PRIVATE_KEY;
     delete process.env.JOB_AUTH_PUBLIC_KEY;
     delete process.env.R_MODEL;
@@ -41,8 +41,8 @@ describe('buildBaseWorkerEnv', () => {
     });
 
     expect(env.R_APP_URL).toBe('https://web.roomote.example.com');
-    expect(env.TRPC_URL).toBe('https://api.roomote.example.com');
-    expect(env.PREVIEW_PROXY_BASE_URL).toBeUndefined();
+    expect(env.R_TRPC_URL).toBe('https://api.roomote.example.com');
+    expect(env.R_PREVIEW_PROXY_BASE_URL).toBeUndefined();
   });
 
   it('injects the legacy ROOMOTE_APP_URL alias for pre-rename snapshot workers', () => {
@@ -55,14 +55,14 @@ describe('buildBaseWorkerEnv', () => {
   });
 
   it('forwards an explicit preview proxy base URL', () => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.example.com';
+    process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.example.com';
 
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
       extraEnv: {},
     });
 
-    expect(env.PREVIEW_PROXY_BASE_URL).toBe('https://preview.example.com');
+    expect(env.R_PREVIEW_PROXY_BASE_URL).toBe('https://preview.example.com');
   });
 
   it('forwards only public launcher auth transport keys for the sandbox worker runtime', () => {

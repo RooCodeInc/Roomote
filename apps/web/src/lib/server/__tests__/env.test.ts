@@ -77,7 +77,7 @@ describe('web server Env wrapper', () => {
     mockDotenvxGet.mockImplementation((key: string) => {
       if (
         key === 'ARTIFACT_SIGNING_KEY_PREVIOUS' ||
-        key === 'PREVIEW_TOKEN_TTL_SECONDS'
+        key === 'R_PREVIEW_TOKEN_TTL_SECONDS'
       ) {
         return undefined;
       }
@@ -88,7 +88,7 @@ describe('web server Env wrapper', () => {
       const { Env } = await import('../env');
 
       expect(Env.ARTIFACT_SIGNING_KEY_PREVIOUS).toBeUndefined();
-      expect(Env.PREVIEW_TOKEN_TTL_SECONDS).toBe(3600);
+      expect(Env.R_PREVIEW_TOKEN_TTL_SECONDS).toBe(3600);
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;
@@ -307,13 +307,13 @@ describe('web server Env wrapper', () => {
     expect(mockDotenvxConfig).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the local preview domain default when PREVIEW_DOMAINS is missing outside production', async () => {
+  it('uses the local preview domain default when R_PREVIEW_DOMAINS is missing outside production', async () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
 
     delete process.env.SKIP_ENV_VALIDATION;
 
     mockDotenvxGet.mockImplementation((key: string) => {
-      if (key === 'PREVIEW_DOMAINS') {
+      if (key === 'R_PREVIEW_DOMAINS') {
         return undefined;
       }
 
@@ -325,7 +325,7 @@ describe('web server Env wrapper', () => {
 
       rehydrateWebEnv();
 
-      expect(Env.PREVIEW_DOMAINS).toBe(
+      expect(Env.R_PREVIEW_DOMAINS).toBe(
         'localhost,127.0.0.1,roomotepreview.localhost',
       );
     } finally {

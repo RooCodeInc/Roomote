@@ -55,9 +55,10 @@ export class DockerService {
   ];
 
   static async ensureWorkerImage(verbose: boolean): Promise<void> {
-    const image = process.env.DOCKER_WORKER_IMAGE ?? this.DEFAULT_WORKER_IMAGE;
+    const image =
+      process.env.R_DOCKER_WORKER_IMAGE ?? this.DEFAULT_WORKER_IMAGE;
     const platform =
-      process.env.DOCKER_WORKER_PLATFORM ?? this.DEFAULT_WORKER_PLATFORM;
+      process.env.R_DOCKER_WORKER_PLATFORM ?? this.DEFAULT_WORKER_PLATFORM;
     const rootDir = path.resolve(process.cwd(), '../..');
 
     if (

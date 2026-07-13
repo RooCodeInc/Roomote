@@ -425,8 +425,8 @@ describe('DockerService.ensureWorkerImage', () => {
 
   it('honors custom Docker worker image and platform settings', async () => {
     const rootDir = path.resolve(process.cwd(), '../..');
-    process.env.DOCKER_WORKER_IMAGE = 'custom-worker:test';
-    process.env.DOCKER_WORKER_PLATFORM = 'linux/arm64';
+    process.env.R_DOCKER_WORKER_IMAGE = 'custom-worker:test';
+    process.env.R_DOCKER_WORKER_PLATFORM = 'linux/arm64';
 
     vi.mocked(execa)
       .mockRejectedValueOnce(new Error('missing image'))

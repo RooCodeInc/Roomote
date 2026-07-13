@@ -7,8 +7,8 @@ function isDebugLogsEnabled(value: string | undefined): boolean {
 
 function isSlackDebugLoggingEnabled(): boolean {
   const effectiveAppEnv = Env.APP_ENV ?? Env.NODE_ENV;
-  const slackDebugLogsEnabled = isDebugLogsEnabled(Env.SLACK_DEBUG_LOGS);
-  const apiDebugLogsEnabled = isDebugLogsEnabled(Env.API_DEBUG_LOGS);
+  const slackDebugLogsEnabled = isDebugLogsEnabled(Env.R_SLACK_DEBUG_LOGS);
+  const apiDebugLogsEnabled = isDebugLogsEnabled(Env.R_API_DEBUG_LOGS);
 
   return (
     effectiveAppEnv !== 'production' ||

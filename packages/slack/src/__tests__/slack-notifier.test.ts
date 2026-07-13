@@ -32,11 +32,11 @@ vi.mock('@slack/web-api', () => {
 
 describe('SlackNotifier', () => {
   const token = 'xoxb-test-token';
-  const originalBaseUrl = process.env.SLACK_API_BASE_URL;
+  const originalBaseUrl = process.env.R_SLACK_API_BASE_URL;
   let notifier: SlackNotifier;
 
   beforeEach(() => {
-    process.env.SLACK_API_BASE_URL = 'https://slack.com/api/';
+    process.env.R_SLACK_API_BASE_URL = 'https://slack.com/api/';
     notifier = new SlackNotifier(token);
     vi.clearAllMocks();
     getGlobalWithFetch().fetch = vi.fn();
@@ -44,11 +44,11 @@ describe('SlackNotifier', () => {
 
   afterEach(() => {
     if (originalBaseUrl === undefined) {
-      delete process.env.SLACK_API_BASE_URL;
+      delete process.env.R_SLACK_API_BASE_URL;
       return;
     }
 
-    process.env.SLACK_API_BASE_URL = originalBaseUrl;
+    process.env.R_SLACK_API_BASE_URL = originalBaseUrl;
   });
 
   describe('postMessage', () => {
@@ -80,7 +80,7 @@ describe('SlackNotifier', () => {
     });
 
     it('suppresses threaded replies when the thread root message is gone', async () => {
-      process.env.SLACK_API_BASE_URL = 'http://127.0.0.1:3012/api';
+      process.env.R_SLACK_API_BASE_URL = 'http://127.0.0.1:3012/api';
 
       getGlobalWithFetch().fetch = vi
         .fn()
@@ -2853,7 +2853,7 @@ describe('SlackNotifier', () => {
       );
       expect(WebClientMock).toHaveBeenCalledWith(token, {
         slackApiUrl: 'https://slack.com/api/',
-        timeout: Env.SLACK_API_TIMEOUT_MS,
+        timeout: Env.R_SLACK_API_TIMEOUT_MS,
       });
     });
 

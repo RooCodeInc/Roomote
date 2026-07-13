@@ -20,9 +20,9 @@ x-roomote-env: &roomote-env
   S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-roomote-local-artifacts-password}
   S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
   R_APP_URL: ${R_PUBLIC_URL:-http://localhost:13000}
-  TRPC_URL: http://api:3001
-  PREVIEW_PROXY_BASE_URL: ${PREVIEW_PROXY_BASE_URL:-http://localhost:18081}
-  PREVIEW_DOMAINS: ${PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
+  R_TRPC_URL: http://api:3001
+  R_PREVIEW_PROXY_BASE_URL: ${R_PREVIEW_PROXY_BASE_URL:-http://localhost:18081}
+  R_PREVIEW_DOMAINS: ${R_PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
   R_PUBLIC_URL: ${R_PUBLIC_URL:-}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
   R_MODEL: ${R_MODEL:-}
@@ -53,7 +53,7 @@ x-roomote-env: &roomote-env
   R_GITHUB_CLIENT_ID: ${R_GITHUB_CLIENT_ID:-}
   R_GITHUB_CLIENT_SECRET: ${R_GITHUB_CLIENT_SECRET:-}
   R_GITHUB_WEBHOOK_SECRET: ${R_GITHUB_WEBHOOK_SECRET:-}
-  SLACK_APP_ID: ${SLACK_APP_ID:-}
+  R_SLACK_APP_ID: ${R_SLACK_APP_ID:-}
   R_SLACK_CLIENT_ID: ${R_SLACK_CLIENT_ID:-}
   R_SLACK_CLIENT_SECRET: ${R_SLACK_CLIENT_SECRET:-}
   R_SLACK_SIGNING_SECRET: ${R_SLACK_SIGNING_SECRET:-}
@@ -64,15 +64,15 @@ x-roomote-env: &roomote-env
   R_LINEAR_WEBHOOK_SECRET: ${R_LINEAR_WEBHOOK_SECRET:-}
   R_GITHUB_APP_SLUG: ${R_GITHUB_APP_SLUG:-}
   SETUP_TOKEN: ${SETUP_TOKEN:-}
-  DEFAULT_COMPUTE_PROVIDER: ${DEFAULT_COMPUTE_PROVIDER:-docker}
+  R_DEFAULT_COMPUTE_PROVIDER: ${R_DEFAULT_COMPUTE_PROVIDER:-docker}
   BL_API_KEY: ${BL_API_KEY:-}
   BL_WORKSPACE: ${BL_WORKSPACE:-}
   BLAXEL_IMAGE: ${BLAXEL_IMAGE:-}
   BLAXEL_REGION: ${BLAXEL_REGION:-}
-  BLAXEL_STANDBY_MAX_COUNT: ${BLAXEL_STANDBY_MAX_COUNT:-25}
-  BLAXEL_STANDBY_MAX_AGE_HOURS: ${BLAXEL_STANDBY_MAX_AGE_HOURS:-168}
-  DOCKER_STANDBY_MAX_COUNT: ${DOCKER_STANDBY_MAX_COUNT:-10}
-  DOCKER_STANDBY_MAX_AGE_HOURS: ${DOCKER_STANDBY_MAX_AGE_HOURS:-24}
+  R_BLAXEL_STANDBY_MAX_COUNT: ${R_BLAXEL_STANDBY_MAX_COUNT:-25}
+  R_BLAXEL_STANDBY_MAX_AGE_HOURS: ${R_BLAXEL_STANDBY_MAX_AGE_HOURS:-168}
+  R_DOCKER_STANDBY_MAX_COUNT: ${R_DOCKER_STANDBY_MAX_COUNT:-10}
+  R_DOCKER_STANDBY_MAX_AGE_HOURS: ${R_DOCKER_STANDBY_MAX_AGE_HOURS:-24}
   # Declarative environment provisioning: point ROOMOTE_ENVIRONMENTS_DIR at a
   # directory of environment YAML files mounted into the api container (for
   # example `- ./environments:/roomote/environments:ro` on the api service),
@@ -144,7 +144,7 @@ services:
     container_name: roomote-api
     image: *roomote-app-image
     command: ['api']
-    # Reachable from task worker containers (worker -> API over TRPC_URL).
+    # Reachable from task worker containers (worker -> API over R_TRPC_URL).
     networks: [default, worker]
     environment:
       <<: *roomote-env

@@ -56,7 +56,7 @@ const {
     R_APP_URL: 'https://app.example.com',
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
     R_TELEGRAM_WEBHOOK_SECRET: 'secret' as string | undefined,
-    TRPC_URL: 'https://api.example.com' as string | undefined,
+    R_TRPC_URL: 'https://api.example.com' as string | undefined,
   },
   getTaskUrlMock: vi.fn(() => 'https://app.example.com/task/task-new'),
   insertMock: vi.fn(),
@@ -348,7 +348,7 @@ describe('Telegram webhook handler', () => {
     envMock.R_APP_URL = 'https://app.example.com';
     envMock.R_TELEGRAM_BOT_TOKEN = 'bot-token';
     envMock.R_TELEGRAM_WEBHOOK_SECRET = 'secret';
-    envMock.TRPC_URL = 'https://api.example.com';
+    envMock.R_TRPC_URL = 'https://api.example.com';
     redisSetMock.mockResolvedValue('OK');
     redisDelMock.mockResolvedValue(1);
     redisGetMock.mockResolvedValue(null);

@@ -21,19 +21,19 @@ const {
     MODAL_ECR_OIDC_ROLE_ARN: undefined,
     MODAL_ECR_REGION: undefined,
     MODAL_REGIONS: undefined,
-    TRPC_URL: 'http://localhost:13001',
-    DOCKER_WORKER_IMAGE: 'roomote-worker:local',
-    DOCKER_WORKER_PLATFORM: 'linux/amd64',
-    DOCKER_WORKER_NETWORK: undefined,
-    DOCKER_WORKER_RELEASE_PATH: undefined,
-    DOCKER_WORKER_CPU_LIMIT: 2,
-    DOCKER_WORKER_MEMORY_LIMIT: '4g',
-    DOCKER_WORKER_PIDS_LIMIT: 512,
-    DOCKER_WORKER_DISK_LIMIT: '20g',
-    DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
-    DOCKER_WORKER_LOG_MAX_SIZE: '10m',
-    DOCKER_WORKER_LOG_MAX_FILES: 3,
-    DOCKER_WORKER_EGRESS_POLICY: 'internet',
+    R_TRPC_URL: 'http://localhost:13001',
+    R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+    R_DOCKER_WORKER_PLATFORM: 'linux/amd64',
+    R_DOCKER_WORKER_NETWORK: undefined,
+    R_DOCKER_WORKER_RELEASE_PATH: undefined,
+    R_DOCKER_WORKER_CPU_LIMIT: 2,
+    R_DOCKER_WORKER_MEMORY_LIMIT: '4g',
+    R_DOCKER_WORKER_PIDS_LIMIT: 512,
+    R_DOCKER_WORKER_DISK_LIMIT: '20g',
+    R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
+    R_DOCKER_WORKER_LOG_MAX_SIZE: '10m',
+    R_DOCKER_WORKER_LOG_MAX_FILES: 3,
+    R_DOCKER_WORKER_EGRESS_POLICY: 'internet',
     DAYTONA_API_KEY: 'daytona-key',
     DAYTONA_API_URL: undefined,
     DAYTONA_TARGET: undefined,
@@ -114,19 +114,19 @@ describe('RoomoteController', () => {
     mockEnv.MODAL_ECR_OIDC_ROLE_ARN = undefined;
     mockEnv.MODAL_ECR_REGION = undefined;
     mockEnv.MODAL_REGIONS = undefined;
-    mockEnv.TRPC_URL = 'http://localhost:13001';
-    mockEnv.DOCKER_WORKER_IMAGE = 'roomote-worker:local';
-    mockEnv.DOCKER_WORKER_PLATFORM = 'linux/amd64';
-    mockEnv.DOCKER_WORKER_NETWORK = undefined;
-    mockEnv.DOCKER_WORKER_RELEASE_PATH = undefined;
-    mockEnv.DOCKER_WORKER_CPU_LIMIT = 2;
-    mockEnv.DOCKER_WORKER_MEMORY_LIMIT = '4g';
-    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 512;
-    mockEnv.DOCKER_WORKER_DISK_LIMIT = '20g';
-    mockEnv.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
-    mockEnv.DOCKER_WORKER_LOG_MAX_SIZE = '10m';
-    mockEnv.DOCKER_WORKER_LOG_MAX_FILES = 3;
-    mockEnv.DOCKER_WORKER_EGRESS_POLICY = 'internet';
+    mockEnv.R_TRPC_URL = 'http://localhost:13001';
+    mockEnv.R_DOCKER_WORKER_IMAGE = 'roomote-worker:local';
+    mockEnv.R_DOCKER_WORKER_PLATFORM = 'linux/amd64';
+    mockEnv.R_DOCKER_WORKER_NETWORK = undefined;
+    mockEnv.R_DOCKER_WORKER_RELEASE_PATH = undefined;
+    mockEnv.R_DOCKER_WORKER_CPU_LIMIT = 2;
+    mockEnv.R_DOCKER_WORKER_MEMORY_LIMIT = '4g';
+    mockEnv.R_DOCKER_WORKER_PIDS_LIMIT = 512;
+    mockEnv.R_DOCKER_WORKER_DISK_LIMIT = '20g';
+    mockEnv.R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
+    mockEnv.R_DOCKER_WORKER_LOG_MAX_SIZE = '10m';
+    mockEnv.R_DOCKER_WORKER_LOG_MAX_FILES = 3;
+    mockEnv.R_DOCKER_WORKER_EGRESS_POLICY = 'internet';
     mockEnv.DAYTONA_API_KEY = 'daytona-key';
     mockEnv.DAYTONA_API_URL = undefined;
     mockEnv.DAYTONA_TARGET = undefined;
@@ -149,7 +149,7 @@ describe('RoomoteController', () => {
   });
 
   it('spawns Docker workers when Docker is the selected provider', async () => {
-    mockEnv.DOCKER_WORKER_NETWORK = 'roomote_default';
+    mockEnv.R_DOCKER_WORKER_NETWORK = 'roomote_default';
     const controller = new RoomoteController('production');
 
     await (

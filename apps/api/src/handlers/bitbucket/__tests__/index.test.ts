@@ -52,7 +52,7 @@ describe('bitbucket webhook router', () => {
     handleBitbucketPullRequest.mockClear();
     handleBitbucketComment.mockClear();
     resolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'BITBUCKET_WEBHOOK_SECRET' ? 'bitbucket-secret' : null,
+      name === 'R_BITBUCKET_WEBHOOK_SECRET' ? 'bitbucket-secret' : null,
     );
   });
 

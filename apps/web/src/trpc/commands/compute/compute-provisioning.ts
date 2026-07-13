@@ -222,7 +222,7 @@ function planComputeProvisioning({
   const workerImageRef = resolveDerivedModalBaseImageRef({
     ...(runtimeEnv ?? process.env),
     ...(dockerWorkerImage !== undefined
-      ? { DOCKER_WORKER_IMAGE: dockerWorkerImage }
+      ? { R_DOCKER_WORKER_IMAGE: dockerWorkerImage }
       : {}),
   });
 

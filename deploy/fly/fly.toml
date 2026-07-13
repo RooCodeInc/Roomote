@@ -16,7 +16,7 @@
 # - Fly Proxy is the HTTPS edge. There is no bundled Caddy and no
 #   `/_roomote-api` path routing. A Fly app has one public hostname, and Fly
 #   Proxy routes by port, not process group, so the web app owns 443 and the
-#   API is exposed on port 8443 of the same hostname: `TRPC_URL` is
+#   API is exposed on port 8443 of the same hostname: `R_TRPC_URL` is
 #   `https://<app>.fly.dev:8443`. The `*.fly.dev` certificate covers
 #   TLS-handled ports other than 443, and GitHub webhooks and hosted-sandbox
 #   workers call that origin directly.
@@ -26,7 +26,7 @@
 #   as the Railway template).
 # - Fly Machines have no Docker socket, so task execution must use a hosted
 #   sandbox provider (modal by default; e2b and daytona also work).
-#   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
+#   R_EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Managed resources replace the bundled datastores: Fly Managed Postgres
 #   (`fly mpg create` + `fly mpg attach` sets DATABASE_URL), Upstash Redis
 #   (`fly redis create`, set REDIS_URL), and Tigris object storage
@@ -42,7 +42,7 @@
 # - The config tracks the mutable `:main` image alias (stable main branch
 #   builds) and contains no version strings. `fly deploy` resolves the
 #   alias at deploy time, so redeploying is upgrading. The images bake
-#   RELEASE_VERSION; the app derives DOCKER_WORKER_IMAGE and
+#   RELEASE_VERSION; the app derives R_DOCKER_WORKER_IMAGE and
 #   MODAL_BASE_IMAGE_REF from it, and the controller reads the worker
 #   release version from the VERSION file inside worker-current.tar.gz.
 #   Production deployments can pin an immutable `v*` / `main-<sha>` tag in
@@ -81,15 +81,15 @@ swap_size_mb = 512
   PORT = '8080'
   ROOMOTE_DOCKER_LOAD_ENV_FILE = 'false'
   R_AUTO_GENERATE_KEYS = 'true'
-  DEFAULT_COMPUTE_PROVIDER = 'modal'
-  EXCLUDED_COMPUTE_PROVIDERS = 'docker'
+  R_DEFAULT_COMPUTE_PROVIDER = 'modal'
+  R_EXCLUDED_COMPUTE_PROVIDERS = 'docker'
   # The single canonical-origin knob: the URL users browse. To attach a
   # custom domain, add the cert to this app and change only this value
   # (R_PUBLIC_URL stays unset; the app falls back to R_APP_URL).
   R_APP_URL = 'https://roomote-CHANGEME.fly.dev'
   # Hosted-sandbox workers and GitHub webhooks call this origin directly;
   # it is the api service on port 8443 of the same Fly hostname.
-  TRPC_URL = 'https://roomote-CHANGEME.fly.dev:8443'
+  R_TRPC_URL = 'https://roomote-CHANGEME.fly.dev:8443'
   # Tigris object storage (S3-compatible). `fly storage create` provisions
   # the bucket and prints the credentials to copy into the S3_* secrets.
   S3_ENDPOINT = 'https://fly.storage.tigris.dev'
@@ -101,7 +101,7 @@ swap_size_mb = 512
   # release version from the VERSION file inside the archive. Do not unset:
   # the fallback is GitHub worker releases, which do not exist for develop
   # builds. Only the controller consumes it; it is harmless elsewhere.
-  DOCKER_WORKER_RELEASE_PATH = '/roomote/releases/worker-current.tar.gz'
+  R_DOCKER_WORKER_RELEASE_PATH = '/roomote/releases/worker-current.tar.gz'
 
 [processes]
   web = 'web'

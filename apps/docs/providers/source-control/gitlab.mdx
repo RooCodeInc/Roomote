@@ -29,7 +29,7 @@ Save the token in setup, deployment env vars, or local `.env.local`:
 GITLAB_TOKEN=<gitlab-token>
 ```
 
-For self-managed GitLab, also set `GITLAB_BASE_URL`.
+For self-managed GitLab, also set `R_GITLAB_BASE_URL`.
 
 ## Sync repositories
 
@@ -58,13 +58,13 @@ Preferred verification uses GitLab signed webhook headers. Set a GitLab
 signing token on the webhook and save the same value in Roomote:
 
 ```sh
-GITLAB_WEBHOOK_SIGNING_TOKEN=<signing-token>
+R_GITLAB_WEBHOOK_SIGNING_TOKEN=<signing-token>
 ```
 
 Legacy secret-token verification is also supported:
 
 ```sh
-GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
+R_GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
 ```
 
 ## Enable merge request comment triggers (recommended)
@@ -86,8 +86,8 @@ create one even though the fields are optional:
    or local `.env.local`:
 
 ```sh
-GITLAB_CLIENT_ID=<application-id>
-GITLAB_CLIENT_SECRET=<application-secret>
+R_GITLAB_CLIENT_ID=<application-id>
+R_GITLAB_CLIENT_SECRET=<application-secret>
 ```
 
 Once configured, a GitLab row appears under Personal settings > Linked

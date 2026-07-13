@@ -109,7 +109,7 @@ function getMissingRequiredEnvVars(): string[] {
     'DATABASE_URL',
     'REDIS_URL',
     'R_APP_URL',
-    'TRPC_URL',
+    'R_TRPC_URL',
     'DASHBOARD_PASSWORD',
     'ENCRYPTION_KEY',
     'ARTIFACT_SIGNING_KEY',
@@ -126,7 +126,7 @@ function getMissingRequiredEnvVars(): string[] {
 function hasPublicUrlCallbackMismatch(): DiagnosticsStatus {
   const publicUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
   const callbackUrls = [
-    Env.SLACK_REDIRECT_URI,
+    Env.R_SLACK_REDIRECT_URI,
     Env.R_LINEAR_REDIRECT_URI,
     Env.R_TEAMS_BOT_TOKEN_ENDPOINT,
   ].filter(present);
@@ -148,8 +148,8 @@ function hasPublicUrlCallbackMismatch(): DiagnosticsStatus {
 function hasWebhookSecretConfigured(): DiagnosticsStatus {
   return [
     Env.R_GITHUB_WEBHOOK_SECRET,
-    Env.GITLAB_WEBHOOK_SECRET,
-    Env.GITLAB_WEBHOOK_SIGNING_TOKEN,
+    Env.R_GITLAB_WEBHOOK_SECRET,
+    Env.R_GITLAB_WEBHOOK_SIGNING_TOKEN,
     Env.R_SLACK_SIGNING_SECRET,
     Env.R_TELEGRAM_WEBHOOK_SECRET,
     Env.R_LINEAR_WEBHOOK_SECRET,
@@ -330,7 +330,7 @@ async function getProviderDiagnostics() {
   ]);
 
   const comms: string[] = [];
-  if ((slackActive[0]?.total ?? 0) > 0 || present(Env.SLACK_APP_ID)) {
+  if ((slackActive[0]?.total ?? 0) > 0 || present(Env.R_SLACK_APP_ID)) {
     comms.push('slack');
   }
   if ((teamsActive[0]?.total ?? 0) > 0 || present(Env.R_TEAMS_BOT_APP_ID)) {
@@ -356,7 +356,7 @@ async function getProviderDiagnostics() {
     ]).size,
     computeProvider:
       settings?.runtimeComputeConfig?.defaultProvider ??
-      Env.DEFAULT_COMPUTE_PROVIDER,
+      Env.R_DEFAULT_COMPUTE_PROVIDER,
   };
 }
 
@@ -386,8 +386,8 @@ async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
     providers,
   ] = await Promise.all([
     getMigrationDiagnostics(),
-    safeFetchStatus(Env.TRPC_URL),
-    safeFetchStatus(Env.PREVIEW_PROXY_BASE_URL),
+    safeFetchStatus(Env.R_TRPC_URL),
+    safeFetchStatus(Env.R_PREVIEW_PROXY_BASE_URL),
     getControllerHeartbeatStatus(),
     getWorkerHeartbeatStatus(),
     getObjectStorageWritableStatus(),
@@ -409,7 +409,7 @@ async function collectDeploymentDiagnostics(): Promise<DeploymentDiagnostics> {
         },
         {
           label: 'Docker image tag',
-          value: parseDockerImageTag(Env.DOCKER_WORKER_IMAGE),
+          value: parseDockerImageTag(Env.R_DOCKER_WORKER_IMAGE),
         },
         { label: 'Deployment mode', value: runtimeDiagnostics.appEnv },
       ],

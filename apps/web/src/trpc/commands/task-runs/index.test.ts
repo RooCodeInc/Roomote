@@ -85,7 +85,7 @@ vi.mock('@roomote/slack', () => ({
 vi.mock('@/lib/server', () => ({
   Env: {
     R_APP_URL: 'https://roomote.test',
-    TRPC_URL: 'https://roomote.test/api/trpc',
+    R_TRPC_URL: 'https://roomote.test/api/trpc',
   },
   getArtifactById: vi.fn(),
   getRepositories: (...args: unknown[]) => mockGetRepositories(...args),

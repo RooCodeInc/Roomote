@@ -112,7 +112,7 @@ function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
-    throw new Error('GITLAB_BASE_URL cannot be empty.');
+    throw new Error('R_GITLAB_BASE_URL cannot be empty.');
   }
 
   return new URL(trimmed).toString().replace(/\/+$/, '');
@@ -202,7 +202,7 @@ export async function createGitLabMergeRequestNote({
 }
 
 export async function resolveGitLabBaseUrl(): Promise<string> {
-  const baseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
+  const baseUrl = await resolveDeploymentEnvVar('R_GITLAB_BASE_URL');
   return normalizeBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
 }
 

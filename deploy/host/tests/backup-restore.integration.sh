@@ -42,8 +42,8 @@ S3_BUCKET_ARTIFACTS=roomote-artifacts
 ENCRYPTION_KEY=$encryption_key
 ROOMOTE_VERSION=backup-ci
 ROOMOTE_COMPOSE_NETWORK=roomote_backup_ci_default
-DOCKER_WORKER_IMAGE=redis:7-alpine
-DOCKER_WORKER_NETWORK=roomote_backup_ci_worker
+R_DOCKER_WORKER_IMAGE=redis:7-alpine
+R_DOCKER_WORKER_NETWORK=roomote_backup_ci_worker
 EOF
   cat >"$root/docker-compose.prod.yml" <<'EOF'
 name: roomote-backup-ci

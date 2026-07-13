@@ -62,9 +62,9 @@ describe('resolveAuthProviderConfig', () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        GITLAB_CLIENT_ID: 'gitlab-client-id',
-        GITLAB_CLIENT_SECRET: 'gitlab-client-secret',
-        GITLAB_BASE_URL: 'https://gitlab.example.com',
+        R_GITLAB_CLIENT_ID: 'gitlab-client-id',
+        R_GITLAB_CLIENT_SECRET: 'gitlab-client-secret',
+        R_GITLAB_BASE_URL: 'https://gitlab.example.com',
       },
     });
 
@@ -78,9 +78,9 @@ describe('resolveAuthProviderConfig', () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        GITEA_CLIENT_ID: 'gitea-client-id',
-        GITEA_CLIENT_SECRET: 'gitea-client-secret',
-        GITEA_BASE_URL: 'https://gitea.example.com',
+        R_GITEA_CLIENT_ID: 'gitea-client-id',
+        R_GITEA_CLIENT_SECRET: 'gitea-client-secret',
+        R_GITEA_BASE_URL: 'https://gitea.example.com',
       },
     });
 
@@ -93,14 +93,14 @@ describe('resolveAuthProviderConfig', () => {
   it('prefers process env Gitea OAuth credentials over deployment env vars', async () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {
-        GITEA_CLIENT_ID: 'runtime-client-id',
-        GITEA_CLIENT_SECRET: 'runtime-client-secret',
-        GITEA_BASE_URL: 'https://runtime.gitea.example.com',
+        R_GITEA_CLIENT_ID: 'runtime-client-id',
+        R_GITEA_CLIENT_SECRET: 'runtime-client-secret',
+        R_GITEA_BASE_URL: 'https://runtime.gitea.example.com',
       },
       deploymentEnvVars: {
-        GITEA_CLIENT_ID: 'deployment-client-id',
-        GITEA_CLIENT_SECRET: 'deployment-client-secret',
-        GITEA_BASE_URL: 'https://deployment.gitea.example.com',
+        R_GITEA_CLIENT_ID: 'deployment-client-id',
+        R_GITEA_CLIENT_SECRET: 'deployment-client-secret',
+        R_GITEA_BASE_URL: 'https://deployment.gitea.example.com',
       },
     });
 
@@ -113,11 +113,11 @@ describe('resolveAuthProviderConfig', () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
-        ADO_CLIENT_ID: 'ado-client-id',
-        ADO_CLIENT_SECRET: 'ado-client-secret',
-        ADO_TENANT_ID: 'ado-tenant-id',
-        ADO_ORGANIZATION: 'ado-org',
-        ADO_BASE_URL: 'https://dev.azure.example.com',
+        R_ADO_CLIENT_ID: 'ado-client-id',
+        R_ADO_CLIENT_SECRET: 'ado-client-secret',
+        R_ADO_TENANT_ID: 'ado-tenant-id',
+        R_ADO_ORGANIZATION: 'ado-org',
+        R_ADO_BASE_URL: 'https://dev.azure.example.com',
       },
     });
 
@@ -134,9 +134,9 @@ describe('resolveAuthProviderConfig', () => {
       runtimeEnv: {},
       deploymentEnvVars: {
         R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
-        ADO_CLIENT_ID: 'ado-client-id',
-        ADO_CLIENT_SECRET: 'ado-client-secret',
-        ADO_ORGANIZATION: 'ado-org',
+        R_ADO_CLIENT_ID: 'ado-client-id',
+        R_ADO_CLIENT_SECRET: 'ado-client-secret',
+        R_ADO_ORGANIZATION: 'ado-org',
       },
     });
 

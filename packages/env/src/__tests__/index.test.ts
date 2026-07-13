@@ -24,7 +24,7 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
   NODE_ENV: 'production',
   R_APP_ENV: 'production',
   R_APP_URL: 'https://roomote.example.com',
-  TRPC_URL: 'https://api.roomote.example.com',
+  R_TRPC_URL: 'https://api.roomote.example.com',
   DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
   REDIS_URL: 'redis://redis:6379',
   S3_ENDPOINT: 'https://s3.example.com',
@@ -40,8 +40,8 @@ const productionCoreEnv: NodeJS.ProcessEnv = {
   DASHBOARD_PASSWORD: 'roomote-admin-password',
   ENCRYPTION_KEY: '12345678901234567890123456789012',
   ARTIFACT_SIGNING_KEY: '12345678901234567890123456789012',
-  PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example.com',
-  PREVIEW_DOMAINS: 'preview.roomote.example.com',
+  R_PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.example.com',
+  R_PREVIEW_DOMAINS: 'preview.roomote.example.com',
   R_GITHUB_APP_SLUG: 'roomote-dev',
 };
 
@@ -54,11 +54,11 @@ describe('Env', () => {
     expect(databaseUrl.pathname).toContain('test');
 
     for (const maybeNumber of [
-      Env.PREVIEW_TOKEN_TTL_SECONDS,
-      Env.SLACK_API_TIMEOUT_MS,
-      Env.API_EXTERNAL_REQUEST_TIMEOUT_MS,
-      Env.API_SLOW_REQUEST_THRESHOLD_MS,
-      Env.API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS,
+      Env.R_PREVIEW_TOKEN_TTL_SECONDS,
+      Env.R_SLACK_API_TIMEOUT_MS,
+      Env.R_API_EXTERNAL_REQUEST_TIMEOUT_MS,
+      Env.R_API_SLOW_REQUEST_THRESHOLD_MS,
+      Env.R_API_SLOW_EXTERNAL_REQUEST_THRESHOLD_MS,
     ]) {
       if (typeof maybeNumber === 'undefined') {
         continue;
@@ -78,34 +78,54 @@ describe('Env', () => {
     delete runtimeEnv.SKIP_ENV_VALIDATION;
     delete runtimeEnv.ARTIFACT_SIGNING_KEY_PREVIOUS;
     delete runtimeEnv.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY;
-    delete runtimeEnv.PREVIEW_TOKEN_TTL_SECONDS;
+    delete runtimeEnv.R_PREVIEW_TOKEN_TTL_SECONDS;
     delete runtimeEnv.SKIP_ENV_VALIDATION;
+    // Clear model overrides so host/task runtime env cannot leak into the
+    // defaulting assertions below.
+    delete runtimeEnv.R_MODEL;
+    delete runtimeEnv.R_SMALL_MODEL;
+    delete runtimeEnv.R_VISION_MODEL;
+    delete runtimeEnv.R_CODE_REVIEW_MODEL;
+    delete runtimeEnv.R_EXPLORE_MODEL;
+    delete runtimeEnv.R_PLANNING_MODEL;
+    delete runtimeEnv.R_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_VISION_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT;
+    delete runtimeEnv.R_MODEL_ENV_KEYS;
+    delete runtimeEnv.R_EXCLUDED_COMPUTE_PROVIDERS;
+    delete runtimeEnv.R_DOCKER_WORKER_IMAGE;
+    delete runtimeEnv.R_DOCKER_WORKER_NETWORK;
+    delete runtimeEnv.R_DOCKER_WORKER_RELEASE_PATH;
+    delete runtimeEnv.R_DEFAULT_COMPUTE_PROVIDER;
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
       expect(env.ARTIFACT_SIGNING_KEY_PREVIOUS).toBeUndefined();
       expect(env.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY).toBeUndefined();
-      expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('docker');
-      expect(env.EXCLUDED_COMPUTE_PROVIDERS).toBeUndefined();
-      expect(env.DOCKER_WORKER_IMAGE).toBe('roomote-worker:local');
-      expect(env.DOCKER_WORKER_PLATFORM).toBe(
+      expect(env.R_DEFAULT_COMPUTE_PROVIDER).toBe('docker');
+      expect(env.R_EXCLUDED_COMPUTE_PROVIDERS).toBeUndefined();
+      expect(env.R_DOCKER_WORKER_IMAGE).toBe('roomote-worker:local');
+      expect(env.R_DOCKER_WORKER_PLATFORM).toBe(
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
       );
-      expect(env.DOCKER_WORKER_NETWORK).toBeUndefined();
-      expect(env.DOCKER_WORKER_RELEASE_PATH).toBeUndefined();
-      expect(env.DOCKER_WORKER_CPU_LIMIT).toBe(2);
-      expect(env.DOCKER_WORKER_MEMORY_LIMIT).toBe('4g');
-      expect(env.DOCKER_WORKER_PIDS_LIMIT).toBe(512);
-      expect(env.DOCKER_WORKER_DISK_LIMIT).toBe('20g');
-      expect(env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK).toBe(false);
-      expect(env.DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
-      expect(env.DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
-      expect(env.DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
-      expect(env.DOCKER_STANDBY_MAX_COUNT).toBe(10);
-      expect(env.DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
-      expect(env.BLAXEL_STANDBY_MAX_COUNT).toBe(25);
-      expect(env.BLAXEL_STANDBY_MAX_AGE_HOURS).toBe(168);
+      expect(env.R_DOCKER_WORKER_NETWORK).toBeUndefined();
+      expect(env.R_DOCKER_WORKER_RELEASE_PATH).toBeUndefined();
+      expect(env.R_DOCKER_WORKER_CPU_LIMIT).toBe(2);
+      expect(env.R_DOCKER_WORKER_MEMORY_LIMIT).toBe('4g');
+      expect(env.R_DOCKER_WORKER_PIDS_LIMIT).toBe(512);
+      expect(env.R_DOCKER_WORKER_DISK_LIMIT).toBe('20g');
+      expect(env.R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK).toBe(false);
+      expect(env.R_DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
+      expect(env.R_DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
+      expect(env.R_DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
+      expect(env.R_DOCKER_STANDBY_MAX_COUNT).toBe(10);
+      expect(env.R_DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
+      expect(env.R_BLAXEL_STANDBY_MAX_COUNT).toBe(25);
+      expect(env.R_BLAXEL_STANDBY_MAX_AGE_HOURS).toBe(168);
       expect(env.R_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
@@ -125,7 +145,7 @@ describe('Env', () => {
       expect(env.S3_ACCESS_KEY_ID).toBe('roomote');
       expect(env.S3_SECRET_ACCESS_KEY).toBe('roomote-local-artifacts-password');
       expect(env.S3_BUCKET_ARTIFACTS).toBe('roomote-artifacts');
-      expect(env.PREVIEW_TOKEN_TTL_SECONDS).toBe(3600);
+      expect(env.R_PREVIEW_TOKEN_TTL_SECONDS).toBe(3600);
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;
@@ -138,35 +158,35 @@ describe('Env', () => {
   it('requires an explicit opt-in for unbounded Docker task disks', () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
-      DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
+      R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: 'true',
     };
     delete runtimeEnv.SKIP_ENV_VALIDATION;
 
     expect(
-      createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+      createRoomoteEnv(runtimeEnv).R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
   });
 
-  it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {
+  it('derives R_DOCKER_WORKER_IMAGE from the baked release version', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DOCKER_WORKER_IMAGE: undefined,
+      R_DOCKER_WORKER_IMAGE: undefined,
       RELEASE_VERSION: 'v1.2.3',
     });
 
-    expect(env.DOCKER_WORKER_IMAGE).toBe(
+    expect(env.R_DOCKER_WORKER_IMAGE).toBe(
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
   });
 
-  it('treats an empty DOCKER_WORKER_IMAGE as unset for the derived default', () => {
+  it('treats an empty R_DOCKER_WORKER_IMAGE as unset for the derived default', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DOCKER_WORKER_IMAGE: '',
+      R_DOCKER_WORKER_IMAGE: '',
       RELEASE_VERSION: 'v1.2.3',
     });
 
-    expect(env.DOCKER_WORKER_IMAGE).toBe(
+    expect(env.R_DOCKER_WORKER_IMAGE).toBe(
       'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
     );
   });
@@ -174,24 +194,24 @@ describe('Env', () => {
   it('honors a ROOMOTE_WORKER_IMAGE_REPO override for the derived worker image', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DOCKER_WORKER_IMAGE: undefined,
+      R_DOCKER_WORKER_IMAGE: undefined,
       RELEASE_VERSION: 'v1.2.3',
       ROOMOTE_WORKER_IMAGE_REPO: 'registry.example.com/fork/roomote-worker',
     });
 
-    expect(env.DOCKER_WORKER_IMAGE).toBe(
+    expect(env.R_DOCKER_WORKER_IMAGE).toBe(
       'registry.example.com/fork/roomote-worker:v1.2.3',
     );
   });
 
-  it('prefers an explicit DOCKER_WORKER_IMAGE over the release-derived default', () => {
+  it('prefers an explicit R_DOCKER_WORKER_IMAGE over the release-derived default', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:pinned',
+      R_DOCKER_WORKER_IMAGE: 'registry.example.com/custom/worker:pinned',
       RELEASE_VERSION: 'v1.2.3',
     });
 
-    expect(env.DOCKER_WORKER_IMAGE).toBe(
+    expect(env.R_DOCKER_WORKER_IMAGE).toBe(
       'registry.example.com/custom/worker:pinned',
     );
   });
@@ -206,21 +226,21 @@ describe('Env', () => {
     ]) {
       const env = createRoomoteEnv({
         ...process.env,
-        DOCKER_WORKER_IMAGE: undefined,
+        R_DOCKER_WORKER_IMAGE: undefined,
         RELEASE_VERSION: releaseVersion,
       });
 
-      expect(env.DOCKER_WORKER_IMAGE).toBe('roomote-worker:local');
+      expect(env.R_DOCKER_WORKER_IMAGE).toBe('roomote-worker:local');
     }
   });
 
   it('accepts an explicit default compute provider override', () => {
     const env = createRoomoteEnv({
       ...process.env,
-      DEFAULT_COMPUTE_PROVIDER: 'modal',
+      R_DEFAULT_COMPUTE_PROVIDER: 'modal',
     });
 
-    expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('modal');
+    expect(env.R_DEFAULT_COMPUTE_PROVIDER).toBe('modal');
   });
 
   it('accepts explicit model config overrides', () => {
@@ -265,25 +285,25 @@ describe('Env', () => {
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
     delete runtimeEnv.R_APP_URL;
-    delete runtimeEnv.TRPC_URL;
+    delete runtimeEnv.R_TRPC_URL;
     delete runtimeEnv.DATABASE_URL;
     delete runtimeEnv.REDIS_URL;
-    delete runtimeEnv.PREVIEW_PROXY_BASE_URL;
-    delete runtimeEnv.PREVIEW_DOMAINS;
+    delete runtimeEnv.R_PREVIEW_PROXY_BASE_URL;
+    delete runtimeEnv.R_PREVIEW_DOMAINS;
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
       expect(env.R_APP_URL).toBe('http://localhost:13000');
-      expect(env.TRPC_URL).toBe('http://localhost:13001');
+      expect(env.R_TRPC_URL).toBe('http://localhost:13001');
       expect(env.DATABASE_URL).toBe(
         'postgres://postgres:password@localhost:15432/roomote_development',
       );
       expect(env.REDIS_URL).toBe('redis://localhost:16379');
-      expect(env.PREVIEW_PROXY_BASE_URL).toBe(
+      expect(env.R_PREVIEW_PROXY_BASE_URL).toBe(
         'http://roomotepreview.localhost:18081',
       );
-      expect(env.PREVIEW_DOMAINS).toBe(
+      expect(env.R_PREVIEW_DOMAINS).toBe(
         'localhost,127.0.0.1,roomotepreview.localhost',
       );
     } finally {
@@ -319,7 +339,7 @@ describe('Env', () => {
       APP_ENV: 'production',
       ROOMOTE_SERVICE: 'controller',
       R_APP_URL: 'https://roomote.example.com',
-      TRPC_URL: 'https://api.roomote.example.com',
+      R_TRPC_URL: 'https://api.roomote.example.com',
       DATABASE_URL: 'postgres://postgres:password@postgres:5432/roomote',
       REDIS_URL: 'redis://redis:6379',
       JOB_AUTH_PRIVATE_KEY: 'job-private-key',
@@ -377,14 +397,14 @@ describe('Env', () => {
     const runtimeEnv = { ...productionCoreEnv };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.PREVIEW_PROXY_BASE_URL;
-    delete runtimeEnv.PREVIEW_DOMAINS;
+    delete runtimeEnv.R_PREVIEW_PROXY_BASE_URL;
+    delete runtimeEnv.R_PREVIEW_DOMAINS;
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
-      expect(env.PREVIEW_PROXY_BASE_URL).toBe('');
-      expect(env.PREVIEW_DOMAINS).toBe('');
+      expect(env.R_PREVIEW_PROXY_BASE_URL).toBe('');
+      expect(env.R_PREVIEW_DOMAINS).toBe('');
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;
@@ -480,18 +500,18 @@ describe('Env', () => {
     delete runtimeEnv.R_GITHUB_CLIENT_ID;
     delete runtimeEnv.R_GITHUB_CLIENT_SECRET;
     delete runtimeEnv.R_GITHUB_WEBHOOK_SECRET;
-    delete runtimeEnv.SLACK_APP_ID;
+    delete runtimeEnv.R_SLACK_APP_ID;
     delete runtimeEnv.R_SLACK_CLIENT_ID;
     delete runtimeEnv.R_SLACK_CLIENT_SECRET;
-    delete runtimeEnv.SLACK_REDIRECT_URI;
-    delete runtimeEnv.SLACK_AUTH_URI;
+    delete runtimeEnv.R_SLACK_REDIRECT_URI;
+    delete runtimeEnv.R_SLACK_AUTH_URI;
     delete runtimeEnv.R_SLACK_SIGNING_SECRET;
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
       expect(env.R_GITHUB_APP_ID).toBe('');
-      expect(env.SLACK_APP_ID).toBe('');
+      expect(env.R_SLACK_APP_ID).toBe('');
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;
@@ -501,25 +521,25 @@ describe('Env', () => {
     }
   });
 
-  it('derives SLACK_AUTH_URI from R_APP_URL when unset or empty', () => {
+  it('derives R_SLACK_AUTH_URI from R_APP_URL when unset or empty', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
 
     const unsetEnv = { ...productionCoreEnv };
     delete unsetEnv.SKIP_ENV_VALIDATION;
-    delete unsetEnv.SLACK_AUTH_URI;
+    delete unsetEnv.R_SLACK_AUTH_URI;
 
     const emptyEnv: NodeJS.ProcessEnv = {
       ...unsetEnv,
-      SLACK_AUTH_URI: '',
+      R_SLACK_AUTH_URI: '',
       R_APP_URL: 'https://roomote.example.com/',
     };
 
     try {
-      expect(createRoomoteEnv(unsetEnv).SLACK_AUTH_URI).toBe(
+      expect(createRoomoteEnv(unsetEnv).R_SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );
       // Trailing slashes on R_APP_URL must not produce a double slash.
-      expect(createRoomoteEnv(emptyEnv).SLACK_AUTH_URI).toBe(
+      expect(createRoomoteEnv(emptyEnv).R_SLACK_AUTH_URI).toBe(
         'https://roomote.example.com/api/slack/auth',
       );
     } finally {
@@ -531,11 +551,11 @@ describe('Env', () => {
     }
   });
 
-  it('prefers an explicit SLACK_AUTH_URI over the derived value', () => {
+  it('prefers an explicit R_SLACK_AUTH_URI over the derived value', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...productionCoreEnv,
-      SLACK_AUTH_URI: 'https://auth.example.com/slack',
+      R_SLACK_AUTH_URI: 'https://auth.example.com/slack',
     };
 
     delete runtimeEnv.SKIP_ENV_VALIDATION;
@@ -543,7 +563,7 @@ describe('Env', () => {
     try {
       const env = createRoomoteEnv(runtimeEnv);
 
-      expect(env.SLACK_AUTH_URI).toBe('https://auth.example.com/slack');
+      expect(env.R_SLACK_AUTH_URI).toBe('https://auth.example.com/slack');
     } finally {
       if (previousSkipEnvValidation === undefined) {
         delete process.env.SKIP_ENV_VALIDATION;
@@ -678,13 +698,13 @@ describe('getDefaultTrpcUrl', () => {
 
   it('requires explicit API configuration for preview', () => {
     expect(() => getDefaultTrpcUrl('preview')).toThrow(
-      'TRPC_URL must be configured explicitly for preview',
+      'R_TRPC_URL must be configured explicitly for preview',
     );
   });
 
   it('requires explicit API configuration for production', () => {
     expect(() => getDefaultTrpcUrl('production')).toThrow(
-      'TRPC_URL must be configured explicitly for production',
+      'R_TRPC_URL must be configured explicitly for production',
     );
   });
 });
@@ -715,10 +735,10 @@ describe('getDefaultPreviewProxyBaseUrl', () => {
 
   it('requires explicit preview proxy configuration outside development', () => {
     expect(() => getDefaultPreviewProxyBaseUrl('preview')).toThrow(
-      'PREVIEW_PROXY_BASE_URL must be configured explicitly for preview',
+      'R_PREVIEW_PROXY_BASE_URL must be configured explicitly for preview',
     );
     expect(() => getDefaultPreviewProxyBaseUrl('production')).toThrow(
-      'PREVIEW_PROXY_BASE_URL must be configured explicitly for production',
+      'R_PREVIEW_PROXY_BASE_URL must be configured explicitly for production',
     );
   });
 });
@@ -775,7 +795,7 @@ describe('getAllowedDevOrigins', () => {
     ]);
   });
 
-  it('adds wildcard preview domains from PREVIEW_DOMAINS', () => {
+  it('adds wildcard preview domains from R_PREVIEW_DOMAINS', () => {
     expect(
       getAllowedDevOrigins(
         'preview.octomote.run, preview-john.ngrok.app, preview.octomote.run',

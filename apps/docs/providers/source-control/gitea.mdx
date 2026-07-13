@@ -28,18 +28,18 @@ Save the instance URL and token in setup, deployment env vars, or local
 `.env.local`:
 
 ```sh
-GITEA_BASE_URL=https://git.example.com
+R_GITEA_BASE_URL=https://git.example.com
 GITEA_TOKEN=<gitea-token>
 ```
 
 Optional values:
 
 ```sh
-GITEA_USERNAME=<token-owner-username>
-GITEA_WEBHOOK_SECRET=<webhook-secret>
+R_GITEA_USERNAME=<token-owner-username>
+R_GITEA_WEBHOOK_SECRET=<webhook-secret>
 ```
 
-When `GITEA_USERNAME` is omitted, Roomote resolves the token owner through the
+When `R_GITEA_USERNAME` is omitted, Roomote resolves the token owner through the
 Gitea API and uses that login for Git-over-HTTPS credentials.
 
 ## Sync repositories
@@ -61,7 +61,7 @@ webhook for each synced Gitea repository. The webhook target is:
 ```
 
 If only loopback Roomote URLs are configured, webhook setup is skipped and
-repository sync still succeeds. If `GITEA_WEBHOOK_SECRET` is missing, Roomote
+repository sync still succeeds. If `R_GITEA_WEBHOOK_SECRET` is missing, Roomote
 generates and persists one as an encrypted deployment environment variable.
 
 ## Enable review automation

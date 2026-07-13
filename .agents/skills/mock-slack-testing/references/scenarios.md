@@ -65,7 +65,7 @@ Use this file to choose the closest scenario before creating a custom one.
 - Use for: worker or API code that should post a reply into an existing Slack thread.
 - Minimum setup:
   - a thread root in state
-  - the Roomote service under test pointed at the harness via `SLACK_API_BASE_URL`
+  - the Roomote service under test pointed at the harness via `R_SLACK_API_BASE_URL`
 - Drive with: the real Roomote code path that emits the outbound Slack call
 - Success looks like:
   - the expected reply appears in `/mock/state`

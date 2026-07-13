@@ -7,7 +7,7 @@ const envSchema = z.object({
   PORT: z.string().default('8081'),
   R_APP_URL: z.string().default('http://localhost:13000'),
   JOB_AUTH_PUBLIC_KEY: z.string().optional(),
-  PREVIEW_TOKEN_TTL_SECONDS: z.string().default('3600'),
+  R_PREVIEW_TOKEN_TTL_SECONDS: z.string().default('3600'),
   DATABASE_URL: z
     .string()
     .default(

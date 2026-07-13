@@ -928,7 +928,7 @@ function isProviderConfigured(
   );
 
   // configSatisfied covers required fields only: optional fields can be
-  // satisfied by unrelated deployment config (for example ADO_TENANT_ID
+  // satisfied by unrelated deployment config (for example R_ADO_TENANT_ID
   // falling back to R_MICROSOFT_TENANT_ID), which must not hide
   // the provider's setup instructions.
   return providerStatus?.configSatisfied ?? false;

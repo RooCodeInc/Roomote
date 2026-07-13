@@ -22,7 +22,7 @@
 #   service receives host-only references (`ROOMOTE_WEB_HOST`,
 #   `ROOMOTE_API_HOST`, `ROOMOTE_MINIO_HOST`, `ROOMOTE_MINIO_HOSTPORT`) and
 #   the entrypoint dispatcher composes the URL-shaped variables
-#   (`R_APP_URL`, `TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
+#   (`R_APP_URL`, `R_TRPC_URL`, `S3_ENDPOINT`, `S3_PRESIGN_ENDPOINT`)
 #   from them when they are unset. The cross-service references use
 #   Render's `fromService` + `envVarKey` form against the Render-provided
 #   `RENDER_EXTERNAL_HOSTNAME`; the first-boot verification in
@@ -38,17 +38,17 @@
 #   `S3_SECRET_ACCESS_KEY` with a `fromService` reference.
 # - Render has no Docker socket, so task execution must use a hosted
 #   sandbox provider (modal by default; e2b and daytona also work).
-#   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
+#   R_EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero deploy-time inputs. Modal tokens and model provider keys are
 #   entered in the /setup wizard after first boot and stored encrypted in
 #   Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
 # - The api service must be publicly reachable: hosted-sandbox workers and
-#   GitHub webhooks call `TRPC_URL` directly. MinIO is public too because
+#   GitHub webhooks call `R_TRPC_URL` directly. MinIO is public too because
 #   presigned artifact URLs (`S3_PRESIGN_ENDPOINT`) must be reachable from
 #   workers and browsers; Render routes its HTTPS domain to port 9000.
 # - The Blueprint tracks the mutable `:main` image alias (stable main
 #   branch builds) and contains no version strings. The images bake
-#   RELEASE_VERSION; the app derives DOCKER_WORKER_IMAGE and
+#   RELEASE_VERSION; the app derives R_DOCKER_WORKER_IMAGE and
 #   MODAL_BASE_IMAGE_REF from it, and the controller reads the worker
 #   release version from the VERSION file inside worker-current.tar.gz.
 #   Production deployments can pin an immutable `v*` or `main-<sha>` tag
@@ -226,11 +226,11 @@ envVarGroups:
         value: roomote-artifacts
       - key: S3_AUTO_CREATE_BUCKET
         value: 'true' # api creates the MinIO bucket at boot; no manual mc step
-      - key: DEFAULT_COMPUTE_PROVIDER
+      - key: R_DEFAULT_COMPUTE_PROVIDER
         value: modal
-      - key: EXCLUDED_COMPUTE_PROVIDERS
+      - key: R_EXCLUDED_COMPUTE_PROVIDERS
         value: docker
       # Only the controller reads this, but the value is a constant baked
       # into the app image, so the shared group is the simplest home for it.
-      - key: DOCKER_WORKER_RELEASE_PATH
+      - key: R_DOCKER_WORKER_RELEASE_PATH
         value: /roomote/releases/worker-current.tar.gz

@@ -70,7 +70,7 @@ async function resolveTelegramBotUsername(
 
   try {
     const apiBaseUrl =
-      process.env.TELEGRAM_API_BASE_URL?.replace(/\/$/u, '') ??
+      process.env.R_TELEGRAM_API_BASE_URL?.replace(/\/$/u, '') ??
       'https://api.telegram.org';
     const response = await fetch(`${apiBaseUrl}/bot${botToken}/getMe`, {
       method: 'POST',

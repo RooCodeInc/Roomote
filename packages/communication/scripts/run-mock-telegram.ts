@@ -212,7 +212,7 @@ async function main() {
 
   console.info(`Mock Telegram Bot API listening at ${baseUrl}`);
   console.info(
-    `Set TELEGRAM_API_BASE_URL=${baseUrl} in the Roomote services you want to point at the harness.`,
+    `Set R_TELEGRAM_API_BASE_URL=${baseUrl} in the Roomote services you want to point at the harness.`,
   );
 
   if (config.replay?.length) {

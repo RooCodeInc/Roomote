@@ -4,10 +4,10 @@ import { Env } from '@roomote/env';
  * Comma-separated list of repository full names (e.g. "owner/repo") that
  * should be skipped for automated GitHub processing.
  *
- * The value comes from the optional `GITHUB_AUTOMATED_SKIP_REPOS` env var.
+ * The value comes from the optional `R_GITHUB_AUTOMATED_SKIP_REPOS` env var.
  */
 const skippedRepos: Set<string> = new Set(
-  (Env.GITHUB_AUTOMATED_SKIP_REPOS ?? '')
+  (Env.R_GITHUB_AUTOMATED_SKIP_REPOS ?? '')
     .split(',')
     .map((repo) => repo.trim().toLowerCase())
     .filter(Boolean),
@@ -17,10 +17,10 @@ const skippedRepos: Set<string> = new Set(
  * Comma-separated list of repository owners (e.g. "Roomote") whose repos
  * should be skipped for automated GitHub processing.
  *
- * The value comes from the optional `GITHUB_AUTOMATED_SKIP_OWNERS` env var.
+ * The value comes from the optional `R_GITHUB_AUTOMATED_SKIP_OWNERS` env var.
  */
 const skippedOwners: Set<string> = new Set(
-  (Env.GITHUB_AUTOMATED_SKIP_OWNERS ?? '')
+  (Env.R_GITHUB_AUTOMATED_SKIP_OWNERS ?? '')
     .split(',')
     .map((owner) => owner.trim().toLowerCase())
     .filter(Boolean),

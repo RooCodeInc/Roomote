@@ -31,7 +31,7 @@ import { getSetupStepDefinition } from './types';
 
 const COMPUTE_CONFIG_STEP = getSetupStepDefinition('compute-config');
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
-const SHARED_WORKER_IMAGE_ENV_VAR = 'DOCKER_WORKER_IMAGE';
+const SHARED_WORKER_IMAGE_ENV_VAR = 'R_DOCKER_WORKER_IMAGE';
 
 function isSecretComputeField(field: { secret?: boolean }) {
   return field.secret === true;
@@ -503,7 +503,7 @@ export function StepComputeConfig({
                     </code>{' '}
                     only works on this host. Set{' '}
                     <code className="font-mono text-xs">
-                      DOCKER_WORKER_IMAGE
+                      R_DOCKER_WORKER_IMAGE
                     </code>{' '}
                     to a pullable image before continuing.
                   </p>

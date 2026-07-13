@@ -61,8 +61,8 @@ describe('resolveStandbyRetentionPolicy', () => {
   it('applies saved or runtime provider overrides', () => {
     expect(
       resolveStandbyRetentionPolicy('docker', {
-        DOCKER_STANDBY_MAX_COUNT: '3',
-        DOCKER_STANDBY_MAX_AGE_HOURS: '12',
+        R_DOCKER_STANDBY_MAX_COUNT: '3',
+        R_DOCKER_STANDBY_MAX_AGE_HOURS: '12',
       }),
     ).toEqual({ maxCount: 3, maxAgeMs: 12 * 60 * 60 * 1_000 });
   });
@@ -70,8 +70,8 @@ describe('resolveStandbyRetentionPolicy', () => {
   it('falls back safely for invalid values', () => {
     expect(
       resolveStandbyRetentionPolicy('blaxel', {
-        BLAXEL_STANDBY_MAX_COUNT: '-1',
-        BLAXEL_STANDBY_MAX_AGE_HOURS: '169',
+        R_BLAXEL_STANDBY_MAX_COUNT: '-1',
+        R_BLAXEL_STANDBY_MAX_AGE_HOURS: '169',
       }),
     ).toEqual({ maxCount: 25, maxAgeMs: 168 * 60 * 60 * 1_000 });
   });

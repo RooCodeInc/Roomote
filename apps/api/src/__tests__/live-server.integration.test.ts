@@ -5,7 +5,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       ...actual.Env,
-      API_SLOW_REQUEST_THRESHOLD_MS: 0,
+      R_API_SLOW_REQUEST_THRESHOLD_MS: 0,
     },
   };
 });

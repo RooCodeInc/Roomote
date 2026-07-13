@@ -82,7 +82,7 @@ describe('handlePushConflictCheck', () => {
     mockGetInstallationOctokit.mockResolvedValue({ rest: {} });
   });
 
-  it('skips repos in GITHUB_AUTOMATED_SKIP_REPOS before scanning push conflicts', async () => {
+  it('skips repos in R_GITHUB_AUTOMATED_SKIP_REPOS before scanning push conflicts', async () => {
     mockIsRepoSkipped.mockReturnValue(true);
 
     const result = await handlePushConflictCheck(createPayload());

@@ -1,7 +1,7 @@
 vi.mock('../../services/runtime-config', () => ({
   getCachedPreviewRuntimeConfig: vi.fn(async () => ({
     effective: {
-      previewProxyBaseUrl: process.env.PREVIEW_PROXY_BASE_URL ?? null,
+      previewProxyBaseUrl: process.env.R_PREVIEW_PROXY_BASE_URL ?? null,
     },
   })),
 }));
@@ -70,55 +70,57 @@ describe('buildSetCookieHeader', () => {
 });
 
 describe('getBaseDomain', () => {
-  const originalEnv = process.env.PREVIEW_PROXY_BASE_URL;
+  const originalEnv = process.env.R_PREVIEW_PROXY_BASE_URL;
 
   afterEach(() => {
     if (originalEnv !== undefined) {
-      process.env.PREVIEW_PROXY_BASE_URL = originalEnv;
+      process.env.R_PREVIEW_PROXY_BASE_URL = originalEnv;
     } else {
-      delete process.env.PREVIEW_PROXY_BASE_URL;
+      delete process.env.R_PREVIEW_PROXY_BASE_URL;
     }
   });
 
   it('extracts hostname from production URL', async () => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.example';
+    process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.example';
     await expect(getBaseDomain()).resolves.toBe('preview.roomote.example');
   });
 
   it('extracts hostname without port from development URL', async () => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'http://roomotepreview.localhost:8081';
+    process.env.R_PREVIEW_PROXY_BASE_URL =
+      'http://roomotepreview.localhost:8081';
     await expect(getBaseDomain()).resolves.toBe('roomotepreview.localhost');
   });
 
   it('returns empty string when env var is missing', async () => {
-    delete process.env.PREVIEW_PROXY_BASE_URL;
+    delete process.env.R_PREVIEW_PROXY_BASE_URL;
     await expect(getBaseDomain()).resolves.toBe('');
   });
 });
 
 describe('getCookieDomain', () => {
-  const originalEnv = process.env.PREVIEW_PROXY_BASE_URL;
+  const originalEnv = process.env.R_PREVIEW_PROXY_BASE_URL;
 
   afterEach(() => {
     if (originalEnv !== undefined) {
-      process.env.PREVIEW_PROXY_BASE_URL = originalEnv;
+      process.env.R_PREVIEW_PROXY_BASE_URL = originalEnv;
     } else {
-      delete process.env.PREVIEW_PROXY_BASE_URL;
+      delete process.env.R_PREVIEW_PROXY_BASE_URL;
     }
   });
 
   it('returns dotted domain for production URL', async () => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.example';
+    process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.example';
     await expect(getCookieDomain()).resolves.toBe('.preview.roomote.example');
   });
 
   it('returns undefined for localhost URL', async () => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'http://roomotepreview.localhost:8081';
+    process.env.R_PREVIEW_PROXY_BASE_URL =
+      'http://roomotepreview.localhost:8081';
     await expect(getCookieDomain()).resolves.toBeUndefined();
   });
 
   it('returns undefined when env var is missing', async () => {
-    delete process.env.PREVIEW_PROXY_BASE_URL;
+    delete process.env.R_PREVIEW_PROXY_BASE_URL;
     await expect(getCookieDomain()).resolves.toBeUndefined();
   });
 });

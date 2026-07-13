@@ -8,7 +8,7 @@ const { chatPostMessageMock, findFirstMock, getDebugChannelMock } = vi.hoisted(
 
 vi.mock('@roomote/env', () => ({
   Env: {
-    ROUTER_DEBUG_CHANNEL_ID: 'CDEBUG',
+    R_ROUTER_DEBUG_CHANNEL_ID: 'CDEBUG',
   },
 }));
 

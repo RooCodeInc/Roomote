@@ -80,7 +80,7 @@ describe('snapshot', () => {
     vi.clearAllMocks();
 
     mockFetchSnapshotEnv.mockResolvedValue({
-      envVars: { PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.run' },
+      envVars: { R_PREVIEW_PROXY_BASE_URL: 'https://preview.roomote.run' },
       gitHubToken: 'gh-token',
       taskId: 'task-42',
     });

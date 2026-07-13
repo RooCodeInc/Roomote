@@ -97,50 +97,62 @@ export async function resolveAuthProviderConfig(
       'R_MICROSOFT_TENANT_ID',
     ) ?? null;
   const gitlabClientId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITLAB_CLIENT_ID') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_GITLAB_CLIENT_ID') ??
     null;
   const gitlabClientSecret =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'GITLAB_CLIENT_SECRET',
+      'R_GITLAB_CLIENT_SECRET',
     ) ?? null;
   const gitlabBaseUrl =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITLAB_BASE_URL') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_GITLAB_BASE_URL') ??
     null;
   const giteaClientId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITEA_CLIENT_ID') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_GITEA_CLIENT_ID') ??
     null;
   const giteaClientSecret =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITEA_CLIENT_SECRET') ??
-    null;
+    readConfiguredValue(
+      runtimeEnv,
+      deploymentEnvVars,
+      'R_GITEA_CLIENT_SECRET',
+    ) ?? null;
   const giteaBaseUrl =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'GITEA_BASE_URL') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_GITEA_BASE_URL') ??
     null;
   const bitbucketClientId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'BITBUCKET_CLIENT_ID') ??
-    null;
+    readConfiguredValue(
+      runtimeEnv,
+      deploymentEnvVars,
+      'R_BITBUCKET_CLIENT_ID',
+    ) ?? null;
   const bitbucketClientSecret =
     readConfiguredValue(
       runtimeEnv,
       deploymentEnvVars,
-      'BITBUCKET_CLIENT_SECRET',
+      'R_BITBUCKET_CLIENT_SECRET',
     ) ?? null;
   const bitbucketBaseUrl =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'BITBUCKET_BASE_URL') ??
-    null;
+    readConfiguredValue(
+      runtimeEnv,
+      deploymentEnvVars,
+      'R_BITBUCKET_BASE_URL',
+    ) ?? null;
   const adoClientId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_ID') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_ADO_CLIENT_ID') ??
+    null;
   const adoClientSecret =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_SECRET') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_ADO_CLIENT_SECRET') ??
     null;
   const adoTenantId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_ADO_TENANT_ID') ??
+    null;
   const adoOrganization =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_ORGANIZATION') ??
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_ADO_ORGANIZATION') ??
     null;
   const adoBaseUrl =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_BASE_URL') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'R_ADO_BASE_URL') ??
+    null;
 
   const enabledProviders = SETUP_AUTH_PROVIDER_CATALOG.filter((provider) =>
     provider.id === 'slack'

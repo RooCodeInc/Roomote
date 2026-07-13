@@ -42,4 +42,4 @@ networks:
   default:
     name: ${ROOMOTE_DEFAULT_NETWORK:-roomote_ci_default}
   worker:
-    name: ${DOCKER_WORKER_NETWORK:-roomote_ci_worker}
+    name: ${R_DOCKER_WORKER_NETWORK:-roomote_ci_worker}

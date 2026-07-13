@@ -208,7 +208,7 @@ Your job:
 - If nothing else should be recommended, submit an empty list.
 
 When you are ready, submit the final result with an authenticated POST request to:
-\`${'${ROOMOTE_PLATFORM_API_URL:-$TRPC_URL}'}/api/mcp/tasks/$ROOMOTE_TASK_ID/mcp_recommendations\`
+\`${'${ROOMOTE_PLATFORM_API_URL:-$R_TRPC_URL}'}/api/mcp/tasks/$ROOMOTE_TASK_ID/mcp_recommendations\`
 
 Always include:
 - \`Authorization: Bearer $ROOMOTE_CLOUD_TOKEN\`

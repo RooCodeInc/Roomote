@@ -122,7 +122,7 @@ describe('createComputeProviderClient', () => {
   it('falls back to the worker image for a missing Modal base image ref', () => {
     const workerImageEnvKeys = [
       'MODAL_BASE_IMAGE_REF',
-      'DOCKER_WORKER_IMAGE',
+      'R_DOCKER_WORKER_IMAGE',
       'RELEASE_VERSION',
       'ROOMOTE_WORKER_IMAGE_REPO',
       'APP_ENV',
@@ -144,7 +144,7 @@ describe('createComputeProviderClient', () => {
           tokenSecret: 'token-secret',
         } as ModalConfig,
         envFallback: {
-          DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
+          R_DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v9.9.9',
         },
       });
 
@@ -177,7 +177,7 @@ describe('createComputeProviderClient', () => {
         } as ModalConfig,
         envFallback: {
           NODE_ENV: 'development',
-          DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+          R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
         },
       });
 
@@ -391,7 +391,7 @@ describe('createComputeProviderClient', () => {
         envFallback: {
           BL_API_KEY: 'key',
           BL_WORKSPACE: 'workspace',
-          DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:v1',
+          R_DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:v1',
         },
       }),
     ).toThrow('Missing BLAXEL_IMAGE');

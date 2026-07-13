@@ -70,7 +70,7 @@ export abstract class BaseController {
     protected readonly appEnv: 'development' | 'preview' | 'production',
   ) {
     const useLocalReleaseArtifacts = this.appEnv === 'development';
-    const configuredWorkerReleasePath = Env.DOCKER_WORKER_RELEASE_PATH;
+    const configuredWorkerReleasePath = Env.R_DOCKER_WORKER_RELEASE_PATH;
 
     this.localWorkerReleasePath =
       configuredWorkerReleasePath ??

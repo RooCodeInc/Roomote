@@ -59,14 +59,14 @@ export function createComputeProviderClient(
 
       // The published worker image doubles as the Modal base image, so a
       // missing ref falls back to the deployment's effective worker image
-      // (explicit DOCKER_WORKER_IMAGE, or derived from the baked
+      // (explicit R_DOCKER_WORKER_IMAGE, or derived from the baked
       // RELEASE_VERSION on published app images), then the development-only
       // public latest image.
       const baseImageRef =
         options.config?.baseImageRef ??
         resolveEffectiveModalBaseImageRef({
           MODAL_BASE_IMAGE_REF: envValue('MODAL_BASE_IMAGE_REF'),
-          DOCKER_WORKER_IMAGE: envValue('DOCKER_WORKER_IMAGE'),
+          R_DOCKER_WORKER_IMAGE: envValue('R_DOCKER_WORKER_IMAGE'),
           RELEASE_VERSION: envValue('RELEASE_VERSION'),
           ROOMOTE_WORKER_IMAGE_REPO: envValue('ROOMOTE_WORKER_IMAGE_REPO'),
           APP_ENV: envValue('APP_ENV'),
@@ -203,7 +203,7 @@ export function createComputeProviderClient(
       const image = options.config?.image ?? envValue('BLAXEL_IMAGE');
       const region = envValue('BLAXEL_REGION');
       const standbyMaxAgeHours = Number(
-        envValue('BLAXEL_STANDBY_MAX_AGE_HOURS'),
+        envValue('R_BLAXEL_STANDBY_MAX_AGE_HOURS'),
       );
 
       assertDefined(apiKey, 'Missing BL_API_KEY');

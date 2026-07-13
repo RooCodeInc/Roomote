@@ -49,7 +49,7 @@ const {
     R_MICROSOFT_CLIENT_ID: 'microsoft-client-id' as string | undefined,
     R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret' as string | undefined,
     R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id' as string | undefined,
-    TRPC_URL: 'https://api.example.com',
+    R_TRPC_URL: 'https://api.example.com',
   },
   fetchMessageImageDataUrlsMock: vi.fn(),
   findFirstMock: vi.fn(),

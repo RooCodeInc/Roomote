@@ -6,8 +6,8 @@ function isApiDebugLoggingEnabled(): boolean {
 
   return (
     effectiveAppEnv !== 'production' ||
-    Env.API_DEBUG_LOGS === '1' ||
-    Env.API_DEBUG_LOGS === 'true'
+    Env.R_API_DEBUG_LOGS === '1' ||
+    Env.R_API_DEBUG_LOGS === 'true'
   );
 }
 

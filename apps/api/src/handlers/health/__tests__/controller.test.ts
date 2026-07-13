@@ -8,7 +8,7 @@ const envMock = vi.hoisted(() => ({
     | 'preview'
     | 'production'
     | undefined,
-  API_SLOW_REQUEST_THRESHOLD_MS: 3_000,
+  R_API_SLOW_REQUEST_THRESHOLD_MS: 3_000,
 }));
 
 const redisGetMock = vi.hoisted(() => vi.fn());

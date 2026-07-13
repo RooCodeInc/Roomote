@@ -183,7 +183,7 @@ describe('conflictScanJob', () => {
     });
   });
 
-  it('skips repos in GITHUB_AUTOMATED_SKIP_REPOS before scanning PRs', async () => {
+  it('skips repos in R_GITHUB_AUTOMATED_SKIP_REPOS before scanning PRs', async () => {
     mockIsRepoSkipped.mockReturnValue(true);
 
     await conflictScanJob();

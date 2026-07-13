@@ -92,17 +92,17 @@ function makeTaskRun(payload: TaskRun['payload']): TaskRun {
 
 describe('Azure DevOps API helpers', () => {
   const originalAdoToken = process.env.ADO_TOKEN;
-  const originalAdoOrganization = process.env.ADO_ORGANIZATION;
-  const originalAdoBaseUrl = process.env.ADO_BASE_URL;
-  const originalAdoUsername = process.env.ADO_USERNAME;
+  const originalAdoOrganization = process.env.R_ADO_ORGANIZATION;
+  const originalAdoBaseUrl = process.env.R_ADO_BASE_URL;
+  const originalAdoUsername = process.env.R_ADO_USERNAME;
 
   beforeEach(() => {
     vi.clearAllMocks();
     clearAdoDeploymentUserCache();
     process.env.ADO_TOKEN = 'ado_deployment_token';
-    process.env.ADO_ORGANIZATION = 'acme';
-    delete process.env.ADO_BASE_URL;
-    delete process.env.ADO_USERNAME;
+    process.env.R_ADO_ORGANIZATION = 'acme';
+    delete process.env.R_ADO_BASE_URL;
+    delete process.env.R_ADO_USERNAME;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -121,21 +121,21 @@ describe('Azure DevOps API helpers', () => {
     }
 
     if (originalAdoOrganization === undefined) {
-      delete process.env.ADO_ORGANIZATION;
+      delete process.env.R_ADO_ORGANIZATION;
     } else {
-      process.env.ADO_ORGANIZATION = originalAdoOrganization;
+      process.env.R_ADO_ORGANIZATION = originalAdoOrganization;
     }
 
     if (originalAdoBaseUrl === undefined) {
-      delete process.env.ADO_BASE_URL;
+      delete process.env.R_ADO_BASE_URL;
     } else {
-      process.env.ADO_BASE_URL = originalAdoBaseUrl;
+      process.env.R_ADO_BASE_URL = originalAdoBaseUrl;
     }
 
     if (originalAdoUsername === undefined) {
-      delete process.env.ADO_USERNAME;
+      delete process.env.R_ADO_USERNAME;
     } else {
-      process.env.ADO_USERNAME = originalAdoUsername;
+      process.env.R_ADO_USERNAME = originalAdoUsername;
     }
   });
 
@@ -221,7 +221,7 @@ describe('Azure DevOps API helpers', () => {
         organization: '',
       }),
     ).rejects.toThrow(
-      'ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
+      'R_ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
     );
   });
 

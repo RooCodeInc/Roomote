@@ -201,7 +201,7 @@ async function main() {
 
   console.info(`Mock Slack API listening at ${baseUrl}`);
   console.info(
-    `Set SLACK_API_BASE_URL=${baseUrl}/api/ in the Roomote services you want to point at the harness.`,
+    `Set R_SLACK_API_BASE_URL=${baseUrl}/api/ in the Roomote services you want to point at the harness.`,
   );
 
   if (config.replay?.length) {

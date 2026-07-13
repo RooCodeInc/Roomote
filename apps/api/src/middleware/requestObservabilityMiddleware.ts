@@ -47,7 +47,7 @@ export const requestObservabilityMiddleware: MiddlewareHandler = async (
   c,
   next,
 ) => {
-  const slowRequestThresholdMs = Env.API_SLOW_REQUEST_THRESHOLD_MS;
+  const slowRequestThresholdMs = Env.R_API_SLOW_REQUEST_THRESHOLD_MS;
   const startedAt = Date.now();
   let thrownError: unknown;
 

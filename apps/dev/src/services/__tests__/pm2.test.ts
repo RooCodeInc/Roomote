@@ -67,8 +67,8 @@ describe('PM2Service.startServices', () => {
       R_APP_URL: 'https://roomote-example.ngrok.app',
       USE_WORKER_RELEASE: 'false',
     });
-    expect(pm2Env).not.toHaveProperty('WORKER_RELEASE_CHANNEL');
-    expect(pm2Env).not.toHaveProperty('WORKER_RELEASE_VERSION');
+    expect(pm2Env).not.toHaveProperty('R_WORKER_RELEASE_CHANNEL');
+    expect(pm2Env).not.toHaveProperty('R_WORKER_RELEASE_VERSION');
   });
 
   it('omits the pinned version env var when using the release channel without a pinned version', async () => {
@@ -81,9 +81,9 @@ describe('PM2Service.startServices', () => {
 
     expect(pm2Env).toMatchObject({
       USE_WORKER_RELEASE: 'true',
-      WORKER_RELEASE_CHANNEL: 'stable',
+      R_WORKER_RELEASE_CHANNEL: 'stable',
     });
-    expect(pm2Env).not.toHaveProperty('WORKER_RELEASE_VERSION');
+    expect(pm2Env).not.toHaveProperty('R_WORKER_RELEASE_VERSION');
   });
 });
 

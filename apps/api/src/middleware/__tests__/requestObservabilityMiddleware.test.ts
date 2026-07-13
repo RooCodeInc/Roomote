@@ -7,7 +7,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   return {
     ...actual,
     Env: {
-      API_SLOW_REQUEST_THRESHOLD_MS: 5_000,
+      R_API_SLOW_REQUEST_THRESHOLD_MS: 5_000,
     },
   };
 });
@@ -63,7 +63,7 @@ describe('requestObservabilityMiddleware', () => {
 
     app.use('*', requestObservabilityMiddleware);
     app.get('/slow', (c) => {
-      now += Env.API_SLOW_REQUEST_THRESHOLD_MS;
+      now += Env.R_API_SLOW_REQUEST_THRESHOLD_MS;
       return c.text('ok');
     });
 
@@ -74,7 +74,7 @@ describe('requestObservabilityMiddleware', () => {
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
-      `[API Slow Request] GET /slow status=200 durationMs=${Env.API_SLOW_REQUEST_THRESHOLD_MS} requestId=req_123`,
+      `[API Slow Request] GET /slow status=200 durationMs=${Env.R_API_SLOW_REQUEST_THRESHOLD_MS} requestId=req_123`,
     );
 
     dateNowSpy.mockRestore();

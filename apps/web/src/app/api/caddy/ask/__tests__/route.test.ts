@@ -3,19 +3,19 @@ import { NextRequest } from 'next/server';
 import { GET, isAllowedCaddyPreviewDomain } from '../route';
 
 describe('GET /api/caddy/ask', () => {
-  const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
+  const originalPreviewProxyBaseUrl = process.env.R_PREVIEW_PROXY_BASE_URL;
   const originalRoomotePreviewDomain = process.env.ROOMOTE_PREVIEW_DOMAIN;
 
   beforeEach(() => {
-    process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
+    process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
     delete process.env.ROOMOTE_PREVIEW_DOMAIN;
   });
 
   afterEach(() => {
     if (originalPreviewProxyBaseUrl === undefined) {
-      delete process.env.PREVIEW_PROXY_BASE_URL;
+      delete process.env.R_PREVIEW_PROXY_BASE_URL;
     } else {
-      process.env.PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
+      process.env.R_PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
     }
 
     if (originalRoomotePreviewDomain === undefined) {

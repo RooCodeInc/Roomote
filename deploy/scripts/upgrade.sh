@@ -120,14 +120,14 @@ image_registry="${ROOMOTE_IMAGE_REGISTRY_ARG:-$(read_env_value IMAGE_REGISTRY)}"
 image_namespace="${ROOMOTE_IMAGE_NAMESPACE_ARG:-$(read_env_value IMAGE_NAMESPACE)}"
 image_registry="${image_registry:-ghcr.io}"
 image_namespace="${image_namespace:-roocodeinc}"
-previous_worker_image="$(read_env_value DOCKER_WORKER_IMAGE)"
+previous_worker_image="$(read_env_value R_DOCKER_WORKER_IMAGE)"
 worker_image="$image_registry/$image_namespace/roomote-worker:$ROOMOTE_VERSION"
 # worker-current.tar.gz always matches the running image (see install.sh).
 worker_release_path="/roomote/releases/worker-current.tar.gz"
 # Keep the installer/deployer-managed Modal base image ref in sync with the
 # new worker image. The wizard stores the selected sandbox provider in the
 # database, not in the env file, so this must not gate on
-# DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
+# R_DEFAULT_COMPUTE_PROVIDER. A different non-empty value is an operator
 # override and is left untouched.
 modal_base_image_ref="$(read_env_value MODAL_BASE_IMAGE_REF)"
 sync_modal_base_image_ref=false
@@ -176,13 +176,13 @@ awk \
     seen_namespace = 1
     next
   }
-  /^(export[[:space:]]+)?DOCKER_WORKER_IMAGE=/ {
-    print "DOCKER_WORKER_IMAGE=" worker_image
+  /^(export[[:space:]]+)?R_DOCKER_WORKER_IMAGE=/ {
+    print "R_DOCKER_WORKER_IMAGE=" worker_image
     seen_worker = 1
     next
   }
-  /^(export[[:space:]]+)?DOCKER_WORKER_RELEASE_PATH=/ {
-    print "DOCKER_WORKER_RELEASE_PATH=" worker_release_path
+  /^(export[[:space:]]+)?R_DOCKER_WORKER_RELEASE_PATH=/ {
+    print "R_DOCKER_WORKER_RELEASE_PATH=" worker_release_path
     seen_worker_release_path = 1
     next
   }
@@ -194,8 +194,8 @@ awk \
   /^(export[[:space:]]+)?ROOMOTE_API_DOMAIN=/ {
     next
   }
-  /^(export[[:space:]]+)?TRPC_URL=/ {
-    print "TRPC_URL=" trpc_url
+  /^(export[[:space:]]+)?R_TRPC_URL=/ {
+    print "R_TRPC_URL=" trpc_url
     seen_trpc = 1
     next
   }
@@ -211,16 +211,16 @@ awk \
       print "IMAGE_NAMESPACE=" image_namespace
     }
     if (!seen_worker) {
-      print "DOCKER_WORKER_IMAGE=" worker_image
+      print "R_DOCKER_WORKER_IMAGE=" worker_image
     }
     if (!seen_worker_release_path) {
-      print "DOCKER_WORKER_RELEASE_PATH=" worker_release_path
+      print "R_DOCKER_WORKER_RELEASE_PATH=" worker_release_path
     }
     if (sync_modal_base_image_ref == "true" && !seen_modal_base_image_ref) {
       print "MODAL_BASE_IMAGE_REF=" modal_base_image_ref
     }
     if (!seen_trpc) {
-      print "TRPC_URL=" trpc_url
+      print "R_TRPC_URL=" trpc_url
     }
   }
 ' .env > "$tmp_env"

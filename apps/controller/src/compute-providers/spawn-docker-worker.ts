@@ -122,8 +122,8 @@ export async function spawnDockerWorker(
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
       runtimeEnv: process.env,
-      defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-      defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+      defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+      defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
     });
 
   const containerName = isStandbyResume
@@ -220,7 +220,7 @@ export async function spawnDockerWorker(
         }
 
         console.warn(
-          `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
+          `[spawnDockerWorker] Docker storage driver cannot enforce writable-layer limit ${config.diskLimit}; R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK is enabled, so this task will continue without --storage-opt size.`,
         );
         await docker(['rm', '-f', containerName], { allowFailure: true });
         containerId = await startContainer();
@@ -308,12 +308,14 @@ export async function spawnDockerWorker(
       image: config.image,
       extraEnv: {
         SANDBOX_TIMEOUT_MS: String(config.dockerTimeoutMs),
-        TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
+        R_TRPC_URL: toContainerReachableUrl(
+          process.env.R_TRPC_URL ?? Env.R_TRPC_URL,
+        ),
         // Mock-Slack parity: worker-side SlackNotifier calls (question blocks,
         // reactions) must reach the same mock harness the API uses.
-        ...(process.env.SLACK_API_BASE_URL && {
-          SLACK_API_BASE_URL: toContainerReachableUrl(
-            process.env.SLACK_API_BASE_URL,
+        ...(process.env.R_SLACK_API_BASE_URL && {
+          R_SLACK_API_BASE_URL: toContainerReachableUrl(
+            process.env.R_SLACK_API_BASE_URL,
           ),
         }),
         R_APP_URL: toContainerReachableUrl(
@@ -325,11 +327,11 @@ export async function spawnDockerWorker(
           process.env.R_APP_URL ?? Env.R_APP_URL,
         ),
         ...(resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl && {
-          PREVIEW_PROXY_BASE_URL:
+          R_PREVIEW_PROXY_BASE_URL:
             resolvedPreviewRuntimeConfig.effective.previewProxyBaseUrl,
         }),
         ...(resolvedPreviewRuntimeConfig.effective.previewDomains && {
-          PREVIEW_DOMAINS:
+          R_PREVIEW_DOMAINS:
             resolvedPreviewRuntimeConfig.effective.previewDomains,
         }),
         ...(resolvedPreviewRuntimeConfig.effective.roomotePreviewDomain && {
@@ -392,7 +394,7 @@ export function shouldRetryDockerWorkerWithoutDiskLimit(params: {
 
   if (!params.allowUnboundedDisk) {
     throw new NonRetryableSpawnError(
-      `Docker storage driver cannot enforce writable-layer limit ${params.diskLimit}. Refusing to start an unbounded task. Configure a quota-capable Docker data root or set DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true to explicitly accept the host disk-exhaustion risk.`,
+      `Docker storage driver cannot enforce writable-layer limit ${params.diskLimit}. Refusing to start an unbounded task. Configure a quota-capable Docker data root or set R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=true to explicitly accept the host disk-exhaustion risk.`,
     );
   }
 

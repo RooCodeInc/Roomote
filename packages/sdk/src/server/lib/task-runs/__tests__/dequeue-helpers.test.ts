@@ -471,8 +471,8 @@ describe('redactControlPlaneEnvVars', () => {
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',
         // Derived from the source-control secret catalog.
-        GITLAB_WEBHOOK_SECRET: 'gl-webhook',
-        GITLAB_CLIENT_SECRET: 'gl-client',
+        R_GITLAB_WEBHOOK_SECRET: 'gl-webhook',
+        R_GITLAB_CLIENT_SECRET: 'gl-client',
         // Derived from the sign-in auth catalog.
         R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).

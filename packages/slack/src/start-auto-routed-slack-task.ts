@@ -345,7 +345,7 @@ export async function startAutoRoutedSlackTask({
       ...(processedVideoDescriptions?.length
         ? { videoDescriptions: processedVideoDescriptions }
         : {}),
-      apiBaseUrl: Env.TRPC_URL,
+      apiBaseUrl: Env.R_TRPC_URL,
     });
     const normalizedRoutingRepositoryConstraint =
       routingRepositoryConstraint?.trim().toLowerCase() || null;

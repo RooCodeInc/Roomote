@@ -129,7 +129,7 @@ describe('ComputeProviderSection advanced settings', () => {
     supportsSnapshots: false,
     fields: [
       {
-        envVarName: 'DOCKER_STANDBY_MAX_COUNT',
+        envVarName: 'R_DOCKER_STANDBY_MAX_COUNT',
         label: 'Maximum retained tasks',
         required: false,
         category: 'infrastructure',
@@ -172,7 +172,7 @@ describe('ComputeProviderSection advanced settings', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save/ }));
 
     expect(onSave).toHaveBeenCalledWith('docker', {
-      DOCKER_STANDBY_MAX_COUNT: '4',
+      R_DOCKER_STANDBY_MAX_COUNT: '4',
     });
   });
 

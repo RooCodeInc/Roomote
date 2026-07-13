@@ -37,7 +37,7 @@ describe('resolveTelegramRuntimeCredentials', () => {
     invalidateTelegramRuntimeCredentialsCache();
     process.env.R_TELEGRAM_BOT_TOKEN = '123:token';
     process.env.R_TELEGRAM_WEBHOOK_SECRET = 'secret';
-    process.env.TELEGRAM_API_BASE_URL = 'https://telegram.example.test';
+    process.env.R_TELEGRAM_API_BASE_URL = 'https://telegram.example.test';
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
     deploymentSettingsFindFirstMock.mockResolvedValue({ metadata: {} });
     deploymentSettingsUpdateSetMock.mockReturnValue({

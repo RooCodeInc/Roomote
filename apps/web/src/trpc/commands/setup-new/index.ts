@@ -1301,7 +1301,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   };
 
   const sourceControlConnection = await getSourceControlConnectionSummary();
-  const gitlabBaseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
+  const gitlabBaseUrl = await resolveDeploymentEnvVar('R_GITLAB_BASE_URL');
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
@@ -1550,7 +1550,7 @@ export async function saveSetupNewComputeConfigCommand(
         getPersistedEnvironmentVariableNames(tx),
       ]);
 
-      // In-request DOCKER_WORKER_IMAGE is only used for this save/provisioning
+      // In-request R_DOCKER_WORKER_IMAGE is only used for this save/provisioning
       // pass. It is not persisted as sticky deployment state; process env and
       // RELEASE_VERSION derivation own runtime configuration.
       const submittedWorkerImage =
@@ -1586,7 +1586,7 @@ export async function saveSetupNewComputeConfigCommand(
         );
         const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
           ...process.env,
-          DOCKER_WORKER_IMAGE: effectiveWorkerImage,
+          R_DOCKER_WORKER_IMAGE: effectiveWorkerImage,
         });
 
         if (
@@ -1641,7 +1641,7 @@ export async function saveSetupNewComputeConfigCommand(
         if (provisioning.fieldPending) {
           if (!provisioning.provisionable) {
             throw new Error(
-              `${providerStatus.label} needs a registry-qualified worker image (for example via DOCKER_WORKER_IMAGE) so Roomote can provision the worker base image automatically.`,
+              `${providerStatus.label} needs a registry-qualified worker image (for example via R_DOCKER_WORKER_IMAGE) so Roomote can provision the worker base image automatically.`,
             );
           }
 

@@ -113,7 +113,7 @@ async function resolveSlackOAuthConfig() {
   return {
     clientId: readConfiguredValue('R_SLACK_CLIENT_ID'),
     clientSecret: readConfiguredValue('R_SLACK_CLIENT_SECRET'),
-    appId: readConfiguredValue('SLACK_APP_ID'),
+    appId: readConfiguredValue('R_SLACK_APP_ID'),
   };
 }
 

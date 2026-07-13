@@ -43,7 +43,7 @@ export function getSandboxOidcIssuer(): string {
   // This issuer URL is configured in customer IAM/OIDC provider trust policies,
   // so treat it as stable once deployed. It must point at apps/api, whose host
   // serves the root .well-known discovery endpoint and advertised JWKS URI.
-  return normalizeUrlBase(Env.TRPC_URL);
+  return normalizeUrlBase(Env.R_TRPC_URL);
 }
 
 export function getSandboxOidcKeyId(

@@ -154,7 +154,7 @@ export function buildSlackAccountLinkConnectMessage(
               text: copy.buttonText,
               emoji: true,
             },
-            url: `${Env.SLACK_AUTH_URI}?state=${authToken}`,
+            url: `${Env.R_SLACK_AUTH_URI}?state=${authToken}`,
             style: 'primary',
           },
         ],
@@ -1145,7 +1145,7 @@ export async function showTaskConfiguration({
           ...(event.processedVideoDescriptions?.length
             ? { videoDescriptions: event.processedVideoDescriptions }
             : {}),
-          apiBaseUrl: Env.TRPC_URL,
+          apiBaseUrl: Env.R_TRPC_URL,
         });
 
         console.log(
@@ -2740,7 +2740,7 @@ export async function handleSlackRoutingCorrection({
       ...(originalEvent.processedVideoDescriptions?.length
         ? { videoDescriptions: originalEvent.processedVideoDescriptions }
         : {}),
-      apiBaseUrl: Env.TRPC_URL,
+      apiBaseUrl: Env.R_TRPC_URL,
     });
 
     // Add the previous suggestion so the router can revise the workspace.

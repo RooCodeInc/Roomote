@@ -314,7 +314,7 @@ describe('buildSetupAuthStatus', () => {
 
     const slack = status.providers.find((provider) => provider.id === 'slack');
     const slackAppIdField = slack?.fields.find(
-      (field) => field.envVarName === 'SLACK_APP_ID',
+      (field) => field.envVarName === 'R_SLACK_APP_ID',
     );
 
     expect(slack).toMatchObject({

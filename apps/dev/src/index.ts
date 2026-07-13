@@ -54,10 +54,10 @@ class LocalDevStarter {
       options.publicUrl = publicUrlResolution.publicUrl;
       process.env.R_PUBLIC_URL = publicUrlResolution.publicUrl;
       process.env.R_APP_URL = publicUrlResolution.publicUrl;
-      // Match the deployed TRPC_URL contract so hosted compute workers
+      // Match the deployed R_TRPC_URL contract so hosted compute workers
       // (Vercel Sandbox, Modal, Daytona, E2B) can reach the API through the
       // public app URL instead of an unreachable localhost address.
-      process.env.TRPC_URL = `${publicUrlResolution.publicUrl}/_roomote-api`;
+      process.env.R_TRPC_URL = `${publicUrlResolution.publicUrl}/_roomote-api`;
 
       console.info(
         `🌐 Public URL: ${publicUrlResolution.publicUrl}${
@@ -83,7 +83,7 @@ class LocalDevStarter {
         await WorkerReleaseService.build(options);
       }
 
-      if ((process.env.DEFAULT_COMPUTE_PROVIDER ?? 'docker') === 'docker') {
+      if ((process.env.R_DEFAULT_COMPUTE_PROVIDER ?? 'docker') === 'docker') {
         await DockerService.ensureWorkerImage(options.verbose);
       }
 

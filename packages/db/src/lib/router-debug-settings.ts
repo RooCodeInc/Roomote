@@ -23,7 +23,7 @@ export function normalizeRouterDebugSlackChannelId(
 export async function getRouterDebugSettings(
   options: {
     executor?: DatabaseOrTransaction;
-    runtimeEnv?: Pick<NodeJS.ProcessEnv, 'ROUTER_DEBUG_CHANNEL_ID'>;
+    runtimeEnv?: Pick<NodeJS.ProcessEnv, 'R_ROUTER_DEBUG_CHANNEL_ID'>;
   } = {},
 ): Promise<{
   routerDebugSlackChannelId: string | null;
@@ -43,7 +43,7 @@ export async function getRouterDebugSettings(
     deployment?.routerDebugSlackChannelId,
   );
   const envFallbackSlackChannelId = normalizeRouterDebugSlackChannelId(
-    (options.runtimeEnv ?? process.env).ROUTER_DEBUG_CHANNEL_ID,
+    (options.runtimeEnv ?? process.env).R_ROUTER_DEBUG_CHANNEL_ID,
   );
   const effectiveRouterDebugSlackChannelId =
     routerDebugSlackChannelId ?? envFallbackSlackChannelId;
@@ -63,7 +63,7 @@ export async function getRouterDebugSettings(
 export async function getConfiguredRouterDebugSlackChannelId(
   options: {
     executor?: DatabaseOrTransaction;
-    runtimeEnv?: Pick<NodeJS.ProcessEnv, 'ROUTER_DEBUG_CHANNEL_ID'>;
+    runtimeEnv?: Pick<NodeJS.ProcessEnv, 'R_ROUTER_DEBUG_CHANNEL_ID'>;
   } = {},
 ): Promise<string | null> {
   const settings = await getRouterDebugSettings(options);

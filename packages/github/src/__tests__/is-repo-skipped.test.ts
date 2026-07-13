@@ -3,15 +3,15 @@ describe('isRepoSkipped', () => {
     vi.resetModules();
   });
 
-  it('should return false when GITHUB_AUTOMATED_SKIP_REPOS is not set', async () => {
+  it('should return false when R_GITHUB_AUTOMATED_SKIP_REPOS is not set', async () => {
     vi.doMock('@roomote/env', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@roomote/env')>();
 
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: undefined,
-          GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_REPOS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
         },
       };
     });
@@ -20,15 +20,15 @@ describe('isRepoSkipped', () => {
     expect(isRepoSkipped('Roomote/example-app')).toBe(false);
   });
 
-  it('should return false when GITHUB_AUTOMATED_SKIP_REPOS is empty', async () => {
+  it('should return false when R_GITHUB_AUTOMATED_SKIP_REPOS is empty', async () => {
     vi.doMock('@roomote/env', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@roomote/env')>();
 
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: '',
-          GITHUB_AUTOMATED_SKIP_OWNERS: '',
+          R_GITHUB_AUTOMATED_SKIP_REPOS: '',
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: '',
         },
       };
     });
@@ -44,9 +44,9 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS:
+          R_GITHUB_AUTOMATED_SKIP_REPOS:
             'Roomote/example-app,Roomote/example-app,Roomote/example-cloud',
-          GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
         },
       };
     });
@@ -64,8 +64,8 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: 'Roomote/example-app',
-          GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_REPOS: 'Roomote/example-app',
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
         },
       };
     });
@@ -81,8 +81,8 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: 'Roomote/example-app',
-          GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_REPOS: 'Roomote/example-app',
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
         },
       };
     });
@@ -99,9 +99,9 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS:
+          R_GITHUB_AUTOMATED_SKIP_REPOS:
             ' Roomote/example-app , Roomote/example-app ',
-          GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: undefined,
         },
       };
     });
@@ -118,8 +118,8 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: undefined,
-          GITHUB_AUTOMATED_SKIP_OWNERS: 'Roomote',
+          R_GITHUB_AUTOMATED_SKIP_REPOS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: 'Roomote',
         },
       };
     });
@@ -137,8 +137,8 @@ describe('isRepoSkipped', () => {
       return {
         ...actual,
         Env: {
-          GITHUB_AUTOMATED_SKIP_REPOS: undefined,
-          GITHUB_AUTOMATED_SKIP_OWNERS: ' Roomote , SomeOtherOrg ',
+          R_GITHUB_AUTOMATED_SKIP_REPOS: undefined,
+          R_GITHUB_AUTOMATED_SKIP_OWNERS: ' Roomote , SomeOtherOrg ',
         },
       };
     });

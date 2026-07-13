@@ -1,6 +1,6 @@
 ---
 name: mock-slack-testing
-description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_slack_channel`, `SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_slack_channel`, `R_SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Slack Testing
@@ -84,7 +84,7 @@ When testing flows where Roomote posts back to Slack (thread replies, channel po
 
 ```bash
 # Set in the API server's environment before it starts, or inject at runtime
-SLACK_API_BASE_URL=http://127.0.0.1:3012/api/
+R_SLACK_API_BASE_URL=http://127.0.0.1:3012/api/
 ```
 
 The signing secret is read from `Env.SLACK_SIGNING_SECRET` via dotenvx. The harness uses the same secret by default, so inbound replay signatures will match without extra configuration.

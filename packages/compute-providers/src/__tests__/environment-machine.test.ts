@@ -9,20 +9,20 @@ import {
   getNamedPortsForEnvironment,
 } from '../environment-machine';
 
-const originalTrpcUrl = process.env.TRPC_URL;
+const originalTrpcUrl = process.env.R_TRPC_URL;
 const originalRoomoteAppUrl = process.env.R_APP_URL;
 
 describe('getNamedPortsForEnvironment', () => {
   beforeEach(() => {
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
     delete process.env.R_APP_URL;
   });
 
   afterAll(() => {
     if (originalTrpcUrl === undefined) {
-      delete process.env.TRPC_URL;
+      delete process.env.R_TRPC_URL;
     } else {
-      process.env.TRPC_URL = originalTrpcUrl;
+      process.env.R_TRPC_URL = originalTrpcUrl;
     }
 
     if (originalRoomoteAppUrl === undefined) {
@@ -33,7 +33,7 @@ describe('getNamedPortsForEnvironment', () => {
   });
 
   it('does not infer callback surfaces from local controller callback URLs', () => {
-    process.env.TRPC_URL = 'http://localhost:3001';
+    process.env.R_TRPC_URL = 'http://localhost:3001';
 
     const namedPorts = getNamedPortsForEnvironment({});
 

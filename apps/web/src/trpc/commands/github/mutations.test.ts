@@ -53,7 +53,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@/lib/server', () => ({
   Env: {
     R_APP_URL: 'https://roomote.example.com',
-    TRPC_URL: 'http://localhost:3000',
+    R_TRPC_URL: 'http://localhost:3000',
     R_GITHUB_APP_SLUG: 'roomote',
     R_GITHUB_CLIENT_ID: 'client-id',
     R_GITHUB_CLIENT_SECRET: 'client-secret',

@@ -16,7 +16,7 @@ export function normalizeApiBaseUrl(raw: string | undefined): string | null {
 export function resolveApiBaseUrl(explicit?: string): string | null {
   return (
     normalizeApiBaseUrl(explicit) ??
-    normalizeApiBaseUrl(Env.TRPC_URL) ??
+    normalizeApiBaseUrl(Env.R_TRPC_URL) ??
     normalizeApiBaseUrl(Env.R_APP_URL)
   );
 }

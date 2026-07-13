@@ -164,7 +164,7 @@ function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
-    throw new Error('ADO_BASE_URL cannot be empty.');
+    throw new Error('R_ADO_BASE_URL cannot be empty.');
   }
 
   return new URL(trimmed).toString().replace(/\/+$/, '');
@@ -175,7 +175,7 @@ function normalizeOrganization(organization: string): string {
 
   if (!trimmed) {
     throw new Error(
-      'ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
+      'R_ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
     );
   }
 
@@ -187,17 +187,17 @@ export async function resolveAdoToken(): Promise<string | null> {
 }
 
 export async function resolveAdoOrganization(): Promise<string | null> {
-  const organization = await resolveDeploymentEnvVar('ADO_ORGANIZATION');
+  const organization = await resolveDeploymentEnvVar('R_ADO_ORGANIZATION');
   return organization ? normalizeOrganization(organization) : null;
 }
 
 export async function resolveAdoBaseUrl(): Promise<string> {
-  const baseUrl = await resolveDeploymentEnvVar('ADO_BASE_URL');
+  const baseUrl = await resolveDeploymentEnvVar('R_ADO_BASE_URL');
   return normalizeBaseUrl(baseUrl ?? DEFAULT_ADO_BASE_URL);
 }
 
 export async function resolveAdoUsername(): Promise<string | null> {
-  return resolveDeploymentEnvVar('ADO_USERNAME');
+  return resolveDeploymentEnvVar('R_ADO_USERNAME');
 }
 
 export function buildAdoOrganizationApiBaseUrl({
@@ -436,7 +436,7 @@ export async function getAdoPullRequest({
 
   if (!resolvedOrganizationApiBaseUrl) {
     throw new Error(
-      'ADO_ORGANIZATION is required to read Azure DevOps pull requests.',
+      'R_ADO_ORGANIZATION is required to read Azure DevOps pull requests.',
     );
   }
 
@@ -587,7 +587,7 @@ export async function createAdoPullRequestComment({
 
   if (!resolvedOrganizationApiBaseUrl) {
     throw new Error(
-      'ADO_ORGANIZATION is required to create Azure DevOps pull request comments.',
+      'R_ADO_ORGANIZATION is required to create Azure DevOps pull request comments.',
     );
   }
 
@@ -657,7 +657,7 @@ export async function listAdoRepositories({
 
   if (!resolvedOrganization?.trim()) {
     throw new Error(
-      'ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
+      'R_ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
     );
   }
 
@@ -953,7 +953,7 @@ export async function ensureAdoServiceHooksForRepositories({
 
   if (!resolvedOrganization?.trim()) {
     throw new Error(
-      'ADO_ORGANIZATION is required to configure Azure DevOps service hooks.',
+      'R_ADO_ORGANIZATION is required to configure Azure DevOps service hooks.',
     );
   }
 
@@ -1097,7 +1097,7 @@ export async function removeAdoServiceHooksForRepositories({
 
   if (!resolvedOrganization?.trim()) {
     throw new Error(
-      'ADO_ORGANIZATION is required to configure Azure DevOps service hooks.',
+      'R_ADO_ORGANIZATION is required to configure Azure DevOps service hooks.',
     );
   }
 
@@ -1248,7 +1248,7 @@ export async function syncAdoRepositories({
 
   if (!resolvedOrganization?.trim()) {
     throw new Error(
-      'ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
+      'R_ADO_ORGANIZATION is required to sync Azure DevOps repositories.',
     );
   }
 

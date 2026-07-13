@@ -112,18 +112,18 @@ export class RoomoteController extends BaseController {
       }
       case 'docker': {
         await spawnDockerWorker(taskRun, authToken, {
-          image: Env.DOCKER_WORKER_IMAGE,
-          platform: Env.DOCKER_WORKER_PLATFORM,
-          network: Env.DOCKER_WORKER_NETWORK,
+          image: Env.R_DOCKER_WORKER_IMAGE,
+          platform: Env.R_DOCKER_WORKER_PLATFORM,
+          network: Env.R_DOCKER_WORKER_NETWORK,
           dockerTimeoutMs: timeoutMs,
-          cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
-          memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
-          pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
-          diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
-          allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
-          logMaxSize: Env.DOCKER_WORKER_LOG_MAX_SIZE,
-          logMaxFiles: Env.DOCKER_WORKER_LOG_MAX_FILES,
-          egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
+          cpuLimit: Env.R_DOCKER_WORKER_CPU_LIMIT,
+          memoryLimit: Env.R_DOCKER_WORKER_MEMORY_LIMIT,
+          pidsLimit: Env.R_DOCKER_WORKER_PIDS_LIMIT,
+          diskLimit: Env.R_DOCKER_WORKER_DISK_LIMIT,
+          allowUnboundedDisk: Env.R_DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
+          logMaxSize: Env.R_DOCKER_WORKER_LOG_MAX_SIZE,
+          logMaxFiles: Env.R_DOCKER_WORKER_LOG_MAX_FILES,
+          egressPolicy: Env.R_DOCKER_WORKER_EGRESS_POLICY,
           localWorkerReleasePath: this.localWorkerReleasePath,
           deploymentSlug: deploymentSlug,
         });
@@ -223,7 +223,7 @@ export class RoomoteController extends BaseController {
   private async cleanStaleDockerSandboxes(): Promise<void> {
     try {
       await cleanupStaleDockerSandboxes({
-        controlNetwork: Env.DOCKER_WORKER_NETWORK,
+        controlNetwork: Env.R_DOCKER_WORKER_NETWORK,
       });
     } catch (error) {
       console.error(

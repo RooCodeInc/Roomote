@@ -107,7 +107,7 @@ export async function getComputeStatusCommand(auth: UserAuthSuccess): Promise<
 > {
   assertAdmin(auth);
 
-  // Drop sticky DB-backed DOCKER_WORKER_IMAGE rows from the removed Settings
+  // Drop sticky DB-backed R_DOCKER_WORKER_IMAGE rows from the removed Settings
   // editor so release-derived / process-env images always win.
   await purgeSavedDeploymentWorkerImage();
 
@@ -166,7 +166,7 @@ export async function saveComputeConfigCommand(
       getPersistedEnvironmentVariableNames(tx),
     ]);
 
-    // DOCKER_WORKER_IMAGE may be submitted only for this request (setup).
+    // R_DOCKER_WORKER_IMAGE may be submitted only for this request (setup).
     // Process env wins; uploaded/DB sticky values are not used.
     const submittedWorkerImage =
       input.values?.[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() || null;
@@ -202,7 +202,7 @@ export async function saveComputeConfigCommand(
       // Never accept a form-submitted MODAL_BASE_IMAGE_REF — derived only.
       const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
         ...process.env,
-        DOCKER_WORKER_IMAGE: resolveEffectiveWorkerImageForSave(
+        R_DOCKER_WORKER_IMAGE: resolveEffectiveWorkerImageForSave(
           effectiveSubmittedWorkerImage,
         ),
       });
@@ -218,7 +218,7 @@ export async function saveComputeConfigCommand(
     }
 
     // Credentials and operator-editable infrastructure values are persisted as
-    // encrypted deployment env vars. DOCKER_WORKER_IMAGE and managed artifacts
+    // encrypted deployment env vars. R_DOCKER_WORKER_IMAGE and managed artifacts
     // (Modal base image, E2B/Daytona) are not form-sticky from the UI.
     const valuesToSave: Array<{ name: string; value: string }> = [];
     const envVarsToClear: string[] = [];

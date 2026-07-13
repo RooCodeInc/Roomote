@@ -135,7 +135,7 @@ function buildComputeSetup(
     persistedDefaultProvider: null,
     setupSatisfied: false,
     workerImage: {
-      envVarName: 'DOCKER_WORKER_IMAGE',
+      envVarName: 'R_DOCKER_WORKER_IMAGE',
       label: 'Worker Image',
       runtimeSatisfied: false,
       savedSatisfied: true,
@@ -176,7 +176,7 @@ describe('StepComputeConfig', () => {
       <StepComputeConfig
         computeSetup={buildComputeSetup({
           workerImage: {
-            envVarName: 'DOCKER_WORKER_IMAGE',
+            envVarName: 'R_DOCKER_WORKER_IMAGE',
             label: 'Worker Image',
             runtimeSatisfied: false,
             savedSatisfied: false,
@@ -202,7 +202,7 @@ describe('StepComputeConfig', () => {
       <StepComputeConfig
         computeSetup={buildComputeSetup({
           workerImage: {
-            envVarName: 'DOCKER_WORKER_IMAGE',
+            envVarName: 'R_DOCKER_WORKER_IMAGE',
             label: 'Worker Image',
             runtimeSatisfied: true,
             savedSatisfied: false,

@@ -236,8 +236,8 @@ async function validateRuntimePreviewConfig(): Promise<
 > {
   const resolvedConfig = await resolveEffectivePreviewRuntimeConfig({
     runtimeEnv: process.env,
-    defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-    defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+    defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+    defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
   });
   const analysis = resolvedConfig.analysis;
 
@@ -336,8 +336,8 @@ export async function getPreviewSettingsCommand(
       getEnvironmentsCommand(auth),
       resolveEffectivePreviewRuntimeConfig({
         runtimeEnv: process.env,
-        defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-        defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+        defaultPreviewProxyBaseUrl: Env.R_PREVIEW_PROXY_BASE_URL,
+        defaultPreviewDomains: Env.R_PREVIEW_DOMAINS,
       }),
       validateRuntimePreviewConfig(),
     ]);
@@ -495,12 +495,12 @@ export async function updatePreviewRuntimeConfigCommand(
 ) {
   assertAdmin(auth);
 
-  if ((process.env.PREVIEW_PROXY_BASE_URL ?? '').trim()) {
+  if ((process.env.R_PREVIEW_PROXY_BASE_URL ?? '').trim()) {
     return {
       success: false as const,
       fieldErrors: {
         previewProxyBaseUrl:
-          'This value is managed by PREVIEW_PROXY_BASE_URL in the runtime environment and cannot be changed here.',
+          'This value is managed by R_PREVIEW_PROXY_BASE_URL in the runtime environment and cannot be changed here.',
       },
     };
   }

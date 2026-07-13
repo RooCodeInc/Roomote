@@ -20,18 +20,18 @@ Save the organization and token in setup, deployment env vars, or local
 `.env.local`:
 
 ```sh
-ADO_ORGANIZATION=<azure-devops-organization>
+R_ADO_ORGANIZATION=<azure-devops-organization>
 ADO_TOKEN=<azure-devops-pat>
 ```
 
 Optional values:
 
 ```sh
-ADO_BASE_URL=https://dev.azure.com
-ADO_USERNAME=ado
+R_ADO_BASE_URL=https://dev.azure.com
+R_ADO_USERNAME=ado
 ```
 
-`ADO_BASE_URL` defaults to `https://dev.azure.com`. `ADO_USERNAME` defaults to
+`R_ADO_BASE_URL` defaults to `https://dev.azure.com`. `R_ADO_USERNAME` defaults to
 `ado` and is used as the Git-over-HTTPS username paired with the PAT.
 
 ## Sync repositories

@@ -12,10 +12,10 @@ import {
   updateTaskRunMachine,
 } from '../utils';
 
-const originalTrpcUrl = process.env.TRPC_URL;
+const originalTrpcUrl = process.env.R_TRPC_URL;
 const originalRoomoteAppUrl = process.env.R_APP_URL;
-const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
-const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
+const originalPreviewProxyBaseUrl = process.env.R_PREVIEW_PROXY_BASE_URL;
+const originalPreviewDomains = process.env.R_PREVIEW_DOMAINS;
 const originalRoomotePreviewDomain = process.env.ROOMOTE_PREVIEW_DOMAIN;
 
 const mockUpdate = vi.fn().mockReturnValue({
@@ -89,18 +89,18 @@ describe('getNamedPortsForTaskRun', () => {
         isReady: true,
       },
     });
-    delete process.env.TRPC_URL;
+    delete process.env.R_TRPC_URL;
     delete process.env.R_APP_URL;
-    process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
-    process.env.PREVIEW_DOMAINS = 'preview.roomote.test';
+    process.env.R_PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
+    process.env.R_PREVIEW_DOMAINS = 'preview.roomote.test';
     delete process.env.ROOMOTE_PREVIEW_DOMAIN;
   });
 
   afterAll(() => {
     if (originalTrpcUrl === undefined) {
-      delete process.env.TRPC_URL;
+      delete process.env.R_TRPC_URL;
     } else {
-      process.env.TRPC_URL = originalTrpcUrl;
+      process.env.R_TRPC_URL = originalTrpcUrl;
     }
 
     if (originalRoomoteAppUrl === undefined) {
@@ -110,15 +110,15 @@ describe('getNamedPortsForTaskRun', () => {
     }
 
     if (originalPreviewProxyBaseUrl === undefined) {
-      delete process.env.PREVIEW_PROXY_BASE_URL;
+      delete process.env.R_PREVIEW_PROXY_BASE_URL;
     } else {
-      process.env.PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
+      process.env.R_PREVIEW_PROXY_BASE_URL = originalPreviewProxyBaseUrl;
     }
 
     if (originalPreviewDomains === undefined) {
-      delete process.env.PREVIEW_DOMAINS;
+      delete process.env.R_PREVIEW_DOMAINS;
     } else {
-      process.env.PREVIEW_DOMAINS = originalPreviewDomains;
+      process.env.R_PREVIEW_DOMAINS = originalPreviewDomains;
     }
 
     if (originalRoomotePreviewDomain === undefined) {
@@ -243,7 +243,7 @@ describe('getNamedPortsForTaskRun', () => {
   });
 
   it('does not expose callback ports from loopback controller URLs', async () => {
-    process.env.TRPC_URL = 'http://127.0.0.1:3001';
+    process.env.R_TRPC_URL = 'http://127.0.0.1:3001';
     process.env.R_APP_URL = 'http://localhost:3000';
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: 'env-123',

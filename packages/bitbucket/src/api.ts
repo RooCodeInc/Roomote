@@ -188,7 +188,7 @@ function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
-    throw new Error('BITBUCKET_BASE_URL cannot be empty.');
+    throw new Error('R_BITBUCKET_BASE_URL cannot be empty.');
   }
 
   return new URL(trimmed).toString().replace(/\/+$/, '');
@@ -264,14 +264,14 @@ export async function resolveBitbucketToken(): Promise<string | null> {
 }
 
 export async function resolveBitbucketBaseUrl(): Promise<string> {
-  const baseUrl = await resolveDeploymentEnvVar('BITBUCKET_BASE_URL');
+  const baseUrl = await resolveDeploymentEnvVar('R_BITBUCKET_BASE_URL');
   return baseUrl?.trim()
     ? normalizeBaseUrl(baseUrl)
     : DEFAULT_BITBUCKET_BASE_URL;
 }
 
 export async function resolveBitbucketUsername(): Promise<string | null> {
-  return resolveDeploymentEnvVar('BITBUCKET_USERNAME');
+  return resolveDeploymentEnvVar('R_BITBUCKET_USERNAME');
 }
 
 let cachedBitbucketDeploymentUser: {
@@ -402,7 +402,7 @@ async function resolveAuthIdentity({
   // email. There is no discovery endpoint that works without it, so the value
   // must be configured up front.
   throw new Error(
-    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
+    'R_BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
   );
 }
 

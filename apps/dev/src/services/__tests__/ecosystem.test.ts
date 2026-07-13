@@ -82,18 +82,18 @@ describe('ecosystem.config.js', () => {
   it('defaults local services to Docker worker execution', () => {
     process.env = {
       ...originalEnv,
-      DEFAULT_COMPUTE_PROVIDER: undefined,
-      DOCKER_WORKER_IMAGE: undefined,
-      DOCKER_WORKER_PLATFORM: undefined,
+      R_DEFAULT_COMPUTE_PROVIDER: undefined,
+      R_DOCKER_WORKER_IMAGE: undefined,
+      R_DOCKER_WORKER_PLATFORM: undefined,
     };
 
     const apps = loadEcosystemApps();
     const controllerApp = apps.find((app) => app.name === 'roomote-controller');
 
     expect(controllerApp?.env).toMatchObject({
-      DEFAULT_COMPUTE_PROVIDER: 'docker',
-      DOCKER_WORKER_IMAGE: 'roomote-worker:local',
-      DOCKER_WORKER_PLATFORM:
+      R_DEFAULT_COMPUTE_PROVIDER: 'docker',
+      R_DOCKER_WORKER_IMAGE: 'roomote-worker:local',
+      R_DOCKER_WORKER_PLATFORM:
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
     });
   });
@@ -134,9 +134,9 @@ describe('ecosystem.config.js', () => {
     expect(webApp?.env).toMatchObject({
       R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
       R_APP_URL: 'https://roomote-example.ngrok.app',
-      SLACK_REDIRECT_URI:
+      R_SLACK_REDIRECT_URI:
         'https://roomote-example.ngrok.app/api/slack/callback',
-      SLACK_AUTH_URI: 'https://roomote-example.ngrok.app/api/slack/auth',
+      R_SLACK_AUTH_URI: 'https://roomote-example.ngrok.app/api/slack/auth',
       R_LINEAR_REDIRECT_URI:
         'https://roomote-example.ngrok.app/api/linear/callback',
     });

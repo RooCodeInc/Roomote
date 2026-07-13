@@ -6,7 +6,7 @@
  * scripts/judge-criteria.ts).
  *
  * Prerequisites: local dev stack running (pnpm dev) with
- * SLACK_API_BASE_URL pointing at the mock port used here, and the mock
+ * R_SLACK_API_BASE_URL pointing at the mock port used here, and the mock
  * Slack installation/user mapping seeded (see
  * .claude/skills/mock-slack-testing/SKILL.md).
  *
@@ -106,11 +106,11 @@ console.log(`mock slack listening at ${baseUrl} -> ${values.webhook}`);
 
 const expectedBase = `${baseUrl}/api/`;
 if (
-  process.env.SLACK_API_BASE_URL &&
-  process.env.SLACK_API_BASE_URL !== expectedBase
+  process.env.R_SLACK_API_BASE_URL &&
+  process.env.R_SLACK_API_BASE_URL !== expectedBase
 ) {
   console.warn(
-    `WARNING: SLACK_API_BASE_URL=${process.env.SLACK_API_BASE_URL} does not match ${expectedBase}; ` +
+    `WARNING: R_SLACK_API_BASE_URL=${process.env.R_SLACK_API_BASE_URL} does not match ${expectedBase}; ` +
       `the API server may post replies somewhere else.`,
   );
 }

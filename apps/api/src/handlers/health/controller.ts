@@ -170,7 +170,7 @@ async function checkController(): Promise<CheckResult> {
 
 controllerHealth.get('/', async (c) => {
   const requestStartedAt = Date.now();
-  const slowThresholdMs = Env.API_SLOW_REQUEST_THRESHOLD_MS;
+  const slowThresholdMs = Env.R_API_SLOW_REQUEST_THRESHOLD_MS;
 
   const checks = await Promise.all([
     runTimedHealthCheck('controllerHeartbeat', checkController),
