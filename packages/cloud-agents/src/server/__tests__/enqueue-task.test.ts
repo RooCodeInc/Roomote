@@ -5,6 +5,15 @@
 // scope dedup.
 import Redis from 'ioredis-mock';
 
+const { mockGenerateLlmTaskTitle } = vi.hoisted(() => ({
+  mockGenerateLlmTaskTitle: vi.fn().mockResolvedValue('Generated title'),
+}));
+
+vi.mock('../llm-task-title', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../llm-task-title')>()),
+  generateLlmTaskTitle: mockGenerateLlmTaskTitle,
+}));
+
 import {
   type TaskSpec,
   type SnapshotResumeTask,
@@ -34,6 +43,7 @@ import {
   resolveQueueScope,
   type FreshTaskLaunch,
 } from '../task-run-queue';
+import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -98,6 +108,35 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('persists and locks an explicit title at task creation', async () => {
+    const userId = await createUser();
+
+    mockGenerateLlmTaskTitle.mockClear();
+    const run = await enqueueTask(
+      {
+        task: standardTaskInput(),
+        title: 'Set up your first environment',
+        initiator: { kind: 'user', userId },
+        workflow: 'setup_onboarding',
+        surface: 'web',
+        trigger: 'manual',
+      },
+      { enqueue: false },
+    );
+    createdTaskIds.push(run.taskId);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: { title: true, llmTitleCheckpoint: true },
+    });
+
+    expect(task).toEqual({
+      title: 'Set up your first environment',
+      llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT,
+    });
+    expect(mockGenerateLlmTaskTitle).not.toHaveBeenCalled();
+  });
+
   it('persists a linked-user initiator with CHECK-valid shape', async () => {
     const userId = await createUser();
 

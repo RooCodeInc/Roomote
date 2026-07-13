@@ -39,7 +39,10 @@ import * as GitHub from '@roomote/github';
 
 import { checkRepoAccess } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
-import { buildUpdateEnvironmentDefinitionPrompt } from '@/lib/environment-definition';
+import {
+  buildSetupEnvironmentTaskTitle,
+  buildUpdateEnvironmentDefinitionPrompt,
+} from '@/lib/environment-definition';
 import { getRepositories } from '@/lib/server';
 
 export type SnapshotStatus = 'pending' | 'ready' | 'expired' | 'failed';
@@ -654,7 +657,7 @@ export async function getActiveEnvironmentDefinitionTaskCommand(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.workflow, 'standard'),
+        eq(tasks.workflow, 'setup_onboarding'),
         inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${input.environmentId}`,
       ),
@@ -688,6 +691,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   const selectedRepositoryFullNames = selectedRepositories.map(
     (repository) => repository.fullName,
   );
+  const title = buildSetupEnvironmentTaskTitle(selectedRepositoryFullNames);
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     selectedRepositoryFullNames,
   );
@@ -731,6 +735,7 @@ export async function startEnvironmentDefinitionTaskCommand(
 
   const startedAt = new Date().toISOString();
   const launchResult = await enqueueTask({
+    title,
     task: {
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -739,11 +744,10 @@ export async function startEnvironmentDefinitionTaskCommand(
           ? { environmentDefinitionId: input.environmentId }
           : {}),
         description: prompt,
-        visibleInTranscript: false,
       },
     },
     initiator: { kind: 'user', userId },
-    workflow: 'standard',
+    workflow: 'setup_onboarding',
     surface: 'web',
     trigger: 'manual',
   });

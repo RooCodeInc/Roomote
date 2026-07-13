@@ -76,6 +76,9 @@ export interface TaskSession {
   /** Artifacts associated with this task. */
   artifacts: TaskArtifact[];
 
+  /** Environment created by a completed setup-onboarding task, when available. */
+  onboardingEnvironment?: { name: string } | null;
+
   /** The initial prompt for the session, null if not yet loaded or not found. */
   prompt: AcpUiMessage | null;
 
@@ -289,6 +292,7 @@ export function useTaskSession(
       taskRun,
       token: tokenEnabled ? tokenQuery.data : undefined,
       artifacts,
+      onboardingEnvironment: sessionQuery.data?.onboardingEnvironment ?? null,
       prompt,
       blank: !!payloadBlank,
       draftPrompt: task?.draftPrompt ?? null,
@@ -307,6 +311,7 @@ export function useTaskSession(
       tokenEnabled,
       tokenQuery.data,
       artifacts,
+      sessionQuery.data?.onboardingEnvironment,
       prompt,
       payloadBlank,
       sessionState,

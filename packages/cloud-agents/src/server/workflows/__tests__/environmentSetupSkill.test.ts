@@ -141,7 +141,7 @@ describe('environment-setup guidance', () => {
       'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`.',
     );
     expect(skillContent).toContain(
-      'Narrate concise progress updates in the current task as the spawned task status changes or as you make material check-ins',
+      'Narrate concise, plain-language progress updates while the follow-up check runs',
     );
     expect(skillContent).toContain(
       'Preparing the environment can take 5 minutes or more, so do not stop monitoring just because startup is taking a long time.',
@@ -166,7 +166,22 @@ describe('environment-setup guidance', () => {
     );
     expect(skillContent).not.toContain('monitoring limit');
     expect(skillContent).toContain(
-      'Under `Next:`, put a short monitored-outcome line.',
+      'When setup succeeds, begin with a plain-language outcome sentence such as `Your environment is ready.`',
+    );
+    expect(skillContent).toContain(
+      'Describe internal orchestration in user terms.',
+    );
+    expect(skillContent).toContain(
+      "[Create a new task](/) and describe what you'd like done.",
+    );
+    expect(skillContent).toContain(
+      'This is the final visible paragraph; do not append an internal status summary after it.',
+    );
+    expect(skillContent).toContain(
+      'Do not mention a spawned task, task status, polling, or monitoring in those user-facing updates.',
+    );
+    expect(skillContent).not.toContain(
+      'When the verification task completed cleanly, report that the spawned verification task completed.',
     );
     expect(skillContent).toContain(
       'Never include the full environment YAML in your visible response or Slack reply.',

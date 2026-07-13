@@ -79,7 +79,7 @@ export function StepRepoSelection({
   initialSelectedModelId = null,
   retryReason = null,
 }: {
-  onContinue: () => void;
+  onContinue: (onboardingTaskId: string) => void;
   onSkip: () => void;
   onReviewComputeProvider?: () => void;
   initialSelectedRepositoryIds?: string[];
@@ -105,15 +105,21 @@ export function StepRepoSelection({
   const hasAutoSelectedSingleRepoRef = useRef(
     initialSelectedRepositoryIds.length > 0,
   );
+  const savedLaunchInputRef = useRef<{
+    repositoryIds: string[];
+    setupGuidance?: string;
+    selectedModelId?: string;
+  } | null>(null);
 
   const saveSelection = useMutation(
     trpc.setupNew.saveSelection.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-        onContinue();
+      onError: (error) => {
+        toast.error(error.message);
       },
+    }),
+  );
+  const startOnboardingTask = useMutation(
+    trpc.setupNew.startOnboardingTask.mutationOptions({
       onError: (error) => {
         toast.error(error.message);
       },
@@ -253,21 +259,44 @@ export function StepRepoSelection({
       return;
     }
 
-    await saveSelection.mutateAsync({
+    const launchInput = {
       repositoryIds: selectedRepositoryIds,
       setupGuidance: setupGuidance.trim() || undefined,
       ...(effectiveSelectedModelId
         ? { selectedModelId: effectiveSelectedModelId }
         : {}),
-    });
+    };
+
+    try {
+      if (
+        JSON.stringify(savedLaunchInputRef.current) !==
+        JSON.stringify(launchInput)
+      ) {
+        await saveSelection.mutateAsync(launchInput);
+        savedLaunchInputRef.current = launchInput;
+      }
+
+      const result = await startOnboardingTask.mutateAsync();
+      await queryClient.invalidateQueries({
+        queryKey: trpc.setupNew.status.queryKey(),
+      });
+      onContinue(result.taskId);
+    } catch {
+      // Both mutations show the existing error toast. Keep local form state
+      // intact so the saved selection can be retried safely.
+    }
   }, [
     effectiveSelectedModelId,
+    onContinue,
+    queryClient,
     saveSelection,
     selectedRepositoryIds,
+    startOnboardingTask,
     setupGuidance,
+    trpc.setupNew.status,
   ]);
 
-  const isBusy = saveSelection.isPending;
+  const isBusy = saveSelection.isPending || startOnboardingTask.isPending;
   const isRefreshingRepositories = repositories.isFetching || isRefreshPending;
 
   if (repositories.isPending) {

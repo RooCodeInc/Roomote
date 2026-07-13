@@ -135,6 +135,15 @@ vi.mock('@/lib/repositories', () => ({
 
 vi.mock('@/lib/setup-new', () => ({
   appendEnvironmentDefinitionGuidance: vi.fn(),
+  buildSetupEnvironmentTaskTitle: vi.fn((repositoryFullNames: string[]) => {
+    const repositoryNames = repositoryFullNames
+      .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
+      .filter(Boolean);
+
+    return repositoryNames.length === 0
+      ? 'Set up your first environment'
+      : `Set up the ${repositoryNames.join(' + ')} environment`;
+  }),
   buildSetupNewKickoffPrompt: vi.fn(),
   buildSetupNewWorkspacePayload: vi.fn(),
   findMatchingSetupNewEnvironment: vi.fn(),
@@ -192,6 +201,7 @@ import { SlackNotifier } from '@roomote/slack';
 import { getRepositories } from '@/lib/server';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   normalizeRepositorySelection,
@@ -1024,6 +1034,7 @@ describe('setup-new onboarding task start command', () => {
     expect(enqueueTask).toHaveBeenCalledTimes(1);
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1047,6 +1058,35 @@ describe('setup-new onboarding task start command', () => {
           slackChannel: null,
           slackThreadTs: null,
         }),
+      }),
+    );
+  });
+
+  it('includes every selected repository name in the onboarding task title', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      { id: 'repo-1', fullName: 'acme/api' },
+      { id: 'repo-2', fullName: 'acme/web' },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    vi.mocked(normalizeRepositorySelection).mockReturnValue([
+      'repo-1',
+      'repo-2',
+    ]);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        selectedRepositoryIds: ['repo-1', 'repo-2'],
+      },
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(buildSetupEnvironmentTaskTitle).toHaveBeenCalledWith([
+      'acme/api',
+      'acme/web',
+    ]);
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Set up the api + web environment',
       }),
     );
   });
@@ -1096,6 +1136,7 @@ describe('setup-new onboarding task start command', () => {
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1162,6 +1203,7 @@ describe('setup-new onboarding task start command', () => {
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1356,6 +1398,7 @@ describe('setup-new onboarding task start command', () => {
 
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           harness: 'opencode-server',
           type: TaskPayloadKind.StandardTask,
@@ -1418,6 +1461,7 @@ describe('setup-new onboarding task start command', () => {
     expect(openConversationMock).toHaveBeenCalledWith('U1');
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.SlackAppMention,
           payload: expect.objectContaining({

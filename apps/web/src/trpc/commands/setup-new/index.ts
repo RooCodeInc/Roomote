@@ -99,6 +99,7 @@ import {
 import { areAllRepositoriesEmpty } from '@/lib/repositories';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   findMatchingSetupNewEnvironment,
@@ -2206,6 +2207,9 @@ export async function startSetupNewOnboardingTaskCommand(
     const selectedRepositoryFullNames = selectedRepositories.map(
       (repository) => repository.fullName,
     );
+    const onboardingTaskTitle = buildSetupEnvironmentTaskTitle(
+      selectedRepositoryFullNames,
+    );
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
     );
@@ -2315,6 +2319,7 @@ export async function startSetupNewOnboardingTaskCommand(
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
           const launchResult = await enqueueTask({
+            title: onboardingTaskTitle,
             task: {
               ...(modelSelection.harness
                 ? { harness: modelSelection.harness }
@@ -2390,6 +2395,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
       const startedAt = new Date().toISOString();
       const launchResult = await enqueueTask({
+        title: onboardingTaskTitle,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
@@ -2467,6 +2473,7 @@ export async function startSetupNewOnboardingTaskCommand(
 
     try {
       launchResult = await enqueueTask({
+        title: onboardingTaskTitle,
         task: {
           ...(modelSelection.harness
             ? { harness: modelSelection.harness }
