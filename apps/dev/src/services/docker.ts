@@ -4,6 +4,10 @@ import { execa } from 'execa';
 import ora from 'ora';
 import Docker from 'dockerode';
 
+export const WORKER_IMAGE_SCHEMA_LABEL =
+  'dev.roomote.worker-image.schema-version';
+export const WORKER_IMAGE_SCHEMA_VERSION = '1';
+
 export class DockerService {
   private static readonly CURRENT_COMPOSE_PROJECT = 'roomote';
   private static readonly REQUIRED_CONTAINERS = [
@@ -61,7 +65,7 @@ export class DockerService {
     const rootDir = path.resolve(process.cwd(), '../..');
 
     if (
-      (await this.hasImage(image)) &&
+      (await this.hasCurrentWorkerImageSchema(image)) &&
       (await this.hasRequiredWorkerImageTools(image, platform))
     ) {
       return;
@@ -280,10 +284,19 @@ export class DockerService {
     }
   }
 
-  private static async hasImage(image: string): Promise<boolean> {
+  private static async hasCurrentWorkerImageSchema(
+    image: string,
+  ): Promise<boolean> {
     try {
-      await execa('docker', ['image', 'inspect', image]);
-      return true;
+      const result = await execa('docker', [
+        'image',
+        'inspect',
+        '--format',
+        `{{ index .Config.Labels "${WORKER_IMAGE_SCHEMA_LABEL}" }}`,
+        image,
+      ]);
+
+      return result.stdout?.trim() === WORKER_IMAGE_SCHEMA_VERSION;
     } catch (_error) {
       return false;
     }
@@ -303,7 +316,7 @@ export class DockerService {
         '/bin/sh',
         image,
         '-c',
-        'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null',
+        'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null && command -v docker >/dev/null && docker --version >/dev/null && docker compose version >/dev/null',
       ]);
       return true;
     } catch (_error) {

@@ -252,4 +252,8 @@ RUN sudo apt-get update \
   && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
   && sudo rm -rf /var/lib/apt/lists/*
 
+# Bump when local worker prerequisites change so dev startup rebuilds stale
+# cached images before launching tasks.
+LABEL dev.roomote.worker-image.schema-version="1"
+
 WORKDIR /sandbox
