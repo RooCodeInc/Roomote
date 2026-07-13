@@ -33,13 +33,14 @@ describe('matchSlackMcpSetupService', () => {
       'https://zero.xyz/profile/wallet',
       'https://mcp.zero.xyz',
       'https://mcp.zero.xyz/anything',
-    ])('matches the Zero product surface %s', (url) => {
+      'https://www.zero.xyz/',
+      'https://zero.xyz',
+      'https://withzero.ai/',
+    ])('matches the Zero product surface or homepage %s', (url) => {
       expect(matchServiceIdForUrl(url)).toBe('zero');
     });
 
     it.each([
-      'https://www.zero.xyz/',
-      'https://zero.xyz',
       'https://zero.xyz/faq',
       'https://zero.xyz/security',
       'https://zero.xyz/getlisted',
@@ -47,8 +48,8 @@ describe('matchSlackMcpSetupService', () => {
       'https://zero.xyz/SKILL.md',
       'https://zero.xyz/browsers',
       'https://zero.xyz/customers',
-      'https://withzero.ai/',
-    ])('does not match the marketing surface %s', (url) => {
+      'https://withzero.ai/pricing',
+    ])('does not match the deep marketing page %s', (url) => {
       expect(matchServiceIdForUrl(url)).toBeNull();
     });
   });
