@@ -46,6 +46,7 @@ function buildProvisioning(
 ): SetupNewComputeProvisioningState {
   return {
     status: 'building',
+    runtimeSchemaVersion: 1,
     imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop-abc12345',
     templateRef: 'roomote-worker:develop-abc12345',
     error: null,
@@ -55,10 +56,13 @@ function buildProvisioning(
   };
 }
 
-function renderSection(provisioning: SetupNewComputeProvisioningState | null) {
+function renderSection(
+  provisioning: SetupNewComputeProvisioningState | null,
+  providerOverride: ComputeProviderStatus = provider,
+) {
   return render(
     <ComputeProviderSection
-      provider={provider}
+      provider={providerOverride}
       isDefault={false}
       provisioning={provisioning}
       onSave={vi.fn()}
@@ -76,8 +80,19 @@ describe('ComputeProviderSection provisioning states', () => {
     const button = screen.getByRole('button', { name: /Provisioning\.\.\./ });
     expect(button).toBeDisabled();
     expect(
-      screen.getByText(/Provisioning the worker base image/),
+      screen.getByText(/must finish before this provider can run tasks/),
     ).toBeInTheDocument();
+  });
+
+  it('explains that a rebuild is non-blocking when an older artifact is active', () => {
+    renderSection(buildProvisioning({ status: 'building' }), {
+      ...provider,
+      configSatisfied: true,
+    });
+
+    expect(
+      screen.getByText(/Updating the worker base image in the background/),
+    ).toHaveTextContent(/existing tasks keep using the current image/);
   });
 
   it('surfaces the provisioning error and offers a retry after a failed run', () => {

@@ -424,7 +424,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: 'roomote-worker:tag-r1',
       });
     });
 
@@ -444,7 +444,7 @@ describe('compute commands', () => {
         provider: 'daytona',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker-tag',
+        templateRef: 'roomote-worker-tag-r1',
       });
     });
 
@@ -461,7 +461,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: 'roomote-worker:tag-r1',
       });
     });
 

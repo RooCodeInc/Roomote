@@ -1,4 +1,5 @@
 import { ImageInstance, SandboxInstance, settings } from '@blaxel/core';
+import { WORKER_RUNTIME_SCHEMA_TAG } from '@roomote/types';
 
 export const BLAXEL_WORKER_IMAGE_NAME_PREFIX = 'roomote-worker';
 
@@ -36,7 +37,7 @@ export function deriveBlaxelWorkerImageName(imageRef: string): string {
   }
 
   const image = createBlaxelWorkerImage(imageRef);
-  return `${BLAXEL_WORKER_IMAGE_NAME_PREFIX}-${image.hash}`;
+  return `${BLAXEL_WORKER_IMAGE_NAME_PREFIX}-${image.hash}-${WORKER_RUNTIME_SCHEMA_TAG}`;
 }
 
 /**

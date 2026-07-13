@@ -356,7 +356,10 @@ describe('DockerService.ensureWorkerImage', () => {
     );
 
     expect(dockerfile).toContain(
-      `LABEL ${WORKER_IMAGE_SCHEMA_LABEL}="${WORKER_IMAGE_SCHEMA_VERSION}"`,
+      `ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
+    );
+    expect(dockerfile).toContain(
+      `LABEL ${WORKER_IMAGE_SCHEMA_LABEL}="\${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"`,
     );
   });
 
@@ -382,6 +385,8 @@ describe('DockerService.ensureWorkerImage', () => {
         'build',
         '--platform',
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',
@@ -452,6 +457,8 @@ describe('DockerService.ensureWorkerImage', () => {
           'build',
           '--platform',
           process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+          '--build-arg',
+          `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
           '-f',
           'apps/worker/Dockerfile',
           '-t',
@@ -492,6 +499,8 @@ describe('DockerService.ensureWorkerImage', () => {
         'build',
         '--platform',
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',
@@ -526,6 +535,8 @@ describe('DockerService.ensureWorkerImage', () => {
         'build',
         '--platform',
         'linux/arm64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',
