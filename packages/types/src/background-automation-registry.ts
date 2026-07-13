@@ -146,10 +146,11 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Summarize Merged PRs',
     availability: 'stable',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github'],
+    // Merged-PR summaries read the provider-neutral taskPullRequests table.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack'],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: sourceControlProviders,
   },
   {
     automationKey: 'manager_stats',
