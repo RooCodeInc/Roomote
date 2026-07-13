@@ -82,8 +82,9 @@ export async function listConfiguredComputeProviders(
 ): Promise<ComputeProvider[]> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
-  const persistedComputeConfig =
-    await loadPersistedRuntimeComputeConfig(executor);
+  const persistedComputeConfig = executor.query?.deploymentSettings
+    ? await loadPersistedRuntimeComputeConfig(executor)
+    : { defaultProvider: null, excludedProviders: [] };
   const excludedProviders = parseExcludedComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
