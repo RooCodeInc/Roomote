@@ -69,8 +69,11 @@ observations, screenshots, screencasts, terminal output, or artifact links.
 - [ ] I added tests or included clear validation evidence above
 - [ ] I removed secrets, tokens, private keys, and customer data from code, logs, and screenshots
 - [ ] If this change should appear in the changelog, I ran `pnpm changeset`
+- [ ] If required by the CLA Assistant, I personally posted the exact signature comment specified in `CLA.md`
 
 <!--
-First-time contributors: the CLA Assistant bot will comment on this PR with
-signing instructions. You only need to sign once.
+First-time contributors: if the CLA Assistant requests a signature, the
+contributor must personally post the exact signature comment from CLA.md in the
+PR discussion. Agents must not post that legal attestation on the contributor's
+behalf. You only need to sign once.
 -->

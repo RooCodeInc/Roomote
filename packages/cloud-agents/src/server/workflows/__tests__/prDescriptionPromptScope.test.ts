@@ -25,10 +25,61 @@ describe('PR description prompt scope', () => {
     expect(roomoteTemplate).toContain('## Evidence');
     expect(roomoteTemplate).toContain('## Contribution status');
     expect(roomoteTemplate).toContain(
+      'I personally posted the exact signature comment specified in `CLA.md`',
+    );
+    expect(roomoteTemplate).toContain(
+      "Agents must not post that legal attestation on the contributor's",
+    );
+    expect(roomoteTemplate).toContain(
       'The PR title follows the repo convention: `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`',
     );
     expect(roomoteTemplate).not.toContain('## What changed');
     expect(roomoteTemplate).not.toContain('## How it was tested');
+  });
+
+  it('defines one canonical PR-writing contract and keeps child skills reference-only', () => {
+    const implementSkill = readSkill(
+      '../skills/standard/implement-changes/SKILL.md',
+    );
+    const childSkills = [
+      readSkill('../skills/standard/create-pr/SKILL.md'),
+      readSkill('../skills/standard/create-draft-pr/SKILL.md'),
+      readSkill('../skills/standard/fix-pr/SKILL.md'),
+    ];
+    const contractMatches = implementSkill.match(
+      /<pr_writing_contract id="pr-writing-contract">[\s\S]*?<\/pr_writing_contract>/g,
+    );
+
+    expect(contractMatches).toHaveLength(1);
+    expect(contractMatches![0]).toContain(
+      'Use conversation context only when it still matches the final shipped diff.',
+    );
+    expect(contractMatches![0]).toContain(
+      "Follow the selected template's explicit title convention. Otherwise use exactly one of `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`",
+    );
+    expect(contractMatches![0]).toContain(
+      '<section name="What problem this solves">',
+    );
+    expect(contractMatches![0]).toContain('<section name="Evidence">');
+    expect(contractMatches![0]).toContain(
+      'State failed, skipped, or unavailable checks honestly.',
+    );
+    expect(contractMatches![0]).toContain(
+      "Never post a personal legal attestation on the contributor's behalf.",
+    );
+    expect(contractMatches![0]).toContain(
+      'Treat failure as a hard gate: rewrite the metadata and re-check it before the source-control mutation.',
+    );
+    expect(implementSkill).not.toContain('<pr-writing-guide>');
+
+    for (const childSkill of childSkills) {
+      expect(childSkill).toContain('inherited `pr-writing-contract`');
+      expect(childSkill).toContain(
+        "do not duplicate or override the contract's title, body, or gate rules locally.",
+      );
+      expect(childSkill).not.toContain('<pr-writing-guide>');
+      expect(childSkill).not.toContain('<pr_writing_contract');
+    }
   });
 
   it('keeps delivery skills aligned on the shared PR metadata update recipe', () => {
@@ -74,11 +125,11 @@ describe('PR description prompt scope', () => {
           "Before writing `/tmp/pr-body.md`, check for a checked-in repository pull request or merge request template in the locations the repository's source-control provider supports.",
         );
         expect(skillContent).toContain(
-          'Write `/tmp/pr-body.md` using the shipped diff, the recovered conversation, and the `pr-writing-guide` section below. When a selected repo template exists, use it as the starting scaffold for `/tmp/pr-body.md`',
+          'Write `/tmp/pr-body.md` from the shipped diff and recovered conversation under the inherited `pr-writing-contract`.',
         );
       } else {
         expect(skillContent).toContain(
-          'Write `/tmp/pr-body.md` using the shipped diff, the recovered conversation, and any still-applicable metadata recovered from the previous `/tmp/pr-body.md`.',
+          'Write `/tmp/pr-body.md` from the shipped diff, recovered conversation, and still-applicable metadata under the inherited `pr-writing-contract`.',
         );
       }
       if (skillContent === fixPrSkill) {
@@ -146,32 +197,7 @@ describe('PR description prompt scope', () => {
         '`body` set to the exact `/tmp/pr-body.md` contents',
       );
       expect(skillContent).toContain(
-        'When the selected repository template contains an explicit title convention, follow that convention exactly instead of imposing the fallback Roomote format.',
-      );
-      expect(skillContent).toContain(
-        'Otherwise, start the title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.',
-      );
-      expect(skillContent).toContain(
-        'For fallback titles, keep the bracket contents to the type only and follow the tag with a space and the description.',
-      );
-      expect(skillContent).toContain(
-        'Write the user-facing description in sentence case. Capitalize the first word after the required title prefix and preserve proper nouns and acronyms.',
-      );
-      expect(skillContent).toContain(
-        'Treat this as a hard gate: if the metadata fails, rewrite it and re-check before running the source-control mutation.',
-      );
-      expect(skillContent).toContain(
-        '<example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>',
-      );
-      expect(skillContent).toContain(
-        '<example type="fix">[Fix] Task list fails to load when user has no environments</example>',
-      );
-      expect(skillContent).toContain(
-        '<section name="What problem this solves">',
-      );
-      expect(skillContent).toContain('<section name="Evidence">');
-      expect(skillContent).toContain(
-        'State failed, skipped, or unavailable checks honestly.',
+        'Immediately before the source-control mutation, derive the refreshed title and validate it together with the exact `/tmp/pr-body.md` against the inherited `pr-writing-contract`.',
       );
       expect(skillContent).not.toContain('order: asc');
       expect(skillContent).not.toMatch(/--body(?!-file)\b/);
@@ -203,7 +229,7 @@ describe('PR description prompt scope', () => {
       'HEAD` to capture the full PR diff for the branch. Use this local git diff for every provider.',
     );
     expect(createDraftPrSkill).toContain(
-      'Write `/tmp/pr-body.md` using the PR diff, the recovered conversation, and any still-applicable metadata recovered from the previous `/tmp/pr-body.md`.',
+      'Write `/tmp/pr-body.md` from the PR diff, recovered conversation, and still-applicable metadata under the inherited `pr-writing-contract`.',
     );
     expect(createDraftPrSkill).toContain(
       'When that uploaded artifact list does not exist and the latest proof handoff is an honest no-op result because this cycle did not run `capture-visual-proof`, preserve any existing `## Screenshots` and `## Screencasts` sections from the previous `/tmp/pr-body.md` when they already contain valid artifact URLs or screencast embeds.',
@@ -213,10 +239,7 @@ describe('PR description prompt scope', () => {
     );
     for (const skillContent of [createPrSkill, createDraftPrSkill]) {
       expect(skillContent).toContain(
-        "Before any `mcp__roomote__manage_source_control` call, run the recipe's required PR metadata contract check.",
-      );
-      expect(skillContent).toContain(
-        'do not create or refresh a pull request with non-contract metadata.',
+        'Apply the recipe, including its inherited PR-writing contract gate, before each `mcp__roomote__manage_source_control` mutation in this step.',
       );
       expect(skillContent).toContain(
         "Before writing `/tmp/pr-body.md`, check for a checked-in repository pull request or merge request template in the locations the repository's source-control provider supports.",
@@ -228,20 +251,11 @@ describe('PR description prompt scope', () => {
         'On Azure DevOps, inspect `.azuredevops/pull_request_template.md`',
       );
       expect(skillContent).toContain(
-        'When a selected repo template exists, use it as the starting scaffold for `/tmp/pr-body.md`: preserve its reviewer-facing headings, checklist items, and other required structure, replace placeholder guidance with final content, and merge the `pr-writing-guide` substance into that scaffold instead of replacing the template.',
-      );
-      expect(skillContent).toContain(
-        'When no repo template exists, structure the body per the `pr-writing-guide` section below.',
-      );
-      expect(skillContent).toContain(
-        "Before calling `mcp__roomote__manage_source_control`, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. When a selected repo template defines an explicit title convention, the title must follow it; otherwise the title must begin with exactly one approved bracketed fallback type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What problem this solves`, `## Why this change was made`, `## User impact`, and `## Evidence`.",
-      );
-      expect(skillContent).toContain(
-        'Do not add generic top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` unless the selected repo template explicitly requires them.',
+        'under the inherited `pr-writing-contract`.',
       );
 
       const mutationGateIndex = skillContent.indexOf(
-        'Before calling `mcp__roomote__manage_source_control`, validate the exact title and `/tmp/pr-body.md` against the PR writing guide.',
+        'Immediately before the source-control mutation, derive the refreshed title and validate it together with the exact `/tmp/pr-body.md` against the inherited `pr-writing-contract`.',
       );
       const mutationCallIndex = skillContent.indexOf(
         'Call `mcp__roomote__manage_source_control` with `action: "create_or_update_pull_request"`, `repositoryFullName: "<OWNER/REPO-or-provider-full-name>"`, `sourceBranch: "<current-branch>"`, `targetBranch: "<base-branch-for-this-repo>"`, `title: "<TITLE>"`,',
@@ -286,19 +300,13 @@ describe('PR description prompt scope', () => {
       'When no open pull request exists for the branch, report a blocker instead of refreshing: `create_or_update_pull_request` would open a new pull request, and `fix-pr` must never create one.',
     );
     expect(fixPrSkill).toContain(
-      "Before any `mcp__roomote__manage_source_control` refresh call, run the recipe's required PR metadata contract check.",
+      'Apply the recipe, including its inherited PR-writing contract gate, before the `mcp__roomote__manage_source_control` refresh mutation.',
     );
     expect(fixPrSkill).toContain(
-      'do not refresh a pull request with non-contract metadata.',
+      'If the current PR body conflicts with the selected template or fallback contract, rebuild it from the final shipped diff instead of preserving unrelated old sections.',
     );
     expect(fixPrSkill).toContain(
-      "Before the refresh call, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. When a selected repo template defines an explicit title convention, the title must follow it; otherwise the title must begin with exactly one approved bracketed fallback type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What problem this solves`, `## Why this change was made`, `## User impact`, and `## Evidence`.",
-    );
-    expect(fixPrSkill).toContain(
-      'Do not add generic top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` unless the selected repo template explicitly requires them.',
-    );
-    expect(fixPrSkill).toContain(
-      'If the current PR body is non-contract relative to the selected repo template or the fallback Roomote contract, rebuild it from the final shipped diff instead of preserving unrelated old sections from that body.',
+      'Immediately before the source-control mutation, derive the refreshed title and validate it together with the exact `/tmp/pr-body.md` against the inherited `pr-writing-contract`.',
     );
     expect(fixPrSkill).toContain(
       'Preserve or refresh `## Linked work items` when the current PR body or current workflow instructions identify linked work items.',
@@ -318,16 +326,13 @@ describe('PR description prompt scope', () => {
     );
 
     expect(implementSkill).toContain(
-      'Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its shared `pr-metadata-update-recipe` block plus the relevant `pr-writing-guide` section instead of duplicating that procedure here.',
+      'Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its `pr-metadata-update-recipe` plus the inherited `pr-writing-contract` instead of duplicating that procedure here.',
     );
     expect(implementSkill).toContain(
-      "Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.",
+      'Let `fix-pr` own the post-push PR metadata refresh using its `pr-metadata-update-recipe` and the inherited `pr-writing-contract`.',
     );
     expect(implementSkill).toContain(
-      "Follow the selected repository template's explicit title convention when it defines one; otherwise use `[Type] user-facing description`.",
-    );
-    expect(implementSkill).toContain(
-      '<example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>',
+      "Follow the selected template's explicit title convention. Otherwise use exactly one of `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`",
     );
     expect(implementSkill).not.toContain(
       'Apply a `Net PR Changes Only` rule when writing the pull request title and body: base them on the full current PR diff for the branch plus only the conversation context that still matches what actually changed, not just the opening request, latest follow-up, or most recent commit.',

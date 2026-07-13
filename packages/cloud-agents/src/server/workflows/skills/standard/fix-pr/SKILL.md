@@ -161,70 +161,22 @@ You are a pull-request fixer. Resolve requested PR feedback in code, keep the re
         <actions>
           <action>Use the identical `pr-metadata-update-recipe` block below after any required delegated proof handoff and before thread-resolution closeout. This workflow should normally exercise the open-pull-request path from that recipe.</action>
           <action>Do not stop after the push step or a required proof handoff; continue into PR metadata refresh unless an explicit blocker prevents it.</action>
-          <action>Before any `mcp__roomote__manage_source_control` refresh call, run the recipe's required PR metadata contract check. If the check fails, rewrite `/tmp/pr-body.md` and the title until it passes; do not refresh a pull request with non-contract metadata.</action>
+          <action>Apply the recipe, including its inherited PR-writing contract gate, before the `mcp__roomote__manage_source_control` refresh mutation.</action>
         </actions>
         <pr-metadata-update-recipe>
           <item>When an open pull request exists, capture the full shipped diff for the branch locally with `git fetch origin '<targetBranch>'` and `git diff <baseSha>...HEAD`, using the base SHA and branches from the latest `get_pull_request` result. Use this local git diff for every provider.</item>
           <item>When an open pull request exists, recover existing PR-body metadata that still applies, including current `## Related PRs` links, from the `body` field of the latest `get_pull_request` result.</item>
           <item>Call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "get_messages"` for the current task using `limit: 20`. Reverse the returned newest-first message list before extracting the original problem statement, motivation, and key decisions from the conversation history.</item>
           <item>Before writing `/tmp/pr-body.md`, check for a checked-in repository pull request or merge request template in the locations the repository's source-control provider supports. On GitHub, inspect `.github/pull_request_template.md`, `.github/PULL_REQUEST_TEMPLATE.md`, any `.md` files inside `.github/PULL_REQUEST_TEMPLATE/`, `docs/pull_request_template.md`, `docs/PULL_REQUEST_TEMPLATE.md`, `pull_request_template.md`, and `PULL_REQUEST_TEMPLATE.md`. On GitLab, inspect the `.md` files inside `.gitlab/merge_request_templates/`, preferring `Default.md` when present. On Gitea, inspect `.gitea/pull_request_template.md`, `.gitea/PULL_REQUEST_TEMPLATE.md`, any `.md` files inside `.gitea/PULL_REQUEST_TEMPLATE/`, and the same root-level and `docs/` fallbacks GitHub supports. On Azure DevOps, inspect `.azuredevops/pull_request_template.md`, any branch-specific `.md` files inside `.azuredevops/pull_request_template/branches/`, `docs/pull_request_template.md`, and root-level `pull_request_template.md`. Match the repo's actual filename casing when present. When multiple template files exist in the directory path, choose the single template that best matches the current PR scope and treat it as the selected repo template for this run.</item>
-          <item>Write `/tmp/pr-body.md` using the shipped diff, the recovered conversation, and the `pr-writing-guide` section below. When a selected repo template exists, use it as the starting scaffold for `/tmp/pr-body.md`: preserve its reviewer-facing headings, checklist items, and other required structure, replace placeholder guidance with final content, and merge the `pr-writing-guide` substance into that scaffold instead of replacing the template. When no repo template exists, structure the body per the `pr-writing-guide` section below. If the current PR body is non-contract relative to the selected repo template or the fallback Roomote contract, rebuild it from the final shipped diff instead of preserving unrelated old sections from that body.</item>
+          <item>Write `/tmp/pr-body.md` from the shipped diff and recovered conversation under the inherited `pr-writing-contract`. If the current PR body conflicts with the selected template or fallback contract, rebuild it from the final shipped diff instead of preserving unrelated old sections.</item>
           <item>Preserve only still-applicable metadata from the current PR body: the caller-supplied PR provenance block as the opening blockquote, `## Related PRs` links identified by the current PR body or task context, and current valid proof artifact sections.</item>
           <item>Preserve or refresh `## Linked work items` when the current PR body or current workflow instructions identify linked work items. When the current workflow instructions include a pre-rendered linked-work-item block for this run, include that block verbatim and do not rewrite provider-specific closing or reference syntax.</item>
           <item>When the latest `capture-visual-proof` handoff reports an uploaded artifact list from `manage_artifacts` upload results, treat it as the authoritative visual-proof input. Visual proof sections are only `## Screenshots` and `## Screencasts` when current artifact links exist. Render screenshots from the reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body; do not create `## Visual proof` for screenshots and do not render screenshot artifact viewer links when `rawUrl` exists. Render screencasts from the reported screencasts only when present using `[![<clip-name>](<first-keyframe-rawUrl>)](<video-viewUrl>)`, plus a caption line below each embed, where `<video-viewUrl>` is the clip's uploaded `viewUrl`. Remove any existing `## Screenshots` or `## Screencasts` section whose latest reported set is empty so stale evidence is not preserved.</item>
           <item>When that uploaded artifact list does not exist and the latest proof handoff is an honest no-op result because this cycle did not run `capture-visual-proof`, preserve existing `## Screenshots` and `## Screencasts` sections only when they already contain valid artifact URLs or screencast embeds. When the latest proof handoff reports that browser proof is not applicable, unnecessary, or blocked, remove existing `## Screenshots` and `## Screencasts` sections instead of preserving stale proof from an earlier cycle. Only when screenshot `rawUrl` values are still available from the latest proof handoff should the screenshot-only fallback include `## Screenshots`.</item>
-          <item>Derive a refreshed PR title per the `pr-writing-guide` section below.</item>
-          <item>Before the refresh call, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. When a selected repo template defines an explicit title convention, the title must follow it; otherwise the title must begin with exactly one approved bracketed fallback type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What problem this solves`, `## Why this change was made`, `## User impact`, and `## Evidence`. Do not add generic top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` unless the selected repo template explicitly requires them. Treat this as a hard gate: if the metadata fails, rewrite it and re-check before running the source-control mutation.</item>
+          <item>Immediately before the source-control mutation, derive the refreshed title and validate it together with the exact `/tmp/pr-body.md` against the inherited `pr-writing-contract`. If validation fails, rewrite and re-check; do not duplicate or override the contract's title, body, or gate rules locally.</item>
           <item>When the latest `get_pull_request` result confirms the pull request is open, refresh it with `mcp__roomote__manage_source_control` `action: "create_or_update_pull_request"`, passing `repositoryFullName`, `sourceBranch` and `targetBranch` from that result, the refreshed `title`, and `body` set to the exact `/tmp/pr-body.md` contents. The refresh never flips draft status: the platform preserves the pull request's existing draft state on update.</item>
           <item>When no open pull request exists for the branch, report a blocker instead of refreshing: `create_or_update_pull_request` would open a new pull request, and `fix-pr` must never create one. Verify the open state from `get_pull_request` before calling the tool.</item>
         </pr-metadata-update-recipe>
-        <pr-writing-guide>
-          <pr_title_format>
-            <format>Follow the selected repository template's explicit title convention when it defines one; otherwise use `[Type] user-facing description`.</format>
-            <types>
-              <type name="feat">New capability or behavior visible to the user.</type>
-              <type name="fix">Bug fix. Description must use the pattern "... when user [does X]" or "... [user-visible symptom]" so the title names the symptom, not the code fix.</type>
-              <type name="improve">Enhancement to existing behavior, UX polish, or quality-of-life change.</type>
-              <type name="refactor">Code restructuring with no user-visible behavior change.</type>
-              <type name="docs">Documentation-only change.</type>
-              <type name="chore">Dependency updates, config, CI, infra, or other non-functional maintenance.</type>
-            </types>
-            <scope>The bracketed Roomote format is the fallback only when the selected repository template does not define a title convention.</scope>
-            <description_rules>
-              <rule>When the selected repository template contains an explicit title convention, follow that convention exactly instead of imposing the fallback Roomote format.</rule>
-              <rule>Otherwise, start the title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.</rule>
-              <rule>For fallback titles, keep the bracket contents to the type only and follow the tag with a space and the description.</rule>
-              <rule>Lead with what the user sees or can do, not the implementation detail.</rule>
-              <rule>Write the user-facing description in sentence case. Capitalize the first word after the required title prefix and preserve proper nouns and acronyms.</rule>
-              <rule>For fixes, frame as the user-visible symptom: "task list fails to load when user has no environments", not "add null check to getTaskList query".</rule>
-              <rule>For non-fix titles, use present-tense imperative mood.</rule>
-              <rule>For features, name the capability: "Add bulk-cancel action to task dashboard", not "implement BulkCancelButton component".</rule>
-              <rule>For improvements, name the better experience: "Show environment name in task status notifications", not "pass env name through notification context".</rule>
-            </description_rules>
-            <examples>
-              <example type="fix">[Fix] Task list fails to load when user has no environments</example>
-              <example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>
-              <example type="improve">[Improve] Show environment name in task status notifications</example>
-            </examples>
-          </pr_title_format>
-          <pr_body_sections>
-            <section name="What problem this solves">
-              <guidance>Describe the concrete user, product, developer, or operational problem. Name the affected surface or workflow. For fixes, describe the broken behavior and trigger. For features, improvements, refactors, docs, and chores, state the unmet need, limitation, maintenance burden, or reviewer-relevant objective without inventing user-facing drama. Do not lead with the implementation or narrate files.</guidance>
-            </section>
-            <section name="Why this change was made">
-              <guidance>Explain the complete shipped solution, important design decisions, and relevant boundaries or non-goals. Include implementation detail only when it helps the reviewer understand behavior or risk. Avoid file-by-file narration.</guidance>
-            </section>
-            <section name="User impact">
-              <guidance>State what users, operators, or developers can now do or expect. Lead with the concrete benefit. When there is no intended user-facing change, say so plainly and state the operational, maintenance, or reviewer-visible benefit instead.</guidance>
-            </section>
-            <section name="Evidence">
-              <guidance>Show the most useful proof that the change works. Include focused tests, CI results, manual observations, terminal output, redacted logs, screenshots, screencasts, or artifact links as appropriate. State failed, skipped, or unavailable checks honestly. Make validation easy to understand without restating the diff.</guidance>
-            </section>
-            <section name="Related PRs">
-              <guidance>Include only when the same task ships through multiple pull requests and sibling PR URLs can be recovered honestly from the current PR body or live task context. Link the sibling PRs with short labels such as repository names or frontend/backend. Omit the current PR, and remove stale links when the task split changes.</guidance>
-            </section>
-          </pr_body_sections>
-        </pr-writing-guide>
         <validation>The PR title/body now describe the actual shipped diff and the latest retained proof result rather than stale fixer workflow history.</validation>
       </step>
 

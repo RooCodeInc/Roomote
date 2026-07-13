@@ -37,7 +37,7 @@ describe('implement-changes PR fixer appendix', () => {
       'Patch the canonical fixer comment through the same endpoint family it was created with, keeping the hidden marker first, keeping `task_link_see` inline on the final summary when it is available, and including the real commit link in the final comment.',
     );
     expect(skillContent).toContain(
-      "Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.",
+      'Let `fix-pr` own the post-push PR metadata refresh using its `pr-metadata-update-recipe` and the inherited `pr-writing-contract`.',
     );
     expect(skillContent).toContain(
       'Let `fix-pr` own the existing PR branch, mergeability preflight, and thread-management flow end to end; do not restate `gh pr view`, `gh pr diff`, `gh api`, `gh pr edit`, or canonical fixer comment mechanics in this appendix.',

@@ -9,7 +9,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
 
 <skill_structure>
 <core_contract id="core-contract">
-<purpose>Define the shared mutation rules that standalone child skills inherit when they load `implement-changes` for fallback context.</purpose>
+<purpose>Define the shared mutation rules and PR-writing contract that standalone child skills inherit when they load `implement-changes` for fallback context.</purpose>
 <loading_rules>
 <rule>Standalone mutating child skills may load this skill when it is not already in context, but they must inherit only this `core-contract` section plus any explicitly referenced child-path contract.</rule>
 <rule>Loading this skill for inheritance does not authorize executing the default workflow automatically.</rule>
@@ -24,6 +24,40 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
 <rule>Do not narrate implementation rationale into runtime-visible product output.</rule>
 <rule>Do not claim branch, push, PR, validation, or proof steps completed unless they actually happened.</rule>
 </shared_rules>
+<pr_writing_contract id="pr-writing-contract">
+<purpose>Produce concise reviewer-facing pull request metadata from the final shipped state.</purpose>
+<source_hierarchy>
+<rule>Use the final shipped diff and current task context as the source of truth.</rule>
+<rule>Use conversation context only when it still matches the final shipped diff.</rule>
+<rule>When a selected repository template defines a title convention or body structure, follow it. Use the Roomote fallback only for elements the template does not define.</rule>
+</source_hierarchy>
+
+<title>
+<rule>Follow the selected template's explicit title convention. Otherwise use exactly one of `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`, followed by a sentence-case, user-facing description.</rule>
+<rule>Lead with the outcome rather than the implementation. Fix titles name the visible symptom and trigger; other titles use present-tense imperative language.</rule>
+</title>
+<body>
+<template_mode>Preserve the selected template's reviewer-facing headings, contribution and legal requirements, checklist items, and required structure. Replace placeholders with final content and cover the same problem, solution, impact, and evidence substance as the fallback without forcing fallback headings.</template_mode>
+<fallback_mode>
+<section name="What problem this solves">State the concrete user, product, developer, or operational problem and affected workflow. Do not lead with implementation details.</section>
+<section name="Why this change was made">Explain the shipped solution, important decisions, and relevant boundaries without narrating files.</section>
+<section name="User impact">State what users, operators, or developers can now expect. If there is no user-visible change, say so and name the maintenance benefit.</section>
+<section name="Evidence">Provide the most useful proof, such as focused tests, CI results, manual observations, redacted logs, screenshots, screencasts, or artifact links. State failed, skipped, or unavailable checks honestly.</section>
+</fallback_mode>
+<optional_sections>
+<rule>Include `## Related PRs` only for current sibling pull requests from the same task.</rule>
+<rule>Include linked work items and visual proof only when current task context or current artifacts support them.</rule>
+</optional_sections>
+</body>
+<personal_attestations>
+<rule>Never post a personal legal attestation on the contributor's behalf. Mark it complete only when provider context shows that the contributor personally completed it; otherwise leave it pending and report the exact required user action.</rule>
+</personal_attestations>
+<validation>
+<rule>Before creating or refreshing a pull request, verify that the title follows the applicable convention, the body matches the final diff, required substance is present, evidence is truthful, placeholders are gone, and stale metadata was removed.</rule>
+<rule>Do not add generic `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` headings unless the selected template requires them.</rule>
+<rule>Treat failure as a hard gate: rewrite the metadata and re-check it before the source-control mutation.</rule>
+</validation>
+</pr_writing_contract>
 </core_contract>
 
 <default_path id="default-path">
@@ -174,7 +208,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
           <action>Base the final report on the actual delivery state from the prior step; do not present local validation, proof handoff, or a draft summary as the finish line when delivery work remains pending.</action>
           <action>The only valid terminal states for a repository-changing run are: delegated delivery completed, an explicit blocker, or an explicit policy pause awaiting user input.</action>
           <action>Summarize behavior-level changes, not just file names.</action>
-          <action>Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its shared `pr-metadata-update-recipe` block plus the relevant `pr-writing-guide` section instead of duplicating that procedure here.</action>
+          <action>Let the delegated delivery skill own pull request title/body derivation, screenshot and screencast embedding, related-PR links, and any PR metadata refresh using its `pr-metadata-update-recipe` plus the inherited `pr-writing-contract` instead of duplicating that procedure here.</action>
           <action>Keep the final completion report conversational and concise by default; do not turn routine successful execution into an audit log.</action>
           <action>Do not add standalone `Validation`, `Checks`, or `Status` sections for routine successful runs.</action>
           <action>Mention screenshot or screencast capture only when it materially affects the user's next step or the user explicitly asked about it.</action>
@@ -182,53 +216,6 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
           <action>If you generated a non-codebase markdown file, include the artifact link in the final response.</action>
           <action>Do not claim completion for steps that did not happen.</action>
         </actions>
-        <pr-writing-guide>
-          <pr_title_format>
-            <format>Follow the selected repository template's explicit title convention when it defines one; otherwise use `[Type] user-facing description`.</format>
-            <types>
-              <type name="feat">New capability or behavior visible to the user.</type>
-              <type name="fix">Bug fix. Description must use the pattern "... when user [does X]" or "... [user-visible symptom]" so the title names the symptom, not the code fix.</type>
-              <type name="improve">Enhancement to existing behavior, UX polish, or quality-of-life change.</type>
-              <type name="refactor">Code restructuring with no user-visible behavior change.</type>
-              <type name="docs">Documentation-only change.</type>
-              <type name="chore">Dependency updates, config, CI, infra, or other non-functional maintenance.</type>
-            </types>
-            <scope>The bracketed Roomote format is the fallback only when the selected repository template does not define a title convention.</scope>
-            <description_rules>
-              <rule>When the selected repository template contains an explicit title convention, follow that convention exactly instead of imposing the fallback Roomote format.</rule>
-              <rule>Otherwise, start the title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.</rule>
-              <rule>For fallback titles, keep the bracket contents to the type only and follow the tag with a space and the description.</rule>
-              <rule>Lead with what the user sees or can do, not the implementation detail.</rule>
-              <rule>Write the user-facing description in sentence case. Capitalize the first word after the required title prefix and preserve proper nouns and acronyms.</rule>
-              <rule>For fixes, frame as the user-visible symptom: "task list fails to load when user has no environments", not "add null check to getTaskList query".</rule>
-              <rule>For non-fix titles, use present-tense imperative mood.</rule>
-              <rule>For features, name the capability: "Add bulk-cancel action to task dashboard", not "implement BulkCancelButton component".</rule>
-              <rule>For improvements, name the better experience: "Show environment name in task status notifications", not "pass env name through notification context".</rule>
-            </description_rules>
-            <examples>
-              <example type="fix">[Fix] Task list fails to load when user has no environments</example>
-              <example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>
-              <example type="improve">[Improve] Show environment name in task status notifications</example>
-            </examples>
-          </pr_title_format>
-          <pr_body_sections>
-            <section name="What problem this solves">
-              <guidance>Describe the concrete user, product, developer, or operational problem. Name the affected surface or workflow. For fixes, describe the broken behavior and trigger. For features, improvements, refactors, docs, and chores, state the unmet need, limitation, maintenance burden, or reviewer-relevant objective without inventing user-facing drama. Do not lead with the implementation or narrate files.</guidance>
-            </section>
-            <section name="Why this change was made">
-              <guidance>Explain the complete shipped solution, important design decisions, and relevant boundaries or non-goals. Include implementation detail only when it helps the reviewer understand behavior or risk. Avoid file-by-file narration.</guidance>
-            </section>
-            <section name="User impact">
-              <guidance>State what users, operators, or developers can now do or expect. Lead with the concrete benefit. When there is no intended user-facing change, say so plainly and state the operational, maintenance, or reviewer-visible benefit instead.</guidance>
-            </section>
-            <section name="Evidence">
-              <guidance>Show the most useful proof that the change works. Include focused tests, CI results, manual observations, terminal output, redacted logs, screenshots, screencasts, or artifact links as appropriate. State failed, skipped, or unavailable checks honestly. Make validation easy to understand without restating the diff.</guidance>
-            </section>
-            <section name="Related PRs">
-              <guidance>Include only when the same task ships through multiple pull requests. Link the sibling PRs with short labels such as repository names or user-facing split names like frontend/backend. Omit the current PR, and remove stale links when the task split changes.</guidance>
-            </section>
-          </pr_body_sections>
-        </pr-writing-guide>
         <validation>The final report is consistent with the actual run state.</validation>
       </step>
     </steps>
@@ -453,7 +440,7 @@ Do not narrate your changes into runtime-visible product output. UI copy, string
       <item>For broad requests, reuse the latest Roomote review summary whose first line starts with `<!-- roomote-review-summary` as the canonical issue inventory when available, but treat only unchecked checklist items (`- [ ]`) as unresolved fix targets; ignore checked items and struck-through dismissed bullets, and revalidate each candidate against the live review-thread context and current code before acting.</item>
       <item>When a candidate finding is dismissed as invalid, stale, or out of scope, patch the canonical summary entry into a struck-through bullet with a brief factual reason, reply on the corresponding GitHub review thread or comment, do not describe it as fixed, and leave the thread unresolved by default.</item>
       <item>Let `fix-pr` own any required delegated `capture-visual-proof` handoff after repository-file-changing fixes and before PR metadata refresh so this parent path never improvises browser capture for PR feedback runs.</item>
-      <item>Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.</item>
+      <item>Let `fix-pr` own the post-push PR metadata refresh using its `pr-metadata-update-recipe` and the inherited `pr-writing-contract`.</item>
       <item>Patch the canonical fixer comment through the same endpoint family it was created with, keeping the hidden marker first, keeping `task_link_see` inline on the final summary when it is available, and including the real commit link in the final comment.</item>
     </delegated_fixer_contract>
     <path_specific_policy>
