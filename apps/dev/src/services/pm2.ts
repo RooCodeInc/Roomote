@@ -49,6 +49,9 @@ const OWNED_NGROK_SERVICES = [
 ];
 const LEGACY_LOCAL_SERVICES = [
   'api',
+  // Retired when the Discord Gateway moved into BullMQ. Keep cleaning up an
+  // existing process from older branches so it cannot publish stale status.
+  'roomote-discord-gateway',
   'discord-gateway',
   'web',
   'preview-proxy',
