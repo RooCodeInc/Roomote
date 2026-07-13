@@ -1,5 +1,7 @@
 import { and, eq, inArray, notInArray } from 'drizzle-orm';
 
+import { SOURCE_CONTROL_AUTOMATION_WORKFLOWS } from '@roomote/types';
+
 import {
   db,
   githubInstallationFactory,
@@ -150,6 +152,7 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
     // database across parallel files, so absolute report totals are flaky.
     const now = new Date();
     const inWindow = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+    const beforeWindow = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
     const user = await userFactory.create();
     const installation = await githubInstallationFactory.create({
       installedByUserId: user.id,
@@ -182,6 +185,10 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
       workflow: 'standard',
     });
     const closedTask = await taskFactory.create({
+      initiatorUserId: user.id,
+      workflow: 'standard',
+    });
+    const mixedCaseTask = await taskFactory.create({
       initiatorUserId: user.id,
       workflow: 'standard',
     });
@@ -259,6 +266,19 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
         createdAt: inWindow,
         updatedAt: inWindow,
       },
+      // Historical association with different casing than the in-window row.
+      {
+        taskId: mixedCaseTask.id,
+        repositoryId: repository.id,
+        repository: repository.fullName.toUpperCase(),
+        prNumber: 10,
+        prUrl: `https://github.com/${repository.fullName.toUpperCase()}/pull/10`,
+        prTitle: 'Older mixed-case association',
+        status: 'open',
+        detectedAt: beforeWindow,
+        createdAt: beforeWindow,
+        updatedAt: beforeWindow,
+      },
     ]);
 
     await db.insert(pullRequestFacts).values([
@@ -308,12 +328,12 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
       .where(
         and(
           eq(taskPullRequests.repositoryId, repository.id),
-          notInArray(tasks.workflow, ['pr_review', 'pr_conflict_resolve']),
+          notInArray(tasks.workflow, [...SOURCE_CONTROL_AUTOMATION_WORKFLOWS]),
         ),
       );
 
     expect(productOpenedRows.map((row) => row.prNumber).sort()).toEqual([
-      10, 11, 12, 13,
+      10, 10, 11, 12, 13,
     ]);
 
     const deduped = dedupeAuthoredPullRequests(productOpenedRows);
@@ -352,18 +372,16 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
       );
     }
 
-    const cohort = summarizePullRequestCohort(
-      deduped,
-      new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-      mergeDurations,
-    );
+    const since = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const cohort = summarizePullRequestCohort(deduped, since, mergeDurations);
 
+    // PR #10 first-detected outside the window via mixed-case history row.
     expect(cohort).toEqual({
-      opened: 4,
+      opened: 3,
       open: 1,
       closed: 1,
-      merged: 2,
-      medianTimeToMergeSeconds: 6 * 60 * 60,
+      merged: 1,
+      medianTimeToMergeSeconds: 10 * 60 * 60,
     });
 
     // Smoke: full collector still returns the new field shape under suite load.

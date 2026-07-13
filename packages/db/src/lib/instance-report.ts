@@ -9,11 +9,13 @@ import {
   isNull,
   notInArray,
   or,
+  sql,
   sum,
 } from 'drizzle-orm';
 
 import {
   RunStatus,
+  SOURCE_CONTROL_AUTOMATION_WORKFLOWS,
   getMcpIntegration,
   type PullRequestStatus,
 } from '@roomote/types';
@@ -42,10 +44,13 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
 const REPORT_WINDOW_MS = 24 * 60 * 60 * 1000;
 const PR_REPORT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
-/** Workflows that attach to an existing PR rather than opening one. */
+/**
+ * Workflows that attach to an existing PR rather than opening one. Derived from
+ * the shared source-control automation vocabulary so new attach-to-PR workflows
+ * stay excluded from the product-opened funnel.
+ */
 const PRODUCT_OPENED_WORKFLOW_EXCLUSIONS = [
-  'pr_review',
-  'pr_conflict_resolve',
+  ...SOURCE_CONTROL_AUTOMATION_WORKFLOWS,
 ] as const;
 
 export type InstanceReportModelUsage = {
@@ -328,7 +333,17 @@ async function collectPullRequestFactsDurations(
     filters.push(inArray(pullRequestFacts.repositoryId, repositoryIds));
   }
   if (repositoryNames.length > 0) {
-    filters.push(inArray(pullRequestFacts.repositoryFullName, repositoryNames));
+    // Match facts case-insensitively: task_pull_requests casing can drift from
+    // pull_request_facts.repository_full_name.
+    const repositoryNamesLower = [
+      ...new Set(repositoryNames.map((name) => name.toLowerCase())),
+    ];
+    filters.push(
+      inArray(
+        sql<string>`lower(${pullRequestFacts.repositoryFullName})`,
+        repositoryNamesLower,
+      ),
+    );
   }
 
   if (filters.length === 0) {
@@ -440,6 +455,13 @@ async function collectAuthoredPullRequestHistoryForKeys(
     return [];
   }
 
+  const repositoryIds = [
+    ...new Set(
+      seedRows
+        .map((row) => row.repositoryId)
+        .filter((id): id is string => id != null),
+    ),
+  ];
   const repositoryNames = [
     ...new Set(
       seedRows
@@ -461,16 +483,35 @@ async function collectAuthoredPullRequestHistoryForKeys(
   ];
 
   const clauses = [];
-  if (repositoryNames.length > 0 && prNumbers.length > 0) {
+  // Prefer repositoryId (case-proof). Fall back to lowercased repository
+  // names so mixed-case association rows still compete for first-detection.
+  if (repositoryIds.length > 0 && prNumbers.length > 0) {
     clauses.push(
       and(
-        inArray(taskPullRequests.repository, repositoryNames),
+        inArray(taskPullRequests.repositoryId, repositoryIds),
+        inArray(taskPullRequests.prNumber, prNumbers),
+      ),
+    );
+  }
+  if (repositoryNames.length > 0 && prNumbers.length > 0) {
+    const repositoryNamesLower = [
+      ...new Set(repositoryNames.map((name) => name.toLowerCase())),
+    ];
+    clauses.push(
+      and(
+        inArray(
+          sql<string>`lower(${taskPullRequests.repository})`,
+          repositoryNamesLower,
+        ),
         inArray(taskPullRequests.prNumber, prNumbers),
       ),
     );
   }
   if (prUrls.length > 0) {
-    clauses.push(inArray(taskPullRequests.prUrl, prUrls));
+    const prUrlsLower = [...new Set(prUrls.map((url) => url.toLowerCase()))];
+    clauses.push(
+      inArray(sql<string>`lower(${taskPullRequests.prUrl})`, prUrlsLower),
+    );
   }
 
   if (clauses.length === 0) {
