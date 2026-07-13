@@ -2,6 +2,12 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.4.2 (2026-07-13)
+
+### Patch changes
+
+- Onboarding Slack setup no longer strands revisits with saved credentials on a form with no Continue action: the step button is shown again when the intro screen is skipped.
+
 ## 0.4.1 (2026-07-13)
 
 ### Patch changes
