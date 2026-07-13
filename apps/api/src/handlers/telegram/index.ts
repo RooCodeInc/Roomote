@@ -429,11 +429,16 @@ telegram.post('/', async (c) => {
   const isTaskEntry = isTelegramTaskEntryUpdate(update, {
     botUsername: botUsername ?? undefined,
   });
-  // A completed task topic is already an explicit Roomote conversation, so a
-  // follow-up there can resume without requiring another group @mention.
-  const completedRun =
+  // Only task-owned topics are explicit Roomote conversations. A user-owned
+  // forum topic still requires a group @mention before an old task resumes.
+  const completedRunCandidate =
     !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
       ? await findCompletedTelegramTaskRunWithSnapshot(conversation)
+      : null;
+  const completedRun =
+    completedRunCandidate &&
+    (isTaskEntry || completedRunCandidate.payload.telegramTaskTopic === true)
+      ? completedRunCandidate
       : null;
 
   if (!newTaskCommand && !isTaskEntry && !completedRun) {

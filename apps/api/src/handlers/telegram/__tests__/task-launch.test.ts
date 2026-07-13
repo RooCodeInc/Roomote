@@ -223,7 +223,13 @@ describe('Telegram task topic launch', () => {
   });
 
   it('creates topics only for eligible new task conversations', () => {
-    expect(shouldCreateTelegramTaskTopic({ chatType: 'private' })).toBe(true);
+    expect(
+      shouldCreateTelegramTaskTopic({
+        chatType: 'private',
+        privateTopicsEnabled: true,
+      }),
+    ).toBe(true);
+    expect(shouldCreateTelegramTaskTopic({ chatType: 'private' })).toBe(false);
     expect(
       shouldCreateTelegramTaskTopic({
         chatType: 'supergroup',
@@ -234,6 +240,7 @@ describe('Telegram task topic launch', () => {
       shouldCreateTelegramTaskTopic({
         chatType: 'private',
         threadId: '77',
+        privateTopicsEnabled: true,
       }),
     ).toBe(false);
     expect(
@@ -241,6 +248,7 @@ describe('Telegram task topic launch', () => {
         chatType: 'private',
         threadId: '77',
         forceNewTopic: true,
+        privateTopicsEnabled: true,
       }),
     ).toBe(true);
     expect(shouldCreateTelegramTaskTopic({ chatType: 'group' })).toBe(false);

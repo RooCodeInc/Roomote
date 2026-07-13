@@ -26,6 +26,10 @@ export type TelegramForumTopic = {
   name: string;
 };
 
+export type TelegramBotInfo = {
+  hasTopicsEnabled: boolean;
+};
+
 type TelegramApiResponse =
   | {
       ok: true;
@@ -407,6 +411,18 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       action: input.action ?? 'typing',
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
+  }
+
+  /**
+   * Read the bot capability flag Telegram exposes for private-chat Threaded
+   * Mode. This avoids probing createForumTopic for bots that have it disabled.
+   */
+  async getBotInfo(): Promise<TelegramBotInfo> {
+    const result = (await this.callBotApi('getMe', {})) as {
+      has_topics_enabled?: boolean;
+    };
+
+    return { hasTopicsEnabled: result.has_topics_enabled === true };
   }
 
   /**

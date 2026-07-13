@@ -963,6 +963,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationChannelId: z.string().optional(),
   communicationThreadId: z.string().optional(),
   communicationMessageId: z.string().optional(),
+  /** True when the Telegram topic was created specifically for this task. */
+  telegramTaskTopic: z.boolean().optional(),
 
   /**
    * Optional Slack routing metadata for non-Slack task types that still own a

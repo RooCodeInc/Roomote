@@ -64,11 +64,14 @@ export async function resolveTelegramWorkspace(
 export function shouldCreateTelegramTaskTopic(input: {
   chatType: string;
   isForum?: boolean;
+  privateTopicsEnabled?: boolean;
   threadId?: string;
   forceNewTopic?: boolean;
 }): boolean {
   const supportsTopics =
-    input.chatType.toLowerCase() === 'private' || input.isForum === true;
+    (input.chatType.toLowerCase() === 'private' &&
+      input.privateTopicsEnabled === true) ||
+    input.isForum === true;
 
   return supportsTopics && (!input.threadId || input.forceNewTopic === true);
 }
@@ -122,6 +125,7 @@ export async function launchTelegramTask(input: {
           : {}),
         description: input.queuedMessage.text,
         ...metadata,
+        ...(createdTopic ? { telegramTaskTopic: true } : {}),
       },
     };
   const launchResult = await enqueueTask(

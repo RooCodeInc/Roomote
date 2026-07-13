@@ -14,6 +14,42 @@ async function createTelegramCommunicationProvider(): Promise<TelegramCommunicat
   return new TelegramCommunicationProvider({ botToken });
 }
 
+const TELEGRAM_BOT_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
+let privateTopicsCapabilityCache:
+  | { botToken: string; enabled: boolean; expiresAt: number }
+  | undefined;
+
+export async function telegramPrivateTopicsEnabledBestEffort(): Promise<boolean> {
+  const { botToken } = await resolveTelegramRuntimeCredentials();
+
+  if (!botToken) return false;
+
+  const now = Date.now();
+  if (
+    privateTopicsCapabilityCache?.botToken === botToken &&
+    privateTopicsCapabilityCache.expiresAt > now
+  ) {
+    return privateTopicsCapabilityCache.enabled;
+  }
+
+  try {
+    const { hasTopicsEnabled } = await new TelegramCommunicationProvider({
+      botToken,
+    }).getBotInfo();
+    privateTopicsCapabilityCache = {
+      botToken,
+      enabled: hasTopicsEnabled,
+      expiresAt: now + TELEGRAM_BOT_INFO_CACHE_TTL_MS,
+    };
+    return hasTopicsEnabled;
+  } catch (error) {
+    apiLogger.debug(
+      `[telegram] Could not read bot topic capabilities: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
 export async function postTelegramMessageBestEffort(input: {
   chatId: string;
   threadId?: string;
@@ -78,7 +114,7 @@ export async function createTelegramForumTopicBestEffort(input: {
     // Topic creation is an enhancement over the existing chat flow. A bot
     // without private-chat Threaded Mode, or without manage-topics rights in
     // a forum supergroup, must still be able to launch the task normally.
-    apiLogger.warn(
+    apiLogger.debug(
       `[telegram] Could not create a task topic; falling back to the current chat: ${
         error instanceof Error ? error.message : String(error)
       }`,

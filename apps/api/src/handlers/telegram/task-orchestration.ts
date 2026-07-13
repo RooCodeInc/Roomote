@@ -19,7 +19,10 @@ import {
 
 import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
 import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
-import { postTelegramMessageBestEffort } from './replies.js';
+import {
+  postTelegramMessageBestEffort,
+  telegramPrivateTopicsEnabledBestEffort,
+} from './replies.js';
 import {
   launchTelegramTask,
   resolveTelegramWorkspace,
@@ -75,6 +78,9 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     threadId: input.metadata.communicationThreadId,
     messageId: input.metadata.communicationMessageId,
   });
+  if (completedPayload.telegramTaskTopic === true) {
+    resumePayload.telegramTaskTopic = true;
+  }
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
   // Resumes never create tasks and never re-attribute; the resuming human
@@ -126,9 +132,15 @@ export async function startNewTelegramTask(input: {
   /** Start a new task topic even when the command came from an older topic. */
   forceNewTopic?: boolean;
 }) {
+  const needsPrivateTopicCapability =
+    input.message.chat.type.toLowerCase() === 'private' &&
+    (!input.metadata.communicationThreadId || input.forceNewTopic === true);
   const createTopicForTask = shouldCreateTelegramTaskTopic({
     chatType: input.message.chat.type,
     isForum: input.message.chat.is_forum,
+    privateTopicsEnabled: needsPrivateTopicCapability
+      ? await telegramPrivateTopicsEnabledBestEffort()
+      : false,
     threadId: input.metadata.communicationThreadId,
     forceNewTopic: input.forceNewTopic,
   });

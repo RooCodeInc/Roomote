@@ -16,6 +16,7 @@ const {
   environmentsFindFirstMock,
   envMock,
   getAvailableEnvironmentsMock,
+  getBotInfoMock,
   getTaskUrlMock,
   insertMock,
   insertOnConflictDoNothingMock,
@@ -48,6 +49,7 @@ const {
   enqueueTaskMock: vi.fn(),
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
+  getBotInfoMock: vi.fn(),
   envMock: {
     R_APP_URL: 'https://app.example.com',
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
@@ -246,6 +248,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
       addReaction: addReactionMock,
       answerCallbackQuery: answerCallbackQueryMock,
       createForumTopic: createForumTopicMock,
+      getBotInfo: getBotInfoMock,
       editMessageReplyMarkup: editMessageReplyMarkupMock,
       editMessageText: editMessageTextMock,
       postMessage: postMessageMock,
@@ -356,6 +359,7 @@ describe('Telegram webhook handler', () => {
     createForumTopicMock.mockRejectedValue(
       new Error('Bad Request: chat is not a forum'),
     );
+    getBotInfoMock.mockResolvedValue({ hasTopicsEnabled: true });
     insertMock.mockReturnValue({ values: insertValuesMock });
     insertValuesMock.mockReturnValue({
       onConflictDoNothing: insertOnConflictDoNothingMock,
@@ -849,6 +853,45 @@ describe('Telegram webhook handler', () => {
         text: expect.stringContaining('Reconnected this Telegram chat'),
       }),
     );
+  });
+
+  it('does not silently resume a completed task from a user-owned forum topic', async () => {
+    mockTelegramLinkedSender('launch-owner-4');
+    taskRunsFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      id: 55,
+      status: 'completed',
+      taskId: 'task-old',
+      payload: {
+        repo: 'RooCodeInc/Roomote',
+        communicationProvider: 'telegram',
+        communicationChannelId: '-100222',
+        communicationThreadId: '77',
+      },
+      snapshotId: 'snapshot-1',
+      snapshotCreatedAt: new Date(),
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          message_thread_id: 77,
+          text: 'ordinary group chatter',
+          chat: {
+            id: -100222,
+            type: 'supergroup',
+            title: 'Engineering',
+            is_forum: true,
+          },
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      reason: 'not_task_entry',
+    });
+    expect(enqueueTaskMock).not.toHaveBeenCalled();
   });
 
   it('/new bypasses a resumable snapshot and starts a fresh task', async () => {
