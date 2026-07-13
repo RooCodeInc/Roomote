@@ -2,7 +2,10 @@ import {
   listRecentBackgroundAutomationThreadFeedback,
   type BackgroundAutomationThreadFeedback,
 } from '@roomote/db/server';
-import type { BackgroundAutomationKey } from '@roomote/types';
+import type {
+  BackgroundAutomationKey,
+  TrackedMessageSurface,
+} from '@roomote/types';
 
 const DEFAULT_LOOKBACK_DAYS = 30;
 const DEFAULT_THREAD_LIMIT = 3;
@@ -103,6 +106,7 @@ function buildAutomationThreadFeedbackDebugSnippet(
 async function loadAutomationThreadFeedbackEntries(params: {
   automationKey: BackgroundAutomationKey;
   slackChannelId: string;
+  surface?: TrackedMessageSurface;
   now?: Date;
 }): Promise<BackgroundAutomationThreadFeedback[]> {
   const now = params.now ?? new Date();
@@ -111,7 +115,7 @@ async function loadAutomationThreadFeedbackEntries(params: {
   );
 
   return listRecentBackgroundAutomationThreadFeedback({
-    surface: 'slack',
+    surface: params.surface ?? 'slack',
     automationKey: params.automationKey,
     slackChannelId: params.slackChannelId,
     since,
@@ -122,6 +126,7 @@ async function loadAutomationThreadFeedbackEntries(params: {
 export async function loadAutomationThreadFeedbackContext(params: {
   automationKey: BackgroundAutomationKey;
   slackChannelId: string;
+  surface?: TrackedMessageSurface;
   now?: Date;
 }): Promise<string | null> {
   const entries = await loadAutomationThreadFeedbackEntries(params);
@@ -135,6 +140,7 @@ export async function loadAutomationThreadFeedbackContext(params: {
 export async function loadAutomationThreadFeedbackReport(params: {
   automationKey: BackgroundAutomationKey;
   slackChannelId: string;
+  surface?: TrackedMessageSurface;
   now?: Date;
 }): Promise<AutomationThreadFeedbackReport> {
   const entries = await loadAutomationThreadFeedbackEntries(params);
