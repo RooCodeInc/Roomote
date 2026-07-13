@@ -186,4 +186,57 @@ describe('initializeContainerProjects', () => {
       expect.stringContaining('Continuing because it is optional'),
     );
   });
+
+  it('redacts project values without redacting the base command environment', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('up')) throw new Error('compose failed');
+      if (args.includes('ps')) {
+        return {
+          stdout: 'PATH=/opt/roomote/bin APP_SECRET=project-secret-value',
+        };
+      }
+      return { stdout: '' };
+    });
+
+    const result = initializeContainerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            container_projects: [
+              {
+                type: 'compose',
+                name: 'dev',
+                repository: 'acme/app',
+                files: ['compose.yaml'],
+                env: { APP_SECRET: '${PROJECT_SECRET}' },
+              },
+            ],
+          },
+        },
+        envVars: {
+          PATH: '/opt/roomote/bin',
+          PROJECT_SECRET: 'project-secret-value',
+        },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    await expect(result).rejects.toThrow('PATH=/opt/roomote/bin');
+    await expect(result).rejects.toThrow('APP_SECRET=[redacted]');
+    await expect(result).rejects.not.toThrow('project-secret-value');
+  });
 });

@@ -320,7 +320,7 @@ export async function spawnDockerWorker(
     }
 
     if (isStandbyResume && usesContainerProjects) {
-      await docker(['start', taskDaemonContainerName]);
+      await resumeDockerTaskDaemon(taskDaemonContainerName);
     }
 
     const portMap = controlNetwork
@@ -440,6 +440,13 @@ export async function spawnDockerWorker(
     }
     throw error;
   }
+}
+
+export async function resumeDockerTaskDaemon(
+  containerName: string,
+  runDocker: typeof docker = docker,
+): Promise<void> {
+  await runDocker(['start', containerName], { allowFailure: true });
 }
 
 export function shouldRetryDockerWorkerWithoutDiskLimit(params: {

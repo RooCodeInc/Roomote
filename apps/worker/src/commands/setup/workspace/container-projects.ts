@@ -61,6 +61,7 @@ interface ResolvedContainerProject {
   projectRoot: string;
   composeFiles: string[];
   env: Record<string, string>;
+  sensitiveValues: string[];
 }
 
 async function ensureDockerRuntime({
@@ -251,8 +252,13 @@ async function resolveContainerProject({
       projectRoot,
       composeFiles,
       env,
+      sensitiveValues: Object.values(projectEnv),
     };
   }
+
+  const buildArgs = project.build_args
+    ? substituteEnvVars(project.build_args, baseEnv)
+    : {};
 
   const contextPath = resolveWithin(projectRoot, project.context ?? '.');
   const dockerfilePath = resolveWithin(
@@ -266,7 +272,7 @@ async function resolveContainerProject({
     dockerfile: path.relative(contextPath, dockerfilePath),
   };
   if (project.target) build.target = project.target;
-  if (project.build_args) build.args = project.build_args;
+  if (Object.keys(buildArgs).length > 0) build.args = buildArgs;
 
   const service: Record<string, unknown> = { build };
   if (Object.keys(projectEnv).length > 0) service.environment = projectEnv;
@@ -288,6 +294,10 @@ async function resolveContainerProject({
     projectRoot,
     composeFiles: [composeFile],
     env,
+    sensitiveValues: [
+      ...Object.values(projectEnv),
+      ...Object.values(buildArgs),
+    ],
   };
 }
 
@@ -309,10 +319,10 @@ function buildComposeArgs(
 
 function redactContainerDiagnostics(
   value: string,
-  env: Record<string, string>,
+  sensitiveValues: string[],
 ): string {
   let redacted = value;
-  for (const secret of Object.values(env)) {
+  for (const secret of sensitiveValues) {
     if (secret.length >= 8)
       redacted = redacted.replaceAll(secret, '[redacted]');
   }
@@ -338,7 +348,10 @@ async function collectContainerDiagnostics(
       const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
       if (output) {
         sections.push(
-          `${label}:\n${redactContainerDiagnostics(output, resolved.env)}`,
+          `${label}:\n${redactContainerDiagnostics(
+            output,
+            resolved.sensitiveValues,
+          )}`,
         );
       }
     } catch {
