@@ -131,7 +131,9 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  BrandIcon: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Github: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  RefreshCcw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Spinner: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({
     children,

@@ -107,7 +107,7 @@ export function AdoSourceControlInstructions({
           Azure App registrations
         </a>{' '}
         → New registration → Create an app in the Microsoft tenant that can
-        access your Azure DevOps organization. IF you've created an app for
+        access your Azure DevOps organization. IF you&apos;ve created an app for
         Teams, you can reuse it.
         <br />
         Make sure to add this Web Redirect URI:

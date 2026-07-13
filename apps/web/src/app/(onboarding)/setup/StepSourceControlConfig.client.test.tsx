@@ -281,9 +281,7 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/Azure DevOps Base URL/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Azure DevOps Username/)).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(/Microsoft Entra Client ID/),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
     expect(
       screen.queryByText(/Azure DevOps Webhook Secret/),
     ).not.toBeInTheDocument();
@@ -308,10 +306,8 @@ describe('StepSourceControlConfig', () => {
       screen.getByRole('button', { name: /Personal access token/i }),
     );
     expect(
-      screen.getByRole('link', {
-        name: /Create an Azure DevOps personal access token/i,
-      }),
-    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+      screen.getByText(/Create a personal access token \(PAT\)/i),
+    ).toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
@@ -341,6 +337,10 @@ describe('StepSourceControlConfig', () => {
         selectedProviderId="ado"
         onContinue={vi.fn()}
       />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Personal access token/i }),
     );
 
     fireEvent.click(
