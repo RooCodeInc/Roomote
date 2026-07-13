@@ -20,6 +20,7 @@ const telegramChatSchema = z
     username: z.string().optional(),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
+    is_forum: z.boolean().optional(),
   })
   .passthrough();
 
@@ -365,9 +366,9 @@ function isNewTaskCommandName(
  * plus the task description with the invocation stripped. Returns `null` when
  * the update is not one of those commands.
  *
- * Telegram chats have no threads, so after a task completes the next message
- * in the same chat would otherwise resume the previous task's snapshot. These
- * commands force a fresh task launch instead.
+ * After a task completes, the next message in the same chat/topic would
+ * otherwise resume its snapshot. These commands force a fresh task launch
+ * instead (and the launch path can create a fresh Telegram topic).
  *
  * The command must lead the message — a `/new` or `/done` mentioned
  * mid-sentence is ordinary text, not a command. The only prefix allowed before

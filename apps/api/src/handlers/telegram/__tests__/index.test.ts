@@ -8,6 +8,7 @@ const {
   buildTelegramRoutingContextMock,
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
+  createForumTopicMock,
   restoreLinkCodeMock,
   editMessageReplyMarkupMock,
   editMessageTextMock,
@@ -40,6 +41,7 @@ const {
   buildTelegramRoutingContextMock: vi.fn(),
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
+  createForumTopicMock: vi.fn(),
   restoreLinkCodeMock: vi.fn(),
   editMessageReplyMarkupMock: vi.fn(),
   editMessageTextMock: vi.fn(),
@@ -243,6 +245,7 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
     return {
       addReaction: addReactionMock,
       answerCallbackQuery: answerCallbackQueryMock,
+      createForumTopic: createForumTopicMock,
       editMessageReplyMarkup: editMessageReplyMarkupMock,
       editMessageText: editMessageTextMock,
       postMessage: postMessageMock,
@@ -350,6 +353,9 @@ describe('Telegram webhook handler', () => {
     taskRunsFindFirstMock.mockResolvedValue(null);
     telegramMappingsFindFirstMock.mockResolvedValue(null);
     consumeLinkCodeMock.mockResolvedValue(null);
+    createForumTopicMock.mockRejectedValue(
+      new Error('Bad Request: chat is not a forum'),
+    );
     insertMock.mockReturnValue({ values: insertValuesMock });
     insertValuesMock.mockReturnValue({
       onConflictDoNothing: insertOnConflictDoNothingMock,
@@ -616,6 +622,10 @@ describe('Telegram webhook handler', () => {
 
   it('starts new Telegram tasks as the linked sender', async () => {
     mockTelegramLinkedSender('launch-owner-2');
+    createForumTopicMock.mockResolvedValueOnce({
+      messageThreadId: '77',
+      name: 'please check this',
+    });
     taskRunsFindFirstMock
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(null);
@@ -650,7 +660,8 @@ describe('Telegram webhook handler', () => {
             description: 'please check this',
             communicationProvider: 'telegram',
             communicationChannelId: '222',
-            communicationMessageId: '456',
+            communicationThreadId: '77',
+            communicationMessageId: 'telegram-response',
           }),
         }),
         initiator: { kind: 'user', userId: 'launch-owner-2' },
@@ -662,14 +673,24 @@ describe('Telegram webhook handler', () => {
         launchClass: 'human',
       }),
     );
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         channelId: '222',
-        replyToMessageId: '456',
+        threadId: '77',
+        text: 'Task request from Ada Lovelace:\n\nplease check this',
+      }),
+    );
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        channelId: '222',
+        threadId: '77',
+        replyToMessageId: 'telegram-response',
         text: expect.stringContaining('Started a task'),
       }),
     );
-    const postedCall = postMessageMock.mock.calls[0]![0] as {
+    const postedCall = postMessageMock.mock.calls[1]![0] as {
       text: string;
       buttons?: { text: string; url?: string; callbackData?: string }[][];
     };

@@ -327,10 +327,10 @@ telegram.post('/', async (c) => {
     threadId: metadata.communicationThreadId,
   };
 
-  // `/new` and `/done` are explicit "start a fresh task" signals. Telegram has
-  // no threads, so without these the next message after a task completes would
-  // resume the previous task's snapshot. These commands skip the resume path
-  // below and launch a new StandardTask.
+  // `/new` and `/done` are explicit "start a fresh task" signals. In a plain
+  // chat (or an existing topic), the next message after completion would
+  // otherwise resume the previous snapshot. These commands skip that resume
+  // path and, when topics are available, create a new task topic.
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });
@@ -410,12 +410,17 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
-  if (
-    !newTaskCommand &&
-    !isTelegramTaskEntryUpdate(update, {
-      botUsername: botUsername ?? undefined,
-    })
-  ) {
+  const isTaskEntry = isTelegramTaskEntryUpdate(update, {
+    botUsername: botUsername ?? undefined,
+  });
+  // A completed task topic is already an explicit Roomote conversation, so a
+  // follow-up there can resume without requiring another group @mention.
+  const completedRun =
+    !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
+      ? await findCompletedTelegramTaskRunWithSnapshot(conversation)
+      : null;
+
+  if (!newTaskCommand && !isTaskEntry && !completedRun) {
     apiLogger.debug(
       `[telegram] Ignoring Telegram message without active task run or task entry signal for chat ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
     );
@@ -434,12 +439,6 @@ telegram.post('/', async (c) => {
     chatId: metadata.communicationChannelId,
     messageId: metadata.communicationMessageId,
   });
-
-  // `/new` and `/done` exist to skip snapshot resume; only plain messages
-  // reconnect to a completed task's snapshot.
-  const completedRun = newTaskCommand
-    ? null
-    : await findCompletedTelegramTaskRunWithSnapshot(conversation);
 
   if (completedRun) {
     try {
@@ -476,6 +475,7 @@ telegram.post('/', async (c) => {
     launchOwnerUserId: senderUserId,
     queuedMessage,
     metadata,
+    forceNewTopic: Boolean(newTaskCommand),
   });
 
   if (launch.status === 'replied_inline') {

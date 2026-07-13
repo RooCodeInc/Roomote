@@ -635,6 +635,7 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText(/Create a new Telegram bot/)).toBeInTheDocument();
       expect(screen.getByText('Create bot')).toBeInTheDocument();
       expect(screen.getByText('Bot token')).toBeInTheDocument();
+      expect(screen.getByText('Threaded Mode')).toBeInTheDocument();
       expect(screen.getByText('Webhook')).toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
       expect(

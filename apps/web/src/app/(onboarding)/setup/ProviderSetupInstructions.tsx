@@ -134,6 +134,12 @@ export function ProviderSetupInstructions({
         <InstructionText heading="Bot token">
           Copy the bot token BotFather replies with into the field below.
         </InstructionText>
+        <InstructionText heading="Threaded Mode">
+          In BotFather, open Bot Settings → Threaded Mode and turn it on. This
+          lets Roomote create a separate private-chat topic for every task.
+          Telegram withholds a 15% fee from Stars purchases while this mode is
+          enabled.
+        </InstructionText>
         <InstructionText heading="Webhook">
           Roomote registers the webhook automatically when you save.
         </InstructionText>

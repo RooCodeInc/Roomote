@@ -40,6 +40,7 @@ export type MockTelegramStoredMessage = {
   reply_to_message_id?: number;
   reply_markup?: unknown;
   link_preview_disabled?: boolean;
+  forum_topic_created?: { name: string };
   reactions: string[];
 };
 
@@ -47,6 +48,8 @@ export type MockTelegramBot = {
   id: number;
   username: string;
   first_name: string;
+  /** Mirrors getMe.has_topics_enabled for private-chat Threaded Mode. */
+  has_topics_enabled?: boolean;
 };
 
 export type MockTelegramWebhookRegistration = {
@@ -561,6 +564,56 @@ export class MockTelegramServer {
           is_bot: true,
           first_name: bot.first_name,
           username: bot.username,
+          ...(bot.has_topics_enabled ? { has_topics_enabled: true } : {}),
+        });
+        return;
+      }
+
+      case 'createForumTopic': {
+        const chat = this.findChat(body.chat_id);
+        const bot = this.state.bot ?? DEFAULT_BOT;
+
+        if (!chat) {
+          apiError(response, 400, 'Bad Request: chat not found');
+          return;
+        }
+
+        if (
+          (chat.type === 'private' && !bot.has_topics_enabled) ||
+          (chat.type !== 'private' && !chat.is_forum)
+        ) {
+          apiError(response, 400, 'Bad Request: chat is not a forum');
+          return;
+        }
+
+        const name = String(body.name ?? '').trim();
+        if (!name || name.length > 128) {
+          apiError(response, 400, 'Bad Request: invalid topic name');
+          return;
+        }
+
+        const messageThreadId = this.nextMessageId();
+        this.state.messages = [
+          ...(this.state.messages ?? []),
+          {
+            message_id: messageThreadId,
+            chat_id: String(chat.id),
+            date: Math.floor(Date.now() / 1000),
+            from: {
+              id: bot.id,
+              is_bot: true,
+              first_name: bot.first_name,
+              username: bot.username,
+            },
+            message_thread_id: messageThreadId,
+            forum_topic_created: { name },
+            reactions: [],
+          },
+        ];
+
+        apiResult(response, {
+          message_thread_id: messageThreadId,
+          name,
         });
         return;
       }
@@ -896,6 +949,9 @@ export class MockTelegramServer {
         : {}),
       ...(stored.reply_to_message_id !== undefined
         ? { reply_to_message_id: stored.reply_to_message_id }
+        : {}),
+      ...(stored.forum_topic_created !== undefined
+        ? { forum_topic_created: stored.forum_topic_created }
         : {}),
     };
   }

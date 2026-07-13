@@ -7,7 +7,7 @@ description: Run Roomote Telegram integration flows through the checked-in mock 
 
 Use this skill to exercise Roomote's Telegram integration against the checked-in mock Telegram harness. Do not invent another fake Telegram stack and do not fall back to a real Telegram bot unless the user explicitly asks for that parity test.
 
-Telegram has no threads: conversation continuity is inferred from **chat id (+ forum topic id) → active cloud job**, with `/new` and `/done` as the explicit escape hatches after a task completes. That continuity logic is the highest-value thing to test here.
+Telegram continuity is inferred from **chat id (+ forum topic id) → active cloud job**. Private bot chats can have topics when Threaded Mode is enabled in BotFather, and forum supergroups can have topics when the bot has Manage Topics rights. `/new` and `/done` are the explicit escape hatches after a task completes. That continuity logic is the highest-value thing to test here.
 
 ## Quick Reference
 
@@ -22,7 +22,7 @@ Telegram has no threads: conversation continuity is inferred from **chat id (+ f
 | Example scenario              | `packages/communication/scripts/mock-telegram.example.json` |
 | Webhook secret source         | `Env.R_TELEGRAM_WEBHOOK_SECRET` from dotenvx                |
 | Mock bot identity             | `roomote_mock_bot` (id `7000000001`)                        |
-| Mock linked user              | Telegram user id `111000111` (`grace_mock`)                   |
+| Mock linked user              | Telegram user id `111000111` (`grace_mock`)                 |
 
 ## Step 1: Seed the database
 

@@ -54,6 +54,39 @@ export async function postTelegramMessageBestEffort(input: {
   }
 }
 
+export async function createTelegramForumTopicBestEffort(input: {
+  chatId: string;
+  name: string;
+}): Promise<{ threadId: string } | null> {
+  const provider = await createTelegramCommunicationProvider();
+
+  if (!provider) {
+    apiLogger.warn(
+      '[telegram] Skipping Telegram topic creation because bot token is not configured',
+    );
+    return null;
+  }
+
+  try {
+    const topic = await provider.createForumTopic({
+      channelId: input.chatId,
+      name: input.name,
+    });
+
+    return { threadId: topic.messageThreadId };
+  } catch (error) {
+    // Topic creation is an enhancement over the existing chat flow. A bot
+    // without private-chat Threaded Mode, or without manage-topics rights in
+    // a forum supergroup, must still be able to launch the task normally.
+    apiLogger.warn(
+      `[telegram] Could not create a task topic; falling back to the current chat: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
+}
+
 /** Replace the text and keyboard of a bot message (cards, status lines). */
 export async function editTelegramMessageBestEffort(input: {
   chatId: string;

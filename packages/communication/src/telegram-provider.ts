@@ -21,6 +21,11 @@ export type TelegramCommunicationProviderOptions = {
   fetch?: typeof fetch;
 };
 
+export type TelegramForumTopic = {
+  messageThreadId: string;
+  name: string;
+};
+
 type TelegramApiResponse =
   | {
       ok: true;
@@ -402,6 +407,34 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       action: input.action ?? 'typing',
       ...(threadId ? { message_thread_id: threadId } : {}),
     });
+  }
+
+  /**
+   * Create a task-owned topic in a forum supergroup or a private chat whose
+   * bot has Threaded Mode enabled in BotFather.
+   */
+  async createForumTopic(input: {
+    channelId: string;
+    name: string;
+  }): Promise<TelegramForumTopic> {
+    const result = (await this.callBotApi('createForumTopic', {
+      chat_id: input.channelId,
+      name: input.name,
+    })) as {
+      message_thread_id?: number;
+      name?: string;
+    };
+
+    if (!Number.isSafeInteger(result.message_thread_id)) {
+      throw new Error(
+        'Telegram createForumTopic returned no message_thread_id.',
+      );
+    }
+
+    return {
+      messageThreadId: String(result.message_thread_id),
+      name: result.name ?? input.name,
+    };
   }
 
   /** Delete a message the bot sent (Bot API allows this within 48 hours). */
