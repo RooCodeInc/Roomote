@@ -44,6 +44,7 @@ import {
   type RoutingDebugInfo,
   type RoutingResult,
   type RoutingWorkspace,
+  type SlackMcpSetupRequirement,
   detectSlackMcpSetupRequirement,
   routeTask,
   classifyFollowUp,
@@ -882,10 +883,13 @@ export async function showTaskConfiguration({
     if (!skipRouting) {
       try {
         // Missing MCP setup never blocks the task. When the message links to
-        // a service without a usable connection, post a small suggestion in
-        // the thread, ping the manager channel, and keep going.
+        // a service without a usable connection, a small suggestion is posted
+        // in the thread (after routing decides a task flow is happening) and
+        // the manager channel is pinged.
+        let setupRequirement: SlackMcpSetupRequirement | null = null;
+
         if (!skipMcpSetupSuggestion) {
-          const setupRequirement = await detectSlackMcpSetupRequirement(
+          setupRequirement = await detectSlackMcpSetupRequirement(
             taskDescription,
             {
               userId: userMapping.userId,
@@ -897,30 +901,6 @@ export async function showTaskConfiguration({
             );
             return null;
           });
-
-          if (setupRequirement) {
-            void maybeNotifyManagerChannelForMcpSetupRequirement({
-              triggeredByUserId: userMapping.userId,
-              triggeredBySlackUserId: event.user,
-              requirement: setupRequirement,
-              slack,
-            }).catch((error) => {
-              console.warn(
-                `[SlackMcpSetup] Failed to notify manager channel: ${error instanceof Error ? error.message : String(error)}`,
-              );
-            });
-
-            const suggestionTs = await postSlackMcpSetupSuggestion({
-              slack,
-              channel: event.channel,
-              threadId,
-              suggestion: setupRequirement,
-            });
-
-            if (suggestionTs) {
-              deliveryTracker.track(suggestionTs);
-            }
-          }
         }
 
         // Fetch thread messages for context if this is a reply in a thread
@@ -1002,6 +982,33 @@ export async function showTaskConfiguration({
           }
 
           return { routingUsed: false, threadId };
+        }
+
+        // A task flow is proceeding (routed or manual picker) — surface the
+        // non-blocking setup suggestion now, so it never shows on pure Q&A
+        // platform answers.
+        if (setupRequirement) {
+          void maybeNotifyManagerChannelForMcpSetupRequirement({
+            triggeredByUserId: userMapping.userId,
+            triggeredBySlackUserId: event.user,
+            requirement: setupRequirement,
+            slack,
+          }).catch((error) => {
+            console.warn(
+              `[SlackMcpSetup] Failed to notify manager channel: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+
+          const suggestionTs = await postSlackMcpSetupSuggestion({
+            slack,
+            channel: event.channel,
+            threadId,
+            suggestion: setupRequirement,
+          });
+
+          if (suggestionTs) {
+            deliveryTracker.track(suggestionTs);
+          }
         }
 
         if (decision.status === 'routed') {

@@ -23,7 +23,7 @@ export function buildSlackMcpSetupSuggestionText(
             ? `<${settingsUrl}|finish connecting ${serviceName}>`
             : `<${settingsUrl}|link your ${serviceName} account>`;
 
-  return `That looks like a ${serviceName} link. I don't have ${serviceName} access yet, so I'll work without it — ${action} if you want me to be able to use it.`;
+  return `That looks like a ${serviceName} link. I don't have ${serviceName} access yet — ${action} if you want me to be able to use it.`;
 }
 
 export function buildSlackMcpSetupSuggestionBlocks(

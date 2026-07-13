@@ -496,26 +496,9 @@ export async function startAutoRoutedSlackTask({
       threadMessages?.map((message) => message.ts) ?? [],
     );
 
-    const postSetupSuggestion = async () => {
-      if (!setupSuggestion) {
-        return;
-      }
-
-      const suggestionTs = await postSlackMcpSetupSuggestion({
-        slack,
-        channel,
-        threadId,
-        suggestion: setupSuggestion,
-      });
-
-      if (suggestionTs) {
-        deliveryTracker?.track(suggestionTs);
-      }
-    };
-
+    // Follow-ups that reuse an active run skip the suggestion so repeated
+    // messages with the same link don't stack identical nudges.
     if (taskRun.reusedExistingRun) {
-      await postSetupSuggestion();
-
       return {
         status: 'started',
         threadId,
@@ -551,7 +534,18 @@ export async function startAutoRoutedSlackTask({
       slack,
     });
 
-    await postSetupSuggestion();
+    if (setupSuggestion) {
+      const suggestionTs = await postSlackMcpSetupSuggestion({
+        slack,
+        channel,
+        threadId,
+        suggestion: setupSuggestion,
+      });
+
+      if (suggestionTs) {
+        deliveryTracker.track(suggestionTs);
+      }
+    }
 
     return {
       status: 'started',

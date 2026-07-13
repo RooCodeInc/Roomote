@@ -1312,6 +1312,51 @@ describe('startAutoRoutedSlackTask', () => {
     }
   });
 
+  it('does not repeat the setup suggestion when a follow-up reuses an active run', async () => {
+    detectSlackMcpSetupRequirementMock.mockResolvedValue({
+      serviceId: 'linear',
+      serviceName: 'Linear',
+      reason: 'user_auth_required',
+      canConfigure: true,
+      settingsUrl: 'https://app.example.com/settings/personal?service=linear',
+      copyVariant: 'user_auth_required',
+    });
+    startSlackAppMentionTaskMock.mockResolvedValue({
+      id: 88,
+      taskId: 'task_existing',
+      reusedExistingRun: true,
+    });
+    getTaskUrlMock.mockReturnValue(
+      'https://app.example.com/task/task_existing',
+    );
+
+    const slack = {
+      hasMessageInThread: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi
+        .fn()
+        .mockImplementation(async (text: string) => text),
+      fetchThreadMessages: vi.fn().mockResolvedValue([]),
+      postMessage: vi.fn().mockResolvedValue('130.000'),
+    };
+
+    const result = await startAutoRoutedSlackTask({
+      slackInstallation: { orgId: 'org_1' } as never,
+      slack: slack as never,
+      initiator: { kind: 'user' as const, userId: 'user_installer' },
+      trigger: 'message' as const,
+      launchUserId: 'user_installer',
+      slackUserId: 'UINSTALLER',
+      channel: 'C123',
+      prompt: 'Also check https://linear.app/acme/issue/OPS-123',
+      threadTs: '120.000',
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({ status: 'started', runId: 88 }),
+    );
+    expect(slack.postMessage).not.toHaveBeenCalled();
+  });
+
   it('starts the task without detection when the setup suggestion is skipped', async () => {
     detectSlackMcpSetupRequirementMock.mockResolvedValue({
       serviceId: 'linear',

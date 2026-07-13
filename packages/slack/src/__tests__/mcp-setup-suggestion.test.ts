@@ -307,6 +307,41 @@ describe('Slack MCP setup suggestion flow', () => {
     expect(routeTaskMock).toHaveBeenCalledTimes(1);
   });
 
+  it('does not post a suggestion when routing resolves to a platform answer', async () => {
+    detectSlackMcpSetupRequirementMock.mockResolvedValue(SETUP_REQUIREMENT);
+    routeTaskMock.mockResolvedValue({
+      status: 'platform_answer',
+      result: { answer: 'Roomote supports Notion via MCP.' },
+    });
+
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> does Roomote support https://www.notion.so?',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    const suggestionPosts = postMessageMock.mock.calls.filter((call) =>
+      JSON.stringify(call[0]).includes('That looks like a'),
+    );
+    expect(suggestionPosts).toHaveLength(0);
+    expect(
+      maybeNotifyManagerChannelForMcpSetupRequirementMock,
+    ).not.toHaveBeenCalled();
+  });
+
   it('does not post a suggestion when no setup is required', async () => {
     detectSlackMcpSetupRequirementMock.mockResolvedValue(null);
 
