@@ -1,4 +1,5 @@
 import type { FeatureFlag } from '@roomote/feature-flags';
+import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -834,12 +835,12 @@ describe('setup-new compute config commands', () => {
       provider: 'e2b',
       userId: 'setup-test-user',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
   });
 
@@ -863,9 +864,9 @@ describe('setup-new compute config commands', () => {
               setupNewState: {
                 e2bTemplateBuild: {
                   status: 'building',
-                  runtimeSchemaVersion: 2,
+                  runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
                   imageRef: 'registry.example.com/worker:tag',
-                  templateRef: 'roomote-worker:tag-r2',
+                  templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
                   error: null,
                   startedAt: new Date().toISOString(),
                   finishedAt: null,
@@ -891,7 +892,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
-      templateRef: 'roomote-worker:tag-r2',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
   });
 
