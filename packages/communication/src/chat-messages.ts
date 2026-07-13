@@ -95,6 +95,25 @@ export function buildRoutingConfirmationText({
   return `I'll get started in ${workspace}${model}, OK?`;
 }
 
+/**
+ * Returns a model display name for chat acknowledgements only when the router
+ * treated the pick as an explicit user preference. Default / preserved models
+ * stay out of the "getting started" copy.
+ */
+export function getUserRequestedModelDisplayName(
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null,
+): string | undefined {
+  if (model?.source !== 'preference') {
+    return undefined;
+  }
+
+  const displayName = model.displayName?.trim();
+  return displayName || undefined;
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
@@ -108,7 +127,7 @@ export function buildTaskStartingText({
 }): string {
   const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
-    ? ` using ${formatModelName(modelDisplayName)}`
+    ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
 
   return `Getting started on your task in ${workspace}${model}`;
