@@ -6,6 +6,9 @@ const { isTaskRunAsleepMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  Button: ({ children }: { children: ReactNode }) => (
+    <button>{children}</button>
+  ),
   Sun: () => <svg aria-hidden="true" />,
 }));
 
@@ -194,5 +197,40 @@ describe('HistoricalContent', () => {
     expect(
       screen.queryByText('Task ended because of an error:'),
     ).not.toBeInTheDocument();
+  });
+
+  it('guides users from a completed onboarding task to their first task', () => {
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            taskRun: {
+              id: 123,
+              status: 'completed',
+              snapshotId: null,
+              createdAt: new Date('2026-05-22T20:57:00.000Z'),
+              startedAt: new Date('2026-05-22T20:58:30.000Z'),
+            },
+            taskId: 'task-123',
+            artifacts: [],
+            onboardingEnvironment: { name: 'Satanama' },
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.textContent ===
+          'The Satanama environment is set up. You can start your first task.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Go' })).toHaveAttribute(
+      'href',
+      '/',
+    );
   });
 });
