@@ -599,7 +599,7 @@ describe('SourceControl settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
 
     expect(
-      screen.getByRole('link', { name: /Azure DevOps personal access token/ }),
+      screen.getByRole('link', { name: /Azure DevOps connection/ }),
     ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
     expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
   });

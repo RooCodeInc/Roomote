@@ -36,10 +36,10 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
   },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',
-    setupLabel: 'Azure DevOps personal access token',
+    setupLabel: 'Azure DevOps connection',
     setupLabelArticle: 'an',
     creationHint:
-      'Create the PAT with Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. Prefer a bot or service account that is a member of those projects; Roomote syncs repositories and configures pull request service hooks automatically. The organization is the slug from your https://dev.azure.com/<organization> URL. Most setups only need the organization and PAT—open advanced config for self-hosted Azure DevOps, custom OAuth/account linking, or non-default credentials. Webhook secrets are generated automatically when service hooks are configured.',
+      'Choose a PAT for the fastest setup, or connect a Microsoft Entra app for short-lived service-principal tokens. PATs should use Code read & write scopes and permission to manage service hook subscriptions for the projects Roomote should access. The organization is the slug from your https://dev.azure.com/<organization> URL. Webhook secrets are generated automatically when service hooks are configured.',
   },
 };
 

@@ -25,6 +25,10 @@ import {
   Spinner,
 } from '@/components/system';
 import { useCreateGitHubAppManifest } from '@/hooks/github';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 
 import { StepTitle } from './StepTitle';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
@@ -101,6 +105,11 @@ export function StepSourceControlConfig({
   >({});
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
+  const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
+    'pat',
+  );
+  const adoLinkedAccount = useAdoLinkedAccount();
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
   const [githubOrganization, setGithubOrganization] = useState('');
   const [manifestForm, setManifestForm] =
     useState<GitHubAppManifestForm | null>(null);
@@ -111,6 +120,15 @@ export function StepSourceControlConfig({
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.linkedAccounts.ado.queryKey(),
+        });
+        if (adoAuthMode === 'delegated' && !adoLinkedAccount.data?.account) {
+          authenticateAdoAccount.mutate(
+            `${window.location.pathname}${window.location.search}`,
+          );
+          return;
+        }
         onContinue();
       },
       onError: (error) => {
@@ -143,8 +161,17 @@ export function StepSourceControlConfig({
     [selectedProvider],
   );
   const baseFields = useMemo(
-    () => getSetupSourceControlVisibleFields(providerFields),
-    [providerFields],
+    () =>
+      getSetupSourceControlVisibleFields(providerFields).filter((field) =>
+        !isAdo
+          ? true
+          : adoAuthMode === 'pat'
+            ? field.envVarName !== 'ADO_CLIENT_ID' &&
+              field.envVarName !== 'ADO_CLIENT_SECRET' &&
+              field.envVarName !== 'ADO_TENANT_ID'
+            : field.envVarName !== 'ADO_TOKEN',
+      ),
+    [providerFields, isAdo, adoAuthMode],
   );
   const advancedFields = useMemo(
     () =>
@@ -157,8 +184,16 @@ export function StepSourceControlConfig({
     () =>
       getSetupSourceControlVisibleFields(providerFields, {
         showAdvancedConfig: isAdo && showAdoAdvancedConfig,
-      }),
-    [providerFields, isAdo, showAdoAdvancedConfig],
+      }).filter((field) =>
+        !isAdo
+          ? true
+          : adoAuthMode === 'pat'
+            ? field.envVarName !== 'ADO_CLIENT_ID' &&
+              field.envVarName !== 'ADO_CLIENT_SECRET' &&
+              field.envVarName !== 'ADO_TENANT_ID'
+            : field.envVarName !== 'ADO_TOKEN',
+      ),
+    [providerFields, isAdo, showAdoAdvancedConfig, adoAuthMode],
   );
 
   // Key off field content, not array identity — parent refreshes create a new
@@ -185,9 +220,32 @@ export function StepSourceControlConfig({
     setEditingSavedValues({});
     setShowManualGitHubValues(false);
     setShowAdoAdvancedConfig(false);
+    const hasAdoEntraCredentials = providerFields.some(
+      (field) =>
+        ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID'].includes(
+          field.envVarName,
+        ) &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
+    const hasAdoPat = providerFields.some(
+      (field) =>
+        field.envVarName === 'ADO_TOKEN' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
+    const configuredMode = providerFields.find(
+      (field) => field.envVarName === 'ADO_AUTH_MODE',
+    )?.savedValue;
+    const initialAdoAuthMode =
+      configuredMode === 'delegated'
+        ? 'delegated'
+        : hasAdoEntraCredentials && !hasAdoPat
+          ? 'entra'
+          : 'pat';
+    setAdoAuthMode(initialAdoAuthMode);
+    setShowAdoAdvancedConfig(initialAdoAuthMode === 'entra');
     setGithubOrganization('');
     setManifestForm(null);
-  }, [effectiveSelectedProviderId, nonSecretInitialValues]);
+  }, [effectiveSelectedProviderId, nonSecretInitialValues, providerFields]);
 
   useEffect(() => {
     if (manifestForm) {
@@ -214,7 +272,26 @@ export function StepSourceControlConfig({
         !field.savedSatisfied &&
         nextValue.length === 0
       );
-    });
+    }) ||
+    (isAdo &&
+      (adoAuthMode === 'pat'
+        ? !(
+            values['ADO_TOKEN']?.trim() ||
+            providerFields.find((field) => field.envVarName === 'ADO_TOKEN')
+              ?.runtimeSatisfied ||
+            providerFields.find((field) => field.envVarName === 'ADO_TOKEN')
+              ?.savedSatisfied
+          )
+        : !['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID'].every(
+            (envVarName) =>
+              Boolean(
+                values[envVarName]?.trim() ||
+                providerFields.find((field) => field.envVarName === envVarName)
+                  ?.runtimeSatisfied ||
+                providerFields.find((field) => field.envVarName === envVarName)
+                  ?.savedSatisfied,
+              ),
+          )));
 
   const handleContinue = async () => {
     if (!selectedProvider) {
@@ -223,7 +300,16 @@ export function StepSourceControlConfig({
 
     await saveSourceControlConfig.mutateAsync({
       provider: selectedProvider.provider,
-      values: filterValuesToFields(visibleFields, values),
+      values: {
+        ...filterValuesToFields(visibleFields, values),
+        ...(isAdo
+          ? {
+              ADO_AUTH_MODE: adoAuthMode,
+              ADO_LINKED_ACCOUNT_ID:
+                adoLinkedAccount.data?.account?.accountId ?? '',
+            }
+          : {}),
+      },
     });
   };
 
@@ -451,6 +537,82 @@ export function StepSourceControlConfig({
         </p>
       </div>
 
+      {isAdo ? (
+        <div className="space-y-2 pl-10">
+          <Label>How should Roomote connect?</Label>
+          <div className="grid max-w-xl gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              aria-pressed={adoAuthMode === 'pat'}
+              className={`rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-border'}`}
+              onClick={() => {
+                setAdoAuthMode('pat');
+                setShowAdoAdvancedConfig(false);
+              }}
+            >
+              <span className="block font-medium">Personal access token</span>
+              <span className="text-sm text-muted-foreground">
+                Fastest setup; use a dedicated bot or service account.
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={adoAuthMode === 'entra'}
+              className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
+              onClick={() => {
+                setAdoAuthMode('entra');
+                setShowAdoAdvancedConfig(true);
+              }}
+            >
+              <span className="block font-medium">Microsoft Entra app</span>
+              <span className="text-sm text-muted-foreground">
+                Short-lived tokens for a service principal.
+              </span>
+            </button>
+            <button
+              type="button"
+              aria-pressed={adoAuthMode === 'delegated'}
+              className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
+              onClick={() => {
+                setAdoAuthMode('delegated');
+                setShowAdoAdvancedConfig(true);
+              }}
+            >
+              <span className="block font-medium">Connect with Microsoft</span>
+              <span className="text-sm text-muted-foreground">
+                Use a delegated Azure DevOps account.
+              </span>
+            </button>
+          </div>
+          {adoAuthMode === 'delegated' ? (
+            <div className="max-w-xl rounded-md border p-3 text-sm">
+              <p className="text-muted-foreground">
+                {adoLinkedAccount.data?.account
+                  ? `Connected as ${adoLinkedAccount.data.account.displayName}.`
+                  : 'Connect the Azure DevOps account Roomote should use.'}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={() =>
+                  authenticateAdoAccount.mutate(
+                    `${window.location.pathname}${window.location.search}`,
+                  )
+                }
+                disabled={authenticateAdoAccount.isPending}
+              >
+                {authenticateAdoAccount.isPending ? <Spinner /> : null}
+                {adoLinkedAccount.data?.account
+                  ? 'Reconnect with Microsoft'
+                  : 'Connect with Microsoft'}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="space-y-2 pl-10">
         {(isAdo ? baseFields : visibleFields).map((field) => (
           <SourceControlFieldInput
@@ -545,7 +707,11 @@ export function StepSourceControlConfig({
           {saveSourceControlConfig.isPending
             ? 'Saving...'
             : canContinueWithoutNewValues
-              ? 'Continue'
+              ? isAdo &&
+                adoAuthMode === 'delegated' &&
+                !adoLinkedAccount.data?.account
+                ? 'Save and connect with Microsoft'
+                : 'Continue'
               : 'Save and continue'}
           {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>

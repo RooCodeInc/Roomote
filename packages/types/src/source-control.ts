@@ -29,6 +29,7 @@ export type SourceControlGitCredential = {
   repositoryFullName: string;
   username: string;
   token: string;
+  authScheme?: 'basic' | 'bearer';
   originBaseUrl?: string;
 };
 

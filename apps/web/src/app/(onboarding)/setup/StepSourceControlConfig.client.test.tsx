@@ -16,6 +16,7 @@ const { createGitHubAppManifestMock, saveMutationOptionsRef, mutateAsyncMock } =
   }));
 
 vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: undefined }),
   useMutation: (options: typeof saveMutationOptionsRef.current) => {
     saveMutationOptionsRef.current = options;
 
@@ -37,6 +38,12 @@ vi.mock('@/trpc/client', () => ({
       },
       status: {
         queryKey: () => ['setupNew.status'],
+      },
+    },
+    linkedAccounts: {
+      ado: {
+        queryKey: () => ['linkedAccounts.ado'],
+        queryOptions: () => ({ queryKey: ['linkedAccounts.ado'] }),
       },
     },
   }),
@@ -265,7 +272,7 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
-    expect(screen.getByText('Azure DevOps Access Token')).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Access Token/)).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
@@ -356,11 +363,13 @@ describe('StepSourceControlConfig', () => {
       values: {
         ADO_ORGANIZATION: 'my-org',
         ADO_TOKEN: 'ado-pat',
+        ADO_AUTH_MODE: 'pat',
+        ADO_LINKED_ACCOUNT_ID: '',
       },
     });
   });
 
-  it('includes advanced Azure DevOps values when the advanced section is open', async () => {
+  it('keeps Entra values separate from PAT values', async () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildAdoSourceControlSetup()}
@@ -372,11 +381,8 @@ describe('StepSourceControlConfig', () => {
     fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
       target: { value: 'my-org' },
     });
-    fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
-      target: { value: 'ado-pat' },
-    });
     fireEvent.click(
-      screen.getByRole('button', { name: 'Show advanced config' }),
+      screen.getByRole('button', { name: /Microsoft Entra app/ }),
     );
     fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
       target: { value: 'https://ado.example.com' },
@@ -399,12 +405,13 @@ describe('StepSourceControlConfig', () => {
       provider: 'ado',
       values: {
         ADO_ORGANIZATION: 'my-org',
-        ADO_TOKEN: 'ado-pat',
         ADO_BASE_URL: 'https://ado.example.com',
         ADO_USERNAME: 'service-user',
         ADO_CLIENT_ID: 'client-id',
         ADO_CLIENT_SECRET: 'client-secret',
         ADO_TENANT_ID: 'tenant-id',
+        ADO_AUTH_MODE: 'entra',
+        ADO_LINKED_ACCOUNT_ID: '',
       },
     });
   });

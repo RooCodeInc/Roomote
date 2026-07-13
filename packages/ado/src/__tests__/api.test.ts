@@ -7,10 +7,14 @@ const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
+  mockAuthAccountsFindFirst,
+  mockAuthAccountsUpdate,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
+  mockAuthAccountsFindFirst: vi.fn(),
+  mockAuthAccountsUpdate: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,10 +31,13 @@ vi.mock('@roomote/db/server', () => ({
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
       },
+      authAccounts: {
+        findFirst: (...args: unknown[]) => mockAuthAccountsFindFirst(...args),
+      },
     },
     select: vi.fn(),
     insert: vi.fn(),
-    update: vi.fn(),
+    update: (...args: unknown[]) => mockAuthAccountsUpdate(...args),
   },
   environments: {
     id: 'environments.id',
@@ -42,6 +49,11 @@ vi.mock('@roomote/db/server', () => ({
     fullName: 'repositories.fullName',
     cloneUrl: 'repositories.cloneUrl',
     externalRepoId: 'repositories.externalRepoId',
+  },
+  authAccounts: {
+    id: 'authAccounts.id',
+    accountId: 'authAccounts.accountId',
+    providerId: 'authAccounts.providerId',
   },
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
@@ -65,6 +77,7 @@ import {
   buildAdoOrganizationApiBaseUrl,
   buildAdoRepositoryValues,
   clearAdoDeploymentUserCache,
+  clearAdoEntraTokenCache,
   createAdoPullRequestComment,
   createTaskRunAdoCredentials,
   ensureAdoServiceHooksForRepositories,
@@ -72,6 +85,7 @@ import {
   getAdoDeploymentUser,
   listAdoRepositories,
   normalizeAdoLinkedAccountKey,
+  resolveAdoToken,
   validateAdoToken,
   type AdoRepository,
 } from '../api';
@@ -95,16 +109,33 @@ describe('Azure DevOps API helpers', () => {
   const originalAdoOrganization = process.env.ADO_ORGANIZATION;
   const originalAdoBaseUrl = process.env.ADO_BASE_URL;
   const originalAdoUsername = process.env.ADO_USERNAME;
+  const originalAdoClientId = process.env.ADO_CLIENT_ID;
+  const originalAdoClientSecret = process.env.ADO_CLIENT_SECRET;
+  const originalAdoTenantId = process.env.ADO_TENANT_ID;
+  const originalAdoAuthMode = process.env.ADO_AUTH_MODE;
+  const originalAdoLinkedAccountId = process.env.ADO_LINKED_ACCOUNT_ID;
 
   beforeEach(() => {
     vi.clearAllMocks();
     clearAdoDeploymentUserCache();
+    clearAdoEntraTokenCache();
     process.env.ADO_TOKEN = 'ado_deployment_token';
     process.env.ADO_ORGANIZATION = 'acme';
     delete process.env.ADO_BASE_URL;
     delete process.env.ADO_USERNAME;
+    delete process.env.ADO_CLIENT_ID;
+    delete process.env.ADO_CLIENT_SECRET;
+    delete process.env.ADO_TENANT_ID;
+    delete process.env.ADO_AUTH_MODE;
+    delete process.env.ADO_LINKED_ACCOUNT_ID;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
+    mockAuthAccountsFindFirst.mockResolvedValue(null);
+    mockAuthAccountsUpdate.mockReturnValue({
+      set: vi
+        .fn()
+        .mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+    });
     mockRepositoriesFindMany.mockResolvedValue([
       {
         fullName: 'acme/Platform/backend',
@@ -137,6 +168,17 @@ describe('Azure DevOps API helpers', () => {
     } else {
       process.env.ADO_USERNAME = originalAdoUsername;
     }
+
+    for (const [name, value] of [
+      ['ADO_CLIENT_ID', originalAdoClientId],
+      ['ADO_CLIENT_SECRET', originalAdoClientSecret],
+      ['ADO_TENANT_ID', originalAdoTenantId],
+      ['ADO_AUTH_MODE', originalAdoAuthMode],
+      ['ADO_LINKED_ACCOUNT_ID', originalAdoLinkedAccountId],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   });
 
   it('builds the organization API base URL from the Azure DevOps instance URL', () => {
@@ -146,6 +188,66 @@ describe('Azure DevOps API helpers', () => {
         organization: 'acme',
       }),
     ).toBe('https://dev.azure.com/acme');
+  });
+
+  it('acquires and caches a Microsoft Entra service-principal token when no PAT is configured', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_CLIENT_ID = 'client-id';
+    process.env.ADO_CLIENT_SECRET = 'client-secret';
+    process.env.ADO_TENANT_ID = 'tenant-id';
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'header.payload.signature',
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const first = await resolveAdoToken();
+    const second = await resolveAdoToken();
+
+    expect(first).toBe('header.payload.signature');
+    expect(second).toBe(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://login.microsoftonline.com/tenant-id/oauth2/v2.0/token',
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.any(URLSearchParams),
+      }),
+    );
+  });
+
+  it('refreshes and persists an Azure DevOps delegated token', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_AUTH_MODE = 'delegated';
+    process.env.ADO_LINKED_ACCOUNT_ID = 'ado-user@example.com';
+    process.env.ADO_CLIENT_ID = 'client-id';
+    process.env.ADO_CLIENT_SECRET = 'client-secret';
+    process.env.ADO_TENANT_ID = 'tenant-id';
+    mockAuthAccountsFindFirst.mockResolvedValue({
+      id: 'account-1',
+      accountId: 'ado-user@example.com',
+      accessToken: 'expired.token.value',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() - 60_000),
+    });
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'new.header.signature',
+          refresh_token: 'rotated-refresh-token',
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await expect(resolveAdoToken()).resolves.toBe('new.header.signature');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(mockAuthAccountsUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('lists Azure DevOps repositories with PAT basic auth', async () => {
@@ -348,7 +450,7 @@ describe('Azure DevOps API helpers', () => {
     ).resolves.toEqual({
       status: 'invalid',
       error:
-        'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+        'Azure DevOps rejected the access token. Confirm it is active, belongs to the organization, and has Code read access.',
     });
   });
 
@@ -499,6 +601,7 @@ describe('Azure DevOps API helpers', () => {
           repositoryFullName: 'acme/Platform/_git/backend',
           username: 'ado',
           token: 'ado_deployment_token',
+          authScheme: 'basic',
           originBaseUrl: 'https://dev.azure.com',
         },
       ],
@@ -536,6 +639,7 @@ describe('Azure DevOps API helpers', () => {
           repositoryFullName: 'acme/Platform/_git/backend',
           username: 'ado',
           token: 'ado_deployment_token',
+          authScheme: 'basic',
           originBaseUrl: 'https://ado.example.com/tfs',
         },
       ],

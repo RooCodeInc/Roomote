@@ -24,6 +24,7 @@ const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
 );
 
 vi.mock('@tanstack/react-query', () => ({
+  useQuery: () => ({ data: undefined }),
   useMutation: (options: typeof mutationOptionsRef.current) => {
     mutationOptionsRef.current = options;
     return {
@@ -51,6 +52,12 @@ vi.mock('@/trpc/client', () => ({
       },
       repositories: {
         queryKey: () => ['sourceControl.repositories'],
+      },
+    },
+    linkedAccounts: {
+      ado: {
+        queryKey: () => ['linkedAccounts.ado'],
+        queryOptions: () => ({ queryKey: ['linkedAccounts.ado'] }),
       },
     },
   }),
@@ -219,7 +226,7 @@ describe('SourceControlConfigForm', () => {
     });
   });
 
-  it('still renders the full Azure DevOps field set including advanced and webhook secret', () => {
+  it('renders the Azure DevOps auth modes and advanced fields', () => {
     const ado = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
       (provider) => provider.provider === 'ado',
     )!;
@@ -262,9 +269,12 @@ describe('SourceControlConfigForm', () => {
     );
 
     expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
-    expect(screen.getByText('Azure DevOps Access Token')).toBeInTheDocument();
+    expect(screen.getByText(/Azure DevOps Access Token/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+    );
     expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
     expect(
       screen.getByText(/Microsoft Entra Client Secret/),

@@ -274,6 +274,40 @@ describe('buildSetupSourceControlStatus', () => {
     });
   });
 
+  it('does not mark delegated Azure DevOps setup complete without a linked account', () => {
+    const incomplete = buildSetupSourceControlStatus({
+      persistedEnvVarNames: [
+        'ADO_ORGANIZATION',
+        'ADO_AUTH_MODE',
+        'ADO_CLIENT_ID',
+        'ADO_CLIENT_SECRET',
+        'ADO_TENANT_ID',
+      ],
+      persistedEnvVarValues: { ADO_AUTH_MODE: 'delegated' },
+    });
+    const complete = buildSetupSourceControlStatus({
+      persistedEnvVarNames: [
+        'ADO_ORGANIZATION',
+        'ADO_AUTH_MODE',
+        'ADO_LINKED_ACCOUNT_ID',
+        'ADO_CLIENT_ID',
+        'ADO_CLIENT_SECRET',
+        'ADO_TENANT_ID',
+      ],
+      persistedEnvVarValues: {
+        ADO_AUTH_MODE: 'delegated',
+        ADO_LINKED_ACCOUNT_ID: 'ado-user@example.com',
+      },
+    });
+
+    expect(
+      incomplete.providers.find((provider) => provider.provider === 'ado'),
+    ).toMatchObject({ configSatisfied: false });
+    expect(
+      complete.providers.find((provider) => provider.provider === 'ado'),
+    ).toMatchObject({ configSatisfied: true });
+  });
+
   it('marks config unsatisfied when a required field is missing', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: { ADO_ORGANIZATION: 'my-org' },
