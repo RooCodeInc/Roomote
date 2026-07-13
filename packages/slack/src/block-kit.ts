@@ -20,6 +20,7 @@ import {
   buildAccountLinkThreadReplyText as buildSharedAccountLinkThreadReplyText,
   buildRoutingConfirmationText,
   getUserRequestedModelDisplayName,
+  resolveUserFacingModelDisplayName,
 } from '@roomote/communication/chat-messages';
 import {
   type SlackInstallation,
@@ -2521,6 +2522,10 @@ export async function handleSlackRoutingCorrection({
 
       // Store new confirmation with fresh nonce.
       const correctionNonce = randomUUID();
+      const modelDisplayName = resolveUserFacingModelDisplayName({
+        model: result.model,
+        previousDisplayName: oldPrefill.modelDisplayName,
+      });
 
       const newPrefill: RoutingPrefillData = {
         agentName: newAgentName,
@@ -2528,9 +2533,7 @@ export async function handleSlackRoutingCorrection({
         workspaceValue: newWorkspaceValue,
         workspaceDisplayName: newWorkspaceDisplayName,
         modelId: result.model?.id ?? oldPrefill.modelId,
-        modelDisplayName:
-          getUserRequestedModelDisplayName(result.model) ??
-          oldPrefill.modelDisplayName,
+        modelDisplayName,
         workspaceType: result.workspace.type,
         teamId: slackInstallation.teamId,
         teamDomain: slackInstallation.teamDomain ?? oldPrefill.teamDomain,
@@ -2556,8 +2559,7 @@ export async function handleSlackRoutingCorrection({
           message: {
             blocks: buildRoutingConfirmBlocks(
               newWorkspaceDisplayName,
-              getUserRequestedModelDisplayName(result.model) ??
-                oldPrefill.modelDisplayName,
+              modelDisplayName,
               {
                 threadId,
                 confirmNonce: correctionNonce,
@@ -2577,8 +2579,7 @@ export async function handleSlackRoutingCorrection({
           thread_ts: threadId,
           blocks: buildRoutingConfirmBlocks(
             newWorkspaceDisplayName,
-            getUserRequestedModelDisplayName(result.model) ??
-              oldPrefill.modelDisplayName,
+            modelDisplayName,
             {
               threadId,
               confirmNonce: correctionNonce,

@@ -114,6 +114,30 @@ export function getUserRequestedModelDisplayName(
   return displayName || undefined;
 }
 
+/**
+ * Resolves the user-facing model display name for routing state that can carry
+ * either a freshly routed model selection or a previous correction prefill.
+ * When a new model selection is present, only preference-sourced names are kept
+ * so display names cannot outlive a later default/preserved `modelId`.
+ */
+export function resolveUserFacingModelDisplayName({
+  model,
+  previousDisplayName,
+}: {
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null;
+  previousDisplayName?: string | null;
+}): string | undefined {
+  if (model) {
+    return getUserRequestedModelDisplayName(model);
+  }
+
+  const previous = previousDisplayName?.trim();
+  return previous || undefined;
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
