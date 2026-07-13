@@ -873,8 +873,8 @@ export async function duplicateEnvironmentCommand(
 
 /**
  * Validates an environment configuration asynchronously against server-side
- * resources. Checks repository accessibility via the GitHub API (hard error)
- * and branch existence (soft warning).
+ * resources. Checks repository accessibility (hard error) and branch existence
+ * for providers with a branch-listing implementation (soft warning).
  */
 export async function validateConfigCommand(
   auth: UserAuthSuccess,
@@ -884,6 +884,10 @@ export async function validateConfigCommand(
 
   const errors: string[] = [];
   const warnings: string[] = [];
+  const repositoryProviders = new Map<
+    string,
+    (typeof repositories.$inferSelect)['sourceControlProvider']
+  >();
   const repositoryNames = [
     ...new Set(input.config.repositories.map((repo) => repo.repository)),
   ];
@@ -894,6 +898,7 @@ export async function validateConfigCommand(
         id: repositories.id,
         fullName: repositories.fullName,
         installationId: repositories.installationId,
+        sourceControlProvider: repositories.sourceControlProvider,
       })
       .from(repositories)
       .where(
@@ -908,6 +913,13 @@ export async function validateConfigCommand(
     if (repositoryConfigError) {
       errors.push(repositoryConfigError);
     }
+
+    for (const repository of dbRepos) {
+      repositoryProviders.set(
+        repository.fullName,
+        repository.sourceControlProvider,
+      );
+    }
   }
 
   await Promise.all(
@@ -921,8 +933,13 @@ export async function validateConfigCommand(
         return; // skip branch check if repo itself is inaccessible
       }
 
-      // If a branch is specified, check it exists
-      if (repo.branch) {
+      // Branch listing is currently implemented only for GitHub. Do not send
+      // repositories from other providers through the GitHub API: its
+      // provider-scoped lookup correctly returns no branches for those rows.
+      if (
+        repo.branch &&
+        repositoryProviders.get(repo.repository) === 'github'
+      ) {
         try {
           const branches = await GitHub.getBranches({
             userId,

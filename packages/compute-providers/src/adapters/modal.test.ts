@@ -444,6 +444,43 @@ describe('ModalClient', () => {
     );
   });
 
+  it('uses the VM runtime for fresh and resumed Docker sandboxes', async () => {
+    sandboxCreateMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      tunnels: vi.fn().mockResolvedValue({}),
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+      vmRuntime: true,
+    });
+
+    await client.createInstance({ ports: [3000] });
+
+    expect(sandboxCreateMock).toHaveBeenLastCalledWith(
+      { appId: 'app-123' },
+      { imageId: 'img-123' },
+      expect.objectContaining({
+        experimentalOptions: { vm_runtime: true },
+      }),
+    );
+
+    await client.resumeFromSnapshot({
+      sourceSnapshotId: 'img-snap-123',
+      ports: [3000],
+    });
+
+    expect(sandboxCreateMock).toHaveBeenLastCalledWith(
+      { appId: 'app-123' },
+      { imageId: 'img-snap-123' },
+      expect.objectContaining({
+        experimentalOptions: { vm_runtime: true },
+      }),
+    );
+  });
+
   it('uses the longer snapshot deadline and normalizes Modal snapshot RPC failures', async () => {
     const snapshotFilesystemMock = vi
       .fn()

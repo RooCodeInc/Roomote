@@ -12,6 +12,7 @@ const {
   mockGetPersistedEnvironmentVariableValues,
   mockResolveSavedWorkerImage,
   mockRunComputeProvisioning,
+  mockAcquireComputeProvisioningLock,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockDbInsert: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
+  mockAcquireComputeProvisioningLock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('./compute-provisioning', async (importOriginal) => {
@@ -32,6 +34,7 @@ vi.mock('./compute-provisioning', async (importOriginal) => {
 
   return {
     ...actual,
+    acquireComputeProvisioningLock: mockAcquireComputeProvisioningLock,
     runComputeProvisioning: mockRunComputeProvisioning,
   };
 });
@@ -424,7 +427,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: 'roomote-worker:tag-r2',
       });
     });
 
@@ -444,7 +447,7 @@ describe('compute commands', () => {
         provider: 'daytona',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker-tag',
+        templateRef: 'roomote-worker-tag-r2',
       });
     });
 
@@ -461,7 +464,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: 'roomote-worker:tag-r2',
       });
     });
 

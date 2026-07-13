@@ -103,6 +103,18 @@ export function getDockerWorkerContainerName(taskRunId: number): string {
   return `${WORKER_CONTAINER_PREFIX}${taskRunId}`;
 }
 
+export function getDockerTaskDaemonContainerName(
+  workerContainerName: string,
+): string {
+  return `${workerContainerName}-docker`;
+}
+
+export function getDockerTaskWorkspaceVolumeName(
+  workerContainerName: string,
+): string {
+  return `${workerContainerName}-workspace`;
+}
+
 export function buildDockerWorkerLabels(params: {
   taskRunId: number;
   autoRemove: boolean;
@@ -143,6 +155,27 @@ export function buildDockerWorkerResourceArgs(
     'NET_ADMIN',
     '--cap-drop',
     'NET_RAW',
+  ];
+}
+
+export function buildDockerTaskDaemonResourceArgs(
+  limits: DockerWorkerResourceLimits,
+): string[] {
+  return [
+    '--cpus',
+    String(limits.cpuLimit),
+    '--memory',
+    limits.memoryLimit,
+    '--memory-swap',
+    limits.memoryLimit,
+    '--pids-limit',
+    String(limits.pidsLimit),
+    '--log-driver',
+    'json-file',
+    '--log-opt',
+    `max-size=${limits.logMaxSize}`,
+    '--log-opt',
+    `max-file=${limits.logMaxFiles}`,
   ];
 }
 
@@ -348,7 +381,20 @@ export async function removeDockerSandboxResources(
     ['rm', '-f', getEgressPolicyHelperContainerName(params.containerName)],
     { allowFailure: true },
   );
+  await runDocker(
+    ['rm', '-f', getDockerTaskDaemonContainerName(params.containerName)],
+    { allowFailure: true },
+  );
   await runDocker(['rm', '-f', params.containerName], { allowFailure: true });
+  await runDocker(
+    [
+      'volume',
+      'rm',
+      '-f',
+      getDockerTaskWorkspaceVolumeName(params.containerName),
+    ],
+    { allowFailure: true },
+  );
   await removeDockerTaskNetwork(params.taskNetwork, runDocker);
 }
 

@@ -17,6 +17,8 @@ import type { SourceControlProvider } from './source-control';
  */
 export type SetupNewComputeProvisioningState = {
   status: 'building' | 'succeeded' | 'failed';
+  /** Worker runtime contract used to build this provider artifact. */
+  runtimeSchemaVersion: number;
   imageRef: string;
   /** Provider-side artifact reference (template, snapshot, or image ref). */
   templateRef: string | null;

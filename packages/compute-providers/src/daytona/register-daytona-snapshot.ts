@@ -1,4 +1,5 @@
 import { Daytona } from '@daytonaio/sdk';
+import { WORKER_RUNTIME_SCHEMA_TAG } from '@roomote/types';
 
 /**
  * Default name prefix for the Roomote worker base snapshot. The suffix is
@@ -14,7 +15,7 @@ export function deriveDaytonaWorkerSnapshotName(imageRef: string): string {
 
   const sanitizedTag = imageTag.toLowerCase().replace(/[^a-z0-9._-]/g, '-');
 
-  return `${DAYTONA_WORKER_SNAPSHOT_NAME_PREFIX}-${sanitizedTag}`;
+  return `${DAYTONA_WORKER_SNAPSHOT_NAME_PREFIX}-${sanitizedTag}-${WORKER_RUNTIME_SCHEMA_TAG}`;
 }
 
 export interface RegisterDaytonaWorkerSnapshotOptions {
@@ -30,7 +31,7 @@ export interface RegisterDaytonaWorkerSnapshotOptions {
    * registration has no per-call registry credentials.
    */
   imageRef: string;
-  /** Overrides the derived `roomote-worker-<image-tag>` snapshot name. */
+  /** Overrides `roomote-worker-<image-tag>-r<schema>`. */
   snapshotName?: string;
   onLog?: (chunk: string) => void;
 }

@@ -161,6 +161,8 @@ export async function spawnModalWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
+  const needsVmRuntime = Boolean(environmentConfig?.container_projects?.length);
+
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
@@ -267,6 +269,7 @@ export async function spawnModalWorker(
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
     ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
+    ...(needsVmRuntime ? { vmRuntime: true } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),

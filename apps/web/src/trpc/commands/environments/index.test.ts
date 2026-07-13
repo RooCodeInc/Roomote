@@ -1,27 +1,37 @@
-const { mockDbSelect, mockEnqueueTask, mockGetRepositories } = vi.hoisted(
-  () => ({
-    mockDbSelect: vi.fn(),
-    mockEnqueueTask: vi.fn().mockResolvedValue({
-      taskId: 'task-env-definition-1',
-      id: 'run-env-definition-1',
-    }),
-    mockGetRepositories: vi.fn().mockResolvedValue([
-      {
-        id: 'repo-1',
-        fullName: 'acme/api',
-        installationId: 'installation-1',
-      },
-      {
-        id: 'repo-2',
-        fullName: 'acme/web',
-        installationId: 'installation-1',
-      },
-    ]),
+const {
+  mockCheckRepoAccess,
+  mockDbSelect,
+  mockEnqueueTask,
+  mockGetBranches,
+  mockGetRepositories,
+} = vi.hoisted(() => ({
+  mockCheckRepoAccess: vi.fn(),
+  mockDbSelect: vi.fn(),
+  mockEnqueueTask: vi.fn().mockResolvedValue({
+    taskId: 'task-env-definition-1',
+    id: 'run-env-definition-1',
   }),
-);
+  mockGetBranches: vi.fn(),
+  mockGetRepositories: vi.fn().mockResolvedValue([
+    {
+      id: 'repo-1',
+      fullName: 'acme/api',
+      installationId: 'installation-1',
+    },
+    {
+      id: 'repo-2',
+      fullName: 'acme/web',
+      installationId: 'installation-1',
+    },
+  ]),
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
+}));
+
+vi.mock('@roomote/github', () => ({
+  getBranches: mockGetBranches,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -50,7 +60,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@/lib/server', () => ({
-  checkRepoAccess: vi.fn(),
+  checkRepoAccess: mockCheckRepoAccess,
   getRepositories: mockGetRepositories,
 }));
 
@@ -60,6 +70,7 @@ import {
   createEnvironmentCommand,
   startEnvironmentDefinitionTaskCommand,
   updateEnvironmentCommand,
+  validateConfigCommand,
 } from './index';
 
 function buildMockAuth(): UserAuthSuccess {
@@ -187,6 +198,74 @@ describe('environment repository validation', () => {
     expect(result).toEqual({
       success: false,
       error: 'Repositories are not linked to this deployment: roomote/Test ADO',
+    });
+  });
+
+  it('does not validate Azure DevOps branches through GitHub', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: async () => [
+          {
+            id: 'repo-ado',
+            fullName: 'roomote/Test ADO/Test ADO',
+            installationId: null,
+            sourceControlProvider: 'ado',
+          },
+        ],
+      }),
+    });
+    mockCheckRepoAccess.mockResolvedValue(true);
+
+    const result = await validateConfigCommand(buildMockAuth(), {
+      config: {
+        name: 'ADO Test',
+        repositories: [
+          {
+            repository: 'roomote/Test ADO/Test ADO',
+            branch: 'main',
+          },
+        ],
+      },
+    });
+
+    expect(result).toEqual({ errors: [], warnings: [] });
+    expect(mockGetBranches).not.toHaveBeenCalled();
+  });
+
+  it('continues warning when a GitHub branch is missing', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: async () => [
+          {
+            id: 'repo-github',
+            fullName: 'roomote/roomote',
+            installationId: 'installation-1',
+            sourceControlProvider: 'github',
+          },
+        ],
+      }),
+    });
+    mockCheckRepoAccess.mockResolvedValue(true);
+    mockGetBranches.mockResolvedValue(['main']);
+
+    const result = await validateConfigCommand(buildMockAuth(), {
+      config: {
+        name: 'GitHub Test',
+        repositories: [
+          { repository: 'roomote/roomote', branch: 'missing-branch' },
+        ],
+      },
+    });
+
+    expect(result).toEqual({
+      errors: [],
+      warnings: [
+        "Branch 'missing-branch' was not found in 'roomote/roomote'. It may not exist yet.",
+      ],
+    });
+    expect(mockGetBranches).toHaveBeenCalledWith({
+      userId: 'user-1',
+      fullName: 'roomote/roomote',
     });
   });
 });

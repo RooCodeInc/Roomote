@@ -40,6 +40,11 @@ Region and standby retention are also editable under **Settings > Sandboxes >
 Blaxel > Advanced settings**. Process environment variables take precedence
 and appear as locked values in Settings.
 
+Roomote's provisioned Blaxel worker image includes Docker, Docker Compose, and
+the legacy iptables backend required for
+[container projects](/environments/definition#container-projects). Container
+builds and services share the task sandbox's memory allocation.
+
 ## Verify setup
 
 1. Save the API key and workspace name.

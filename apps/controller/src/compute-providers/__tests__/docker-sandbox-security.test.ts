@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   attachDockerEgressPolicy,
+  buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerResourceArgs,
   cleanupStaleDockerSandboxes,
   getDockerTaskNetworkName,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
+  removeDockerSandboxResources,
   restoreDockerStandbyNetworking,
   type DockerCommand,
 } from '../docker-sandbox-security';
@@ -56,6 +58,46 @@ describe('buildDockerWorkerResourceArgs', () => {
         logMaxFiles: 3,
       }),
     ).not.toContain('--storage-opt');
+  });
+});
+
+describe('buildDockerTaskDaemonResourceArgs', () => {
+  it('bounds the daemon without dropping networking capabilities it needs', () => {
+    const args = buildDockerTaskDaemonResourceArgs({
+      cpuLimit: 2,
+      memoryLimit: '4g',
+      pidsLimit: 512,
+      diskLimit: '20g',
+      logMaxSize: '10m',
+      logMaxFiles: 3,
+    });
+
+    expect(args).toContain('--pids-limit');
+    expect(args).not.toContain('--cap-drop');
+    expect(args).not.toContain('--storage-opt');
+  });
+});
+
+describe('removeDockerSandboxResources', () => {
+  it('removes the task Docker daemon and shared workspace volume', async () => {
+    const runDocker = vi.fn<DockerCommand>().mockResolvedValue('');
+
+    await removeDockerSandboxResources(
+      {
+        containerName: 'roomote-worker-42',
+        taskNetwork: 'roomote-task-42',
+      },
+      runDocker,
+    );
+
+    expect(runDocker).toHaveBeenCalledWith(
+      ['rm', '-f', 'roomote-worker-42-docker'],
+      { allowFailure: true },
+    );
+    expect(runDocker).toHaveBeenCalledWith(
+      ['volume', 'rm', '-f', 'roomote-worker-42-workspace'],
+      { allowFailure: true },
+    );
   });
 });
 

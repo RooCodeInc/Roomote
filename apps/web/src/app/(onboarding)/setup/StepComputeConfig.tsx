@@ -121,6 +121,13 @@ export function StepComputeConfig({
           effectiveSelectedProviderId,
         )
       : null;
+  const selectedProvider = useMemo(
+    () =>
+      computeSetup.providers.find(
+        (provider) => provider.provider === effectiveSelectedProviderId,
+      ),
+    [computeSetup.providers, effectiveSelectedProviderId],
+  );
   const saveComputeConfig = useMutation(
     trpc.setupNew.saveComputeConfig.mutationOptions({
       onSuccess: async (result) => {
@@ -137,7 +144,10 @@ export function StepComputeConfig({
               )
             : null;
 
-        if (resultProvisioning?.status === 'building') {
+        if (
+          resultProvisioning?.status === 'building' &&
+          !selectedProvider?.configSatisfied
+        ) {
           setAwaitingTemplateBuild(true);
           return;
         }
@@ -159,10 +169,13 @@ export function StepComputeConfig({
 
   // Re-attach to an in-flight build (e.g. after a page reload mid-build).
   useEffect(() => {
-    if (templateBuild?.status === 'building') {
+    if (
+      templateBuild?.status === 'building' &&
+      !selectedProvider?.configSatisfied
+    ) {
       setAwaitingTemplateBuild(true);
     }
-  }, [templateBuild?.status]);
+  }, [selectedProvider?.configSatisfied, templateBuild?.status]);
 
   useEffect(() => {
     if (!awaitingTemplateBuild) {
@@ -183,14 +196,6 @@ export function StepComputeConfig({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [awaitingTemplateBuild, templateBuild?.status]);
-
-  const selectedProvider = useMemo(
-    () =>
-      computeSetup.providers.find(
-        (provider) => provider.provider === effectiveSelectedProviderId,
-      ),
-    [computeSetup.providers, effectiveSelectedProviderId],
-  );
 
   const credentialFields =
     selectedProvider?.fields.filter(isComputeCredentialField) ?? [];

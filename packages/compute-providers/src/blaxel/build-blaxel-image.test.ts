@@ -21,13 +21,19 @@ import {
 describe('Blaxel worker image provisioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFromRegistry.mockReturnValue({ hash: 'abc123', build: mockBuild });
+    const image = {
+      hash: 'abc123',
+      build: mockBuild,
+      runCommands: vi.fn(),
+    };
+    image.runCommands.mockReturnValue(image);
+    mockFromRegistry.mockReturnValue(image);
     mockDelete.mockResolvedValue(undefined);
   });
 
   it('derives a deterministic resource name from the Blaxel image hash', () => {
     expect(deriveBlaxelWorkerImageName('ghcr.io/roomote/worker:v1')).toBe(
-      'roomote-worker-abc123',
+      'roomote-worker-abc123-r2',
     );
   });
 
@@ -43,7 +49,7 @@ describe('Blaxel worker image provisioning', () => {
         imageRef: 'ghcr.io/roomote/worker:v1',
       }),
     ).resolves.toEqual({
-      imageName: 'roomote-worker-abc123',
+      imageName: 'roomote-worker-abc123-r2',
       imageRef: 'sandbox/roomote-worker:version',
     });
 
@@ -52,8 +58,8 @@ describe('Blaxel worker image provisioning', () => {
       workspace: 'workspace',
     });
     expect(mockBuild).toHaveBeenCalledWith(
-      expect.objectContaining({ name: 'roomote-worker-abc123' }),
+      expect.objectContaining({ name: 'roomote-worker-abc123-r2' }),
     );
-    expect(mockDelete).toHaveBeenCalledWith('roomote-worker-abc123');
+    expect(mockDelete).toHaveBeenCalledWith('roomote-worker-abc123-r2');
   });
 });

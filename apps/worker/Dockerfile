@@ -23,10 +23,13 @@ RUN apt-get update \
     ca-certificates \
     bubblewrap \
     curl \
+    docker.io \
+    docker-compose-v2 \
     unzip \
     jq \
     git \
     inotify-tools \
+    iptables \
     gnupg \
     netcat-openbsd \
     tar \
@@ -63,6 +66,9 @@ RUN apt-get update \
     libxrandr2 \
     libxss1 \
   && ln -sf "$(command -v python3)" /usr/local/bin/python \
+  && update-alternatives --set iptables /usr/sbin/iptables-legacy \
+  && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy \
+  && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8
@@ -100,7 +106,7 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 # Create user 'roomote' and grant passwordless sudo.
 RUN useradd -m -s /bin/bash roomote \
-  && usermod -aG sudo roomote \
+  && usermod -aG sudo,docker roomote \
   && echo 'roomote ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/roomote \
   && chmod 0440 /etc/sudoers.d/roomote
 
@@ -245,5 +251,10 @@ RUN sudo chmod +x /usr/local/bin/opencode \
 RUN sudo apt-get update \
   && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
   && sudo rm -rf /var/lib/apt/lists/*
+
+# Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
+# pass this explicitly; the default keeps direct/release Docker builds labeled.
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=2
+LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox

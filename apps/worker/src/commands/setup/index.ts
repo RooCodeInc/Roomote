@@ -16,6 +16,7 @@ export {
   type PrepareWorkspaceOptions,
   type PrepareWorkspaceResult,
   initializeRepositories,
+  initializeContainerProjects,
   initializeAllServices,
   installOrganizationEnvironmentSkills,
   executeOrganizationEnvironmentRepositoryCommands,

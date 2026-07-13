@@ -15,6 +15,21 @@ export async function register() {
       await import('@/lib/server/bootstrap-runtime-env');
 
     await bootstrapWebRuntimeEnv();
+
+    // Non-fatal, detached reconciliation of E2B/Daytona/Blaxel artifacts.
+    // A release image or worker-runtime schema change creates a replacement
+    // artifact and atomically activates it only after the build succeeds.
+    void import('@/trpc/commands/compute/compute-provisioning')
+      .then(({ reconcileComputeProvisioningOnStartup }) =>
+        reconcileComputeProvisioningOnStartup(),
+      )
+      .catch((error) => {
+        console.error(
+          `[instrumentation] Hosted worker artifact reconciliation failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
   }
 
   const environment = resolveWebSentryEnvironment();
