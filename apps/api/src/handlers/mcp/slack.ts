@@ -62,6 +62,7 @@ import {
   maybeAddCommunicationReaction,
   maybeSendCommunicationThreadReply,
 } from './communication-thread-replies';
+import { maybeSendCommunicationChannelPost } from './communication-channel-posts';
 import {
   buildThreadReplyImageBlocks,
   errorResponseForThreadReplyImageError,
@@ -1732,6 +1733,7 @@ slackMcp.post('/channel_post', async (c) => {
     columns: {
       id: true,
       taskId: true,
+      payload: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
@@ -1760,6 +1762,14 @@ slackMcp.post('/channel_post', async (c) => {
       { error: error instanceof Error ? error.message : 'Invalid JSON body' },
       400,
     );
+  }
+
+  const communicationResponse = await maybeSendCommunicationChannelPost({
+    taskRun,
+    parsedBody,
+  });
+  if (communicationResponse) {
+    return communicationResponse;
   }
 
   const slackInstallation = await db.query.slackInstallations.findFirst({

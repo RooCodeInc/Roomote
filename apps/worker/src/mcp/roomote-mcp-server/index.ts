@@ -45,7 +45,10 @@ import {
   type ChatReplyPurpose,
   recordChatReplySatisfaction,
 } from './chat-reply-satisfaction.js';
-import { handlePostToSlackChannel } from './post-to-slack-channel.js';
+import {
+  handlePostToChannel,
+  handlePostToSlackChannel,
+} from './post-to-slack-channel.js';
 import { handleGetSlackChannelMessages } from './get-slack-channel-messages.js';
 import { handleGetSlackThread } from './get-slack-thread.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
@@ -1213,6 +1216,85 @@ function recordSuccessfulSlackTurnSatisfactionResult(
 }
 
 if (shouldRegisterSlackChannelPostTool()) {
+  if (hasTelegramChatContext() || hasTeamsChatContext()) {
+    const postSurface = getChatReplySurfaceLabel();
+
+    roomoteMcpServer.registerTool(
+      'post_to_channel',
+      {
+        title: 'Post To Channel',
+        description:
+          `${postSurface}-visible: posts a new standalone message into the ${postSurface} conversation this task was launched from. ` +
+          'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
+          `Pass the ${postSurface} conversation ID this task originated from; posting to other conversations is not supported on ${postSurface}. ` +
+          'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
+        inputSchema: {
+          channel: z
+            .string()
+            .describe(
+              `${postSurface} conversation ID this task originated from`,
+            ),
+          text: z
+            .string()
+            .optional()
+            .describe(
+              'Markdown text to post. Lead with the answer or takeaway.',
+            ),
+          imagePaths: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Optional workspace-relative or /tmp image file paths to upload and attach',
+            ),
+          imageArtifactIds: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Optional already-uploaded artifact IDs for images that should be attached',
+            ),
+        },
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async (params): Promise<ToolResult> => {
+        const artifactConfig = getArtifactConfig();
+        if (!artifactConfig) {
+          return errorResult(
+            'ROOMOTE_CLOUD_TOKEN environment variable not set',
+          );
+        }
+
+        const roomoteConfig = getRoomoteConfig();
+        if (!roomoteConfig) {
+          return errorResult(
+            'ROOMOTE_CLOUD_TOKEN environment variable not set',
+          );
+        }
+
+        const taskId = process.env.ROOMOTE_TASK_ID;
+        if (!taskId?.trim()) {
+          return errorResult('ROOMOTE_TASK_ID environment variable not set');
+        }
+
+        return handlePostToChannel(
+          {
+            taskId,
+            channel: params.channel,
+            text: params.text,
+            imagePaths: params.imagePaths,
+            imageArtifactIds: params.imageArtifactIds,
+          },
+          artifactConfig,
+          roomoteConfig,
+        );
+      },
+    );
+  }
+
   if (
     hasSlackChatContext() ||
     hasTelegramChatContext() ||
