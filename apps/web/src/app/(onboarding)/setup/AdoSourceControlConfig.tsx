@@ -1,4 +1,4 @@
-import { Blocks, PlugZap, UserKey } from 'lucide-react';
+import { Blocks, PlugZap, UserCog, UserKey } from 'lucide-react';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
@@ -81,17 +81,11 @@ export function AdoSourceControlInstructions({
           Create a personal access token (PAT)
         </p>
         <p className="text-sm">
-          <a
-            href="https://dev.azure.com/_usersSettings/tokens"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="font-semibold text-foreground underline"
-          >
-            Go to your personal Azure settings
-          </a>{' '}
-          → Create a PAT → Grant Code read and write access, plus permission to
-          manage service hook subscriptions for the projects Roomote should
-          access.
+          Go to your personal Azure settings (
+          <UserCog className="inline size-4 ml-1" /> in the top right) →
+          Personal Access Tokens → New Token. Grant Code read and write access,
+          plus permission to manage service hook subscriptions for the projects
+          Roomote should access.
         </p>
       </div>
     );

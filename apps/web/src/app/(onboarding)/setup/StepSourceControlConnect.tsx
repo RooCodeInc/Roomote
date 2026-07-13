@@ -10,7 +10,13 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { BrandIcon, Button, Github, Spinner } from '@/components/system';
+import {
+  BrandIcon,
+  Button,
+  Github,
+  RefreshCcw,
+  Spinner,
+} from '@/components/system';
 import { useCreateGitHubInstallation } from '@/hooks/github/useCreateGitHubInstallation';
 import {
   useAdoLinkedAccount,
@@ -268,7 +274,9 @@ export function StepSourceControlConnect({
             >
               {syncRepositories.isPending || saveAdoLinkedAccount.isPending ? (
                 <Spinner />
-              ) : null}
+              ) : (
+                <RefreshCcw />
+              )}
               Sync repositories
             </Button>
           </div>
