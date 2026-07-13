@@ -71,6 +71,13 @@ export function StepInvoke({
           old ? { ...old, onboardingCompletedAt: new Date() } : old,
         );
 
+        // When an onboarding task is already known (background env setup),
+        // leave for that task before any await. Yielding first lets /setup's
+        // completed-setup guard race and flash Home before the task page.
+        if (onboardingTaskId) {
+          router.replace(`/task/${onboardingTaskId}`);
+        }
+
         // setup.complete also marks onboarding as completed server-side.
         // Invalidate both route guards so the next page load cannot reuse
         // stale cached status and bounce the user back into onboarding.
@@ -93,6 +100,10 @@ export function StepInvoke({
         queryClient.removeQueries({
           queryKey: trpc.github.installations.queryKey(),
         });
+
+        if (onboardingTaskId) {
+          return;
+        }
 
         const refreshedSetupNewStatus = await queryClient.fetchQuery(
           trpc.setupNew.status.queryOptions(undefined, { staleTime: 0 }),

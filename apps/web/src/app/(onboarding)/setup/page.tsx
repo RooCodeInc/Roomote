@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -213,7 +213,17 @@ export default function SetupPage() {
     shouldEvaluateSetupRedirect && !isSetupStatusError && setupStatus != null
       ? getSetupRedirectPath(setupStatus)
       : null;
+  // When the user finishes setup from the invoke step, setup.status flips to
+  // completed before StepInvoke navigates to the onboarding task. Without this
+  // guard the effect below would replace('/') first and flash Home.
+  const observedIncompleteSetupRef = useRef(false);
   useRedirectToSignIn(shouldRedirectToSignIn);
+
+  useEffect(() => {
+    if (setupStatus != null && setupStatus.setupCompletedAt == null) {
+      observedIncompleteSetupRef.current = true;
+    }
+  }, [setupStatus]);
 
   useEffect(() => {
     if (authStatus === 'signed-in' && !isAdmin) {
@@ -234,7 +244,7 @@ export default function SetupPage() {
         return;
       }
 
-      if (setupRedirectPath === null) {
+      if (setupRedirectPath === null && !observedIncompleteSetupRef.current) {
         router.replace('/');
         return;
       }

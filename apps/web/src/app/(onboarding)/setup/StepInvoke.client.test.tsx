@@ -272,17 +272,19 @@ describe('Setup StepInvoke', () => {
     );
 
     await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');
+    });
+    // Destination is already known from the invoke prop — do not wait on a
+    // setupNew.status refresh before leaving, or /setup can flash Home first.
+    expect(fetchQueryMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('environmentId='),
+    );
+    await waitFor(() => {
       expect(invalidateQueriesMock).toHaveBeenCalledWith({
         queryKey: queryKeys.setupStatus,
       });
     });
-    expect(fetchQueryMock).toHaveBeenCalledWith({
-      queryKey: ['setupNew.status'],
-    });
-    expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');
-    expect(replaceMock).not.toHaveBeenCalledWith(
-      expect.stringContaining('environmentId='),
-    );
   });
 
   it('uses the refreshed onboarding task id when finishing setup', async () => {
