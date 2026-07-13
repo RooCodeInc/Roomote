@@ -21,6 +21,15 @@ export type TelegramCommunicationProviderOptions = {
   fetch?: typeof fetch;
 };
 
+export type TelegramForumTopic = {
+  messageThreadId: string;
+  name: string;
+};
+
+export type TelegramBotInfo = {
+  hasTopicsEnabled: boolean;
+};
+
 type TelegramApiResponse =
   | {
       ok: true;
@@ -401,6 +410,65 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       chat_id: input.channelId,
       action: input.action ?? 'typing',
       ...(threadId ? { message_thread_id: threadId } : {}),
+    });
+  }
+
+  /**
+   * Read the bot capability flag Telegram exposes for private-chat Threaded
+   * Mode. This avoids probing createForumTopic for bots that have it disabled.
+   */
+  async getBotInfo(): Promise<TelegramBotInfo> {
+    const result = (await this.callBotApi('getMe', {})) as {
+      has_topics_enabled?: boolean;
+    };
+
+    return { hasTopicsEnabled: result.has_topics_enabled === true };
+  }
+
+  /**
+   * Create a task-owned topic in a forum supergroup or a private chat whose
+   * bot has Threaded Mode enabled in BotFather.
+   */
+  async createForumTopic(input: {
+    channelId: string;
+    name: string;
+  }): Promise<TelegramForumTopic> {
+    const result = (await this.callBotApi('createForumTopic', {
+      chat_id: input.channelId,
+      name: input.name,
+    })) as {
+      message_thread_id?: number;
+      name?: string;
+    };
+
+    if (!Number.isSafeInteger(result.message_thread_id)) {
+      throw new Error(
+        'Telegram createForumTopic returned no message_thread_id.',
+      );
+    }
+
+    return {
+      messageThreadId: String(result.message_thread_id),
+      name: result.name ?? input.name,
+    };
+  }
+
+  /** Rename an existing forum topic, including private-chat bot topics. */
+  async editForumTopic(input: {
+    channelId: string;
+    threadId: string;
+    name: string;
+  }): Promise<void> {
+    const threadId = parsePositiveInteger(input.threadId);
+
+    if (!threadId) {
+      throw new Error('Telegram editForumTopic requires a valid thread id.');
+    }
+
+    await this.callBotApi('editForumTopic', {
+      chat_id: input.channelId,
+      message_thread_id: threadId,
+      name: input.name,
     });
   }
 

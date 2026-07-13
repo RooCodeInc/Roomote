@@ -753,6 +753,14 @@ export interface EnqueueTaskOptions {
    */
   skipEarlyTitleGeneration?: boolean;
   /**
+   * Best-effort surface callback after the canonical early LLM title is
+   * generated. The task title is persisted before this callback runs.
+   */
+  onEarlyTitleGenerated?: (input: {
+    taskRun: TaskRun;
+    title: string;
+  }) => Promise<void> | void;
+  /**
    * Runs inside the run-creation transaction after the new run row is
    * inserted and before the transaction commits.
    */
@@ -1442,6 +1450,21 @@ async function enqueueFreshLaunch(
               lt(tasks.llmTitleCheckpoint, 1),
             ),
           );
+
+        if (shouldPersistGeneratedTitle && options.onEarlyTitleGenerated) {
+          try {
+            await options.onEarlyTitleGenerated({
+              taskRun,
+              title: generatedTitle,
+            });
+          } catch (error) {
+            console.warn(
+              `[enqueueTask] Early-title callback failed for task ${taskRun.taskId}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
       } catch (error) {
         console.warn(
           `[enqueueTask] Failed to generate early LLM title for task ${taskRun.taskId}: ${

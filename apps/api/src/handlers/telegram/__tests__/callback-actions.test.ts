@@ -89,13 +89,14 @@ import { handleTelegramCallbackQuery } from '../callback-actions.js';
 const WORK_ITEM_ID = 'work-item-1';
 const CLAIMED_AT = new Date('2026-07-01T12:00:00.000Z');
 
-function buildSuggestionQuery(): TelegramCallbackQuery {
+function buildSuggestionQuery(threadId?: number): TelegramCallbackQuery {
   return {
     id: 'callback-1',
     from: { id: 42, is_bot: false, first_name: 'Matt' },
     data: `idea:${WORK_ITEM_ID}`,
     message: {
       message_id: 100,
+      ...(threadId ? { message_thread_id: threadId } : {}),
       date: 0,
       chat: { id: 555, type: 'private' },
     },
@@ -121,6 +122,23 @@ beforeEach(() => {
 });
 
 describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
+  it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery(44));
+
+    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceNewTopic: true,
+        queuedMessage: expect.objectContaining({ threadTs: '44' }),
+        metadata: expect.objectContaining({ communicationThreadId: '44' }),
+      }),
+    );
+  });
+
   it('finalizes the work item with the task id and the claim token on success', async () => {
     startNewTelegramTaskMock.mockResolvedValue({
       status: 'started',

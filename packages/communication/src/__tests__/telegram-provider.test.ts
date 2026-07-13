@@ -13,6 +13,97 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('TelegramCommunicationProvider', () => {
+  it('reads the private-chat topics capability from getMe', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { has_topics_enabled: true } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(provider.getBotInfo()).resolves.toEqual({
+      hasTopicsEnabled: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/getMe',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('creates Telegram forum topics for task conversations', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: {
+          message_thread_id: 77,
+          name: 'Fix the flaky login test',
+        },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.createForumTopic({
+        channelId: '123',
+        name: 'Fix the flaky login test',
+      }),
+    ).resolves.toEqual({
+      messageThreadId: '77',
+      name: 'Fix the flaky login test',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/createForumTopic',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          name: 'Fix the flaky login test',
+        }),
+      }),
+    );
+  });
+
+  it('renames Telegram forum topics', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: true,
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      name: 'Fix flaky login tests',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/editForumTopic',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          message_thread_id: 77,
+          name: 'Fix flaky login tests',
+        }),
+      }),
+    );
+  });
+
   it('sends Telegram messages through the Bot API', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({

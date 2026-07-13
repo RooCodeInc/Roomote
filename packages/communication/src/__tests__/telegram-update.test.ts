@@ -257,13 +257,13 @@ describe('Telegram update helpers', () => {
     // neither stripped from the queued text nor treated specially.
     expect(
       telegramUpdateToQueuedCommunicationMessage(
-        buildUpdate('ping me when you are /done with the build', 'private', [
-          { type: 'bot_command', offset: 21, length: 5 },
+        buildUpdate('ping me when you are /status with the build', 'private', [
+          { type: 'bot_command', offset: 21, length: 7 },
         ]),
         { botUsername: 'roomote_bot' },
       ),
     ).toMatchObject({
-      text: 'ping me when you are /done with the build',
+      text: 'ping me when you are /status with the build',
     });
 
     expect(
@@ -363,7 +363,7 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: 'fix the flaky auth test' });
     });
 
-    it('detects /done as an alias for /new', () => {
+    it('does not recognize the removed /done alias', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(
@@ -372,7 +372,7 @@ describe('Telegram update helpers', () => {
             ]),
           ),
         ),
-      ).toEqual({ command: 'done', text: 'run the tests' });
+      ).toBeNull();
     });
 
     it('is case-insensitive on the command name', () => {
@@ -399,19 +399,7 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: '' });
     });
 
-    it('ignores /new and /done mentioned mid-sentence', () => {
-      expect(
-        getTelegramNewTaskCommand(
-          parse(
-            buildUpdate(
-              'ping me when you are /done with the build',
-              'private',
-              [{ type: 'bot_command', offset: 21, length: 5 }],
-            ),
-          ),
-        ),
-      ).toBeNull();
-
+    it('ignores /new mentioned mid-sentence', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(

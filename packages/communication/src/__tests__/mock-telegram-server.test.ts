@@ -75,6 +75,57 @@ describe('MockTelegramServer', () => {
     cleanups.push(fn);
   }
 
+  it('creates topics in private chats when the bot has Threaded Mode enabled', async () => {
+    const state = baseState();
+    state.bot = { ...state.bot!, has_topics_enabled: true };
+    const { server, baseUrl } = await startServer(state);
+    onCleanup(() => server.stop());
+
+    const topic = await providerFor(baseUrl).createForumTopic({
+      channelId: '111000111',
+      name: 'Fix the flaky login test',
+    });
+    await providerFor(baseUrl).postMessage({
+      channelId: '111000111',
+      threadId: topic.messageThreadId,
+      text: 'Task started.',
+    });
+    await providerFor(baseUrl).editForumTopic({
+      channelId: '111000111',
+      threadId: topic.messageThreadId,
+      name: 'Fix flaky login tests',
+    });
+
+    expect(topic.name).toBe('Fix the flaky login test');
+    expect(Number(topic.messageThreadId)).toBeGreaterThan(0);
+    expect(server.getState().messages).toContainEqual(
+      expect.objectContaining({
+        chat_id: '111000111',
+        message_thread_id: Number(topic.messageThreadId),
+        forum_topic_created: { name: 'Fix flaky login tests' },
+      }),
+    );
+    expect(server.getState().messages).toContainEqual(
+      expect.objectContaining({
+        chat_id: '111000111',
+        message_thread_id: Number(topic.messageThreadId),
+        text: 'Task started.',
+      }),
+    );
+  });
+
+  it('rejects private-chat topic creation when Threaded Mode is disabled', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    await expect(
+      providerFor(baseUrl).createForumTopic({
+        channelId: '111000111',
+        name: 'Fix the flaky login test',
+      }),
+    ).rejects.toThrow('chat is not a forum');
+  });
+
   it('stores a bot message posted through the real provider and anchors the reply', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
@@ -477,8 +528,8 @@ describe('computeTelegramEntities', () => {
   });
 
   it('marks mid-sentence commands the way Telegram does', () => {
-    expect(computeTelegramEntities('try running /done later')).toEqual([
-      { type: 'bot_command', offset: 12, length: 5 },
+    expect(computeTelegramEntities('try running /status later')).toEqual([
+      { type: 'bot_command', offset: 12, length: 7 },
     ]);
   });
 
