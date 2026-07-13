@@ -29,7 +29,7 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           path-to-document: https://github.com/RooCodeInc/Roomote/blob/develop/CLA.md
           branch: cla-signatures
-          allowlist: '*[bot]'
+          allowlist: "roomote,*[bot]"
           custom-notsigned-prcomment: >-
             Thank you for your contribution! Before we can merge this pull
             request, we need you to sign our [Contributor License
