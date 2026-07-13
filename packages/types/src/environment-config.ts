@@ -819,6 +819,24 @@ export function getEnvironmentRepositoryInstallationError(
   return MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR;
 }
 
+export function getMissingEnvironmentRepositoryError(
+  repositoryNames: string[],
+  repositoryRows: Array<{ fullName: string }>,
+): string | null {
+  const linkedRepositoryNames = new Set(
+    repositoryRows.map((repository) => repository.fullName),
+  );
+  const missingRepositories = repositoryNames.filter(
+    (name) => !linkedRepositoryNames.has(name),
+  );
+
+  if (missingRepositories.length === 0) {
+    return null;
+  }
+
+  return `Repositories are not linked to this deployment: ${missingRepositories.join(', ')}`;
+}
+
 export function getPrimaryPortFromConfig(
   ports: NamedPort[] | undefined,
 ): NamedPort | undefined {

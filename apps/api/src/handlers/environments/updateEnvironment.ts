@@ -9,7 +9,10 @@ import {
   repositories,
   updateEnvironmentDefinition,
 } from '@roomote/db/server';
-import { environmentConfigSchema } from '@roomote/types';
+import {
+  environmentConfigSchema,
+  getMissingEnvironmentRepositoryError,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -19,7 +22,6 @@ import {
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
   getEnvironmentRepositoryConfigError,
-  getMissingEnvironmentRepositoryError,
   isEnvironmentNameUniqueViolation,
   resolveEnvironmentWriteUserId,
 } from './createEnvironment';
@@ -181,7 +183,6 @@ export async function updateEnvironment(
       success: true,
       environmentId: id,
       name: config.name,
-      missingRepositories: [],
     });
   } catch (error) {
     if (isEnvironmentNameUniqueViolation(error)) {

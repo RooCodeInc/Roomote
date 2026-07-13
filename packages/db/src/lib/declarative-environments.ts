@@ -5,6 +5,7 @@ import type { EnvironmentConfig } from '@roomote/types';
 import {
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
+  getMissingEnvironmentRepositoryError,
 } from '@roomote/types';
 import { and, eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
 import YAML from 'yaml';
@@ -124,8 +125,6 @@ export type DeclarativeEnvironmentsSummary = {
    * unknown. Existing declarative markers are left untouched in that case.
    */
   orphaningDeferred: boolean;
-  /** Configured repository names that are not linked to the deployment yet. */
-  missingRepositories: string[];
 };
 
 type ParsedDefinitions = {
@@ -376,7 +375,6 @@ async function resolveConfiguredRepositories(config: EnvironmentConfig) {
     repositoryIds: repositoryNames
       .map((name) => repoMap.get(name)?.id)
       .filter((id): id is string => Boolean(id)),
-    missingRepositories: repositoryNames.filter((name) => !repoMap.has(name)),
   };
 }
 
@@ -465,13 +463,10 @@ async function updateDeclarativeEnvironment(
 
 async function applyDefinition(
   definition: DeclarativeEnvironmentDefinition,
-): Promise<
-  | { outcome: ApplyOutcome; missingRepositories: string[] }
-  | { skip: DeclarativeEnvironmentSkip }
-> {
+): Promise<{ outcome: ApplyOutcome } | { skip: DeclarativeEnvironmentSkip }> {
   const { config, source } = definition;
 
-  const { repositoryRows, repositoryIds, missingRepositories } =
+  const { repositoryRows, repositoryIds } =
     await resolveConfiguredRepositories(config);
 
   const repositoryConfigError =
@@ -479,6 +474,15 @@ async function applyDefinition(
 
   if (repositoryConfigError) {
     return { skip: { source, reason: repositoryConfigError } };
+  }
+
+  const missingRepositoryError = getMissingEnvironmentRepositoryError(
+    config.repositories.map((repository) => repository.repository),
+    repositoryRows,
+  );
+
+  if (missingRepositoryError) {
+    return { skip: { source, reason: missingRepositoryError } };
   }
 
   const findExisting = () =>
@@ -497,7 +501,7 @@ async function applyDefinition(
   if (!existing) {
     try {
       await createDeclarativeEnvironment(definition, repositoryIds);
-      return { outcome: 'created', missingRepositories };
+      return { outcome: 'created' };
     } catch (error) {
       if (!isEnvironmentNameUniqueViolation(error)) {
         throw error;
@@ -533,7 +537,7 @@ async function applyDefinition(
     repositoryIds,
   );
 
-  return { outcome, missingRepositories };
+  return { outcome };
 }
 
 /**
@@ -577,7 +581,6 @@ export async function applyDeclarativeEnvironments(options: {
     skipped: [],
     orphaned: [],
     orphaningDeferred: false,
-    missingRepositories: [],
   };
 
   const { definitions, skipped, hasUnresolvedNames } =
@@ -589,8 +592,6 @@ export async function applyDeclarativeEnvironments(options: {
   // orphaned back to manual management.
   const declaredNames = definitions.map((definition) => definition.config.name);
 
-  const missingRepositories = new Set<string>();
-
   for (const definition of definitions) {
     try {
       const result = await applyDefinition(definition);
@@ -601,10 +602,6 @@ export async function applyDeclarativeEnvironments(options: {
       }
 
       summary[result.outcome].push(definition.config.name);
-
-      for (const missing of result.missingRepositories) {
-        missingRepositories.add(missing);
-      }
     } catch (error) {
       if (isMissingRelationError(error)) {
         throw error;
@@ -616,8 +613,6 @@ export async function applyDeclarativeEnvironments(options: {
       });
     }
   }
-
-  summary.missingRepositories = [...missingRepositories];
 
   if (hasUnresolvedNames) {
     // Part of the declared set could not be read or validated, so the names
@@ -717,14 +712,6 @@ export async function bootstrapDeclarativeEnvironments(
       '[declarative-environments] Deferred orphan reconciliation: part of ' +
         'the declared set could not be read or validated, so existing ' +
         'declarative markers were left untouched.',
-    );
-  }
-
-  if (summary.missingRepositories.length > 0) {
-    log(
-      '[declarative-environments] Configured repositories not linked to ' +
-        'this deployment yet (mappings will backfill once linked): ' +
-        summary.missingRepositories.join(', '),
     );
   }
 

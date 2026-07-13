@@ -1,21 +1,24 @@
-const { mockEnqueueTask, mockGetRepositories } = vi.hoisted(() => ({
-  mockEnqueueTask: vi.fn().mockResolvedValue({
-    taskId: 'task-env-definition-1',
-    id: 'run-env-definition-1',
+const { mockDbSelect, mockEnqueueTask, mockGetRepositories } = vi.hoisted(
+  () => ({
+    mockDbSelect: vi.fn(),
+    mockEnqueueTask: vi.fn().mockResolvedValue({
+      taskId: 'task-env-definition-1',
+      id: 'run-env-definition-1',
+    }),
+    mockGetRepositories: vi.fn().mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'acme/api',
+        installationId: 'installation-1',
+      },
+      {
+        id: 'repo-2',
+        fullName: 'acme/web',
+        installationId: 'installation-1',
+      },
+    ]),
   }),
-  mockGetRepositories: vi.fn().mockResolvedValue([
-    {
-      id: 'repo-1',
-      fullName: 'acme/api',
-      installationId: 'installation-1',
-    },
-    {
-      id: 'repo-2',
-      fullName: 'acme/web',
-      installationId: 'installation-1',
-    },
-  ]),
-}));
+);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
@@ -26,7 +29,9 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   cancelTaskRunDirect: vi.fn(),
   createEnvironmentConfigVersionSnapshot: vi.fn(),
-  db: {},
+  db: {
+    select: mockDbSelect,
+  },
   desc: vi.fn(),
   environmentConfigVersions: {},
   environmentRepositoryMappings: {},
@@ -51,7 +56,11 @@ vi.mock('@/lib/server', () => ({
 
 import { TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
-import { startEnvironmentDefinitionTaskCommand } from './index';
+import {
+  createEnvironmentCommand,
+  startEnvironmentDefinitionTaskCommand,
+  updateEnvironmentCommand,
+} from './index';
 
 function buildMockAuth(): UserAuthSuccess {
   return {
@@ -113,5 +122,71 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         trigger: 'manual',
       }),
     );
+  });
+});
+
+describe('environment repository validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('rejects create when a configured repository is not linked', async () => {
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({ where: () => ({ limit: async () => [] }) }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: async () => [] }),
+      });
+
+    const result = await createEnvironmentCommand(buildMockAuth(), {
+      name: 'ADO Test',
+      config: {
+        name: 'ADO Test',
+        repositories: [{ repository: 'roomote/Test ADO' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Repositories are not linked to this deployment: roomote/Test ADO',
+    });
+  });
+
+  it('rejects update when a configured repository is not linked', async () => {
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: async () => [
+              {
+                id: 'env-1',
+                name: 'ADO Test',
+                description: null,
+                config: {
+                  name: 'ADO Test',
+                  repositories: [{ repository: 'roomote/Test ADO/Test ADO' }],
+                },
+              },
+            ],
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({ where: async () => [] }),
+      });
+
+    const result = await updateEnvironmentCommand(buildMockAuth(), {
+      id: 'env-1',
+      config: {
+        name: 'ADO Test',
+        repositories: [{ repository: 'roomote/Test ADO' }],
+      },
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error: 'Repositories are not linked to this deployment: roomote/Test ADO',
+    });
   });
 });

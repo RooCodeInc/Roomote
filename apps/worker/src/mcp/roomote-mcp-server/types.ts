@@ -100,14 +100,12 @@ export interface CreateEnvironmentResponse {
   success: boolean;
   environmentId: string;
   name: string;
-  missingRepositories: string[];
 }
 
 export interface UpdateEnvironmentResponse {
   success: boolean;
   environmentId: string;
   name: string;
-  missingRepositories: string[];
 }
 
 export interface SlackThreadReplyResponse {

@@ -14,6 +14,7 @@ import {
 import {
   type TaskPayload,
   environmentConfigSchema,
+  getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
 
@@ -68,24 +69,6 @@ export function getEnvironmentRepositoryConfigError(
   }>,
 ): string | null {
   return getEnvironmentRepositoryInstallationError(repositoryRows);
-}
-
-export function getMissingEnvironmentRepositoryError(
-  repositoryNames: string[],
-  repositoryRows: Array<{ fullName: string }>,
-): string | null {
-  const linkedRepositoryNames = new Set(
-    repositoryRows.map((repository) => repository.fullName),
-  );
-  const missingRepositories = repositoryNames.filter(
-    (name) => !linkedRepositoryNames.has(name),
-  );
-
-  if (missingRepositories.length === 0) {
-    return null;
-  }
-
-  return `Repositories are not linked to this deployment: ${missingRepositories.join(', ')}`;
 }
 
 function extractRunId(auth: McpAuth): number | null {
@@ -330,7 +313,6 @@ export async function createEnvironment(
       success: true,
       environmentId: created.id,
       name: config.name,
-      missingRepositories: [],
     });
   } catch (error) {
     if (isEnvironmentNameUniqueViolation(error)) {
