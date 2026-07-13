@@ -72,6 +72,10 @@ const VERCEL_PROJECT_TAB_PATH_REGEX = new RegExp(
   `^/(?!(?:${VERCEL_PUBLIC_SITE_ROOT_SEGMENT_PATTERN})(?:/|$))[^/]+/[^/]+/(?:analytics|deployments|domains|functions|logs|observability|settings|storage|usage)(?:/|$)`,
 );
 
+// Zero product surfaces: capability pages (/c/<id>), the service directory
+// (/browse), and the wallet/profile page. The rest of zero.xyz is marketing.
+const ZERO_APP_PATH_REGEX = /^\/(?:c|browse|profile)(?:\/|$)/;
+
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'asana',
@@ -221,7 +225,16 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     id: 'zero',
     name: 'Zero',
     availabilityKind: 'curated_oauth',
-    hostSuffixes: ['zero.xyz', 'withzero.ai'],
+    hostSuffixes: ['zero.xyz'],
+    hostRules: [
+      {
+        hostSuffix: 'mcp.zero.xyz',
+      },
+      {
+        hostSuffix: 'zero.xyz',
+        pathRegexes: [ZERO_APP_PATH_REGEX],
+      },
+    ],
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',
   },
