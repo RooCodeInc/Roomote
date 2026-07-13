@@ -73,6 +73,7 @@ import {
 } from './started-message-blocks';
 import { appendSlackVideoDescriptionsToText } from './video-descriptions';
 import { maybeNotifyManagerChannelForMcpSetupRequirement } from './manager-mcp-setup';
+import { postSlackMcpSetupSuggestion } from './mcp-setup-suggestion';
 import {
   finishRoutedStart,
   getSlackStartedMessageFollowUrl,
@@ -99,8 +100,6 @@ const MAX_TEXT_LENGTH = 75;
  * Redis key prefix for storing LLM routing pre-fill data for auto-confirm.
  */
 const ROUTING_PREFILL_PREFIX = 'routing_prefill:';
-const MCP_SETUP_INTERRUPT_PREFIX = 'slack:mcp-setup-interrupt:';
-const MCP_SETUP_INTERRUPT_TTL_SECONDS = 15 * 60;
 const SLACK_AUTH_NO_RESUME_SENTINEL = '__roomote:no-resume__';
 
 function formatSlackCode(value: string): string {
@@ -340,27 +339,6 @@ return val
 `;
 
 /**
- * Lua script to atomically GET + DEL an MCP setup interruption only when
- * the stored nonce and Slack user both match the interactive action.
- *
- * KEYS[1] = the interruption key
- * ARGV[1] = the expected nonce
- * ARGV[2] = the expected Slack user id
- *
- * Returns the stored JSON string if nonce + user match, nil otherwise.
- */
-const CLAIM_MCP_SETUP_INTERRUPT_LUA = `
-local val = redis.call('get', KEYS[1])
-if not val then return nil end
-local ok, data = pcall(cjson.decode, val)
-if not ok then return nil end
-if data.nonce ~= ARGV[1] then return nil end
-if data.slackUserId ~= ARGV[2] then return nil end
-redis.call('del', KEYS[1])
-return val
-`;
-
-/**
  * Data stored in Redis for a pending Slack routing confirmation.
  */
 interface RoutingPrefillData {
@@ -394,23 +372,6 @@ interface RoutingConfirmActionValue {
 
 interface RetryFailedTaskActionValue {
   runId: number;
-}
-
-interface PendingSlackMcpSetupInterruptData {
-  threadId: string;
-  teamId: string;
-  slackUserId: string;
-  channel: string;
-  originalEvent: SlackEvent;
-  normalizedTaskText: string;
-  serviceId: string;
-  serviceName: string;
-  reason: SlackMcpSetupRequirement['reason'];
-  canConfigure: boolean;
-  settingsUrl: string;
-  copyVariant: SlackMcpSetupRequirement['copyVariant'];
-  originalMessageTs: string;
-  nonce: string;
 }
 
 export function getSlackRoutingAutoConfirmDelayMs(
@@ -537,26 +498,6 @@ function parseRetryFailedTaskActionValue(
 }
 
 /**
- * Atomically claims Slack MCP setup interruption data only if the nonce
- * and clicking Slack user from the interactive action match the stored
- * interruption data.
- */
-async function claimSlackMcpSetupInterruptWithNonce(
-  threadId: string,
-  expectedNonce: string,
-  expectedSlackUserId: string,
-): Promise<string | null> {
-  const result = await getRedis().eval(
-    CLAIM_MCP_SETUP_INTERRUPT_LUA,
-    1,
-    getSlackMcpSetupInterruptKey(threadId),
-    expectedNonce,
-    expectedSlackUserId,
-  );
-  return result as string | null;
-}
-
-/**
  * Checks if there is a pending routing confirmation for a thread.
  * Used to detect whether an incoming message is a correction to a routing suggestion.
  */
@@ -569,25 +510,6 @@ export async function hasPendingRoutingConfirmation(
   return exists === 1;
 }
 
-function getSlackMcpSetupInterruptKey(threadId: string): string {
-  return `${MCP_SETUP_INTERRUPT_PREFIX}${threadId}`;
-}
-
-export async function hasPendingSlackMcpSetupInterrupt(
-  threadId: string,
-): Promise<boolean> {
-  const exists = await getRedis().exists(
-    getSlackMcpSetupInterruptKey(threadId),
-  );
-  return exists === 1;
-}
-
-export async function clearPendingSlackMcpSetupInterrupt(
-  threadId: string,
-): Promise<void> {
-  await getRedis().del(getSlackMcpSetupInterruptKey(threadId));
-}
-
 /**
  * Truncate text to a maximum length, adding ellipsis if needed.
  * Slack Block Kit has a character limit for text fields in options.
@@ -598,84 +520,6 @@ function truncateText(text: string, maxLength = MAX_TEXT_LENGTH): string {
   }
 
   return text.slice(0, maxLength - 3) + '...';
-}
-
-function buildSlackMcpSetupInterruptBlocks(
-  data: Pick<
-    PendingSlackMcpSetupInterruptData,
-    | 'serviceName'
-    | 'reason'
-    | 'canConfigure'
-    | 'settingsUrl'
-    | 'copyVariant'
-    | 'nonce'
-  >,
-): SlackBlock[] {
-  const secondaryText =
-    data.copyVariant === 'deployment_disabled_non_admin'
-      ? `To do that, please ask a ${PRODUCT_NAME} admin to enable it in the web app.`
-      : data.copyVariant === 'deployment_auth_required_non_admin'
-        ? `To do that, please ask a ${PRODUCT_NAME} admin to connect it in the web app.`
-        : data.copyVariant === 'deployment_disabled_admin'
-          ? 'To do that, please enable it in the web app.'
-          : data.copyVariant === 'deployment_auth_required_admin'
-            ? 'To do that, please finish connecting it in the web app.'
-            : 'To do that, please enable it in the web app and then link your account.';
-
-  return [
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `That seems like a ${data.serviceName} link.\nWant me to be able to read it?\n*${secondaryText}*`,
-      },
-    },
-    {
-      type: 'actions',
-      block_id: 'mcp_setup_interrupt',
-      elements: [
-        {
-          type: 'button',
-          action_id: 'mcp_setup_configure',
-          text: {
-            type: 'plain_text',
-            text: data.canConfigure ? 'Configure' : 'Open settings',
-            emoji: false,
-          },
-          url: data.settingsUrl,
-          style: 'primary',
-          value: data.nonce,
-        },
-        {
-          type: 'button',
-          action_id: 'mcp_setup_ignore',
-          text: { type: 'plain_text', text: 'Nah, keep going', emoji: true },
-          value: data.nonce,
-        },
-      ],
-    },
-  ];
-}
-
-function buildSlackMcpSetupFollowUpBlocks(
-  copyVariant: PendingSlackMcpSetupInterruptData['copyVariant'],
-): SlackBlock[] {
-  const text =
-    copyVariant === 'deployment_disabled_non_admin'
-      ? 'Ask an admin to finish setup in the web app, then send this request again.'
-      : copyVariant === 'deployment_auth_required_non_admin'
-        ? 'Ask an admin to connect it in the web app, then send this request again.'
-        : 'Finish setup in the web app, then send this request again.';
-
-  return [
-    {
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text,
-      },
-    },
-  ];
 }
 
 function buildPlatformAnswerMessage(
@@ -931,7 +775,7 @@ export async function showTaskConfiguration({
   userMapping,
   slack,
   skipRouting,
-  skipMcpSetupInterrupt,
+  skipMcpSetupSuggestion,
   replaceMessageTs,
   processingReactionName,
 }: {
@@ -940,7 +784,7 @@ export async function showTaskConfiguration({
   userMapping: SlackUserMapping;
   slack: SlackNotifier;
   skipRouting?: boolean;
-  skipMcpSetupInterrupt?: boolean;
+  skipMcpSetupSuggestion?: boolean;
   /** When provided, update this message instead of posting a new one. */
   replaceMessageTs?: string;
   processingReactionName?: string;
@@ -1038,63 +882,25 @@ export async function showTaskConfiguration({
 
     if (!skipRouting) {
       try {
-        if (!skipMcpSetupInterrupt) {
-          const setupRequirement = await detectSlackMcpSetupRequirement(
+        // Missing MCP setup never blocks the task. When the message links to
+        // a service without a usable connection, a small suggestion is posted
+        // in the thread (after routing decides a task flow is happening) and
+        // the manager channel is pinged.
+        let setupRequirement: SlackMcpSetupRequirement | null = null;
+
+        if (!skipMcpSetupSuggestion) {
+          setupRequirement = await detectSlackMcpSetupRequirement(
             taskDescription,
             {
               userId: userMapping.userId,
               apiBaseUrl: Env.R_APP_URL,
             },
-          );
-
-          if (setupRequirement) {
-            void maybeNotifyManagerChannelForMcpSetupRequirement({
-              triggeredByUserId: userMapping.userId,
-              triggeredBySlackUserId: event.user,
-              requirement: setupRequirement,
-              slack,
-            }).catch((error) => {
-              console.warn(
-                `[SlackMcpSetup] Failed to notify manager channel: ${error instanceof Error ? error.message : String(error)}`,
-              );
-            });
-
-            const interruptData: PendingSlackMcpSetupInterruptData = {
-              threadId,
-              teamId: slackInstallation.teamId,
-              slackUserId: event.user,
-              channel: event.channel,
-              originalEvent: event,
-              normalizedTaskText: taskDescription,
-              serviceId: setupRequirement.serviceId,
-              serviceName: setupRequirement.serviceName,
-              reason: setupRequirement.reason,
-              canConfigure: setupRequirement.canConfigure,
-              settingsUrl: setupRequirement.settingsUrl,
-              copyVariant: setupRequirement.copyVariant,
-              originalMessageTs: event.ts,
-              nonce: randomUUID(),
-            };
-
-            await redis.set(
-              getSlackMcpSetupInterruptKey(threadId),
-              JSON.stringify(interruptData),
-              'EX',
-              MCP_SETUP_INTERRUPT_TTL_SECONDS,
+          ).catch((error) => {
+            console.warn(
+              `[SlackMcpSetup] Setup detection failed for thread ${threadId}: ${error instanceof Error ? error.message : String(error)}`,
             );
-
-            await postOrReplaceSlackMessage({
-              slack,
-              channel: event.channel,
-              threadId,
-              replaceMessageTs,
-              message: {
-                blocks: buildSlackMcpSetupInterruptBlocks(interruptData),
-              },
-            });
-
-            return { routingUsed: false, threadId };
-          }
+            return null;
+          });
         }
 
         // Fetch thread messages for context if this is a reply in a thread
@@ -1176,6 +982,33 @@ export async function showTaskConfiguration({
           }
 
           return { routingUsed: false, threadId };
+        }
+
+        // A task flow is proceeding (routed or manual picker) — surface the
+        // non-blocking setup suggestion now, so it never shows on pure Q&A
+        // platform answers.
+        if (setupRequirement) {
+          void maybeNotifyManagerChannelForMcpSetupRequirement({
+            triggeredByUserId: userMapping.userId,
+            triggeredBySlackUserId: event.user,
+            requirement: setupRequirement,
+            slack,
+          }).catch((error) => {
+            console.warn(
+              `[SlackMcpSetup] Failed to notify manager channel: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          });
+
+          const suggestionTs = await postSlackMcpSetupSuggestion({
+            slack,
+            channel: event.channel,
+            threadId,
+            suggestion: setupRequirement,
+          });
+
+          if (suggestionTs) {
+            deliveryTracker.track(suggestionTs);
+          }
         }
 
         if (decision.status === 'routed') {
@@ -1567,124 +1400,6 @@ export async function showTaskConfiguration({
   } finally {
     await deliveryTracker.commit();
   }
-}
-
-export async function handleSlackMcpSetupConfigure(
-  payload: SlackInteractivePayload,
-) {
-  const threadId = payload.message.thread_ts || payload.message.ts;
-  const expectedNonce =
-    payload.actions[0]?.type === 'button'
-      ? (payload.actions[0].value ?? undefined)
-      : undefined;
-
-  if (!expectedNonce) {
-    console.warn(
-      `[SlackMcpSetupConfigure] Missing nonce for thread ${threadId}; ignoring stale or malformed action`,
-    );
-    return;
-  }
-
-  const interruptJson = await claimSlackMcpSetupInterruptWithNonce(
-    threadId,
-    expectedNonce,
-    payload.user.id,
-  );
-
-  if (!interruptJson) {
-    return;
-  }
-
-  let interrupt: PendingSlackMcpSetupInterruptData;
-  try {
-    interrupt = JSON.parse(interruptJson) as PendingSlackMcpSetupInterruptData;
-  } catch {
-    console.error(
-      `[SlackMcpSetupConfigure] Failed to parse interrupt data for thread ${threadId}`,
-    );
-    return;
-  }
-
-  await postSlackInteractiveResponse(payload.response_url, {
-    replace_original: true,
-    blocks: buildSlackMcpSetupFollowUpBlocks(interrupt.copyVariant),
-  });
-}
-
-export async function handleSlackMcpSetupIgnore(
-  payload: SlackInteractivePayload,
-) {
-  const teamId = payload.team.id;
-  const threadId = payload.message.thread_ts || payload.message.ts;
-  const expectedNonce =
-    payload.actions[0]?.type === 'button'
-      ? (payload.actions[0].value ?? undefined)
-      : undefined;
-
-  if (!expectedNonce) {
-    console.warn(
-      `[SlackMcpSetupIgnore] Missing nonce for thread ${threadId}; ignoring stale or malformed action`,
-    );
-    return;
-  }
-
-  const interruptJson = await claimSlackMcpSetupInterruptWithNonce(
-    threadId,
-    expectedNonce,
-    payload.user.id,
-  );
-
-  if (!interruptJson) {
-    return;
-  }
-
-  let interrupt: PendingSlackMcpSetupInterruptData;
-  try {
-    interrupt = JSON.parse(interruptJson) as PendingSlackMcpSetupInterruptData;
-  } catch {
-    console.error(
-      `[SlackMcpSetupIgnore] Failed to parse interrupt data for thread ${threadId}`,
-    );
-    return;
-  }
-
-  const [slackInstallation] = await db
-    .select()
-    .from(slackInstallations)
-    .where(eq(slackInstallations.teamId, teamId))
-    .limit(1);
-
-  if (!slackInstallation) {
-    console.error('[SlackMcpSetupIgnore] Slack installation not found');
-    return;
-  }
-
-  const [userMapping] = await db
-    .select()
-    .from(slackUserMappings)
-    .where(
-      and(
-        eq(slackUserMappings.slackUserId, interrupt.originalEvent.user),
-        eq(slackUserMappings.slackTeamId, teamId),
-      ),
-    )
-    .limit(1);
-
-  if (!userMapping) {
-    console.error('[SlackMcpSetupIgnore] User mapping not found');
-    return;
-  }
-
-  const slack = new SlackNotifier(slackInstallation.botAccessToken);
-
-  await showTaskConfiguration({
-    event: interrupt.originalEvent,
-    slackInstallation,
-    userMapping,
-    slack,
-    skipMcpSetupInterrupt: true,
-    replaceMessageTs: payload.message.ts,
-  });
 }
 
 export async function handleTaskConfiguration(

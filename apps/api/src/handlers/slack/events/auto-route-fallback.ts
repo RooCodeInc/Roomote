@@ -60,7 +60,7 @@ export async function showManualPickerForAutoRouteFallback(params: {
     userMapping: params.userMapping as SlackUserMapping,
     slack: params.slack,
     skipRouting: true,
-    skipMcpSetupInterrupt: true,
+    skipMcpSetupSuggestion: true,
     processingReactionName: params.processingReactionName,
   });
 
