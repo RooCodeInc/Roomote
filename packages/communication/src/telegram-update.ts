@@ -519,8 +519,15 @@ export function telegramUpdateToQueuedCommunicationMessage(
   }
 
   const sourceText = message.text ?? message.caption ?? '';
-  const text = sourceText
-    ? stripTelegramBotInvocation(sourceText, message, options)
+  const invocationMessage =
+    message.caption && !message.text
+      ? { ...message, entities: message.caption_entities }
+      : message;
+  const strippedText = sourceText
+    ? stripTelegramBotInvocation(sourceText, invocationMessage, options)
+    : '';
+  const text = strippedText
+    ? strippedText
     : message.photo?.length
       ? 'Image attachment'
       : message.document

@@ -354,6 +354,40 @@ describe('Telegram update helpers', () => {
     ).toMatchObject({ text: 'Image attachment' });
   });
 
+  it('strips bot mentions from group media captions', () => {
+    const buildCaptionUpdate = (caption: string) =>
+      parseTelegramUpdate({
+        update_id: 4002,
+        message: {
+          message_id: 71,
+          chat: { id: -1007, type: 'group', title: 'Engineering' },
+          caption,
+          caption_entities: [{ type: 'mention', offset: 0, length: 12 }],
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-1',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }).data!;
+
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(
+        buildCaptionUpdate('@roomote_bot what is this?'),
+        { botUsername: 'roomote_bot' },
+      ),
+    ).toMatchObject({ text: 'what is this?' });
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(
+        buildCaptionUpdate('@roomote_bot'),
+        { botUsername: 'roomote_bot' },
+      ),
+    ).toMatchObject({ text: 'Image attachment' });
+  });
+
   describe('getTelegramNewTaskCommand', () => {
     const buildUpdate = (
       text: string,

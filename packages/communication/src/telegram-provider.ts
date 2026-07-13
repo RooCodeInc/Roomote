@@ -648,7 +648,8 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
         });
         if (
           attempt < this.maxRetries &&
-          (response.status === 429 || response.status >= 500)
+          (response.status === 429 ||
+            (options.retryNetworkErrors && response.status >= 500))
         ) {
           const body = (await response
             .clone()
