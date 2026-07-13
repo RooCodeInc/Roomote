@@ -22,6 +22,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { NumberedStep } from './NumberedStep';
 import { ProviderSetupInstructions } from './ProviderSetupInstructions';
 import { getProviderSetupCopy } from './providerSetupCopy';
 
@@ -153,25 +154,6 @@ export function getSetupSubmitValues({
   // writing snapshots here locks derived config so client-id updates drift.
 
   return nextValues;
-}
-
-function NumberedStep({
-  number,
-  children,
-  className,
-}: {
-  number: number;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`flex gap-2 items-start ${className ?? ''}`}>
-      <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
-        {number}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1">{children}</div>
-    </div>
-  );
 }
 
 function InstructionUrl({ heading, url }: { heading: string; url: string }) {

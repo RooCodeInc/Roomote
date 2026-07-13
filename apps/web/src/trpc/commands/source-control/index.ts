@@ -32,6 +32,7 @@ import { Env } from '@/lib/server/env';
 
 import {
   assertAdmin,
+  deleteDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
@@ -663,6 +664,32 @@ export async function saveSourceControlConfigValues(params: {
   }
 
   if (valuesToSave.length > 0) {
+    if (params.provider === 'ado') {
+      const authMode =
+        params.values?.['ADO_AUTH_MODE']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ||
+        (params.values?.['ADO_TOKEN']?.trim() ? 'pat' : 'entra');
+      const usesEntraCredentials = Boolean(
+        params.values?.['ADO_CLIENT_ID']?.trim() ||
+        params.values?.['ADO_CLIENT_SECRET']?.trim() ||
+        params.values?.['ADO_TENANT_ID']?.trim(),
+      );
+      await deleteDeploymentEnvironmentVariables(
+        params.executor,
+        authMode === 'pat'
+          ? [
+              'ADO_CLIENT_ID',
+              'ADO_CLIENT_SECRET',
+              'ADO_TENANT_ID',
+              'ADO_LINKED_ACCOUNT_ID',
+            ]
+          : usesEntraCredentials
+            ? ['ADO_TOKEN']
+            : params.values?.['ADO_TOKEN']?.trim()
+              ? ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID']
+              : [],
+      );
+    }
     await upsertDeploymentEnvironmentVariables(params.executor, {
       userId: params.actorUserId,
       values: valuesToSave,
@@ -681,6 +708,7 @@ export async function saveSourceControlConfigValues(params: {
 export async function assertValidSourceControlConfigInput(params: {
   provider: SourceControlProvider;
   values?: Partial<Record<string, string>>;
+  allowIncompleteDelegated?: boolean;
 }): Promise<void> {
   const nextGitLabToken =
     params.provider === 'gitlab'
@@ -696,8 +724,52 @@ export async function assertValidSourceControlConfigInput(params: {
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
-      ? params.values?.['ADO_TOKEN']?.trim()
+      ? (params.values?.['ADO_TOKEN']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_TOKEN')))
       : undefined;
+  const nextAdoClientId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_CLIENT_ID')))
+      : undefined;
+  const nextAdoClientSecret =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET')))
+      : undefined;
+  const nextAdoTenantId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_TENANT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
+        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID')))
+      : undefined;
+  const nextAdoAuthMode =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_AUTH_MODE']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ??
+        (nextAdoToken ? 'pat' : 'entra'))
+      : undefined;
+  const nextAdoLinkedAccountId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID')))
+      : undefined;
+
+  if (
+    params.provider === 'ado' &&
+    (nextAdoAuthMode === 'pat'
+      ? !nextAdoToken
+      : !(nextAdoClientId && nextAdoClientSecret && nextAdoTenantId) ||
+        (nextAdoAuthMode === 'delegated' &&
+          !nextAdoLinkedAccountId &&
+          !params.allowIncompleteDelegated))
+  ) {
+    throw new Error(
+      nextAdoAuthMode === 'delegated'
+        ? 'Connect an Azure DevOps account and provide the Microsoft Entra client ID, client secret, and tenant ID.'
+        : 'Configure either an Azure DevOps access token or a Microsoft Entra client ID, client secret, and tenant ID.',
+    );
+  }
 
   if (nextGitLabToken) {
     const validation = await GitLab.validateGitLabToken({

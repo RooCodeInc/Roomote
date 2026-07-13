@@ -588,7 +588,8 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const onboardingEnvironmentId =
     task.workflow === 'setup_onboarding' &&
-    (taskRun.status === RunStatus.Completed ||
+    (taskRun.status === RunStatus.Running ||
+      taskRun.status === RunStatus.Completed ||
       (taskRun.status === RunStatus.Idle &&
         taskRun.taskPhase === 'waiting_for_prompt'))
       ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)

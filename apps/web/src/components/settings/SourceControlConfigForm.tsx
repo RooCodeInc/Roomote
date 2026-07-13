@@ -7,6 +7,10 @@ import type { SetupSourceControlStatus } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { Button, Check, Input, Spinner } from '@/components/system';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
@@ -95,6 +99,26 @@ export function SourceControlConfigForm({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
+    'pat',
+  );
+  const adoLinkedAccount = useAdoLinkedAccount();
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
+
+  const isAdo = provider === 'ado';
+  const fieldsForAuthMode = (fields: readonly SourceControlField[]) =>
+    fields.filter(
+      (field) =>
+        field.settingsHidden !== true &&
+        (!isAdo
+          ? true
+          : adoAuthMode === 'pat'
+            ? field.envVarName !== 'ADO_CLIENT_ID' &&
+              field.envVarName !== 'ADO_CLIENT_SECRET' &&
+              field.envVarName !== 'ADO_TENANT_ID'
+            : field.envVarName !== 'ADO_TOKEN'),
+    );
+  const visibleFields = fieldsForAuthMode(providerStatus?.fields ?? []);
 
   const saveConfig = useMutation(
     trpc.sourceControl.saveConfig.mutationOptions({
@@ -108,7 +132,7 @@ export function SourceControlConfigForm({
         // Secret-only saves leave non-secret content keys unchanged, so the
         // content-keyed reset effect will not run — clear secrets explicitly.
         setValues((current) =>
-          withoutSecretFieldValues(providerStatus?.fields ?? [], current),
+          withoutSecretFieldValues(visibleFields, current),
         );
         setEditingSavedValues({});
         toast.success(
@@ -125,15 +149,66 @@ export function SourceControlConfigForm({
   useEffect(() => {
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
-  }, [provider, nonSecretInitialValues]);
+    if (isAdo) {
+      const configuredMode = providerStatus?.fields.find(
+        (field) => field.envVarName === 'ADO_AUTH_MODE',
+      )?.savedValue;
+      const hasPat = providerStatus?.fields.some(
+        (field) => field.envVarName === 'ADO_TOKEN' && field.savedSatisfied,
+      );
+      const hasEntra = [
+        'ADO_CLIENT_ID',
+        'ADO_CLIENT_SECRET',
+        'ADO_TENANT_ID',
+      ].every((envVarName) =>
+        providerStatus?.fields.some(
+          (field) => field.envVarName === envVarName && field.savedSatisfied,
+        ),
+      );
+      setAdoAuthMode(
+        configuredMode === 'delegated'
+          ? 'delegated'
+          : hasEntra && !hasPat
+            ? 'entra'
+            : 'pat',
+      );
+    }
+  }, [
+    provider,
+    nonSecretInitialValues,
+    isAdo,
+    nonSecretInitialValuesKey,
+    providerStatus?.fields,
+  ]);
 
   if (!providerStatus) {
     return null;
   }
 
+  const hasAdoAppCredentials = [
+    'ADO_CLIENT_ID',
+    'ADO_CLIENT_SECRET',
+    'ADO_TENANT_ID',
+  ].every((envVarName) =>
+    Boolean(
+      values[envVarName]?.trim() ||
+      providerStatus.fields.find((field) => field.envVarName === envVarName)
+        ?.runtimeSatisfied ||
+      providerStatus.fields.find((field) => field.envVarName === envVarName)
+        ?.savedSatisfied,
+    ),
+  );
+  const hasAdoPat = Boolean(
+    values['ADO_TOKEN']?.trim() ||
+    providerStatus.fields.find((field) => field.envVarName === 'ADO_TOKEN')
+      ?.runtimeSatisfied ||
+    providerStatus.fields.find((field) => field.envVarName === 'ADO_TOKEN')
+      ?.savedSatisfied,
+  );
+
   const isActionDisabled =
     saveConfig.isPending ||
-    providerStatus.fields.some((field) => {
+    visibleFields.some((field) => {
       const nextValue = values[field.envVarName]?.trim() ?? '';
       return (
         field.required !== false &&
@@ -141,9 +216,14 @@ export function SourceControlConfigForm({
         !field.savedSatisfied &&
         nextValue.length === 0
       );
-    });
+    }) ||
+    (isAdo &&
+      (adoAuthMode === 'pat'
+        ? !hasAdoPat
+        : !hasAdoAppCredentials ||
+          (adoAuthMode === 'delegated' && !adoLinkedAccount.data?.account)));
 
-  const hasNewValues = providerStatus.fields.some((field) => {
+  const hasNewValues = visibleFields.some((field) => {
     if (field.runtimeSatisfied) {
       return false;
     }
@@ -156,8 +236,80 @@ export function SourceControlConfigForm({
 
   return (
     <div className="space-y-4">
+      {isAdo ? (
+        <div className="grid max-w-xl gap-2 sm:grid-cols-3">
+          <button
+            type="button"
+            aria-pressed={adoAuthMode === 'pat'}
+            className={`rounded-md border p-3 text-left ${adoAuthMode === 'pat' ? 'border-foreground' : 'border-border'}`}
+            onClick={() => setAdoAuthMode('pat')}
+          >
+            <span className="block font-medium">Personal access token</span>
+            <span className="text-sm text-muted-foreground">
+              Use a PAT from a bot or service account.
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={adoAuthMode === 'entra'}
+            className={`rounded-md border p-3 text-left ${adoAuthMode === 'entra' ? 'border-foreground' : 'border-border'}`}
+            onClick={() => setAdoAuthMode('entra')}
+          >
+            <span className="block font-medium">
+              Microsoft Entra service principal
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Use short-lived service-principal tokens.
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-pressed={adoAuthMode === 'delegated'}
+            className={`rounded-md border p-3 text-left ${adoAuthMode === 'delegated' ? 'border-foreground' : 'border-border'}`}
+            onClick={() => setAdoAuthMode('delegated')}
+          >
+            <span className="block font-medium">
+              Connect with your Microsoft account
+            </span>
+            <span className="text-sm text-muted-foreground">
+              Use a delegated Azure DevOps account.
+            </span>
+          </button>
+        </div>
+      ) : null}
+      {isAdo && adoAuthMode === 'delegated' ? (
+        <div className="max-w-xl rounded-md border p-3 text-sm">
+          <p className="text-muted-foreground">
+            {adoLinkedAccount.data?.account
+              ? `Connected as ${adoLinkedAccount.data.account.displayName}.`
+              : 'Connect the Azure DevOps account Roomote should use for this deployment.'}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="mt-2"
+            onClick={() =>
+              authenticateAdoAccount.mutate(
+                `${window.location.pathname}${window.location.search}`,
+              )
+            }
+            disabled={
+              authenticateAdoAccount.isPending ||
+              adoLinkedAccount.data?.configured !== true
+            }
+          >
+            {authenticateAdoAccount.isPending ? <Spinner /> : null}
+            {adoLinkedAccount.data?.account
+              ? 'Reconnect with Microsoft'
+              : adoLinkedAccount.data?.configured === true
+                ? 'Connect with your Microsoft account'
+                : 'Save app settings first'}
+          </Button>
+        </div>
+      ) : null}
       <div className="space-y-2">
-        {providerStatus.fields.map((field) => {
+        {visibleFields.map((field) => {
           const value = values[field.envVarName] ?? '';
           const isSecretField = isSecretSourceControlField(field);
           const shouldShowSavedValueMask =
@@ -230,7 +382,26 @@ export function SourceControlConfigForm({
         <Button
           type="button"
           size="sm"
-          onClick={() => saveConfig.mutate({ provider, values })}
+          onClick={() =>
+            saveConfig.mutate({
+              provider,
+              values: {
+                ...Object.fromEntries(
+                  visibleFields.map((field) => [
+                    field.envVarName,
+                    values[field.envVarName] ?? '',
+                  ]),
+                ),
+                ...(isAdo
+                  ? {
+                      ADO_AUTH_MODE: adoAuthMode,
+                      ADO_LINKED_ACCOUNT_ID:
+                        adoLinkedAccount.data?.account?.accountId ?? '',
+                    }
+                  : {}),
+              },
+            })
+          }
           disabled={isActionDisabled}
         >
           {saveConfig.isPending ? <Spinner /> : null}

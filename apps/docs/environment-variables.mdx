@@ -267,12 +267,14 @@ as per-task auth tokens or workspace paths.
 | `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                        |
 | `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                       |
 | `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                       |
+| `ADO_AUTH_MODE`                | Optional     | `pat`, `entra`, or `delegated`; omitted values retain legacy PAT/Entra inference.                |
+| `ADO_LINKED_ACCOUNT_ID`        | Optional     | Linked Azure DevOps account key used by delegated authentication.                                |
 | `ADO_BASE_URL`                 | Optional     | Azure DevOps base URL.                                                                           |
 | `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                           |
-| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps OAuth.                                                |
-| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps OAuth.                                            |
-| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. `R_MICROSOFT_TENANT_ID` is also accepted.      |
-| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret.                                                                     |
+| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps service-principal authentication.                     |
+| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps service-principal authentication.                 |
+| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps service-principal authentication.                     |
+| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret. Generated automatically when Roomote configures service hooks.      |
 
 ### Communications and sign-in
 

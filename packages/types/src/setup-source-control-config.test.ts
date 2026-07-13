@@ -1,6 +1,7 @@
 import {
   SETUP_SOURCE_CONTROL_PROVIDER_CATALOG,
   buildSetupSourceControlStatus,
+  getSetupSourceControlVisibleFields,
 } from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
@@ -202,12 +203,14 @@ describe('buildSetupSourceControlStatus', () => {
     );
     expect(optionalBaseUrl).toMatchObject({
       required: false,
+      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoWebhookSecret).toMatchObject({
       required: false,
       secret: true,
+      setupHidden: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
@@ -266,6 +269,40 @@ describe('buildSetupSourceControlStatus', () => {
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
+  });
+
+  it('does not mark delegated Azure DevOps setup complete without a linked account', () => {
+    const incomplete = buildSetupSourceControlStatus({
+      persistedEnvVarNames: [
+        'ADO_ORGANIZATION',
+        'ADO_AUTH_MODE',
+        'ADO_CLIENT_ID',
+        'ADO_CLIENT_SECRET',
+        'ADO_TENANT_ID',
+      ],
+      persistedEnvVarValues: { ADO_AUTH_MODE: 'delegated' },
+    });
+    const complete = buildSetupSourceControlStatus({
+      persistedEnvVarNames: [
+        'ADO_ORGANIZATION',
+        'ADO_AUTH_MODE',
+        'ADO_LINKED_ACCOUNT_ID',
+        'ADO_CLIENT_ID',
+        'ADO_CLIENT_SECRET',
+        'ADO_TENANT_ID',
+      ],
+      persistedEnvVarValues: {
+        ADO_AUTH_MODE: 'delegated',
+        ADO_LINKED_ACCOUNT_ID: 'ado-user@example.com',
+      },
+    });
+
+    expect(
+      incomplete.providers.find((provider) => provider.provider === 'ado'),
+    ).toMatchObject({ configSatisfied: false });
+    expect(
+      complete.providers.find((provider) => provider.provider === 'ado'),
+    ).toMatchObject({ configSatisfied: true });
   });
 
   it('marks config unsatisfied when a required field is missing', () => {
@@ -347,5 +384,49 @@ describe('buildSetupSourceControlStatus', () => {
 
     expect(status.setupSatisfied).toBe(true);
     expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+  });
+});
+
+describe('getSetupSourceControlVisibleFields', () => {
+  const ado = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (provider) => provider.provider === 'ado',
+  );
+
+  it('keeps mode-specific Azure DevOps credentials visible during setup', () => {
+    expect(
+      getSetupSourceControlVisibleFields(ado?.fields ?? []).map(
+        (field) => field.envVarName,
+      ),
+    ).toEqual([
+      'ADO_ORGANIZATION',
+      'ADO_TOKEN',
+      'ADO_CLIENT_ID',
+      'ADO_CLIENT_SECRET',
+      'ADO_TENANT_ID',
+    ]);
+  });
+
+  it('includes optional Azure DevOps fields when advanced config is open', () => {
+    expect(
+      getSetupSourceControlVisibleFields(ado?.fields ?? [], {
+        showAdvancedConfig: true,
+      }).map((field) => field.envVarName),
+    ).toEqual([
+      'ADO_ORGANIZATION',
+      'ADO_TOKEN',
+      'ADO_BASE_URL',
+      'ADO_USERNAME',
+      'ADO_CLIENT_ID',
+      'ADO_CLIENT_SECRET',
+      'ADO_TENANT_ID',
+    ]);
+  });
+
+  it('never returns the Azure DevOps webhook secret during setup', () => {
+    const names = getSetupSourceControlVisibleFields(ado?.fields ?? [], {
+      showAdvancedConfig: true,
+    }).map((field) => field.envVarName);
+
+    expect(names).not.toContain('ADO_WEBHOOK_SECRET');
   });
 });

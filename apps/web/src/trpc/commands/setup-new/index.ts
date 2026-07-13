@@ -2004,7 +2004,10 @@ async function saveSourceControlConfig(input: {
 }) {
   // Provider-API validation happens before the transaction so the external
   // HTTP round-trip never holds a pooled DB connection open.
-  await assertValidSourceControlConfigInput(input);
+  await assertValidSourceControlConfigInput({
+    ...input,
+    allowIncompleteDelegated: true,
+  });
 
   return db.transaction(async (tx) => {
     const currentState = await getPersistedSetupNewState(tx);

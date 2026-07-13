@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   isSourceControlTokenBackedProvider,
@@ -10,8 +10,18 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { Button, Github, Spinner } from '@/components/system';
+import {
+  BrandIcon,
+  Button,
+  Github,
+  RefreshCcw,
+  Spinner,
+} from '@/components/system';
 import { useCreateGitHubInstallation } from '@/hooks/github/useCreateGitHubInstallation';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 import { useSyncRepositories } from '@/hooks/source-control/useSyncRepositories';
 
 import { StepTitle } from './StepTitle';
@@ -71,6 +81,13 @@ export function StepSourceControlConnect({
     (candidate) => candidate.provider === provider,
   );
   const [syncedWithZeroRepos, setSyncedWithZeroRepos] = useState(false);
+  const adoLinkedAccount = useAdoLinkedAccount();
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
+  const saveAdoLinkedAccount = useMutation(
+    trpc.sourceControl.saveConfig.mutationOptions({
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const createInstallation = useCreateGitHubInstallation({
     onSuccess: (result) => {
@@ -135,6 +152,13 @@ export function StepSourceControlConnect({
   );
 
   const alreadyConnected = providerStatus?.connected === true;
+  const adoAuthMode = providerStatus?.fields.find(
+    (field) => field.envVarName === 'ADO_AUTH_MODE',
+  )?.savedValue;
+  const needsAdoMicrosoftConnection =
+    provider === 'ado' &&
+    adoAuthMode === 'delegated' &&
+    !adoLinkedAccount.data?.account;
   const lockedByRuntime = sourceControlSetup.lockReason === 'runtime_env';
   const providerLabel = providerStatus?.label ?? provider;
   const githubCopy = lockedByRuntime
@@ -147,11 +171,29 @@ export function StepSourceControlConnect({
     providerLabel,
   });
 
+  const handleSyncRepositories = async () => {
+    if (
+      provider === 'ado' &&
+      adoAuthMode === 'delegated' &&
+      adoLinkedAccount.data?.account
+    ) {
+      await saveAdoLinkedAccount.mutateAsync({
+        provider: 'ado',
+        values: {
+          ADO_AUTH_MODE: 'delegated',
+          ADO_LINKED_ACCOUNT_ID: adoLinkedAccount.data.account.accountId,
+        },
+      });
+    }
+
+    syncRepositories.mutate();
+  };
+
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">
       <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
 
-      {alreadyConnected ? (
+      {alreadyConnected && !needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
           <p>
             {providerStatus?.label ?? provider} is connected with{' '}
@@ -162,6 +204,38 @@ export function StepSourceControlConnect({
             .
           </p>
           <Button onClick={onContinue}>Continue</Button>
+        </div>
+      ) : needsAdoMicrosoftConnection ? (
+        <div className="space-y-4">
+          <p>
+            Connect your Azure DevOps account with Microsoft before syncing
+            repositories.
+          </p>
+          {adoLinkedAccount.isPending ? (
+            <Spinner />
+          ) : adoLinkedAccount.data?.configured === false ? (
+            <p className="text-sm text-destructive">
+              The Microsoft Entra service-principal settings are not ready yet.
+              Go back and save the Azure DevOps app credentials first.
+            </p>
+          ) : (
+            <Button
+              className="w-full sm:w-auto"
+              onClick={() =>
+                authenticateAdoAccount.mutate(
+                  `${window.location.pathname}?step=source-control-connect`,
+                )
+              }
+              disabled={authenticateAdoAccount.isPending}
+            >
+              {authenticateAdoAccount.isPending ? (
+                <Spinner />
+              ) : (
+                <BrandIcon name="ADO" icon="ado" />
+              )}
+              Connect with your Microsoft account
+            </Button>
+          )}
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
@@ -193,10 +267,16 @@ export function StepSourceControlConnect({
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <Button
               className="w-full sm:w-auto"
-              onClick={() => syncRepositories.mutate()}
-              disabled={syncRepositories.isPending}
+              onClick={() => void handleSyncRepositories()}
+              disabled={
+                syncRepositories.isPending || saveAdoLinkedAccount.isPending
+              }
             >
-              {syncRepositories.isPending ? <Spinner /> : null}
+              {syncRepositories.isPending || saveAdoLinkedAccount.isPending ? (
+                <Spinner />
+              ) : (
+                <RefreshCcw />
+              )}
               Sync repositories
             </Button>
           </div>
