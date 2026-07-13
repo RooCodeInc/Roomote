@@ -14,10 +14,7 @@ import {
   findActiveGitHubPrReviewTask,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import {
-  recordPrStatusChangeInTaskHistory,
-  updateTaskPrStatus,
-} from '@roomote/sdk/server';
+import { markTaskPullRequestTerminal } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
@@ -125,10 +122,8 @@ export async function handleGiteaPullRequest(
       ? ('merged' as const)
       : ('closed' as const);
 
-    await updateTaskPrStatus('gitea', repoFullName, payload.number, status);
-
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    await markTaskPullRequestTerminal(
+      {
         sourceControlProvider: 'gitea',
         repository: repoFullName,
         prNumber: payload.number,
@@ -136,14 +131,9 @@ export async function handleGiteaPullRequest(
         prUrl: getPullRequestUrl(payload),
         status,
         actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
-      }),
-    ).catch((error) => {
-      console.warn(
-        `[handleGiteaPullRequest] Failed to record PR status in task history for ${repoFullName}#${payload.number}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
+      },
+      { logLabel: 'handleGiteaPullRequest' },
+    );
 
     if (pullRequest.merged) {
       await notifyMergedPullRequestThreads(payload, repoFullName);

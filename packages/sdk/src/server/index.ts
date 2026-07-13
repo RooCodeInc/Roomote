@@ -163,6 +163,10 @@ export {
 
 export { updateTaskPrStatus } from './lib/pull-requests/update-task-pr-status';
 export {
+  markTaskPullRequestTerminal,
+  type MarkTaskPullRequestTerminalInput,
+} from './lib/pull-requests/mark-task-pull-request-terminal';
+export {
   createOrUpdateSourceControlPullRequestForTaskRun,
   findTaskRunForSourceControlMutation,
   sourceControlPullRequestMutationInputSchema,

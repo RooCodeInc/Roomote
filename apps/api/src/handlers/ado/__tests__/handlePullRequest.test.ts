@@ -1,8 +1,7 @@
 const {
   mockEnqueueTask,
   mockGetAdoAutomationTargets,
-  mockUpdateTaskPrStatus,
-  mockRecordPrStatusChangeInTaskHistory,
+  mockMarkTaskPullRequestTerminal,
   mockRepositoriesFindFirst,
   mockDedupSelect,
   mockNotifySlackPrMerge,
@@ -11,8 +10,7 @@ const {
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetAdoAutomationTargets: vi.fn(),
-  mockUpdateTaskPrStatus: vi.fn(),
-  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  mockMarkTaskPullRequestTerminal: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   // Resolves the rows for each `db.select().from(tasks).innerJoin(...)`
   // dedup lookup, in call order.
@@ -27,8 +25,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  updateTaskPrStatus: mockUpdateTaskPrStatus,
-  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  markTaskPullRequestTerminal: mockMarkTaskPullRequestTerminal,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -168,7 +165,7 @@ describe('handleAdoPullRequest', () => {
   beforeEach(() => {
     mockEnqueueTask.mockReset();
     mockGetAdoAutomationTargets.mockReset();
-    mockUpdateTaskPrStatus.mockReset();
+    mockMarkTaskPullRequestTerminal.mockReset();
     mockRepositoriesFindFirst.mockReset();
     mockDedupSelect.mockReset();
     mockNotifySlackPrMerge.mockReset();
@@ -374,11 +371,18 @@ describe('handleAdoPullRequest', () => {
       ),
     ).resolves.toEqual({ status: 'ok' });
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'ado',
-      'acme/Platform/backend',
-      42,
-      'merged',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'ado',
+        repository: 'acme/Platform/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl:
+          'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+        status: 'merged',
+        actorLogin: 'roomote-bot@acme.example',
+      },
+      { logLabel: 'handleAdoPullRequest' },
     );
     expect(mockNotifySlackPrMerge).toHaveBeenCalledWith({
       sourceControlProvider: 'ado',
@@ -417,7 +421,7 @@ describe('handleAdoPullRequest', () => {
       message: 'unsupported_ado_pull_request_event:git.pullrequest.merged',
     });
 
-    expect(mockUpdateTaskPrStatus).not.toHaveBeenCalled();
+    expect(mockMarkTaskPullRequestTerminal).not.toHaveBeenCalled();
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
@@ -430,11 +434,18 @@ describe('handleAdoPullRequest', () => {
       { updatedNotificationType: 'StatusUpdateNotification' },
     );
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'ado',
-      'acme/Platform/backend',
-      42,
-      'closed',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'ado',
+        repository: 'acme/Platform/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl:
+          'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+        status: 'closed',
+        actorLogin: 'roomote-bot@acme.example',
+      },
+      { logLabel: 'handleAdoPullRequest' },
     );
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();

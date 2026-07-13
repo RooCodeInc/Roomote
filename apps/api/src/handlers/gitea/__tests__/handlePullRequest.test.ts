@@ -1,8 +1,7 @@
 const {
   mockEnqueueTask,
   mockGetGiteaAutomationTargets,
-  mockUpdateTaskPrStatus,
-  mockRecordPrStatusChangeInTaskHistory,
+  mockMarkTaskPullRequestTerminal,
   mockRepositoriesFindFirst,
   mockNotifySlackPrMerge,
   mockNotifyTeamsPrMerge,
@@ -11,8 +10,7 @@ const {
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
-  mockUpdateTaskPrStatus: vi.fn(),
-  mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  mockMarkTaskPullRequestTerminal: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockNotifySlackPrMerge: vi.fn(),
   mockNotifyTeamsPrMerge: vi.fn(),
@@ -25,8 +23,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
-  updateTaskPrStatus: mockUpdateTaskPrStatus,
-  recordPrStatusChangeInTaskHistory: mockRecordPrStatusChangeInTaskHistory,
+  markTaskPullRequestTerminal: mockMarkTaskPullRequestTerminal,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -105,7 +102,7 @@ describe('handleGiteaPullRequest', () => {
   beforeEach(() => {
     mockEnqueueTask.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
-    mockUpdateTaskPrStatus.mockReset();
+    mockMarkTaskPullRequestTerminal.mockReset();
     mockRepositoriesFindFirst.mockReset();
     mockNotifySlackPrMerge.mockReset();
     mockNotifyTeamsPrMerge.mockReset();
@@ -234,11 +231,17 @@ describe('handleGiteaPullRequest', () => {
       handleGiteaPullRequest(makePayload('closed', { merged: true })),
     ).resolves.toEqual({ status: 'ok' });
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'gitea',
-      'acme/backend',
-      42,
-      'merged',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitea',
+        repository: 'acme/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://git.example.com/acme/backend/pulls/42',
+        status: 'merged',
+        actorLogin: 'roomote-bot',
+      },
+      { logLabel: 'handleGiteaPullRequest' },
     );
     expect(mockNotifySlackPrMerge).toHaveBeenCalledWith({
       sourceControlProvider: 'gitea',
@@ -270,11 +273,17 @@ describe('handleGiteaPullRequest', () => {
   it('updates tracked task PR status without notifications for closed pull requests', async () => {
     await handleGiteaPullRequest(makePayload('closed'));
 
-    expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
-      'gitea',
-      'acme/backend',
-      42,
-      'closed',
+    expect(mockMarkTaskPullRequestTerminal).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitea',
+        repository: 'acme/backend',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://git.example.com/acme/backend/pulls/42',
+        status: 'closed',
+        actorLogin: 'roomote-bot',
+      },
+      { logLabel: 'handleGiteaPullRequest' },
     );
     expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
     expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();

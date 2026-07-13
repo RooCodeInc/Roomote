@@ -20,10 +20,7 @@ import {
   sql,
 } from '@roomote/db/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
-import {
-  recordPrStatusChangeInTaskHistory,
-  updateTaskPrStatus,
-} from '@roomote/sdk/server';
+import { markTaskPullRequestTerminal } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
 import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
@@ -221,7 +218,10 @@ export async function handleAdoPullRequest(
     pullRequest,
   });
 
-  if (pullRequest.status === 'abandoned') {
+  if (
+    pullRequest.status === 'abandoned' ||
+    pullRequest.status === 'completed'
+  ) {
     if (payload.eventType !== 'git.pullrequest.updated') {
       return {
         status: 'ok',
@@ -229,15 +229,13 @@ export async function handleAdoPullRequest(
       };
     }
 
-    await updateTaskPrStatus(
-      'ado',
-      repoFullName,
-      pullRequest.pullRequestId,
-      'closed',
-    );
+    const status =
+      pullRequest.status === 'completed'
+        ? ('merged' as const)
+        : ('closed' as const);
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
+    await markTaskPullRequestTerminal(
+      {
         sourceControlProvider: 'ado',
         repository: repoFullName,
         prNumber: pullRequest.pullRequestId,
@@ -247,62 +245,17 @@ export async function handleAdoPullRequest(
           pullRequest,
           repositoryFullName: repoFullName,
         }),
-        status: 'closed',
+        status,
         actorLogin:
           getAdoIdentityName(payload.resource.closedBy) ??
           'someone in Azure DevOps',
-      }),
-    ).catch((error) => {
-      console.warn(
-        `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
-
-    return { status: 'ok' };
-  }
-
-  if (pullRequest.status === 'completed') {
-    if (payload.eventType !== 'git.pullrequest.updated') {
-      return {
-        status: 'ok',
-        message: `unsupported_ado_pull_request_event:${payload.eventType}`,
-      };
-    }
-
-    await updateTaskPrStatus(
-      'ado',
-      repoFullName,
-      pullRequest.pullRequestId,
-      'merged',
+      },
+      { logLabel: 'handleAdoPullRequest' },
     );
 
-    await Promise.resolve(
-      recordPrStatusChangeInTaskHistory({
-        sourceControlProvider: 'ado',
-        repository: repoFullName,
-        prNumber: pullRequest.pullRequestId,
-        prTitle: pullRequest.title,
-        prUrl: getAdoPullRequestUrl({
-          resourceContainers: payload.resourceContainers,
-          pullRequest,
-          repositoryFullName: repoFullName,
-        }),
-        status: 'merged',
-        actorLogin:
-          getAdoIdentityName(payload.resource.closedBy) ??
-          'someone in Azure DevOps',
-      }),
-    ).catch((error) => {
-      console.warn(
-        `[handleAdoPullRequest] Failed to record PR status in task history for ${repoFullName}#${pullRequest.pullRequestId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    });
-
-    await notifyMergedPullRequestThreads(payload, repoFullName);
+    if (status === 'merged') {
+      await notifyMergedPullRequestThreads(payload, repoFullName);
+    }
 
     return { status: 'ok' };
   }
