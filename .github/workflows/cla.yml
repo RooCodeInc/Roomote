@@ -29,7 +29,15 @@ jobs:
           path-to-signatures: signatures/version1/cla.json
           path-to-document: https://github.com/RooCodeInc/Roomote/blob/develop/CLA.md
           branch: cla-signatures
-          allowlist: '*[bot]'
+          # The action matches each committer's GitHub login (or raw git
+          # author name when no account is linked) with a case-sensitive
+          # exact compare — it NEVER matches emails, so email entries here
+          # do nothing. `*[bot]` exempts GitHub bot accounts by login;
+          # `roomote` covers the linked login, `Roomote` the raw author
+          # name on unlinked commits, `roomote-roomote` the internal bot
+          # account login, `claude` the Claude agent name, and `vercel`
+          # the Vercel deployment account.
+          allowlist: '*[bot],claude,roomote,Roomote,roomote-roomote,vercel'
           custom-notsigned-prcomment: >-
             Thank you for your contribution! Before we can merge this pull
             request, we need you to sign our [Contributor License
