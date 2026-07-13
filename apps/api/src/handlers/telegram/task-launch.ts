@@ -124,6 +124,9 @@ export async function launchTelegramTask(input: {
           ? { environmentId: input.workspace.environmentId }
           : {}),
         description: input.queuedMessage.text,
+        ...(input.queuedMessage.images?.length
+          ? { images: input.queuedMessage.images }
+          : {}),
         ...metadata,
         ...(createdTopic ? { telegramTaskTopic: true } : {}),
       },

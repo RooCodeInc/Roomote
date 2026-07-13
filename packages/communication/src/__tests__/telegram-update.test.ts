@@ -330,6 +330,30 @@ describe('Telegram update helpers', () => {
     ).toBe(true);
   });
 
+  it('treats an attachment-only private message as task input', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 4001,
+      message: {
+        message_id: 70,
+        chat: { id: 5, type: 'private' },
+        photo: [
+          {
+            file_id: 'photo-large',
+            file_unique_id: 'photo-1',
+            width: 1280,
+            height: 720,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({ text: 'Image attachment' });
+  });
+
   describe('getTelegramNewTaskCommand', () => {
     const buildUpdate = (
       text: string,

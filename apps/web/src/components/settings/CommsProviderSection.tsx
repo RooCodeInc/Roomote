@@ -27,6 +27,8 @@ type TelegramWebhookStatus = {
   registeredUrl: string | null;
   expectedUrl: string;
   lastErrorMessage: string | null;
+  pendingUpdateCount?: number;
+  lastErrorAtMs?: number | null;
 };
 type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
@@ -488,6 +490,19 @@ export function CommsProviderSection({
   savePending,
   clearPending,
 }: CommsProviderSectionProps) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const repairTelegram = useMutation(
+    trpc.comms.repairTelegram.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Telegram connection repaired');
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const isMicrosoftProvider = provider.id === 'microsoft';
   const teamsIntegrationStatus = useTeamsIntegrationStatus({
     enabled: isMicrosoftProvider,
@@ -743,7 +758,22 @@ export function CommsProviderSection({
                     provider.telegramWebhook.lastErrorMessage
                       ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
                       : ''}
+                    {(provider.telegramWebhook.pendingUpdateCount ?? 0) > 0
+                      ? ` ${provider.telegramWebhook.pendingUpdateCount} update${provider.telegramWebhook.pendingUpdateCount === 1 ? '' : 's'} waiting for delivery.`
+                      : ''}
                   </p>
+                  {provider.telegramWebhook.status !== 'connected' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={repairTelegram.isPending}
+                      onClick={() => repairTelegram.mutate()}
+                    >
+                      <RefreshCw />
+                      {repairTelegram.isPending ? 'Repairing...' : 'Repair'}
+                    </Button>
+                  ) : null}
                 </div>
               )}
               {provider.id === 'telegram' && hasConfiguredValues && (

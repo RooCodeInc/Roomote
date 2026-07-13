@@ -64,6 +64,7 @@ import {
   startNewTelegramTask,
 } from './task-orchestration.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
+import { attachTelegramMediaToQueuedMessage } from './attachments.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
@@ -266,7 +267,7 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, welcomed: true });
   }
 
-  const { botUsername } = await resolveTelegramRuntimeCredentials();
+  const { botToken, botUsername } = await resolveTelegramRuntimeCredentials();
 
   if (!senderUserId) {
     // Nudge the sender to link instead of silently dropping their message.
@@ -339,10 +340,22 @@ telegram.post('/', async (c) => {
     });
   }
 
-  const queuedMessage = telegramUpdateToQueuedCommunicationMessage(update, {
+  let queuedMessage = telegramUpdateToQueuedCommunicationMessage(update, {
     botUsername: botUsername ?? undefined,
     userId: senderUserId,
   }) as QueuedTelegramCommunicationMessage | null;
+
+  if (
+    queuedMessage &&
+    botToken &&
+    (message.photo?.length || message.document)
+  ) {
+    queuedMessage = await attachTelegramMediaToQueuedMessage({
+      message,
+      queuedMessage,
+      botToken,
+    });
+  }
 
   const metadata = getTelegramUpdateCommunicationMetadata(update);
   const conversation = {

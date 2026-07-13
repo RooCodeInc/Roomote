@@ -94,6 +94,7 @@ export type MockTelegramState = {
   webhook?: MockTelegramWebhookRegistration;
   callbackAnswers?: MockTelegramCallbackAnswer[];
   chatActions?: MockTelegramChatAction[];
+  botCommands?: Array<{ command: string; description: string }>;
   behavior?: MockTelegramBehavior;
 };
 
@@ -175,6 +176,7 @@ function normalizeState(state: MockTelegramState): MockTelegramState {
     })),
     callbackAnswers: [...(state.callbackAnswers ?? [])],
     chatActions: [...(state.chatActions ?? [])],
+    botCommands: [...(state.botCommands ?? [])],
   };
 }
 
@@ -566,6 +568,14 @@ export class MockTelegramServer {
           username: bot.username,
           ...(bot.has_topics_enabled ? { has_topics_enabled: true } : {}),
         });
+        return;
+      }
+
+      case 'setMyCommands': {
+        this.state.botCommands = Array.isArray(body.commands)
+          ? (body.commands as Array<{ command: string; description: string }>)
+          : [];
+        apiResult(response, true);
         return;
       }
 

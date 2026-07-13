@@ -41,15 +41,39 @@ const telegramForumTopicCreatedSchema = z
   })
   .passthrough();
 
+const telegramPhotoSizeSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    width: z.number().int(),
+    height: z.number().int(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
+const telegramDocumentSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    file_name: z.string().optional(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
     message_thread_id: z.number().int().optional(),
     date: z.number().int().optional(),
     text: z.string().optional(),
+    caption: z.string().optional(),
+    photo: z.array(telegramPhotoSizeSchema).optional(),
+    document: telegramDocumentSchema.optional(),
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
+    caption_entities: z.array(telegramMessageEntitySchema).optional(),
     forum_topic_created: telegramForumTopicCreatedSchema.optional(),
   })
   .passthrough();
@@ -326,13 +350,21 @@ export function isTelegramBotMentioned(
   message: TelegramMessage,
   options: TelegramBotMentionOptions = {},
 ): boolean {
-  const text = message.text ?? '';
+  const text = message.text ?? message.caption ?? '';
 
   if (!text) {
     return false;
   }
 
-  return Boolean(getTelegramInvocationEntity(text, message, options));
+  return Boolean(
+    getTelegramInvocationEntity(
+      text,
+      message.caption && !message.text
+        ? { ...message, entities: message.caption_entities }
+        : message,
+      options,
+    ),
+  );
 }
 
 /**
@@ -358,7 +390,10 @@ export function isTelegramTaskEntryUpdate(
 
   return Boolean(
     message &&
-    message.text &&
+    (message.text ||
+      message.caption ||
+      message.photo?.length ||
+      message.document) &&
     (isTelegramPrivateChat(message) ||
       isTelegramBotMentioned(message, options)),
   );
@@ -479,11 +514,18 @@ export function telegramUpdateToQueuedCommunicationMessage(
 ): QueuedCommunicationMessage | null {
   const message = getTelegramUpdateMessage(update);
 
-  if (!message?.text) {
+  if (!message) {
     return null;
   }
 
-  const text = stripTelegramBotInvocation(message.text, message, options);
+  const sourceText = message.text ?? message.caption ?? '';
+  const text = sourceText
+    ? stripTelegramBotInvocation(sourceText, message, options)
+    : message.photo?.length
+      ? 'Image attachment'
+      : message.document
+        ? `Document attachment${message.document.file_name ? `: ${message.document.file_name}` : ''}`
+        : '';
 
   if (!text) {
     return null;
