@@ -63,14 +63,14 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
-  '`/link code:<code>` — link this Discord account to Roomote.',
+  '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
   'Follow up by sending another message in the task thread.',
 ].join('\n');
 
 const DISCORD_LINK_REQUIRED_MESSAGE =
-  'Link your Discord account to Roomote before starting tasks. Generate a code under **Settings → Personal → Linked Accounts**, then use `/link code:<code>`.';
+  'Link your Discord account to Roomote before starting tasks. Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
 
 function isPermanentDiscordEventError(
   error: unknown,
@@ -203,6 +203,17 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (command?.name === 'link') {
+    if (!channel.isDirectMessage) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: 'Run `/link` in a direct message with me so Roomote can verify that it can reach you. Your link code has not been used.',
+        ephemeral: true,
+      });
+      return { ok: true, linked: false, reason: 'link_requires_dm' };
+    }
     const linkedUserId = command.code
       ? await consumeDiscordLinkCode(command.code)
       : null;

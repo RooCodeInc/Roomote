@@ -650,6 +650,50 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('requires /link in a DM without consuming the one-shot code', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      name: 'general',
+      type: 0,
+      guild_id: 'guild-1',
+    });
+    const interaction = {
+      id: 'interaction-link-guild',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: {
+        user: { id: 'discord-user-1', username: 'matt' },
+      },
+      data: {
+        name: 'link',
+        type: 1,
+        options: [{ name: 'code', type: 3, value: 'link-abcdefghijklmnop' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      linked: false,
+      reason: 'link_requires_dm',
+    });
+    expect(mocks.consumeLinkCode).not.toHaveBeenCalled();
+    expect(mocks.upsertUserMapping).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ephemeral: true,
+        text: expect.stringContaining('direct message'),
+      }),
+    );
+  });
+
   it('dispatches component interactions to the callback handler', async () => {
     const interaction = {
       id: 'interaction-button',
