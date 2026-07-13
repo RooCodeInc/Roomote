@@ -395,7 +395,7 @@ describe('buildSlackAccountLinkConnectMessage', () => {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: "Hi, I'm Roomote, your very own cloud coding agent. I can answer questions, write and review code, fix issues and connect to the tools you use.\nTo get me onto something, just @-mention me in a channel, or DM me here.",
+            text: "Hi, I'm Roomote.\nI handle the operational engineering work that shows up in Slack: bug reports, escalations, regressions, repo questions, and small fixes.",
           },
         },
         { type: 'divider' },
@@ -403,7 +403,7 @@ describe('buildSlackAccountLinkConnectMessage', () => {
           type: 'section',
           text: {
             type: 'mrkdwn',
-            text: '*But first, I need to link your Slack and Roomote accounts.*\n\nThis links your identity so I can associate tasks to you and properly work on your behalf.',
+            text: '*To get started, I need to link your Slack and Roomote accounts.*\n\nThis links your identity so I can:\n• Associate tasks with you\n• Access your configured agents\n• Work with your authorized repositories',
           },
         },
         {

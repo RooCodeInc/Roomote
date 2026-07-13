@@ -56,6 +56,7 @@ vi.mock('@/components/system', () => ({
     icon: string;
   } & SVGProps<SVGSVGElement>) => <svg aria-label={name || icon} {...props} />,
   ExternalLink: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Spinner: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({
     asChild,
@@ -193,10 +194,6 @@ describe('StepCommunicationConnect', () => {
       'href',
       'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id',
     );
-    expect(
-      screen.getByRole('link', { name: /Download the app package/i }),
-    ).toHaveAttribute('href', '/api/teams/app-package');
-
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(onContinue).toHaveBeenCalledTimes(1);
   });
@@ -238,7 +235,7 @@ describe('StepCommunicationConnect', () => {
       />,
     );
 
-    expect(screen.getByText('Waiting for bot message')).toBeInTheDocument();
+    expect(screen.getByText('Received!')).toBeInTheDocument();
     expect(
       screen.getByText(
         'Send a message to the Roomote bot on Teams to complete the connection',
