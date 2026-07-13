@@ -13,6 +13,64 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('TelegramCommunicationProvider', () => {
+  it('registers the supported slash commands', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.registerCommands();
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      commands: [
+        { command: 'start', description: 'Show welcome and command help' },
+        { command: 'new', description: 'Start a fresh task' },
+      ],
+    });
+  });
+
+  it('retries transient idempotent Bot API failures', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { has_topics_enabled: false } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+      maxRetries: 1,
+    });
+
+    await expect(provider.getBotInfo()).resolves.toEqual({
+      hasTopicsEnabled: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an ambiguous server error for message delivery', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 99 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({ channelId: '123', text: 'hello' }),
+    ).rejects.toThrow('Telegram sendMessage failed (500)');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
   it('reads the private-chat topics capability from getMe', async () => {
     const fetchMock = vi
       .fn()

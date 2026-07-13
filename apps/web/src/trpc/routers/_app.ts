@@ -237,6 +237,7 @@ import {
   getCommsStatusCommand,
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
+  repairTelegramWebhookCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
@@ -1310,6 +1311,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         clearCommsAuthConfigCommand(auth, input),
       ),
+
+    repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      repairTelegramWebhookCommand(auth),
+    ),
   }),
 
   compute: createRouter({

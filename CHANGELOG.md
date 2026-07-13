@@ -2,6 +2,13 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.4.1 (2026-07-13)
+
+### Patch changes
+
+- Automation act work items no longer fail after a scan task resumes: submit uses the current scan run instead of a non-deterministic first run when a task has multiple runs.
+- Improve Telegram reliability with automatic slash-command registration, bounded Bot API retries, persistent bot identity caching, photo and document task inputs, and repairable connection diagnostics.
+
 ## 0.4.0 (2026-07-13)
 
 ### Minor changes

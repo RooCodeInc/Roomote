@@ -1,3 +1,8 @@
+import { createHash } from 'node:crypto';
+import { eq, sql } from 'drizzle-orm';
+
+import { db } from '../db';
+import { deploymentSettings } from '../schema';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 
 export type TelegramRuntimeCredentials = {
@@ -7,6 +12,8 @@ export type TelegramRuntimeCredentials = {
 };
 
 const CACHE_TTL_MS = 30_000;
+const BOT_INFO_TTL_MS = 24 * 60 * 60 * 1000;
+const BOT_INFO_METADATA_KEY = 'telegram_bot_info_cache';
 
 let cachedCredentials: {
   value: TelegramRuntimeCredentials;
@@ -39,6 +46,28 @@ async function resolveTelegramBotUsername(
 ): Promise<string | null> {
   if (!botToken) return null;
 
+  const tokenFingerprint = createHash('sha256').update(botToken).digest('hex');
+  const settings = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, 'default'),
+    columns: { metadata: true },
+  });
+  const cached = (settings?.metadata as Record<string, unknown> | undefined)?.[
+    BOT_INFO_METADATA_KEY
+  ] as
+    | { tokenFingerprint?: string; username?: string; fetchedAtMs?: number }
+    | undefined;
+  const matchingCachedUsername =
+    cached?.tokenFingerprint === tokenFingerprint && cached.username
+      ? cached.username
+      : null;
+  if (
+    matchingCachedUsername &&
+    typeof cached?.fetchedAtMs === 'number' &&
+    Date.now() - cached.fetchedAtMs < BOT_INFO_TTL_MS
+  ) {
+    return matchingCachedUsername;
+  }
+
   try {
     const apiBaseUrl =
       process.env.TELEGRAM_API_BASE_URL?.replace(/\/$/u, '') ??
@@ -47,6 +76,7 @@ async function resolveTelegramBotUsername(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
+      signal: AbortSignal.timeout(10_000),
     });
     const body = (await response.json().catch(() => null)) as {
       ok?: boolean;
@@ -54,9 +84,31 @@ async function resolveTelegramBotUsername(
     } | null;
     const username = body?.result?.username?.trim().replace(/^@/u, '');
 
-    return response.ok && body?.ok && username ? username : null;
+    if (!response.ok || !body?.ok || !username) {
+      return matchingCachedUsername;
+    }
+
+    try {
+      await db
+        .update(deploymentSettings)
+        .set({
+          metadata: sql`${deploymentSettings.metadata} || ${JSON.stringify({
+            [BOT_INFO_METADATA_KEY]: {
+              tokenFingerprint,
+              username,
+              fetchedAtMs: Date.now(),
+            },
+          })}::jsonb`,
+          updatedAt: new Date(),
+        })
+        .where(eq(deploymentSettings.id, 'default'));
+    } catch {
+      // Identity lookup still succeeded; persistence is only an optimization.
+    }
+
+    return username;
   } catch {
-    return null;
+    return matchingCachedUsername;
   }
 }
 

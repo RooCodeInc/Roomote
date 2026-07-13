@@ -13,6 +13,8 @@ const {
   mockResolveInvocationIdentities,
   mockResolveTelegramRuntimeCredentials,
   mockTelegramGetWebhookInfo,
+  mockTelegramRegisterCommands,
+  mockTelegramRegisterWebhook,
 } = vi.hoisted(() => ({
   mockDbDelete: vi.fn(() => ({
     where: vi.fn(async () => undefined),
@@ -30,6 +32,8 @@ const {
     botUsername: null as string | null,
   })),
   mockTelegramGetWebhookInfo: vi.fn(),
+  mockTelegramRegisterCommands: vi.fn(),
+  mockTelegramRegisterWebhook: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -61,7 +65,8 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/communication/telegram-provider', () => ({
   TelegramCommunicationProvider: class {
     getWebhookInfo = mockTelegramGetWebhookInfo;
-    registerWebhook = vi.fn();
+    registerWebhook = mockTelegramRegisterWebhook;
+    registerCommands = mockTelegramRegisterCommands;
   },
 }));
 
@@ -87,6 +92,7 @@ import {
   classifyTelegramWebhookCheckError,
   clearCommsAuthConfigCommand,
   getCommsStatusCommand,
+  repairTelegramWebhookCommand,
   saveCommsAuthConfigCommand,
 } from './index';
 
@@ -220,6 +226,8 @@ describe('comms commands', () => {
         expectedUrl: 'https://app.example.com/api/webhooks/telegram',
         lastErrorMessage:
           'Telegram rejected the bot token. Check the token from BotFather and save again.',
+        pendingUpdateCount: 0,
+        lastErrorAtMs: null,
       });
     });
   });
@@ -448,6 +456,23 @@ describe('comms commands', () => {
       expect(username).toBeUndefined();
       expect(token?.savedValue).toBeNull();
     });
+  });
+
+  it('repairs the webhook and refreshes the slash command menu', async () => {
+    mockResolveTelegramRuntimeCredentials.mockResolvedValue({
+      botToken: 'token',
+      webhookSecret: 'secret',
+      botUsername: 'RoomoteBot',
+    });
+
+    await expect(
+      repairTelegramWebhookCommand(buildMockAuth()),
+    ).resolves.toEqual({ repaired: true });
+    expect(mockTelegramRegisterWebhook).toHaveBeenCalledWith({
+      url: 'https://app.example.com/api/webhooks/telegram',
+      secretToken: 'secret',
+    });
+    expect(mockTelegramRegisterCommands).toHaveBeenCalledOnce();
   });
 
   describe('clearCommsAuthConfigCommand', () => {
