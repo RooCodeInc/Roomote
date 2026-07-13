@@ -46,9 +46,7 @@ const TELEGRAM_WELCOME_MESSAGE = [
   [
     '*Available commands*',
     '`/start` — show this welcome message.',
-    '`/start <request>` — start a task with the request.',
     '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
-    '`/done <request>` — alias for `/new`.',
   ].join('\n'),
 ].join('\n\n');
 

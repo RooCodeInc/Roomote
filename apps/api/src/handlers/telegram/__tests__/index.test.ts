@@ -1104,9 +1104,9 @@ describe('Telegram webhook handler', () => {
     const welcomeText = postMessageMock.mock.calls[0]?.[0].text as string;
     expect(welcomeText).toContain('*Available commands*');
     expect(welcomeText).toContain('`/start`');
-    expect(welcomeText).toContain('`/start <request>`');
     expect(welcomeText).toContain('`/new <request>`');
-    expect(welcomeText).toContain('`/done <request>`');
+    expect(welcomeText).not.toContain('`/start <request>`');
+    expect(welcomeText).not.toContain('`/done <request>`');
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {
