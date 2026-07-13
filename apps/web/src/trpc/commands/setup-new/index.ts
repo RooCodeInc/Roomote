@@ -914,11 +914,7 @@ export async function launchQueuedSetupTasksIfReady({
       ? {
           communicationProvider: nonSlackChatHandoffProvider,
           communicationChannelId: chatHandoffChannelId,
-          // Telegram treats communicationThreadId as a forum-topic
-          // message_thread_id, which the private primary chat does not have,
-          // so only Teams threads starter-task replies under the kickoff
-          // message.
-          ...(nonSlackChatHandoffProvider === 'teams' && chatHandoffThreadId
+          ...(chatHandoffThreadId
             ? { communicationThreadId: chatHandoffThreadId }
             : {}),
           ...(chatHandoffServiceUrl
@@ -2251,13 +2247,30 @@ export async function startSetupNewOnboardingTaskCommand(
         const kickoffMessage = buildSetupKickoffText();
         let kickoffMessageId: string | null = null;
         let kickoffChannelId: string | null = null;
+        let kickoffThreadId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
             botToken: fallbackTarget.botToken,
           });
+          try {
+            const { hasTopicsEnabled } = await telegram.getBotInfo();
+            if (hasTopicsEnabled) {
+              const topic = await telegram.createForumTopic({
+                channelId: fallbackTarget.chatId,
+                name: 'Set up Roomote',
+              });
+              kickoffThreadId = topic.messageThreadId;
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Could not create a Telegram topic for the setup task; falling back to the primary chat.',
+              error,
+            );
+          }
           const posted = await telegram.postMessage({
             channelId: fallbackTarget.chatId,
+            ...(kickoffThreadId ? { threadId: kickoffThreadId } : {}),
             text: kickoffMessage,
             textFormat: 'markdown',
           });
@@ -2317,6 +2330,12 @@ export async function startSetupNewOnboardingTaskCommand(
                 communicationProvider: fallbackTarget.provider,
                 communicationChannelId: kickoffChannelId,
                 communicationMessageId: kickoffMessageId,
+                ...(kickoffThreadId
+                  ? {
+                      communicationThreadId: kickoffThreadId,
+                      telegramTaskTopic: true,
+                    }
+                  : {}),
                 ...(fallbackTarget.provider === 'teams'
                   ? {
                       communicationThreadId: kickoffMessageId,
@@ -2349,7 +2368,9 @@ export async function startSetupNewOnboardingTaskCommand(
               slackThreadTs: null,
               chatHandoffProvider: fallbackTarget.provider,
               chatHandoffChannelId: kickoffChannelId,
-              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffThreadId:
+                kickoffThreadId ??
+                (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
               chatHandoffServiceUrl:
                 fallbackTarget.provider === 'teams'
                   ? fallbackTarget.serviceUrl

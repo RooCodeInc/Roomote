@@ -123,6 +123,28 @@ export async function createTelegramForumTopicBestEffort(input: {
   }
 }
 
+export async function postTelegramMessageInNewTopicBestEffort(input: {
+  chatId: string;
+  topicName: string;
+  text: string;
+  textFormat?: 'plain' | 'markdown';
+  buttons?: CommunicationMessageButton[][];
+}): Promise<{ messageId: string; threadId?: string } | null> {
+  const topic = await createTelegramForumTopicBestEffort({
+    chatId: input.chatId,
+    name: input.topicName,
+  });
+  const posted = await postTelegramMessageBestEffort({
+    chatId: input.chatId,
+    ...(topic ? { threadId: topic.threadId } : {}),
+    text: input.text,
+    ...(input.textFormat ? { textFormat: input.textFormat } : {}),
+    ...(input.buttons ? { buttons: input.buttons } : {}),
+  });
+
+  return posted ? { messageId: posted.messageId, ...(topic ?? {}) } : null;
+}
+
 export async function editTelegramForumTopicBestEffort(input: {
   chatId: string;
   threadId: string;

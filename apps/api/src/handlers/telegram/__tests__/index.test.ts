@@ -1297,7 +1297,10 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        text: expect.stringContaining('Linked!'),
+        text: expect.stringMatching(
+          /Linked![\s\S]*Available commands[\s\S]*\/start[\s\S]*\/new <request>/,
+        ),
+        textFormat: 'markdown',
       }),
     );
   });

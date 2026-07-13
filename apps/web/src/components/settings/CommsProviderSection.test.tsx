@@ -629,7 +629,7 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText('Create bot')).toBeInTheDocument();
       expect(screen.getByText('Bot token')).toBeInTheDocument();
       expect(screen.getByText('Threaded Mode')).toBeInTheDocument();
-      expect(screen.getByText('Webhook')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook')).not.toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
       expect(
         screen.getByText(/Roomote generates a webhook secret automatically/),

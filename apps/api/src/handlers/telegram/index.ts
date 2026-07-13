@@ -41,14 +41,16 @@ import {
   postTelegramMessageBestEffort,
 } from './replies.js';
 
+const TELEGRAM_COMMAND_HELP = [
+  '*Available commands*',
+  '`/start` — show this welcome message.',
+  '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+].join('\n');
+
 const TELEGRAM_WELCOME_MESSAGE = [
   "👋 Hi, I'm Roomote. Message me here to start tasks in your connected repos — I'll route your request, reply with progress, and post results (including screenshots) right in this chat.",
   'Try something like *"Fix the flaky auth test"* or *"What changed in the repo this week?"*. While a task is running you can send follow-ups in its chat or topic, and every started task has a cancel button.',
-  [
-    '*Available commands*',
-    '`/start` — show this welcome message.',
-    '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
-  ].join('\n'),
+  TELEGRAM_COMMAND_HELP,
 ].join('\n\n');
 
 const TELEGRAM_WELCOME_LINK_NUDGE =
@@ -206,7 +208,12 @@ telegram.post('/', async (c) => {
       });
       await postTelegramMessageBestEffort({
         chatId,
-        text: '✅ Linked! This Telegram account is now connected to your Roomote account — tasks you start here are attributed to you, and Roomote can reach you in this chat.',
+        text: [
+          '✅ Linked! This Telegram account is now connected to your Roomote account. Tasks you start here are attributed to you, and Roomote can reach you in this chat.',
+          'Send a request to start a task, or use:',
+          TELEGRAM_COMMAND_HELP,
+        ].join('\n\n'),
+        textFormat: 'markdown',
       });
 
       return c.json({ ok: true, linked: true });

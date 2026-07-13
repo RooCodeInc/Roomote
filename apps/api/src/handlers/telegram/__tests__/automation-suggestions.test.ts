@@ -60,7 +60,7 @@ vi.mock('../primary-chat.js', () => ({
 }));
 
 vi.mock('../replies.js', () => ({
-  postTelegramMessageBestEffort: postTelegramMessageBestEffortMock,
+  postTelegramMessageInNewTopicBestEffort: postTelegramMessageBestEffortMock,
 }));
 
 vi.mock('../../tasks/scheduled-suggestion-root-summary.js', () => ({
@@ -89,7 +89,10 @@ describe('postScheduledSuggestionsToTelegram', () => {
       onConflictDoNothing: insertOnConflictDoNothingMock,
     });
     insertOnConflictDoNothingMock.mockResolvedValue(undefined);
-    postTelegramMessageBestEffortMock.mockResolvedValue({ messageId: '950' });
+    postTelegramMessageBestEffortMock.mockResolvedValue({
+      messageId: '950',
+      threadId: '88',
+    });
     buildRootMessageMock.mockResolvedValue({
       summaryText: 'I triaged the latest Sentry issues.',
       actionFooterText: 'footer',
@@ -112,12 +115,14 @@ describe('postScheduledSuggestionsToTelegram', () => {
 
     expect(postTelegramMessageBestEffortMock).toHaveBeenCalledTimes(1);
     const posted = postTelegramMessageBestEffortMock.mock.calls[0]![0] as {
+      topicName: string;
       text: string;
       buttons: Array<Array<{ callbackData?: string }>>;
     };
 
     expect(posted.text).toContain('I triaged the latest Sentry issues.');
     expect(posted.text).toContain('Fix crash');
+    expect(posted.topicName).toBe('Suggested tasks');
     expect(posted.buttons).toEqual([
       [expect.objectContaining({ callbackData: 'idea:aaa' })],
       [expect.objectContaining({ callbackData: 'idea:bbb' })],

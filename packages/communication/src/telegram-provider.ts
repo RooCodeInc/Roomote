@@ -101,7 +101,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     }
 
     const threadId = parsePositiveInteger(input.threadId);
-    const replyToMessageId = parsePositiveInteger(input.replyToMessageId);
+    // Telegram's chronological chat already provides enough context. Quoting
+    // every inbound message duplicates the transcript and overwhelms both
+    // topic and non-topic conversations.
+    const replyToMessageId = undefined;
     const useMarkdown = input.textFormat === 'markdown';
     const chunks: Array<{ markdown: string; html: string | null }> = text
       ? useMarkdown

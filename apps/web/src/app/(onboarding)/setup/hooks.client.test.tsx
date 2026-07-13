@@ -807,6 +807,23 @@ describe('useSetupFlow', () => {
     });
   });
 
+  it('skips the communication provider chooser after Telegram setup completes', async () => {
+    markSetupWelcomeSeen();
+    setupSessionState.session = {
+      ...setupSessionState.session,
+      communicationStep: {
+        state: 'completed',
+      },
+    };
+    mockStatus();
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('env-vars');
+    });
+  });
+
   it('skips the communication connect step when the session marks it skipped', async () => {
     setupSessionState.session = {
       ...setupSessionState.session,

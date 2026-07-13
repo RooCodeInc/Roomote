@@ -12,7 +12,7 @@ import { apiLogger } from '../../logging.js';
 import { resolveScheduledSuggestionSlackConfig } from '../tasks/background-automation-slack.js';
 import { buildScheduledSuggestionRootMessage } from '../tasks/scheduled-suggestion-root-summary.js';
 import { findTelegramPrimaryChatId } from './primary-chat.js';
-import { postTelegramMessageBestEffort } from './replies.js';
+import { postTelegramMessageInNewTopicBestEffort } from './replies.js';
 
 const MAX_TELEGRAM_AUTOMATION_SUGGESTIONS = 5;
 
@@ -121,9 +121,9 @@ export async function postScheduledSuggestionsToTelegram(params: {
       },
     ],
   );
-
-  const posted = await postTelegramMessageBestEffort({
+  const posted = await postTelegramMessageInNewTopicBestEffort({
     chatId,
+    topicName: 'Suggested tasks',
     text: messageLines.join('\n'),
     textFormat: 'markdown',
     buttons,
