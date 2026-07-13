@@ -76,18 +76,6 @@ ENV LC_ALL=en_US.UTF-8
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
-# Install VSCode
-# Run with: `$VSCODE_BIN --no-sandbox --user-data-dir $VSCODE_USER_DATA_DIR --version`
-RUN ARCH="$(dpkg --print-architecture)" \
-  && mkdir -p /etc/apt/keyrings \
-  && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
-  && echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
-    > /etc/apt/sources.list.d/vscode.list \
-  && apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends code \
-  && rm -rf /var/lib/apt/lists/*
-
 # Install gh cli
 RUN ARCH="$(dpkg --print-architecture)" \
   && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${ARCH}.tar.gz" -o /tmp/gh.tar.gz \
@@ -110,6 +98,8 @@ RUN useradd -m -s /bin/bash roomote \
   && echo 'roomote ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/roomote \
   && chmod 0440 /etc/sudoers.d/roomote
 
+# Keep /sandbox/.vscode as a legacy provider/snapshot path identifier; no
+# editor is installed.
 RUN mkdir -p \
     /sandbox \
     /sandbox/repos \

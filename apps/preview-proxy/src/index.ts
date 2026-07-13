@@ -34,9 +34,9 @@ import { handleAuthCallback } from './handlers/auth-callback';
 import { handleResumeStatusRequest } from './handlers/resume-status';
 
 /**
- * Pre-computed set of URL slugs for system-managed ports (e.g. "editor",
- * "sandbox-server"). The preview widget should not be injected into these
- * ports because they serve non-user content (VS Code, sandbox API, etc.).
+ * Pre-computed set of URL slugs for system-managed ports. The preview widget
+ * should not be injected into these ports because they serve internal runtime
+ * content or preserve legacy URL classifications.
  */
 const SYSTEM_PORT_SLUGS = new Set([...SYSTEM_PORT_NAMES].map(portNameToSlug));
 
@@ -128,8 +128,8 @@ proxy.on('proxyRes', (proxyRes, req, res) => {
 
   // selfHandleResponse is enabled, so we must write the response ourselves.
   // Inject the overlay script into HTML responses; pass everything else through.
-  // Skip injection for system ports (VS Code editor, sandbox server) since the
-  // preview widget is only relevant for normal user previews, not internal automation sessions.
+  // Skip injection for system ports since the preview widget is only relevant
+  // for normal user previews, not internal runtime or legacy URL surfaces.
   const serverRes = res as http.ServerResponse;
   const host = req.headers.host || '';
   const parsed = parseHostForConfig(
