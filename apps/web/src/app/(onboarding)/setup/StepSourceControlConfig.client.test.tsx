@@ -262,7 +262,7 @@ describe('StepSourceControlConfig', () => {
     });
   }
 
-  it('shows only Azure DevOps organization and PAT by default', () => {
+  it('defaults Azure DevOps setup to delegated authentication', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildAdoSourceControlSetup()}
@@ -272,7 +272,10 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
-    expect(screen.getByText(/Azure DevOps Access Token/)).toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Azure DevOps Access Token/),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
@@ -295,6 +298,15 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
+    expect(
+      screen.getByRole('link', {
+        name: /Azure App registrations/i,
+      }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Personal access token/i }),
+    );
     expect(
       screen.getByRole('link', {
         name: /Create an Azure DevOps personal access token/i,
@@ -402,6 +414,9 @@ describe('StepSourceControlConfig', () => {
     fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
       target: { value: 'my-org' },
     });
+    fireEvent.click(
+      screen.getByRole('button', { name: /Personal access token/i }),
+    );
     fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
       target: { value: 'ado-pat' },
     });
@@ -432,6 +447,9 @@ describe('StepSourceControlConfig', () => {
     fireEvent.change(screen.getByPlaceholderText('ADO_ORGANIZATION'), {
       target: { value: 'my-org' },
     });
+    fireEvent.click(
+      screen.getByRole('button', { name: /Personal access token/i }),
+    );
     fireEvent.change(screen.getByPlaceholderText('ADO_TOKEN'), {
       target: { value: 'ado-pat' },
     });

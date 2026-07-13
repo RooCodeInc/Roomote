@@ -26,6 +26,7 @@ import { NumberedStep } from './NumberedStep';
 import {
   AdoSourceControlConfig,
   AdoSourceControlInstructions,
+  DEFAULT_ADO_AUTH_MODE,
 } from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
 import { GitLabSourceControlConfig } from './GitLabSourceControlConfig';
@@ -97,7 +98,7 @@ export function StepSourceControlConfig({
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
-    'pat',
+    DEFAULT_ADO_AUTH_MODE,
   );
   const saveSourceControlConfig = useMutation(
     trpc.setupNew.saveSourceControlConfig.mutationOptions({
@@ -197,15 +198,21 @@ export function StepSourceControlConfig({
         field.envVarName === 'ADO_TOKEN' &&
         (field.runtimeSatisfied || field.savedSatisfied),
     );
-    const configuredMode = providerFields.find(
-      (field) => field.envVarName === 'ADO_AUTH_MODE',
-    )?.savedValue;
+    const configuredMode = providerFields
+      .find((field) => field.envVarName === 'ADO_AUTH_MODE')
+      ?.savedValue?.trim();
     const initialAdoAuthMode =
-      configuredMode === 'delegated'
-        ? 'delegated'
-        : hasAdoEntraCredentials && !hasAdoPat
+      configuredMode === 'pat'
+        ? 'pat'
+        : configuredMode === 'entra'
           ? 'entra'
-          : 'pat';
+          : configuredMode === 'delegated'
+            ? 'delegated'
+            : hasAdoEntraCredentials && !hasAdoPat
+              ? 'entra'
+              : hasAdoPat
+                ? 'pat'
+                : DEFAULT_ADO_AUTH_MODE;
     setAdoAuthMode(initialAdoAuthMode);
     setShowAdoAdvancedConfig(false);
   }, [effectiveSelectedProviderId, nonSecretInitialValues, providerFields]);

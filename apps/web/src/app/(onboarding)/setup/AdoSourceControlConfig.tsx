@@ -3,6 +3,8 @@ import { InstructionUrl } from './ProviderSetupInstructions';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
 
+export const DEFAULT_ADO_AUTH_MODE: AdoAuthMode = 'delegated';
+
 export function AdoSourceControlConfig({
   authMode,
   onAuthModeChange,
@@ -12,9 +14,7 @@ export function AdoSourceControlConfig({
 }) {
   return (
     <div className="space-y-2">
-      <p className="font-semibold text-foreground">
-        How should Roomote connect to ADO?
-      </p>
+      <p className="font-semibold text-foreground">Choose a connection path:</p>
       <div className="w-full flex flex-col gap-1">
         <button
           type="button"
@@ -28,7 +28,7 @@ export function AdoSourceControlConfig({
               Connect with your Microsoft account
             </span>
             <span className="text-sm text-muted-foreground">
-              Easiest to start.
+              Easiest to start, recommended, if you have the permissions.
             </span>
           </div>
         </button>
@@ -42,7 +42,7 @@ export function AdoSourceControlConfig({
           <div>
             <span className="block font-medium">Personal access token</span>
             <span className="text-sm text-muted-foreground">
-              Also quick, but tied to you, may need to change later.
+              Also quick, best if you have limited ADO permissions.
             </span>
           </div>
         </button>
