@@ -667,7 +667,7 @@ function SourceControlProviderBlock({
                 onShowManualValues={() => setShowManualGitHubValues(true)}
                 onHideManualValues={() => setShowManualGitHubValues(false)}
               />
-            ) : (
+            ) : provider === 'ado' && configForm ? null : (
               <ProviderSetupInstructions provider={provider} title={title} />
             )
           ) : null}

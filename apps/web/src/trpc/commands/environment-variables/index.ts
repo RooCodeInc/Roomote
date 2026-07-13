@@ -148,6 +148,23 @@ export async function upsertDeploymentEnvironmentVariables(
   }
 }
 
+export async function deleteDeploymentEnvironmentVariables(
+  tx: DatabaseOrTransaction,
+  names: string[],
+) {
+  const uniqueNames = Array.from(
+    new Set(names.map((name) => name.trim()).filter(Boolean)),
+  );
+
+  if (uniqueNames.length === 0) {
+    return;
+  }
+
+  await tx
+    .delete(environmentVariables)
+    .where(inArray(environmentVariables.name, uniqueNames));
+}
+
 export async function getEnvVarsCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 

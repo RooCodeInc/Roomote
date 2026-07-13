@@ -577,7 +577,7 @@ describe('SourceControl settings', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows ADO setup instructions when required config is not satisfied', () => {
+  it('shows the org-first ADO config when required config is not satisfied', () => {
     state.adoRepositories = [];
     state.configProviders = [
       { provider: 'github', configSatisfied: true },
@@ -599,8 +599,10 @@ describe('SourceControl settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
 
     expect(
-      screen.getByRole('link', { name: /Azure DevOps personal access token/ }),
-    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+      screen.queryByRole('link', {
+        name: /Azure DevOps personal access token/,
+      }),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId('source-control-config-ado')).toBeInTheDocument();
   });
 

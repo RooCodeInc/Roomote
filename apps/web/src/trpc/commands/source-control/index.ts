@@ -27,11 +27,13 @@ import {
 
 import type { UserAuthSuccess } from '@/types';
 
+import { ADO_CLOUD_BASE_URL } from '@/lib/ado';
 import { getRepositories } from '@/lib/server';
 import { Env } from '@/lib/server/env';
 
 import {
   assertAdmin,
+  deleteDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
@@ -644,6 +646,25 @@ export async function saveSourceControlConfigValues(params: {
       },
     ];
   });
+  const submittedValues = params.values ?? {};
+  const envVarNamesToClear = providerStatus.fields.flatMap((field) => {
+    const wasSubmitted = Object.prototype.hasOwnProperty.call(
+      submittedValues,
+      field.envVarName,
+    );
+    const nextValue = submittedValues[field.envVarName]?.trim() ?? '';
+
+    if (
+      field.required !== false ||
+      !field.savedSatisfied ||
+      !wasSubmitted ||
+      nextValue
+    ) {
+      return [];
+    }
+
+    return [field.envVarName];
+  });
 
   const hasMissingRequiredValue = providerStatus.fields.some((field) => {
     const nextValue = params.values?.[field.envVarName]?.trim() ?? '';
@@ -667,6 +688,13 @@ export async function saveSourceControlConfigValues(params: {
       userId: params.actorUserId,
       values: valuesToSave,
     });
+  }
+
+  if (envVarNamesToClear.length > 0) {
+    await deleteDeploymentEnvironmentVariables(
+      params.executor,
+      envVarNamesToClear,
+    );
   }
 
   return providerStatus;
@@ -759,10 +787,18 @@ export async function assertValidSourceControlConfigInput(params: {
       return;
     }
 
+    const adoBaseUrlWasSubmitted = Object.prototype.hasOwnProperty.call(
+      params.values ?? {},
+      'ADO_BASE_URL',
+    );
+    const submittedAdoBaseUrl = params.values?.['ADO_BASE_URL']?.trim() ?? '';
+
     const validation = await Ado.validateAdoToken({
       token: nextAdoToken,
       organization: nextAdoOrganization,
-      baseUrl: params.values?.['ADO_BASE_URL']?.trim() || undefined,
+      baseUrl: adoBaseUrlWasSubmitted
+        ? submittedAdoBaseUrl || ADO_CLOUD_BASE_URL
+        : undefined,
     });
 
     if (validation.status === 'invalid') {

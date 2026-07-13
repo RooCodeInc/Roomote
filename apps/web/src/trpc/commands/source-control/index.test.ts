@@ -14,6 +14,7 @@ const {
   mockResolveAdoOrganization,
   mockValidateAdoToken,
   mockValidateGiteaToken,
+  mockDeleteDeploymentEnvironmentVariables,
   mockEnv,
 } = vi.hoisted(() => ({
   mockEnsureAdoServiceHooksForRepositories: vi.fn(),
@@ -29,6 +30,7 @@ const {
   mockResolveAdoOrganization: vi.fn(),
   mockValidateAdoToken: vi.fn(),
   mockValidateGiteaToken: vi.fn(),
+  mockDeleteDeploymentEnvironmentVariables: vi.fn(),
   mockEnv: {
     R_APP_URL: 'https://roomote.example.com',
     TRPC_URL: 'http://localhost:3000/trpc',
@@ -91,12 +93,15 @@ vi.mock('../environment-variables', () => ({
       throw new Error('Unauthorized');
     }
   },
+  deleteDeploymentEnvironmentVariables:
+    mockDeleteDeploymentEnvironmentVariables,
   upsertDeploymentEnvironmentVariables:
     mockUpsertDeploymentEnvironmentVariables,
 }));
 
 import {
   assertValidSourceControlConfigInput,
+  saveSourceControlConfigValues,
   syncRepositoriesCommand,
 } from './index';
 
@@ -159,6 +164,34 @@ describe('source-control commands', () => {
     mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
     mockResolveAdoOrganization.mockResolvedValue(null);
     mockValidateAdoToken.mockResolvedValue({ status: 'valid' });
+  });
+
+  it('clears a submitted blank optional source-control value', async () => {
+    const executor = {
+      select: () => ({
+        from: () =>
+          Promise.resolve([
+            { name: 'ADO_ORGANIZATION' },
+            { name: 'ADO_TOKEN' },
+            { name: 'ADO_BASE_URL' },
+          ]),
+      }),
+    } as unknown as Parameters<
+      typeof saveSourceControlConfigValues
+    >[0]['executor'];
+
+    await saveSourceControlConfigValues({
+      executor,
+      actorUserId: 'source-control-user',
+      provider: 'ado',
+      values: { ADO_BASE_URL: '' },
+    });
+
+    expect(mockDeleteDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      executor,
+      ['ADO_BASE_URL'],
+    );
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
   it('syncs Gitea repositories and configures pull request webhooks', async () => {
@@ -341,6 +374,23 @@ describe('source-control commands', () => {
       token: 'ado-token',
       organization: 'acme',
       baseUrl: undefined,
+    });
+  });
+
+  it('validates a new Azure DevOps token against cloud when clearing a saved Server URL', async () => {
+    await assertValidSourceControlConfigInput({
+      provider: 'ado',
+      values: {
+        ADO_ORGANIZATION: 'acme',
+        ADO_TOKEN: 'ado-token',
+        ADO_BASE_URL: '',
+      },
+    });
+
+    expect(mockValidateAdoToken).toHaveBeenCalledWith({
+      token: 'ado-token',
+      organization: 'acme',
+      baseUrl: 'https://dev.azure.com',
     });
   });
 

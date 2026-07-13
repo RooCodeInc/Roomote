@@ -5,7 +5,10 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  buildSetupSourceControlStatus,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
 const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
   () => ({
@@ -213,6 +216,131 @@ describe('SourceControlConfigForm', () => {
       expect(screen.queryByDisplayValue('new-secret-value')).toBeNull();
       expect(screen.getByDisplayValue(MASKED_VALUE)).toBeInTheDocument();
       expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
+    });
+  });
+
+  it('uses the organization-first Azure DevOps setup flow', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText('Azure DevOps Organization'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Azure DevOps Access Token'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      screen.getByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).toHaveAttribute(
+      'href',
+      'https://dev.azure.com/acme/_usersSettings/tokens',
+    );
+    expect(
+      screen.getByLabelText('Azure DevOps Access Token'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Azure DevOps Base URL/),
+    ).not.toBeInTheDocument();
+
+    const advancedOptionsButton = screen.getByRole('button', {
+      name: 'Show advanced options',
+    });
+    expect(advancedOptionsButton).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(advancedOptionsButton);
+
+    expect(screen.getByText('Azure DevOps Base URL (optional)')).toBeVisible();
+    expect(advancedOptionsButton).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('builds the Azure DevOps PAT link from a runtime organization', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: { ADO_ORGANIZATION: 'runtime-org' },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).toHaveAttribute(
+      'href',
+      'https://dev.azure.com/runtime-org/_usersSettings/tokens',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Change organization' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Managed by runtime configuration')).toBeVisible();
+  });
+
+  it('does not send a custom Azure DevOps Server user to the cloud PAT page', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: {
+            ADO_ORGANIZATION: 'Default Collection',
+            ADO_BASE_URL: 'https://ado.example.com/tfs',
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'View PAT setup instructions' }),
+    ).toHaveAttribute(
+      'href',
+      'https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate?view=azure-devops',
+    );
+    expect(
+      screen.queryByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('saves Azure DevOps organization and PAT together', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: ' acme ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(screen.getByLabelText('Azure DevOps Access Token'), {
+      target: { value: 'ado-pat' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save configuration' }));
+
+    expect(mutateMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_ORGANIZATION: 'acme',
+        ADO_TOKEN: 'ado-pat',
+      },
     });
   });
 });

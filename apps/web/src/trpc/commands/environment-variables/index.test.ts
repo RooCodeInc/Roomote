@@ -2,8 +2,9 @@ import type { FeatureFlag } from '@roomote/feature-flags';
 
 import type { UserAuthSuccess } from '@/types';
 
-const { mockFinalChain } = vi.hoisted(() => ({
+const { mockFinalChain, mockInArray } = vi.hoisted(() => ({
   mockFinalChain: vi.fn(),
+  mockInArray: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -19,12 +20,16 @@ vi.mock('@roomote/db/server', () => ({
   environmentVariables: { name: 'env.name', userId: 'env.user_id' },
   eq: vi.fn(),
   desc: vi.fn(),
-  inArray: vi.fn(),
+  inArray: mockInArray,
   not: vi.fn(),
   getTableColumns: () => ({ id: 'env.id', name: 'env.name' }),
 }));
 
-import { createEnvVarCommand, getEnvVarsCommand } from './index';
+import {
+  createEnvVarCommand,
+  deleteDeploymentEnvironmentVariables,
+  getEnvVarsCommand,
+} from './index';
 
 function buildMockAuth(
   overrides: Partial<UserAuthSuccess> = {},
@@ -69,6 +74,27 @@ describe('environment-variables commands', () => {
       await getEnvVarsCommand(buildMockAuth());
 
       expect(mockFinalChain).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('deleteDeploymentEnvironmentVariables', () => {
+    it('deletes each named deployment value once', async () => {
+      const where = vi.fn().mockResolvedValue(undefined);
+      const executor = {
+        delete: vi.fn(() => ({ where })),
+      } as unknown as Parameters<
+        typeof deleteDeploymentEnvironmentVariables
+      >[0];
+
+      await deleteDeploymentEnvironmentVariables(executor, [
+        ' ADO_BASE_URL ',
+        'ADO_BASE_URL',
+        '',
+      ]);
+
+      expect(mockInArray).toHaveBeenCalledWith('env.name', ['ADO_BASE_URL']);
+      expect(executor.delete).toHaveBeenCalledTimes(1);
+      expect(where).toHaveBeenCalledTimes(1);
     });
   });
 
