@@ -21,7 +21,7 @@ import { SUMMARIZE_MERGED_PRS_SETTINGS_HASH } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
-import { hasActiveGitHubInstallation } from './github-deployment-scope';
+import { hasAnyActiveRepository } from './github-deployment-scope';
 import { buildAutomationRootSummaryMessage } from '../lib/manager-slack';
 import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
 import {
@@ -55,7 +55,9 @@ const WINDOW_DAYS: Record<AnnouncerFrequency, number> = {
 const MAX_DETAIL_MESSAGE_CHARS = 3_000;
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
-  if (!(await hasActiveGitHubInstallation())) {
+  // Merged-PR data comes from the provider-neutral taskPullRequests table,
+  // so any active repository qualifies regardless of source-control provider.
+  if (!(await hasAnyActiveRepository())) {
     return [];
   }
 
@@ -224,7 +226,8 @@ export async function announcerJob(
   const eligibleDeployments = await findEligibleDeployments();
 
   if (eligibleDeployments.length === 0) {
-    result.skippedReason = 'GitHub and Slack must both be connected.';
+    result.skippedReason =
+      'An active repository and Slack must both be connected.';
   }
 
   let processed = 0;
