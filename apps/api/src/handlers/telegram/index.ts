@@ -332,10 +332,10 @@ telegram.post('/', async (c) => {
     threadId: metadata.communicationThreadId,
   };
 
-  // `/new` and `/done` are explicit "start a fresh task" signals. In a plain
-  // chat (or an existing topic), the next message after completion would
-  // otherwise resume the previous snapshot. These commands skip that resume
-  // path and, when topics are available, create a new task topic.
+  // `/new` is an explicit "start a fresh task" signal. In a plain chat (or an
+  // existing topic), the next message after completion would otherwise resume
+  // the previous snapshot. This command skips that resume path and, when
+  // topics are available, creates a new task topic.
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });

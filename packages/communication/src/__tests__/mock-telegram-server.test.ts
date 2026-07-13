@@ -523,8 +523,8 @@ describe('computeTelegramEntities', () => {
   });
 
   it('marks mid-sentence commands the way Telegram does', () => {
-    expect(computeTelegramEntities('try running /done later')).toEqual([
-      { type: 'bot_command', offset: 12, length: 5 },
+    expect(computeTelegramEntities('try running /status later')).toEqual([
+      { type: 'bot_command', offset: 12, length: 7 },
     ]);
   });
 

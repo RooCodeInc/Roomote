@@ -878,37 +878,6 @@ describe('Telegram webhook handler', () => {
     expect(routeTaskMock).toHaveBeenCalled();
   });
 
-  it('/done works as an alias for /new', async () => {
-    mockTelegramLinkedSender('launch-owner-6');
-    taskRunsFindFirstMock.mockResolvedValueOnce(null);
-
-    const response = await postTelegramUpdate(
-      createTelegramUpdate({
-        message: {
-          text: '/done run the test suite',
-          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
-        },
-      }),
-    );
-
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      started: true,
-      runId: 88,
-    });
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          type: 'standard',
-          payload: expect.objectContaining({
-            description: 'run the test suite',
-          }),
-        }),
-      }),
-      expect.objectContaining({ launchClass: 'human' }),
-    );
-  });
-
   it('replies with a usage hint for a bare /new with no description', async () => {
     mockTelegramLinkedSender('launch-owner-7');
 
@@ -973,7 +942,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('names the command sent and echoes the request in the refusal', async () => {
+  it('echoes the /new request in the active-task refusal', async () => {
     mockTelegramLinkedSender('launch-owner-8');
     taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
@@ -986,8 +955,8 @@ describe('Telegram webhook handler', () => {
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: '/done update the README instead',
-          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+          text: '/new update the README instead',
+          entities: [{ type: 'bot_command', offset: 0, length: 4 }],
         },
       }),
     );
@@ -999,12 +968,12 @@ describe('Telegram webhook handler', () => {
     });
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: expect.stringContaining('/done update the README instead'),
+        text: expect.stringContaining('/new update the README instead'),
       }),
     );
   });
 
-  it('queues a mid-sentence /done as an ordinary follow-up to the active task', async () => {
+  it('queues a mid-sentence slash token as an ordinary follow-up', async () => {
     mockTelegramLinkedSender('launch-owner-9');
     taskRunsFindFirstMock.mockResolvedValueOnce({
       id: 77,
@@ -1017,8 +986,8 @@ describe('Telegram webhook handler', () => {
     const response = await postTelegramUpdate(
       createTelegramUpdate({
         message: {
-          text: 'ping me when you are /done with the build',
-          entities: [{ type: 'bot_command', offset: 21, length: 5 }],
+          text: 'check the /status route in the build',
+          entities: [{ type: 'bot_command', offset: 10, length: 7 }],
         },
       }),
     );
@@ -1035,7 +1004,7 @@ describe('Telegram webhook handler', () => {
         userId: 'launch-owner-9',
         // The mid-sentence command is message content: delivered verbatim,
         // not spliced out of the follow-up text.
-        text: 'ping me when you are /done with the build',
+        text: 'check the /status route in the build',
       }),
     );
     expect(enqueueTaskMock).not.toHaveBeenCalled();
@@ -1106,7 +1075,6 @@ describe('Telegram webhook handler', () => {
     expect(welcomeText).toContain('`/start`');
     expect(welcomeText).toContain('`/new <request>`');
     expect(welcomeText).not.toContain('`/start <request>`');
-    expect(welcomeText).not.toContain('`/done <request>`');
   });
 
   it('welcomes bare /start commands from an unlinked sender', async () => {

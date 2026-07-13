@@ -2,7 +2,7 @@
 
 Each scenario lists the updates to inject, the expected observable behavior, and where to assert it. "State" means `GET http://127.0.0.1:3013/mock/state`; "DB" means the `cloud_jobs` table. Bot messages have `from.is_bot == true`.
 
-Because Telegram has no threads, the core product invariant under test is: **one chat (or forum topic) maps to at most one active conversation**, continuity comes from the active-job lookup, and `/new`/`/done` are the only ways to break out early.
+The core product invariant under test is: **one chat (or forum topic) maps to at most one active conversation**, continuity comes from the active-job lookup, and `/new` is the way to break out early.
 
 ## 1. private-fast-answer
 
@@ -29,13 +29,13 @@ A second message arrives in the same chat while the job is active.
 - Assert: state shows the second inbound message with a reaction but no new task-start ack; DB still has one active job for the chat.
 - Regression risk: if active-job lookup breaks, every follow-up silently launches a parallel task — the worst UX failure this surface has.
 
-## 4. new-task-command / done-command
+## 4. new-task-command
 
-After a task completes, the next plain message resumes its snapshot; `/new` or `/done` must force a fresh task instead.
+After a task completes, the next plain message resumes its snapshot; `/new` must force a fresh task instead.
 
 - Inject: complete a task in the chat (or seed a Completed job with a resumable snapshot), then `message` with text `/new upgrade the login tests to vitest 4`.
 - Expect: a fresh task launch (new job id), not a snapshot resume; the `/new` invocation is stripped from the queued task text.
-- Variants: `/done <req>`; group forms `/new@roomote_mock_bot <req>` and `@roomote_mock_bot /new <req>`; a mid-sentence `/new` must NOT trigger (it is ordinary text); `/new` while a job is still running is refused with an echo-back so the user can resend.
+- Variants: group forms `/new@roomote_mock_bot <req>` and `@roomote_mock_bot /new <req>`; a mid-sentence `/new` must NOT trigger (it is ordinary text); `/new` while a job is still running is refused with an echo-back so the user can resend.
 - Assert: DB (new job vs `SnapshotResume` payload); state for the refusal echo.
 
 ## 5. group-mention-gating

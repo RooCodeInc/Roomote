@@ -1,13 +1,13 @@
 ---
 name: mock-telegram-testing
-description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, `/new` and `/done` commands, callback buttons, outbound Telegram posts, reply footers, message chunking, `TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, the `/new` command, callback buttons, outbound Telegram posts, reply footers, message chunking, `TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Telegram Testing
 
 Use this skill to exercise Roomote's Telegram integration against the checked-in mock Telegram harness. Do not invent another fake Telegram stack and do not fall back to a real Telegram bot unless the user explicitly asks for that parity test.
 
-Telegram continuity is inferred from **chat id (+ forum topic id) → active cloud job**. Private bot chats can have topics when Threaded Mode is enabled in BotFather, and forum supergroups can have topics when the bot has Manage Topics rights. `/new` and `/done` are the explicit escape hatches after a task completes. That continuity logic is the highest-value thing to test here.
+Telegram continuity is inferred from **chat id (+ forum topic id) → active cloud job**. Private bot chats can have topics when Threaded Mode is enabled in BotFather, and forum supergroups can have topics when the bot has Manage Topics rights. `/new` is the explicit escape hatch after a task completes. That continuity logic is the highest-value thing to test here.
 
 ## Quick Reference
 
