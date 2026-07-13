@@ -216,20 +216,17 @@ describe('buildSetupSourceControlStatus', () => {
     });
     expect(optionalAdoTenantId).toMatchObject({
       required: false,
-      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoClientId).toMatchObject({
       required: false,
-      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
     expect(optionalAdoClientSecret).toMatchObject({
       required: false,
       secret: true,
-      advanced: true,
       runtimeSatisfied: false,
       savedSatisfied: false,
     });
@@ -395,15 +392,21 @@ describe('getSetupSourceControlVisibleFields', () => {
     (provider) => provider.provider === 'ado',
   );
 
-  it('defaults Azure DevOps setup to organization and PAT only', () => {
+  it('keeps mode-specific Azure DevOps credentials visible during setup', () => {
     expect(
       getSetupSourceControlVisibleFields(ado?.fields ?? []).map(
         (field) => field.envVarName,
       ),
-    ).toEqual(['ADO_ORGANIZATION', 'ADO_TOKEN']);
+    ).toEqual([
+      'ADO_ORGANIZATION',
+      'ADO_TOKEN',
+      'ADO_CLIENT_ID',
+      'ADO_CLIENT_SECRET',
+      'ADO_TENANT_ID',
+    ]);
   });
 
-  it('includes advanced Azure DevOps fields when advanced config is open', () => {
+  it('includes optional Azure DevOps fields when advanced config is open', () => {
     expect(
       getSetupSourceControlVisibleFields(ado?.fields ?? [], {
         showAdvancedConfig: true,

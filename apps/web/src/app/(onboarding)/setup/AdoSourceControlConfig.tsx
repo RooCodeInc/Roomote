@@ -1,3 +1,5 @@
+import { InstructionUrl } from './ProviderSetupInstructions';
+
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
 
 export function AdoSourceControlConfig({
@@ -86,31 +88,30 @@ export function AdoSourceControlInstructions({
   }
 
   return (
-    <div className="max-w-xl space-y-3 text-sm text-muted-foreground">
+    <div className="max-w-xl space-y-3 text-muted-foreground">
       <p className="font-semibold text-foreground">
         Create a Microsoft Entra app.
       </p>
-      <p>
-        Open Azure App registrations, choose <strong>New registration</strong>,
-        and create an app in the Microsoft tenant that can access your Azure
-        DevOps organization.
+      <p className="text-sm">
+        Open{' '}
+        <a
+          href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-foreground underline"
+        >
+          Azure App registrations
+        </a>
+        , choose <strong>New registration</strong>, and create an app in the
+        Microsoft tenant that can access your Azure DevOps organization.
       </p>
-      <a
-        href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="font-semibold text-foreground underline"
-      >
-        Open Azure App registrations
-      </a>
+
       {authMode === 'delegated' ? (
         <>
-          <p>Under Authentication, add this Web redirect URI:</p>
-          <p className="break-all">
-            <code className="text-foreground">
-              {publicOrigin}/api/auth/oauth2/callback/ado
-            </code>
-          </p>
+          <InstructionUrl
+            heading="Web redirect URI"
+            url={`${publicOrigin}/api/auth/oauth2/callback/ado`}
+          />
           <p>
             Create a client secret, grant the Azure DevOps delegated permissions
             required by your organization, and grant admin consent if your

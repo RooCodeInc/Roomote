@@ -207,7 +207,7 @@ export function StepSourceControlConfig({
           ? 'entra'
           : 'pat';
     setAdoAuthMode(initialAdoAuthMode);
-    setShowAdoAdvancedConfig(initialAdoAuthMode === 'entra');
+    setShowAdoAdvancedConfig(false);
   }, [effectiveSelectedProviderId, nonSecretInitialValues, providerFields]);
   const canContinueWithoutNewValues =
     visibleFields.every(
@@ -350,7 +350,7 @@ export function StepSourceControlConfig({
             authMode={adoAuthMode}
             onAuthModeChange={(mode) => {
               setAdoAuthMode(mode);
-              setShowAdoAdvancedConfig(mode !== 'pat');
+              setShowAdoAdvancedConfig(false);
             }}
           />
         </NumberedStep>

@@ -308,7 +308,7 @@ describe('StepSourceControlConfig', () => {
       screen.getByText('Create a Microsoft Entra app.'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: /Open Azure App registrations/i }),
+      screen.getByRole('link', { name: /Azure App registrations/i }),
     ).toBeInTheDocument();
 
     fireEvent.click(
@@ -316,13 +316,13 @@ describe('StepSourceControlConfig', () => {
         name: /Connect with your Microsoft account/,
       }),
     );
-    expect(screen.getByText(/Web redirect URI/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Web redirect URI/).length).toBeGreaterThan(0);
     expect(
       screen.getByText(/\/api\/auth\/oauth2\/callback\/ado/),
     ).toBeInTheDocument();
   });
 
-  it('reveals advanced Azure DevOps fields without showing the webhook secret', () => {
+  it('reveals optional Azure DevOps fields without showing the webhook secret', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildAdoSourceControlSetup()}
@@ -337,17 +337,21 @@ describe('StepSourceControlConfig', () => {
 
     expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();
-    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Microsoft Entra Client Secret/),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Microsoft Entra Tenant ID/)).toBeInTheDocument();
+      screen.queryByText(/Microsoft Entra Client ID/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Microsoft Entra Client Secret/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Microsoft Entra Tenant ID/),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText(/Azure DevOps Webhook Secret/),
     ).not.toBeInTheDocument();
   });
 
-  it('keeps advanced Azure DevOps fields closed when switching auth modes', () => {
+  it('keeps optional Azure DevOps fields closed when switching auth modes', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildAdoSourceControlSetup()}
@@ -361,7 +365,7 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: 'Hide advanced config' }),
+      screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
 
@@ -375,14 +379,14 @@ describe('StepSourceControlConfig', () => {
       screen.getByText('Create a Microsoft Entra app.'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: /Open Azure App registrations/i }),
+      screen.getByRole('link', { name: /Azure App registrations/i }),
     ).toHaveAttribute(
       'href',
       'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
     );
 
     expect(
-      screen.getByRole('button', { name: 'Hide advanced config' }),
+      screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
   });
 
@@ -458,6 +462,9 @@ describe('StepSourceControlConfig', () => {
     });
     fireEvent.click(
       screen.getByRole('button', { name: /Microsoft Entra service principal/ }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show advanced config' }),
     );
     fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
       target: { value: 'https://ado.example.com' },

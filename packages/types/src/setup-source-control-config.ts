@@ -369,7 +369,6 @@ function buildProviderFields(
           acceptedEnvVarNames: ['ADO_CLIENT_ID'],
           label: 'Microsoft Entra Client ID',
           required: false,
-          advanced: true,
         },
         {
           envVarName: 'ADO_CLIENT_SECRET',
@@ -377,14 +376,12 @@ function buildProviderFields(
           label: 'Microsoft Entra Client Secret',
           secret: true,
           required: false,
-          advanced: true,
         },
         {
           envVarName: 'ADO_TENANT_ID',
           acceptedEnvVarNames: ['ADO_TENANT_ID'],
           label: 'Microsoft Entra Tenant ID',
           required: false,
-          advanced: true,
         },
         {
           envVarName: 'ADO_WEBHOOK_SECRET',

@@ -27,7 +27,13 @@ function InstructionText({
   );
 }
 
-function InstructionUrl({ heading, url }: { heading: string; url: string }) {
+export function InstructionUrl({
+  heading,
+  url,
+}: {
+  heading: string;
+  url: string;
+}) {
   return (
     <div className="space-y-1 flex gap-2 items-center">
       <p className="font-semibold text-foreground text-sm w-45 shrink-0">
