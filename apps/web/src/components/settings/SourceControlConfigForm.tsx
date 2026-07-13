@@ -1,12 +1,28 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SetupSourceControlStatus } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
+import {
+  AdoSourceControlConfigFields,
+  getAdoOAuthValidationError,
+  getEffectiveAdoBaseUrl,
+  getEffectiveAdoOrganization,
+  isAdoOAuthReady,
+} from '@/components/source-control/AdoSourceControlConfigFields';
 import { Button, Check, Input, Spinner } from '@/components/system';
+import {
+  getAdoBaseUrlValidationError,
+  getAdoOrganizationValidationError,
+  isAdoCloudBaseUrl,
+} from '@/lib/ado';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
@@ -95,6 +111,19 @@ export function SourceControlConfigForm({
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [adoOrganizationConfirmed, setAdoOrganizationConfirmed] =
+    useState(false);
+  const [adoAdvancedExpanded, setAdoAdvancedExpanded] = useState(false);
+  const adoPostSaveActionRef = useRef<'save' | 'link'>('save');
+  const adoLinkedAccount = useAdoLinkedAccount({ enabled: provider === 'ado' });
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
+  const hasConfiguredAdoOrganization =
+    provider === 'ado' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'ADO_ORGANIZATION' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) === true;
 
   const saveConfig = useMutation(
     trpc.sourceControl.saveConfig.mutationOptions({
@@ -111,10 +140,15 @@ export function SourceControlConfigForm({
           withoutSecretFieldValues(providerStatus?.fields ?? [], current),
         );
         setEditingSavedValues({});
+        setAdoAdvancedExpanded(false);
         toast.success(
           saveSuccessMessage ?? 'Source-control configuration saved.',
         );
         onSaved?.();
+        if (adoPostSaveActionRef.current === 'link') {
+          adoPostSaveActionRef.current = 'save';
+          authenticateAdoAccount.mutate('/settings?service=ado');
+        }
       },
       onError: (error) => {
         toast.error(error.message);
@@ -125,13 +159,15 @@ export function SourceControlConfigForm({
   useEffect(() => {
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
-  }, [provider, nonSecretInitialValues]);
+    setAdoOrganizationConfirmed(hasConfiguredAdoOrganization);
+    setAdoAdvancedExpanded(false);
+  }, [hasConfiguredAdoOrganization, provider, nonSecretInitialValues]);
 
   if (!providerStatus) {
     return null;
   }
 
-  const isActionDisabled =
+  const isSaveActionDisabled =
     saveConfig.isPending ||
     providerStatus.fields.some((field) => {
       const nextValue = values[field.envVarName]?.trim() ?? '';
@@ -142,6 +178,41 @@ export function SourceControlConfigForm({
         nextValue.length === 0
       );
     });
+  const isAdo = provider === 'ado';
+  const adoOrganization = isAdo
+    ? getEffectiveAdoOrganization(providerStatus.fields, values)
+    : '';
+  const adoBaseUrl = isAdo
+    ? getEffectiveAdoBaseUrl(providerStatus.fields, values)
+    : '';
+  const adoOrganizationValidationError = getAdoOrganizationValidationError(
+    adoOrganization,
+    adoBaseUrl,
+  );
+  const adoBaseUrlValidationError = getAdoBaseUrlValidationError(adoBaseUrl);
+  const usesAdoCloud = isAdo && isAdoCloudBaseUrl(adoBaseUrl);
+  const adoOAuthValidationError = usesAdoCloud
+    ? getAdoOAuthValidationError(providerStatus.fields, values)
+    : null;
+  const adoOAuthReady = usesAdoCloud
+    ? isAdoOAuthReady(providerStatus.fields, values)
+    : true;
+  const adoAccountLinked = Boolean(adoLinkedAccount.data?.account);
+  const canConfirmAdoOrganization =
+    adoOrganizationValidationError === null &&
+    adoBaseUrlValidationError === null;
+  const isActionDisabled =
+    isAdo && !adoOrganizationConfirmed
+      ? saveConfig.isPending || !canConfirmAdoOrganization
+      : isSaveActionDisabled ||
+        (isAdo &&
+          (adoOrganizationValidationError !== null ||
+            adoBaseUrlValidationError !== null));
+  const publicOrigin =
+    typeof window === 'undefined'
+      ? 'https://your-deployment-url'
+      : window.location.origin;
+  const adoRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/ado`;
 
   const hasNewValues = providerStatus.fields.some((field) => {
     if (field.runtimeSatisfied) {
@@ -154,87 +225,166 @@ export function SourceControlConfigForm({
     return nextValue.length > 0;
   });
 
+  const handleAction = () => {
+    if (isAdo && !adoOrganizationConfirmed) {
+      if (!canConfirmAdoOrganization) {
+        return;
+      }
+
+      const organizationField = providerStatus.fields.find(
+        (field) => field.envVarName === 'ADO_ORGANIZATION',
+      );
+
+      if (!organizationField?.runtimeSatisfied) {
+        setValues((current) => ({
+          ...current,
+          ADO_ORGANIZATION: adoOrganization,
+        }));
+      }
+      setAdoAdvancedExpanded(false);
+      setAdoOrganizationConfirmed(true);
+      return;
+    }
+
+    adoPostSaveActionRef.current =
+      usesAdoCloud && !adoAccountLinked ? 'link' : 'save';
+    saveConfig.mutate({ provider, values });
+  };
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        {providerStatus.fields.map((field) => {
-          const value = values[field.envVarName] ?? '';
-          const isSecretField = isSecretSourceControlField(field);
-          const shouldShowSavedValueMask =
-            isSecretField &&
-            !field.runtimeSatisfied &&
-            field.savedSatisfied &&
-            value.length === 0 &&
-            !editingSavedValues[field.envVarName];
+        {isAdo ? (
+          <AdoSourceControlConfigFields
+            fields={providerStatus.fields}
+            values={values}
+            editingSavedValues={editingSavedValues}
+            organizationConfirmed={adoOrganizationConfirmed}
+            advancedExpanded={adoAdvancedExpanded}
+            oauthCallbackUrl={adoRedirectUri}
+            oauthAccountLinked={adoAccountLinked}
+            oauthAccountStatePending={adoLinkedAccount.isPending}
+            disabled={saveConfig.isPending || authenticateAdoAccount.isPending}
+            compact
+            idPrefix="settings-ado"
+            onValueChange={(envVarName, value) =>
+              setValues((current) => ({
+                ...current,
+                [envVarName]: value,
+              }))
+            }
+            onEditingSavedValueChange={(envVarName, editing) =>
+              setEditingSavedValues((current) => ({
+                ...current,
+                [envVarName]: editing,
+              }))
+            }
+            onEditOrganization={() => {
+              setAdoAdvancedExpanded(false);
+              setAdoOrganizationConfirmed(false);
+            }}
+            onAdvancedExpandedChange={setAdoAdvancedExpanded}
+          />
+        ) : (
+          providerStatus.fields.map((field) => {
+            const value = values[field.envVarName] ?? '';
+            const isSecretField = isSecretSourceControlField(field);
+            const shouldShowSavedValueMask =
+              isSecretField &&
+              !field.runtimeSatisfied &&
+              field.savedSatisfied &&
+              value.length === 0 &&
+              !editingSavedValues[field.envVarName];
 
-          return (
-            <div
-              key={field.envVarName}
-              className="grid max-w-xl gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center"
-            >
-              <div className="text-sm font-medium">
-                {field.label}
-                {field.required === false ? ' (optional)' : ''}
-              </div>
-              <div className="flex items-center gap-2">
-                <Input
-                  secret={isSecretField && !field.runtimeSatisfied}
-                  type={isSecretField ? undefined : 'text'}
-                  className="font-mono"
-                  value={
-                    isSecretField && field.runtimeSatisfied
-                      ? MASKED_VALUE
-                      : shouldShowSavedValueMask
+            return (
+              <div
+                key={field.envVarName}
+                className="grid max-w-xl gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center"
+              >
+                <div className="text-sm font-medium">
+                  {field.label}
+                  {field.required === false ? ' (optional)' : ''}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    secret={isSecretField && !field.runtimeSatisfied}
+                    type={isSecretField ? undefined : 'text'}
+                    className="font-mono"
+                    value={
+                      isSecretField && field.runtimeSatisfied
                         ? MASKED_VALUE
-                        : field.runtimeSatisfied && !isSecretField
-                          ? (field.savedValue ?? value)
-                          : value
-                  }
-                  onFocus={() => {
-                    if (shouldShowSavedValueMask) {
-                      setEditingSavedValues((current) => ({
-                        ...current,
-                        [field.envVarName]: true,
-                      }));
+                        : shouldShowSavedValueMask
+                          ? MASKED_VALUE
+                          : field.runtimeSatisfied && !isSecretField
+                            ? (field.savedValue ?? value)
+                            : value
                     }
-                  }}
-                  onBlur={() => {
-                    if (
-                      isSecretField &&
-                      field.savedSatisfied &&
-                      value.length === 0
-                    ) {
-                      setEditingSavedValues((current) => ({
+                    onFocus={() => {
+                      if (shouldShowSavedValueMask) {
+                        setEditingSavedValues((current) => ({
+                          ...current,
+                          [field.envVarName]: true,
+                        }));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (
+                        isSecretField &&
+                        field.savedSatisfied &&
+                        value.length === 0
+                      ) {
+                        setEditingSavedValues((current) => ({
+                          ...current,
+                          [field.envVarName]: false,
+                        }));
+                      }
+                    }}
+                    onChange={(event) =>
+                      setValues((current) => ({
                         ...current,
-                        [field.envVarName]: false,
-                      }));
+                        [field.envVarName]: event.target.value,
+                      }))
                     }
-                  }}
-                  onChange={(event) =>
-                    setValues((current) => ({
-                      ...current,
-                      [field.envVarName]: event.target.value,
-                    }))
-                  }
-                  placeholder={field.runtimeSatisfied ? '' : field.envVarName}
-                  disabled={saveConfig.isPending || field.runtimeSatisfied}
-                  data-1p-ignore
-                />
-                {(field.runtimeSatisfied || field.savedSatisfied) && <Check />}
+                    placeholder={field.runtimeSatisfied ? '' : field.envVarName}
+                    disabled={saveConfig.isPending || field.runtimeSatisfied}
+                    data-1p-ignore
+                  />
+                  {(field.runtimeSatisfied || field.savedSatisfied) && (
+                    <Check />
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
       <div className="flex items-center gap-2">
         <Button
           type="button"
           size="sm"
-          onClick={() => saveConfig.mutate({ provider, values })}
-          disabled={isActionDisabled}
+          onClick={() => {
+            adoPostSaveActionRef.current = 'save';
+            handleAction();
+          }}
+          disabled={
+            isActionDisabled ||
+            authenticateAdoAccount.isPending ||
+            (isAdo && adoOrganizationConfirmed && !adoOAuthReady) ||
+            (isAdo &&
+              adoOrganizationConfirmed &&
+              adoOAuthValidationError !== null)
+          }
         >
           {saveConfig.isPending ? <Spinner /> : null}
-          {hasNewValues ? 'Save configuration' : 'Save'}
+          {isAdo && !adoOrganizationConfirmed
+            ? 'Continue'
+            : usesAdoCloud && !adoAccountLinked
+              ? hasNewValues
+                ? 'Save and link account'
+                : 'Link account'
+              : hasNewValues
+                ? 'Save configuration'
+                : 'Save'}
         </Button>
       </div>
     </div>

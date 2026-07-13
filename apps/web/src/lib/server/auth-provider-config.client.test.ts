@@ -129,19 +129,21 @@ describe('resolveAuthProviderConfig', () => {
     expect(config.adoBaseUrl).toBe('https://dev.azure.example.com');
   });
 
-  it('does not use the Microsoft tenant for Azure DevOps Entra linking when no ADO tenant is configured', async () => {
+  it('reuses Microsoft credentials for Azure DevOps Entra linking when ADO credentials are not configured', async () => {
     const config = await resolveAuthProviderConfig({
       runtimeEnv: {},
       deploymentEnvVars: {
+        R_MICROSOFT_CLIENT_ID: 'microsoft-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'microsoft-client-secret',
         R_MICROSOFT_TENANT_ID: 'microsoft-tenant-id',
-        ADO_CLIENT_ID: 'ado-client-id',
-        ADO_CLIENT_SECRET: 'ado-client-secret',
         ADO_ORGANIZATION: 'ado-org',
       },
     });
 
-    expect(config.enabledProviders).toEqual([]);
-    expect(config.adoTenantId).toBeNull();
+    expect(config.enabledProviders).toEqual(['microsoft']);
+    expect(config.adoClientId).toBe('microsoft-client-id');
+    expect(config.adoClientSecret).toBe('microsoft-client-secret');
+    expect(config.adoTenantId).toBe('microsoft-tenant-id');
   });
 
   it('bootstraps the web runtime before resolving default deployment env vars', async () => {

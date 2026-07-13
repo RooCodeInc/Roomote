@@ -5,20 +5,27 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react';
-import type { SetupSourceControlStatus } from '@roomote/types';
+import {
+  buildSetupSourceControlStatus,
+  type SetupSourceControlStatus,
+} from '@roomote/types';
 
-const { mutateMock, mutationOptionsRef, invalidateQueriesMock } = vi.hoisted(
-  () => ({
-    mutateMock: vi.fn(),
-    mutationOptionsRef: {
-      current: null as {
-        onSuccess?: () => Promise<void> | void;
-        onError?: (error: Error) => void;
-      } | null,
-    },
-    invalidateQueriesMock: vi.fn(async () => undefined),
-  }),
-);
+const {
+  authenticateAdoAccountMock,
+  mutateMock,
+  mutationOptionsRef,
+  invalidateQueriesMock,
+} = vi.hoisted(() => ({
+  authenticateAdoAccountMock: vi.fn(),
+  mutateMock: vi.fn(),
+  mutationOptionsRef: {
+    current: null as {
+      onSuccess?: () => Promise<void> | void;
+      onError?: (error: Error) => void;
+    } | null,
+  },
+  invalidateQueriesMock: vi.fn(async () => undefined),
+}));
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: (options: typeof mutationOptionsRef.current) => {
@@ -50,6 +57,17 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => ['sourceControl.repositories'],
       },
     },
+  }),
+}));
+
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => ({
+    data: { configured: false, account: null },
+    isPending: false,
+  }),
+  useAuthenticateAdoAccount: () => ({
+    mutate: authenticateAdoAccountMock,
+    isPending: false,
   }),
 }));
 
@@ -214,5 +232,223 @@ describe('SourceControlConfigForm', () => {
       expect(screen.getByDisplayValue(MASKED_VALUE)).toBeInTheDocument();
       expect(screen.getByDisplayValue('saved-slug')).toBeInTheDocument();
     });
+  });
+
+  it('uses the organization-first Azure DevOps setup flow', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText('Azure DevOps Organization'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText('Azure DevOps Access Token'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    expect(
+      screen.getByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).toHaveAttribute(
+      'href',
+      'https://dev.azure.com/acme/_usersSettings/tokens',
+    );
+    expect(
+      screen.getByLabelText('Azure DevOps Access Token'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Azure DevOps Base URL/),
+    ).not.toBeInTheDocument();
+
+    const advancedOptionsButton = screen.getByRole('button', {
+      name: 'Show advanced options',
+    });
+    expect(advancedOptionsButton).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(advancedOptionsButton);
+
+    expect(screen.getByText('Azure DevOps Base URL (optional)')).toBeVisible();
+    expect(advancedOptionsButton).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('builds the Azure DevOps PAT link from a runtime organization', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: { ADO_ORGANIZATION: 'runtime-org' },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).toHaveAttribute(
+      'href',
+      'https://dev.azure.com/runtime-org/_usersSettings/tokens',
+    );
+    expect(
+      screen.queryByRole('button', { name: 'Change organization' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText('Managed by runtime configuration')).toBeVisible();
+  });
+
+  it('does not send a custom Azure DevOps Server user to the cloud PAT page', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: {
+            ADO_ORGANIZATION: 'Default Collection',
+            ADO_BASE_URL: 'https://ado.example.com/tfs',
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'View PAT setup instructions' }),
+    ).toHaveAttribute(
+      'href',
+      'https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate?view=azure-devops',
+    );
+    expect(
+      screen.queryByRole('link', { name: 'Create Azure DevOps PAT' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('requires OAuth when saving an Azure DevOps cloud configuration', () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: ' acme ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(screen.getByLabelText('Azure DevOps Access Token'), {
+      target: { value: 'ado-pat' },
+    });
+    expect(
+      screen.getByRole('button', { name: 'Save and link account' }),
+    ).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Microsoft Entra Client ID'), {
+      target: { value: 'client-id' },
+    });
+    fireEvent.change(screen.getByLabelText('Microsoft Entra Client Secret'), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save and link account' }),
+    );
+
+    expect(mutateMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_ORGANIZATION: 'acme',
+        ADO_TOKEN: 'ado-pat',
+      },
+    });
+  });
+
+  it('saves OAuth credentials and immediately starts account linking', async () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+        })}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('Azure DevOps Organization'), {
+      target: { value: 'acme' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.change(screen.getByLabelText('Azure DevOps Access Token'), {
+      target: { value: 'ado-pat' },
+    });
+    fireEvent.change(screen.getByLabelText(/Microsoft Entra Client ID/), {
+      target: { value: 'client-id' },
+    });
+    expect(
+      screen.getByText(/Enter both the Microsoft Entra application/),
+    ).toBeVisible();
+    fireEvent.change(screen.getByLabelText(/Microsoft Entra Client Secret/), {
+      target: { value: 'client-secret' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Save and link account' }),
+    );
+
+    expect(mutateMock).toHaveBeenCalledWith({
+      provider: 'ado',
+      values: {
+        ADO_CLIENT_ID: 'client-id',
+        ADO_CLIENT_SECRET: 'client-secret',
+        ADO_ORGANIZATION: 'acme',
+        ADO_TOKEN: 'ado-pat',
+      },
+    });
+
+    await act(async () => {
+      await mutationOptionsRef.current?.onSuccess?.();
+    });
+
+    expect(authenticateAdoAccountMock).toHaveBeenCalledWith(
+      '/settings?service=ado',
+    );
+  });
+
+  it('reuses existing Microsoft setup before linking the Azure DevOps account', async () => {
+    render(
+      <SourceControlConfigForm
+        provider="ado"
+        configStatus={buildSetupSourceControlStatus({
+          selectedProvider: 'ado',
+          runtimeEnv: {
+            ADO_ORGANIZATION: 'acme',
+            ADO_TOKEN: 'ado-pat',
+            R_MICROSOFT_CLIENT_ID: 'client-id',
+            R_MICROSOFT_CLIENT_SECRET: 'client-secret',
+            R_MICROSOFT_TENANT_ID: 'tenant-id',
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText(/found your existing Microsoft setup/),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Link account' }));
+
+    await act(async () => {
+      await mutationOptionsRef.current?.onSuccess?.();
+    });
+
+    expect(authenticateAdoAccountMock).toHaveBeenCalledWith(
+      '/settings?service=ado',
+    );
   });
 });

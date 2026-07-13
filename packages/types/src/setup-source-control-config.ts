@@ -123,6 +123,27 @@ const DEFAULT_SETUP_SOURCE_CONTROL_PROVIDER_DESCRIPTOR: SetupSourceControlProvid
     (descriptor) => descriptor.provider === DEFAULT_SOURCE_CONTROL_PROVIDER,
   )!;
 
+const ADO_CLOUD_REQUIRED_OAUTH_ENV_VAR_NAMES = new Set([
+  'ADO_CLIENT_ID',
+  'ADO_CLIENT_SECRET',
+]);
+
+function isAdoCloudConfiguration(fields: SetupSourceControlFieldStatus[]) {
+  const baseUrl = fields
+    .find((field) => field.envVarName === 'ADO_BASE_URL')
+    ?.savedValue?.trim();
+
+  if (!baseUrl) {
+    return true;
+  }
+
+  try {
+    return new URL(baseUrl).hostname.toLowerCase() === 'dev.azure.com';
+  } catch {
+    return false;
+  }
+}
+
 export function getSetupSourceControlProvider(
   provider: SourceControlProvider,
 ): SetupSourceControlProviderDescriptor {
@@ -281,20 +302,23 @@ function buildProviderFields(
         },
         {
           envVarName: 'ADO_CLIENT_ID',
-          acceptedEnvVarNames: ['ADO_CLIENT_ID'],
+          acceptedEnvVarNames: ['ADO_CLIENT_ID', 'R_MICROSOFT_CLIENT_ID'],
           label: 'Microsoft Entra Client ID',
           required: false,
         },
         {
           envVarName: 'ADO_CLIENT_SECRET',
-          acceptedEnvVarNames: ['ADO_CLIENT_SECRET'],
+          acceptedEnvVarNames: [
+            'ADO_CLIENT_SECRET',
+            'R_MICROSOFT_CLIENT_SECRET',
+          ],
           label: 'Microsoft Entra Client Secret',
           secret: true,
           required: false,
         },
         {
           envVarName: 'ADO_TENANT_ID',
-          acceptedEnvVarNames: ['ADO_TENANT_ID'],
+          acceptedEnvVarNames: ['ADO_TENANT_ID', 'R_MICROSOFT_TENANT_ID'],
           label: 'Microsoft Entra Tenant ID',
           required: false,
         },
@@ -393,7 +417,14 @@ export function buildSetupSourceControlStatus(input: {
       };
     });
 
-    const requiredFields = fields.filter(isRequiredField);
+    const requiresAdoCloudOAuth =
+      descriptor.provider === 'ado' && isAdoCloudConfiguration(fields);
+    const requiredFields = fields.filter(
+      (field) =>
+        isRequiredField(field) ||
+        (requiresAdoCloudOAuth &&
+          ADO_CLOUD_REQUIRED_OAUTH_ENV_VAR_NAMES.has(field.envVarName)),
+    );
     const runtimeConfigSatisfied = requiredFields.every(
       (field) => field.runtimeSatisfied,
     );
