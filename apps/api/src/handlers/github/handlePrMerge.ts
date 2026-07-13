@@ -11,13 +11,12 @@ export const handlePrMerge = async ({
   pull_request,
   sender,
 }: WebhookPullRequestClosed): Promise<WebhookResponse> => {
-  // Only process merged PRs.
-  if (!pull_request.merged || !pull_request.merged_at) {
-    return { status: 'ok' };
-  }
+  const status = pull_request.merged
+    ? ('merged' as const)
+    : ('closed' as const);
 
   // Notify Slack, Teams, Telegram, and Linear threads/sessions associated
-  // with this PR (fire-and-forget).
+  // with this PR when it becomes terminal (merged or closed). Fire-and-forget.
   if (installation?.id) {
     const notificationParams = {
       sourceControlProvider: 'github' as const,
@@ -26,7 +25,10 @@ export const handlePrMerge = async ({
       prNumber: pull_request.number,
       prTitle: pull_request.title,
       prUrl: pull_request.html_url,
-      mergedBy: pull_request.merged_by?.login || sender.login,
+      status,
+      actorLogin:
+        (pull_request.merged ? pull_request.merged_by?.login : null) ||
+        sender.login,
     };
 
     notifySlackPrMerge(notificationParams).catch((error) => {

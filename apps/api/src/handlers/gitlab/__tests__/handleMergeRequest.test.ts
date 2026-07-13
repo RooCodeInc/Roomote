@@ -256,7 +256,8 @@ describe('handleGitLabMergeRequest', () => {
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-      mergedBy: 'roomote-bot',
+      status: 'merged',
+      actorLogin: 'roomote-bot',
     };
 
     expect(mockNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
@@ -267,7 +268,7 @@ describe('handleGitLabMergeRequest', () => {
     });
   });
 
-  it('does not notify merge threads for closed merge requests', async () => {
+  it('notifies Slack, Teams, and Telegram/Linear threads for closed merge requests', async () => {
     await handleGitLabMergeRequest(makePayload('close'));
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -276,9 +277,21 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'closed',
     );
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    const expectedParams = {
+      sourceControlProvider: 'gitlab',
+      repository: 'acme/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot',
+    };
+    expect(mockNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);
+    expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
+      ...expectedParams,
+      sourceControlProvider: 'gitlab',
+    });
   });
 
   it('does not notify merge threads when the repository is not an active synced GitLab row', async () => {

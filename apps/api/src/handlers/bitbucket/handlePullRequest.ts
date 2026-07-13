@@ -57,9 +57,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: BitbucketPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -81,7 +82,8 @@ async function notifyMergedPullRequestThreads(
     prNumber,
     prTitle: payload.pullrequest.title,
     prUrl: getBitbucketPullRequestUrl(payload),
-    mergedBy: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+    status,
+    actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
   };
 
   notifySlackPrMerge(notificationParams).catch((error) => {
@@ -149,9 +151,7 @@ export async function handleBitbucketPullRequest(
       );
     });
 
-    if (merged) {
-      await notifyMergedPullRequestThreads(payload, repoFullName);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }

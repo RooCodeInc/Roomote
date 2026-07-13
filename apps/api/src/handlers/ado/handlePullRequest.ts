@@ -75,9 +75,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: AdoPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -102,7 +103,8 @@ async function notifyMergedPullRequestThreads(
       pullRequest: payload.resource,
       repositoryFullName: repoFullName,
     }),
-    mergedBy:
+    status,
+    actorLogin:
       getAdoIdentityName(payload.resource.closedBy) ??
       'someone in Azure DevOps',
   };
@@ -260,6 +262,8 @@ export async function handleAdoPullRequest(
       );
     });
 
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'closed');
+
     return { status: 'ok' };
   }
 
@@ -302,7 +306,7 @@ export async function handleAdoPullRequest(
       );
     });
 
-    await notifyMergedPullRequestThreads(payload, repoFullName);
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
   }

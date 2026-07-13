@@ -60,9 +60,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: GiteaPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -83,7 +84,8 @@ async function notifyMergedPullRequestThreads(
     prNumber: payload.number,
     prTitle: payload.pull_request.title,
     prUrl: getPullRequestUrl(payload),
-    mergedBy: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
+    status,
+    actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
   };
 
   notifySlackPrMerge(notificationParams).catch((error) => {
@@ -145,9 +147,7 @@ export async function handleGiteaPullRequest(
       );
     });
 
-    if (pullRequest.merged) {
-      await notifyMergedPullRequestThreads(payload, repoFullName);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }

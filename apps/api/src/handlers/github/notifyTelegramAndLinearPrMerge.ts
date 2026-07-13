@@ -10,7 +10,7 @@ import {
   isNotNull,
 } from '@roomote/db/server';
 import {
-  buildPullRequestMergedNotificationText,
+  buildPullRequestStatusNotificationText,
   formatMarkdownLink,
 } from '@roomote/communication/chat-messages';
 import { createLinearClient } from '@roomote/linear';
@@ -40,7 +40,10 @@ interface NotifyTelegramAndLinearPrMergeParams {
   prNumber: number;
   prTitle: string;
   prUrl: string;
-  mergedBy: string;
+  status?: 'merged' | 'closed';
+  actorLogin?: string;
+  /** @deprecated Prefer `actorLogin`. */
+  mergedBy?: string;
 }
 
 type TelegramPrMergeTarget = {
@@ -96,13 +99,13 @@ async function resolveLinearClient() {
 
 /**
  * Notifies Telegram chats and Linear sessions associated with a PR that the PR
- * has been merged. Links the merged PR to task runs scoped to the merging
+ * has been merged or closed. Links the terminal PR to task runs scoped to the
  * source control provider (GitHub, GitLab, Gitea, or Azure DevOps) using the
- * repository name and PR number, then posts the merge message to every Telegram
- * chat (via the best-effort poster) and Linear agent session (via a closing
- * response activity) it can resolve from those jobs.
+ * repository name and PR number, then posts the status message to every
+ * Telegram chat (via the best-effort poster) and Linear agent session (via a
+ * closing response activity) it can resolve from those jobs.
  *
- * Fire-and-forget and best-effort, mirroring the Slack and Teams PR-merge
+ * Fire-and-forget and best-effort, mirroring the Slack and Teams PR-status
  * notifiers.
  */
 export async function notifyTelegramAndLinearPrMerge({
@@ -112,8 +115,12 @@ export async function notifyTelegramAndLinearPrMerge({
   prNumber,
   prTitle,
   prUrl,
+  status = 'merged',
+  actorLogin,
   mergedBy,
 }: NotifyTelegramAndLinearPrMergeParams): Promise<void> {
+  const resolvedActorLogin = actorLogin || mergedBy || 'someone';
+
   try {
     if (installationId !== undefined) {
       // Verify this GitHub installation is tracked.
@@ -184,12 +191,13 @@ export async function notifyTelegramAndLinearPrMerge({
       return;
     }
 
-    const mergeNotification = buildPullRequestMergedNotificationText({
+    const statusNotification = buildPullRequestStatusNotificationText({
       prTitle,
       prUrl,
-      mergedBy,
+      status,
+      actorLogin: resolvedActorLogin,
       formatLink: formatMarkdownLink,
-      formatStatus: (status) => `**${status}**`,
+      formatStatus: (value) => `**${value}**`,
     });
 
     if (telegramTargets.length > 0) {
@@ -211,7 +219,7 @@ export async function notifyTelegramAndLinearPrMerge({
           ...(target.replyToMessageId
             ? { replyToMessageId: target.replyToMessageId }
             : {}),
-          text: mergeNotification.bodyText,
+          text: statusNotification.bodyText,
           textFormat: 'markdown',
         });
 
@@ -219,7 +227,7 @@ export async function notifyTelegramAndLinearPrMerge({
 
         if (result) {
           console.log(
-            `[notifyTelegramAndLinearPrMerge] Sent notification to Telegram conversation ${conversationKey} for PR ${repository}#${prNumber}`,
+            `[notifyTelegramAndLinearPrMerge] Sent ${status} notification to Telegram conversation ${conversationKey} for PR ${repository}#${prNumber}`,
           );
         }
       }
@@ -230,7 +238,7 @@ export async function notifyTelegramAndLinearPrMerge({
 
       if (!linearClient) {
         console.warn(
-          '[notifyTelegramAndLinearPrMerge] No active Linear connection, skipping Linear PR-merge notification',
+          '[notifyTelegramAndLinearPrMerge] No active Linear connection, skipping Linear PR-status notification',
         );
       } else {
         const notifiedSessions = new Set<string>();
@@ -244,14 +252,14 @@ export async function notifyTelegramAndLinearPrMerge({
           // object, so no try/catch is needed here.
           const result = await linearClient.emitResponse(
             sessionId,
-            mergeNotification.bodyText,
+            statusNotification.bodyText,
           );
 
           notifiedSessions.add(sessionId);
 
           if (result.success) {
             console.log(
-              `[notifyTelegramAndLinearPrMerge] Sent notification to Linear session ${sessionId} for PR ${repository}#${prNumber}`,
+              `[notifyTelegramAndLinearPrMerge] Sent ${status} notification to Linear session ${sessionId} for PR ${repository}#${prNumber}`,
             );
           } else {
             console.error(

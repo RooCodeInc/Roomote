@@ -51,13 +51,14 @@ function getReviewTaskType(
 
 /**
  * Notifies Slack, Teams, Telegram, and Linear threads/sessions linked to the
- * MR after a merge. GitLab has no installation gate, so verify the repository
- * is an active synced GitLab row before notifying (fire-and-forget, mirroring
- * the GitHub merge handler).
+ * MR after it becomes terminal (merged or closed). GitLab has no installation
+ * gate, so verify the repository is an active synced GitLab row before
+ * notifying (fire-and-forget, mirroring the GitHub status handler).
  */
-async function notifyMergedMergeRequestThreads(
+async function notifyTerminalMergeRequestThreads(
   payload: GitLabMergeRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -78,7 +79,8 @@ async function notifyMergedMergeRequestThreads(
     prNumber: payload.object_attributes.iid,
     prTitle: payload.object_attributes.title,
     prUrl: payload.object_attributes.url,
-    mergedBy:
+    status,
+    actorLogin:
       payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
   };
 
@@ -147,8 +149,8 @@ export async function handleGitLabMergeRequest(
       );
     });
 
-    if (mergeRequest.action === 'merge') {
-      await notifyMergedMergeRequestThreads(payload, repoFullName);
+    if (mergeRequest.action === 'merge' || mergeRequest.action === 'close') {
+      await notifyTerminalMergeRequestThreads(payload, repoFullName, status);
     }
 
     return { status: 'ok' };

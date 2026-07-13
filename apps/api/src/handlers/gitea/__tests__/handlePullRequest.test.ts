@@ -246,7 +246,8 @@ describe('handleGiteaPullRequest', () => {
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
+      status: 'merged',
+      actorLogin: 'roomote-bot',
     });
     expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith({
       sourceControlProvider: 'gitea',
@@ -254,20 +255,22 @@ describe('handleGiteaPullRequest', () => {
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
+      status: 'merged',
+      actorLogin: 'roomote-bot',
     });
     expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
       repository: 'acme/backend',
       prNumber: 42,
       prTitle: 'Update backend',
       prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
+      status: 'merged',
+      actorLogin: 'roomote-bot',
       sourceControlProvider: 'gitea',
     });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
-  it('updates tracked task PR status without notifications for closed pull requests', async () => {
+  it('updates tracked task PR status and notifications for closed pull requests', async () => {
     await handleGiteaPullRequest(makePayload('closed'));
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -276,8 +279,32 @@ describe('handleGiteaPullRequest', () => {
       42,
       'closed',
     );
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifySlackPrMerge).toHaveBeenCalledWith({
+      sourceControlProvider: 'gitea',
+      repository: 'acme/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://git.example.com/acme/backend/pulls/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot',
+    });
+    expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith({
+      sourceControlProvider: 'gitea',
+      repository: 'acme/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://git.example.com/acme/backend/pulls/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot',
+    });
+    expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
+      repository: 'acme/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://git.example.com/acme/backend/pulls/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot',
+      sourceControlProvider: 'gitea',
+    });
   });
 });

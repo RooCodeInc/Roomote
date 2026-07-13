@@ -3,6 +3,7 @@ import { z } from 'zod';
 const {
   mockFindFirstTaskRun,
   mockFindFirstTaskPullRequest,
+  mockFindFirstSlackInstallation,
   mockConsumePending,
   mockRequeuePending,
   mockSchedule,
@@ -11,9 +12,11 @@ const {
   mockPostMessage,
   mockTeamsPostMessage,
   mockTelegramPostMessage,
+  mockStickyFooterPost,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
+  mockFindFirstSlackInstallation: vi.fn(),
   mockConsumePending: vi.fn(),
   mockRequeuePending: vi.fn(),
   mockSchedule: vi.fn(),
@@ -22,6 +25,7 @@ const {
   mockPostMessage: vi.fn(),
   mockTeamsPostMessage: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
+  mockStickyFooterPost: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -34,6 +38,10 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) =>
           mockFindFirstTaskPullRequest(...args),
       },
+      slackInstallations: {
+        findFirst: (...args: unknown[]) =>
+          mockFindFirstSlackInstallation(...args),
+      },
     },
   },
   and: vi.fn(() => 'and-condition'),
@@ -45,6 +53,14 @@ vi.mock('@roomote/db/server', () => ({
     repository: 'repository',
     prNumber: 'prNumber',
   },
+  slackInstallations: { isActive: 'isActive' },
+}));
+
+vi.mock('@roomote/slack', () => ({
+  postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
+  SlackNotifier: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -106,6 +122,9 @@ describe('prReviewNotificationJob', () => {
       taskPhase: 'waiting_for_prompt',
     });
     mockFindFirstTaskPullRequest.mockResolvedValue({ status: 'open' });
+    mockFindFirstSlackInstallation.mockResolvedValue({
+      botAccessToken: 'xoxb-token',
+    });
     mockConsumePending.mockResolvedValue(events);
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -117,6 +136,7 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     mockRecordDelivery.mockResolvedValue(undefined);
+    mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
       provider: 'slack',
       channelId: 'C123',
@@ -149,11 +169,16 @@ describe('prReviewNotificationJob', () => {
       },
       events,
     });
-    expect(mockPostMessage).toHaveBeenCalledWith({
-      channelId: 'C123',
-      threadId: '111.222',
-      text: 'formatted-message',
-    });
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        threadTs: '111.222',
+        taskId: 'task-1',
+        text: 'formatted-message',
+        utmCampaign: 'slack.pr_review',
+      }),
+    );
+    expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRecordDelivery).toHaveBeenCalledWith({
       runId: 1,
       taskId: 'task-1',
@@ -338,7 +363,7 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('requeues drained events and rethrows when posting fails', async () => {
-    mockPostMessage.mockRejectedValue(new Error('slack down'));
+    mockStickyFooterPost.mockRejectedValue(new Error('slack down'));
 
     await expect(prReviewNotificationJob(makeJob() as never)).rejects.toThrow(
       'slack down',

@@ -328,6 +328,29 @@ export const TASK_STARTUP_FAILURE_TEXT =
 export const TASK_RUNTIME_FAILURE_TEXT =
   "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.";
 
+export function buildPullRequestStatusNotificationText({
+  prTitle,
+  prUrl,
+  status,
+  actorLogin,
+  formatLink = (label) => label,
+  formatStatus = identity,
+}: {
+  prTitle: string;
+  prUrl: string;
+  status: 'merged' | 'closed';
+  actorLogin: string;
+  formatLink?: LinkFormatter;
+  formatStatus?: TextFormatter;
+}): { text: string; bodyText: string } {
+  return {
+    text: `${prTitle} was ${status} by ${actorLogin}`,
+    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
+      status,
+    )} by ${actorLogin}`,
+  };
+}
+
 export function buildPullRequestMergedNotificationText({
   prTitle,
   prUrl,
@@ -341,10 +364,12 @@ export function buildPullRequestMergedNotificationText({
   formatLink?: LinkFormatter;
   formatStatus?: TextFormatter;
 }): { text: string; bodyText: string } {
-  return {
-    text: `${prTitle} was merged by ${mergedBy}`,
-    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
-      'merged',
-    )} by ${mergedBy}`,
-  };
+  return buildPullRequestStatusNotificationText({
+    prTitle,
+    prUrl,
+    status: 'merged',
+    actorLogin: mergedBy,
+    formatLink,
+    formatStatus,
+  });
 }
