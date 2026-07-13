@@ -31,6 +31,7 @@ type TelegramWebhookStatus = {
 type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
+  telegramBotUsername?: string | null;
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -729,12 +730,15 @@ export function CommsProviderSection({
                     <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
                   )}
                   <p className="text-sm">
-                    {provider.telegramWebhook.status === 'error'
-                      ? (provider.telegramWebhook.lastErrorMessage ??
-                        TELEGRAM_WEBHOOK_STATUS_COPY.error.label)
-                      : TELEGRAM_WEBHOOK_STATUS_COPY[
-                          provider.telegramWebhook.status
-                        ].label}
+                    {provider.telegramWebhook.status === 'connected' &&
+                    provider.telegramBotUsername
+                      ? `Connected to @${provider.telegramBotUsername}`
+                      : provider.telegramWebhook.status === 'error'
+                        ? (provider.telegramWebhook.lastErrorMessage ??
+                          TELEGRAM_WEBHOOK_STATUS_COPY.error.label)
+                        : TELEGRAM_WEBHOOK_STATUS_COPY[
+                            provider.telegramWebhook.status
+                          ].label}
                     {provider.telegramWebhook.status !== 'error' &&
                     provider.telegramWebhook.lastErrorMessage
                       ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`

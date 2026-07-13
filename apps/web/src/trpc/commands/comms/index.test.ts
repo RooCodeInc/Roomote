@@ -370,7 +370,6 @@ describe('comms commands', () => {
         provider: 'telegram',
         values: {
           R_TELEGRAM_BOT_TOKEN: ' 123:ABC\n ',
-          R_TELEGRAM_BOT_USERNAME: '@RoomoteBot',
         },
       });
 
@@ -381,10 +380,6 @@ describe('comms commands', () => {
             expect.objectContaining({
               name: 'R_TELEGRAM_BOT_TOKEN',
               value: '123:ABC',
-            }),
-            expect.objectContaining({
-              name: 'R_TELEGRAM_BOT_USERNAME',
-              value: 'RoomoteBot',
             }),
           ]),
         }),
@@ -424,7 +419,7 @@ describe('comms commands', () => {
       expect(webhookSecret?.required).toBe(false);
     });
 
-    it('returns the Telegram bot username as a plain saved value', async () => {
+    it('does not expose a separate Telegram bot username field', async () => {
       mockResolveTelegramRuntimeCredentials.mockResolvedValue({
         botToken: 'token',
         webhookSecret: 'secret',
@@ -432,7 +427,6 @@ describe('comms commands', () => {
       });
       mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
         'R_TELEGRAM_BOT_TOKEN',
-        'R_TELEGRAM_BOT_USERNAME',
       ]);
       mockTelegramGetWebhookInfo.mockResolvedValue({
         url: 'https://app.example.com/api/webhooks/telegram',
@@ -451,7 +445,7 @@ describe('comms commands', () => {
         (field) => field.envVarName === 'R_TELEGRAM_BOT_TOKEN',
       );
 
-      expect(username?.savedValue).toBe('RoomoteBot');
+      expect(username).toBeUndefined();
       expect(token?.savedValue).toBeNull();
     });
   });

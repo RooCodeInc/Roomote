@@ -51,6 +51,7 @@ export type CommsProviderStatus = Omit<
 > & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
+  telegramBotUsername?: string | null;
 };
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
@@ -241,15 +242,13 @@ function withTelegramProvider(
     persistedEnvVarNames: string[];
     telegramWebhook: TelegramWebhookStatus | null;
     invocationIdentities: InvocationIdentity[];
-    botUsername: string | null;
   },
 ): CommsStatus {
-  const {
-    persistedEnvVarNames,
-    telegramWebhook,
-    invocationIdentities,
-    botUsername,
-  } = options;
+  const { persistedEnvVarNames, telegramWebhook, invocationIdentities } =
+    options;
+  const telegramBotUsername =
+    invocationIdentities.find((identity) => identity.provider === 'telegram')
+      ?.displayName ?? null;
   const isSaved = (name: string) => persistedEnvVarNames.includes(name);
   const isRuntime = (name: string) => Boolean(process.env[name]?.trim());
   const isSatisfied = (name: string) => isRuntime(name) || isSaved(name);
@@ -293,17 +292,12 @@ function withTelegramProvider(
             secret: true,
             required: false,
           }),
-          buildField({
-            envVarName: 'R_TELEGRAM_BOT_USERNAME',
-            label: 'Telegram Bot Username',
-            required: false,
-            savedValue: botUsername,
-          }),
         ],
         runtimeSatisfied: isRuntime('R_TELEGRAM_BOT_TOKEN'),
         savedSatisfied: isSaved('R_TELEGRAM_BOT_TOKEN'),
         setupSatisfied: isSatisfied('R_TELEGRAM_BOT_TOKEN'),
         telegramWebhook,
+        telegramBotUsername,
       },
     ],
   };
@@ -319,13 +313,11 @@ export async function getCommsStatusCommand(
     nonSecretAuthEnvValues,
     telegramWebhook,
     invocationIdentities,
-    telegramCredentials,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getTelegramWebhookStatus(),
     resolveInvocationIdentities(),
-    resolveTelegramRuntimeCredentials(),
   ]);
 
   return withTelegramProvider(
@@ -338,7 +330,6 @@ export async function getCommsStatusCommand(
       persistedEnvVarNames,
       telegramWebhook,
       invocationIdentities,
-      botUsername: telegramCredentials.botUsername,
     },
   );
 }
@@ -370,12 +361,6 @@ export async function saveCommsAuthConfigCommand(
               acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
               label: 'Telegram Webhook Secret',
               secret: true,
-              required: false,
-            },
-            {
-              envVarName: 'R_TELEGRAM_BOT_USERNAME',
-              acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
-              label: 'Telegram Bot Username',
               required: false,
             },
           ],
@@ -447,9 +432,7 @@ export async function saveCommsAuthConfigCommand(
       const nextValue =
         field.envVarName === 'R_TELEGRAM_BOT_TOKEN'
           ? (normalizeTelegramBotToken(rawValue) ?? '')
-          : field.envVarName === 'R_TELEGRAM_BOT_USERNAME'
-            ? rawValue.trim().replace(/^@/, '')
-            : rawValue.trim();
+          : rawValue.trim();
 
       if (!nextValue) {
         return [];
@@ -562,6 +545,7 @@ export async function clearCommsAuthConfigCommand(
           fields: [
             { acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'] },
             { acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'] },
+            // Clean up the retired field for existing installations.
             { acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'] },
           ],
         }

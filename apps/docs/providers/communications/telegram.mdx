@@ -39,14 +39,12 @@ For self-hosted env-var configuration instead of the UI:
 
 ```sh
 R_TELEGRAM_BOT_TOKEN=<botfather-token>
-R_TELEGRAM_BOT_USERNAME=<bot-username-without-at>
 # Optional — Roomote generates one on save when unset:
 # R_TELEGRAM_WEBHOOK_SECRET=<random-secret>
 ```
 
-`R_TELEGRAM_BOT_USERNAME` is optional for webhook delivery, but recommended so
-Roomote can show the correct `@username` and `https://t.me/<username>` link in
-setup and getting-started guidance.
+Roomote reads the bot username from Telegram using the bot token, so it does
+not need to be configured separately.
 
 Restart Roomote after changing Telegram env vars. Inbound webhooks are accepted
 only when Telegram sends the matching `X-Telegram-Bot-Api-Secret-Token`
