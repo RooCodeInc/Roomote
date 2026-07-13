@@ -164,7 +164,6 @@ type ActiveSetupQualificationBlock = {
   lastBlockedAt: Date;
 };
 
-const SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 function buildSetupOnboardingTaskTitle(repositoryFullNames: string[]) {
   const repositoryNames = repositoryFullNames
     .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
@@ -175,38 +174,6 @@ function buildSetupOnboardingTaskTitle(repositoryFullNames: string[]) {
   }
 
   return `Set up the ${repositoryNames.join(' + ')} environment`;
-}
-
-async function ensureSetupBootstrapAuditUser(
-  executor: DatabaseOrTransaction,
-): Promise<string> {
-  const [existingUser] = await executor
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.id, SETUP_BOOTSTRAP_USER_ID))
-    .limit(1);
-
-  if (existingUser) {
-    return existingUser.id;
-  }
-
-  await executor.insert(users).values({
-    id: SETUP_BOOTSTRAP_USER_ID,
-    name: 'Setup Bootstrap',
-    email: 'setup-bootstrap@roomote.local',
-    imageUrl: '',
-    entity: {
-      id: SETUP_BOOTSTRAP_USER_ID,
-      name: 'Setup Bootstrap',
-      email: 'setup-bootstrap@roomote.local',
-      imageUrl: '',
-    },
-    metadata: {
-      system: true,
-    },
-  });
-
-  return SETUP_BOOTSTRAP_USER_ID;
 }
 
 async function assertSetupBootstrapOpen() {
