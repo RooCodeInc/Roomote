@@ -19,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
   Skeleton,
-  Switch,
 } from '@/components/system';
 
 import { Section } from './Section';
@@ -165,102 +164,84 @@ export function ComputeProviders() {
   return (
     <div className="space-y-4">
       <Section icon={Cpu} title="Default sandbox provider">
-        <div className="space-y-5">
-          <div className="flex items-start gap-4">
-            <Switch
-              checked={localDockerEnabled}
-              onCheckedChange={(enabled) =>
-                setLocalDockerEnabled.mutate({ enabled })
-              }
-              disabled={setLocalDockerEnabled.isPending}
-              aria-label="Toggle Local Docker"
-              className="mt-1"
-            />
-            <div>
-              <p className="font-semibold">
-                Enable Local Docker
-                {setLocalDockerEnabled.isPending ? (
-                  <span className="relative left-2 text-sm text-muted-foreground">
-                    Saving...
-                  </span>
-                ) : null}
+        <div className="max-w-xl space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Roomote runs each task on an isolated sandbox. New tasks run on this
+            provider unless a task explicitly overrides it.
+          </p>
+          <Select
+            value={effectiveDefaultProvider}
+            onValueChange={(value) =>
+              setDefaultProvider.mutate({ provider: value as ComputeProvider })
+            }
+            disabled={setDefaultProvider.isPending}
+          >
+            <SelectTrigger className="w-full sm:w-72">
+              <SelectValue placeholder="Select a sandbox provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers
+                .filter(
+                  (provider) =>
+                    localDockerEnabled || provider.provider !== 'docker',
+                )
+                .map((provider) => (
+                  <SelectItem
+                    key={provider.provider}
+                    value={provider.provider}
+                    disabled={!provider.configSatisfied}
+                  >
+                    {provider.label}
+                    {getDefaultProviderDisabledLabel(provider)}
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+          {defaultProviderStatus && !defaultProviderStatus.configSatisfied && (
+            <Alert variant="notice">
+              <Info className="size-4" />
+              <p>
+                {defaultProviderStatus.label} is the default sandbox provider
+                but is missing configuration. Tasks may fail to start until it
+                is configured or another default is selected.
               </p>
-              <p className="text-sm text-muted-foreground">
-                Make Local Docker available as a sandbox provider for new tasks.
-              </p>
-            </div>
-          </div>
-
-          {localDockerEnabled && (
-            <div className="max-w-xl space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Roomote runs each task on an isolated sandbox. New tasks run on
-                this provider unless a task explicitly overrides it.
-              </p>
-              <Select
-                value={effectiveDefaultProvider}
-                onValueChange={(value) =>
-                  setDefaultProvider.mutate({
-                    provider: value as ComputeProvider,
-                  })
-                }
-                disabled={setDefaultProvider.isPending}
-              >
-                <SelectTrigger className="w-full sm:w-72">
-                  <SelectValue placeholder="Select a sandbox provider" />
-                </SelectTrigger>
-                <SelectContent>
-                  {providers.map((provider) => (
-                    <SelectItem
-                      key={provider.provider}
-                      value={provider.provider}
-                      disabled={!provider.configSatisfied}
-                    >
-                      {provider.label}
-                      {getDefaultProviderDisabledLabel(provider)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {defaultProviderStatus &&
-                !defaultProviderStatus.configSatisfied && (
-                  <Alert variant="notice">
-                    <Info className="size-4" />
-                    <p>
-                      {defaultProviderStatus.label} is the default sandbox
-                      provider but is missing configuration. Tasks may fail to
-                      start until it is configured or another default is
-                      selected.
-                    </p>
-                  </Alert>
-                )}
-            </div>
+            </Alert>
           )}
         </div>
       </Section>
-      {localDockerEnabled &&
-        providers.map((provider) => (
-          <ComputeProviderSection
-            key={provider.provider}
-            provider={provider}
-            isDefault={provider.provider === effectiveDefaultProvider}
-            provisioning={
-              isSetupProvisionableComputeProvider(provider.provider)
-                ? (provisioningByProvider[provider.provider] ?? null)
-                : null
-            }
-            onSave={handleSave}
-            onClear={handleClear}
-            savePending={
-              saveConfig.isPending &&
-              saveConfig.variables?.provider === provider.provider
-            }
-            clearPending={
-              clearConfig.isPending &&
-              clearConfig.variables?.provider === provider.provider
-            }
-          />
-        ))}
+      {providers.map((provider) => (
+        <ComputeProviderSection
+          key={provider.provider}
+          provider={provider}
+          isDefault={provider.provider === effectiveDefaultProvider}
+          provisioning={
+            isSetupProvisionableComputeProvider(provider.provider)
+              ? (provisioningByProvider[provider.provider] ?? null)
+              : null
+          }
+          onSave={handleSave}
+          onClear={handleClear}
+          savePending={
+            saveConfig.isPending &&
+            saveConfig.variables?.provider === provider.provider
+          }
+          clearPending={
+            clearConfig.isPending &&
+            clearConfig.variables?.provider === provider.provider
+          }
+          localDockerEnabled={
+            provider.provider === 'docker' ? localDockerEnabled : undefined
+          }
+          onLocalDockerToggle={
+            provider.provider === 'docker'
+              ? (enabled) => setLocalDockerEnabled.mutate({ enabled })
+              : undefined
+          }
+          localDockerTogglePending={
+            provider.provider === 'docker' && setLocalDockerEnabled.isPending
+          }
+        />
+      ))}
     </div>
   );
 }
