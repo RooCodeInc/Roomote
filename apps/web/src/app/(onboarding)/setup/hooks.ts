@@ -408,8 +408,6 @@ export function useSetupFlow(
     },
     [
       communicationStepResolved,
-      hasOnboardingProgress,
-      communicationStepSkipped,
       hasPostOnboardingAccess,
       pendingAuthProvider,
       status,

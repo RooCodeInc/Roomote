@@ -267,7 +267,9 @@ describe('Setup StepInvoke', () => {
         /once your environment is ready, you can work with roomote in these ways/i,
       ),
     ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /finish setup/i }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /finish environment setup/i }),
+    );
 
     await waitFor(() => {
       expect(invalidateQueriesMock).toHaveBeenCalledWith({
