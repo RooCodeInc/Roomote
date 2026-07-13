@@ -55,6 +55,9 @@ describe('buildE2bWorkerTemplate', () => {
     expect(mockSetUser).toHaveBeenNthCalledWith(2, 'roomote');
     expect(mockSetWorkdir).toHaveBeenCalledWith('/home/roomote');
     expect(mockRunCmd).toHaveBeenCalledWith('/usr/bin/docker compose version');
+    expect(mockRunCmd).toHaveBeenCalledWith(
+      'service docker start && /usr/bin/docker info',
+    );
     const runCommandOrder = mockRunCmd.mock.invocationCallOrder[0];
     const rootUserOrder = mockSetUser.mock.invocationCallOrder[0];
     const roomoteUserOrder = mockSetUser.mock.invocationCallOrder[1];

@@ -1,6 +1,7 @@
-import type {
-  SetupNewComputeProvisioningState,
-  SetupNewState,
+import {
+  WORKER_RUNTIME_SCHEMA_VERSION,
+  type SetupNewComputeProvisioningState,
+  type SetupNewState,
 } from '@roomote/types';
 
 const {
@@ -85,7 +86,7 @@ const STALE_STARTED_AT = '2026-07-03T00:00:00.000Z';
 
 const staleBuildingEntry: SetupNewComputeProvisioningState = {
   status: 'building',
-  runtimeSchemaVersion: 2,
+  runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
   imageRef: 'registry.example.com/worker:old',
   templateRef: 'roomote-worker-old',
   error: null,
@@ -105,7 +106,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker-new',
         error: null,
@@ -130,7 +131,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'failed',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:old',
         templateRef: null,
         error: 'boom',
@@ -158,7 +159,7 @@ describe('persistComputeProvisioning', () => {
       'e2b',
       {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker:new',
         error: null,
@@ -277,7 +278,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker-tag',
         error: null,
@@ -325,7 +326,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:old',
         templateRef: 'roomote-worker:old',
         error: null,
@@ -414,7 +415,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -509,7 +510,7 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     const { executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'succeeded',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -542,7 +543,7 @@ describe('runComputeProvisioning', () => {
     const { captured, executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'building',
-        runtimeSchemaVersion: 2,
+        runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker:new-r2',
         error: null,
