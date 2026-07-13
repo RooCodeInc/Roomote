@@ -79,8 +79,7 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
           detail={
             gatewayReady
               ? 'Connected and receiving Discord events.'
-              : (status.gateway?.lastError ??
-                'The Discord Gateway service is not ready yet.')
+              : (status.gateway?.lastError ?? 'Discord is still connecting.')
           }
         />
         <DiagnosticRow

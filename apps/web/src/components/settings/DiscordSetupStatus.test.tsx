@@ -246,6 +246,10 @@ describe('DiscordSetupStatus', () => {
     expect(
       screen.queryByText('Default Discord destination'),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Discord is still connecting.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Gateway service/i)).not.toBeInTheDocument();
     expect(screen.getByText('Discord account linking')).toBeInTheDocument();
   });
 });
