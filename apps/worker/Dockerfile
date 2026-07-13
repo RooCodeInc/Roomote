@@ -244,7 +244,7 @@ RUN sudo apt-get update \
 
 # Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
 # pass this explicitly; the default keeps direct/release Docker builds labeled.
-ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=3
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=4
 LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox

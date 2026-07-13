@@ -27,7 +27,7 @@ export type SetupNewComputeProvisioningState = {
   finishedAt: string | null;
 };
 
-export const SETUP_COMPUTE_PROVISIONING_STALE_MS = 10 * 60_000;
+export const SETUP_COMPUTE_PROVISIONING_STALE_MS = 20 * 60_000;
 
 export function isSetupNewComputeProvisioningStale(
   state: SetupNewComputeProvisioningState | null | undefined,

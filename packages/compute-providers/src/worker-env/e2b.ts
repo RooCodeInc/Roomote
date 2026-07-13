@@ -24,10 +24,9 @@ export function buildE2bWorkerEnv({
       deploymentSlug,
       environmentId,
     }),
-    // E2B's Docker-enabled sandbox runtime exposes its daemon over this
-    // loopback endpoint rather than the default Unix socket. Keep an explicit
-    // caller override for self-hosted/custom E2B environments.
-    DOCKER_HOST: extraEnv?.DOCKER_HOST ?? 'tcp://127.0.0.1:2375',
+    // The template snapshots Docker's packaged service, which listens on the
+    // standard Unix socket. Keep an explicit override for custom E2B runtimes.
+    DOCKER_HOST: extraEnv?.DOCKER_HOST ?? 'unix:///var/run/docker.sock',
     MISE_DATA_DIR: '/opt/mise',
     MISE_CACHE_DIR: '/opt/mise/cache',
   };

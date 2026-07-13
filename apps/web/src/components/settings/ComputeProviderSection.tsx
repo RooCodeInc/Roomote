@@ -198,6 +198,12 @@ export function ComputeProviderSection({
       !field.runtimeSatisfied &&
       !field.savedSatisfied,
   );
+  const retryableProvisionableFields = provider.fields.filter(
+    (field) =>
+      isAutoProvisionedComputeArtifactField(field) &&
+      field.setupProvisionable &&
+      !field.runtimeSatisfied,
+  );
   const provisioningRunning = provisioning?.status === 'building';
   const provisioningRefresh = provisioningRunning && provider.configSatisfied;
   const provisioningFailed = provisioning?.status === 'failed';
@@ -217,7 +223,7 @@ export function ComputeProviderSection({
   // long as the required credentials are already satisfied.
   const canRetryProvisioning =
     provisioning?.status === 'failed' &&
-    provisionableEnvOnlyFields.length > 0 &&
+    retryableProvisionableFields.length > 0 &&
     credentialsSatisfiedForProvisioning;
   // First-time (or re-)provisioning with already-saved credentials and no
   // field edits must still be actionable from Settings.

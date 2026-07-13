@@ -181,7 +181,110 @@ describe('initializeContainerProjects', () => {
     expect(runCommand).toHaveBeenCalledWith(
       'sudo',
       ['sh', '-c', expect.stringContaining('nohup dockerd')],
-      expect.not.objectContaining({ detached: true }),
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ROOMOTE_DOCKER_DAEMON_HOST: 'unix:///var/run/docker.sock',
+        }),
+      }),
+    );
+  });
+
+  it('starts the fallback daemon on the configured Docker host', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Docker daemon is unavailable'))
+      .mockResolvedValue({ stdout: '' });
+
+    await initializeContainerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            container_projects: [
+              {
+                type: 'compose',
+                name: 'dev',
+                repository: 'acme/app',
+                files: ['compose.yaml'],
+              },
+            ],
+          },
+        },
+        envVars: {
+          DOCKER_HOST: 'tcp://127.0.0.1:2375',
+          PATH: '/usr/bin',
+        },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    expect(runCommand).toHaveBeenCalledWith(
+      'sudo',
+      ['sh', '-c', expect.stringContaining('ROOMOTE_DOCKER_DAEMON_HOST')],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          ROOMOTE_DOCKER_DAEMON_HOST: 'tcp://127.0.0.1:2375',
+        }),
+      }),
+    );
+  });
+
+  it('starts Blaxel projects without the unsupported healthcheck wait', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi.fn().mockResolvedValue({ stdout: '' });
+
+    await initializeContainerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            container_projects: [
+              {
+                type: 'compose',
+                name: 'dev',
+                repository: 'acme/app',
+                files: ['compose.yaml'],
+              },
+            ],
+          },
+        },
+        envVars: { COMPUTE_PROVIDER: 'blaxel', PATH: '/usr/bin' },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    const startCall = runCommand.mock.calls.find(
+      ([command, args]) => command === 'docker' && args.includes('up'),
+    );
+    expect(startCall).toBeDefined();
+    expect(startCall?.[1]).not.toContain('--wait');
+    expect(logger.userLog.warn).toHaveBeenCalledWith(
+      expect.stringContaining('does not support Docker healthchecks'),
     );
   });
 

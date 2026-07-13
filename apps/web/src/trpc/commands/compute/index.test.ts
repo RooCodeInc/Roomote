@@ -1,4 +1,5 @@
 import type { FeatureFlag } from '@roomote/feature-flags';
+import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -427,7 +428,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag-r3',
+        templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 
@@ -447,7 +448,7 @@ describe('compute commands', () => {
         provider: 'daytona',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker-tag-r3',
+        templateRef: `roomote-worker-tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 
@@ -464,7 +465,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag-r3',
+        templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 

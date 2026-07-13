@@ -366,7 +366,7 @@ export async function prepareComputeProvisioningStart(input: {
  * otherwise a still-running run could present as failed and a retry could
  * start a concurrent duplicate.
  */
-const COMPUTE_PROVISIONING_TIMEOUT_MS = 8 * 60_000;
+const COMPUTE_PROVISIONING_TIMEOUT_MS = 15 * 60_000;
 
 if (COMPUTE_PROVISIONING_TIMEOUT_MS >= SETUP_COMPUTE_PROVISIONING_STALE_MS) {
   throw new Error(

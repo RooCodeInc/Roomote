@@ -75,17 +75,22 @@ async function ensureDockerRuntime({
   try {
     await runCommand('docker', ['info'], commandOptions);
   } catch (initialError) {
-    if (!baseEnv.DOCKER_HOST) {
-      await runCommand(
-        'sudo',
-        [
-          'sh',
-          '-c',
-          'nohup dockerd --host=unix:///var/run/docker.sock --log-level=error >/tmp/roomote-dockerd.log 2>&1 </dev/null &',
-        ],
-        commandOptions,
-      );
-    }
+    const dockerHost = baseEnv.DOCKER_HOST ?? 'unix:///var/run/docker.sock';
+    await runCommand(
+      'sudo',
+      [
+        'sh',
+        '-c',
+        'nohup dockerd --host="$ROOMOTE_DOCKER_DAEMON_HOST" --log-level=error >/tmp/roomote-dockerd.log 2>&1 </dev/null &',
+      ],
+      {
+        ...commandOptions,
+        env: {
+          ...commandOptions.env,
+          ROOMOTE_DOCKER_DAEMON_HOST: dockerHost,
+        },
+      },
+    );
 
     let lastError: unknown = initialError;
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -393,6 +398,12 @@ async function startContainerProject({
     resolved.project.type === 'compose'
       ? (resolved.project.services ?? [])
       : [];
+  const waitForServices = resolved.env.COMPUTE_PROVIDER !== 'blaxel';
+  if (!waitForServices) {
+    logger.userLog.warn(
+      'Blaxel does not support Docker healthchecks; continuing after Compose starts the services.',
+    );
+  }
   let startResult: Awaited<ReturnType<ContainerCommandRunner>>;
   try {
     startResult = await runCommand(
@@ -402,9 +413,9 @@ async function startContainerProject({
         '--detach',
         '--build',
         '--remove-orphans',
-        '--wait',
-        '--wait-timeout',
-        String(timeoutSeconds),
+        ...(waitForServices
+          ? ['--wait', '--wait-timeout', String(timeoutSeconds)]
+          : []),
         ...services,
       ]),
       commandOptions,

@@ -112,6 +112,32 @@ describe('ComputeProviderSection provisioning states', () => {
     ).toBeEnabled();
   });
 
+  it('offers a retry when a failed replacement has an older saved artifact', () => {
+    renderSection(
+      buildProvisioning({
+        status: 'failed',
+        error: 'Replacement failed',
+        finishedAt: new Date().toISOString(),
+      }),
+      {
+        ...provider,
+        configSatisfied: true,
+        fields: [
+          apiKeyField,
+          {
+            ...templateField,
+            savedSatisfied: true,
+            savedValue: 'roomote-worker:older-build',
+          },
+        ],
+      },
+    );
+
+    expect(
+      screen.getByRole('button', { name: /Retry provisioning/ }),
+    ).toBeEnabled();
+  });
+
   it('falls back to generic failure copy when the run recorded no error', () => {
     renderSection(
       buildProvisioning({
