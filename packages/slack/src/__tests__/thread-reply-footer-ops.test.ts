@@ -125,6 +125,11 @@ describe('thread-reply-footer-ops', () => {
         ]),
       }),
     );
+    expect(mockBuildFooterText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linkedPr: { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' },
+      }),
+    );
     expect(slack.updateMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C1',
@@ -137,6 +142,25 @@ describe('thread-reply-footer-ops', () => {
       }),
     );
     expect(mockSetFooterTs).toHaveBeenCalledWith('C1', '100.000', '222.000');
+
+    mockBuildFooterText.mockClear();
+    slack.postMessage.mockClear();
+
+    await postSlackThreadMessageWithStickyFooter({
+      slack,
+      channel: 'C1',
+      threadTs: '100.000',
+      taskId: 'task-1',
+      text: 'PR closed',
+      footerStyle: 'reply-only',
+    });
+
+    expect(mockBuildFooterText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        linkedPr: null,
+        livePreviewUrl: null,
+      }),
+    );
   });
 
   it('no-ops remove when footer block is already absent', async () => {

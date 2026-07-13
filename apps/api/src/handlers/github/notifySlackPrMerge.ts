@@ -198,6 +198,9 @@ export async function notifySlackPrMerge({
             },
           ],
           utmCampaign: 'slack.pr_status',
+          // Keep sticky placement on the latest message, but never claim the
+          // bot is still working once the PR is terminal.
+          footerStyle: 'reply-only',
         });
 
         const terminalReaction =

@@ -196,6 +196,13 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
   /** Body blocks without the footer context block. */
   blocks?: unknown[];
   utmCampaign?: string;
+  /**
+   * Footer content style. `active` keeps linked PR / live preview when the
+   * shared resolver still considers the task active. `reply-only` is for
+   * terminal events (merged/closed PRs) so the relocated sticky line never
+   * reads as "still working on this" after the task becomes terminal.
+   */
+  footerStyle?: 'active' | 'reply-only';
 }): Promise<string | null> {
   const taskUrl = buildOutOfBandTaskUrl(
     params.taskId,
@@ -208,10 +215,11 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
     channelId: params.channel,
     threadTs: params.threadTs,
   });
+  const replyOnly = params.footerStyle === 'reply-only';
   const footerText = buildSlackThreadFooterText({
     taskUrl,
-    linkedPr: footerContext.linkedPr,
-    livePreviewUrl: footerContext.livePreviewUrl,
+    linkedPr: replyOnly ? null : footerContext.linkedPr,
+    livePreviewUrl: replyOnly ? null : footerContext.livePreviewUrl,
     explicitMentionRequired: footerContext.explicitMentionRequired,
   });
   const footerBlock = buildSlackThreadReplyFooterBlock({ footerText });

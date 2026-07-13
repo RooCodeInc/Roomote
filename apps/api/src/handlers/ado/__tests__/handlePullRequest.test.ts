@@ -427,7 +427,7 @@ describe('handleAdoPullRequest', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
-  it('updates tracked task PR status for abandoned pull requests', async () => {
+  it('updates tracked task PR status and notifies for abandoned pull requests', async () => {
     await handleAdoPullRequest(
       makePayload('git.pullrequest.updated', { status: 'abandoned' }),
       { updatedNotificationType: 'StatusUpdateNotification' },
@@ -439,8 +439,32 @@ describe('handleAdoPullRequest', () => {
       42,
       'closed',
     );
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    expect(mockNotifySlackPrMerge).toHaveBeenCalledWith({
+      sourceControlProvider: 'ado',
+      repository: 'acme/Platform/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot@acme.example',
+    });
+    expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith({
+      sourceControlProvider: 'ado',
+      repository: 'acme/Platform/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot@acme.example',
+    });
+    expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
+      repository: 'acme/Platform/backend',
+      prNumber: 42,
+      prTitle: 'Update backend',
+      prUrl: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+      status: 'closed',
+      actorLogin: 'roomote-bot@acme.example',
+      sourceControlProvider: 'ado',
+    });
   });
 });

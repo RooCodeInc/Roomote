@@ -151,9 +151,7 @@ export async function handleBitbucketPullRequest(
       );
     });
 
-    if (merged || status === 'closed') {
-      await notifyTerminalPullRequestThreads(payload, repoFullName, status);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }
