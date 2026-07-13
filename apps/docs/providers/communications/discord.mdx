@@ -9,9 +9,9 @@ sign-in provider.
 
 Roomote can receive direct messages and server mentions, create a separate
 thread or forum post for each task, accept follow-ups in that conversation, and
-send proactive work to a chosen server channel. Discord connects to Roomote
-through the Gateway, so it does not require an inbound webhook or public
-callback URL.
+send onboarding work to the linked setup user's direct messages. Discord
+connects to Roomote through the Gateway, so it does not require an inbound
+webhook or public callback URL.
 
 ## Create the Discord bot
 
@@ -38,7 +38,7 @@ After saving the token, select **Add to Discord** in Roomote and choose the
 server. The generated installation link requests the permissions Roomote needs;
 administrator access is not required.
 
-Roomote checks the selected destination for:
+For tasks started in a server, the bot needs permission to:
 
 - viewing the channel and reading message history
 - sending messages and links
@@ -119,13 +119,12 @@ setup UI are detected automatically without a restart.
 1. confirm the Discord settings page shows the bot identity and a connected
    Gateway
 2. confirm **Message Content intent** and **Slash commands** pass their checks
-3. select a server and default channel, then confirm the permission check passes
-4. link your personal Discord account
-5. mention the bot with a small request and confirm Roomote creates a task
+3. link your personal Discord account
+4. mention the bot with a small request and confirm Roomote creates a task
    thread or forum post
-6. reply in that conversation and confirm the same task continues
+5. reply in that conversation and confirm the same task continues
 
-If the Gateway remains disconnected, verify the Discord Gateway service is
-running and has access to the same Redis, database, token, and internal secret
-as the API. If natural messages are ignored but slash commands work, enable
-Message Content Intent in the Developer Portal and restart the Gateway service.
+If the Gateway remains disconnected, verify BullMQ is running and has access to
+the same Redis, database, token, and internal secret as the API. If natural
+messages are ignored but slash commands work, enable Message Content Intent in
+the Developer Portal and restart BullMQ.
