@@ -136,7 +136,7 @@ describe('resolveComputeProviderEnvValues', () => {
     });
 
     expect(values.MODAL_BASE_IMAGE_REF).toBe(
-      'ghcr.io/roocodeinc/roomote-worker:latest',
+      'ghcr.io/roocodeinc/roomote-worker:develop',
     );
   });
 

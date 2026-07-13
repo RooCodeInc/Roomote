@@ -565,8 +565,11 @@ function isConfiguredEnvValue(
  */
 const DEFAULT_WORKER_IMAGE_REPOSITORY = 'ghcr.io/roocodeinc/roomote-worker';
 
+// Source checkouts do not have a baked RELEASE_VERSION. Follow the published
+// development channel automatically for hosted providers; operators can pin
+// any registry-qualified image with DOCKER_WORKER_IMAGE.
 export const DEVELOPMENT_MODAL_BASE_IMAGE_REF =
-  'ghcr.io/roocodeinc/roomote-worker:latest';
+  'ghcr.io/roocodeinc/roomote-worker:develop';
 
 /**
  * Derives the published worker image ref for the running app release:

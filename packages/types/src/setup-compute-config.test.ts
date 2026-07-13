@@ -793,7 +793,7 @@ describe('resolveDerivedModalBaseImageRef', () => {
 
   it('falls back to the development Modal image when no hosted image is configured', () => {
     expect(resolveDerivedModalBaseImageRef({ NODE_ENV: 'development' })).toBe(
-      DEVELOPMENT_MODAL_BASE_IMAGE_REF,
+      'ghcr.io/roocodeinc/roomote-worker:develop',
     );
     expect(
       resolveDerivedModalBaseImageRef({

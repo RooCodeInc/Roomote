@@ -482,14 +482,14 @@ describe('prepareComputeProvisioningStart', () => {
       provisionable: true,
       start: {
         provider: 'e2b',
-        imageRef: 'ghcr.io/roocodeinc/roomote-worker:latest',
-        templateRef: 'roomote-worker:latest',
+        imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        templateRef: 'roomote-worker:develop',
       },
     });
     expect(markPending).toHaveBeenCalledWith(
       expect.objectContaining({
-        imageRef: 'ghcr.io/roocodeinc/roomote-worker:latest',
-        templateRef: 'roomote-worker:latest',
+        imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
+        templateRef: 'roomote-worker:develop',
       }),
     );
   });
