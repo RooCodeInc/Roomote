@@ -45,12 +45,16 @@ export type TaskWorkflow = (typeof TASK_WORKFLOWS)[number];
 
 /**
  * Source-control automation workflows accepted by webhook routing gates.
- * These are workflow discriminators, not persisted agent identities.
+ * These are workflow discriminators, not persisted agent identities. Keep this
+ * list in lockstep with any attach-to-existing-PR product behavior.
  */
-export type SourceControlAutomationWorkflow = Extract<
-  TaskWorkflow,
-  'pr_review' | 'pr_conflict_resolve'
->;
+export const SOURCE_CONTROL_AUTOMATION_WORKFLOWS = [
+  'pr_review',
+  'pr_conflict_resolve',
+] as const satisfies ReadonlyArray<TaskWorkflow>;
+
+export type SourceControlAutomationWorkflow =
+  (typeof SOURCE_CONTROL_AUTOMATION_WORKFLOWS)[number];
 
 export const TASK_SURFACES = [
   'web',
