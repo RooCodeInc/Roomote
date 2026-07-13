@@ -22,18 +22,27 @@ describe('normalizeDeploymentComputeConfig', () => {
   it('returns null for missing or invalid providers', () => {
     expect(normalizeDeploymentComputeConfig(null)).toEqual({
       defaultProvider: null,
+      excludedProviders: [],
     });
     expect(
       normalizeDeploymentComputeConfig({
         defaultProvider: 'fly' as never,
       }),
-    ).toEqual({ defaultProvider: null });
+    ).toEqual({ defaultProvider: null, excludedProviders: [] });
   });
 
   it('keeps valid providers', () => {
     expect(
       normalizeDeploymentComputeConfig({ defaultProvider: 'modal' }),
-    ).toEqual({ defaultProvider: 'modal' });
+    ).toEqual({ defaultProvider: 'modal', excludedProviders: [] });
+  });
+
+  it('keeps only valid unique excluded providers', () => {
+    expect(
+      normalizeDeploymentComputeConfig({
+        excludedProviders: ['docker', 'docker', 'invalid' as never],
+      }),
+    ).toEqual({ defaultProvider: null, excludedProviders: ['docker'] });
   });
 });
 
@@ -56,6 +65,19 @@ describe('buildSetupComputeStatus', () => {
 
     expect(status.selectedProvider).toBe('docker');
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('does not select an excluded persisted provider', () => {
+    const status = buildSetupComputeStatus({
+      persistedComputeConfig: {
+        defaultProvider: 'docker',
+        excludedProviders: ['docker'],
+      },
+    });
+
+    expect(status.selectedProvider).toBeNull();
+    expect(status.persistedDefaultProvider).toBeNull();
+    expect(status.excludedProviders).toContain('docker');
   });
 
   it('requires credentials for hosted providers', () => {

@@ -167,10 +167,12 @@ export type SetupComputeStatus = {
   providers: SetupComputeProviderStatus[];
   workerImage: SetupComputeWorkerImageStatus;
   setupSatisfied: boolean;
+  excludedProviders?: ComputeProvider[];
 };
 
 export type DeploymentComputeConfig = {
   defaultProvider: ComputeProvider | null;
+  excludedProviders: ComputeProvider[];
 };
 
 export const SETUP_COMPUTE_PROVIDER_IDS = computeProviders;
@@ -528,6 +530,7 @@ export function isRequiredComputeField(field: SetupComputeFieldDescriptor) {
 export function createEmptyDeploymentComputeConfig(): DeploymentComputeConfig {
   return {
     defaultProvider: null,
+    excludedProviders: [],
   };
 }
 
@@ -541,6 +544,9 @@ export function normalizeDeploymentComputeConfig(
       defaultProvider && isComputeProvider(defaultProvider)
         ? defaultProvider
         : null,
+    excludedProviders: Array.from(
+      new Set((value?.excludedProviders ?? []).filter(isComputeProvider)),
+    ),
   };
 }
 
@@ -694,6 +700,9 @@ export function buildSetupComputeStatus(input: {
   const excludedProviders = parseExcludedComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
+  for (const provider of persistedComputeConfig.excludedProviders) {
+    excludedProviders.add(provider);
+  }
   const runtimeDefaultProvider =
     runtimeDefaultValue &&
     isComputeProvider(runtimeDefaultValue) &&
@@ -790,7 +799,12 @@ export function buildSetupComputeStatus(input: {
   });
 
   const selectedProvider =
-    input.selectedProvider ?? persistedComputeConfig.defaultProvider ?? null;
+    input.selectedProvider && !excludedProviders.has(input.selectedProvider)
+      ? input.selectedProvider
+      : persistedComputeConfig.defaultProvider &&
+          !excludedProviders.has(persistedComputeConfig.defaultProvider)
+        ? persistedComputeConfig.defaultProvider
+        : null;
   const preselectedProvider =
     selectedProvider ??
     runtimeDefaultProvider ??
@@ -813,9 +827,14 @@ export function buildSetupComputeStatus(input: {
     selectedProvider,
     preselectedProvider,
     runtimeDefaultProvider,
-    persistedDefaultProvider: persistedComputeConfig.defaultProvider,
+    persistedDefaultProvider:
+      persistedComputeConfig.defaultProvider &&
+      !excludedProviders.has(persistedComputeConfig.defaultProvider)
+        ? persistedComputeConfig.defaultProvider
+        : null,
     providers,
     workerImage,
     setupSatisfied,
+    excludedProviders: Array.from(excludedProviders),
   };
 }

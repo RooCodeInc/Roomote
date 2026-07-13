@@ -811,9 +811,7 @@ describe('Home', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
-      'Modal',
-    );
+    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Use single-repo environment' }),
