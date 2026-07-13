@@ -1,8 +1,14 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { Button, Check, ExternalLink, LucideLink } from '@/components/system';
+import {
+  Button,
+  Check,
+  CopyIconButton,
+  ExternalLink,
+  LucideLink,
+} from '@/components/system';
 import {
   useCreateTelegramLinkCode,
   useTelegramLinkedAccount,
@@ -13,14 +19,39 @@ import {
  * account. The deep link opens the bot with `/start <code>`, so one tap
  * covers first contact, primary-chat capture, and account linking.
  */
-export function TelegramLinkAccountStep() {
-  const telegramAccount = useTelegramLinkedAccount();
+export function TelegramLinkAccountStep({
+  pollUntilLinked = false,
+  autoGenerate = false,
+}: {
+  pollUntilLinked?: boolean;
+  autoGenerate?: boolean;
+} = {}) {
+  const telegramAccount = useTelegramLinkedAccount({
+    refetchInterval: pollUntilLinked ? 2_000 : false,
+  });
   const createTelegramLinkCode = useCreateTelegramLinkCode();
   const [linkCode, setLinkCode] = useState<{
     code: string;
     expiresInSeconds: number;
     deepLink: string | null;
   } | null>(null);
+  const autoGenerateStarted = useRef(false);
+
+  useEffect(() => {
+    if (
+      !autoGenerate ||
+      autoGenerateStarted.current ||
+      telegramAccount.data?.mapping ||
+      telegramAccount.data?.configured !== true
+    ) {
+      return;
+    }
+
+    autoGenerateStarted.current = true;
+    createTelegramLinkCode.mutate(undefined, {
+      onSuccess: (result) => setLinkCode(result),
+    });
+  }, [autoGenerate, createTelegramLinkCode, telegramAccount.data]);
 
   if (!telegramAccount.data?.configured) {
     return null;
@@ -46,19 +77,25 @@ export function TelegramLinkAccountStep() {
   return (
     <div className="space-y-2 mt-4">
       {linkCode ? (
-        <>
+        <div className="max-w-sm space-y-3">
           <p className="text-sm">
             Send this code to the bot within{' '}
             {Math.round(linkCode.expiresInSeconds / 60)} minutes to link your
             Telegram account:
           </p>
-          <p>
-            <code className="rounded bg-muted px-2 py-1 font-mono text-sm select-all ph-no-capture">
+          <div className="flex h-10 w-full items-center gap-2 rounded-md border border-black px-3">
+            <code className="min-w-0 grow truncate font-mono text-sm select-all ph-no-capture">
               {linkCode.code}
             </code>
-          </p>
+            <CopyIconButton
+              aria-label="Copy Telegram link code"
+              content={linkCode.code}
+              tooltip="Copy link code"
+              className="shrink-0"
+            />
+          </div>
           {linkCode.deepLink && (
-            <Button asChild variant="outline" size="sm">
+            <Button asChild className="w-full">
               <a
                 href={linkCode.deepLink}
                 target="_blank"
@@ -69,7 +106,9 @@ export function TelegramLinkAccountStep() {
               </a>
             </Button>
           )}
-        </>
+        </div>
+      ) : createTelegramLinkCode.isPending ? (
+        <p className="text-sm">Generating your Telegram link…</p>
       ) : (
         <>
           <p className="text-sm">

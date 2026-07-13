@@ -624,7 +624,7 @@ describe('StepAuthEnvVars', () => {
     ).toBeEnabled();
   });
 
-  it('submits hidden Teams bot values for the single Microsoft app path', async () => {
+  it('submits Microsoft single-app values without materializing Teams bot env vars', async () => {
     const mutateAsync = setupMutationMock();
 
     render(
@@ -660,16 +660,18 @@ describe('StepAuthEnvVars', () => {
     await waitFor(() => {
       expect(mutateAsync).toHaveBeenCalledWith({
         provider: 'microsoft',
-        values: expect.objectContaining({
+        values: {
           R_MICROSOFT_CLIENT_ID: '11111111-2222-3333-4444-555555555555',
           R_MICROSOFT_CLIENT_SECRET: 'client-secret',
           R_MICROSOFT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
-          R_TEAMS_BOT_APP_ID: '11111111-2222-3333-4444-555555555555',
-          R_TEAMS_BOT_APP_PASSWORD: 'client-secret',
-          R_TEAMS_BOT_TENANT_ID: '22222222-3333-4444-5555-666666666666',
-        }),
+        },
       });
     });
+
+    const submittedValues = mutateAsync.mock.calls[0]?.[0]?.values ?? {};
+    expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_ID');
+    expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_PASSWORD');
+    expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_TENANT_ID');
   });
 
   it('links saved Microsoft credentials to the stored app package download', () => {

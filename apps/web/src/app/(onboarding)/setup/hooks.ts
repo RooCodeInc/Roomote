@@ -239,8 +239,9 @@ export function useSetupFlow(
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
-  const communicationStepSkipped =
-    setupSession.session.communicationStep.state === 'skipped';
+  const communicationStepResolved =
+    setupSession.session.communicationStep.state === 'skipped' ||
+    setupSession.session.communicationStep.state === 'completed';
   const hasUnlockedPostOnboardingFlow = useCallback(() => {
     if (!setupSession.session.onboardingTask.postOnboardingUnlocked) {
       return false;
@@ -324,7 +325,7 @@ export function useSetupFlow(
               (hasSeenSetupWelcome() || hasRealProgress(status)))
           );
         case 'auth-provider':
-          return communicationStepSkipped || effectiveAuthProvider !== null;
+          return communicationStepResolved || effectiveAuthProvider !== null;
         case 'auth-env-vars':
           return (
             effectiveAuthProvider === null ||
@@ -386,7 +387,7 @@ export function useSetupFlow(
           return computeProviderStatus?.configSatisfied ?? false;
         }
         case 'slack':
-          if (communicationStepSkipped) {
+          if (communicationStepResolved) {
             return true;
           }
 
@@ -423,7 +424,7 @@ export function useSetupFlow(
       }
     },
     [
-      communicationStepSkipped,
+      communicationStepResolved,
       hasOnboardingProgress,
       hasPostOnboardingAccess,
       hasUnlockedPostOnboardingFlow,

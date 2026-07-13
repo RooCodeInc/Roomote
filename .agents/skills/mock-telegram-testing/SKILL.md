@@ -1,13 +1,13 @@
 ---
 name: mock-telegram-testing
-description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, `/new` and `/done` commands, callback buttons, outbound Telegram posts, reply footers, message chunking, `TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Telegram integration flows through the checked-in mock Telegram Bot API harness instead of a real Telegram bot. Use when testing Telegram task entry, follow-up queueing to active jobs, the `/new` command, callback buttons, outbound Telegram posts, reply footers, message chunking, `TELEGRAM_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Telegram Testing
 
 Use this skill to exercise Roomote's Telegram integration against the checked-in mock Telegram harness. Do not invent another fake Telegram stack and do not fall back to a real Telegram bot unless the user explicitly asks for that parity test.
 
-Telegram has no threads: conversation continuity is inferred from **chat id (+ forum topic id) → active cloud job**, with `/new` and `/done` as the explicit escape hatches after a task completes. That continuity logic is the highest-value thing to test here.
+Telegram continuity is inferred from **chat id (+ forum topic id) → active cloud job**. Private bot chats can have topics when Threaded Mode is enabled in BotFather, and forum supergroups can have topics when the bot has Manage Topics rights. `/new` is the explicit escape hatch after a task completes. That continuity logic is the highest-value thing to test here.
 
 ## Quick Reference
 
@@ -22,7 +22,7 @@ Telegram has no threads: conversation continuity is inferred from **chat id (+ f
 | Example scenario              | `packages/communication/scripts/mock-telegram.example.json` |
 | Webhook secret source         | `Env.R_TELEGRAM_WEBHOOK_SECRET` from dotenvx                |
 | Mock bot identity             | `roomote_mock_bot` (id `7000000001`)                        |
-| Mock linked user              | Telegram user id `111000111` (`grace_mock`)                   |
+| Mock linked user              | Telegram user id `111000111` (`grace_mock`)                 |
 
 ## Step 1: Seed the database
 
@@ -54,9 +54,11 @@ The API resolves Telegram credentials from real env vars first (`resolveTelegram
 ```bash
 R_TELEGRAM_BOT_TOKEN=7000000001:mock-telegram-token   # any value; the harness accepts all tokens unless acceptedBotTokens is set
 R_TELEGRAM_WEBHOOK_SECRET=<any-shared-secret>         # harness reads the same var via dotenvx, so signatures match automatically
-R_TELEGRAM_BOT_USERNAME=roomote_mock_bot              # required for group-mention and /new@bot gating scenarios
 TELEGRAM_API_BASE_URL=http://127.0.0.1:3013           # reroutes ALL outbound Bot API calls to the harness
 ```
+
+Roomote resolves `roomote_mock_bot` from the harness's `getMe` response using
+the configured token; no separate username variable is needed.
 
 Without `R_TELEGRAM_WEBHOOK_SECRET` the webhook returns 503; with a mismatched secret it returns 401.
 

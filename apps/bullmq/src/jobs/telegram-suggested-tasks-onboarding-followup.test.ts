@@ -27,6 +27,7 @@ vi.mock('@roomote/sdk/server', async () => {
   return {
     telegramSuggestedTasksOnboardingFollowupRequestSchema: z.object({
       chatId: z.string(),
+      threadId: z.string().optional(),
       introMessageId: z.string(),
       sourceTaskId: z.string(),
     }),
@@ -57,6 +58,7 @@ describe('telegramSuggestedTasksOnboardingFollowupJob', () => {
     await telegramSuggestedTasksOnboardingFollowupJob(
       buildJob({
         chatId: '8846357662',
+        threadId: '77',
         introMessageId: '900',
         sourceTaskId: 'task-1',
       }),
@@ -65,6 +67,7 @@ describe('telegramSuggestedTasksOnboardingFollowupJob', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '8846357662',
+        threadId: '77',
         replyToMessageId: '900',
         textFormat: 'markdown',
         buttons: [

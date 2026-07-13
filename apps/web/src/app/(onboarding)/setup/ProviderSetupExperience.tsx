@@ -47,18 +47,28 @@ const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
 ]);
 
+const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
+  'R_TELEGRAM_WEBHOOK_SECRET',
+]);
+
 export function getSetupVisibleFields(provider: ProviderStatus | null) {
   if (!provider) {
     return [];
   }
 
-  if (provider.id !== 'microsoft') {
-    return provider.fields;
+  if (provider.id === 'microsoft') {
+    return provider.fields.filter(
+      (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
   }
 
-  return provider.fields.filter(
-    (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
-  );
+  if (provider.id === 'telegram') {
+    return provider.fields.filter(
+      (field) => !TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
+  }
+
+  return provider.fields;
 }
 
 export function getSetupEffectiveFieldValue({
@@ -74,6 +84,10 @@ export function getSetupEffectiveFieldValue({
 
   if (ownValue.length > 0) {
     return ownValue;
+  }
+
+  if (field.secret !== true && field.savedValue?.trim()) {
+    return field.savedValue;
   }
 
   if (
@@ -121,21 +135,9 @@ export function getSetupSubmitValues({
     }
   }
 
-  if (provider.id === 'microsoft') {
-    for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
-    )) {
-      if (nextValues[envVarName]?.trim()) {
-        continue;
-      }
-
-      const copiedValue = values[sourceEnvVarName];
-
-      if (copiedValue?.trim()) {
-        nextValues[envVarName] = copiedValue;
-      }
-    }
-  }
+  // Do not materialize inferred Teams bot env vars from Microsoft single-app
+  // credentials. Runtime resolution already borrows Microsoft values, and
+  // writing snapshots here locks derived config so client-id updates drift.
 
   return nextValues;
 }
@@ -220,7 +222,9 @@ function ProviderFields({
       {fields.map((field) => {
         const explicitValue = values[field.envVarName] ?? '';
         const value = getSetupEffectiveFieldValue({ provider, field, values });
+        const isSecretField = field.secret === true;
         const shouldShowSavedValueMask =
+          isSecretField &&
           !field.runtimeSatisfied &&
           field.savedSatisfied &&
           explicitValue.length === 0 &&
@@ -241,10 +245,10 @@ function ProviderFields({
             <div>
               <div className="flex items-center gap-2">
                 <Input
-                  secret={field.secret && !field.runtimeSatisfied}
+                  secret={isSecretField && !field.runtimeSatisfied}
                   className="font-mono"
                   value={
-                    field.runtimeSatisfied
+                    isSecretField && field.runtimeSatisfied
                       ? MASKED_VALUE
                       : shouldShowSavedValueMask
                         ? MASKED_VALUE
@@ -271,7 +275,9 @@ function ProviderFields({
                       );
                     }
                   }}
-                  placeholder={field.runtimeSatisfied ? '' : field.label}
+                  placeholder={
+                    isSecretField && field.runtimeSatisfied ? '' : field.label
+                  }
                   disabled={disabled || field.runtimeSatisfied}
                   data-1p-ignore
                 />

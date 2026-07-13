@@ -6,7 +6,7 @@ import {
 } from '@roomote/db/server';
 
 import { findTelegramPrimaryChatId } from '../../telegram/primary-chat.js';
-import { postTelegramMessageBestEffort } from '../../telegram/replies.js';
+import { postTelegramMessageInNewTopicBestEffort } from '../../telegram/replies.js';
 import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-workspace.js';
 import type { PersistedAutomationWorkItem } from './types.js';
 
@@ -62,8 +62,9 @@ export async function postLateBoundWorkItemFailureToTelegram(params: {
     `An automation queued this work item, but the execution task failed to launch: ${params.reason}`,
   ].join('\n');
 
-  await postTelegramMessageBestEffort({
+  await postTelegramMessageInNewTopicBestEffort({
     chatId: params.chatId,
+    topicName: params.workItem.title,
     text,
     textFormat: 'markdown',
   });

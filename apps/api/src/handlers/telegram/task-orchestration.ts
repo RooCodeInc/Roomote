@@ -19,8 +19,15 @@ import {
 
 import type { CompletedTelegramTaskRun } from './task-run-lookup.js';
 import { maybeRequestTelegramRoutingConfirmation } from './routing-confirmation.js';
-import { postTelegramMessageBestEffort } from './replies.js';
-import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
+import {
+  postTelegramMessageBestEffort,
+  telegramPrivateTopicsEnabledBestEffort,
+} from './replies.js';
+import {
+  launchTelegramTask,
+  resolveTelegramWorkspace,
+  shouldCreateTelegramTaskTopic,
+} from './task-launch.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
@@ -71,6 +78,9 @@ export async function resumeTelegramTaskFromSnapshot(input: {
     threadId: input.metadata.communicationThreadId,
     messageId: input.metadata.communicationMessageId,
   });
+  if (completedPayload.telegramTaskTopic === true) {
+    resumePayload.telegramTaskTopic = true;
+  }
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
   // Resumes never create tasks and never re-attribute; the resuming human
@@ -119,7 +129,21 @@ export async function startNewTelegramTask(input: {
    * expressed explicit intent (for example a suggestion button click).
    */
   skipRoutingConfirmation?: boolean;
+  /** Start a new task topic even when the command came from an older topic. */
+  forceNewTopic?: boolean;
 }) {
+  const needsPrivateTopicCapability =
+    input.message.chat.type.toLowerCase() === 'private' &&
+    (!input.metadata.communicationThreadId || input.forceNewTopic === true);
+  const createTopicForTask = shouldCreateTelegramTaskTopic({
+    chatType: input.message.chat.type,
+    isForum: input.message.chat.is_forum,
+    privateTopicsEnabled: needsPrivateTopicCapability
+      ? await telegramPrivateTopicsEnabledBestEffort()
+      : false,
+    threadId: input.metadata.communicationThreadId,
+    forceNewTopic: input.forceNewTopic,
+  });
   const routingContext = await buildTelegramRoutingContext({
     userId: input.launchOwnerUserId,
     taskDescription: input.queuedMessage.text,
@@ -158,6 +182,7 @@ export async function startNewTelegramTask(input: {
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      createTopicForTask,
     });
 
     if (confirmation) {
@@ -186,6 +211,7 @@ export async function startNewTelegramTask(input: {
     queuedMessage: input.queuedMessage,
     metadata: input.metadata,
     workspace,
+    createTopicForTask,
   });
 
   return {

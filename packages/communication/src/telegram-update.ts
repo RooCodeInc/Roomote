@@ -20,6 +20,7 @@ const telegramChatSchema = z
     username: z.string().optional(),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
+    is_forum: z.boolean().optional(),
   })
   .passthrough();
 
@@ -28,6 +29,15 @@ const telegramMessageEntitySchema = z
     type: z.string(),
     offset: z.number().int(),
     length: z.number().int(),
+  })
+  .passthrough();
+
+const telegramForumTopicCreatedSchema = z
+  .object({
+    name: z.string(),
+    icon_color: z.number().int().optional(),
+    icon_custom_emoji_id: z.string().optional(),
+    is_name_implicit: z.boolean().optional(),
   })
   .passthrough();
 
@@ -40,6 +50,7 @@ const telegramMessageSchema = z
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
+    forum_topic_created: telegramForumTopicCreatedSchema.optional(),
   })
   .passthrough();
 
@@ -132,6 +143,12 @@ export function getTelegramMessageThreadId(
   return message.message_thread_id === undefined
     ? undefined
     : String(message.message_thread_id);
+}
+
+export function isTelegramImplicitTopicCreatedMessage(
+  message: TelegramMessage,
+): boolean {
+  return message.forum_topic_created?.is_name_implicit === true;
 }
 
 export function formatTelegramUser(message: TelegramMessage): string {
@@ -347,7 +364,7 @@ export function isTelegramTaskEntryUpdate(
   );
 }
 
-export const TELEGRAM_NEW_TASK_COMMANDS = ['new', 'done'] as const;
+export const TELEGRAM_NEW_TASK_COMMANDS = ['new'] as const;
 
 export type TelegramNewTaskCommand = {
   command: (typeof TELEGRAM_NEW_TASK_COMMANDS)[number];
@@ -361,17 +378,16 @@ function isNewTaskCommandName(
 }
 
 /**
- * Detects an explicit `/new` or `/done` command and returns the command name
- * plus the task description with the invocation stripped. Returns `null` when
- * the update is not one of those commands.
+ * Detects an explicit `/new` command and returns the command name plus the task
+ * description with the invocation stripped. Returns `null` for other updates.
  *
- * Telegram chats have no threads, so after a task completes the next message
- * in the same chat would otherwise resume the previous task's snapshot. These
- * commands force a fresh task launch instead.
+ * After a task completes, the next message in the same chat/topic would
+ * otherwise resume its snapshot. This command forces a fresh task launch
+ * instead (and the launch path can create a fresh Telegram topic).
  *
- * The command must lead the message — a `/new` or `/done` mentioned
- * mid-sentence is ordinary text, not a command. The only prefix allowed before
- * the command is a mention of this bot, so both group forms work:
+ * The command must lead the message — a `/new` mentioned mid-sentence is
+ * ordinary text, not a command. The only prefix allowed before the command is
+ * a mention of this bot, so both group forms work:
  * `/new@<botUsername> <text>` and `@<botUsername> /new <text>`. A bare `/new`
  * from another member, or one suffixed for another bot, does not hijack the
  * chat.

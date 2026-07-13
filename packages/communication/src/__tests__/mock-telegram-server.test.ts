@@ -75,7 +75,58 @@ describe('MockTelegramServer', () => {
     cleanups.push(fn);
   }
 
-  it('stores a bot message posted through the real provider and anchors the reply', async () => {
+  it('creates topics in private chats when the bot has Threaded Mode enabled', async () => {
+    const state = baseState();
+    state.bot = { ...state.bot!, has_topics_enabled: true };
+    const { server, baseUrl } = await startServer(state);
+    onCleanup(() => server.stop());
+
+    const topic = await providerFor(baseUrl).createForumTopic({
+      channelId: '111000111',
+      name: 'Fix the flaky login test',
+    });
+    await providerFor(baseUrl).postMessage({
+      channelId: '111000111',
+      threadId: topic.messageThreadId,
+      text: 'Task started.',
+    });
+    await providerFor(baseUrl).editForumTopic({
+      channelId: '111000111',
+      threadId: topic.messageThreadId,
+      name: 'Fix flaky login tests',
+    });
+
+    expect(topic.name).toBe('Fix the flaky login test');
+    expect(Number(topic.messageThreadId)).toBeGreaterThan(0);
+    expect(server.getState().messages).toContainEqual(
+      expect.objectContaining({
+        chat_id: '111000111',
+        message_thread_id: Number(topic.messageThreadId),
+        forum_topic_created: { name: 'Fix flaky login tests' },
+      }),
+    );
+    expect(server.getState().messages).toContainEqual(
+      expect.objectContaining({
+        chat_id: '111000111',
+        message_thread_id: Number(topic.messageThreadId),
+        text: 'Task started.',
+      }),
+    );
+  });
+
+  it('rejects private-chat topic creation when Threaded Mode is disabled', async () => {
+    const { server, baseUrl } = await startServer();
+    onCleanup(() => server.stop());
+
+    await expect(
+      providerFor(baseUrl).createForumTopic({
+        channelId: '111000111',
+        name: 'Fix the flaky login test',
+      }),
+    ).rejects.toThrow('chat is not a forum');
+  });
+
+  it('stores a bot message without quoting the inbound message', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -92,11 +143,11 @@ describe('MockTelegramServer', () => {
     const botMessage = messages.find((m) => m.from.is_bot);
     expect(botMessage).toBeDefined();
     expect(botMessage?.text).toBe('On it — taking a look now.');
-    expect(botMessage?.reply_to_message_id).toBe(1000);
+    expect(botMessage?.reply_to_message_id).toBeUndefined();
     expect(result.messageId).toBe(String(botMessage?.message_id));
   });
 
-  it('splits long markdown into multiple messages under the 4096 limit with reply on first and buttons on last', async () => {
+  it('splits long markdown into multiple unquoted messages with buttons on the last', async () => {
     const { server, baseUrl } = await startServer();
     onCleanup(() => server.stop());
 
@@ -123,9 +174,8 @@ describe('MockTelegramServer', () => {
       );
     }
 
-    expect(botMessages[0]?.reply_to_message_id).toBe(1000);
     expect(
-      botMessages.slice(1).every((m) => m.reply_to_message_id === undefined),
+      botMessages.every((message) => message.reply_to_message_id === undefined),
     ).toBe(true);
 
     const withButtons = botMessages.filter((m) => m.reply_markup !== undefined);
@@ -477,8 +527,8 @@ describe('computeTelegramEntities', () => {
   });
 
   it('marks mid-sentence commands the way Telegram does', () => {
-    expect(computeTelegramEntities('try running /done later')).toEqual([
-      { type: 'bot_command', offset: 12, length: 5 },
+    expect(computeTelegramEntities('try running /status later')).toEqual([
+      { type: 'bot_command', offset: 12, length: 7 },
     ]);
   });
 

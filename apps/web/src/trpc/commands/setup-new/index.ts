@@ -65,6 +65,7 @@ import {
   isConfiguredEnvValue,
   isExitedRunStatus,
   isRequiredComputeField,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
@@ -75,6 +76,7 @@ import {
   normalizeSetupNewState,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
+  resolveTeamsBotCredentialEnvVarNames,
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
@@ -912,11 +914,7 @@ export async function launchQueuedSetupTasksIfReady({
       ? {
           communicationProvider: nonSlackChatHandoffProvider,
           communicationChannelId: chatHandoffChannelId,
-          // Telegram treats communicationThreadId as a forum-topic
-          // message_thread_id, which the private primary chat does not have,
-          // so only Teams threads starter-task replies under the kickoff
-          // message.
-          ...(nonSlackChatHandoffProvider === 'teams' && chatHandoffThreadId
+          ...(chatHandoffThreadId
             ? { communicationThreadId: chatHandoffThreadId }
             : {}),
           ...(chatHandoffServiceUrl
@@ -1177,6 +1175,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
+    nonSecretAuthEnvValues,
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
@@ -1186,6 +1185,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
@@ -1271,6 +1271,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const authSetup = buildSetupAuthStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretAuthEnvValues,
     selectedProvider: setupNewState.authProvider,
   });
   const modelSetup = buildSetupModelStatus({
@@ -1887,15 +1888,40 @@ async function saveSetupAuthConfig(input: {
       ];
     });
 
+    const hasConfiguredAuthEnvVar = (name: string) =>
+      Boolean(process.env[name]?.trim()) ||
+      persistedEnvVarNames.includes(name) ||
+      Boolean(input.values?.[name]?.trim());
+
+    const microsoftTeamsBotResolution =
+      input.provider === 'microsoft'
+        ? resolveTeamsBotCredentialEnvVarNames({
+            hasConfiguredEnvVar: hasConfiguredAuthEnvVar,
+          })
+        : null;
+
     const hasMissingRequiredValue = providerStatus.fields.some((field) => {
       const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
 
-      return (
-        field.required !== false &&
-        !field.runtimeSatisfied &&
-        !field.savedSatisfied &&
-        nextValue.length === 0
-      );
+      if (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      ) {
+        return false;
+      }
+
+      if (
+        microsoftTeamsBotResolution?.source === 'microsoft_auth' &&
+        microsoftTeamsBotResolution.fieldSourceEnvVarNames[
+          field.envVarName as keyof typeof microsoftTeamsBotResolution.fieldSourceEnvVarNames
+        ]
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     if (hasMissingRequiredValue) {
@@ -2036,10 +2062,12 @@ export async function getSetupBootstrapStatusCommand(input?: {
     };
   }
 
-  const [setupNewState, persistedEnvVarNames] = await Promise.all([
-    getPersistedSetupNewState(),
-    getPersistedEnvironmentVariableNames(),
-  ]);
+  const [setupNewState, persistedEnvVarNames, nonSecretAuthEnvValues] =
+    await Promise.all([
+      getPersistedSetupNewState(),
+      getPersistedEnvironmentVariableNames(),
+      getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    ]);
 
   return {
     setupOpen: bootstrapState.setupOpen,
@@ -2048,6 +2076,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
     authSetup: buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
       selectedProvider: setupNewState.authProvider,
     }),
   };
@@ -2218,13 +2247,30 @@ export async function startSetupNewOnboardingTaskCommand(
         const kickoffMessage = buildSetupKickoffText();
         let kickoffMessageId: string | null = null;
         let kickoffChannelId: string | null = null;
+        let kickoffThreadId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
             botToken: fallbackTarget.botToken,
           });
+          try {
+            const { hasTopicsEnabled } = await telegram.getBotInfo();
+            if (hasTopicsEnabled) {
+              const topic = await telegram.createForumTopic({
+                channelId: fallbackTarget.chatId,
+                name: 'Set up Roomote',
+              });
+              kickoffThreadId = topic.messageThreadId;
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Could not create a Telegram topic for the setup task; falling back to the primary chat.',
+              error,
+            );
+          }
           const posted = await telegram.postMessage({
             channelId: fallbackTarget.chatId,
+            ...(kickoffThreadId ? { threadId: kickoffThreadId } : {}),
             text: kickoffMessage,
             textFormat: 'markdown',
           });
@@ -2284,6 +2330,12 @@ export async function startSetupNewOnboardingTaskCommand(
                 communicationProvider: fallbackTarget.provider,
                 communicationChannelId: kickoffChannelId,
                 communicationMessageId: kickoffMessageId,
+                ...(kickoffThreadId
+                  ? {
+                      communicationThreadId: kickoffThreadId,
+                      telegramTaskTopic: true,
+                    }
+                  : {}),
                 ...(fallbackTarget.provider === 'teams'
                   ? {
                       communicationThreadId: kickoffMessageId,
@@ -2316,7 +2368,9 @@ export async function startSetupNewOnboardingTaskCommand(
               slackThreadTs: null,
               chatHandoffProvider: fallbackTarget.provider,
               chatHandoffChannelId: kickoffChannelId,
-              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffThreadId:
+                kickoffThreadId ??
+                (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
               chatHandoffServiceUrl:
                 fallbackTarget.provider === 'teams'
                   ? fallbackTarget.serviceUrl

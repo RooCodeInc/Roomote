@@ -24,6 +24,7 @@ import {
   getBackgroundAgentSettings,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
+  resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
@@ -72,6 +73,10 @@ export async function generatePrompt({
   // the configured app slug first so an app created through the /setup flow
   // is recognized as ourselves.
   await resolveConfiguredGitHubAppSlug();
+  const telegramBotUsername =
+    getCommunicationProviderFromTaskPayload(taskSpec.payload) === 'telegram'
+      ? (await resolveTelegramRuntimeCredentials()).botUsername
+      : null;
 
   const taskRow = await db.query.tasks.findFirst({
     where: eq(tasks.id, taskRun.taskId),
@@ -283,7 +288,7 @@ export async function generatePrompt({
             : undefined,
         telegramBotUsername:
           nonSlackChatProvider === 'telegram'
-            ? (Env.R_TELEGRAM_BOT_USERNAME ?? undefined)
+            ? (telegramBotUsername ?? undefined)
             : undefined,
         teamsConversationId:
           nonSlackChatProvider === 'teams'

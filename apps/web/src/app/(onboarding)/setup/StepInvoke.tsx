@@ -35,10 +35,18 @@ export function StepInvoke({
   const queryClient = useQueryClient();
   const environments = useEnvironments();
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
+  const effectiveCommunicationProviders = [
+    ...communicationProviders,
+    ...(commsStatus.data?.providers?.some(
+      (provider) => provider.id === 'telegram' && provider.setupSatisfied,
+    ) && !communicationProviders.includes('telegram')
+      ? (['telegram'] as const)
+      : []),
+  ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
   const methods = buildInvokeMethods({
-    communicationProviders,
+    communicationProviders: effectiveCommunicationProviders,
     sourceControlProviders,
     includeLinear,
     invocationIdentities: commsStatus.data?.invocationIdentities,

@@ -65,6 +65,7 @@ type PendingTelegramRoute = {
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
+  createTopicForTask?: boolean;
   options: PendingTelegramRouteOption[];
   /**
    * Index into `options` of the router's suggestion. Null once the card is
@@ -342,6 +343,7 @@ async function autoConfirmTelegramRouting(
     queuedMessage: pending.queuedMessage,
     metadata: pending.metadata,
     workspace,
+    createTopicForTask: pending.createTopicForTask,
   });
 }
 
@@ -363,6 +365,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
+  createTopicForTask?: boolean;
 }): Promise<{ pendingRouteId: string } | null> {
   const routed =
     input.routingDecision.status === 'routed'
@@ -393,6 +396,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      createTopicForTask: input.createTopicForTask,
       options,
       suggestedIndex,
     };
@@ -481,6 +485,7 @@ async function switchToWorkspacePicker(params: {
     // message so the user is not stuck.
     const posted = await postTelegramMessageBestEffort({
       chatId: params.chatId,
+      threadId: params.claimed.metadata.communicationThreadId,
       replyToMessageId: params.messageId,
       text: PICKER_TEXT,
       buttons: buildPickerButtons(nextId, nextPending.options),
@@ -603,6 +608,9 @@ export async function handleTelegramRoutingCallback(params: {
     });
     await postTelegramMessageBestEffort({
       chatId,
+      ...(message.message_thread_id !== undefined
+        ? { threadId: String(message.message_thread_id) }
+        : {}),
       replyToMessageId: String(message.message_id),
       text: 'Could not start the task — that workspace is no longer available. Send the request again.',
     });
@@ -625,6 +633,7 @@ export async function handleTelegramRoutingCallback(params: {
       queuedMessage: claimed.queuedMessage,
       metadata: claimed.metadata,
       workspace,
+      createTopicForTask: claimed.createTopicForTask,
     });
   } catch (error) {
     apiLogger.warn(
@@ -634,6 +643,9 @@ export async function handleTelegramRoutingCallback(params: {
     );
     await postTelegramMessageBestEffort({
       chatId,
+      ...(message.message_thread_id !== undefined
+        ? { threadId: String(message.message_thread_id) }
+        : {}),
       replyToMessageId: String(message.message_id),
       text: 'Could not start the task — send the request again.',
     });

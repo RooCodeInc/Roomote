@@ -50,14 +50,16 @@ See [`.changeset/README.md`](.changeset/README.md).
 
 ### How a release ships
 
-1. Merge work to `develop` (squash). When pending changesets exist, automation
-   opens a **Release Roomote** Version PR that bumps the root version and
-   `CHANGELOG.md` (nothing else).
-2. When the product version is untagged, automation cuts a frozen
-   `release/vX.Y.Z` branch at the version-bump commit and opens or refreshes a
-   **Promote `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work
-   merged to `develop` after the version bump waits for the next release.
-3. Merge that promote PR with a **merge commit** (branch rules on `main` allow
+1. Merge work to `develop` (squash), adding changesets for user-visible changes
+   when practical.
+2. A maintainer uses the `changeset-release-pr` skill to audit missing notes,
+   run `pnpm run version`, and open one **Release Roomote X.Y.Z** PR containing
+   the final version bump and `CHANGELOG.md` entry.
+3. Squash-merge that release PR. Automation cuts a frozen `release/vX.Y.Z`
+   branch at the version-bump commit and opens or refreshes a **Promote
+   `vX.Y.Z` to production** PR (`release/vX.Y.Z` → `main`). Work merged to
+   `develop` afterward waits for the next release.
+4. Merge that promote PR with a **merge commit** (branch rules on `main` allow
    merge only; `develop` stays squash-only). Tagging (`vX.Y.Z`), GHCR image
    publish (`latest`), and the GitHub Release follow from `main` / tag workflows.
    Product tagging requires the `RELEASE_BOT_TOKEN` repository secret.

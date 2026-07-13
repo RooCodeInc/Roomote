@@ -10,6 +10,7 @@ import {
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessage,
   getTelegramNewTaskCommand,
+  isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
@@ -40,9 +41,16 @@ import {
   postTelegramMessageBestEffort,
 } from './replies.js';
 
+const TELEGRAM_COMMAND_HELP = [
+  '*Available commands*',
+  '`/start` — show this welcome message.',
+  '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+].join('\n');
+
 const TELEGRAM_WELCOME_MESSAGE = [
   "👋 Hi, I'm Roomote. Message me here to start tasks in your connected repos — I'll route your request, reply with progress, and post results (including screenshots) right in this chat.",
-  'Try something like *"Fix the flaky auth test"* or *"What changed in the repo this week?"*. While a task is running you can send follow-ups here, and every started task has a cancel button. Telegram has no threads, so after a task finishes send `/new <request>` (or `/done <request>`) to start a fresh task instead of resuming the previous one.',
+  'Try something like *"Fix the flaky auth test"* or *"What changed in the repo this week?"*. While a task is running you can send follow-ups in its chat or topic, and every started task has a cancel button.',
+  TELEGRAM_COMMAND_HELP,
 ].join('\n\n');
 
 const TELEGRAM_WELCOME_LINK_NUDGE =
@@ -59,6 +67,7 @@ import type { QueuedTelegramCommunicationMessage } from './types.js';
 import {
   claimTelegramLinkNudge,
   claimTelegramUpdate,
+  rememberTelegramImplicitTopic,
   verifyTelegramWebhookSecret,
 } from './webhook-gate.js';
 
@@ -131,6 +140,15 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, duplicate: true });
   }
 
+  if (isTelegramImplicitTopicCreatedMessage(message)) {
+    const implicitThreadId = message.message_thread_id ?? message.message_id;
+    await rememberTelegramImplicitTopic({
+      chatId: String(message.chat.id),
+      threadId: String(implicitThreadId),
+    });
+    return c.json({ ok: true, implicitTopicRemembered: true });
+  }
+
   // Account linking: a bare link code (or /start <code> from the deep link)
   // binds the sender's Telegram identity to their Roomote user.
   const messageText = message.text?.trim() ?? '';
@@ -190,7 +208,12 @@ telegram.post('/', async (c) => {
       });
       await postTelegramMessageBestEffort({
         chatId,
-        text: '✅ Linked! This Telegram account is now connected to your Roomote account — tasks you start here are attributed to you, and Roomote can reach you in this chat.',
+        text: [
+          '✅ Linked! This Telegram account is now connected to your Roomote account. Tasks you start here are attributed to you, and Roomote can reach you in this chat.',
+          'Send a request to start a task, or use:',
+          TELEGRAM_COMMAND_HELP,
+        ].join('\n\n'),
+        textFormat: 'markdown',
       });
 
       return c.json({ ok: true, linked: true });
@@ -327,10 +350,10 @@ telegram.post('/', async (c) => {
     threadId: metadata.communicationThreadId,
   };
 
-  // `/new` and `/done` are explicit "start a fresh task" signals. Telegram has
-  // no threads, so without these the next message after a task completes would
-  // resume the previous task's snapshot. These commands skip the resume path
-  // below and launch a new StandardTask.
+  // `/new` is an explicit "start a fresh task" signal. In a plain chat (or an
+  // existing topic), the next message after completion would otherwise resume
+  // the previous snapshot. This command skips that resume path and, when
+  // topics are available, creates a new task topic.
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });
@@ -410,12 +433,22 @@ telegram.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
-  if (
-    !newTaskCommand &&
-    !isTelegramTaskEntryUpdate(update, {
-      botUsername: botUsername ?? undefined,
-    })
-  ) {
+  const isTaskEntry = isTelegramTaskEntryUpdate(update, {
+    botUsername: botUsername ?? undefined,
+  });
+  // Only task-owned topics are explicit Roomote conversations. A user-owned
+  // forum topic still requires a group @mention before an old task resumes.
+  const completedRunCandidate =
+    !newTaskCommand && (isTaskEntry || metadata.communicationThreadId)
+      ? await findCompletedTelegramTaskRunWithSnapshot(conversation)
+      : null;
+  const completedRun =
+    completedRunCandidate &&
+    (isTaskEntry || completedRunCandidate.payload.telegramTaskTopic === true)
+      ? completedRunCandidate
+      : null;
+
+  if (!newTaskCommand && !isTaskEntry && !completedRun) {
     apiLogger.debug(
       `[telegram] Ignoring Telegram message without active task run or task entry signal for chat ${metadata.communicationChannelId} thread ${metadata.communicationThreadId ?? 'unknown'}`,
     );
@@ -434,12 +467,6 @@ telegram.post('/', async (c) => {
     chatId: metadata.communicationChannelId,
     messageId: metadata.communicationMessageId,
   });
-
-  // `/new` and `/done` exist to skip snapshot resume; only plain messages
-  // reconnect to a completed task's snapshot.
-  const completedRun = newTaskCommand
-    ? null
-    : await findCompletedTelegramTaskRunWithSnapshot(conversation);
 
   if (completedRun) {
     try {
@@ -476,6 +503,7 @@ telegram.post('/', async (c) => {
     launchOwnerUserId: senderUserId,
     queuedMessage,
     metadata,
+    forceNewTopic: Boolean(newTaskCommand),
   });
 
   if (launch.status === 'replied_inline') {

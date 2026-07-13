@@ -129,6 +129,9 @@ async function handleCancelTaskCallback(params: {
 
     await postTelegramMessageBestEffort({
       chatId,
+      ...(message.message_thread_id !== undefined
+        ? { threadId: String(message.message_thread_id) }
+        : {}),
       replyToMessageId: String(message.message_id),
       text: canceled
         ? 'Canceled the task.'
@@ -193,6 +196,10 @@ async function handleSuggestionLaunchCallback(params: {
       : []),
   ].join('\n');
   const messageId = String(message.message_id);
+  const threadId =
+    message.message_thread_id === undefined
+      ? undefined
+      : String(message.message_thread_id);
   const queuedMessage: QueuedTelegramCommunicationMessage = {
     provider: 'telegram',
     text: promptText,
@@ -200,6 +207,7 @@ async function handleSuggestionLaunchCallback(params: {
     userId: senderUserId,
     ts: messageId,
     channel: chatId,
+    ...(threadId ? { threadTs: threadId } : {}),
   };
 
   // The claim's `launchClaimedAt` is this launcher's fencing token; thread it
@@ -215,10 +223,12 @@ async function handleSuggestionLaunchCallback(params: {
       metadata: {
         communicationProvider: 'telegram',
         communicationChannelId: chatId,
+        ...(threadId ? { communicationThreadId: threadId } : {}),
         communicationMessageId: messageId,
       },
       // The button click already is the explicit start signal.
       skipRoutingConfirmation: true,
+      forceNewTopic: true,
     });
 
     if (started.status === 'started') {
