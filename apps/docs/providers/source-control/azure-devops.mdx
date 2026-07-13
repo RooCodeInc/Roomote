@@ -71,8 +71,9 @@ ADO_CLIENT_SECRET=<microsoft-entra-client-secret>
 ADO_TENANT_ID=<microsoft-entra-tenant-id>
 ```
 
-`ADO_TENANT_ID` is optional. It reuses `R_MICROSOFT_TENANT_ID` when available,
-then defaults to Microsoft&apos;s `common` tenant.
+`ADO_TENANT_ID` is required unless the Entra app supports multiple tenants. It
+reuses `R_MICROSOFT_TENANT_ID` when available, then defaults to Microsoft&apos;s
+`common` tenant for multi-tenant apps.
 
 ## Sync repositories
 

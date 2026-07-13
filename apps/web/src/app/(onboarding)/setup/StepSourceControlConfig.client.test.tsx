@@ -505,7 +505,12 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText('Microsoft Entra Client ID')).toBeVisible();
     expect(screen.getByText('Microsoft Entra Client Secret')).toBeVisible();
     expect(
-      screen.getByText('Microsoft Entra Tenant ID (optional)'),
+      screen.getByText(
+        'Microsoft Entra Tenant ID (required unless multi-tenant)',
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/tenant ID is required unless the app supports/),
     ).toBeVisible();
     expect(
       screen.getByText(/If Microsoft Teams or Microsoft sign-in/),

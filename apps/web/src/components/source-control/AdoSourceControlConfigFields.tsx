@@ -203,7 +203,10 @@ export function AdoSourceControlConfigFields({
   const renderField = (
     field: SourceControlField,
     validationError: string | null = null,
-    optional = field.required === false,
+    qualifier:
+      | 'optional'
+      | 'required-unless-multi-tenant'
+      | null = field.required === false ? 'optional' : null,
   ) => {
     const value = values[field.envVarName] ?? '';
     const isSecretField = isSecretSourceControlField(field);
@@ -227,7 +230,11 @@ export function AdoSourceControlConfigFields({
       >
         <Label htmlFor={inputId} className="text-sm font-medium">
           {field.label}
-          {optional ? ' (optional)' : ''}
+          {qualifier === 'optional'
+            ? ' (optional)'
+            : qualifier === 'required-unless-multi-tenant'
+              ? ' (required unless multi-tenant)'
+              : ''}
         </Label>
         <div className="space-y-1">
           <div className="flex items-center gap-2">
@@ -456,7 +463,8 @@ export function AdoSourceControlConfigFields({
               </p>
               <p>
                 Paste the application ID and client secret below. The tenant ID
-                is optional; use the same tenant as Teams when applicable.
+                is required unless the app supports multiple tenants. If you
+                reuse the Teams app, use its tenant ID.
               </p>
             </div>
             <div className="space-y-2">
@@ -464,7 +472,9 @@ export function AdoSourceControlConfigFields({
                 renderField(
                   field,
                   null,
-                  field.envVarName === ADO_TENANT_ID_ENV_VAR,
+                  field.envVarName === ADO_TENANT_ID_ENV_VAR
+                    ? 'required-unless-multi-tenant'
+                    : null,
                 ),
               )}
             </div>
