@@ -453,7 +453,7 @@ async function failWaitingTasksForProvisioning(
     );
 }
 
-export async function dispatchWaitingTasksForProvisioning(
+async function dispatchWaitingTasksForProvisioning(
   provider: SetupProvisionableComputeProvider,
 ): Promise<void> {
   // Clearing the wait phase is the durable release. If this process exits
