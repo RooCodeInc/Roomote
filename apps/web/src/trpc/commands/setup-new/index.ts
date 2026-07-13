@@ -1489,6 +1489,7 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     const runtimeComputeConfig = hasCredentialFields
       ? persistedRuntimeComputeConfig
       : normalizeDeploymentComputeConfig({
+          ...persistedRuntimeComputeConfig,
           defaultProvider: input.provider,
         });
 

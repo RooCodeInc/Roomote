@@ -82,9 +82,15 @@ export async function listConfiguredComputeProviders(
 ): Promise<ComputeProvider[]> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
+  const persistedComputeConfig = executor.query?.deploymentSettings
+    ? await loadPersistedRuntimeComputeConfig(executor)
+    : { defaultProvider: null, excludedProviders: [] };
   const excludedProviders = parseExcludedComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
+  for (const provider of persistedComputeConfig.excludedProviders) {
+    excludedProviders.add(provider);
+  }
 
   // Preserve setup-catalog display order so callers that fall back to the first
   // entry match the home dropdown ordering (modal, e2b, daytona, docker).
@@ -124,16 +130,21 @@ export async function resolveDefaultComputeProvider(
   const persistedComputeConfig = await loadPersistedRuntimeComputeConfig(
     options.executor ?? db,
   );
+  const excludedProviders = parseExcludedComputeProviders(
+    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
+  );
+  for (const provider of persistedComputeConfig.excludedProviders) {
+    excludedProviders.add(provider);
+  }
 
-  if (persistedComputeConfig.defaultProvider) {
+  if (
+    persistedComputeConfig.defaultProvider &&
+    !excludedProviders.has(persistedComputeConfig.defaultProvider)
+  ) {
     return persistedComputeConfig.defaultProvider;
   }
 
   const runtimeDefault = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
-  const excludedProviders = parseExcludedComputeProviders(
-    runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
-  );
-
   if (
     runtimeDefault &&
     isComputeProvider(runtimeDefault) &&

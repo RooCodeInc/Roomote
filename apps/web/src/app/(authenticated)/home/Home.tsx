@@ -601,30 +601,32 @@ export function Home({
                 onValueChange={setSelectedModelOverrideId}
               />
 
-              <Select
-                value={selectedComputeProvider}
-                onValueChange={(value) =>
-                  setSelectedComputeProvider(value as ComputeProvider)
-                }
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="w-36"
-                  aria-label="Sandbox provider"
+              {computeProviderDescriptors.length > 1 && (
+                <Select
+                  value={selectedComputeProvider}
+                  onValueChange={(value) =>
+                    setSelectedComputeProvider(value as ComputeProvider)
+                  }
                 >
-                  <SelectValue placeholder="Backend" />
-                </SelectTrigger>
-                <SelectContent>
-                  {computeProviderDescriptors.map((descriptor) => (
-                    <SelectItem
-                      key={descriptor.provider}
-                      value={descriptor.provider}
-                    >
-                      {descriptor.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <SelectTrigger
+                    size="sm"
+                    className="w-36"
+                    aria-label="Sandbox provider"
+                  >
+                    <SelectValue placeholder="Backend" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {computeProviderDescriptors.map((descriptor) => (
+                      <SelectItem
+                        key={descriptor.provider}
+                        value={descriptor.provider}
+                      >
+                        {descriptor.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
 
               {showRoutingSpinner && (
                 <div

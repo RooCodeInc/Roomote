@@ -423,11 +423,42 @@ export async function setDefaultComputeProviderCommand(
     }
 
     const runtimeComputeConfig = normalizeDeploymentComputeConfig({
+      ...persistedComputeConfig,
       defaultProvider: input.provider,
     });
 
     await savePersistedRuntimeComputeConfig(runtimeComputeConfig, tx);
 
+    return { runtimeComputeConfig };
+  });
+}
+
+export async function setLocalDockerEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { enabled: boolean },
+) {
+  assertAdmin(auth);
+
+  return db.transaction(async (tx) => {
+    const currentConfig = await getPersistedRuntimeComputeConfig(tx);
+    const excludedProviders = new Set(currentConfig.excludedProviders);
+
+    if (input.enabled) {
+      excludedProviders.delete('docker');
+    } else {
+      excludedProviders.add('docker');
+    }
+
+    const runtimeComputeConfig = normalizeDeploymentComputeConfig({
+      ...currentConfig,
+      defaultProvider:
+        !input.enabled && currentConfig.defaultProvider === 'docker'
+          ? null
+          : currentConfig.defaultProvider,
+      excludedProviders: Array.from(excludedProviders),
+    });
+
+    await savePersistedRuntimeComputeConfig(runtimeComputeConfig, tx);
     return { runtimeComputeConfig };
   });
 }
