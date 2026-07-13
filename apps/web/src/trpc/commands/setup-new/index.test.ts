@@ -834,12 +834,12 @@ describe('setup-new compute config commands', () => {
       provider: 'e2b',
       userId: 'setup-test-user',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r1',
+      templateRef: 'roomote-worker:tag-r2',
     });
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag-r1',
+      templateRef: 'roomote-worker:tag-r2',
     });
   });
 
@@ -863,9 +863,9 @@ describe('setup-new compute config commands', () => {
               setupNewState: {
                 e2bTemplateBuild: {
                   status: 'building',
-                  runtimeSchemaVersion: 1,
+                  runtimeSchemaVersion: 2,
                   imageRef: 'registry.example.com/worker:tag',
-                  templateRef: 'roomote-worker:tag-r1',
+                  templateRef: 'roomote-worker:tag-r2',
                   error: null,
                   startedAt: new Date().toISOString(),
                   finishedAt: null,
@@ -891,7 +891,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
-      templateRef: 'roomote-worker:tag-r1',
+      templateRef: 'roomote-worker:tag-r2',
     });
   });
 

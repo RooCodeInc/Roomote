@@ -21,7 +21,6 @@ interface ContainerCommandOptions {
   cwd: string;
   env: Record<string, string>;
   timeoutMs?: number;
-  detached?: boolean;
 }
 
 type ContainerCommandRunner = (
@@ -39,16 +38,10 @@ const runContainerCommand: ContainerCommandRunner = async (
     cwd: options.cwd,
     env: options.env,
     extendEnv: false,
-    detached: options.detached,
     reject: true,
-    stdio: options.detached ? 'ignore' : 'pipe',
+    stdio: 'pipe',
     timeout: options.timeoutMs,
   });
-
-  if (options.detached) {
-    subprocess.unref();
-    return {};
-  }
 
   const result = await subprocess;
 
@@ -85,8 +78,12 @@ async function ensureDockerRuntime({
     if (!baseEnv.DOCKER_HOST) {
       await runCommand(
         'sudo',
-        ['dockerd', '--host=unix:///var/run/docker.sock', '--log-level=error'],
-        { ...commandOptions, timeoutMs: undefined, detached: true },
+        [
+          'sh',
+          '-c',
+          'nohup dockerd --host=unix:///var/run/docker.sock --log-level=error >/tmp/roomote-dockerd.log 2>&1 </dev/null &',
+        ],
+        commandOptions,
       );
     }
 

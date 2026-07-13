@@ -85,7 +85,7 @@ const STALE_STARTED_AT = '2026-07-03T00:00:00.000Z';
 
 const staleBuildingEntry: SetupNewComputeProvisioningState = {
   status: 'building',
-  runtimeSchemaVersion: 1,
+  runtimeSchemaVersion: 2,
   imageRef: 'registry.example.com/worker:old',
   templateRef: 'roomote-worker-old',
   error: null,
@@ -105,7 +105,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'building',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker-new',
         error: null,
@@ -130,7 +130,7 @@ describe('persistComputeProvisioning', () => {
       'daytona',
       {
         status: 'failed',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:old',
         templateRef: null,
         error: 'boom',
@@ -158,7 +158,7 @@ describe('persistComputeProvisioning', () => {
       'e2b',
       {
         status: 'building',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:new',
         templateRef: 'roomote-worker:new',
         error: null,
@@ -277,7 +277,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'building',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker-tag',
         error: null,
@@ -325,7 +325,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:old',
         templateRef: 'roomote-worker:old',
         error: null,
@@ -414,7 +414,7 @@ describe('prepareComputeProvisioningStart', () => {
       },
       existingState: {
         status: 'succeeded',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -509,7 +509,7 @@ describe('reconcileComputeProvisioningOnStartup', () => {
     const { executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'succeeded',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:tag',
         templateRef: 'roomote-worker:tag',
         error: null,
@@ -533,7 +533,7 @@ describe('runComputeProvisioning', () => {
       E2B_API_KEY: 'key',
     });
     mockBuildE2bWorkerTemplate.mockResolvedValue({
-      templateRef: 'roomote-worker:old-r1',
+      templateRef: 'roomote-worker:old-r2',
       templateId: 'template-id',
       buildId: 'build-id',
       tags: [],
@@ -542,9 +542,9 @@ describe('runComputeProvisioning', () => {
     const { captured, executor } = createExecutorMock({
       e2bTemplateBuild: {
         status: 'building',
-        runtimeSchemaVersion: 1,
+        runtimeSchemaVersion: 2,
         imageRef: 'registry.example.com/worker:new',
-        templateRef: 'roomote-worker:new-r1',
+        templateRef: 'roomote-worker:new-r2',
         error: null,
         startedAt: new Date().toISOString(),
         finishedAt: null,
@@ -558,7 +558,7 @@ describe('runComputeProvisioning', () => {
       provider: 'e2b',
       userId: null,
       imageRef: 'registry.example.com/worker:old',
-      templateRef: 'roomote-worker:old-r1',
+      templateRef: 'roomote-worker:old-r2',
     });
 
     expect(execute).toHaveBeenCalledOnce();

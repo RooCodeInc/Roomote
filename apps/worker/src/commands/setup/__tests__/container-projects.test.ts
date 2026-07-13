@@ -139,6 +139,52 @@ describe('initializeContainerProjects', () => {
     expect(generated).toContain('Dockerfile');
   });
 
+  it('starts a fallback Docker daemon without leaving a rejecting detached subprocess', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Docker daemon is unavailable'))
+      .mockResolvedValue({ stdout: '' });
+
+    await initializeContainerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            container_projects: [
+              {
+                type: 'compose',
+                name: 'dev',
+                repository: 'acme/app',
+                files: ['compose.yaml'],
+              },
+            ],
+          },
+        },
+        envVars: { PATH: '/usr/bin' },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    expect(runCommand).toHaveBeenCalledWith(
+      'sudo',
+      ['sh', '-c', expect.stringContaining('nohup dockerd')],
+      expect.not.objectContaining({ detached: true }),
+    );
+  });
+
   it('continues when an optional project fails', async () => {
     await fs.writeFile(
       path.join(repositoryPath, 'compose.yaml'),

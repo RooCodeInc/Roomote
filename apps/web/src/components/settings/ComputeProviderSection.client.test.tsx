@@ -46,7 +46,7 @@ function buildProvisioning(
 ): SetupNewComputeProvisioningState {
   return {
     status: 'building',
-    runtimeSchemaVersion: 1,
+    runtimeSchemaVersion: 2,
     imageRef: 'ghcr.io/roocodeinc/roomote-worker:develop-abc12345',
     templateRef: 'roomote-worker:develop-abc12345',
     error: null,
