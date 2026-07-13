@@ -32,9 +32,11 @@ export function StepBootstrapAccount({
     <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
       <StepTitle text="Authentication setup" />
       <p>
-        Do you use any of these communication tools? Auth is easier with them.
+        Do you use any of these communication tools? They make auth easier (no
+        invites or passwords to deal with) and talking to Roomote more
+        convenient.
         <br />
-        You can also just do email/password.
+        If not, you can also just do email/password.
       </p>
       <div className="space-y-2 max-w-md">
         {providerButtons.map((provider) => (

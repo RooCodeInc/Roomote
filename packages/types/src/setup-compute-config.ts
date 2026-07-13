@@ -168,6 +168,8 @@ export type SetupComputeStatus = {
   workerImage: SetupComputeWorkerImageStatus;
   setupSatisfied: boolean;
   excludedProviders?: ComputeProvider[];
+  /** True when any hosted provider is fully configured in the process env. */
+  setupSatisfiedByRuntimeEnv: boolean;
 };
 
 export type DeploymentComputeConfig = {
@@ -819,9 +821,17 @@ export function buildSetupComputeStatus(input: {
   const selectedProviderStatus = selectedProvider
     ? providers.find((candidate) => candidate.provider === selectedProvider)
     : null;
+  const setupSatisfiedByRuntimeEnv = providers.some(
+    (provider) =>
+      provider.provider !== DEFAULT_SETUP_COMPUTE_PROVIDER_ID &&
+      provider.fields
+        .filter(isRequiredComputeField)
+        .every((field) => field.runtimeSatisfied || field.defaultSatisfied),
+  );
   const setupSatisfied =
-    selectedProvider !== null &&
-    (selectedProviderStatus?.configSatisfied ?? false);
+    setupSatisfiedByRuntimeEnv ||
+    (selectedProvider !== null &&
+      (selectedProviderStatus?.configSatisfied ?? false));
 
   return {
     selectedProvider,
@@ -836,5 +846,6 @@ export function buildSetupComputeStatus(input: {
     workerImage,
     setupSatisfied,
     excludedProviders: Array.from(excludedProviders),
+    setupSatisfiedByRuntimeEnv,
   };
 }

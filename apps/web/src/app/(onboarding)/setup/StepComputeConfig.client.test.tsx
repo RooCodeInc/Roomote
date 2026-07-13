@@ -134,6 +134,7 @@ function buildComputeSetup(
     runtimeDefaultProvider: null,
     persistedDefaultProvider: null,
     setupSatisfied: false,
+    setupSatisfiedByRuntimeEnv: false,
     workerImage: {
       envVarName: 'DOCKER_WORKER_IMAGE',
       label: 'Worker Image',

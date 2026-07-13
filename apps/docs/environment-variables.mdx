@@ -62,6 +62,13 @@ Use environment variables when:
 - you want changes reviewed in infrastructure config
 - you need to prevent in-app overrides
 
+`/setup` also respects env-managed provider configuration. If an inference
+provider is fully configured from environment variables, setup skips the
+inference-provider step. If a hosted sandbox provider such as Modal, E2B, or
+Daytona is fully configured from environment variables, setup skips the sandbox
+provider step too. Local Docker is still treated as the default local fallback,
+so Docker-only configuration does not skip that step.
+
 ## Production recommendations
 
 For production and shared self-hosted deployments:
@@ -296,6 +303,11 @@ as per-task auth tokens or workspace paths.
 | `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
 | `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.       |
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
+
+During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
+the Teams bot by default. Use **Show advanced config** after the Directory
+(Tenant) ID field only when your Azure Bot app ID is different from the Entra
+app ID, or when you need to set the optional bot name or token overrides.
 
 ### Integrations
 

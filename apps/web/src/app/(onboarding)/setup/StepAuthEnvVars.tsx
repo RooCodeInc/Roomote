@@ -72,6 +72,8 @@ export function StepAuthEnvVars({
   const [clearedSavedValues, setClearedSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [showMicrosoftAdvancedConfig, setShowMicrosoftAdvancedConfig] =
+    useState(false);
   const saveAuthConfig = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.saveAuthConfig
@@ -128,6 +130,7 @@ export function StepAuthEnvVars({
     setValues({});
     setEditingSavedValues({});
     setClearedSavedValues({});
+    setShowMicrosoftAdvancedConfig(false);
   }, [effectiveSelectedProviderId]);
 
   const selectedProvider = useMemo(
@@ -138,8 +141,11 @@ export function StepAuthEnvVars({
     [authSetup.providers, effectiveSelectedProviderId],
   );
   const visibleFields = useMemo(
-    () => getSetupVisibleFields(selectedProvider ?? null),
-    [selectedProvider],
+    () =>
+      getSetupVisibleFields(selectedProvider ?? null, {
+        showMicrosoftAdvancedConfig,
+      }),
+    [selectedProvider, showMicrosoftAdvancedConfig],
   );
   const isMicrosoftProvider = selectedProvider?.id === 'microsoft';
 
@@ -176,7 +182,11 @@ export function StepAuthEnvVars({
 
     await saveAuthConfig.mutateAsync({
       provider: selectedProvider.id,
-      values: getSetupSubmitValues({ provider: selectedProvider, values }),
+      values: getSetupSubmitValues({
+        provider: selectedProvider,
+        values,
+        showMicrosoftAdvancedConfig,
+      }),
       ...(bootstrapMode && setupToken ? { setupToken } : {}),
     });
   };
@@ -290,7 +300,11 @@ export function StepAuthEnvVars({
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
           showManualSlackValues={showManualSlackValues}
+          showMicrosoftAdvancedConfig={showMicrosoftAdvancedConfig}
           onShowManualSlackValues={() => setShowManualSlackValues(true)}
+          onToggleMicrosoftAdvancedConfig={() =>
+            setShowMicrosoftAdvancedConfig((current) => !current)
+          }
           onBack={onBack}
           onValueChange={(envVarName, value) =>
             setValues((current) => ({ ...current, [envVarName]: value }))

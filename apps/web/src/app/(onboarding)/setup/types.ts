@@ -19,6 +19,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Configure comms',
   },
   {
+    id: 'slack',
+    title: 'Connect Slack',
+  },
+  {
     id: 'env-vars',
     title: 'Configure inference',
   },
@@ -45,10 +49,6 @@ const SETUP_STEP_DEFINITIONS = [
   {
     id: 'compute-config',
     title: 'Configure sandboxes',
-  },
-  {
-    id: 'slack',
-    title: 'Connect Slack',
   },
   {
     id: 'repo-selection',
