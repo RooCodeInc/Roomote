@@ -76,6 +76,7 @@ import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
   setDefaultComputeProviderCommand,
+  setLocalDockerEnabledCommand,
 } from './index';
 
 function buildMockAuth(
@@ -648,8 +649,68 @@ describe('compute commands', () => {
         provider: 'e2b',
       });
 
-      expect(result.runtimeComputeConfig).toEqual({ defaultProvider: 'e2b' });
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: 'e2b',
+        excludedProviders: [],
+      });
       expect(txInsert).toHaveBeenCalledWith(expect.anything());
+    });
+  });
+
+  describe('setLocalDockerEnabledCommand', () => {
+    it('disables Docker and clears it as the persisted default', async () => {
+      const txInsert = createInsertChain();
+
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: 'docker',
+                excludedProviders: ['modal'],
+              },
+            },
+          ]),
+          insert: txInsert,
+        } as never),
+      );
+
+      const result = await setLocalDockerEnabledCommand(buildMockAuth(), {
+        enabled: false,
+      });
+
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: null,
+        excludedProviders: ['modal', 'docker'],
+      });
+      expect(txInsert).toHaveBeenCalledWith(expect.anything());
+    });
+
+    it('enables Docker without dropping other exclusions', async () => {
+      const txInsert = createInsertChain();
+
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: 'e2b',
+                excludedProviders: ['docker', 'modal'],
+              },
+            },
+          ]),
+          insert: txInsert,
+        } as never),
+      );
+
+      const result = await setLocalDockerEnabledCommand(buildMockAuth(), {
+        enabled: true,
+      });
+
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: 'e2b',
+        excludedProviders: ['modal'],
+      });
     });
   });
 });

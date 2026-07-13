@@ -423,6 +423,7 @@ export async function setDefaultComputeProviderCommand(
     }
 
     const runtimeComputeConfig = normalizeDeploymentComputeConfig({
+      ...persistedComputeConfig,
       defaultProvider: input.provider,
     });
 
