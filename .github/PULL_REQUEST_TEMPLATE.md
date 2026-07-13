@@ -15,7 +15,7 @@ See CONTRIBUTING.md for details.
 -->
 
 <!--
-Agents: Include the related issue and why this PR exists sections unless
+Agents: Include the related issue and contribution status sections unless
 the initiating user is a CODEOWNER of the repo.
 -->
 
@@ -28,25 +28,45 @@ and use "Fixes #123" so it closes automatically on merge.
 
 Fixes #
 
-## Why this PR exists
+## Contribution status
 
 - [ ] A maintainer explicitly invited this PR in the linked issue or discussion
 - [ ] I am a maintainer / this is internal Roomote work
 
-## What changed
+## What problem this solves
 
-<!-- Describe the user-visible or reviewer-visible change, not a file-by-file list. -->
+<!--
+Describe the concrete user, product, or operational problem. Name the affected
+surface or workflow and avoid describing the code-level cause.
+-->
 
-## How it was tested
+## Why this change was made
 
-<!-- Describe added tests or the manual validation performed. -->
+<!--
+Explain the shipped solution, important design decisions, and relevant
+boundaries or non-goals. Avoid file-by-file narration.
+-->
+
+## User impact
+
+<!--
+State what users, operators, or developers can now do or expect. If there is no
+user-visible impact, say so plainly and describe the maintenance benefit.
+-->
+
+## Evidence
+
+<!--
+Show the most useful proof that this works: focused tests, CI results, manual
+observations, screenshots, screencasts, terminal output, or artifact links.
+-->
 
 ## Checklist
 
 - [ ] The PR title follows the repo convention: `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]` followed by a user-facing description
 - [ ] This PR is small and scoped to one change
 - [ ] `pnpm lint` and `pnpm check-types` pass locally
-- [ ] I added tests or included a clear manual validation note above
+- [ ] I added tests or included clear validation evidence above
 - [ ] I removed secrets, tokens, private keys, and customer data from code, logs, and screenshots
 - [ ] If this change should appear in the changelog, I ran `pnpm changeset`
 

@@ -184,7 +184,7 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
         </actions>
         <pr-writing-guide>
           <pr_title_format>
-            <format>[Type] user-facing description</format>
+            <format>Follow the selected repository template's explicit title convention when it defines one; otherwise use `[Type] user-facing description`.</format>
             <types>
               <type name="feat">New capability or behavior visible to the user.</type>
               <type name="fix">Bug fix. Description must use the pattern "... when user [does X]" or "... [user-visible symptom]" so the title names the symptom, not the code fix.</type>
@@ -193,13 +193,13 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
               <type name="docs">Documentation-only change.</type>
               <type name="chore">Dependency updates, config, CI, infra, or other non-functional maintenance.</type>
             </types>
-            <scope>Use a single bracketed type tag such as `[Fix]` or `[Feat]`, then continue with the user-facing description in plain text.</scope>
+            <scope>The bracketed Roomote format is the fallback only when the selected repository template does not define a title convention.</scope>
             <description_rules>
-              <rule>Start every title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.</rule>
-              <rule>Keep the bracket contents to the type only, using forms like `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.</rule>
-              <rule>Follow the bracketed type tag with a space and then the description.</rule>
+              <rule>When the selected repository template contains an explicit title convention, follow that convention exactly instead of imposing the fallback Roomote format.</rule>
+              <rule>Otherwise, start the title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.</rule>
+              <rule>For fallback titles, keep the bracket contents to the type only and follow the tag with a space and the description.</rule>
               <rule>Lead with what the user sees or can do, not the implementation detail.</rule>
-              <rule>Write the user-facing description in sentence case. Capitalize the first word after the bracketed tag and preserve proper nouns and acronyms.</rule>
+              <rule>Write the user-facing description in sentence case. Capitalize the first word after the required title prefix and preserve proper nouns and acronyms.</rule>
               <rule>For fixes, frame as the user-visible symptom: "task list fails to load when user has no environments", not "add null check to getTaskList query".</rule>
               <rule>For non-fix titles, use present-tense imperative mood.</rule>
               <rule>For features, name the capability: "Add bulk-cancel action to task dashboard", not "implement BulkCancelButton component".</rule>
@@ -212,14 +212,17 @@ You are a coding workflow specialist. Analyze the request, implement a correct r
             </examples>
           </pr_title_format>
           <pr_body_sections>
-            <section name="What changed">
-              <guidance>Summarize the shipped change in reviewer-facing terms. For fixes, describe the broken behavior and the visible correction. For features or improvements, name the new capability or better experience. For refactors, docs, and chores, describe the internal or maintenance change plainly without inventing user-facing drama. Avoid file-by-file narration.</guidance>
+            <section name="What problem this solves">
+              <guidance>Describe the concrete user, product, developer, or operational problem. Name the affected surface or workflow. For fixes, describe the broken behavior and trigger. For features, improvements, refactors, docs, and chores, state the unmet need, limitation, maintenance burden, or reviewer-relevant objective without inventing user-facing drama. Do not lead with the implementation or narrate files.</guidance>
             </section>
             <section name="Why this change was made">
-              <guidance>One or two sentences connecting the change to the motivation or risk it addresses. Mention the user problem, new capability, maintenance goal, or reviewer-relevant constraint as appropriate. Include implementation detail only when it helps the reviewer understand outcome or risk.</guidance>
+              <guidance>Explain the complete shipped solution, important design decisions, and relevant boundaries or non-goals. Include implementation detail only when it helps the reviewer understand behavior or risk. Avoid file-by-file narration.</guidance>
             </section>
-            <section name="Impact">
-              <guidance>Describe the effect of the change. Lead with the concrete user-visible result when there is one. When there is no intended user-facing change (for example refactor, docs, or chore work), say so plainly and state the operational, maintenance, or reviewer-visible benefit instead.</guidance>
+            <section name="User impact">
+              <guidance>State what users, operators, or developers can now do or expect. Lead with the concrete benefit. When there is no intended user-facing change, say so plainly and state the operational, maintenance, or reviewer-visible benefit instead.</guidance>
+            </section>
+            <section name="Evidence">
+              <guidance>Show the most useful proof that the change works. Include focused tests, CI results, manual observations, terminal output, redacted logs, screenshots, screencasts, or artifact links as appropriate. State failed, skipped, or unavailable checks honestly. Make validation easy to understand without restating the diff.</guidance>
             </section>
             <section name="Related PRs">
               <guidance>Include only when the same task ships through multiple pull requests. Link the sibling PRs with short labels such as repository names or user-facing split names like frontend/backend. Omit the current PR, and remove stale links when the task split changes.</guidance>

@@ -10,6 +10,27 @@ function readSkill(relativePath: string) {
 }
 
 describe('PR description prompt scope', () => {
+  it('keeps the Roomote repository template aligned with the fallback reviewer contract', () => {
+    const roomoteTemplate = fs.readFileSync(
+      path.resolve(
+        thisDirPath,
+        '../../../../../../.github/PULL_REQUEST_TEMPLATE.md',
+      ),
+      'utf8',
+    );
+
+    expect(roomoteTemplate).toContain('## What problem this solves');
+    expect(roomoteTemplate).toContain('## Why this change was made');
+    expect(roomoteTemplate).toContain('## User impact');
+    expect(roomoteTemplate).toContain('## Evidence');
+    expect(roomoteTemplate).toContain('## Contribution status');
+    expect(roomoteTemplate).toContain(
+      'The PR title follows the repo convention: `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`',
+    );
+    expect(roomoteTemplate).not.toContain('## What changed');
+    expect(roomoteTemplate).not.toContain('## How it was tested');
+  });
+
   it('keeps delivery skills aligned on the shared PR metadata update recipe', () => {
     const createPrSkill = readSkill('../skills/standard/create-pr/SKILL.md');
     const createDraftPrSkill = readSkill(
@@ -85,11 +106,11 @@ describe('PR description prompt scope', () => {
       }
       if (skillContent === fixPrSkill) {
         expect(skillContent).toContain(
-          'When the latest `capture-visual-proof` handoff reports an uploaded artifact list from `manage_artifacts` upload results, treat it as the authoritative proof-section input. Proof sections are only `## Screenshots` and `## Screencasts` when current artifact links exist. Render screenshots from the reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body; do not create `## Visual proof` for screenshots and do not render screenshot artifact viewer links when `rawUrl` exists. Render screencasts from the reported screencasts only when present',
+          'When the latest `capture-visual-proof` handoff reports an uploaded artifact list from `manage_artifacts` upload results, treat it as the authoritative visual-proof input. Visual proof sections are only `## Screenshots` and `## Screencasts` when current artifact links exist. Render screenshots from the reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body; do not create `## Visual proof` for screenshots and do not render screenshot artifact viewer links when `rawUrl` exists. Render screencasts from the reported screencasts only when present',
         );
       } else {
         expect(skillContent).toContain(
-          'When the latest `capture-visual-proof` handoff reports an uploaded artifact list from `manage_artifacts` upload results, treat it as the authoritative proof-section input: render `## Screenshots` from its reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body; do not create `## Visual proof` for screenshots and do not render screenshot artifact viewer links when `rawUrl` exists; render `## Screencasts` from its reported screencasts only when present',
+          'When the latest `capture-visual-proof` handoff reports an uploaded artifact list from `manage_artifacts` upload results, treat it as the authoritative visual-proof input: render `## Screenshots` from its reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body; do not create `## Visual proof` for screenshots and do not render screenshot artifact viewer links when `rawUrl` exists; render `## Screencasts` from its reported screencasts only when present',
         );
       }
       expect(skillContent).toContain(
@@ -125,16 +146,16 @@ describe('PR description prompt scope', () => {
         '`body` set to the exact `/tmp/pr-body.md` contents',
       );
       expect(skillContent).toContain(
-        'Start every title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.',
+        'When the selected repository template contains an explicit title convention, follow that convention exactly instead of imposing the fallback Roomote format.',
       );
       expect(skillContent).toContain(
-        'Keep the bracket contents to the type only, using forms like `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.',
+        'Otherwise, start the title with exactly one singular bracketed type tag such as `[Fix]`, `[Feat]`, `[Improve]`, `[Refactor]`, `[Docs]`, or `[Chore]`.',
       );
       expect(skillContent).toContain(
-        'Follow the bracketed type tag with a space and then the description.',
+        'For fallback titles, keep the bracket contents to the type only and follow the tag with a space and the description.',
       );
       expect(skillContent).toContain(
-        'Write the user-facing description in sentence case. Capitalize the first word after the bracketed tag and preserve proper nouns and acronyms.',
+        'Write the user-facing description in sentence case. Capitalize the first word after the required title prefix and preserve proper nouns and acronyms.',
       );
       expect(skillContent).toContain(
         'Treat this as a hard gate: if the metadata fails, rewrite it and re-check before running the source-control mutation.',
@@ -146,10 +167,11 @@ describe('PR description prompt scope', () => {
         '<example type="fix">[Fix] Task list fails to load when user has no environments</example>',
       );
       expect(skillContent).toContain(
-        'Do not include this as a standalone PR body section for routine successful runs.',
+        '<section name="What problem this solves">',
       );
+      expect(skillContent).toContain('<section name="Evidence">');
       expect(skillContent).toContain(
-        'instead of adding `## Validation`, `## Checks`, or `## Status`.',
+        'State failed, skipped, or unavailable checks honestly.',
       );
       expect(skillContent).not.toContain('order: asc');
       expect(skillContent).not.toMatch(/--body(?!-file)\b/);
@@ -212,10 +234,10 @@ describe('PR description prompt scope', () => {
         'When no repo template exists, structure the body per the `pr-writing-guide` section below.',
       );
       expect(skillContent).toContain(
-        "Before calling `mcp__roomote__manage_source_control`, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. The title must begin with exactly one approved bracketed type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What changed`, `## Why this change was made`, and `## Impact`.",
+        "Before calling `mcp__roomote__manage_source_control`, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. When a selected repo template defines an explicit title convention, the title must follow it; otherwise the title must begin with exactly one approved bracketed fallback type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What problem this solves`, `## Why this change was made`, `## User impact`, and `## Evidence`.",
       );
       expect(skillContent).toContain(
-        'Do not add legacy top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` for routine successful runs unless the selected repo template explicitly requires them.',
+        'Do not add generic top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` unless the selected repo template explicitly requires them.',
       );
 
       const mutationGateIndex = skillContent.indexOf(
@@ -245,7 +267,7 @@ describe('PR description prompt scope', () => {
         'render `## Screenshots` from its reported screenshots only when present, embedding each screenshot as `![<shot-description>](<rawUrl>)` so the image renders inline in the PR body',
       );
       expect(skillContent).toContain(
-        'When no previous `/tmp/pr-body.md` exists, there is no prior body to preserve, so include proof sections only when current-cycle proof links are available and include `## Linked work items` only when the current workflow instructions provide one.',
+        'When no previous `/tmp/pr-body.md` exists, there is no prior body to preserve, so include visual proof sections only when current-cycle proof links are available and include `## Linked work items` only when the current workflow instructions provide one.',
       );
       expect(skillContent).toContain(
         'Do not use provider-specific PR CLIs such as `gh` for creation or refresh; the `mcp__roomote__manage_source_control` tool handles open pull request lookup and provider-specific mutation server-side.',
@@ -270,10 +292,10 @@ describe('PR description prompt scope', () => {
       'do not refresh a pull request with non-contract metadata.',
     );
     expect(fixPrSkill).toContain(
-      "Before the refresh call, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. The title must begin with exactly one approved bracketed type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What changed`, `## Why this change was made`, and `## Impact`.",
+      "Before the refresh call, validate the exact title and `/tmp/pr-body.md` against the PR writing guide. When a selected repo template defines an explicit title convention, the title must follow it; otherwise the title must begin with exactly one approved bracketed fallback type tag. When a selected repo template exists, the body must preserve the template's reviewer-facing headings, checklist items, and required structure, replace placeholder guidance with final content, and cover the same reviewer substance the `pr-writing-guide` requires without forcing Roomote-only headings that the template does not use. When no repo template exists, the body must include `## What problem this solves`, `## Why this change was made`, `## User impact`, and `## Evidence`.",
     );
     expect(fixPrSkill).toContain(
-      'Do not add legacy top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` for routine successful runs unless the selected repo template explicitly requires them.',
+      'Do not add generic top-level sections such as `## Summary`, `## Changes`, `## Validation`, `## Checks`, or `## Status` unless the selected repo template explicitly requires them.',
     );
     expect(fixPrSkill).toContain(
       'If the current PR body is non-contract relative to the selected repo template or the fallback Roomote contract, rebuild it from the final shipped diff instead of preserving unrelated old sections from that body.',
@@ -282,7 +304,7 @@ describe('PR description prompt scope', () => {
       'Preserve or refresh `## Linked work items` when the current PR body or current workflow instructions identify linked work items.',
     );
     expect(fixPrSkill).toContain(
-      'Proof sections are only `## Screenshots` and `## Screencasts` when current artifact links exist.',
+      'Visual proof sections are only `## Screenshots` and `## Screencasts` when current artifact links exist.',
     );
     expect(fixPrSkill).not.toContain('`## Visual Proof`');
     expect(fixPrSkill).not.toContain(
@@ -302,7 +324,7 @@ describe('PR description prompt scope', () => {
       "Let `fix-pr` own the post-push PR metadata refresh using its shared `pr-metadata-update-recipe` block and the `fix-pr` skill's `pr-writing-guide` section.",
     );
     expect(implementSkill).toContain(
-      'Use a single bracketed type tag such as `[Fix]` or `[Feat]`, then continue with the user-facing description in plain text.',
+      "Follow the selected repository template's explicit title convention when it defines one; otherwise use `[Type] user-facing description`.",
     );
     expect(implementSkill).toContain(
       '<example type="feat">[Feat] Add bulk-cancel action to task dashboard</example>',
