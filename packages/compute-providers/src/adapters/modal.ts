@@ -451,6 +451,9 @@ export class ModalClient implements ComputeProviderClient {
           ...(this.config.regions?.length
             ? { regions: this.config.regions }
             : {}),
+          ...(this.config.vmRuntime
+            ? { experimentalOptions: { vm_runtime: true } }
+            : {}),
         }),
         signal: input.signal,
         abortMessage: 'Creating a Modal sandbox was aborted',
@@ -913,6 +916,9 @@ export class ModalClient implements ComputeProviderClient {
             : {}),
           ...(this.config.regions?.length
             ? { regions: this.config.regions }
+            : {}),
+          ...(this.config.vmRuntime
+            ? { experimentalOptions: { vm_runtime: true } }
             : {}),
         }),
         signal: input.signal,

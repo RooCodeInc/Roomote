@@ -161,11 +161,7 @@ export async function spawnModalWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
-  if (environmentConfig?.container_projects?.length) {
-    throw new NonRetryableSpawnError(
-      'Modal does not support environment container projects. Use Docker, Daytona, E2B, or Blaxel for this environment.',
-    );
-  }
+  const needsVmRuntime = Boolean(environmentConfig?.container_projects?.length);
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
@@ -273,6 +269,7 @@ export async function spawnModalWorker(
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
     ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
+    ...(needsVmRuntime ? { vmRuntime: true } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),

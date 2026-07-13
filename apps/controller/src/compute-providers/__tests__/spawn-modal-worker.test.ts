@@ -133,6 +133,46 @@ describe('spawnModalWorker', () => {
     );
   });
 
+  it('uses Modal VM sandboxes for environments with container projects', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+      environmentSnapshotId: undefined,
+      environmentConfig: {
+        container_projects: [
+          {
+            name: 'app',
+            type: 'compose',
+            repository: 'test/repo',
+            files: ['compose.yaml'],
+          },
+        ],
+      },
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'modal',
+        config: expect.objectContaining({ vmRuntime: true }),
+      }),
+    );
+    expect(mockCreateModalMachine).toHaveBeenCalled();
+  });
+
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {
     mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
