@@ -23,12 +23,14 @@ import {
   getTaskUrl,
   routeTask,
   type RoutingResult,
+  type SlackMcpSetupRequirement,
 } from '@roomote/cloud-agents/server';
 
 import {
   mapRoutingWorkspaceToSelectionValue,
   resolveWorkspace,
 } from './block-kit';
+import { postSlackMcpSetupSuggestion } from './mcp-setup-suggestion';
 import { finishRoutedStart } from './started-message';
 import { SlackNotifier } from './slack-notifier';
 import { getPromptReadyThreadMessages } from './prompt-ready-thread-messages';
@@ -45,7 +47,6 @@ type SlackTaskStartFailureCode =
   | 'source_message_missing'
   | 'source_message_inaccessible'
   | 'launch_message_failed'
-  | 'mcp_setup_required'
   | 'routing_fallback'
   | 'workspace_unavailable';
 
@@ -143,7 +144,7 @@ export async function startAutoRoutedSlackTask({
   harness,
   model,
   reasoningEffort,
-  skipMcpSetupInterrupt = false,
+  skipMcpSetupSuggestion = false,
   channelAutoStartLaunchMode:
     _channelAutoStartLaunchMode = DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
 }: {
@@ -186,7 +187,7 @@ export async function startAutoRoutedSlackTask({
   harness?: string;
   model?: string;
   reasoningEffort?: ReasoningEffort;
-  skipMcpSetupInterrupt?: boolean;
+  skipMcpSetupSuggestion?: boolean;
   channelAutoStartLaunchMode?: ChannelAutoStartLaunchMode;
 }): Promise<StartAutoRoutedSlackTaskResult> {
   let threadId = threadTs ?? '';
@@ -233,23 +234,21 @@ export async function startAutoRoutedSlackTask({
       await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
     );
 
-    if (!skipMcpSetupInterrupt && launchUserId) {
-      const setupRequirement = await detectSlackMcpSetupRequirement(
-        taskDescription,
-        {
-          userId: launchUserId,
-          apiBaseUrl: Env.R_APP_URL,
-        },
-      );
+    // Missing MCP setup never blocks the launch; when the message links to a
+    // service without a usable connection, a small suggestion is posted after
+    // the task starts instead.
+    let setupSuggestion: SlackMcpSetupRequirement | null = null;
 
-      if (setupRequirement) {
-        return {
-          status: 'not_started',
-          code: 'mcp_setup_required',
-          threadId,
-          message: `Task was not started because ${setupRequirement.serviceName} still needs Slack MCP setup.`,
-        };
-      }
+    if (!skipMcpSetupSuggestion && launchUserId) {
+      setupSuggestion = await detectSlackMcpSetupRequirement(taskDescription, {
+        userId: launchUserId,
+        apiBaseUrl: Env.R_APP_URL,
+      }).catch((error) => {
+        console.warn(
+          `[startAutoRoutedSlackTask] MCP setup detection failed for ${channel}:${threadId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      });
     }
 
     let threadMessages: SlackThreadMessage[] | undefined;
@@ -497,7 +496,26 @@ export async function startAutoRoutedSlackTask({
       threadMessages?.map((message) => message.ts) ?? [],
     );
 
+    const postSetupSuggestion = async () => {
+      if (!setupSuggestion) {
+        return;
+      }
+
+      const suggestionTs = await postSlackMcpSetupSuggestion({
+        slack,
+        channel,
+        threadId,
+        suggestion: setupSuggestion,
+      });
+
+      if (suggestionTs) {
+        deliveryTracker?.track(suggestionTs);
+      }
+    };
+
     if (taskRun.reusedExistingRun) {
+      await postSetupSuggestion();
+
       return {
         status: 'started',
         threadId,
@@ -532,6 +550,8 @@ export async function startAutoRoutedSlackTask({
       routingDebug: decision.result.debug,
       slack,
     });
+
+    await postSetupSuggestion();
 
     return {
       status: 'started',

@@ -4,7 +4,6 @@ const {
   routeTaskMock,
   repositoriesFindManyMock,
   environmentsFindManyMock,
-  selectLimitMock,
   hasMessageInThreadMock,
   fetchThreadMessagesMock,
   normalizeIncomingTextMock,
@@ -15,6 +14,7 @@ const {
   redisGetMock,
   redisHsetMock,
   redisEvalMock,
+  deliveryTrackerTrackMock,
   deliveryTrackerCommitMock,
   maybeNotifyManagerChannelForMcpSetupRequirementMock,
 } = vi.hoisted(() => ({
@@ -23,7 +23,6 @@ const {
   routeTaskMock: vi.fn(),
   repositoriesFindManyMock: vi.fn(),
   environmentsFindManyMock: vi.fn(),
-  selectLimitMock: vi.fn(),
   hasMessageInThreadMock: vi.fn(),
   fetchThreadMessagesMock: vi.fn(),
   normalizeIncomingTextMock: vi.fn(),
@@ -34,6 +33,7 @@ const {
   redisGetMock: vi.fn(),
   redisHsetMock: vi.fn(),
   redisEvalMock: vi.fn(),
+  deliveryTrackerTrackMock: vi.fn(),
   deliveryTrackerCommitMock: vi.fn(),
   maybeNotifyManagerChannelForMcpSetupRequirementMock: vi.fn(),
 }));
@@ -84,7 +84,7 @@ vi.mock('@roomote/db/server', () => ({
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
-          limit: selectLimitMock,
+          limit: vi.fn(),
         })),
       })),
     })),
@@ -117,7 +117,7 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('../slack-thread-delivery-tracker', () => ({
   SlackThreadDeliveryTracker: vi.fn().mockImplementation(function () {
     return {
-      track: vi.fn(),
+      track: deliveryTrackerTrackMock,
       trackAll: vi.fn(),
       commit: deliveryTrackerCommitMock,
     };
@@ -156,18 +156,25 @@ vi.mock('../manager-mcp-setup', () => ({
 }));
 
 import { SlackNotifier } from '../slack-notifier';
+import { showTaskConfiguration } from '../block-kit';
 import {
-  handleSlackMcpSetupConfigure,
-  handleSlackMcpSetupIgnore,
-  showTaskConfiguration,
-} from '../block-kit';
+  buildSlackMcpSetupSuggestionBlocks,
+  buildSlackMcpSetupSuggestionText,
+} from '../mcp-setup-suggestion';
 
-describe('Slack MCP setup interruption flow', () => {
-  const fetchMock = vi.fn();
+const SETUP_REQUIREMENT = {
+  serviceId: 'notion',
+  serviceName: 'Notion',
+  reason: 'user_auth_required',
+  canConfigure: true,
+  settingsUrl:
+    'https://app.example.com/settings/personal?service=notion&source=slack-mcp-interrupt',
+  copyVariant: 'user_auth_required',
+} as const;
 
+describe('Slack MCP setup suggestion flow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.stubGlobal('fetch', fetchMock);
     repositoriesFindManyMock.mockResolvedValue([
       {
         name: 'App Repo',
@@ -207,24 +214,12 @@ describe('Slack MCP setup interruption flow', () => {
     });
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('posts an interrupt instead of routing when setup is required', async () => {
-    detectSlackMcpSetupRequirementMock.mockResolvedValue({
-      serviceId: 'notion',
-      serviceName: 'Notion',
-      reason: 'user_auth_required',
-      canConfigure: true,
-      settingsUrl:
-        'https://app.example.com/settings/personal?service=notion&source=slack-mcp-interrupt',
-      copyVariant: 'user_auth_required',
-    });
+  it('posts a non-blocking suggestion and keeps routing when setup is required', async () => {
+    detectSlackMcpSetupRequirementMock.mockResolvedValue(SETUP_REQUIREMENT);
 
     const slack = new SlackNotifier('xoxb-test');
 
-    const result = await showTaskConfiguration({
+    await showTaskConfiguration({
       event: {
         type: 'app_mention',
         channel: 'C123',
@@ -241,38 +236,36 @@ describe('Slack MCP setup interruption flow', () => {
       slack: slack as never,
     });
 
-    expect(result).toEqual({ routingUsed: false, threadId: '111.222' });
     expect(detectSlackMcpSetupRequirementMock).toHaveBeenCalledWith(
       '<@BOT> review https://www.notion.so/acme/spec-123',
       expect.objectContaining({
         userId: 'user_1',
       }),
     );
-    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
-    expect(routeTaskMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        blocks: expect.arrayContaining([
-          expect.objectContaining({ type: 'section' }),
+        channel: 'C123',
+        thread_ts: '111.222',
+        blocks: [
           expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
+            type: 'context',
+            elements: [
               expect.objectContaining({
-                action_id: 'mcp_setup_configure',
-                value: expect.any(String),
+                type: 'mrkdwn',
+                text: expect.stringContaining('link your Notion account'),
               }),
-              expect.objectContaining({
-                action_id: 'mcp_setup_ignore',
-                value: expect.any(String),
-              }),
-            ]),
+            ],
           }),
-        ]),
+        ],
       }),
     );
+    expect(deliveryTrackerTrackMock).toHaveBeenCalledWith('999.000');
+    // Routing must proceed despite the missing setup.
+    expect(buildSlackRoutingContextMock).toHaveBeenCalledTimes(1);
+    expect(routeTaskMock).toHaveBeenCalledTimes(1);
   });
 
-  it('notifies the manager channel when org setup is required while keeping the requester prompt', async () => {
+  it('notifies the manager channel while continuing the task', async () => {
     const setupRequirement = {
       serviceId: 'sentry',
       serviceName: 'Sentry',
@@ -286,7 +279,7 @@ describe('Slack MCP setup interruption flow', () => {
 
     const slack = new SlackNotifier('xoxb-test');
 
-    const result = await showTaskConfiguration({
+    await showTaskConfiguration({
       event: {
         type: 'app_mention',
         channel: 'C123',
@@ -303,7 +296,6 @@ describe('Slack MCP setup interruption flow', () => {
       slack: slack as never,
     });
 
-    expect(result).toEqual({ routingUsed: false, threadId: '111.222' });
     expect(
       maybeNotifyManagerChannelForMcpSetupRequirementMock,
     ).toHaveBeenCalledWith({
@@ -312,200 +304,131 @@ describe('Slack MCP setup interruption flow', () => {
       requirement: setupRequirement,
       slack,
     });
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123',
-        thread_ts: '111.222',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'actions',
-            elements: expect.arrayContaining([
-              expect.objectContaining({ action_id: 'mcp_setup_configure' }),
-            ]),
-          }),
-        ]),
-      }),
-    );
+    expect(routeTaskMock).toHaveBeenCalledTimes(1);
   });
 
-  it('clears the interrupt and replaces the prompt after Configure', async () => {
-    redisEvalMock.mockResolvedValueOnce(
-      JSON.stringify({
-        copyVariant: 'user_auth_required',
-        nonce: 'nonce-123',
-      }),
-    );
+  it('does not post a suggestion when no setup is required', async () => {
+    detectSlackMcpSetupRequirementMock.mockResolvedValue(null);
 
-    await handleSlackMcpSetupConfigure({
-      type: 'block_actions',
-      team: { id: 'T123', domain: 'acme' },
-      user: { id: 'U123', name: 'alice' },
-      channel: { id: 'C123', name: 'general' },
-      message: { ts: '111.222' },
-      actions: [
-        {
-          type: 'button',
-          action_id: 'mcp_setup_configure',
-          text: { text: 'Configure' },
-          value: 'nonce-123',
-        },
-      ],
-      state: { values: {} },
-      response_url: 'https://slack.test/response',
-      trigger_id: 'trigger-123',
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> review this please',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
     });
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://slack.test/response',
-      expect.objectContaining({
-        method: 'POST',
-        body: expect.stringContaining(
-          'Finish setup in the web app, then send this request again.',
-        ),
-      }),
-    );
-    expect(redisEvalMock).toHaveBeenCalledWith(
-      expect.any(String),
-      1,
-      'slack:mcp-setup-interrupt:111.222',
-      'nonce-123',
-      'U123',
-    );
+    expect(
+      maybeNotifyManagerChannelForMcpSetupRequirementMock,
+    ).not.toHaveBeenCalled();
+    const suggestionPosts = postMessageMock.mock.calls.filter((call) => {
+      const message = call[0] as { blocks?: Array<{ type?: string }> };
+      return message.blocks?.some((block) => block.type === 'context');
+    });
+    expect(suggestionPosts).toHaveLength(0);
+    expect(routeTaskMock).toHaveBeenCalledTimes(1);
   });
 
-  it('continues into the normal routing path when Ignore is clicked', async () => {
-    detectSlackMcpSetupRequirementMock.mockResolvedValue(null);
-    redisEvalMock.mockResolvedValueOnce(
-      JSON.stringify({
-        threadId: '111.222',
-        teamId: 'T123',
-        slackUserId: 'U123',
-        channel: 'C123',
-        originalEvent: {
+  it('keeps routing when setup detection fails', async () => {
+    const consoleWarnSpy = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => {});
+    try {
+      detectSlackMcpSetupRequirementMock.mockRejectedValue(
+        new Error('detection down'),
+      );
+
+      const slack = new SlackNotifier('xoxb-test');
+
+      await showTaskConfiguration({
+        event: {
           type: 'app_mention',
           channel: 'C123',
           user: 'U123',
-          text: '<@BOT> ignore and continue',
+          text: '<@BOT> review https://www.notion.so/acme/spec-123',
           ts: '111.222',
         },
-        normalizedTaskText: '<@BOT> ignore and continue',
-        serviceId: 'notion',
-        serviceName: 'Notion',
-        reason: 'user_auth_required',
-        canConfigure: true,
-        settingsUrl:
-          'https://app.example.com/settings/personal?service=notion&source=slack-mcp-interrupt',
-        copyVariant: 'user_auth_required',
-        originalMessageTs: '111.222',
-        nonce: 'nonce-123',
-      }),
-    );
-    selectLimitMock
-      .mockResolvedValueOnce([
-        {
+        slackInstallation: {
           teamId: 'T123',
-          botAccessToken: 'xoxb-test',
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
+        } as never,
+        userMapping: {
           userId: 'user_1',
-        },
-      ]);
+        } as never,
+        slack: slack as never,
+      });
 
-    await handleSlackMcpSetupIgnore({
-      type: 'block_actions',
-      team: { id: 'T123', domain: 'acme' },
-      user: { id: 'U123', name: 'alice' },
-      channel: { id: 'C123', name: 'general' },
-      message: { ts: '111.222' },
-      actions: [
-        {
-          type: 'button',
-          action_id: 'mcp_setup_ignore',
-          text: { text: 'Ignore' },
-          value: 'nonce-123',
-        },
-      ],
-      state: { values: {} },
-      response_url: 'https://slack.test/response',
-      trigger_id: 'trigger-123',
+      expect(routeTaskMock).toHaveBeenCalledTimes(1);
+      expect(
+        maybeNotifyManagerChannelForMcpSetupRequirementMock,
+      ).not.toHaveBeenCalled();
+    } finally {
+      consoleWarnSpy.mockRestore();
+    }
+  });
+});
+
+describe('buildSlackMcpSetupSuggestionText', () => {
+  it.each([
+    [
+      'user_auth_required',
+      '<https://app.example.com/settings|link your Zero account>',
+    ],
+    [
+      'deployment_disabled_admin',
+      '<https://app.example.com/settings|enable the Zero integration>',
+    ],
+    [
+      'deployment_auth_required_admin',
+      '<https://app.example.com/settings|finish connecting Zero>',
+    ],
+    ['deployment_disabled_non_admin', 'ask a'],
+    ['deployment_auth_required_non_admin', 'ask a'],
+  ] as const)('renders the %s variant', (copyVariant, expected) => {
+    const text = buildSlackMcpSetupSuggestionText({
+      serviceId: 'zero',
+      serviceName: 'Zero',
+      settingsUrl: 'https://app.example.com/settings',
+      copyVariant,
     });
 
-    expect(detectSlackMcpSetupRequirementMock).not.toHaveBeenCalled();
-    expect(buildSlackRoutingContextMock).toHaveBeenCalledTimes(1);
-    expect(updateMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'C123',
-        ts: '111.222',
-      }),
-    );
-    expect(redisEvalMock).toHaveBeenCalledWith(
-      expect.any(String),
-      1,
-      'slack:mcp-setup-interrupt:111.222',
-      'nonce-123',
-      'U123',
-    );
+    expect(text).toContain('That looks like a Zero link');
+    expect(text).toContain(expected);
   });
 
-  it('ignores stale Configure clicks when nonce does not match', async () => {
-    redisEvalMock.mockResolvedValueOnce(null);
-
-    await handleSlackMcpSetupConfigure({
-      type: 'block_actions',
-      team: { id: 'T123', domain: 'acme' },
-      user: { id: 'U123', name: 'alice' },
-      channel: { id: 'C123', name: 'general' },
-      message: { ts: '111.222' },
-      actions: [
-        {
-          type: 'button',
-          action_id: 'mcp_setup_configure',
-          text: { text: 'Configure' },
-          value: 'stale-nonce',
-        },
-      ],
-      state: { values: {} },
-      response_url: 'https://slack.test/response',
-      trigger_id: 'trigger-123',
+  it('builds a single context block', () => {
+    const blocks = buildSlackMcpSetupSuggestionBlocks({
+      serviceId: 'zero',
+      serviceName: 'Zero',
+      settingsUrl: 'https://app.example.com/settings',
+      copyVariant: 'user_auth_required',
     });
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(selectLimitMock).not.toHaveBeenCalled();
-  });
-
-  it('ignores Ignore clicks from other Slack users', async () => {
-    redisEvalMock.mockResolvedValueOnce(null);
-
-    await handleSlackMcpSetupIgnore({
-      type: 'block_actions',
-      team: { id: 'T123', domain: 'acme' },
-      user: { id: 'U999', name: 'teammate' },
-      channel: { id: 'C123', name: 'general' },
-      message: { ts: '111.222' },
-      actions: [
-        {
-          type: 'button',
-          action_id: 'mcp_setup_ignore',
-          text: { text: 'Ignore' },
-          value: 'nonce-123',
-        },
-      ],
-      state: { values: {} },
-      response_url: 'https://slack.test/response',
-      trigger_id: 'trigger-123',
-    });
-
-    expect(redisEvalMock).toHaveBeenCalledWith(
-      expect.any(String),
-      1,
-      'slack:mcp-setup-interrupt:111.222',
-      'nonce-123',
-      'U999',
-    );
-    expect(selectLimitMock).not.toHaveBeenCalled();
-    expect(buildSlackRoutingContextMock).not.toHaveBeenCalled();
-    expect(updateMessageMock).not.toHaveBeenCalled();
+    expect(blocks).toEqual([
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: buildSlackMcpSetupSuggestionText({
+              serviceId: 'zero',
+              serviceName: 'Zero',
+              settingsUrl: 'https://app.example.com/settings',
+              copyVariant: 'user_auth_required',
+            }),
+          },
+        ],
+      },
+    ]);
   });
 });
