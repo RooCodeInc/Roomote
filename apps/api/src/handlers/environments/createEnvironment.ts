@@ -70,6 +70,24 @@ export function getEnvironmentRepositoryConfigError(
   return getEnvironmentRepositoryInstallationError(repositoryRows);
 }
 
+export function getMissingEnvironmentRepositoryError(
+  repositoryNames: string[],
+  repositoryRows: Array<{ fullName: string }>,
+): string | null {
+  const linkedRepositoryNames = new Set(
+    repositoryRows.map((repository) => repository.fullName),
+  );
+  const missingRepositories = repositoryNames.filter(
+    (name) => !linkedRepositoryNames.has(name),
+  );
+
+  if (missingRepositories.length === 0) {
+    return null;
+  }
+
+  return `Repositories are not linked to this deployment: ${missingRepositories.join(', ')}`;
+}
+
 function extractRunId(auth: McpAuth): number | null {
   return 'runId' in auth.authContext ? auth.authContext.runId : null;
 }
@@ -256,9 +274,14 @@ export async function createEnvironment(
     }
 
     const repoMap = new Map(orgRepos.map((repo) => [repo.fullName, repo.id]));
-    const missingRepositories = repositoryNames.filter(
-      (name) => !repoMap.has(name),
+    const missingRepositoryError = getMissingEnvironmentRepositoryError(
+      repositoryNames,
+      orgRepos,
     );
+
+    if (missingRepositoryError) {
+      return c.json({ error: missingRepositoryError }, 400);
+    }
 
     const created = await db.transaction(async (tx) => {
       const inserted = await tx
@@ -307,7 +330,7 @@ export async function createEnvironment(
       success: true,
       environmentId: created.id,
       name: config.name,
-      missingRepositories,
+      missingRepositories: [],
     });
   } catch (error) {
     if (isEnvironmentNameUniqueViolation(error)) {

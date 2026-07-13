@@ -19,6 +19,7 @@ import {
   EVAL_ENVIRONMENT_WRITE_ERROR,
   attachEnvironmentIdToTaskRun,
   getEnvironmentRepositoryConfigError,
+  getMissingEnvironmentRepositoryError,
   isEnvironmentNameUniqueViolation,
   resolveEnvironmentWriteUserId,
 } from './createEnvironment';
@@ -139,9 +140,15 @@ export async function updateEnvironment(
     }
 
     const repoMap = new Map(orgRepos.map((repo) => [repo.fullName, repo.id]));
-    const missingRepositories = repositoryNames.filter(
-      (name) => !repoMap.has(name),
+    const missingRepositoryError = getMissingEnvironmentRepositoryError(
+      repositoryNames,
+      orgRepos,
     );
+
+    if (missingRepositoryError) {
+      return c.json({ error: missingRepositoryError }, 400);
+    }
+
     const repositoryIds = repositoryNames
       .map((name) => repoMap.get(name))
       .filter((repositoryId): repositoryId is string => Boolean(repositoryId));
@@ -174,7 +181,7 @@ export async function updateEnvironment(
       success: true,
       environmentId: id,
       name: config.name,
-      missingRepositories,
+      missingRepositories: [],
     });
   } catch (error) {
     if (isEnvironmentNameUniqueViolation(error)) {
