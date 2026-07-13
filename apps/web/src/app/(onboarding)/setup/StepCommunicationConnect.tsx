@@ -76,62 +76,72 @@ export function StepCommunicationConnect({
           &quot;Hi!&quot; works) to Roomote to finish.
         </p>
 
-        {teamsIntegrationStatus.isPending ? (
-          <Spinner />
-        ) : teamsIntegrationStatus.isError ? (
-          <p className="text-sm text-destructive">
-            Unable to load Microsoft Teams setup status. Refresh and try again.
-          </p>
-        ) : teamsReady ? (
-          <>
-            <div>
-              <div className="flex items-center gap-2 font-semibold">
-                <TaskStatusIndicator
-                  phase={
-                    primaryConversationReady ? 'waiting_for_prompt' : 'stopped'
-                  }
-                  compact={true}
-                />
-                <span>
-                  {primaryConversationReady
-                    ? 'Received!'
-                    : 'Waiting for bot message'}
-                </span>
+        <div className="space-y-4">
+          {teamsIntegrationStatus.isPending ? (
+            <Spinner />
+          ) : teamsIntegrationStatus.isError ? (
+            <p className="text-sm text-destructive">
+              Unable to load Microsoft Teams setup status. Refresh and try
+              again.
+            </p>
+          ) : teamsReady ? (
+            <>
+              <div>
+                <div className="flex items-center gap-2 font-semibold">
+                  <TaskStatusIndicator
+                    phase={
+                      primaryConversationReady
+                        ? 'waiting_for_prompt'
+                        : 'stopped'
+                    }
+                    compact={true}
+                  />
+                  <span>
+                    {primaryConversationReady
+                      ? 'Received!'
+                      : 'Waiting for bot message'}
+                  </span>
+                </div>
+                <p className="pl-4 text-muted-foreground">
+                  Send a message to the {teamsBotName} bot on Teams to complete
+                  the connection
+                </p>
               </div>
-              <p className="pl-4 text-muted-foreground">
-                Send a message to the {teamsBotName} bot on Teams to complete
-                the connection
-              </p>
-            </div>
-            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-              <Button asChild variant="outline">
-                <a
-                  href={openInTeamsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                <Button asChild variant="outline">
+                  <a
+                    href={openInTeamsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <BrandIcon
+                      icon="teams"
+                      name=""
+                      className="size-4 shrink-0"
+                    />
+                    Open Microsoft Teams bot
+                    <ExternalLink className="size-4 shrink-0" />
+                  </a>
+                </Button>
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  onClick={onContinue}
+                  disabled={!primaryConversationReady}
                 >
-                  <BrandIcon icon="teams" name="" className="size-4 shrink-0" />
-                  Open Microsoft Teams bot
-                  <ExternalLink className="size-4 shrink-0" />
-                </a>
-              </Button>
-              <Button
-                type="button"
-                className="w-full sm:w-auto"
-                onClick={onContinue}
-                disabled={!primaryConversationReady}
-              >
-                Continue
-                <ArrowRight />
-              </Button>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Microsoft Teams is not ready to open because the bot app ID is
-            missing from this deployment.
-          </p>
-        )}
+                  Continue
+                  <ArrowRight />
+                </Button>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Microsoft Teams is not ready to open because the bot app ID is
+              missing from this deployment.
+            </p>
+          )}
+          {skipLink}
+        </div>
       </div>
     );
   }

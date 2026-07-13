@@ -246,7 +246,8 @@ describe('StepCommunicationConnect', () => {
     );
   });
 
-  it('renders a blocked state when Teams has no bot URL', () => {
+  it('renders a skip control when Teams has no bot URL', () => {
+    const onSkip = vi.fn();
     teamsStatusState.data = {
       botConfigured: false,
       botUsesTenantSpecificTokenFlow: false,
@@ -262,7 +263,7 @@ describe('StepCommunicationConnect', () => {
       <StepCommunicationConnect
         authSetup={buildAuthSetup('microsoft')}
         onContinue={vi.fn()}
-        onSkip={vi.fn()}
+        onSkip={onSkip}
       />,
     );
 
@@ -270,5 +271,26 @@ describe('StepCommunicationConnect', () => {
     expect(
       screen.queryByRole('link', { name: /Open Microsoft Teams bot/i }),
     ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Do this later' }));
+    expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders a skip control when Teams status cannot be loaded', () => {
+    const onSkip = vi.fn();
+    teamsStatusState.isError = true;
+
+    render(
+      <StepCommunicationConnect
+        authSetup={buildAuthSetup('microsoft')}
+        onContinue={vi.fn()}
+        onSkip={onSkip}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Unable to load Microsoft Teams setup status/i),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Do this later' }));
+    expect(onSkip).toHaveBeenCalledTimes(1);
   });
 });
