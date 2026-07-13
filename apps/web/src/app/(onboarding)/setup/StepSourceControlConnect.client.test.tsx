@@ -13,6 +13,7 @@ const {
   toastErrorMock,
   toastInfoMock,
   toastWarningMock,
+  authenticateAdoMutateMock,
 } = vi.hoisted(() => ({
   createInstallationMutateMock: vi.fn(),
   syncRepositoriesMutateMock: vi.fn(),
@@ -42,6 +43,7 @@ const {
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastWarningMock: vi.fn(),
+  authenticateAdoMutateMock: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', async () => {
@@ -49,6 +51,13 @@ vi.mock('@tanstack/react-query', async () => {
 
   return {
     ...actual,
+    useMutation: (options: {
+      mutationFn?: (variables: unknown) => unknown;
+    }) => ({
+      mutateAsync: async (variables: unknown) =>
+        options.mutationFn?.(variables),
+      isPending: false,
+    }),
     useQueryClient: () => ({
       invalidateQueries: vi.fn(),
       ensureQueryData: ensureQueryDataMock,
@@ -65,8 +74,17 @@ vi.mock('@/trpc/client', () => ({
       },
     },
     sourceControl: {
+      saveConfig: {
+        mutationOptions: (options: unknown) => options,
+      },
       repositories: {
         queryKey: () => ['sourceControl.repositories'],
+      },
+    },
+    linkedAccounts: {
+      ado: {
+        queryKey: () => ['linkedAccounts.ado'],
+        queryOptions: () => ({ queryKey: ['linkedAccounts.ado'] }),
       },
     },
   }),
@@ -91,6 +109,17 @@ vi.mock('@/hooks/source-control/useSyncRepositories', () => ({
       isPending: false,
     };
   },
+}));
+
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => ({
+    data: { configured: true, account: null },
+    isPending: false,
+  }),
+  useAuthenticateAdoAccount: () => ({
+    mutate: authenticateAdoMutateMock,
+    isPending: false,
+  }),
 }));
 
 vi.mock('sonner', () => ({
@@ -263,6 +292,47 @@ describe('StepSourceControlConnect', () => {
 
     expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(1);
     expect(syncRepositoriesOptionsRef.current?.provider).toBe('ado');
+  });
+
+  it('connects a delegated Azure DevOps account before repository sync', () => {
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('ado', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('ado').providers[0]!,
+              fields: [
+                {
+                  envVarName: 'ADO_AUTH_MODE',
+                  acceptedEnvVarNames: ['ADO_AUTH_MODE'],
+                  label: 'Azure DevOps Authentication Mode',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  savedValue: 'delegated',
+                  satisfiedByEnvVarName: 'ADO_AUTH_MODE',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/before syncing repositories/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /Connect with Microsoft/i }),
+    );
+
+    expect(authenticateAdoMutateMock).toHaveBeenCalledWith(
+      '/setup?step=source-control-connect',
+    );
+    expect(syncRepositoriesMutateMock).not.toHaveBeenCalled();
   });
 
   it('reports Gitea webhook setup failures as repositories', async () => {

@@ -20,14 +20,13 @@ import {
   Input,
   Spinner,
 } from '@/components/system';
-import {
-  useAdoLinkedAccount,
-  useAuthenticateAdoAccount,
-} from '@/hooks/linked-accounts';
 
 import { StepTitle } from './StepTitle';
 import { NumberedStep } from './NumberedStep';
-import { AdoSourceControlConfig } from './AdoSourceControlConfig';
+import {
+  AdoSourceControlConfig,
+  AdoSourceControlInstructions,
+} from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
 import { GitLabSourceControlConfig } from './GitLabSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
@@ -100,23 +99,12 @@ export function StepSourceControlConfig({
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
     'pat',
   );
-  const adoLinkedAccount = useAdoLinkedAccount();
-  const authenticateAdoAccount = useAuthenticateAdoAccount();
   const saveSourceControlConfig = useMutation(
     trpc.setupNew.saveSourceControlConfig.mutationOptions({
       onSuccess: async () => {
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });
-        await queryClient.invalidateQueries({
-          queryKey: trpc.linkedAccounts.ado.queryKey(),
-        });
-        if (adoAuthMode === 'delegated' && !adoLinkedAccount.data?.account) {
-          authenticateAdoAccount.mutate(
-            `${window.location.pathname}${window.location.search}`,
-          );
-          return;
-        }
         onContinue();
       },
       onError: (error) => {
@@ -274,8 +262,7 @@ export function StepSourceControlConfig({
         ...(isAdo
           ? {
               ADO_AUTH_MODE: adoAuthMode,
-              ADO_LINKED_ACCOUNT_ID:
-                adoLinkedAccount.data?.account?.accountId ?? '',
+              ADO_LINKED_ACCOUNT_ID: '',
             }
           : {}),
       },
@@ -321,41 +308,62 @@ export function StepSourceControlConfig({
     <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
       <StepTitle text={`Configure ${providerSetupLabel}`} />
 
-      <NumberedStep number={1} className="mt-6">
-        <p className="font-semibold">
-          {providerSetupCopy ? (
-            <>
-              Create a new {providerSetupCopy.setupLabel}.
-              <Button variant="outline" className="ml-2" asChild>
-                <a
-                  href={providerSetupCopy.creationHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                </a>
-              </Button>
-            </>
-          ) : (
-            <>Create a new {providerSetupLabel}.</>
-          )}
-        </p>
-        {providerSetupCopy?.creationHint ? (
-          <p className="text-sm text-muted-foreground">
-            {providerSetupCopy.creationHint}
+      {!isAdo ? (
+        <NumberedStep number={1} className="mt-6">
+          <p className="font-semibold">
+            {providerSetupCopy ? (
+              <>
+                Create a new {providerSetupCopy.setupLabel}.
+                <Button variant="outline" className="ml-2" asChild>
+                  <a
+                    href={providerSetupCopy.creationHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                  </a>
+                </Button>
+              </>
+            ) : (
+              <>Create a new {providerSetupLabel}.</>
+            )}
           </p>
-        ) : null}
-        <p className="text-sm text-muted-foreground">
-          If you need it,{' '}
-          <Link
-            className="underline underline-offset-4 hover:text-foreground"
-            href="/api/setup/roomote-logo"
-          >
-            here's our logo
-          </Link>
-          .
-        </p>
-      </NumberedStep>
+          {providerSetupCopy?.creationHint ? (
+            <p className="text-sm text-muted-foreground">
+              {providerSetupCopy.creationHint}
+            </p>
+          ) : null}
+          <p className="text-sm text-muted-foreground">
+            If you need it,{' '}
+            <Link
+              className="underline underline-offset-4 hover:text-foreground"
+              href="/api/setup/roomote-logo"
+            >
+              here&apos;s our logo
+            </Link>
+            .
+          </p>
+        </NumberedStep>
+      ) : (
+        <NumberedStep number={1} className="mt-6">
+          <AdoSourceControlConfig
+            authMode={adoAuthMode}
+            onAuthModeChange={(mode) => {
+              setAdoAuthMode(mode);
+              setShowAdoAdvancedConfig(mode !== 'pat');
+            }}
+          />
+        </NumberedStep>
+      )}
+
+      {isAdo ? (
+        <NumberedStep number={2}>
+          <AdoSourceControlInstructions
+            authMode={adoAuthMode}
+            publicOrigin={publicOrigin}
+          />
+        </NumberedStep>
+      ) : null}
 
       {isGitLab ? (
         <NumberedStep number={2}>
@@ -366,30 +374,11 @@ export function StepSourceControlConfig({
         </NumberedStep>
       ) : null}
 
-      <NumberedStep number={valuesStepNumber}>
+      <NumberedStep number={isAdo ? 3 : valuesStepNumber}>
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
           integration.
         </p>
-
-        {isAdo ? (
-          <AdoSourceControlConfig
-            authMode={adoAuthMode}
-            linkedAccount={adoLinkedAccount.data?.account}
-            authenticate={() =>
-              authenticateAdoAccount.mutate(
-                `${window.location.pathname}${window.location.search}`,
-              )
-            }
-            authenticatePending={authenticateAdoAccount.isPending}
-            onAuthModeChange={(mode) => {
-              setAdoAuthMode(mode);
-              if (mode === 'pat') {
-                setShowAdoAdvancedConfig(false);
-              }
-            }}
-          />
-        ) : null}
 
         <div className="space-y-2">
           {(isAdo ? baseFields : visibleFields).map((field) => (
@@ -488,11 +477,7 @@ export function StepSourceControlConfig({
           {saveSourceControlConfig.isPending
             ? 'Saving...'
             : canContinueWithoutNewValues
-              ? isAdo &&
-                adoAuthMode === 'delegated' &&
-                !adoLinkedAccount.data?.account
-                ? 'Save and connect with Microsoft'
-                : 'Continue'
+              ? 'Continue'
               : 'Save and continue'}
           {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>

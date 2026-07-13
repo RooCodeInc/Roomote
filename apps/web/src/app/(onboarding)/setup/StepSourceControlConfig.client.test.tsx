@@ -286,6 +286,40 @@ describe('StepSourceControlConfig', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('shows mode-specific Azure DevOps creation instructions in step two', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildAdoSourceControlSetup()}
+        selectedProviderId="ado"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', {
+        name: /Create an Azure DevOps personal access token/i,
+      }),
+    ).toHaveAttribute('href', 'https://dev.azure.com/_usersSettings/tokens');
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Microsoft Entra app/ }),
+    );
+    expect(
+      screen.getByText('Create a Microsoft Entra app.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Open Azure App registrations/i }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /Connect with Microsoft/ }),
+    );
+    expect(screen.getByText(/Web redirect URI/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/\/api\/auth\/oauth2\/callback\/ado/),
+    ).toBeInTheDocument();
+  });
+
   it('reveals advanced Azure DevOps fields without showing the webhook secret', () => {
     render(
       <StepSourceControlConfig
@@ -325,18 +359,26 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(
-      screen.getByRole('button', { name: 'Show advanced config' }),
+      screen.getByRole('button', { name: 'Hide advanced config' }),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Microsoft Entra Client ID/),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getAllByRole('button', { name: /Connect with Microsoft/ })[0]!,
+      screen.getByRole('button', { name: /Connect with Microsoft/ }),
     );
 
     expect(
-      screen.getByRole('button', { name: 'Show advanced config' }),
+      screen.getByText('Create a Microsoft Entra app.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Open Azure App registrations/i }),
+    ).toHaveAttribute(
+      'href',
+      'https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Hide advanced config' }),
     ).toBeInTheDocument();
   });
 
@@ -412,9 +454,6 @@ describe('StepSourceControlConfig', () => {
     });
     fireEvent.click(
       screen.getByRole('button', { name: /Microsoft Entra app/ }),
-    );
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Show advanced config' }),
     );
     fireEvent.change(screen.getByPlaceholderText('ADO_BASE_URL'), {
       target: { value: 'https://ado.example.com' },

@@ -1,23 +1,19 @@
-import { Button, Label, Spinner } from '@/components/system';
+import { Label } from '@/components/system';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
 
 export function AdoSourceControlConfig({
   authMode,
-  linkedAccount,
-  authenticate,
-  authenticatePending,
   onAuthModeChange,
 }: {
   authMode: AdoAuthMode;
-  linkedAccount?: { displayName: string } | null;
-  authenticate: () => void;
-  authenticatePending: boolean;
   onAuthModeChange: (mode: AdoAuthMode) => void;
 }) {
   return (
     <div className="space-y-2">
-      <Label>How should Roomote connect?</Label>
+      <p className="font-semibold text-foreground">
+        How should Roomote connect?
+      </p>
       <div className="w-full flex flex-col gap-1">
         <button
           type="button"
@@ -38,7 +34,7 @@ export function AdoSourceControlConfig({
         >
           <span className="block font-medium">Personal access token</span>
           <span className="text-sm text-muted-foreground">
-            Fast setup, might might need switching later.
+            Fast setup, with the option to switch later.
           </span>
         </button>
         <button
@@ -53,28 +49,79 @@ export function AdoSourceControlConfig({
           </span>
         </button>
       </div>
+    </div>
+  );
+}
+
+export function AdoSourceControlInstructions({
+  authMode,
+  publicOrigin,
+}: {
+  authMode: AdoAuthMode;
+  publicOrigin: string;
+}) {
+  if (authMode === 'pat') {
+    return (
+      <div className="max-w-xl space-y-3 text-sm text-muted-foreground">
+        <p>
+          Create a PAT for the Azure DevOps identity Roomote should use. Open
+          Azure DevOps token settings:
+        </p>
+        <a
+          href="https://dev.azure.com/_usersSettings/tokens"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-semibold text-foreground underline"
+        >
+          Create an Azure DevOps personal access token
+        </a>
+        <p>
+          Grant Code read and write access, plus permission to manage service
+          hook subscriptions for the projects Roomote should access.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-xl space-y-3 text-sm text-muted-foreground">
+      <p className="font-semibold text-foreground">
+        Create a Microsoft Entra app.
+      </p>
+      <p>
+        Open Azure App registrations, choose <strong>New registration</strong>,
+        and create an app in the Microsoft tenant that can access your Azure
+        DevOps organization.
+      </p>
+      <a
+        href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-foreground underline"
+      >
+        Open Azure App registrations
+      </a>
       {authMode === 'delegated' ? (
-        <div className="max-w-xl rounded-md border p-3 text-sm">
-          <p className="text-muted-foreground">
-            {linkedAccount
-              ? `Connected as ${linkedAccount.displayName}.`
-              : 'Connect the Azure DevOps account Roomote should use.'}
+        <>
+          <p>Under Authentication, add this Web redirect URI:</p>
+          <p className="break-all">
+            <code className="text-foreground">
+              {publicOrigin}/api/auth/oauth2/callback/ado
+            </code>
           </p>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onClick={authenticate}
-            disabled={authenticatePending}
-          >
-            {authenticatePending ? <Spinner /> : null}
-            {linkedAccount
-              ? 'Reconnect with Microsoft'
-              : 'Connect with Microsoft'}
-          </Button>
-        </div>
-      ) : null}
+          <p>
+            Create a client secret, grant the Azure DevOps delegated permissions
+            required by your organization, and grant admin consent if your
+            tenant requires it.
+          </p>
+        </>
+      ) : (
+        <p>
+          Create a client secret, add the application to the Azure DevOps
+          organization, and grant it access to the projects and repositories
+          Roomote should use.
+        </p>
+      )}
     </div>
   );
 }

@@ -290,12 +290,17 @@ export function SourceControlConfigForm({
                 `${window.location.pathname}${window.location.search}`,
               )
             }
-            disabled={authenticateAdoAccount.isPending}
+            disabled={
+              authenticateAdoAccount.isPending ||
+              adoLinkedAccount.data?.configured !== true
+            }
           >
             {authenticateAdoAccount.isPending ? <Spinner /> : null}
             {adoLinkedAccount.data?.account
               ? 'Reconnect with Microsoft'
-              : 'Connect with Microsoft'}
+              : adoLinkedAccount.data?.configured === true
+                ? 'Connect with Microsoft'
+                : 'Save app settings first'}
           </Button>
         </div>
       ) : null}
