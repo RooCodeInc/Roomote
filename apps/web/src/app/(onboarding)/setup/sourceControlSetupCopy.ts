@@ -18,6 +18,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
+    creationHref: 'https://gitlab.com/-/user_settings/applications',
     setupLabel: 'GitLab OAuth application',
     creationHint:
       'In GitLab, click on your avatar → Edit Profile → Applications → Add new application, granting the API read/write scope.',

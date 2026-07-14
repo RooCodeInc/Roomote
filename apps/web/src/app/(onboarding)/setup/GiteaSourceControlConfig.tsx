@@ -11,17 +11,12 @@ export function GiteaSourceControlInstructions({
         Configure the Gitea application.
       </p>
       <p className="text-sm">
-        Add both redirect URIs below to the Gitea application. The first is for
-        deployment authorization; the second is for linking individual Gitea
-        accounts in Roomote.
+        Add this redirect URI to the Gitea application for deployment
+        authorization.
       </p>
       <InstructionUrl
         heading="Deployment callback"
         url={`${publicOrigin}/api/source-control/gitea/oauth/callback`}
-      />
-      <InstructionUrl
-        heading="Account linking callback"
-        url={`${publicOrigin}/api/auth/oauth2/callback/gitea`}
       />
     </div>
   );

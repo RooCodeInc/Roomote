@@ -223,7 +223,7 @@ describe('gitea webhook router', () => {
     );
   });
 
-  it('routes issue_comment webhooks when Gitea omits is_pull', async () => {
+  it('ignores issue_comment webhooks when Gitea omits is_pull', async () => {
     const payload = {
       action: 'created',
       sender: { id: 7, login: 'alice' },
@@ -255,11 +255,14 @@ describe('gitea webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockHandleGiteaComment).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issue: expect.objectContaining({ number: 42 }),
-      }),
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-comment-3',
+      'issue_comment.created',
+      expect.objectContaining({ action: 'created' }),
+      expect.any(Function),
+      { provider: 'gitea' },
     );
+    expect(mockHandleGiteaComment).not.toHaveBeenCalled();
   });
 
   it('rejects invalid signatures', async () => {

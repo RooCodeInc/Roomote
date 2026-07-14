@@ -82,9 +82,11 @@ existing PR owner task when possible, or enqueue a new review task.
 
 ## Current limits
 
-Personal Gitea account linking reuses the same OAuth application but stores a
-separate `authAccounts` grant with only `read:user`; the deployment service
-account grant is never used to identify a pull-request commenter.
+Gitea OAuth applications accept one redirect URL. The setup flow configures the
+deployment callback, so the same OAuth application cannot also provide personal
+Gitea account linking. Pull-request comment mentions still use the Gitea webhook
+sender identity and never use the deployment service-account grant to identify
+the commenter.
 
 ## Verify setup
 

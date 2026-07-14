@@ -274,10 +274,15 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText(/Gitea OAuth Client Secret/)).toBeInTheDocument();
     expect(screen.getByText(/Gitea 1\.23\+/)).toBeInTheDocument();
     expect(screen.getByText('Deployment callback')).toBeInTheDocument();
-    expect(screen.getByText('Account linking callback')).toBeInTheDocument();
     expect(
-      screen.getByText(/api\/auth\/oauth2\/callback\/gitea/),
+      screen.getByText(/api\/source-control\/gitea\/oauth\/callback/),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Account linking callback'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/api\/auth\/oauth2\/callback\/gitea/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Access Token')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Username')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
