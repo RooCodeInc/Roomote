@@ -75,8 +75,11 @@ const GITHUB_APP_DEFAULT_EVENTS = [
   'workflow_run',
 ] as const;
 
+const GITHUB_APP_MANIFEST_DESCRIPTION = 'Cloud coding agents for all';
+
 type GitHubAppManifest = {
   name: string;
+  description: string;
   url: string;
   hook_attributes: {
     url: string;
@@ -222,6 +225,7 @@ function buildGitHubAppManifest(): GitHubAppManifest {
 
   return {
     name: buildGitHubManifestName(),
+    description: GITHUB_APP_MANIFEST_DESCRIPTION,
     url: callbackUrl,
     redirect_url: callbackUrl,
     setup_url: callbackUrl,

@@ -133,6 +133,7 @@ describe('GitHub App manifest commands', () => {
     expect(manifest.name).toBe('roomote-example-com');
     expect(manifest.name.length).toBeLessThanOrEqual(34);
     expect(manifest).toMatchObject({
+      description: 'Cloud coding agents for all',
       url: 'https://roomote.example.com/github/callback',
       redirect_url: 'https://roomote.example.com/github/callback',
       setup_url: 'https://roomote.example.com/github/callback',
