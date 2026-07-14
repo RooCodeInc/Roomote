@@ -337,6 +337,10 @@ export function useSetupFlow(
         status.setupNewState.authProvider ??
         status.authSetup.runtimeConfiguredProvider ??
         status.authSetup.selectedProvider;
+      const selectedComputeProvider = status.computeSetup.selectedProvider;
+      const hasStaleComputeProvider =
+        status.setupNewState.computeProvider !== null &&
+        selectedComputeProvider !== status.setupNewState.computeProvider;
 
       switch (candidate) {
         case 'welcome':
@@ -389,16 +393,14 @@ export function useSetupFlow(
           return activeQualificationBlock === null;
         case 'compute-provider':
           return (
-            status.computeSetup.setupSatisfied ||
-            status.setupNewState.computeProvider != null
+            !hasStaleComputeProvider &&
+            (status.computeSetup.setupSatisfied ||
+              selectedComputeProvider !== null)
           );
         case 'compute-config': {
-          if (status.computeSetup.setupSatisfied) {
+          if (hasStaleComputeProvider || status.computeSetup.setupSatisfied) {
             return true;
           }
-
-          const selectedComputeProvider =
-            status.setupNewState.computeProvider ?? null;
 
           if (!selectedComputeProvider) {
             return true;

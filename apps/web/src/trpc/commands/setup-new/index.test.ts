@@ -664,6 +664,32 @@ describe('setup-new compute config commands', () => {
     expect(result.runtimeComputeConfig.defaultProvider).toBe('docker');
   });
 
+  it('rejects an excluded provider choice', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+
+    await expect(
+      saveSetupNewComputeProviderChoiceCommand(buildMockAuth(), {
+        provider: 'docker',
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+  });
+
+  it('rejects configuration for an excluded provider', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'modal');
+
+    await expect(
+      saveSetupNewComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_TOKEN_ID: 'token-id',
+          MODAL_TOKEN_SECRET: 'token-secret',
+        },
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('persists a Modal base image derived from the worker image', async () => {
     vi.stubEnv(
       'DOCKER_WORKER_IMAGE',
@@ -985,6 +1011,11 @@ describe('setup-new onboarding task start command', () => {
           },
         ]),
       );
+      if (setupNewState?.computeProvider) {
+        mockTxSelect.mockReturnValueOnce(
+          createSelectChain([{ runtimeComputeConfig: null }]),
+        );
+      }
       mockTxSelect.mockReturnValueOnce(
         createSelectChain(slackInstallation ? [slackInstallation] : []),
       );
@@ -1070,6 +1101,22 @@ describe('setup-new onboarding task start command', () => {
         }),
       }),
     );
+  });
+
+  it('rejects a stale excluded compute provider before launch', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { computeProvider: 'docker' },
+    });
+
+    await expect(
+      startSetupNewOnboardingTaskCommand(buildMockAuth()),
+    ).rejects.toThrow(
+      'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
+    );
+
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it('creates the onboarding task without dispatching while first-time E2B provisioning is running', async () => {
