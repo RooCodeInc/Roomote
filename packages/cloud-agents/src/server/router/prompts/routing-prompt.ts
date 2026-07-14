@@ -141,13 +141,14 @@ Also always set \`kickoffMessage\` to the full short user-facing kickoff for cha
 
 - Keep it short (about 8-18 words).
 - Naturally include the exact environment name from your \`workspaceValue\` choice.
-- When \`requestedModelId\` is a real model id (not \`__no_model__\`), naturally include that model's **display name** from the Available Models list. When the choice is \`__no_model__\`, do not mention a model.
+- When \`requestedModelId\` is a real model id (not \`__no_model__\`) with high confidence (at least 0.9), naturally include that model's **display name** from the Available Models list. When the choice is \`__no_model__\`, or you are not highly confident the user named a model, do not mention any model.
 - Be dynamic and varied: do not always say "Getting started on your task in…".
 - Prefer lively, progressive phrasing such as "Diving into…", "Looking into…", "Checking…", "Spinning up on…".
 - Good examples:
   - "Looking into daily environment snapshots for faster startup in App"
   - "Checking mobile login redirects in Payments with Opus 4.8"
   - "Digging into the flaky checkout email race in Full Stack"
+- The environment and model names in the sentence must match the Available lists exactly (same spelling/casing as shown).
 - Do not include emojis, markdown, quotes, @-mentions, Slack markup, or a trailing period.
 - Do not invent environment or model names that are not in the provided lists.
 - Always produce a non-empty kickoffMessage for real routed tasks. Keep routing justification in \`reasoning\`; keep the spoken kickoff in \`kickoffMessage\`.

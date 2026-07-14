@@ -200,13 +200,68 @@ function stripMatchingEdgeQuotes(value: string): string {
   return value.slice(start, end);
 }
 
+function isDisplayNameBoundary(char: string | undefined): boolean {
+  if (char == null) {
+    return true;
+  }
+
+  // Letters/numbers (any script) and underscore keep a match glued to a larger
+  // token so substring hits like env "App" inside "authentication" are rejected.
+  return !/[\p{L}\p{N}_]/u.test(char);
+}
+
+/**
+ * True when `displayName` appears as a delimited whole token/phrase in `text`.
+ * Multi-word names must match contiguously with non-alphanumeric (or
+ * string-edge) boundaries on both sides.
+ */
 function includesDisplayName(text: string, displayName: string): boolean {
-  const needle = displayName.trim().toLowerCase();
+  const needle = displayName.trim();
   if (!needle) {
     return false;
   }
 
-  return text.toLowerCase().includes(needle);
+  const haystack = text.toLowerCase();
+  const target = needle.toLowerCase();
+  let from = 0;
+
+  while (from <= haystack.length - target.length) {
+    const index = haystack.indexOf(target, from);
+    if (index < 0) {
+      return false;
+    }
+
+    const before = index === 0 ? undefined : text.charAt(index - 1);
+    const afterIndex = index + target.length;
+    const after =
+      afterIndex >= text.length ? undefined : text.charAt(afterIndex);
+
+    if (isDisplayNameBoundary(before) && isDisplayNameBoundary(after)) {
+      return true;
+    }
+
+    from = index + 1;
+  }
+
+  return false;
+}
+
+/**
+ * Detect free-form kickoffs that advertise a model choice. Used when no
+ * user-facing preference model should be announced: low-confidence router
+ * picks are rejected in resolveRoutedTaskModel, but the LLM may still put
+ * that model wording in kickoffMessage.
+ */
+function appearsToClaimCodingModel(text: string): boolean {
+  if (/\bas the coding model\b/i.test(text)) {
+    return true;
+  }
+
+  // Common "using/with <model family>" announcements without the longer
+  // "as the coding model" phrase.
+  return /\b(?:using|with)\s+(?:the\s+)?(?:gpt[\s.-]?\d|claude|opus|sonnet|haiku|gemini|glm|minimax|fable|grok|o\d)\b/i.test(
+    text,
+  );
 }
 
 export function buildTaskStartingText({
@@ -232,14 +287,17 @@ export function buildTaskStartingText({
   const kickoff = normalizeKickoffMessage(kickoffMessage);
 
   // Dynamic kickoffs come as complete free-form sentences from the router and
-  // are posted as-is. Only fall through to the template when required env/model
-  // details are missing so information is never silently dropped.
-  if (
-    kickoff &&
-    includesDisplayName(kickoff, workspacePlain) &&
-    (!modelPlain || includesDisplayName(kickoff, modelPlain))
-  ) {
-    return kickoff;
+  // are posted as-is. Fall through to the template when required env/model
+  // details are missing or when the free-form string would announce a model
+  // that is not the active user-facing preference.
+  if (kickoff && includesDisplayName(kickoff, workspacePlain)) {
+    if (modelPlain) {
+      if (includesDisplayName(kickoff, modelPlain)) {
+        return kickoff;
+      }
+    } else if (!appearsToClaimCodingModel(kickoff)) {
+      return kickoff;
+    }
   }
 
   const workspace = formatWorkspaceName(workspacePlain || workspaceDisplayName);

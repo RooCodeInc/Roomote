@@ -141,6 +141,39 @@ describe('chat message copy builders', () => {
         kickoffMessage: '<!channel> Looking into auth bugs in App',
       }),
     ).toBe('Looking into auth bugs in App');
+
+    // Substring collision: env "App" must not match inside "authentication".
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: 'Mapping authentication flows for login',
+      }),
+    ).toBe('Getting started on your task in App');
+
+    // Multi-word env names still match as a delimited phrase.
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'Full Stack',
+        kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
+      }),
+    ).toBe('Digging into the flaky checkout race in Full Stack');
+
+    // Reject free-form model claims when no preference model is being shown
+    // (e.g. low-confidence router picks that were demoted to the default).
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: 'Checking login redirects in App with Opus 4.8',
+      }),
+    ).toBe('Getting started on your task in App');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage:
+          'Checking login redirects in App using Claude as the coding model',
+      }),
+    ).toBe('Getting started on your task in App');
   });
 
   it('only returns model names the router treated as an explicit preference', () => {
