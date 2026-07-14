@@ -95,10 +95,20 @@ describe('resolveAutomationRuntimeDestination', () => {
   it('returns a slack destination as-is', async () => {
     await expect(
       resolveAutomationRuntimeDestination({
-        runtime: { destination: { provider: 'slack', channelId: 'C123' } },
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C123',
+            source: 'manager_channel',
+          },
+        },
         slackConnected: true,
       }),
-    ).resolves.toEqual({ provider: 'slack', channelId: 'C123' });
+    ).resolves.toEqual({
+      provider: 'slack',
+      channelId: 'C123',
+      source: 'manager_channel',
+    });
   });
 
   it('resolves the serviceUrl for a teams destination', async () => {
@@ -109,7 +119,11 @@ describe('resolveAutomationRuntimeDestination', () => {
     await expect(
       resolveAutomationRuntimeDestination({
         runtime: {
-          destination: { provider: 'teams', channelId: '19:conv@thread.v2' },
+          destination: {
+            provider: 'teams',
+            channelId: '19:conv@thread.v2',
+            source: 'automation_target',
+          },
         },
         slackConnected: false,
       }),
@@ -117,6 +131,7 @@ describe('resolveAutomationRuntimeDestination', () => {
       provider: 'teams',
       channelId: '19:conv@thread.v2',
       serviceUrl: 'https://smba.example/amer/',
+      source: 'automation_target',
     });
   });
 
@@ -126,7 +141,11 @@ describe('resolveAutomationRuntimeDestination', () => {
     await expect(
       resolveAutomationRuntimeDestination({
         runtime: {
-          destination: { provider: 'teams', channelId: '19:conv@thread.v2' },
+          destination: {
+            provider: 'teams',
+            channelId: '19:conv@thread.v2',
+            source: 'automation_target',
+          },
         },
         slackConnected: false,
       }),
@@ -159,6 +178,7 @@ describe('resolveAutomationRuntimeDestination', () => {
       provider: 'teams',
       channelId: '19:primary@thread.v2',
       serviceUrl: 'https://smba.example/amer/',
+      source: 'primary_conversation',
     });
   });
 
@@ -171,7 +191,11 @@ describe('resolveAutomationRuntimeDestination', () => {
         runtime: { destination: null },
         slackConnected: false,
       }),
-    ).resolves.toEqual({ provider: 'telegram', channelId: '-100123' });
+    ).resolves.toEqual({
+      provider: 'telegram',
+      channelId: '-100123',
+      source: 'primary_conversation',
+    });
   });
 });
 
@@ -181,6 +205,7 @@ describe('payload fields and prompt context', () => {
       buildDestinationTaskPayloadFields({
         provider: 'slack',
         channelId: 'C123',
+        source: 'manager_channel',
       }),
     ).toEqual({});
   });
@@ -191,6 +216,7 @@ describe('payload fields and prompt context', () => {
         provider: 'teams',
         channelId: '19:conv@thread.v2',
         serviceUrl: 'https://smba.example/amer/',
+        source: 'automation_target',
       }),
     ).toEqual({
       communicationProvider: 'teams',
@@ -201,14 +227,22 @@ describe('payload fields and prompt context', () => {
 
   it('builds surface-correct prompt context', () => {
     expect(
-      buildDestinationPromptContext({ provider: 'slack', channelId: 'C1' }),
+      buildDestinationPromptContext({
+        provider: 'slack',
+        channelId: 'C1',
+        source: 'manager_channel',
+      }),
     ).toEqual({
       channelTag: 'slack_channel_id',
       postToolName: 'post_to_slack_channel',
       surfaceLabel: 'Slack',
     });
     expect(
-      buildDestinationPromptContext({ provider: 'telegram', channelId: '1' }),
+      buildDestinationPromptContext({
+        provider: 'telegram',
+        channelId: '1',
+        source: 'automation_target',
+      }),
     ).toEqual({
       channelTag: 'channel_id',
       postToolName: 'post_to_channel',

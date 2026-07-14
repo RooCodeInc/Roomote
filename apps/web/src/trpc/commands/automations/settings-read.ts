@@ -8,11 +8,17 @@ import {
 import {
   db,
   desc,
+  getAutomationRuntime,
   getBackgroundAgentSettingsForDeployment,
   inArray,
   listAutomations,
   tasks,
 } from '@roomote/db/server';
+import {
+  findTeamsConversationDisplayName,
+  resolveAutomationRuntimeDestination,
+  type ResolvedAutomationDestination,
+} from '@roomote/sdk/server';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
 
@@ -37,7 +43,11 @@ import {
   getSlackChannelDisplayNames,
   REQUIRED_BACKGROUND_AGENT_SCOPES,
 } from './slack-channels';
-import type { SlackChannelDisplayNames } from './types';
+import {
+  MANAGER_REPORTING_AUTOMATION_KEYS,
+  type ResolvedAutomationDestinations,
+  type SlackChannelDisplayNames,
+} from './types';
 
 /**
  * Automation run history is the tasks the automation launched
@@ -150,6 +160,65 @@ async function buildAutomationStatus(): Promise<
   return status;
 }
 
+async function resolveDestinationDisplayName(
+  destination: ResolvedAutomationDestination,
+  notifier: SlackNotifier | null,
+): Promise<string | null> {
+  if (destination.provider === 'slack') {
+    const channelName = notifier
+      ? await notifier.getChannelName(destination.channelId)
+      : null;
+
+    return channelName ? `#${channelName}` : null;
+  }
+
+  if (destination.provider === 'teams') {
+    return findTeamsConversationDisplayName(destination.channelId);
+  }
+
+  // Telegram chats have no reliable display name; the UI shows the chat id.
+  return null;
+}
+
+/**
+ * Resolves, per manager-reporting automation, where its next run will report
+ * (destination waterfall: own target -> Manager Channel -> primary
+ * conversation) so the settings page can show a "Reports to" line.
+ */
+async function resolveAutomationDestinations(params: {
+  slackConnected: boolean;
+  notifier: SlackNotifier | null;
+}): Promise<ResolvedAutomationDestinations> {
+  const entries = await Promise.all(
+    MANAGER_REPORTING_AUTOMATION_KEYS.map(async (key) => {
+      const runtime = await getAutomationRuntime(key);
+      const destination = await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: params.slackConnected,
+      });
+
+      if (!destination) {
+        return [key, null] as const;
+      }
+
+      return [
+        key,
+        {
+          provider: destination.provider,
+          channelId: destination.channelId,
+          source: destination.source,
+          displayName: await resolveDestinationDisplayName(
+            destination,
+            params.notifier,
+          ),
+        },
+      ] as const;
+    }),
+  );
+
+  return Object.fromEntries(entries) as ResolvedAutomationDestinations;
+}
+
 export async function getBackgroundAgentSettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<{
@@ -190,6 +259,7 @@ export async function getBackgroundAgentSettingsCommand(
     ciFailureTriageSlackChannel: string | null;
   };
   slackChannelDisplayNames: SlackChannelDisplayNames;
+  resolvedDestinations: ResolvedAutomationDestinations;
   recentRuns: Partial<
     Record<BackgroundAutomationKey, AutomationTaskRunSummary[]>
   >;
@@ -267,6 +337,10 @@ export async function getBackgroundAgentSettingsCommand(
     ciFailureTriageSlackChannelId:
       visibleSettings.ciFailureTriageSlackChannelId,
   });
+  const resolvedDestinations = await resolveAutomationDestinations({
+    slackConnected: Boolean(slackInstallation?.isActive),
+    notifier,
+  });
 
   // The reviewer mapping derives its managed-login list synchronously from
   // the cached configured app slug.
@@ -292,6 +366,7 @@ export async function getBackgroundAgentSettingsCommand(
     },
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
+    resolvedDestinations,
     recentRuns,
     automationStatus: status,
   };

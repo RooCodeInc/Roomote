@@ -20,6 +20,8 @@ export type ResolvedAutomationDestination = {
   channelId: string;
   /** Bot Framework serviceUrl; present for Teams destinations. */
   serviceUrl?: string;
+  /** Which waterfall level produced this destination. */
+  source: 'automation_target' | 'manager_channel' | 'primary_conversation';
 };
 
 /**
@@ -47,6 +49,30 @@ export async function listConnectedCommunicationProviders(): Promise<
       : []),
     ...(telegramCredentials.botToken ? (['telegram'] as const) : []),
   ];
+}
+
+/**
+ * Human-readable name for a Teams destination conversation: the channel name
+ * when known, else the team name. Null when the conversation is unknown.
+ */
+export async function findTeamsConversationDisplayName(
+  conversationId: string,
+): Promise<string | null> {
+  const [row] = await db
+    .select({
+      channelName: teamsInstallations.channelName,
+      teamName: teamsInstallations.teamName,
+    })
+    .from(teamsInstallations)
+    .where(
+      and(
+        eq(teamsInstallations.conversationId, conversationId),
+        eq(teamsInstallations.isActive, true),
+      ),
+    )
+    .limit(1);
+
+  return row?.channelName ?? row?.teamName ?? null;
 }
 
 async function findTeamsConversationServiceUrl(
@@ -104,12 +130,17 @@ export async function resolveAutomationRuntimeDestination(params: {
       provider: 'teams',
       channelId: teamsConversation.conversationId,
       serviceUrl: teamsConversation.serviceUrl,
+      source: 'primary_conversation',
     };
   }
 
   const telegramChatId = await findTelegramPrimaryChatId();
   if (telegramChatId) {
-    return { provider: 'telegram', channelId: telegramChatId };
+    return {
+      provider: 'telegram',
+      channelId: telegramChatId,
+      source: 'primary_conversation',
+    };
   }
 
   return null;
