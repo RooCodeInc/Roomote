@@ -67,6 +67,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   classifyFollowUp: classifyFollowUpMock,
   detectSlackMcpSetupRequirement: vi.fn().mockResolvedValue(null),
   getTaskUrl: getTaskUrlMock,
+  isDynamicKickoffMessageEnabled: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../find-active-slack-task-run', () => ({
