@@ -20,9 +20,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -73,43 +71,19 @@ async function notifyTerminalMergeRequestThreads(
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'gitlab' as const,
-    repository: repoFullName,
-    prNumber: payload.object_attributes.iid,
-    prTitle: payload.object_attributes.title,
-    prUrl: payload.object_attributes.url,
-    status,
-    actorLogin:
-      payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Slack for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Teams for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'gitlab',
-  }).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Telegram/Linear for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'gitlab',
+      repository: repoFullName,
+      prNumber: payload.object_attributes.iid,
+      prTitle: payload.object_attributes.title,
+      prUrl: payload.object_attributes.url,
+      status,
+      actorLogin:
+        payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
+    },
+    `MR !${payload.object_attributes.iid}`,
+  );
 }
 
 export async function handleGitLabMergeRequest(

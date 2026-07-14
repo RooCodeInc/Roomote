@@ -20,9 +20,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -76,42 +74,19 @@ async function notifyTerminalPullRequestThreads(
   }
 
   const prNumber = getBitbucketPullRequestNumber(payload.pullrequest);
-  const notificationParams = {
-    sourceControlProvider: 'bitbucket' as const,
-    repository: repoFullName,
-    prNumber,
-    prTitle: payload.pullrequest.title,
-    prUrl: getBitbucketPullRequestUrl(payload),
-    status,
-    actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
-  };
 
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'bitbucket',
-  }).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'bitbucket',
+      repository: repoFullName,
+      prNumber,
+      prTitle: payload.pullrequest.title,
+      prUrl: getBitbucketPullRequestUrl(payload),
+      status,
+      actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+    },
+    `PR #${prNumber}`,
+  );
 }
 
 export async function handleBitbucketPullRequest(
