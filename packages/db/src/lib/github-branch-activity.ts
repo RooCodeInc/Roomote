@@ -243,6 +243,7 @@ export async function findReusableGitHubPrFollowUpOwner({
     .where(
       and(
         ...baseConditions,
+        payloadProviderCondition(sourceControlProvider),
         sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`(
           ${taskRuns.payload}->>'branch' = ${branchName}

@@ -826,6 +826,102 @@ describe('findReusableGitHubPrFollowUpOwner', () => {
       delivery: 'resume',
     });
   });
+
+  it('does not let a GitHub branch owner claim follow-ups for another provider', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-owner-cross-provider';
+    const prNumber = 552;
+    const branchName = 'feature/owner-cross-provider';
+
+    // Legacy GitHub payload: no sourceControlProvider field, which defaults
+    // to 'github' at runtime.
+    const githubRun = await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        description: 'GitHub work on the branch',
+      },
+    });
+
+    // A GitLab follow-up for the same repository fullName + branch must not
+    // attach to the GitHub run.
+    const gitlabResult = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(gitlabResult).toBeNull();
+
+    // The default (GitHub) lookup still matches the legacy payload.
+    const githubResult = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber,
+      branchName,
+    });
+
+    expect(githubResult).toMatchObject({
+      runId: githubRun.id,
+      match: 'branch',
+      delivery: 'attach',
+    });
+  });
+
+  it('matches provider-tagged branch owners only for the same provider', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-owner-gitlab-branch';
+    const prNumber = 553;
+    const branchName = 'feature/owner-gitlab-branch';
+
+    const gitlabRun = await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        sourceControlProvider: 'gitlab',
+        description: 'GitLab work on the branch',
+      },
+    });
+
+    const gitlabResult = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(gitlabResult).toMatchObject({
+      runId: gitlabRun.id,
+      match: 'branch',
+      delivery: 'attach',
+    });
+
+    // The GitLab-tagged run must not claim GitHub or ADO follow-ups.
+    const githubResult = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber,
+      branchName,
+    });
+
+    expect(githubResult).toBeNull();
+
+    const adoResult = await findReusableGitHubPrFollowUpOwner({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'ado',
+    });
+
+    expect(adoResult).toBeNull();
+  });
 });
 
 describe('findActiveGitHubPrReviewTask', () => {
