@@ -43,14 +43,32 @@ export type RepositoryRow = {
  * in exactly one place.
  */
 
+/**
+ * Resolves the active repository row for a (provider, fullName) identity,
+ * optionally narrowed by source-control instance host.
+ *
+ * When `host` is provided (typically from the task payload's
+ * `sourceControlHost`), rows whose `host` matches exactly are preferred;
+ * when none match, rows with a NULL host still qualify so legacy rows
+ * written before the host backfill keep resolving (mirroring the scoping in
+ * `upsertSourceControlPullRequestFactFromWebhook`).
+ *
+ * Without a `host`, a (provider, fullName) identity active on more than one
+ * row is an error rather than an arbitrary pick: same-name repositories on
+ * multiple hosts (self-managed GitLab/Gitea/ADO instances) could otherwise
+ * silently resolve to the wrong instance. Launch sites disambiguate by
+ * stamping `sourceControlHost` into the task payload.
+ */
 export async function resolveRepositoryRow({
   provider,
   repositoryFullName,
+  host,
 }: {
   provider: SourceControlProvider;
   repositoryFullName: string;
+  host?: string;
 }): Promise<RepositoryRow> {
-  const repository = await db.query.repositories.findFirst({
+  const rows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, provider),
       eq(repositories.fullName, repositoryFullName),
@@ -67,7 +85,33 @@ export async function resolveRepositoryRow({
     },
   });
 
-  if (!repository) {
+  if (host !== undefined) {
+    const exactMatches = rows.filter((row) => row.host === host);
+    const candidates =
+      exactMatches.length > 0
+        ? exactMatches
+        : rows.filter((row) => row.host === null);
+
+    if (candidates.length === 0) {
+      throw new Error(
+        `${getSourceControlProviderLabel(
+          provider,
+        )} repository not found or inactive on ${host}: ${repositoryFullName}`,
+      );
+    }
+
+    if (candidates.length > 1) {
+      throw new Error(
+        `${getSourceControlProviderLabel(
+          provider,
+        )} repository ${repositoryFullName} matches more than one active repository on ${host}.`,
+      );
+    }
+
+    return candidates[0]!;
+  }
+
+  if (rows.length === 0) {
     throw new Error(
       `${getSourceControlProviderLabel(
         provider,
@@ -75,7 +119,20 @@ export async function resolveRepositoryRow({
     );
   }
 
-  return repository;
+  if (rows.length > 1) {
+    const hosts = [
+      ...new Set(rows.map((row) => row.host ?? 'unknown host')),
+    ].sort((left, right) => left.localeCompare(right));
+    throw new Error(
+      `${getSourceControlProviderLabel(
+        provider,
+      )} repository ${repositoryFullName} is linked from multiple hosts (${hosts.join(
+        ', ',
+      )}); the task payload must carry sourceControlHost to disambiguate.`,
+    );
+  }
+
+  return rows[0]!;
 }
 
 export async function assertRepositoryInTaskRunScope(

@@ -22,6 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -160,6 +161,8 @@ export async function handleGitLabMergeRequest(
   const result = await getGitLabAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The MR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(mergeRequest.url),
   });
 
   if (result.status === 'error') {
@@ -210,7 +213,7 @@ export async function handleGitLabMergeRequest(
     payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -218,6 +221,12 @@ export async function handleGitLabMergeRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'gitlab',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: mergeRequest.iid,
             prTitle: mergeRequest.title,
             prUrl: mergeRequest.url,

@@ -16,6 +16,7 @@ import {
   or,
 } from '@roomote/db/server';
 
+import { pickHostScopedRepository } from '../utils';
 import type {
   GiteaPullRequestCommentWebhook,
   GiteaPullRequestWebhook,
@@ -58,11 +59,18 @@ function getGiteaUserId(user: GiteaUser | undefined): string | null {
 export async function getGiteaAutomationTargets({
   workflow,
   payload,
+  webhookHost = null,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
   workflow: SourceControlAutomationWorkflow;
   payload: GiteaAutomationWebhookContext;
+  /**
+   * Instance host derived from the webhook's own URLs. Scopes the repository
+   * lookup host-first (legacy NULL-host rows as fallback) so same-name
+   * repositories on other self-managed hosts are never selected.
+   */
+  webhookHost?: string | null;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
 }): Promise<
@@ -84,7 +92,7 @@ export async function getGiteaAutomationTargets({
   const senderUsername = getGiteaUsername(sender) ?? authorUsername;
   let linkedSenderUserId: string | null = null;
 
-  const repo = await db.query.repositories.findFirst({
+  const repoRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitea'),
       eq(repositories.isActive, true),
@@ -96,6 +104,7 @@ export async function getGiteaAutomationTargets({
         : eq(repositories.externalRepoId, repositoryId),
     ),
   });
+  const repo = pickHostScopedRepository(repoRows, webhookHost);
 
   if (!repo) {
     return {

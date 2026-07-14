@@ -114,6 +114,7 @@ describe('handleGiteaPullRequest', () => {
         {
           id: 'gitea:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
@@ -168,6 +169,91 @@ describe('handleGiteaPullRequest', () => {
       expect.objectContaining({
         launchClass: 'automation',
       }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
+    // Two active rows share the repository identity; only the host differs.
+    const rows = [
+      { id: 'repo-host-a', host: 'gitea.host-a.example' },
+      { id: 'repo-host-b', host: 'gitea.host-b.example' },
+    ];
+    mockGetGiteaAutomationTargets.mockImplementation(
+      async ({ webhookHost }: { webhookHost?: string | null }) => {
+        const repo = rows.find((row) => row.host === webhookHost);
+        return repo
+          ? {
+              status: 'ok',
+              targets: [
+                {
+                  id: `gitea:pr_review:${repo.id}`,
+                  settings: null,
+                  repo,
+                  repositoryIds: [repo.id],
+                  userId: 'user-1',
+                },
+              ],
+            }
+          : { status: 'error', message: 'no matching repository row' };
+      },
+    );
+
+    await handleGiteaPullRequest(
+      makePayload('opened', {
+        html_url: 'https://gitea.host-a.example/acme/backend/pulls/42',
+      }),
+    );
+
+    // The handler derives the instance host from the webhook URL...
+    expect(mockGetGiteaAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookHost: 'gitea.host-a.example' }),
+    );
+    // ...and the launched payload pins the matching row's host.
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'gitea.host-a.example',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('stamps the repository host into review payloads when the repository row has one', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'git.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGiteaPullRequest(makePayload('opened'));
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitea',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'git.example.com',
+          }),
+        }),
+      }),
+      expect.any(Object),
     );
   });
 

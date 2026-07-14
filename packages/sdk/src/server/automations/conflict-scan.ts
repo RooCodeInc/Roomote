@@ -13,6 +13,7 @@ import {
   isNull,
   eq,
   and,
+  or,
   inArray,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
@@ -133,11 +134,18 @@ async function getActiveProviderNeutralRepos(): Promise<RepositoryRow[]> {
 /**
  * Check if there's already an active (pending/running) conflict resolution
  * run for the given PR.
+ *
+ * When a non-null `host` is given, association rows recorded for a
+ * different host do not suppress the launch: a same-name repository and PR
+ * number on another self-managed instance is a different PR. Rows with a
+ * NULL host (written before the host backfill) still suppress, mirroring
+ * the legacy tolerance in resolveRepositoryRow.
  */
 async function hasActiveResolutionRun(
   repoFullName: string,
   prNumber: number,
   sourceControlProvider: SourceControlProvider,
+  host?: string | null,
 ): Promise<boolean> {
   const activeStatuses = [RunStatus.Pending, RunStatus.Running];
 
@@ -152,6 +160,9 @@ async function hasActiveResolutionRun(
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
         inArray(taskRuns.status, activeStatuses),
       ),
     )
@@ -597,8 +608,17 @@ async function scanProviderNeutralRepos({
           `${LOG_PREFIX} PR ${repo.fullName}#${pr.number} has conflicts`,
         );
 
-        // Check for existing active resolution run (dedup guard)
-        if (await hasActiveResolutionRun(repo.fullName, pr.number, provider)) {
+        // Check for existing active resolution run (dedup guard). The
+        // repo's host scopes both lookups so a same-name PR on another
+        // self-managed instance cannot suppress this one.
+        if (
+          await hasActiveResolutionRun(
+            repo.fullName,
+            pr.number,
+            provider,
+            repo.host,
+          )
+        ) {
           console.log(
             `${LOG_PREFIX} Active resolution run exists for ${repo.fullName}#${pr.number} — skipping`,
           );
@@ -610,6 +630,7 @@ async function scanProviderNeutralRepos({
           prNumber: pr.number,
           branchName: pr.sourceBranch,
           sourceControlProvider: provider,
+          host: repo.host,
         });
 
         if (activeBranchWork) {
@@ -637,6 +658,10 @@ async function scanProviderNeutralRepos({
                 headRef: pr.sourceBranch,
                 baseRef: pr.targetBranch,
                 sourceControlProvider: provider,
+                // Pin repository resolution to this repo's host so
+                // same-name repositories on other hosts cannot be picked
+                // up. Legacy rows without a recorded host omit the field.
+                ...(repo.host ? { sourceControlHost: repo.host } : {}),
               },
             },
             initiator: {
@@ -656,6 +681,9 @@ async function scanProviderNeutralRepos({
             trigger: manualTrigger ? 'manual' : 'schedule',
             prLinkage: {
               provider,
+              // Host-scope the task association so later dedup lookups for
+              // a same-name PR on another host do not match this run.
+              ...(repo.host ? { host: repo.host } : {}),
               repository: repo.fullName,
               prNumber: pr.number,
               prUrl: pr.url,

@@ -22,6 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -160,6 +161,8 @@ export async function handleBitbucketPullRequest(
   const result = await getBitbucketAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getBitbucketPullRequestUrl(payload)),
   });
 
   if (result.status === 'error') {
@@ -214,7 +217,7 @@ export async function handleBitbucketPullRequest(
   const prAuthorId =
     getBitbucketUserAccountKey(pullRequest.author) ?? prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -222,6 +225,12 @@ export async function handleBitbucketPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'bitbucket',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber,
             prTitle: pullRequest.title,
             prUrl,

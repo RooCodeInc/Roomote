@@ -1,5 +1,5 @@
 const {
-  mockRepositoriesFindFirst,
+  mockRepositoriesFindMany,
   mockAuthAccountsFindFirst,
   mockSelectWhere,
   mockGetReviewCodeAutomationSettings,
@@ -8,7 +8,7 @@ const {
   mockOr,
   mockDesc,
 } = vi.hoisted(() => ({
-  mockRepositoriesFindFirst: vi.fn(),
+  mockRepositoriesFindMany: vi.fn(),
   mockAuthAccountsFindFirst: vi.fn(),
   mockSelectWhere: vi.fn(),
   mockGetReviewCodeAutomationSettings: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       repositories: {
-        findFirst: (arg: unknown) => mockRepositoriesFindFirst(arg),
+        findMany: (arg: unknown) => mockRepositoriesFindMany(arg),
       },
       authAccounts: {
         findFirst: (arg: unknown) => mockAuthAccountsFindFirst(arg),
@@ -62,11 +62,14 @@ describe('getGitLabAutomationTargets', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockRepositoriesFindFirst.mockResolvedValue({
-      id: 'repo-1',
-      fullName: 'acme/backend',
-      linkedByUserId: 'repo-owner-1',
-    });
+    mockRepositoriesFindMany.mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'acme/backend',
+        host: null,
+        linkedByUserId: 'repo-owner-1',
+      },
+    ]);
     mockAuthAccountsFindFirst.mockResolvedValue(null);
     mockSelectWhere.mockResolvedValue([{ environmentId: 'env-1' }]);
     mockGetReviewCodeAutomationSettings.mockResolvedValue({
@@ -148,6 +151,60 @@ describe('getGitLabAutomationTargets', () => {
       status: 'error',
       message:
         'no environment mapping associated with [gitlab:42, acme/backend]',
+    });
+  });
+
+  it('selects the repository row matching the webhook host among same-name rows', async () => {
+    mockRepositoriesFindMany.mockResolvedValue([
+      {
+        id: 'repo-host-a',
+        fullName: 'acme/backend',
+        host: 'gitlab.host-a.example',
+      },
+      {
+        id: 'repo-host-b',
+        fullName: 'acme/backend',
+        host: 'gitlab.host-b.example',
+      },
+    ]);
+
+    const result = await getGitLabAutomationTargets({
+      workflow: 'pr_review',
+      payload: {
+        project: { id: 42, path_with_namespace: 'acme/backend' },
+        user: { id: 987, username: 'roomote-bot' },
+      },
+      webhookHost: 'gitlab.host-b.example',
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitlab:pr_review:repo-host-b',
+          repo: { id: 'repo-host-b', host: 'gitlab.host-b.example' },
+        },
+      ],
+    });
+  });
+
+  it('falls back to a legacy null-host row for a host-scoped lookup', async () => {
+    mockRepositoriesFindMany.mockResolvedValue([
+      { id: 'repo-legacy', fullName: 'acme/backend', host: null },
+    ]);
+
+    const result = await getGitLabAutomationTargets({
+      workflow: 'pr_review',
+      payload: {
+        project: { id: 42, path_with_namespace: 'acme/backend' },
+        user: { id: 987, username: 'roomote-bot' },
+      },
+      webhookHost: 'gitlab.host-a.example',
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [{ repo: { id: 'repo-legacy', host: null } }],
     });
   });
 });

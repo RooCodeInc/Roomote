@@ -28,6 +28,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -333,6 +334,15 @@ export async function handleAdoPullRequest(
   const result = await getAdoAutomationTargets({
     workflow: 'pr_review',
     payload: { ...payload, repositoryFullName: repoFullName },
+    // The PR web URL (or the account/collection base URL it is built from)
+    // carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(
+      getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+    ),
   });
 
   if (result.status === 'error') {
@@ -387,7 +397,7 @@ export async function handleAdoPullRequest(
   const prAuthorName = getAdoIdentityName(pullRequest.createdBy);
   const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -395,6 +405,12 @@ export async function handleAdoPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'ado',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: pullRequest.pullRequestId,
             prTitle: pullRequest.title,
             prUrl,
