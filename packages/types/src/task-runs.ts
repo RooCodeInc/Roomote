@@ -864,6 +864,15 @@ const sharedTaskPayloadSchema = z.object({
   sourceControlProvider: sourceControlProviderSchema.optional(),
 
   /**
+   * Source-control instance host for repository resolution (for example
+   * `gitlab.example.com`), matching `repositories.host`. Stamped by launch
+   * sites that know the concrete host so same-name repositories on multiple
+   * hosts resolve unambiguously. Omitted payloads resolve by
+   * (provider, fullName) alone.
+   */
+  sourceControlHost: z.string().optional(),
+
+  /**
    * Per-launch PR delivery override. When present, pull requests created for
    * this run derive their draft/ready state from this action instead of the
    * deployment-wide PR delivery setting. Omitted for launches that follow the

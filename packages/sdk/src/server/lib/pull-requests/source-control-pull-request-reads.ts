@@ -25,6 +25,7 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
@@ -595,9 +596,10 @@ export async function readSourceControlPullRequestForTaskRun({
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestReadResult> {
-  const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(taskRun.payload),
-  );
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider =
+    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
@@ -613,6 +615,7 @@ export async function readSourceControlPullRequestForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
   });
 
   if (input.action === 'list_pull_requests') {

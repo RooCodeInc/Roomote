@@ -637,6 +637,10 @@ async function scanProviderNeutralRepos({
                 headRef: pr.sourceBranch,
                 baseRef: pr.targetBranch,
                 sourceControlProvider: provider,
+                // Pin repository resolution to this repo's host so
+                // same-name repositories on other hosts cannot be picked
+                // up. Legacy rows without a recorded host omit the field.
+                ...(repo.host ? { sourceControlHost: repo.host } : {}),
               },
             },
             initiator: {

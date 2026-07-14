@@ -70,7 +70,12 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       repositories: {
-        findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        // resolveRepositoryRow queries with findMany; tests queue a single
+        // row (or null), adapted here to the list shape it expects.
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row == null ? [] : [row];
+        },
       },
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),

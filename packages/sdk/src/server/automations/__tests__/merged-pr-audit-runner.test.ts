@@ -291,11 +291,14 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     const [githubPayload, gitlabPayload] = enqueuedPayloads();
 
     // GitHub partition launches with the pre-partitioning payload shape: the
-    // provider field is absent entirely, not merely undefined.
+    // provider field is absent entirely, not merely undefined. Legacy
+    // partitions without a recorded host also omit the host field.
     expect('sourceControlProvider' in githubPayload!).toBe(false);
+    expect('sourceControlHost' in githubPayload!).toBe(false);
     expect(githubPayload!.selectedRepositories).toEqual(['acme/gh']);
 
     expect(gitlabPayload!.sourceControlProvider).toBe('gitlab');
+    expect('sourceControlHost' in gitlabPayload!).toBe(false);
     expect(gitlabPayload!.selectedRepositories).toEqual(['acme/gl']);
 
     // Each task's prompt manifest carries only its own provider's PRs.
@@ -391,9 +394,12 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     const [firstPayload, secondPayload] = enqueuedPayloads();
 
     // Hosts launch in lexicographic order: gitlab.com < gitlab.example.com.
+    // Each payload pins repository resolution to its partition host.
     expect(firstPayload!.sourceControlProvider).toBe('gitlab');
+    expect(firstPayload!.sourceControlHost).toBe('gitlab.com');
     expect(firstPayload!.selectedRepositories).toEqual(['acme/cloud']);
     expect(secondPayload!.sourceControlProvider).toBe('gitlab');
+    expect(secondPayload!.sourceControlHost).toBe('gitlab.example.com');
     expect(secondPayload!.selectedRepositories).toEqual(['acme/self-managed']);
 
     const manifests = buildPrompt.mock.calls.map(([params]) =>
@@ -402,7 +408,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     expect(manifests).toEqual([[2], [1]]);
   });
 
-  it('excludes same-name repositories on multiple hosts from every manifest, with a warning', async () => {
+  it('launches host-bearing same-name entries with the host stamped, skipping only legacy null-host collisions', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
@@ -419,38 +425,45 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
           repositoryFullName: 'acme/shared',
           host: 'gitlab.host-b.example',
         }),
+        // A legacy entry whose repository row has no recorded host: its
+        // launched task would resolve by (provider, fullName) alone, so a
+        // same-name collision still forces a skip.
         factRow({
           index: 2,
           provider: 'gitlab',
-          repositoryFullName: 'acme/unique',
-          host: 'gitlab.host-a.example',
+          repositoryFullName: 'acme/legacy',
         }),
       ]);
-      // acme/shared matches two active repository rows, so the launched
-      // task's (provider, fullName) lookup could resolve the wrong host.
+      // Both full names match two active repository rows each.
       mockSlackInstallationRows.mockResolvedValueOnce([
         { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
         { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
-        { sourceControlProvider: 'gitlab', fullName: 'acme/unique' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/legacy' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/legacy' },
       ]);
 
       const result = await job();
 
       expect(result.errors).toEqual([]);
-      // Only the unambiguous entry launches; no task can audit the wrong host.
-      expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+      // The host-bearing entries launch one task per host: each payload
+      // carries the host, so neither task can audit the wrong instance.
+      expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
 
-      const [payload] = enqueuedPayloads();
-      expect(payload!.sourceControlProvider).toBe('gitlab');
-      expect(payload!.selectedRepositories).toEqual(['acme/unique']);
+      const [hostAPayload, hostBPayload] = enqueuedPayloads();
+      expect(hostAPayload!.sourceControlProvider).toBe('gitlab');
+      expect(hostAPayload!.sourceControlHost).toBe('gitlab.host-a.example');
+      expect(hostAPayload!.selectedRepositories).toEqual(['acme/shared']);
+      expect(hostBPayload!.sourceControlProvider).toBe('gitlab');
+      expect(hostBPayload!.sourceControlHost).toBe('gitlab.host-b.example');
+      expect(hostBPayload!.selectedRepositories).toEqual(['acme/shared']);
 
       const manifests = buildPrompt.mock.calls.map(([params]) =>
         params.mergedPullRequests.map((pullRequest) => pullRequest.prNumber),
       );
-      expect(manifests).toEqual([[3]]);
+      expect(manifests).toEqual([[1], [2]]);
 
       expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('skipping 2 merged PR entries'),
+        expect.stringContaining('skipping 1 merged PR entries'),
       );
     } finally {
       warnSpy.mockRestore();
@@ -461,14 +474,15 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     try {
-      // 251 rows overflow the 250-row page; the gitlab half is ambiguous
-      // across two hosts and gets skipped, the github half launches.
+      // 251 rows overflow the 250-row page; the gitlab half has no recorded
+      // repository host and collides with a same-name row on another host,
+      // so it gets skipped; the github half launches.
       const rows = Array.from({ length: 251 }, (_, index) =>
         factRow({
           index,
           provider: index % 2 === 0 ? 'github' : 'gitlab',
           repositoryFullName: index % 2 === 0 ? 'acme/gh' : 'acme/shared',
-          host: index % 2 === 0 ? 'github.com' : 'gitlab.host-a.example',
+          ...(index % 2 === 0 ? { host: 'github.com' } : {}),
         }),
       );
       mockSlackInstallationRows.mockResolvedValueOnce(rows);
@@ -485,6 +499,8 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
 
       const [payload] = enqueuedPayloads();
       expect('sourceControlProvider' in payload!).toBe(false);
+      // GitHub rows carry host github.com, so the payload pins it.
+      expect(payload!.sourceControlHost).toBe('github.com');
       expect(payload!.selectedRepositories).toEqual(['acme/gh']);
 
       // The cursor still covers the full 250-row page, including the skipped

@@ -364,11 +364,13 @@ function repositoryIdentityKey(
 /**
  * Finds (provider, fullName) pairs in the manifest that match more than one
  * active repository row, i.e. same-name repositories linked from multiple
- * hosts (self-managed GitLab/Gitea/ADO instances). The launched task's
- * pull-request tools resolve repositories by (provider, fullName) alone --
- * see resolveRepositoryRow in
- * lib/pull-requests/source-control-pull-request-shared.ts -- so for these
- * pairs a task could silently audit the wrong host's repository.
+ * hosts (self-managed GitLab/Gitea/ADO instances). Manifest entries with a
+ * recorded repository host are safe despite the collision: their launched
+ * task carries `sourceControlHost` and resolveRepositoryRow (in
+ * lib/pull-requests/source-control-pull-request-shared.ts) resolves by
+ * (provider, fullName, host). Only legacy entries without a recorded host
+ * would still resolve by (provider, fullName) alone, so only those must be
+ * skipped when their identity collides.
  *
  * Ambiguity is checked against the repositories table rather than the
  * manifest itself: a same-name repository on another host is a resolution
@@ -514,27 +516,31 @@ async function processDeployment(
     });
     // The pull-request read/write tools bind each task to a single
     // source-control provider (resolved from the task payload) and look
-    // repositories up by (provider, fullName), so a manifest must never mix
-    // providers or hosts: one scan task launches per (provider, host) pair.
+    // repositories up by (provider, fullName, host), so a manifest must
+    // never mix providers or hosts: one scan task launches per
+    // (provider, host) pair, and the partition host is stamped into the
+    // task payload as `sourceControlHost`.
     //
-    // The task payload has no host field, so a launched task cannot tell the
-    // tools which host it means; a manifest entry is only safe when its
-    // (provider, fullName) resolves to exactly one active repository row.
-    // Entries whose full name is active on more than one host would let the
-    // task audit the wrong host's repository, so they are excluded from
-    // every launched manifest instead.
-    // TODO(follow-up): thread host disambiguation through the task payload
-    // and resolveRepositoryRow so same-name repositories on multiple hosts
-    // become auditable instead of skipped.
+    // Entries with a recorded repository host are therefore always safe,
+    // even when a same-name repository is active on another host. Only
+    // legacy entries whose repository row predates the host backfill
+    // (host still NULL) resolve by (provider, fullName) alone; when that
+    // identity collides with another active row the launched task could
+    // audit the wrong host's repository, so those entries are excluded
+    // from every launched manifest. They self-heal once the host backfill
+    // reaches their repository row.
     const ambiguousIdentities =
       await findAmbiguousRepositoryIdentities(mergedPullRequests);
     const auditablePullRequests = mergedPullRequests.filter(
       (pullRequest) =>
-        !ambiguousIdentities.has(
-          repositoryIdentityKey(
-            pullRequest.sourceControlProvider,
-            pullRequest.repositoryFullName,
-          ),
+        !(
+          pullRequest.repositoryHost === null &&
+          ambiguousIdentities.has(
+            repositoryIdentityKey(
+              pullRequest.sourceControlProvider,
+              pullRequest.repositoryFullName,
+            ),
+          )
         ),
     );
     const skippedAmbiguousCount =
@@ -542,7 +548,7 @@ async function processDeployment(
 
     if (skippedAmbiguousCount > 0) {
       console.warn(
-        `${logPrefix} Same-name repositories on multiple hosts are not yet auditable — skipping ${skippedAmbiguousCount} merged PR entries`,
+        `${logPrefix} Legacy repository rows without a recorded host cannot be disambiguated from same-name repositories on other hosts — skipping ${skippedAmbiguousCount} merged PR entries`,
       );
     }
 
@@ -576,7 +582,7 @@ async function processDeployment(
     let firstLaunchedTaskId: string | null = null;
 
     for (const partition of orderedPartitions) {
-      const { provider, pullRequests: partitionPullRequests } = partition;
+      const { provider, host, pullRequests: partitionPullRequests } = partition;
 
       const selectedRepositories = getSelectedRepositories(
         partitionPullRequests,
@@ -603,6 +609,11 @@ async function processDeployment(
             ...(provider === 'github'
               ? {}
               : { sourceControlProvider: provider }),
+            // The partition host pins repository resolution to this host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy partitions without a recorded host omit the field and
+            // resolve by (provider, fullName) alone.
+            ...(host ? { sourceControlHost: host } : {}),
             description: config.buildPrompt({
               channelId,
               destination,
@@ -642,9 +653,9 @@ async function processDeployment(
     // so advancing the cursor only after every partition has launched keeps
     // cursor coverage equal to the union of launched manifests plus the
     // deliberate exclusions. Skipped-ambiguous entries advance with the
-    // cursor by design: they are excluded until host disambiguation lands,
-    // and letting them pin the cursor would stall the scan on every later
-    // PR instead. If a partition launch throws, the run fails without
+    // cursor by design: they are excluded until the host backfill reaches
+    // their repository row, and letting them pin the cursor would stall the
+    // scan on every later PR instead. If a partition launch throws, the run fails without
     // advancing the cursor and the next run rescans the same page:
     // partitions that already launched are re-audited once rather than any
     // PR being skipped.

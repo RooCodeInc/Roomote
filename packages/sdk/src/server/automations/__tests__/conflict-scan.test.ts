@@ -623,7 +623,52 @@ describe('conflictScanJob', () => {
         }),
       }),
     );
+    // A legacy repository row without a recorded host omits the payload
+    // host field entirely so resolution falls back to (provider, fullName).
+    const [enqueueArg] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in enqueueArg.task.payload).toBe(false);
     expect(result.launchedTaskId).toBe('task-9');
+  });
+
+  it('stamps the repository host into the conflict-resolution payload when the repo row has one', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.example.com',
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.example.com/acme/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 9, taskId: 'task-9' });
+
+    await conflictScanJob();
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: 'github_pr_conflict_resolve',
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            prNumber: 42,
+            sourceControlProvider: 'gitlab',
+            // The payload pins repository resolution to this repo's host so
+            // a same-name repository on another host cannot be picked up.
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
+      }),
+    );
   });
 
   it('falls back to a single-PR detail read when an ADO list row has no mergeable signal', async () => {

@@ -37,6 +37,7 @@ import {
   getSourceControlProviderLabel,
   normalizePrBodyAttributionAppMention,
   prActions,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type PrAction,
@@ -239,9 +240,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(taskRun.payload),
-  );
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider =
+    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
@@ -257,6 +259,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
   });
 
   const prAction = await resolveEffectivePrAction(taskRun);
