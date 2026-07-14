@@ -777,14 +777,14 @@ describe('getGitLabDeploymentUser', () => {
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
-          'PRIVATE-TOKEN': 'glpat_deployment_token',
+          'PRIVATE-TOKEN': 'oauth_access_token',
         }),
       }),
     );
   });
 
   it('returns null when no deployment token is configured', async () => {
-    delete process.env.GITLAB_TOKEN;
+    mockGitLabOAuthAccessToken.mockResolvedValue(null);
     const fetchMock = vi.fn<typeof fetch>();
 
     await expect(
