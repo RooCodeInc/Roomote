@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       redirectUri: buildGiteaOAuthRedirectUri(webEnv.R_APP_URL),
     });
     redirect.searchParams.set('gitea', 'connected');
+    redirect.searchParams.set('sync', '1');
   } catch (error) {
     console.error('[Gitea OAuth] callback failed', error);
     redirect.searchParams.set('gitea', 'error');

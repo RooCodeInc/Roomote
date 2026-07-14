@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -198,6 +198,21 @@ export function StepSourceControlConnect({
         (field.runtimeSatisfied || field.savedSatisfied),
     );
 
+  const oauthAutoSyncMarkerPresent =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('sync') === '1';
+  const shouldAutoSync =
+    isSourceControlTokenBackedProvider(provider) &&
+    providerStatus?.configSatisfied === true &&
+    !alreadyConnected &&
+    !needsAdoMicrosoftConnection &&
+    (provider !== 'gitlab' ||
+      !gitlabOAuthConfigured ||
+      oauthAutoSyncMarkerPresent) &&
+    (provider !== 'gitea' ||
+      !giteaOAuthConfigured ||
+      oauthAutoSyncMarkerPresent);
+
   const handleSyncRepositories = async () => {
     if (
       provider === 'ado' &&
@@ -215,6 +230,29 @@ export function StepSourceControlConnect({
 
     syncRepositories.mutate();
   };
+
+  const autoSyncAttempted = useRef(false);
+  useEffect(() => {
+    if (!shouldAutoSync || autoSyncAttempted.current) {
+      return;
+    }
+
+    autoSyncAttempted.current = true;
+    void handleSyncRepositories();
+
+    if (oauthAutoSyncMarkerPresent) {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('sync');
+      const query = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        query
+          ? `${window.location.pathname}?${query}`
+          : window.location.pathname,
+      );
+    }
+  }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
 
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">

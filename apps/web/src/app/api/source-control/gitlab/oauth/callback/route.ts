@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
       redirectUri: buildGitLabOAuthRedirectUri(webEnv.R_APP_URL),
     });
     redirect.searchParams.set('gitlab', 'connected');
+    redirect.searchParams.set('sync', '1');
   } catch (error) {
     console.error('[GitLab OAuth] callback failed', error);
     redirect.searchParams.set('gitlab', 'error');
