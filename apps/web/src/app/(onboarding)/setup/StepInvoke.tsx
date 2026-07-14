@@ -189,12 +189,6 @@ export function StepInvoke({
                 <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
-              {'example' in method && (
-                <p className="text-[0.9em] text-foreground font-mono cursor-default group-hover:text-foreground py-1.5">
-                  <CornerDownRight className="inline size-4 mr-2 relative -top-0.5" />
-                  {method.example}
-                </p>
-              )}
             </div>
           </div>
         ))}

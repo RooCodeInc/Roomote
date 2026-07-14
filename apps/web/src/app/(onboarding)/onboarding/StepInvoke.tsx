@@ -86,11 +86,6 @@ export function StepInvoke({
               <p className="text-sm text-muted-foreground cursor-default group-hover:text-foreground">
                 {method.description}
               </p>
-              {'example' in method && (
-                <p className="text-[0.9em] text-muted-foreground font-mono cursor-default group-hover:text-foreground border-l-2 pl-3 py-1.5">
-                  {method.example}
-                </p>
-              )}
             </div>
           </div>
         ))}

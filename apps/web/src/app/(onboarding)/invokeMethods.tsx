@@ -52,7 +52,6 @@ const sourceControlProviderCopy: Record<
   {
     icon: string;
     description: string;
-    example?: string;
   }
 > = {
   github: {
@@ -61,7 +60,8 @@ const sourceControlProviderCopy: Record<
   },
   gitlab: {
     icon: 'gitlab',
-    description: `Start work from connected GitLab merge requests and repositories.`,
+    description: `Mention @roomote in a comment on any merge request.`,
+    example: '@roomote address the merge request feedback above',
   },
   gitea: {
     icon: 'gitea',
@@ -150,7 +150,11 @@ export function buildInvokeMethods({
         icon: createBrandIcon(copy.icon, title),
         title,
         description,
-        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
+        ...(identity?.examplePrompt
+          ? { example: identity.examplePrompt }
+          : copy.example
+            ? { example: copy.example }
+            : {}),
       };
     }),
     ...(includeLinear

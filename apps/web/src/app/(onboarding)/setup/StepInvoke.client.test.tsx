@@ -343,6 +343,17 @@ describe('Setup StepInvoke', () => {
     ).toBeInTheDocument();
   });
 
+  it('clarifies that GitLab mentions work on any merge request', () => {
+    render(<StepInvoke sourceControlProviders={['gitlab']} />);
+
+    expect(
+      screen.getByText('Mention @roomote in a comment on any merge request.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('@roomote address the merge request feedback above'),
+    ).toBeInTheDocument();
+  });
+
   it('shows configured providers with automations before the web UI', () => {
     render(
       <StepInvoke
