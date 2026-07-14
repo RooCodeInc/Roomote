@@ -266,6 +266,7 @@ export function useSetupFlow(
   );
   const initialized = useRef(false);
   const pinnedUrlStepRef = useRef<SetupStep | null>(null);
+  const navigationHistoryRef = useRef<SetupStep[]>([]);
   const lastUrlStepRef = useRef<SetupStep | null>(null);
   const syncedStepRef = useRef<SetupStep | null>(null);
   const ensuredTaskIdRef = useRef<string | null>(null);
@@ -690,6 +691,7 @@ export function useSetupFlow(
       }
 
       const requestedStep = readUrlStep();
+      navigationHistoryRef.current = [];
       const resolvedStep = resolveDeepLinkStep(requestedStep);
 
       if (resolvedStep === requestedStep) {
@@ -734,6 +736,10 @@ export function useSetupFlow(
 
   const goToStep = useCallback(
     (nextStep: SetupStep, options: { revisit?: boolean } = {}) => {
+      if (nextStep !== step) {
+        navigationHistoryRef.current.push(step);
+      }
+
       // Only explicit review/revisit navigations pin a step. Normal forward
       // navigation must remain subject to the skip rules on the next status
       // refresh.
@@ -741,27 +747,39 @@ export function useSetupFlow(
       setStep(nextStep);
       pushStepUrl(nextStep);
     },
-    [pushStepUrl],
+    [pushStepUrl, step],
   );
 
   const previousStep = useMemo(
-    () => findPreviousStep(SETUP_STEPS.indexOf(step)),
+    () =>
+      navigationHistoryRef.current.at(-1) ??
+      findPreviousStep(SETUP_STEPS.indexOf(step)),
     [findPreviousStep, step],
   );
 
   const goToPreviousStep = useCallback(() => {
-    if (!previousStep) {
+    const nextStep =
+      navigationHistoryRef.current.pop() ??
+      findPreviousStep(SETUP_STEPS.indexOf(step));
+
+    if (!nextStep) {
       return;
     }
 
-    pinnedUrlStepRef.current = null;
-    setStep(previousStep);
-    pushStepUrl(previousStep);
-  }, [previousStep, pushStepUrl]);
+    // The originating step can become skippable as soon as its choice is
+    // saved (e.g. source-control-provider -> source-control-config). Pin it
+    // while returning so the user can still see the step they came from.
+    pinnedUrlStepRef.current = shouldSkip(nextStep) ? nextStep : null;
+    setStep(nextStep);
+    pushStepUrl(nextStep);
+  }, [findPreviousStep, pushStepUrl, shouldSkip, step]);
 
   const goToNextStep = useCallback(() => {
     const currentIndex = SETUP_STEPS.indexOf(step);
     const nextStep = findNextStep(currentIndex + 1);
+    if (nextStep !== step) {
+      navigationHistoryRef.current.push(step);
+    }
     pinnedUrlStepRef.current = null;
     setStep(nextStep);
     pushStepUrl(nextStep);
@@ -770,11 +788,14 @@ export function useSetupFlow(
   const goToNextPostOnboardingStep = useCallback(
     (forceUnlocked = false) => {
       const nextStep = findNextPostOnboardingStep({ forceUnlocked });
+      if (nextStep !== step) {
+        navigationHistoryRef.current.push(step);
+      }
       pinnedUrlStepRef.current = null;
       setStep(nextStep);
       pushStepUrl(nextStep);
     },
-    [findNextPostOnboardingStep, pushStepUrl],
+    [findNextPostOnboardingStep, pushStepUrl, step],
   );
 
   const advancePostOnboardingStep = useCallback(
@@ -783,6 +804,9 @@ export function useSetupFlow(
         fromIndex: SETUP_STEPS.indexOf(resolvedStep) + 1,
         forceUnlocked: true,
       });
+      if (nextStep !== resolvedStep) {
+        navigationHistoryRef.current.push(resolvedStep);
+      }
       pinnedUrlStepRef.current = null;
       setStep(nextStep);
       pushStepUrl(nextStep);
