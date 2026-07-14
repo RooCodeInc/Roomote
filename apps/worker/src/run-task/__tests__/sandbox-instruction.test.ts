@@ -151,6 +151,15 @@ describe('buildSandboxInstruction', () => {
       'They may still be building or waiting for health checks when your task begins.',
     );
     expect(instruction).toContain(
+      'Run `docker compose ls` to find each Roomote-managed project name and its config files',
+    );
+    expect(instruction).toContain(
+      '`docker compose --project-name <name> --file <file> ... ps`',
+    );
+    expect(instruction).toContain(
+      'repeat `--file` for every listed config file',
+    );
+    expect(instruction).not.toContain(
       'Inspect them with `docker compose ps` and `docker compose logs`',
     );
     expect(instruction).not.toContain(

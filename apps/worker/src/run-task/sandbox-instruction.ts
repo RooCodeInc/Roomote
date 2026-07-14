@@ -202,7 +202,7 @@ export function buildSandboxInstruction(
     if (environmentConfig.docker_projects?.length) {
       lines.push(
         '',
-        'Roomote starts configured Docker projects with Docker Compose during environment setup. They may still be building or waiting for health checks when your task begins. Inspect them with `docker compose ps` and `docker compose logs`, wait for the existing startup when necessary, and do not start duplicate copies.',
+        'Roomote starts configured Docker projects with Docker Compose during environment setup. They may still be building or waiting for health checks when your task begins. Run `docker compose ls` to find each Roomote-managed project name and its config files, then inspect it with `docker compose --project-name <name> --file <file> ... ps` or `docker compose --project-name <name> --file <file> ... logs` (repeat `--file` for every listed config file). If a configured project is not listed yet, wait for the existing startup rather than starting a duplicate copy.',
       );
     }
 
