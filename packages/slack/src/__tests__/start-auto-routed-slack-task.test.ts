@@ -1255,14 +1255,10 @@ describe('startAutoRoutedSlackTask', () => {
         thread_ts: '120.000',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: [
-              expect.objectContaining({
-                text: expect.stringContaining(
-                  '<https://app.example.com/settings/personal?service=linear|link your Linear account>',
-                ),
-              }),
-            ],
+            type: 'markdown',
+            text: expect.stringContaining(
+              '[link your Linear account](https://app.example.com/settings/personal?service=linear)',
+            ),
           }),
         ],
       }),
