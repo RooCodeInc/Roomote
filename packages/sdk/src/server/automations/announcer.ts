@@ -21,8 +21,18 @@ import { SUMMARIZE_MERGED_PRS_SETTINGS_HASH } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
 import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
+import {
+  listConnectedCommunicationProviders,
+  resolveAutomationRuntimeDestination,
+  type ResolvedAutomationDestination,
+} from './destination';
 import { hasAnyActiveRepository } from './github-deployment-scope';
-import { buildAutomationRootSummaryMessage } from '../lib/manager-slack';
+import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import {
+  buildAutomationRootSummaryMessage,
+  buildManagerSlackSettingsUrl,
+  degradeSlackMrkdwnToMarkdown,
+} from '../lib/manager-slack';
 import { isRunDue, resolveSlackWorkspaceTimezone } from './scheduling-utils';
 import {
   emptyJobResult,
@@ -34,8 +44,8 @@ const LOG_PREFIX = '[announcer]';
 const SCHEDULE_HOUR_LOCAL = 2;
 
 interface DeploymentContext {
-  slackBotToken: string;
-  slackTeamId: string;
+  slackBotToken: string | null;
+  slackTeamId: string | null;
 }
 
 interface MergedPullRequest {
@@ -61,13 +71,25 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
     return [];
   }
 
-  return db
+  const rows = await db
     .select({
       slackBotToken: slackInstallations.botAccessToken,
       slackTeamId: slackInstallations.teamId,
     })
     .from(slackInstallations)
     .where(eq(slackInstallations.isActive, true));
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  // No Slack: the deployment is still eligible when another comms provider
+  // can carry the announcer's reports.
+  const connectedProviders = await listConnectedCommunicationProviders();
+
+  return connectedProviders.length > 0
+    ? [{ slackBotToken: null, slackTeamId: null }]
+    : [];
 }
 
 async function getMergedPullRequests(
@@ -216,6 +238,85 @@ function buildAnnouncerDetailThreadMessages(
   return messages;
 }
 
+/**
+ * Posts the announcer report to a non-Slack destination through its
+ * communication provider adapter: a markdown root message with an
+ * automation-settings link button, the tracked automation thread, and the
+ * per-repo detail messages threaded under the root message.
+ */
+async function postAnnouncerReportViaCommunicationAdapter(params: {
+  destination: ResolvedAutomationDestination;
+  summary: string;
+  mergedPullRequests: MergedPullRequest[];
+  windowDays: number;
+  now: Date;
+}): Promise<void> {
+  const { destination } = params;
+  const adapter = await getCommunicationProviderAdapter(destination.provider);
+
+  if (!adapter) {
+    throw new Error(
+      `Failed to post announcer summary: ${destination.provider} is not connected`,
+    );
+  }
+
+  const serviceUrlFields = destination.serviceUrl
+    ? { serviceUrl: destination.serviceUrl }
+    : {};
+
+  const root = await adapter.postMessage({
+    channelId: destination.channelId,
+    ...serviceUrlFields,
+    text: degradeSlackMrkdwnToMarkdown(params.summary),
+    textFormat: 'markdown',
+    buttons: [
+      [
+        {
+          text: 'Automation settings',
+          url: buildManagerSlackSettingsUrl(SUMMARIZE_MERGED_PRS_SETTINGS_HASH),
+        },
+      ],
+    ],
+  });
+
+  await upsertBackgroundAutomationSlackThread(db, {
+    surface: destination.provider,
+    automationKey: 'announcer',
+    slackChannelId: destination.channelId,
+    threadTs: root.messageId,
+    summaryText: params.summary,
+    postedAt: params.now,
+    metadata: {
+      mergedCount: params.mergedPullRequests.length,
+      windowDays: params.windowDays,
+    },
+  });
+
+  for (const detailMessage of buildAnnouncerDetailThreadMessages(
+    params.mergedPullRequests,
+  )) {
+    try {
+      await adapter.postMessage({
+        channelId: destination.channelId,
+        ...serviceUrlFields,
+        threadId: root.messageId,
+        // Teams thread replies address the parent activity directly.
+        ...(destination.provider === 'teams'
+          ? { replyToMessageId: root.messageId }
+          : {}),
+        text: degradeSlackMrkdwnToMarkdown(detailMessage),
+        textFormat: 'markdown',
+      });
+    } catch (error) {
+      console.warn(
+        `${LOG_PREFIX} Failed to post announcer detail thread chunk: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
 export async function announcerJob(
   opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
@@ -227,7 +328,7 @@ export async function announcerJob(
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
-      'An active repository and Slack must both be connected.';
+      'An active repository and a communication provider must both be connected.';
   }
 
   let processed = 0;
@@ -244,9 +345,12 @@ export async function announcerJob(
         continue;
       }
 
-      const channelId = runtime.slackChannelId;
+      const destination = await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: deployment.slackBotToken !== null,
+      });
 
-      if (!channelId) {
+      if (!destination) {
         console.log(
           `${LOG_PREFIX} Skipping deployment: announcer channel not configured`,
         );
@@ -255,10 +359,16 @@ export async function announcerJob(
         continue;
       }
 
-      const timezone = await resolveSlackWorkspaceTimezone(
-        deployment,
-        LOG_PREFIX,
-      );
+      const channelId = destination.channelId;
+      const timezone = deployment.slackBotToken
+        ? await resolveSlackWorkspaceTimezone(
+            {
+              slackBotToken: deployment.slackBotToken,
+              slackTeamId: deployment.slackTeamId ?? '',
+            },
+            LOG_PREFIX,
+          )
+        : 'UTC';
 
       if (
         !opts.manualTrigger &&
@@ -299,6 +409,7 @@ export async function announcerJob(
       const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
         automationKey: 'announcer',
         slackChannelId: channelId,
+        surface: destination.provider,
         now,
       });
       const summary = await runAnnouncerAnalysis(
@@ -319,48 +430,64 @@ export async function announcerJob(
         continue;
       }
 
-      const notifier = new SlackNotifier(deployment.slackBotToken);
-      const message = buildAutomationRootSummaryMessage({
-        summaryText: summary,
-        automationSettingsHash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
-      });
-
-      const ts = await notifier.postMessage({
-        channel: channelId,
-        ...message,
-      });
-
-      if (!ts) {
-        throw new Error('Failed to post announcer summary to Slack');
-      }
-
-      await upsertBackgroundAutomationSlackThread(db, {
-        surface: 'slack',
-        automationKey: 'announcer',
-        slackChannelId: channelId,
-        threadTs: ts,
-        summaryText: summary,
-        postedAt: now,
-        metadata: {
-          mergedCount: mergedPullRequests.length,
-          windowDays,
-        },
-      });
-
-      for (const detailMessage of buildAnnouncerDetailThreadMessages(
-        mergedPullRequests,
-      )) {
-        const detailTs = await notifier.postMessage({
-          channel: channelId,
-          thread_ts: ts,
-          text: detailMessage,
-        });
-
-        if (!detailTs) {
-          console.warn(
-            `${LOG_PREFIX} Failed to post announcer detail thread chunk`,
+      if (destination.provider === 'slack') {
+        if (!deployment.slackBotToken) {
+          throw new Error(
+            'Announcer destination is Slack, but Slack is not connected',
           );
         }
+
+        const notifier = new SlackNotifier(deployment.slackBotToken);
+        const message = buildAutomationRootSummaryMessage({
+          summaryText: summary,
+          automationSettingsHash: SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
+        });
+
+        const ts = await notifier.postMessage({
+          channel: channelId,
+          ...message,
+        });
+
+        if (!ts) {
+          throw new Error('Failed to post announcer summary to Slack');
+        }
+
+        await upsertBackgroundAutomationSlackThread(db, {
+          surface: 'slack',
+          automationKey: 'announcer',
+          slackChannelId: channelId,
+          threadTs: ts,
+          summaryText: summary,
+          postedAt: now,
+          metadata: {
+            mergedCount: mergedPullRequests.length,
+            windowDays,
+          },
+        });
+
+        for (const detailMessage of buildAnnouncerDetailThreadMessages(
+          mergedPullRequests,
+        )) {
+          const detailTs = await notifier.postMessage({
+            channel: channelId,
+            thread_ts: ts,
+            text: detailMessage,
+          });
+
+          if (!detailTs) {
+            console.warn(
+              `${LOG_PREFIX} Failed to post announcer detail thread chunk`,
+            );
+          }
+        }
+      } else {
+        await postAnnouncerReportViaCommunicationAdapter({
+          destination,
+          summary,
+          mergedPullRequests,
+          windowDays,
+          now,
+        });
       }
 
       await recordAutomationRunOutcome(db, {

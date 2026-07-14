@@ -149,7 +149,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
     supportedSourceControlProviders: sourceControlProviders,
   },
   {
@@ -159,7 +159,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
     supportedSourceControlProviders: ['github'],
   },
   {
