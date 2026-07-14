@@ -174,6 +174,18 @@ describe('environment-setup guidance', () => {
       'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`.',
     );
     expect(skillContent).toContain(
+      'First read .roomote/setup-status.json in the workspace root: while its state is "running", environment setup commands are still executing in the background',
+    );
+    expect(skillContent).toContain(
+      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from its log under .roomote/setup-logs/.",
+    );
+    expect(skillContent).toContain(
+      'treat `failed` or `completed with warnings` as direct evidence that specific setup commands failed even when the verification task has not described the failure yet',
+    );
+    expect(skillContent).toContain(
+      'or its `Environment Setup` line reports `failed` or `completed with warnings`',
+    );
+    expect(skillContent).toContain(
       'Narrate concise, plain-language progress updates while the follow-up check runs',
     );
     expect(skillContent).toContain(
