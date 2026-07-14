@@ -44,6 +44,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   routeTask: routeTaskMock,
   classifyFollowUp: vi.fn(),
   getTaskUrl: vi.fn(),
+  isDynamicKickoffMessageEnabled: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({

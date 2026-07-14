@@ -3,9 +3,11 @@ import { DEFAULT_TASK_MODEL_SETTINGS } from '@roomote/types';
 import type { RoutingContext, RoutableEnvironment } from '../types';
 import { routeTask } from '../router-service';
 
-const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
-  mockGenerateTrackedNonTaskObject: vi.fn(),
-}));
+const { mockGenerateTrackedNonTaskObject, mockEvaluateFeatureFlag } =
+  vi.hoisted(() => ({
+    mockGenerateTrackedNonTaskObject: vi.fn(),
+    mockEvaluateFeatureFlag: vi.fn().mockResolvedValue(false),
+  }));
 
 vi.mock('../../non-task-provider-usage', async (importOriginal) => {
   const actual =
@@ -16,6 +18,16 @@ vi.mock('../../non-task-provider-usage', async (importOriginal) => {
     generateTrackedNonTaskObject: mockGenerateTrackedNonTaskObject,
   };
 });
+
+vi.mock('@roomote/feature-flags/server', () => ({
+  getFeatureFlagEvaluator: () => ({
+    evaluate: mockEvaluateFeatureFlag,
+  }),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({}),
+}));
 
 describe('routeTask', () => {
   const environments: RoutableEnvironment[] = [
@@ -41,6 +53,7 @@ describe('routeTask', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEvaluateFeatureFlag.mockResolvedValue(false);
     vi.spyOn(console, 'info').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   });
@@ -55,6 +68,8 @@ describe('routeTask', () => {
         workspaceValue: 'Full Stack',
         reasoning: 'Full Stack is the best fit.',
         confidence: 0.92,
+        kickoffMessage:
+          'Looking into daily environment snapshots for faster startup in Full Stack',
         needsExternalLookup: false,
         externalReference: null,
       },
@@ -92,6 +107,33 @@ describe('routeTask', () => {
         workspaceRemapped: false,
       },
     });
+    // Flag off by default → freeform kickoff is stripped even if the LLM returns it.
+    expect(result.result).not.toHaveProperty('kickoffMessage');
+  });
+
+  it('keeps freeform kickoff messages when the feature flag is enabled', async () => {
+    mockEvaluateFeatureFlag.mockResolvedValue(true);
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'Full Stack is the best fit.',
+        confidence: 0.92,
+        kickoffMessage:
+          'Looking into daily environment snapshots for faster startup in Full Stack',
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(createContext());
+    expect(result.status).toBe('routed');
+    if (result.status !== 'routed') {
+      throw new Error('Expected routed result');
+    }
+
+    expect(result.result.kickoffMessage).toBe(
+      'Looking into daily environment snapshots for faster startup in Full Stack',
+    );
   });
 
   it('returns the underlying structured-output failure instead of a generic no-response fallback', async () => {

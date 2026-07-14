@@ -138,23 +138,104 @@ export function resolveUserFacingModelDisplayName({
   return previous || undefined;
 }
 
+/**
+ * Legacy started-message prefix used by the static kickoff template.
+ * Dynamic LLM kickoffs are free-form and are detected via stored message ts
+ * and/or Follow/Cancel action blocks instead of a shared prefix.
+ */
+export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started on your task';
+
+const KICKOFF_MESSAGE_MAX_LENGTH = 160;
+
+const SLACK_CONTROL_TOKEN_PATTERN =
+  /<@[^>\s]+>|<![^>\s]+>|<#C[^|>\s]+(?:\|[^>]+)?>|@everyone|@channel|@here/gi;
+
+/**
+ * Normalize a router-generated kickoff into short, display-safe text.
+ * Returns undefined when empty so callers fall back to the template path.
+ */
+export function normalizeKickoffMessage(
+  value?: string | null,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  let text = value.replace(/\s+/g, ' ').trim();
+  text = stripMatchingEdgeQuotes(text);
+  // Neutralize Slack mrkdwn control tokens so router output cannot broadcast
+  // mentions or special link markup when inserted into a section block.
+  text = text.replace(SLACK_CONTROL_TOKEN_PATTERN, ' ').replace(/[<>]/g, ' ');
+  text = text.replace(/\s+/g, ' ').trim();
+  text = text.replace(/\.+$/, '').trim();
+
+  if (!text) {
+    return undefined;
+  }
+
+  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
+    const truncated = text
+      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
+      .replace(/\s+\S*$/, '')
+      .trim();
+    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 159)}…`;
+  }
+
+  return text;
+}
+
+function stripMatchingEdgeQuotes(value: string): string {
+  const quotes = new Set(['"', "'", '`', '“', '”', '‘', '’']);
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && quotes.has(value.charAt(start))) {
+    start += 1;
+  }
+
+  while (end > start && quotes.has(value.charAt(end - 1))) {
+    end -= 1;
+  }
+
+  return value.slice(start, end);
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
+  kickoffMessage,
+  freeformKickoffEnabled = false,
   formatWorkspaceName = identity,
   formatModelName = identity,
 }: {
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  /**
+   * Optional full router-generated kickoff string. Only used when
+   * `freeformKickoffEnabled` is true; otherwise the static template is used.
+   */
+  kickoffMessage?: string | null;
+  /**
+   * When false (default), ignore free-form kickoff text and use the static
+   * template. Gated by the DynamicKickoffMessage feature flag at call sites.
+   */
+  freeformKickoffEnabled?: boolean;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
+  if (freeformKickoffEnabled) {
+    const kickoff = normalizeKickoffMessage(kickoffMessage);
+    if (kickoff) {
+      return kickoff;
+    }
+  }
+
   const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
     ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
 
-  return `Getting started on your task in ${workspace}${model}`;
+  return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}`;
 }
 
 export function buildOtherRunningTasksText(

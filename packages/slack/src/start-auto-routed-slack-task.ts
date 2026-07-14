@@ -487,6 +487,9 @@ export async function startAutoRoutedSlackTask({
               ...(userRequestedModelDisplayName
                 ? { modelDisplayName: userRequestedModelDisplayName }
                 : {}),
+              ...(decision.result.kickoffMessage
+                ? { kickoffMessage: decision.result.kickoffMessage }
+                : {}),
               workspaceOnly: decision.result.workspaceOnly,
             },
           }
@@ -526,6 +529,7 @@ export async function startAutoRoutedSlackTask({
       agentName: AGENT_DISPLAY_NAME,
       workspaceDisplayName: workspace.workspaceDisplayName,
       modelDisplayName: userRequestedModelDisplayName,
+      kickoffMessage: decision.result.kickoffMessage,
       workspaceType: decision.result.workspace.type,
       workspaceValue,
       workspaceOnly: decision.result.workspaceOnly,

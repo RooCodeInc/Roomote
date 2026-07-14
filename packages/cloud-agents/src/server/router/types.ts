@@ -171,6 +171,12 @@ export interface RoutingResult {
   workspace: RoutingWorkspace;
   model?: RoutingTaskModelSelection;
   reasoning: string;
+  /**
+   * Full short user-facing kickoff sentence generated with the routing decision.
+   * Should naturally include the chosen environment (and model override when
+   * the user requested one). Surfaces may post this directly when valid.
+   */
+  kickoffMessage?: string;
   requestedWorkKindDecision?: RequestedWorkKindDecision;
   /**
    * True when the router result should be presented as workspace-only because
@@ -205,6 +211,11 @@ export interface WorkspaceResponse {
   workspaceValue: string;
   reasoning: string;
   confidence: number;
+  /**
+   * Short user-facing kickoff phrase generated with the routing decision.
+   * Surfaces may turn this into the chat started message.
+   */
+  kickoffMessage?: string | null;
   needsExternalLookup: boolean;
   externalReference: string | null;
   requestedModelId?: string | null;

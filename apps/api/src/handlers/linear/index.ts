@@ -19,7 +19,9 @@ import {
   enqueueTask,
   routeTask,
   buildLinearRoutingContext,
+  isDynamicKickoffMessageEnabled,
 } from '@roomote/cloud-agents/server';
+import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import { getRedis } from '@roomote/redis';
 import { postRouterDebugMessage } from '@roomote/slack';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
@@ -200,6 +202,7 @@ interface RoutedLinearTask {
   workspaceSelection: WorkspaceSelection;
   workspaceDisplayName: string;
   workspaceType: 'environment' | 'all_repositories';
+  kickoffMessage?: string;
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
   routingDurationMs?: number;
@@ -223,7 +226,11 @@ async function startLinearTask({
 
   await linearClient.emitThought(
     sessionId,
-    `Getting started on your task in ${routedTask.workspaceDisplayName}`,
+    buildTaskStartingText({
+      workspaceDisplayName: routedTask.workspaceDisplayName,
+      kickoffMessage: routedTask.kickoffMessage,
+      freeformKickoffEnabled: await isDynamicKickoffMessageEnabled(),
+    }),
     true,
   );
 
@@ -978,6 +985,9 @@ async function handleAgentSessionEvent(
           workspaceSelection: ws,
           workspaceDisplayName: wsDesc,
           workspaceType: deriveWorkspaceType(ws),
+          ...(result.kickoffMessage
+            ? { kickoffMessage: result.kickoffMessage }
+            : {}),
           reasoning: result.reasoning,
           routingDebug: result.debug,
           routingDurationMs,

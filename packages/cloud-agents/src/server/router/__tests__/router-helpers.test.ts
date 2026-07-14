@@ -168,6 +168,7 @@ describe('router helpers', () => {
       workspaceValue: 'Full Stack',
       reasoning: 'Best fit',
       confidence: 0.9,
+      kickoffMessage: null,
       needsExternalLookup: false,
       externalReference: null,
       requestedModelId: null,

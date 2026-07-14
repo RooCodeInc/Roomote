@@ -43,6 +43,14 @@ export const workspaceResponseSchema = z.object({
     .string()
     .describe('Brief explanation of your workspace decision'),
   confidence: confidenceField,
+  kickoffMessage: z
+    .string()
+    .nullable()
+    .describe(
+      'Full short user-facing kickoff sentence posted in chat (about 8-18 words). Naturally include the exact chosen environment name, and when requestedModelId is a real model also naturally include that model display name from the Available Models list. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, mentions, or trailing period. Always provide a non-empty value for real routed tasks.',
+    )
+    .optional()
+    .default(null),
   needsExternalLookup: needsExternalLookupField.optional().default(false),
   externalReference: externalReferenceField.optional().default(null),
   requestedModelId: z

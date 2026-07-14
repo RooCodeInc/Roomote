@@ -9,6 +9,8 @@ import {
 interface BuildStartedBlocksOptions {
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  kickoffMessage?: string | null;
+  freeformKickoffEnabled?: boolean;
   runId?: number | null;
   otherRunningTasksCount?: number;
   taskId?: string | null;
@@ -37,6 +39,8 @@ export function buildStartedBlocks(
   const {
     workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
+    freeformKickoffEnabled = false,
     runId,
     otherRunningTasksCount,
     taskId,
@@ -75,6 +79,8 @@ export function buildStartedBlocks(
   const text = buildTaskStartingText({
     workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
+    freeformKickoffEnabled,
   });
   const blocks: SlackBlock[] = [
     { type: 'section', text: { type: 'mrkdwn', text } },
