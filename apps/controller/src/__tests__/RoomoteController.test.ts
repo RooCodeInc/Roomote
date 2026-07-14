@@ -21,6 +21,7 @@ const {
     MODAL_ECR_OIDC_ROLE_ARN: undefined,
     MODAL_ECR_REGION: undefined,
     MODAL_REGIONS: undefined,
+    MODAL_VM_MEMORY_MIB: 8192,
     TRPC_URL: 'http://localhost:13001',
     DOCKER_WORKER_IMAGE: 'roomote-worker:local',
     DOCKER_WORKER_PLATFORM: 'linux/amd64',
@@ -114,6 +115,7 @@ describe('RoomoteController', () => {
     mockEnv.MODAL_ECR_OIDC_ROLE_ARN = undefined;
     mockEnv.MODAL_ECR_REGION = undefined;
     mockEnv.MODAL_REGIONS = undefined;
+    mockEnv.MODAL_VM_MEMORY_MIB = 8192;
     mockEnv.TRPC_URL = 'http://localhost:13001';
     mockEnv.DOCKER_WORKER_IMAGE = 'roomote-worker:local';
     mockEnv.DOCKER_WORKER_PLATFORM = 'linux/amd64';
@@ -478,6 +480,7 @@ describe('RoomoteController', () => {
         modalRegistryUsername: 'ghcr-user',
         modalRegistryPassword: 'ghcr-token',
         modalRegions: 'us,us-west',
+        modalVmMemoryMiB: 8192,
       }),
     );
   });

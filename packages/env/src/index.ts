@@ -1,6 +1,7 @@
 import { createEnv } from '@t3-oss/env-nextjs';
 import {
   DEFAULT_LOCAL_DOCKER_WORKER_IMAGE,
+  MODAL_VM_DEFAULT_MEMORY_MIB,
   resolveEffectiveDockerWorkerImage,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -205,6 +206,11 @@ const serverSchema = {
   MODAL_ECR_OIDC_ROLE_ARN: z.string().optional(),
   MODAL_ECR_REGION: z.string().optional(),
   MODAL_REGIONS: z.string().optional(),
+  MODAL_VM_MEMORY_MIB: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(MODAL_VM_DEFAULT_MEMORY_MIB),
   DAYTONA_API_KEY: z.string().optional(),
   DAYTONA_API_URL: z.string().url().optional(),
   DAYTONA_TARGET: z.string().optional(),
@@ -410,6 +416,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_ECR_OIDC_ROLE_ARN',
   'MODAL_ECR_REGION',
   'MODAL_REGIONS',
+  'MODAL_VM_MEMORY_MIB',
   'DAYTONA_API_KEY',
   'DAYTONA_API_URL',
   'DAYTONA_TARGET',

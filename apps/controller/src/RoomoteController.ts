@@ -105,6 +105,7 @@ export class RoomoteController extends BaseController {
           modalEcrOidcRoleArn: Env.MODAL_ECR_OIDC_ROLE_ARN,
           modalEcrRegion: Env.MODAL_ECR_REGION,
           modalRegions: resolvedEnv.MODAL_REGIONS,
+          modalVmMemoryMiB: Env.MODAL_VM_MEMORY_MIB,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });

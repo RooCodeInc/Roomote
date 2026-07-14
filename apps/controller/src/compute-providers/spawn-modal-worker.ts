@@ -150,6 +150,8 @@ export async function spawnModalWorker(
     modalEcrRegion?: string;
     /** Comma-separated Modal placement region tokens (`MODAL_REGIONS`). */
     modalRegions?: string;
+    /** Memory allocation for VM sandboxes that run nested Docker workloads. */
+    modalVmMemoryMiB: number;
     modalTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -171,6 +173,7 @@ export async function spawnModalWorker(
     modalEcrOidcRoleArn,
     modalEcrRegion,
     modalRegions,
+    modalVmMemoryMiB,
     modalTimeoutMs,
     localTarballPath,
     deploymentSlug,
@@ -273,7 +276,7 @@ export async function spawnModalWorker(
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
     ...(useVmRuntime
-      ? { configuredCpuCores: 2, configuredMemoryMiB: 4096 }
+      ? { configuredCpuCores: 2, configuredMemoryMiB: modalVmMemoryMiB }
       : {}),
   });
   const modalConfig = {
