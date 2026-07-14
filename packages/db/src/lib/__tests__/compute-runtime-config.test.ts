@@ -56,12 +56,31 @@ describe('resolveComputeProviderEnvValues', () => {
     );
   });
 
-  it('prefers a saved deployment env var over the derived worker image', async () => {
+  it('prefers the release-derived worker image over a saved Modal base image', async () => {
     const values = await resolveComputeProviderEnvValues('modal', {
       runtimeEnv: {
         MODAL_TOKEN_ID: 'id',
         MODAL_TOKEN_SECRET: 'secret',
         RELEASE_VERSION: 'v1.2.3',
+      },
+      executor: makeExecutor([
+        {
+          name: 'MODAL_BASE_IMAGE_REF',
+          value: 'registry.example.com/saved:tag',
+        },
+      ]),
+    });
+
+    expect(values.MODAL_BASE_IMAGE_REF).toBe(
+      'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
+    );
+  });
+
+  it('uses a saved Modal base image when no runtime worker image is derivable', async () => {
+    const values = await resolveComputeProviderEnvValues('modal', {
+      runtimeEnv: {
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
       },
       executor: makeExecutor([
         {
