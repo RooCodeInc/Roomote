@@ -66,6 +66,17 @@ export async function submitAutomationWorkItems(
       return c.json({ error: 'Task not found' }, 404);
     }
 
+    // Initiator stamp catches the new StandardTask CI path (no suggestionSource).
+    if (task?.initiatorAutomation === 'ci_failure_triage') {
+      return c.json(
+        {
+          error:
+            'CI failure triage no longer uses automation work items. Investigate and fix in the launched standard task.',
+        },
+        400,
+      );
+    }
+
     if (run.payloadKind !== TaskPayloadKind.Scan) {
       return c.json({ error: 'Task is not an automation scan task' }, 400);
     }
@@ -82,16 +93,6 @@ export async function submitAutomationWorkItems(
       return c.json(
         {
           error: 'Automation work items are not supported for this task source',
-        },
-        400,
-      );
-    }
-
-    if (automationSource === 'ci_failure_triage') {
-      return c.json(
-        {
-          error:
-            'CI failure triage no longer uses automation work items. Investigate and fix in the launched standard task.',
         },
         400,
       );

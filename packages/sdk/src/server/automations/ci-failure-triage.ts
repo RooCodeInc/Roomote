@@ -4,7 +4,8 @@ import {
   buildRepositoryCoverage,
   enqueueTask,
   getEnvironmentBackedCoverage,
-  tryClaimCiFailureTriageFingerprint,
+  releaseCiFailureTriageInvestigation,
+  tryClaimCiFailureTriageInvestigation,
 } from '@roomote/cloud-agents/server';
 import {
   db,
@@ -103,19 +104,22 @@ export async function ciFailureTriageJob(
         continue;
       }
 
+      // Same fingerprint scheme as webhooks so manual uses the repo-level claim
+      // that webhook investigations already hold for this repository.
       const fingerprint = buildCiFailureTriageFingerprint({
         repositoryFullName: coverage.repositoryFullName,
         workflowName: 'manual-run-now',
         headBranch: 'default',
       });
-      const claimed = await tryClaimCiFailureTriageFingerprint(
+      const claimed = await tryClaimCiFailureTriageInvestigation({
+        repositoryFullName: coverage.repositoryFullName,
         fingerprint,
-        `manual:${coverage.repositoryFullName}`,
-      );
+        marker: `manual:${coverage.repositoryFullName}`,
+      });
 
       if (!claimed) {
         console.log(
-          `${LOG_PREFIX} Skipping ${coverage.repositoryFullName}: active fingerprint claim`,
+          `${LOG_PREFIX} Skipping ${coverage.repositoryFullName}: active investigation claim`,
         );
         continue;
       }
@@ -127,38 +131,55 @@ export async function ciFailureTriageJob(
         },
       ];
 
-      const launchResult = await enqueueTask(
-        {
-          task: {
-            type: TaskPayloadKind.StandardTask,
-            payload: {
-              repo: coverage.repositoryFullName,
-              environmentId,
-              selectedRepositories: [coverage.repositoryFullName],
-              description: buildCiFailureTriagePrompt({
-                channelId,
-                repositoryFullNames: [coverage.repositoryFullName],
-                repositoryCoverage: coverageSlice,
-                scanWindowStart,
-                trigger: 'manual',
-                recentThreadFeedback,
-              }),
-              ...buildDestinationTaskPayloadFields(destination),
-              visibleInTranscript: false,
+      try {
+        const launchResult = await enqueueTask(
+          {
+            task: {
+              type: TaskPayloadKind.StandardTask,
+              payload: {
+                repo: coverage.repositoryFullName,
+                environmentId,
+                selectedRepositories: [coverage.repositoryFullName],
+                description: buildCiFailureTriagePrompt({
+                  channelId,
+                  repositoryFullNames: [coverage.repositoryFullName],
+                  repositoryCoverage: coverageSlice,
+                  scanWindowStart,
+                  trigger: 'manual',
+                  recentThreadFeedback,
+                }),
+                ...buildDestinationTaskPayloadFields(destination),
+                visibleInTranscript: false,
+              },
             },
+            initiator: { kind: 'automation', key: 'ci_failure_triage' },
+            workflow: 'standard',
+            surface: 'system',
+            trigger: 'manual',
+            visibility: 'hidden',
+            channels: { slackChannelId: channelId },
           },
-          initiator: { kind: 'automation', key: 'ci_failure_triage' },
-          workflow: 'standard',
-          surface: 'system',
-          trigger: 'manual',
-          visibility: 'hidden',
-          channels: { slackChannelId: channelId },
-        },
-        { launchClass: 'automation' },
-      );
+          { launchClass: 'automation' },
+        );
 
-      result.launchedTaskId ??= launchResult.taskId;
-      launched++;
+        result.launchedTaskId ??= launchResult.taskId;
+        launched++;
+      } catch (enqueueError) {
+        await releaseCiFailureTriageInvestigation({
+          repositoryFullName: coverage.repositoryFullName,
+          fingerprint,
+        }).catch(() => undefined);
+        const message =
+          enqueueError instanceof Error
+            ? enqueueError.message
+            : String(enqueueError);
+        result.errors.push(
+          `${coverage.repositoryFullName}: failed to launch (${message})`,
+        );
+        console.error(
+          `${LOG_PREFIX} Failed to launch for ${coverage.repositoryFullName}: ${message}`,
+        );
+      }
     }
 
     await recordAutomationRunOutcome(db, {

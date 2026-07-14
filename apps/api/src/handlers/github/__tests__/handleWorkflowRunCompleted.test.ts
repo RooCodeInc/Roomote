@@ -41,7 +41,8 @@ vi.mock('@roomote/redis', () => ({
   }),
 }));
 
-const mockTryClaimCiFailureTriageFingerprint = vi.hoisted(() => vi.fn());
+const mockTryClaimCiFailureTriageInvestigation = vi.hoisted(() => vi.fn());
+const mockReleaseCiFailureTriageInvestigation = vi.hoisted(() => vi.fn());
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildCiFailureTriagePrompt: (params: {
@@ -61,8 +62,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     headBranch: string;
   }) =>
     `${params.repositoryFullName}::${params.workflowName}::${params.headBranch}`,
-  tryClaimCiFailureTriageFingerprint: (...args: unknown[]) =>
-    mockTryClaimCiFailureTriageFingerprint(...args),
+  tryClaimCiFailureTriageInvestigation: (...args: unknown[]) =>
+    mockTryClaimCiFailureTriageInvestigation(...args),
+  releaseCiFailureTriageInvestigation: (...args: unknown[]) =>
+    mockReleaseCiFailureTriageInvestigation(...args),
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -165,7 +168,8 @@ describe('handleWorkflowRunCompleted', () => {
       { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-api' },
     ]);
     mockRedisSet.mockResolvedValue('OK');
-    mockTryClaimCiFailureTriageFingerprint.mockResolvedValue(true);
+    mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
+    mockReleaseCiFailureTriageInvestigation.mockResolvedValue(undefined);
     mockResolveAutomationSlackTarget.mockResolvedValue({
       channelId: 'C123MANAGER',
       slack: {
@@ -331,8 +335,8 @@ describe('handleWorkflowRunCompleted', () => {
     expect(mockUpdateMessage).not.toHaveBeenCalled();
   });
 
-  it('skips silently when the fingerprint claim is held', async () => {
-    mockTryClaimCiFailureTriageFingerprint.mockResolvedValue(false);
+  it('skips silently when the investigation claim is held', async () => {
+    mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(false);
 
     const result = await handleWorkflowRunCompleted(buildPayload());
 
@@ -340,6 +344,17 @@ describe('handleWorkflowRunCompleted', () => {
     expect(result.message).toContain('already has an active task');
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('releases investigation claims when enqueue fails so retries are not blocked', async () => {
+    mockEnqueueTask.mockRejectedValue(new Error('enqueue failed'));
+
+    await handleWorkflowRunCompleted(buildPayload());
+
+    expect(mockReleaseCiFailureTriageInvestigation).toHaveBeenCalledWith({
+      repositoryFullName: 'acme/api',
+      fingerprint: 'acme/api::CI::main',
+    });
   });
 
   it('ignores successful workflow runs', async () => {

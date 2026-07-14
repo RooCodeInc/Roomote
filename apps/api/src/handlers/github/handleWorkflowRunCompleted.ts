@@ -4,7 +4,8 @@ import {
   buildRepositoryCoverage,
   enqueueTask,
   getTaskUrl,
-  tryClaimCiFailureTriageFingerprint,
+  tryClaimCiFailureTriageInvestigation,
+  releaseCiFailureTriageInvestigation,
   buildCiFailureTriageFingerprint,
 } from '@roomote/cloud-agents/server';
 import {
@@ -248,12 +249,13 @@ export async function handleWorkflowRunCompleted(
     workflowName,
     headBranch: run.head_branch,
   });
-  const fingerprintClaimed = await tryClaimCiFailureTriageFingerprint(
+  const investigationClaimed = await tryClaimCiFailureTriageInvestigation({
+    repositoryFullName: match.repositoryFullName,
     fingerprint,
-    run.html_url,
-  );
+    marker: run.html_url,
+  });
 
-  if (!fingerprintClaimed) {
+  if (!investigationClaimed) {
     return {
       status: 'ok',
       message: 'CI failure triage fingerprint already has an active task',
@@ -399,6 +401,20 @@ export async function handleWorkflowRunCompleted(
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
+    // Launch failed: free claims so the next webhook/manual retry can run.
+    await releaseCiFailureTriageInvestigation({
+      repositoryFullName: match.repositoryFullName,
+      fingerprint,
+    }).catch((releaseError: unknown) => {
+      console.warn(
+        `${LOG_PREFIX} Failed to release investigation claims after launch error: ${
+          releaseError instanceof Error
+            ? releaseError.message
+            : String(releaseError)
+        }`,
+      );
+    });
 
     await recordAutomationRunOutcome(db, {
       key: 'ci_failure_triage',

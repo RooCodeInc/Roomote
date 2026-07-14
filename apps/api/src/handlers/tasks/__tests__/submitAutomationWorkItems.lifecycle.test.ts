@@ -575,6 +575,53 @@ describe('submitAutomationWorkItems lifecycle', () => {
     expect(mockLaunchActWorkItems).not.toHaveBeenCalled();
   });
 
+  it('rejects CI failure triage work items from StandardTask using initiator stamp', async () => {
+    const environmentId = '11111111-1111-1111-1111-111111111111';
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: null,
+      payload: {
+        repo: 'acme/app',
+        environmentId,
+        selectedRepositories: ['acme/app'],
+        description: '$ci-failure-triage',
+      },
+    });
+    mockTaskFindFirst.mockResolvedValueOnce({
+      initiatorUserId: null,
+      initiatorAutomation: 'ci_failure_triage',
+    });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/automation_work_items', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workItems: [
+            {
+              title: 'Fix parser nil access',
+              brief: 'Nil access is driving a failing CI run.',
+              actionKind: 'code_change_pr',
+              disposition: 'act',
+              executionPrompt:
+                '$implement-changes\nReproduce the failing job, fix it, and open a PR.',
+              targetRepositoryFullName: 'acme/app',
+              targetEnvironmentId: environmentId,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'CI failure triage no longer uses automation work items. Investigate and fix in the launched standard task.',
+    });
+    expect(mockLaunchActWorkItems).not.toHaveBeenCalled();
+  });
+
   it('falls back to non-Slack execution instructions when no Slack target resolves', async () => {
     const environmentId = '11111111-1111-1111-1111-111111111111';
     const actWorkItem = buildActWorkItem();
