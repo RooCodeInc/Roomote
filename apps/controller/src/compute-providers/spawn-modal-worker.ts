@@ -8,6 +8,7 @@ import {
   type TaskRun,
   createComputeProviderMutationEventRecorder,
   db,
+  tasks,
   taskRuns,
   eq,
 } from '@roomote/db/server';
@@ -113,6 +114,26 @@ function getWorkerLaunchArgs(taskRun: TaskRun, machineId: string): string[] {
     : [command, taskRun.id.toString()];
 }
 
+async function needsModalVmRuntime(
+  taskRun: TaskRun,
+  environmentConfig: Awaited<
+    ReturnType<typeof getNamedPortsForTaskRun>
+  >['environmentConfig'],
+): Promise<boolean> {
+  if (environmentConfig?.docker_projects?.length) {
+    return true;
+  }
+
+  const task = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskRun.taskId),
+    columns: { workflow: true },
+  });
+
+  // Environment setup must be able to discover and validate Docker projects
+  // before an environment config exists to advertise that requirement.
+  return task?.workflow === 'setup_onboarding';
+}
+
 export async function spawnModalWorker(
   taskRun: TaskRun,
   authToken: string,
@@ -161,7 +182,7 @@ export async function spawnModalWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
-  const needsVmRuntime = Boolean(environmentConfig?.docker_projects?.length);
+  const useVmRuntime = await needsModalVmRuntime(taskRun, environmentConfig);
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
@@ -251,7 +272,7 @@ export async function spawnModalWorker(
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
-    ...(needsVmRuntime
+    ...(useVmRuntime
       ? { configuredCpuCores: 2, configuredMemoryMiB: 4096 }
       : {}),
   });
@@ -271,7 +292,7 @@ export async function spawnModalWorker(
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
     ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
-    ...(needsVmRuntime ? { vmRuntime: true } : {}),
+    ...(useVmRuntime ? { vmRuntime: true } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),
