@@ -52,14 +52,14 @@ const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
 /**
  * Steps that may open from a deep link even when earlier setup is still
  * pending — used for credential/error recovery (e.g. GitHub callback → config)
- * and sandbox provider switches. Broader choice steps still pin when revisiting
- * at or behind the first pending step via PINNABLE_SETUP_STEPS.
+ * and sandbox provider switches. Pure choice pickers (e.g. source-control-
+ * provider) stay off this list so they cannot jump ahead of pending earlier
+ * steps; PINNABLE_SETUP_STEPS still covers in-range revisits.
  */
 const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
   'auth-provider',
   'auth-env-vars',
   'env-vars',
-  'source-control-provider',
   'source-control-config',
   'compute-provider',
   'compute-config',

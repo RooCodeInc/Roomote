@@ -743,6 +743,31 @@ describe('useSetupFlow', () => {
     );
   });
 
+  it('blocks deep-linking ahead to source-control-provider when model setup is still required', async () => {
+    mockStatus({
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=source-control-provider');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-env-vars');
+    });
+    expect(routerMock.replace).toHaveBeenCalledWith(
+      '/setup?step=auth-env-vars',
+    );
+  });
+
   it('skips auth-env-vars and env-vars when runtime auth and model setup are already satisfied', async () => {
     mockStatus({
       hasSlack: true,
@@ -1554,7 +1579,33 @@ describe('useSetupFlow', () => {
   });
 
   it('keeps a satisfied pinnable step when browser history lands on it', async () => {
+    // Progress past auth + inference so the first pending step is connect;
+    // history back to the already-chosen picker should pin in-range.
     mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: true,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: 'slack',
+        runtimeConfiguredProviders: ['slack'],
+        lockReason: 'runtime_env',
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
       sourceControlSetup: {
         setupSatisfied: false,
         setupSatisfiedByRuntimeEnv: false,
@@ -1580,8 +1631,8 @@ describe('useSetupFlow', () => {
         ],
       },
       setupNewState: {
-        authProvider: null,
-        modelProvider: null,
+        authProvider: 'slack',
+        modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
         selectedRepositoryIds: [],

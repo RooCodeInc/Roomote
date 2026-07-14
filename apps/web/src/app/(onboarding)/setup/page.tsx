@@ -493,6 +493,13 @@ export default function SetupPage() {
               return;
             }
 
+            // Skipped/no-provider paths never completed auth-env-vars, so
+            // return to the picker instead of an empty config screen.
+            if (communicationSkipped || !communicationProvider) {
+              goToStep('auth-provider', { revisit: true });
+              return;
+            }
+
             goToStep('auth-env-vars', { revisit: true });
           }}
         />
