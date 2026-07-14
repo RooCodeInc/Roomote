@@ -50,8 +50,17 @@ describe('Browser containment policy', () => {
       'utf8',
     );
 
+    // Browser-level verification is delegated to the hidden proof-runner
+    // subagent; the parent environment-setup workflow itself must never
+    // issue browser commands or load browser tooling.
     expect(environmentSetupSkillContent).toContain(
-      'Do not use direct browser automation from `environment-setup`.',
+      'Do not issue browser commands directly from this workflow; browser-level verification belongs to the delegated `proof-runner` subagent.',
+    );
+    expect(environmentSetupSkillContent).toContain(
+      'do not issue browser commands from the parent workflow as a substitute',
+    );
+    expect(environmentSetupSkillContent).toContain(
+      'never capture screenshots directly from the parent workflow',
     );
     expect(environmentSetupSkillContent).not.toContain('agent-browser');
   });
