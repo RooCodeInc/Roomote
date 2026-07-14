@@ -6,6 +6,15 @@ import { TaskPayloadKind } from '@roomote/types';
 
 import type { StartupLogger } from '../../../logging';
 import { initializeDockerProjects } from '../workspace/docker-projects';
+import {
+  appendDockerProjectLog,
+  startDockerProjectLogFollower,
+} from '../workspace/docker-project-logs';
+
+vi.mock('../workspace/docker-project-logs', () => ({
+  appendDockerProjectLog: vi.fn().mockResolvedValue(undefined),
+  startDockerProjectLogFollower: vi.fn().mockResolvedValue(undefined),
+}));
 
 const logger = {
   userLog: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -88,6 +97,22 @@ describe('initializeDockerProjects', () => {
       path.join(workspacePath, '.roomote', 'docker-projects'),
     );
     expect(generatedFiles).toContain('roomote-dev.ports.yaml');
+
+    expect(appendDockerProjectLog).toHaveBeenCalledWith(
+      'dev',
+      expect.stringContaining('Preparing Docker project dev'),
+    );
+    expect(startDockerProjectLogFollower).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectName: 'dev',
+        cwd: repositoryPath,
+        composeArgs: expect.arrayContaining([
+          'compose',
+          '--project-name',
+          'roomote-dev',
+        ]),
+      }),
+    );
   });
 
   it('generates a one-service Compose project for a Dockerfile', async () => {

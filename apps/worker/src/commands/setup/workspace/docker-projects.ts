@@ -8,7 +8,13 @@ import {
   type DockerProject,
   type EnvironmentConfig,
   isServicesEnabledTaskPayloadKind,
+  toComposeProjectName,
 } from '@roomote/types';
+
+import {
+  appendDockerProjectLog,
+  startDockerProjectLogFollower,
+} from './docker-project-logs';
 
 import { substituteEnvVars } from '../../../env';
 import type { StartupLogger } from '../../../logging';
@@ -130,14 +136,6 @@ function resolveWithin(root: string, relativePath: string): string {
   }
 
   return resolvedPath;
-}
-
-function toComposeProjectName(name: string): string {
-  return `roomote-${name}`
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^[^a-z0-9]+/, '')
-    .slice(0, 63);
 }
 
 function findNamedPort(config: EnvironmentConfig, namedPort: string): number {
@@ -392,6 +390,10 @@ async function startDockerProject({
   logger.userLog.log(
     `Building and starting Docker project ${resolved.project.name}...`,
   );
+  await appendDockerProjectLog(
+    resolved.project.name,
+    `[roomote] Building and starting Docker project ${resolved.project.name} (compose project ${resolved.projectName})...`,
+  );
   const services =
     resolved.project.type === 'compose'
       ? (resolved.project.services ?? [])
@@ -425,6 +427,17 @@ async function startDockerProject({
       commandOptions,
     );
     if (diagnostics) logger.debug.error(diagnostics);
+    await appendDockerProjectLog(
+      resolved.project.name,
+      [
+        `[roomote] Docker project ${resolved.project.name} failed to start: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        diagnostics,
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+    );
     throw new Error(
       [error instanceof Error ? error.message : String(error), diagnostics]
         .filter(Boolean)
@@ -435,6 +448,28 @@ async function startDockerProject({
   if (startResult.stdout) logger.debug.log(startResult.stdout);
   if (startResult.stderr) logger.debug.log(startResult.stderr);
   logger.userLog.log(`Docker project ${resolved.project.name} is ready`);
+
+  const startOutput = [startResult.stdout, startResult.stderr]
+    .filter(Boolean)
+    .join('\n');
+
+  if (startOutput) {
+    await appendDockerProjectLog(
+      resolved.project.name,
+      redactContainerDiagnostics(startOutput, resolved.sensitiveValues),
+    );
+  }
+
+  await appendDockerProjectLog(
+    resolved.project.name,
+    `[roomote] Docker project ${resolved.project.name} is ready; following container logs below.`,
+  );
+  await startDockerProjectLogFollower({
+    projectName: resolved.project.name,
+    composeArgs: buildComposeArgs(resolved, []),
+    cwd: resolved.projectRoot,
+    env: resolved.env,
+  });
 }
 
 export async function initializeDockerProjects(
@@ -456,13 +491,25 @@ export async function initializeDockerProjects(
 
   const baseEnv = getDefinedEnv(options.envVars);
 
+  // Create each project's log file up front so the Logs panel can start
+  // tailing it (tail -f needs the file to exist) before startup output lands.
+  for (const project of projects) {
+    await appendDockerProjectLog(
+      project.name,
+      `[roomote] Preparing Docker project ${project.name}...`,
+    );
+  }
+
   try {
     await ensureDockerRuntime({ preparedWorkspace, baseEnv, runCommand });
   } catch (error) {
-    throw new Error(
-      `Docker Compose is not available in this task environment: ${error instanceof Error ? error.message : String(error)}`,
-      { cause: error },
-    );
+    const message = `Docker Compose is not available in this task environment: ${error instanceof Error ? error.message : String(error)}`;
+
+    for (const project of projects) {
+      await appendDockerProjectLog(project.name, `[roomote] ${message}`);
+    }
+
+    throw new Error(message, { cause: error });
   }
 
   for (const project of projects) {
@@ -479,9 +526,14 @@ export async function initializeDockerProjects(
       if (project.required === false) {
         logger.userLog.warn(`${message} Continuing because it is optional.`);
         logger.debug.error(error);
+        await appendDockerProjectLog(
+          project.name,
+          `[roomote] ${message} Continuing because it is optional.`,
+        );
         continue;
       }
 
+      await appendDockerProjectLog(project.name, `[roomote] ${message}`);
       throw new Error(message, { cause: error });
     }
   }
