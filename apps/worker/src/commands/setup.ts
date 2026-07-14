@@ -40,6 +40,7 @@ import {
   installOrganizationEnvironmentSkills,
   executeOrganizationEnvironmentRepositoryCommands,
   setupOrganizationEnvironment,
+  EnvironmentSetupStatusWriter,
 } from './setup/index';
 
 export type SetupMode = 'full' | 'directDispatch';
@@ -395,6 +396,22 @@ async function runSetup({
         return;
       }
 
+      // Publish the command plan to <workspace>/.roomote/setup-status.json
+      // before the agent can start, so the sandbox always has an observable
+      // answer to "have the repository setup commands finished?".
+      let setupStatusWriter: EnvironmentSetupStatusWriter | undefined;
+
+      if (
+        workspace.environmentConfig.repositories.some(
+          (repository) => (repository.commands?.length ?? 0) > 0,
+        )
+      ) {
+        setupStatusWriter = new EnvironmentSetupStatusWriter(
+          initializeRepositoriesResult.workspacePath,
+        );
+        setupStatusWriter.initialize(workspace.environmentConfig.repositories);
+      }
+
       if (!backgroundEnvironmentSetup) {
         const warnings =
           (await setupOrganizationEnvironment(logger, {
@@ -403,6 +420,8 @@ async function runSetup({
             userEnvVars: workspaceOptions.userEnvVars,
             preparedWorkspace: initializeRepositoriesResult,
             continueRepositoryCommandFailures: continueEnvironmentSetupFailures,
+            setupStatusWriter,
+            recordPhase,
           })) ?? [];
 
         environmentSetupWarnings.push(...warnings);
@@ -431,6 +450,8 @@ async function runSetup({
                   userEnvVars: workspaceOptions.userEnvVars,
                   preparedWorkspace: initializeRepositoriesResult,
                   continueRepositoryCommandFailures: true,
+                  setupStatusWriter,
+                  recordPhase,
                 });
 
               environmentSetupWarnings.push(...warnings);

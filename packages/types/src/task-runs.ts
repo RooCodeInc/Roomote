@@ -1962,6 +1962,26 @@ export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
 
 /**
+ * Lifecycle of environment setup (repository setup commands and Docker
+ * projects) for a task run. Distinct from `setupCompletedAt`: that milestone
+ * stamps when the blocking portion of setup returned, while environment setup
+ * may keep running in the background after the agent has already started.
+ *
+ * - running: Background environment setup is still executing.
+ * - completed: All environment setup finished without warnings.
+ * - completed_with_warnings: Finished, but one or more steps reported warnings.
+ * - failed: Environment setup aborted with an unexpected error.
+ */
+export const environmentSetupStates = [
+  'running',
+  'completed',
+  'completed_with_warnings',
+  'failed',
+] as const;
+
+export type EnvironmentSetupState = (typeof environmentSetupStates)[number];
+
+/**
  * Task phases reported by the worker's HarnessManager, plus control-plane
  * phases used before a worker can start.
  *

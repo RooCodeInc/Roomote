@@ -21,4 +21,5 @@ export {
   installOrganizationEnvironmentSkills,
   executeOrganizationEnvironmentRepositoryCommands,
   setupOrganizationEnvironment,
+  EnvironmentSetupStatusWriter,
 } from './workspace';

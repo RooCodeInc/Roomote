@@ -36,7 +36,11 @@ import { recordChatTurnStart } from '../mcp/roomote-mcp-server/chat-reply-satisf
 import { recordSandboxPromptSlackTurnStart } from '../sandbox-server/procedures/slackReplyTurnTracking';
 import { type IntegrationMcpOptions } from '../commands/setup/setup-mcps';
 
-import type { RunTaskOptions, RunTaskState } from './types';
+import type {
+  EnvironmentSetupSettledOutcome,
+  RunTaskOptions,
+  RunTaskState,
+} from './types';
 import {
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_DEV_MS,
@@ -123,6 +127,32 @@ function formatWorkspaceReadinessWarnings(
     'Acknowledge this politely if it affects the user request, and do not assume the environment is fully configured.',
     ...normalizedWarnings.map((warning) => `- ${warning}`),
   ].join('\n');
+}
+
+/**
+ * In-session notification delivered when background environment setup
+ * settles while the agent is already working.
+ */
+function buildEnvironmentSetupSettledPrompt(
+  outcome: EnvironmentSetupSettledOutcome,
+): string {
+  if (outcome.status === 'rejected') {
+    return [
+      'Environment setup update: background environment setup failed unexpectedly.',
+      `Error: ${outcome.errorMessage}`,
+      'Check `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root before relying on installed dependencies or running services. Continue with the user request and mention the failure if it affects your work.',
+    ].join('\n');
+  }
+
+  if (outcome.warningMessages.length > 0) {
+    return [
+      'Environment setup update: background environment setup (repository setup commands and Docker projects) finished with warnings:',
+      ...outcome.warningMessages.map((warning) => `- ${warning}`),
+      'Details are in `.roomote/setup-status.json` and `.roomote/setup-logs/` in the workspace root. Verify anything you depend on is actually available. Continue with the user request; only mention this if it affects your work.',
+    ].join('\n');
+  }
+
+  return 'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully. The environment is now fully configured; `.roomote/setup-status.json` has per-command results. Continue with the user request — no action or acknowledgement is needed.';
 }
 
 function getInitialSlackTurnMessageTs(taskRun: {
@@ -497,6 +527,7 @@ export const runTask = async ({
   repoPaths,
   repoLocalSkills,
   workspaceReadinessWarnings,
+  backgroundEnvironmentSetup,
   prompt,
   harnessInstructions,
   requestedWorkKind,
@@ -764,6 +795,8 @@ export const runTask = async ({
       environmentConfig,
       {
         envVars,
+        backgroundEnvironmentSetupPending:
+          backgroundEnvironmentSetup?.hasPendingBackgroundSetup ?? false,
       },
     );
     const environmentInstructions = formatEnvironmentInstructions(
@@ -1071,6 +1104,39 @@ export const runTask = async ({
     });
     taskCancellation.bindCancelTask(() => {
       harnessManager?.cancelTask();
+    });
+    // Close the loop on background environment setup: when it settles while
+    // the agent is actively working, push a notification into the session so
+    // the agent stops guessing whether dependencies are installed. If the
+    // task is not mid-turn (settled before start, or already waiting for a
+    // prompt), skip the injection — waking an idle task would burn a turn for
+    // nothing, and .roomote/setup-status.json already has the ground truth.
+    backgroundEnvironmentSetup?.onSettled((outcome) => {
+      const currentManager = harnessManager;
+
+      if (!currentManager) {
+        return;
+      }
+
+      if (currentManager.getStatus().phase !== 'running') {
+        return;
+      }
+
+      const sent = currentManager.sendFollowUpPrompt({
+        prompt: buildEnvironmentSetupSettledPrompt(outcome),
+        visibleInTranscript: false,
+        source: 'environment-setup',
+      });
+
+      void recordWorkerRuntimeEvent({
+        eventType: 'decision',
+        message: `Background environment setup settled (${outcome.status}) while task run #${taskRun.id} was running; in-session notification ${sent ? 'delivered' : 'was not accepted by the harness'}.`,
+        details: {
+          reason: 'background_environment_setup_notification',
+          outcome: outcome.status,
+          delivered: sent,
+        },
+      });
     });
     harnessManager.on('taskStateEvent', (eventName) => {
       void recordWorkerRuntimeEvent({

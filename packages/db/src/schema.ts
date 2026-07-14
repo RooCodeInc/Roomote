@@ -40,6 +40,7 @@ import type {
   RunEventSource,
   RunEventType,
   EnvironmentConfig,
+  EnvironmentSetupState,
   TaskMessageEventType,
   TaskMessageRole,
   TaskMessageProtocol,
@@ -1005,6 +1006,14 @@ export const taskRuns = pgTable(
     provisionReadyAt: timestamp('provision_ready_at'),
     startedAt: timestamp('started_at'),
     setupCompletedAt: timestamp('setup_completed_at'),
+    // Environment setup (repository setup commands + Docker projects) can
+    // outlive setupCompletedAt when it runs in the background while the agent
+    // is already working. These track its real lifecycle so the UI can show
+    // "setup still running" during the interactive phase.
+    environmentSetupState: text(
+      'environment_setup_state',
+    ).$type<EnvironmentSetupState>(),
+    environmentSetupCompletedAt: timestamp('environment_setup_completed_at'),
     harnessStartedAt: timestamp('harness_started_at'),
     runtimeTaskStartedAt: timestamp('runtime_task_started_at'),
     firstAssistantOutputAt: timestamp('first_assistant_output_at'),

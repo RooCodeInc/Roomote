@@ -14,6 +14,7 @@ export * from './get-resolved-runtime-env-vars';
 export * from './extract-pull-requests';
 export * from './record-task-run-event';
 export * from './stamp-milestone';
+export * from './update-environment-setup';
 export * from './record-task-message-envelope';
 export * from './record-task-inference-usage';
 export * from './record-compute-provider-usage';

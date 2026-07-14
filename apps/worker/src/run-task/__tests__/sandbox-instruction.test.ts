@@ -308,6 +308,50 @@ describe('buildSandboxInstruction', () => {
     );
   });
 
+  it('tells the agent setup may still be running when background environment setup is pending', () => {
+    const environmentConfig = {
+      name: 'Sandbox',
+      description: 'Test environment',
+      repositories: [
+        {
+          repository: 'owner/repo',
+          commands: [
+            {
+              name: 'Install deps',
+              run: 'pnpm install',
+              timeout: 600,
+              continue_on_error: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const pendingInstruction =
+      buildSandboxInstruction(false, environmentConfig, {
+        backgroundEnvironmentSetupPending: true,
+      }) ?? '';
+
+    expect(pendingInstruction).toContain(
+      'run in the background and may still be executing while you work',
+    );
+    expect(pendingInstruction).toContain('.roomote/setup-status.json');
+    expect(pendingInstruction).toContain('.roomote/setup-logs/');
+    expect(pendingInstruction).not.toContain(
+      'were already executed before your task started',
+    );
+
+    const settledInstruction =
+      buildSandboxInstruction(false, environmentConfig, {
+        backgroundEnvironmentSetupPending: false,
+      }) ?? '';
+
+    expect(settledInstruction).toContain(
+      'were already executed before your task started',
+    );
+    expect(settledInstruction).toContain('.roomote/setup-status.json');
+  });
+
   it('omits external preview URLs when configured hosts are unavailable', () => {
     const instruction = buildSandboxInstruction(
       false,

@@ -25,6 +25,31 @@ import type {
 export type RunTaskContext = Record<string, unknown>;
 
 /**
+ * How background environment setup (repository setup commands + Docker
+ * projects) ended, as delivered to `onSettled` listeners.
+ */
+export type EnvironmentSetupSettledOutcome =
+  | { status: 'fulfilled'; warningMessages: string[] }
+  | { status: 'rejected'; errorMessage: string };
+
+/**
+ * Lets the task runtime observe background environment setup without owning
+ * it. Implemented by BackgroundEnvironmentSetupController; consumed by
+ * runTask to (a) tell the agent whether setup is still running and (b) push a
+ * notification into the harness session when it settles mid-task.
+ */
+export interface BackgroundEnvironmentSetupNotifier {
+  /** True while environment setup is still running in the background. */
+  readonly hasPendingBackgroundSetup: boolean;
+  /**
+   * Register a listener invoked once background setup settles. Fires
+   * immediately (synchronously) if setup already settled; never fires when
+   * there is no background setup.
+   */
+  onSettled(listener: (outcome: EnvironmentSetupSettledOutcome) => void): void;
+}
+
+/**
  * Task-level channel bindings from the SDK dequeue/resume response's `task`
  * object. These live on the tasks row and are the preferred source for
  * Slack/Linear routing decisions; payload-derived extraction remains the
@@ -128,6 +153,12 @@ export type RunTaskOptions = {
   repoPaths?: Record<string, string>;
   repoLocalSkills?: RepoLocalSkill[];
   workspaceReadinessWarnings?: string[];
+  /**
+   * Observer for environment setup still finishing in the background. Used to
+   * pick accurate readiness wording for the agent and to notify it in-session
+   * when setup settles.
+   */
+  backgroundEnvironmentSetup?: BackgroundEnvironmentSetupNotifier;
   /**
    * Task prompt. Optional for Session jobs which wait for the first prompt
    * from the web UI.
