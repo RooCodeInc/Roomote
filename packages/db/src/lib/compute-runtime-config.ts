@@ -5,6 +5,7 @@ import {
   SETUP_COMPUTE_PROVIDER_CATALOG,
   SETUP_COMPUTE_PROVIDER_IDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
+  deriveModalBaseImageRefDefault,
   resolveDerivedModalBaseImageRef,
   deriveWorkerImageFromReleaseVersion,
   isRequiredComputeField,
@@ -176,11 +177,13 @@ export async function resolveDefaultComputeProvider(
 /**
  * Resolves the setup-catalog env values for one compute provider, preferring
  * the process env and falling back to encrypted deployment environment
- * variables saved during setup. For Modal, a still-missing base image ref
- * falls back to the deployment's effective worker image (the explicit
- * DOCKER_WORKER_IMAGE or the ref derived from the baked RELEASE_VERSION),
- * then the development-only GHCR latest image. The published worker image
- * doubles as the Modal base image.
+ * variables saved during setup. For Modal, an explicit process-level base
+ * image wins; otherwise the deployment's current worker image (the explicit
+ * DOCKER_WORKER_IMAGE or the ref derived from the baked RELEASE_VERSION)
+ * outranks a saved base image so upgrades cannot remain pinned to an older
+ * auto-derived worker image. Development finally falls back to the public
+ * GHCR channel image. The published worker image doubles as the Modal base
+ * image.
  */
 export async function resolveComputeProviderEnvValues(
   provider: ComputeProvider,
@@ -207,17 +210,33 @@ export async function resolveComputeProviderEnvValues(
   const resolvedValues: Partial<Record<string, string>> = {};
   const missingEnvVarNames: string[] = [];
 
+  const effectiveRuntimeWorkerImage =
+    runtimeEnv.DOCKER_WORKER_IMAGE?.trim() ||
+    deriveWorkerImageFromReleaseVersion(runtimeEnv) ||
+    undefined;
+  const runtimeManagedModalBaseImage =
+    provider === 'modal' && !runtimeEnv.MODAL_BASE_IMAGE_REF
+      ? deriveModalBaseImageRefDefault(effectiveRuntimeWorkerImage)
+      : null;
+
+  if (runtimeManagedModalBaseImage) {
+    resolvedValues.MODAL_BASE_IMAGE_REF = runtimeManagedModalBaseImage;
+  }
+
   for (const envVarName of envVarNames) {
     const runtimeValue = runtimeEnv[envVarName];
 
     if (runtimeValue) {
       resolvedValues[envVarName] = runtimeValue;
+    } else if (resolvedValues[envVarName]) {
+      continue;
     } else {
       missingEnvVarNames.push(envVarName);
     }
   }
 
   if (missingEnvVarNames.length > 0) {
+    const missingEnvVarNameSet = new Set(missingEnvVarNames);
     const encryptedEnvVars = await executor
       .select({
         name: environmentVariables.name,
@@ -227,6 +246,10 @@ export async function resolveComputeProviderEnvValues(
       .where(inArray(environmentVariables.name, missingEnvVarNames));
 
     for (const envVar of encryptedEnvVars) {
+      if (!missingEnvVarNameSet.has(envVar.name)) {
+        continue;
+      }
+
       const decryptedValue = await decryptSecrets<string>(envVar.value);
 
       if (decryptedValue === null) {
@@ -248,13 +271,9 @@ export async function resolveComputeProviderEnvValues(
   // workers back to a stale image. Development falls back to the public
   // latest image when no hosted image is derivable.
   if (provider === 'modal' && !resolvedValues.MODAL_BASE_IMAGE_REF) {
-    const effectiveWorkerImage =
-      runtimeEnv.DOCKER_WORKER_IMAGE?.trim() ||
-      deriveWorkerImageFromReleaseVersion(runtimeEnv) ||
-      undefined;
     const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
       ...runtimeEnv,
-      DOCKER_WORKER_IMAGE: effectiveWorkerImage,
+      DOCKER_WORKER_IMAGE: effectiveRuntimeWorkerImage,
     });
 
     if (derivedBaseImageRef) {
