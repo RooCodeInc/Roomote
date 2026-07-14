@@ -7,6 +7,7 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {},
   githubInstallations: {},
+  repositories: {},
   slackInstallations: {},
   getAutomationRuntime: vi.fn(),
   recordAutomationRunOutcome: vi.fn(),
@@ -64,6 +65,7 @@ const stats = {
   mergedRoomotePullRequestPercentage: 67,
   additions: 123,
   deletions: 45,
+  locScope: 'all' as const,
   mostActiveRepo: {
     fullName: 'acme/app',
     pullRequestCount: 5,
@@ -99,6 +101,25 @@ describe('formatManagerStatsMessage', () => {
       '· PR merged with me: *2 (67% of 3 authored)*',
     );
     expect(message.text).not.toContain('Share of total PRs');
+  });
+
+  it('reports LOC without a scope note when all Roomote PRs are on GitHub', () => {
+    const message = formatManagerStatsMessage({
+      stats,
+    });
+
+    expect(message.text).toContain('· LOC added / removed: *+123 / -45*');
+    expect(message.text).not.toContain('(GitHub PRs only)');
+  });
+
+  it('scopes the LOC line to GitHub when non-GitHub Roomote PRs are counted', () => {
+    const message = formatManagerStatsMessage({
+      stats: { ...stats, locScope: 'github_only' as const },
+    });
+
+    expect(message.text).toContain(
+      '· LOC added / removed: *+123 / -45* (GitHub PRs only)',
+    );
   });
 
   it('adds an automation-settings context footer', () => {

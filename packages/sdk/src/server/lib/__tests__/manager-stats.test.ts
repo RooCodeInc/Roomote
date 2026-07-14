@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-// The lib module imports the db and github packages at load time; stub them so
-// the pure classification helpers can be exercised without a database or any
-// GitHub network access. `isRoomoteGitHubLogin` is stubbed to recognize only
-// `octomote[bot]` so the tests control the bot signal without slug resolution.
+// The lib module imports the db, github, and provider-read packages at load
+// time; stub them so the pure classification helpers can be exercised without
+// a database or any network access. `isRoomoteGitHubLogin` is stubbed to
+// recognize only `octomote[bot]` so the tests control the bot signal without
+// slug resolution.
 vi.mock('@roomote/db/server', () => ({
   db: {},
   repositories: {},
@@ -18,14 +19,23 @@ vi.mock('@roomote/github', () => ({
   Schemas: {
     isRoomoteGitHubLogin: (login: string) => login === 'octomote[bot]',
   },
+  resolveConfiguredGitHubAppSlug: vi.fn(),
   getPullRequestsForAnalytics: vi.fn(),
   getPullRequest: vi.fn(),
+}));
+
+vi.mock('../pull-requests/source-control-pull-request-reads', () => ({
+  listOpenSourceControlPullRequestsForRepository: vi.fn(),
+  listMergedSourceControlPullRequestsForRepository: vi.fn(),
 }));
 
 import {
   buildRoomotePullRequestMetadata,
   summarizeRoomotePullRequests,
+  toAnalyticsPullRequests,
+  type AnalyticsPullRequest,
 } from '../manager-stats';
+import type { SourceControlPullRequestSummary } from '../pull-requests/source-control-pull-request-reads';
 
 type MetadataRow = Parameters<
   typeof buildRoomotePullRequestMetadata
@@ -34,6 +44,7 @@ type MetadataRow = Parameters<
 function metadataRow(overrides: Partial<MetadataRow>): MetadataRow {
   return {
     taskId: 'task-1',
+    sourceControlProvider: 'github',
     repository: 'acme/app',
     prNumber: 1,
     workflow: 'standard',
@@ -68,9 +79,9 @@ describe('buildRoomotePullRequestMetadata', () => {
       }),
     ]);
 
-    expect(metadata.get('acme/app#1')?.classification).toBe('authored');
-    expect(metadata.get('acme/app#2')?.classification).toBe('reviewed');
-    expect(metadata.get('acme/app#3')?.classification).toBe('authored');
+    expect(metadata.get('github:acme/app#1')?.classification).toBe('authored');
+    expect(metadata.get('github:acme/app#2')?.classification).toBe('reviewed');
+    expect(metadata.get('github:acme/app#3')?.classification).toBe('authored');
   });
 
   it('lets authored win when a key has both authored and review rows', () => {
@@ -88,8 +99,10 @@ describe('buildRoomotePullRequestMetadata', () => {
       }),
     ]);
 
-    expect(reviewThenAuthor.get('acme/app#7')?.classification).toBe('authored');
-    expect(reviewThenAuthor.get('acme/app#7')?.canonicalTaskId).toBe(
+    expect(reviewThenAuthor.get('github:acme/app#7')?.classification).toBe(
+      'authored',
+    );
+    expect(reviewThenAuthor.get('github:acme/app#7')?.canonicalTaskId).toBe(
       'author-task',
     );
 
@@ -107,9 +120,34 @@ describe('buildRoomotePullRequestMetadata', () => {
       }),
     ]);
 
-    expect(authorThenReview.get('acme/app#7')?.classification).toBe('authored');
-    expect(authorThenReview.get('acme/app#7')?.canonicalTaskId).toBe(
+    expect(authorThenReview.get('github:acme/app#7')?.classification).toBe(
+      'authored',
+    );
+    expect(authorThenReview.get('github:acme/app#7')?.canonicalTaskId).toBe(
       'author-task',
+    );
+  });
+
+  it('keys the same repository and number separately per provider', () => {
+    const metadata = buildRoomotePullRequestMetadata([
+      metadataRow({
+        taskId: 'github-task',
+        sourceControlProvider: 'github',
+        prNumber: 9,
+        workflow: 'standard',
+      }),
+      metadataRow({
+        taskId: 'gitlab-task',
+        sourceControlProvider: 'gitlab',
+        prNumber: 9,
+        workflow: 'pr_review',
+      }),
+    ]);
+
+    expect(metadata.get('github:acme/app#9')?.classification).toBe('authored');
+    expect(metadata.get('gitlab:acme/app#9')?.classification).toBe('reviewed');
+    expect(metadata.get('gitlab:acme/app#9')?.canonicalTaskId).toBe(
+      'gitlab-task',
     );
   });
 
@@ -123,12 +161,11 @@ describe('buildRoomotePullRequestMetadata', () => {
   });
 });
 
-type AnalyticsPr = Parameters<
-  typeof summarizeRoomotePullRequests
->[0]['pullRequests'][number];
-
-function analyticsPr(overrides: Partial<AnalyticsPr>): AnalyticsPr {
+function analyticsPr(
+  overrides: Partial<AnalyticsPullRequest>,
+): AnalyticsPullRequest {
   return {
+    sourceControlProvider: 'github',
     repoFullName: 'acme/app',
     number: 1,
     state: 'open',
@@ -200,5 +237,204 @@ describe('summarizeRoomotePullRequests', () => {
 
     expect(authored.map((entry) => entry.pullRequest.number)).toEqual([5]);
     expect(reviewed).toHaveLength(0);
+  });
+
+  it('classifies non-GitHub PRs from task metadata only, never by author login', () => {
+    const metadataByKey = buildRoomotePullRequestMetadata([
+      metadataRow({
+        sourceControlProvider: 'gitlab',
+        prNumber: 1,
+        workflow: 'standard',
+      }),
+      metadataRow({
+        sourceControlProvider: 'ado',
+        prNumber: 2,
+        workflow: 'pr_review',
+      }),
+    ]);
+
+    const { authored, reviewed, roomotePullRequests } =
+      summarizeRoomotePullRequests({
+        pullRequests: [
+          analyticsPr({ sourceControlProvider: 'gitlab', number: 1 }),
+          analyticsPr({ sourceControlProvider: 'ado', number: 2 }),
+          // The GitHub bot login on a non-GitHub provider is someone else's
+          // account name, not Roomote; without a task row it is excluded.
+          analyticsPr({
+            sourceControlProvider: 'gitea',
+            number: 3,
+            authorLogin: 'octomote[bot]',
+          }),
+        ],
+        metadataByKey,
+      });
+
+    expect(roomotePullRequests).toHaveLength(2);
+    expect(authored.map((entry) => entry.pullRequest.number)).toEqual([1]);
+    expect(reviewed.map((entry) => entry.pullRequest.number)).toEqual([2]);
+  });
+
+  it('does not leak metadata across providers for the same repo and number', () => {
+    const metadataByKey = buildRoomotePullRequestMetadata([
+      metadataRow({
+        sourceControlProvider: 'gitlab',
+        prNumber: 6,
+        workflow: 'standard',
+      }),
+    ]);
+
+    const { roomotePullRequests } = summarizeRoomotePullRequests({
+      pullRequests: [
+        // Same repo full name and number, but on GitHub -> not Roomote's.
+        analyticsPr({ sourceControlProvider: 'github', number: 6 }),
+      ],
+      metadataByKey,
+    });
+
+    expect(roomotePullRequests).toHaveLength(0);
+  });
+});
+
+const WINDOW_START = new Date('2026-07-07T00:00:00.000Z');
+
+function summary(
+  overrides: Partial<SourceControlPullRequestSummary>,
+): SourceControlPullRequestSummary {
+  return {
+    number: 1,
+    externalId: null,
+    url: 'https://example.com/pr/1',
+    title: 'A change',
+    state: 'open',
+    draft: false,
+    sourceBranch: 'feature',
+    targetBranch: 'main',
+    author: { id: '42', login: 'human-dev' },
+    updatedAt: '2026-07-10T10:00:00.000Z',
+    createdAt: '2026-07-10T09:00:00.000Z',
+    mergedAt: null,
+    closedAt: null,
+    labels: [],
+    headSha: null,
+    baseSha: null,
+    mergeable: null,
+    mergeStateDescription: null,
+    isCrossRepository: null,
+    headRepositoryFullName: null,
+    ...overrides,
+  };
+}
+
+describe('toAnalyticsPullRequests', () => {
+  it('maps GitLab-shaped summaries created inside the window', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'gitlab',
+      repoFullName: 'group/app',
+      summaries: [
+        summary({ number: 1, createdAt: '2026-07-10T09:00:00.000Z' }),
+        summary({
+          number: 2,
+          state: 'merged',
+          createdAt: '2026-07-09T09:00:00.000Z',
+          mergedAt: '2026-07-10T09:00:00.000Z',
+        }),
+        // Created before the window -> excluded even though still open.
+        summary({ number: 3, createdAt: '2026-07-01T09:00:00.000Z' }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results).toEqual([
+      {
+        sourceControlProvider: 'gitlab',
+        repoFullName: 'group/app',
+        number: 1,
+        state: 'open',
+        authorLogin: 'human-dev',
+      },
+      {
+        sourceControlProvider: 'gitlab',
+        repoFullName: 'group/app',
+        number: 2,
+        state: 'merged',
+        authorLogin: 'human-dev',
+      },
+    ]);
+  });
+
+  it('reports an open draft as draft, matching the GitHub analytics states', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'gitea',
+      repoFullName: 'org/app',
+      summaries: [summary({ number: 4, draft: true })],
+      since: WINDOW_START,
+    });
+
+    expect(results[0]?.state).toBe('draft');
+  });
+
+  it('drops Bitbucket-shaped summaries without a created timestamp instead of guessing', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'bitbucket',
+      repoFullName: 'workspace/app',
+      summaries: [
+        // Bitbucket merged lists carry no merge timestamp and, defensively,
+        // a row may lack created_on too; unknown age must not count.
+        summary({
+          number: 5,
+          state: 'merged',
+          createdAt: null,
+          mergedAt: null,
+          updatedAt: '2026-07-11T09:00:00.000Z',
+        }),
+        summary({ number: 6, createdAt: '2026-07-11T09:00:00.000Z' }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results.map((pullRequest) => pullRequest.number)).toEqual([6]);
+  });
+
+  it('handles ADO-shaped summaries with null updatedAt and null author login', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'ado',
+      repoFullName: 'org/project/repo',
+      summaries: [
+        summary({
+          number: 7,
+          state: 'merged',
+          createdAt: '2026-07-12T09:00:00.000Z',
+          mergedAt: '2026-07-13T09:00:00.000Z',
+          updatedAt: null,
+          author: null,
+        }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results).toEqual([
+      {
+        sourceControlProvider: 'ado',
+        repoFullName: 'org/project/repo',
+        number: 7,
+        state: 'merged',
+        authorLogin: null,
+      },
+    ]);
+  });
+
+  it('dedupes summaries that report the same PR number twice', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'gitlab',
+      repoFullName: 'group/app',
+      summaries: [
+        summary({ number: 8, state: 'open' }),
+        summary({ number: 8, state: 'merged' }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.state).toBe('open');
   });
 });

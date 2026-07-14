@@ -159,10 +159,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Weekly Manager Stats',
     availability: 'stable',
     scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github'],
+    // The stats digest is computed from the provider-neutral PR list
+    // primitives plus taskPullRequests, so any active repository qualifies.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: sourceControlProviders,
   },
   {
     automationKey: 'sentry_triage',
