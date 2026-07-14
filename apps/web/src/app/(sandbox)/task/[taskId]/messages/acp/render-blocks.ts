@@ -26,7 +26,6 @@ export type GroupedToolDisplayKind =
   | ExplorationStepKind
   | 'execute'
   | 'edit'
-  | 'subagent'
   | 'tool';
 
 const EXPLORATION_TOOL_NAMES: Record<ExplorationStepKind, Set<string>> = {
@@ -380,10 +379,6 @@ function resolveGroupedToolDisplayKind(
     return 'edit';
   }
 
-  if (msg.data.kind === 'subagent') {
-    return 'subagent';
-  }
-
   return 'tool';
 }
 
@@ -397,12 +392,8 @@ function isSettledToolMessage(
   return msg.data.status === 'completed' || msg.data.status === 'failed';
 }
 
-function formatToolNameLabel(value: string): string {
-  return value
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
+function formatGenericToolLabel(value: string): string {
+  return value.split(/[_-]+/).filter(Boolean).join(' ').toLowerCase();
 }
 
 const TITLE_PREFIX_RE =
@@ -466,14 +457,29 @@ function summarizeSameTypeGroup(
     };
   }
 
+  if (displayKind === 'edit') {
+    return {
+      action: 'Edited',
+      objectSummary: `${count} ${count === 1 ? 'file' : 'files'}`,
+    };
+  }
+
   const toolNameMatch = /^(?:mcp:[^:]+:|tool:)(.+)$/.exec(groupKey);
-  const toolName = toolNameMatch?.[1]
-    ? formatToolNameLabel(toolNameMatch[1])
-    : 'tools';
+  const toolLabel = toolNameMatch?.[1]
+    ? formatGenericToolLabel(toolNameMatch[1])
+    : null;
+
+  if (toolLabel) {
+    return {
+      action: 'Used',
+      objectSummary:
+        count === 1 ? `1 ${toolLabel}` : `${count} ${toolLabel} calls`,
+    };
+  }
 
   return {
     action: 'Used',
-    objectSummary: `${count} ${toolName}`,
+    objectSummary: `${count} ${count === 1 ? 'tool' : 'tools'}`,
   };
 }
 
@@ -502,7 +508,10 @@ function buildGroupedToolItem(
  * invocation once instead of twice. The `tool_result` is preferred when both
  * are present because it carries the populated title and output; the
  * `tool_call` is kept as a fallback for in-progress invocations that have not
- * yet produced a result. Items without a usable `toolCallId` are kept as-is.
+ * yet produced a result.
+ *
+ * When `toolCallId` is missing, fall back to a stable payload signature so a
+ * lone call/result pair still counts as one invocation rather than twice.
  */
 function dedupeGroupItemsByToolCallId(
   items: GroupedToolCallItem[],
@@ -510,7 +519,7 @@ function dedupeGroupItemsByToolCallId(
   const chosen = new Map<string, GroupedToolCallItem>();
 
   for (const item of items) {
-    const key = extractToolCallIdKey(item.msg.data.toolCallId);
+    const key = extractGroupItemDedupeKey(item);
 
     if (key === null) {
       continue;
@@ -534,7 +543,7 @@ function dedupeGroupItemsByToolCallId(
   const result: GroupedToolCallItem[] = [];
 
   for (const item of items) {
-    const key = extractToolCallIdKey(item.msg.data.toolCallId);
+    const key = extractGroupItemDedupeKey(item);
 
     if (key === null) {
       result.push(item);
@@ -556,6 +565,24 @@ function extractToolCallIdKey(toolCallId: unknown): string | null {
   return typeof toolCallId === 'string' && toolCallId.length > 0
     ? toolCallId
     : null;
+}
+
+function extractGroupItemDedupeKey(item: GroupedToolCallItem): string | null {
+  const toolCallId = extractToolCallIdKey(item.msg.data.toolCallId);
+
+  if (toolCallId) {
+    return `id:${toolCallId}`;
+  }
+
+  const title = item.msg.data.title?.trim() ?? '';
+  const command = item.msg.data.command?.trim() ?? '';
+  const label = item.objectLabel.trim();
+
+  if (!title && !command && !label) {
+    return null;
+  }
+
+  return `sig:${item.groupKey}|${title}|${command}|${label}`;
 }
 
 function isEmptyCompletedTextMessage(msg: AcpUiMessage): boolean {

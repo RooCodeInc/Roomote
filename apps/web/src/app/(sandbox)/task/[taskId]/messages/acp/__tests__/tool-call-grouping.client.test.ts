@@ -797,6 +797,157 @@ describe('buildAcpRenderBlocks', () => {
     ]);
   });
 
+  it('uses lowercase plural-friendly labels for generic MCP tool groups', () => {
+    const entries = buildAcpRenderBlocks([
+      explorationToolMessage({
+        id: 'tool-1',
+        ts: 1,
+        title: null,
+        kind: 'mcp',
+        toolName: 'get_issue',
+      }),
+      explorationToolMessage({
+        id: 'tool-2',
+        ts: 2,
+        title: null,
+        kind: 'mcp',
+        toolName: 'get_issue',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: 'tool_group',
+      action: 'Used',
+      objectSummary: '2 get issue calls',
+      displayKind: 'tool',
+    });
+  });
+
+  it('groups edit tools with edit-specific summary labels', () => {
+    const entries = buildAcpRenderBlocks([
+      explorationToolMessage({
+        id: 'tool-edit-1',
+        ts: 1,
+        title: 'Edit src/a.ts',
+        mcp: false,
+        kind: 'edit',
+      }),
+      explorationToolMessage({
+        id: 'tool-edit-2',
+        ts: 2,
+        title: 'Edit src/b.ts',
+        mcp: false,
+        kind: 'edit',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: 'tool_group',
+      action: 'Edited',
+      objectSummary: '2 files',
+      displayKind: 'edit',
+    });
+  });
+
+  it('dedupes call/result pairs without a toolCallId via payload signature', () => {
+    const callWithoutId = {
+      ...readFileToolCallMessage({
+        id: 'tool-1-call',
+        ts: 1,
+        title: 'Read server.ts',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolCallMessage({
+          id: 'tool-1-call',
+          ts: 1,
+          title: 'Read server.ts',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolCallUiMessage;
+
+    const resultWithoutId = {
+      ...readFileToolMessage({
+        id: 'tool-1-result',
+        ts: 2,
+        title: 'Read server.ts',
+        text: 'server content',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolMessage({
+          id: 'tool-1-result',
+          ts: 2,
+          title: 'Read server.ts',
+          text: 'server content',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolResultUiMessage;
+
+    const call2WithoutId = {
+      ...readFileToolCallMessage({
+        id: 'tool-2-call',
+        ts: 3,
+        title: 'Read evaluator.ts',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolCallMessage({
+          id: 'tool-2-call',
+          ts: 3,
+          title: 'Read evaluator.ts',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolCallUiMessage;
+
+    const result2WithoutId = {
+      ...readFileToolMessage({
+        id: 'tool-2-result',
+        ts: 4,
+        title: 'Read evaluator.ts',
+        text: 'evaluator content',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolMessage({
+          id: 'tool-2-result',
+          ts: 4,
+          title: 'Read evaluator.ts',
+          text: 'evaluator content',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolResultUiMessage;
+
+    const entries = buildAcpRenderBlocks([
+      callWithoutId,
+      resultWithoutId,
+      call2WithoutId,
+      result2WithoutId,
+    ]);
+
+    expect(entries).toHaveLength(1);
+    if (entries[0]?.kind !== 'tool_group') {
+      throw new Error('Expected tool_group entry');
+    }
+
+    expect(entries[0].items).toHaveLength(2);
+    expect(entries[0].items.map((item) => item.msg.kind)).toEqual([
+      'tool_result',
+      'tool_result',
+    ]);
+    expect(entries[0].objectSummary).toBe('2 files');
+  });
+
   it('does not group across non-tool messages', () => {
     const entries = buildAcpRenderBlocks([
       readFileToolMessage({
