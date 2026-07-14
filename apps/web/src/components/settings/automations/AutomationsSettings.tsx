@@ -295,9 +295,10 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
 } as const;
 
 /**
- * Informational capability badges derived from the automation descriptor:
- * which chat surfaces its reports can go to and which source-control
- * providers its scans work with today.
+ * Exception-only capability badges derived from the automation descriptor:
+ * a badge appears only when an automation is LIMITED relative to full
+ * provider coverage. Full coverage (or no applicable surface at all) shows
+ * nothing — the absence of a warning is the signal.
  */
 function getAutomationCapabilityBadges(
   automationKey: BackgroundAutomationKey,
@@ -311,24 +312,23 @@ function getAutomationCapabilityBadges(
 
   const comms: readonly CommunicationProvider[] =
     descriptor.supportedCommunicationProviders;
-  const showCommsBadge =
-    comms.length > 1 || comms.some((provider) => provider !== 'slack');
-  const commsBadge = showCommsBadge
-    ? comms.length === communicationProviders.length
-      ? 'All chat channels'
-      : comms.map(getCommunicationProviderDisplayName).join(' · ')
+  const commsLimited =
+    comms.length > 0 && comms.length < communicationProviders.length;
+  const commsBadge = commsLimited
+    ? comms.length === 1 && comms[0] === 'slack'
+      ? 'Slack only'
+      : `${comms.map(getCommunicationProviderDisplayName).join(' · ')} only`
     : undefined;
 
   const scm: readonly SourceControlProvider[] =
     descriptor.supportedSourceControlProviders;
-  const scmBadge =
-    scm.length === 0
-      ? undefined
-      : scm.length === sourceControlProviders.length
-        ? 'All source control'
-        : scm.length === 1 && scm[0] === 'github'
-          ? 'GitHub only'
-          : scm.map(getSourceControlProviderLabel).join(' · ');
+  const scmLimited =
+    scm.length > 0 && scm.length < sourceControlProviders.length;
+  const scmBadge = scmLimited
+    ? scm.length === 1 && scm[0] === 'github'
+      ? 'GitHub only'
+      : `${scm.map(getSourceControlProviderLabel).join(' · ')} only`
+    : undefined;
 
   return {
     ...(commsBadge ? { commsBadge } : {}),

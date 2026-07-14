@@ -454,20 +454,21 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows capability badges from the shared automation descriptors', async () => {
+  it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Generalized manager automations support every chat surface.
-    expect((await screen.findAllByText('All chat channels')).length).toBe(6);
-    // Suggester, announcer, Sentry triage, and both merged-PR auditors scan
-    // any source control provider.
-    expect(screen.getAllByText('All source control').length).toBe(5);
     // Dependabot/CI triage and manager stats stay GitHub-only.
-    expect(screen.getAllByText('GitHub only').length).toBe(3);
-    // conflict_resolver now supports GitHub, GitLab, and Azure DevOps
-    expect(screen.getAllByText('GitHub · GitLab · Azure DevOps').length).toBe(
-      1,
-    );
+    expect((await screen.findAllByText('GitHub only')).length).toBe(3);
+    // Suggester and CI failure triage still report to Slack only.
+    expect(screen.getAllByText('Slack only').length).toBe(2);
+    // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
+    // Gitea/Bitbucket conflict signal).
+    expect(
+      screen.getAllByText('GitHub · GitLab · Azure DevOps only').length,
+    ).toBe(1);
+    // Full coverage shows nothing — absence of a warning is the signal.
+    expect(screen.queryByText('All chat channels')).toBeNull();
+    expect(screen.queryByText('All source control')).toBeNull();
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
