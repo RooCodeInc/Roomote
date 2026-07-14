@@ -311,6 +311,10 @@ export function StepSourceControlConfig({
           : {}),
       },
     });
+
+    if (selectedProvider.provider === 'gitea') {
+      window.location.assign('/api/source-control/gitea/oauth/authorize');
+    }
   };
 
   const provider = selectedProvider?.label;

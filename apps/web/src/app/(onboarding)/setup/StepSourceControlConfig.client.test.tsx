@@ -269,8 +269,8 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText('Gitea Base URL')).toBeInTheDocument();
     expect(screen.getByText(/Gitea OAuth Client ID/)).toBeInTheDocument();
     expect(screen.getByText(/Gitea OAuth Client Secret/)).toBeInTheDocument();
-    expect(screen.getByText(/Gitea 1\.23 or newer/)).toBeInTheDocument();
-    expect(screen.getByText(/read:user, read:repository/)).toBeInTheDocument();
+    expect(screen.getByText(/Gitea 1\.23\+/)).toBeInTheDocument();
+    expect(screen.getByText('Web redirect URI')).toBeInTheDocument();
     expect(screen.queryByText('Gitea Access Token')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Username')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
