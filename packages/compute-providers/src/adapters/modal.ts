@@ -751,47 +751,64 @@ export class ModalClient implements ComputeProviderClient {
             signal: input.signal,
             abortMessage: `Starting streamed write for ${file.path} on ${input.instanceId} was aborted`,
           });
-          const stderrPromise = process.stderr.readText();
+          const stderrPromise = process.stderr.readText().then(
+            (value) => ({ value, error: undefined }),
+            (error: unknown) => ({ value: '', error }),
+          );
+          let stdinCloseStarted = false;
 
-          for (
-            let offset = 0;
-            offset < file.content.byteLength;
-            offset += MODAL_FILE_WRITE_CHUNK_BYTES
-          ) {
-            throwIfAborted(
-              input.signal,
-              `Writing ${file.path} on ${input.instanceId} was aborted`,
-            );
+          try {
+            for (
+              let offset = 0;
+              offset < file.content.byteLength;
+              offset += MODAL_FILE_WRITE_CHUNK_BYTES
+            ) {
+              throwIfAborted(
+                input.signal,
+                `Writing ${file.path} on ${input.instanceId} was aborted`,
+              );
 
-            const chunkEnd = Math.min(
-              offset + MODAL_FILE_WRITE_CHUNK_BYTES,
-              file.content.byteLength,
-            );
-            const chunk = new Uint8Array(
-              file.content.buffer,
-              file.content.byteOffset + offset,
-              chunkEnd - offset,
-            );
+              const chunkEnd = Math.min(
+                offset + MODAL_FILE_WRITE_CHUNK_BYTES,
+                file.content.byteLength,
+              );
+              const chunk = new Uint8Array(
+                file.content.buffer,
+                file.content.byteOffset + offset,
+                chunkEnd - offset,
+              );
 
-            await raceWithAbort({
-              promise: process.stdin.writeBytes(chunk),
+              await raceWithAbort({
+                promise: process.stdin.writeBytes(chunk),
+                signal: input.signal,
+                abortMessage: `Writing ${file.path} on ${input.instanceId} was aborted`,
+              });
+            }
+
+            stdinCloseStarted = true;
+            await process.stdin.close();
+
+            const [exitCode, stderrResult] = await raceWithAbort({
+              promise: Promise.all([process.wait(), stderrPromise]),
               signal: input.signal,
-              abortMessage: `Writing ${file.path} on ${input.instanceId} was aborted`,
+              abortMessage: `Waiting for streamed write of ${file.path} on ${input.instanceId} was aborted`,
             });
-          }
 
-          await process.stdin.close();
+            if (stderrResult.error !== undefined) {
+              throw stderrResult.error;
+            }
 
-          const [exitCode, stderr] = await raceWithAbort({
-            promise: Promise.all([process.wait(), stderrPromise]),
-            signal: input.signal,
-            abortMessage: `Waiting for streamed write of ${file.path} on ${input.instanceId} was aborted`,
-          });
-
-          if (exitCode !== 0) {
-            throw new Error(
-              `Streamed write failed with exit code ${exitCode}${stderr ? `: ${stderr}` : ''}`,
-            );
+            if (exitCode !== 0) {
+              throw new Error(
+                `Streamed write failed with exit code ${exitCode}${stderrResult.value ? `: ${stderrResult.value}` : ''}`,
+              );
+            }
+          } finally {
+            if (!stdinCloseStarted) {
+              await process.stdin.close().catch(() => {
+                // Best-effort cleanup if the streamed write path aborted.
+              });
+            }
           }
 
           console.log(

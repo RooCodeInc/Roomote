@@ -628,6 +628,47 @@ describe('ModalClient', () => {
     expect(openMock).not.toHaveBeenCalled();
   });
 
+  it('closes VM write stdin and handles stderr rejection when streaming fails', async () => {
+    const writeBytesMock = vi
+      .fn()
+      .mockRejectedValue(new Error('chunk write failed'));
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+    const execMock = vi
+      .fn()
+      .mockResolvedValueOnce({ wait: vi.fn().mockResolvedValue(0) })
+      .mockResolvedValueOnce({
+        stdin: { writeBytes: writeBytesMock, close: closeMock },
+        stderr: {
+          readText: vi.fn().mockRejectedValue(new Error('stderr read failed')),
+        },
+        wait: vi.fn().mockResolvedValue(0),
+      });
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-vm-123',
+      exec: execMock,
+      open: vi.fn(),
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+      vmRuntime: true,
+    });
+
+    await expect(
+      client.writeFiles({
+        instanceId: 'modal-vm-123',
+        files: [
+          { path: '/sandbox/worker.tar.gz', content: Buffer.from('worker') },
+        ],
+      }),
+    ).rejects.toThrow('chunk write failed');
+
+    expect(closeMock).toHaveBeenCalledTimes(1);
+  });
+
   it('surfaces immediate detached-process exits so callers can clean up', async () => {
     const execMock = vi.fn().mockResolvedValue({
       stdout: { readText: vi.fn().mockResolvedValue('boot stdout') },
