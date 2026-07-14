@@ -195,8 +195,8 @@ async function deliverSlackTerminalStatus({
     prUrl,
     status,
     actorLogin: resolvedActorLogin,
-    formatLink: (label, url) => `[${label}](${url})`,
-    formatStatus: (value) => `**${value}**`,
+    formatLink: (label, url) => `<${url}|${label}>`,
+    formatStatus: (value) => `*${value}*`,
   });
   const terminalReaction =
     status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
@@ -215,8 +215,11 @@ async function deliverSlackTerminalStatus({
         text: statusNotification.text,
         blocks: [
           {
-            type: 'markdown',
-            text: statusNotification.bodyText,
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: statusNotification.bodyText,
+            },
           },
         ],
         utmCampaign: 'slack.pr_status',

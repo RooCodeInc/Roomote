@@ -396,7 +396,7 @@ async function handleRequestUserInput(
       blocks: [
         {
           type: 'markdown' as const,
-          text: `I need a private answer before I can continue. Please answer in ${PRODUCT_NAME}: [${getRequestUserInputLinkLabel(taskUrl)}](${taskUrl}).`,
+          text: `I need a private answer before I can continue. Please answer in ${PRODUCT_NAME}: <${taskUrl}|${getRequestUserInputLinkLabel(taskUrl)}>.`,
         },
       ],
     });
@@ -472,8 +472,13 @@ async function handleFollowup(
 
     if (event.suggestions.length > 0) {
       blocks.push({
-        type: 'markdown',
-        text: '**Suggestions:**',
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: ' ' }],
+      });
+
+      blocks.push({
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Suggestions:*' },
       });
 
       event.suggestions.forEach(
@@ -499,8 +504,13 @@ async function handleFollowup(
     }
 
     blocks.push({
-      type: 'markdown',
-      text: '_You can also @-mention me with a custom response._',
+      type: 'context',
+      elements: [
+        {
+          type: 'mrkdwn',
+          text: '_You can also @-mention me with a custom response._',
+        },
+      ],
     });
 
     const slack = await getSlackNotifier();

@@ -426,8 +426,12 @@ describe('handleFollowupAnswer', () => {
         thread_ts: '111.222',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: '_Reply or use the <http://localhost:13000/task/task-1|web app>._',
+            type: 'context',
+            elements: [
+              expect.objectContaining({
+                text: '_Reply or use the <http://localhost:13000/task/task-1|web app>._',
+              }),
+            ],
           }),
         ]),
       }),

@@ -79,11 +79,11 @@ export class SlackCommunicationProvider implements CommunicationProviderAdapter 
       })) ?? [];
     const actionsBlock = buildSlackButtonActionsBlock(input.buttons);
     // Once any block is present Slack demotes `text` to notification fallback,
-    // so a text-plus-buttons message keeps its body via a markdown block.
+    // so a text-plus-buttons message keeps its body via a section block.
     const bodyBlocks =
       input.blocks ??
       (actionsBlock && input.text
-        ? [{ type: 'markdown', text: input.text }]
+        ? [{ type: 'section', text: { type: 'mrkdwn', text: input.text } }]
         : []);
     const blocks = [
       ...bodyBlocks,

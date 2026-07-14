@@ -272,8 +272,11 @@ describe('handleRetryFailedTask', () => {
           replace_original: true,
           blocks: [
             {
-              type: 'markdown',
-              text: 'Getting started on your task in App',
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'Getting started on your task in App',
+              },
             },
             {
               type: 'actions',
@@ -304,8 +307,11 @@ describe('handleRetryFailedTask', () => {
               ],
             },
             {
-              type: 'markdown',
-              text: 'Warming up the workspace.',
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'Warming up the workspace.',
+              },
             },
           ],
         }),

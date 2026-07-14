@@ -81,28 +81,36 @@ describe('postRouterDebugMessage', () => {
         text: 'Router | Slack C123',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '🔍 **Router** | [Slack C123](https://app.slack.com/archives/C123/p123456?thread_ts=123.456&cid=C123)',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '🔍 *Router* | <https://app.slack.com/archives/C123/p123456?thread_ts=123.456&cid=C123|Slack C123>',
+              ),
+            }),
           }),
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '- **Environment:** App — confidence 0.97',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '• *Environment:* App — confidence 0.97',
+              ),
+            }),
           }),
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '**Message**\n> Use GPT 5.4 for this one.',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '*Message*\n> Use GPT 5.4 for this one.',
+              ),
+            }),
           }),
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '- **Model:** GPT 5.4 `openrouter/openai/gpt-5.4` — user preference, confidence 0.96',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '• *Model:* GPT 5.4 `openrouter/openai/gpt-5.4` — user preference, confidence 0.96',
+              ),
+            }),
           }),
         ]),
       }),
@@ -140,16 +148,20 @@ describe('postRouterDebugMessage', () => {
         channel: 'CDEBUG',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '- **Model:** GLM 5.2 `openrouter/z-ai/glm-5.2` — default',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default',
+              ),
+            }),
           }),
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '**Rejected model pick:** Claude Opus 4.8 `openrouter/anthropic/claude-opus-4.8` — confidence 0.55 (below threshold)',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '*Rejected model pick:* Claude Opus 4.8 `openrouter/anthropic/claude-opus-4.8` — confidence 0.55 (below threshold)',
+              ),
+            }),
           }),
         ]),
       }),
@@ -182,10 +194,12 @@ describe('postRouterDebugMessage', () => {
         channel: 'CDEBUG',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '- **Model:** GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router choice: no model mentioned, confidence: 0.98)',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router choice: no model mentioned, confidence: 0.98)',
+              ),
+            }),
           }),
         ]),
       }),
@@ -217,10 +231,12 @@ describe('postRouterDebugMessage', () => {
         channel: 'CDEBUG',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              '- **Model:** GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router model choice: not reported)',
-            ),
+            type: 'section',
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router model choice: not reported)',
+              ),
+            }),
           }),
         ]),
       }),

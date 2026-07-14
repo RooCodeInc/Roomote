@@ -57,8 +57,11 @@ export function buildSuggestedTasksOnboardingFollowupPromptBlocks(params: {
 }): SlackBlock[] {
   return [
     {
-      type: 'markdown',
-      text: SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
+      },
     },
     {
       type: 'actions',
@@ -94,8 +97,11 @@ export function buildSuggestedTasksOnboardingFollowupPromptBlocks(params: {
 export function buildSuggestedTasksOnboardingFollowupPromptTextBlocks(): SlackBlock[] {
   return [
     {
-      type: 'markdown',
-      text: SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_TEXT,
+      },
     },
   ];
 }
@@ -105,8 +111,11 @@ export function buildSuggestedTasksOnboardingFollowupIgnoreBlocks(
 ): SlackBlock[] {
   return [
     {
-      type: 'markdown',
-      text: `OK. If you change their mind, you can [do it here](${settingsUrl}).`,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `OK. If you change their mind, you can <${settingsUrl}|do it here>.`,
+      },
     },
   ];
 }

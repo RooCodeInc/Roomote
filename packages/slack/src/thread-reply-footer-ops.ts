@@ -26,7 +26,7 @@ export const THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE =
   'Timed out acquiring thread reply footer lock';
 
 function isSlackThreadReplyFooterText(text: string): boolean {
-  return /^_(?:Reply(?: with @-mention)? or use the (?:\[web app\]\([^)]+\)|<[^>]+\|web app>)\.|Working on (?:(?:\[PR #?\d+\]\([^)]+\)|<[^>]+\|PR(?:\s+#)?\d+>)(?:, (?:\[live preview\]\([^)]+\)|<[^>]+\|live preview>))?|a (?:\[live preview\]\([^)]+\)|<[^>]+\|live preview>)), reply(?: with @-mention)? or use the (?:\[web app\]\([^)]+\)|<[^>]+\|web app>)\.)_$/.test(
+  return /^_(?:Reply(?: with @-mention)? or use the <[^>]+\|web app>\.|Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>), reply(?: with @-mention)? or use the <[^>]+\|web app>\.)_$/.test(
     text,
   );
 }
@@ -76,14 +76,19 @@ export function isSlackThreadReplyFooterBlock(block: unknown): boolean {
 export function buildSlackThreadReplyFooterBlock(params: {
   footerText: string;
 }): {
-  type: 'markdown';
+  type: 'context';
   block_id: string;
-  text: string;
+  elements: [{ type: 'mrkdwn'; text: string }];
 } {
   return {
-    type: 'markdown',
+    type: 'context',
     block_id: SLACK_THREAD_REPLY_FOOTER_BLOCK_ID,
-    text: params.footerText,
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: params.footerText,
+      },
+    ],
   };
 }
 
@@ -223,8 +228,11 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
       ? params.blocks
       : [
           {
-            type: 'markdown',
-            text: params.text,
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: params.text,
+            },
           },
         ];
 

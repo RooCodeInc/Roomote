@@ -129,15 +129,21 @@ export function buildSlackAccountLinkConnectMessage(
     text: `👋 ${copy.fallbackText}`,
     blocks: [
       {
-        type: 'markdown',
-        text: copy.introText,
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: copy.introText,
+        },
       },
       { type: 'divider' },
       {
-        type: 'markdown',
-        text: `**${copy.requirementText}**\n\nThis links your identity so I can:\n${copy.identityBenefits
-          .map((benefit) => `- ${benefit}`)
-          .join('\n')}`,
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `*${copy.requirementText}*\n\nThis links your identity so I can:\n${copy.identityBenefits
+            .map((benefit) => `• ${benefit}`)
+            .join('\n')}`,
+        },
       },
       {
         type: 'actions',
@@ -156,8 +162,13 @@ export function buildSlackAccountLinkConnectMessage(
         ],
       },
       {
-        type: 'markdown',
-        text: copy.contextText,
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: copy.contextText,
+          },
+        ],
       },
     ],
   };
@@ -528,8 +539,13 @@ function buildPlatformAnswerMessage(
         text: answer,
       },
       {
-        type: 'markdown',
-        text: `_Learn more in the [docs](${docsUrl})._`,
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: `_Learn more in the <${docsUrl}|docs>._`,
+          },
+        ],
       },
     ],
   };
@@ -670,8 +686,11 @@ export function buildRoutingConfirmBlocks(
 
   return [
     {
-      type: 'markdown',
-      text,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text,
+      },
     },
     {
       type: 'actions',
@@ -833,12 +852,18 @@ export async function showTaskConfiguration({
           text: 'Roomote needs an environment before it can start Slack tasks.',
           blocks: [
             {
-              type: 'markdown',
-              text: 'Hi! I can help once Roomote has an environment to use.',
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'Hi! I can help once Roomote has an environment to use.',
+              },
             },
             {
-              type: 'markdown',
-              text: `Please go to [your ${PRODUCT_NAME} environment settings](${Env.R_APP_URL}/settings/environments) and create an environment with at least one repository, then ping me back here again.`,
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `Please go to <${Env.R_APP_URL}/settings/environments|your ${PRODUCT_NAME} environment settings> and create an environment with at least one repository, then ping me back here again.`,
+              },
             },
           ],
         },
@@ -1307,8 +1332,8 @@ export async function showTaskConfiguration({
 
       blocks.push(
         {
-          type: 'markdown',
-          text: 'Which environment should I use?',
+          type: 'section',
+          text: { type: 'mrkdwn', text: 'Which environment should I use?' },
         },
         {
           type: 'actions',
@@ -1327,8 +1352,8 @@ export async function showTaskConfiguration({
       // Dropdown on its own line (separate from label) for better readability
       blocks.push(
         {
-          type: 'markdown',
-          text: 'Which environment should I use?',
+          type: 'section',
+          text: { type: 'mrkdwn', text: 'Which environment should I use?' },
         },
         {
           type: 'actions',
@@ -1985,8 +2010,11 @@ export {
 function buildExistingTaskQueuedBlocks(): SlackBlock[] {
   return [
     {
-      type: 'markdown',
-      text: 'Roomote is already working in this thread. I queued your latest instruction for the active task.',
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: 'Roomote is already working in this thread. I queued your latest instruction for the active task.',
+      },
     },
   ];
 }

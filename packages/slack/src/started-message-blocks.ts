@@ -82,12 +82,14 @@ export function buildStartedBlocks(
     kickoffMessage,
     freeformKickoffEnabled,
   });
-  const blocks: SlackBlock[] = [{ type: 'markdown', text }];
+  const blocks: SlackBlock[] = [
+    { type: 'section', text: { type: 'mrkdwn', text } },
+  ];
 
   if (otherRunningTasksText) {
     blocks.push({
-      type: 'markdown',
-      text: `_${otherRunningTasksText}_`,
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: `_${otherRunningTasksText}_` }],
     });
   }
 
@@ -97,8 +99,11 @@ export function buildStartedBlocks(
 
   if (readinessNote?.trim()) {
     blocks.push({
-      type: 'markdown',
-      text: readinessNote.trim(),
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: readinessNote.trim(),
+      },
     });
   }
 
@@ -121,8 +126,11 @@ export function buildTaskFailedMessage(options: BuildTaskFailedBlocksOptions): {
     text: messageText,
     blocks: [
       {
-        type: 'markdown',
-        text: messageText,
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: messageText,
+        },
       },
       {
         type: 'actions',

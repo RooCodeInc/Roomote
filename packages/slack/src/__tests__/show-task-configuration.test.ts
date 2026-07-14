@@ -330,10 +330,11 @@ describe('Slack deleted-mention suppression', () => {
         text: 'Roomote needs an environment before it can start Slack tasks.',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: expect.stringContaining(
-              'create an environment with at least one repository',
-            ),
+            text: expect.objectContaining({
+              text: expect.stringContaining(
+                'create an environment with at least one repository',
+              ),
+            }),
           }),
         ]),
       }),
@@ -498,8 +499,13 @@ describe('Slack deleted-mention suppression', () => {
           text: '**I can help here.**\n- Ask me where to start\n- I can route deeper work',
         },
         {
-          type: 'markdown',
-          text: '_Learn more in the [docs](https://docs.roomote.dev)._',
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: '_Learn more in the <https://docs.roomote.dev|docs>._',
+            },
+          ],
         },
       ],
     });
@@ -583,8 +589,13 @@ describe('Slack deleted-mention suppression', () => {
             text: '**I can help with that.**\n- I route coding work\n- I support Slack, GitHub, and Linear',
           },
           {
-            type: 'markdown',
-            text: '_Learn more in the [docs](https://docs.roomote.dev)._',
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '_Learn more in the <https://docs.roomote.dev|docs>._',
+              },
+            ],
           },
         ],
       },
@@ -670,8 +681,9 @@ describe('Slack deleted-mention suppression', () => {
       expect.objectContaining({
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'markdown',
-            text: 'Getting started on your task in all repos',
+            text: expect.objectContaining({
+              text: 'Getting started on your task in all repos',
+            }),
           }),
         ]),
       }),

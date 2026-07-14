@@ -51,8 +51,8 @@ describe('SlackCommunicationProvider.postMessage', () => {
       text: 'root summary',
       blocks: [
         {
-          type: 'markdown',
-          text: 'root summary',
+          type: 'section',
+          text: { type: 'mrkdwn', text: 'root summary' },
         },
         {
           type: 'actions',

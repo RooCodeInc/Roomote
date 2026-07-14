@@ -11,30 +11,13 @@ import type { SlackNotifier } from '../slack-notifier';
 function getPrimarySectionText(
   blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
 ): string {
-  const block = blocks.find(
-    (candidate) =>
-      candidate.type === 'markdown' || candidate.type === 'section',
-  );
+  const block = blocks.find((candidate) => candidate.type === 'section');
 
-  if (!block) {
-    throw new Error('Expected a leading markdown or section block with text');
+  if (!block || block.type !== 'section' || !('text' in block) || !block.text) {
+    throw new Error('Expected a leading section block with text');
   }
 
-  if (block.type === 'markdown' && typeof block.text === 'string') {
-    return block.text;
-  }
-
-  if (
-    block.type === 'section' &&
-    'text' in block &&
-    block.text &&
-    typeof block.text === 'object' &&
-    'text' in block.text
-  ) {
-    return block.text.text;
-  }
-
-  throw new Error('Expected a leading markdown or section block with text');
+  return block.text.text;
 }
 
 function getActionsElements(
@@ -52,20 +35,10 @@ function getActionsElements(
 function getFirstContextText(
   blocks: ReturnType<typeof buildRoutingConfirmBlocks>,
 ): string {
-  const markdownBlocks = blocks.filter(
-    (candidate) => candidate.type === 'markdown',
-  );
-  if (markdownBlocks.length > 1) {
-    const secondary = markdownBlocks[1];
-    if (secondary && typeof secondary.text === 'string') {
-      return secondary.text;
-    }
-  }
-
   const block = blocks.find((candidate) => candidate.type === 'context');
 
   if (!block || block.type !== 'context' || !('elements' in block)) {
-    throw new Error('Expected secondary markdown text or context block');
+    throw new Error('Expected context block');
   }
 
   const [element] = block.elements ?? [];
@@ -467,13 +440,19 @@ describe('buildSlackAccountLinkConnectMessage', () => {
       text: '👋 Hi! Let me help you get started with Roomote.',
       blocks: [
         {
-          type: 'markdown',
-          text: "Hi, I'm Roomote.\nI handle the operational engineering work that shows up in Slack: bug reports, escalations, regressions, repo questions, and small fixes.",
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: "Hi, I'm Roomote.\nI handle the operational engineering work that shows up in Slack: bug reports, escalations, regressions, repo questions, and small fixes.",
+          },
         },
         { type: 'divider' },
         {
-          type: 'markdown',
-          text: '**To get started, I need to link your Slack and Roomote accounts.**\n\nThis links your identity so I can:\n- Associate tasks with you\n- Access your configured agents\n- Work with your authorized repositories',
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: '*To get started, I need to link your Slack and Roomote accounts.*\n\nThis links your identity so I can:\n• Associate tasks with you\n• Access your configured agents\n• Work with your authorized repositories',
+          },
         },
         {
           type: 'actions',
@@ -491,8 +470,13 @@ describe('buildSlackAccountLinkConnectMessage', () => {
           ],
         },
         {
-          type: 'markdown',
-          text: "This is a one-time deal. We'll be chatting in no time.",
+          type: 'context',
+          elements: [
+            {
+              type: 'mrkdwn',
+              text: "This is a one-time deal. We'll be chatting in no time.",
+            },
+          ],
         },
       ],
     });

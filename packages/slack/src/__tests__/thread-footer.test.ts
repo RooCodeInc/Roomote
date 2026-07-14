@@ -96,7 +96,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on [PR #4321](https://github.com/roomote/app/pull/4321), reply with @-mention or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on <https://github.com/roomote/app/pull/4321|PR #4321>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -117,7 +117,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -132,7 +132,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on [PR #1234](https://github.com/roomote/app/pull/1234), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -154,7 +154,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on [PR #1234](https://github.com/roomote/app/pull/1234), [live preview](https://task-1-web.preview.example.com/auth/dev-login), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -176,7 +176,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a [live preview](https://task-1-web.preview.example.com/auth/dev-login), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on a <https://task-1-web.preview.example.com/auth/dev-login|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -206,7 +206,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a [live preview](https://task-1-my-app.preview.example.com/?path=/story/example), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on a <https://task-1-my-app.preview.example.com/?path=/story/example|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -228,7 +228,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a [live preview](https://task-1-web.preview.example.com), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -251,7 +251,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -271,7 +271,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -291,7 +291,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on [PR #1234](https://github.com/roomote/app/pull/1234), reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on <https://github.com/roomote/app/pull/1234|PR #1234>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
 
     expect(environmentFindFirstMock).not.toHaveBeenCalled();
@@ -320,7 +320,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the [web app](https://app.example.com/task/task-1)._',
+      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 
@@ -343,7 +343,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Working on a [live preview](https://task-1-web.preview.example.com), reply with @-mention or use the [web app](https://app.example.com/task/task-1)._',
+      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 });

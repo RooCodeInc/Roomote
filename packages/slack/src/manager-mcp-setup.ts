@@ -57,8 +57,11 @@ export function buildManagerMcpSetupNotificationBlocks(params: {
 }): SlackBlock[] {
   const blocks: SlackBlock[] = [
     {
-      type: 'markdown',
-      text: params.messageText,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: params.messageText,
+      },
     },
   ];
 

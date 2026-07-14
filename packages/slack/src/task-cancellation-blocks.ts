@@ -14,8 +14,11 @@ export function buildTaskCancellationResponseBlocks(
 ): SlackBlock[] {
   return [
     {
-      type: 'markdown',
-      text,
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text,
+      },
     },
   ];
 }
@@ -27,7 +30,7 @@ export function buildTaskNotRunningResponseBlocks(
     return buildTaskCancellationResponseBlocks(TASK_NOT_RUNNING_RESPONSE_TEXT);
   }
 
-  let replacedPrimaryBody = false;
+  let replacedPrimarySection = false;
 
   const updatedBlocks = existingBlocks
     .map((block) => {
@@ -37,31 +40,18 @@ export function buildTaskNotRunningResponseBlocks(
 
       const typedBlock = block as {
         type?: string;
-        text?: string | { type?: string; text?: string };
+        text?: { type?: string; text?: string };
         elements?: Array<{ action_id?: string }>;
       };
 
       if (
-        !replacedPrimaryBody &&
-        typedBlock.type === 'markdown' &&
-        typeof typedBlock.text === 'string'
-      ) {
-        replacedPrimaryBody = true;
-        return {
-          ...typedBlock,
-          type: 'markdown' as const,
-          text: TASK_NOT_RUNNING_RESPONSE_TEXT,
-        };
-      }
-
-      if (
-        !replacedPrimaryBody &&
+        !replacedPrimarySection &&
         typedBlock.type === 'section' &&
         typedBlock.text &&
         typeof typedBlock.text === 'object' &&
         typeof typedBlock.text.text === 'string'
       ) {
-        replacedPrimaryBody = true;
+        replacedPrimarySection = true;
         return {
           ...typedBlock,
           text: {

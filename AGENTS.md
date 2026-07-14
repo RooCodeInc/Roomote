@@ -51,7 +51,6 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Slack message formatting
 
-- Prefer Slack `markdown` blocks (`{ type: 'markdown', text }`) and standard markdown content over legacy Block Kit `mrkdwn` text objects whenever the surface allows it.
-- Use standard markdown for those payloads: `[label](url)`, `**bold**`, lists, tables, and code fences. Do not convert markdown body text into mrkdwn (`*bold*`, `<url|label>`) before posting `markdown` blocks.
-- Keep `type: 'mrkdwn'` only where Slack requires it: `section` text beside an `accessory`, Work Object unfurl payloads that still expect section/mrkdwn, and inbound parsing of legacy Slack messages.
+- Present LLM / agent narrative output in Slack as `markdown` blocks (`{ type: 'markdown', text }`) with standard markdown (`[label](url)`, `**bold**`, lists, tables, code fences) whenever possible. Do not convert that body text into legacy mrkdwn (`*bold*`, `<url|label>`) before posting a `markdown` block.
+- Do not migrate hardcoded product UI Block Kit (routing confirmations, sticky footers, unfurls, accessory sections, etc.) for style alone; keep `mrkdwn` there when those builders already rely on it or Slack requires it (for example `section` text with an `accessory`).
 - When reading inbound Slack message blocks, continue to accept both `markdown` blocks and legacy `mrkdwn` text objects.

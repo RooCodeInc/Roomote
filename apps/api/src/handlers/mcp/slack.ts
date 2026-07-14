@@ -234,15 +234,16 @@ function normalizeSlackQuoteText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
-function escapeSlackMarkdownText(text: string): string {
+function escapeSlackMrkdwnText(text: string): string {
   return text
     .replaceAll('\\', '\\\\')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
     .replaceAll('*', '\\*')
     .replaceAll('_', '\\_')
     .replaceAll('~', '\\~')
-    .replaceAll('`', '\\`')
-    .replaceAll('[', '\\[')
-    .replaceAll(']', '\\]');
+    .replaceAll('`', '\\`');
 }
 
 function truncateSlackQuoteText(text: string): string {
@@ -257,10 +258,10 @@ function buildSlackThreadReplyQuote(params: {
   username: string;
   text: string;
 }): string | null {
-  const username = escapeSlackMarkdownText(
+  const username = escapeSlackMrkdwnText(
     normalizeSlackQuoteText(params.username),
   );
-  const text = escapeSlackMarkdownText(
+  const text = escapeSlackMrkdwnText(
     truncateSlackQuoteText(normalizeSlackQuoteText(params.text)),
   );
 
@@ -268,18 +269,21 @@ function buildSlackThreadReplyQuote(params: {
     return null;
   }
 
-  return `> **${username}:** ${text}`;
+  return `>*${username}:* ${text}`;
 }
 
 function buildSlackThreadReplyQuoteBlock(params: { quote: string }): {
-  type: 'markdown';
+  type: 'section';
   block_id: string;
-  text: string;
+  text: { type: 'mrkdwn'; text: string };
 } {
   return {
-    type: 'markdown',
+    type: 'section',
     block_id: ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
-    text: params.quote,
+    text: {
+      type: 'mrkdwn',
+      text: params.quote,
+    },
   };
 }
 
