@@ -408,12 +408,12 @@ export default function SetupPage() {
               center: {
                 opacity: 1,
                 y: 0,
-                transition: { duration: 0.75, ease: 'easeOut' },
+                transition: { duration: 0.25, ease: 'easeOut' },
               },
               exit: (direction) => ({
                 opacity: 0,
                 y: direction === 'forward' ? -20 : 20,
-                transition: { duration: 0.75, ease: 'easeOut' },
+                transition: { duration: 0.25, ease: 'easeOut' },
               }),
             }}
             initial="enter"
