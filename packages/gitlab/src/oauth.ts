@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { db, deploymentSecrets, eq } from '@roomote/db/server';
+import { db, deploymentSecrets, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 const SECRET_NAME = 'gitlab_deployment_oauth_connection';
@@ -70,14 +70,21 @@ export function createGitLabOAuthAuthorizationUrl(input: {
 }
 
 async function readConnection(): Promise<GitLabOAuthConnection | null> {
-  const findFirst = db.query.deploymentSecrets?.findFirst;
-  // Older test harnesses and pre-migration deployments may not expose the
-  // deployment-secrets relation yet; PAT resolution remains available there.
-  if (!findFirst) return null;
-  const row = await findFirst({
-    where: eq(deploymentSecrets.name, SECRET_NAME),
-  });
-  return row ? await decryptSecrets<GitLabOAuthConnection>(row.value) : null;
+  // Use raw SQL here because some deployed DB package versions expose the
+  // relation without the current column metadata. PAT resolution remains
+  // available when the deployment-secrets table is unavailable.
+  try {
+    const rows = await db.execute<{ value: string }>(sql`
+      SELECT value
+      FROM deployment_secrets
+      WHERE name = ${SECRET_NAME}
+      LIMIT 1
+    `);
+    const row = rows[0];
+    return row ? await decryptSecrets<GitLabOAuthConnection>(row.value) : null;
+  } catch {
+    return null;
+  }
 }
 
 async function writeConnection(
