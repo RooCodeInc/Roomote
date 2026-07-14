@@ -162,7 +162,7 @@ describe('environment-setup guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'After successful environment persistence, use the Roomote MCP tool `mcp__roomote__manage_tasks` to launch a lightweight verification task against the created or updated environment and monitor it yourself instead of leaving verification as an implicit manual next step.',
+      'After successful environment persistence, use the Roomote MCP tool `mcp__roomote__manage_tasks` to launch a lightweight verification task against the created or updated environment and await it with `action: "await"` yourself instead of leaving verification as an implicit manual next step or a multi-step `get_summary` poll loop.',
     );
     expect(skillContent).toContain(
       'For that follow-up task launch, call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "list_environments"` first so you can confirm the created or updated environment appears as a current launch target and copy the exact returned `environmentId`.',
@@ -171,25 +171,25 @@ describe('environment-setup guidance', () => {
       'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID',
     );
     expect(skillContent).toContain(
-      'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`.',
+      'Immediately after launch succeeds, call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "await"` and that `taskId`.',
     );
     expect(skillContent).toContain(
-      'Narrate concise, plain-language progress updates while the follow-up check runs',
+      'Prefer this single blocking await over model-driven `get_summary` poll loops or `bash` sleep',
     );
     expect(skillContent).toContain(
-      'Preparing the environment can take 5 minutes or more, so do not stop monitoring just because startup is taking a long time.',
+      'Before or while that await runs, narrate one concise plain-language progress update',
     );
     expect(skillContent).toContain(
-      'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',
+      'Preparing the environment can take 5 minutes or more — use the default await timeout',
     );
     expect(skillContent).toContain(
-      'If those latest task messages clearly report that the environment looks ready, treat that as a successful spawned-task run and report the observed success directly.',
+      'If await returns `Terminal: Ready`, `Idle`, or `NeedsInput`',
     );
     expect(skillContent).toContain(
-      'If the monitored summary reaches `Completed` without a surfaced startup or runtime failure, treat that as a successful spawned-task run and report that observed outcome directly instead of asking the user to confirm it manually.',
+      'Treat the await result as the source of truth for verification settlement.',
     );
     expect(skillContent).toContain(
-      'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
+      'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, await the new taskId, and repeat instead of stopping after the first failure.',
     );
     expect(skillContent).toContain(
       'Retry at most 2 additional full environment-update-plus-verification attempts after the first spawned verification task',
@@ -198,6 +198,9 @@ describe('environment-setup guidance', () => {
       'If the observed verification error appears to require product or source-code changes outside environment-setup scope',
     );
     expect(skillContent).not.toContain('monitoring limit');
+    expect(skillContent).not.toContain(
+      'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"`',
+    );
     expect(skillContent).toContain(
       'When setup succeeds, begin with a plain-language outcome sentence such as `Your environment is ready.`',
     );
@@ -211,7 +214,7 @@ describe('environment-setup guidance', () => {
       'This is the final visible paragraph; do not append an internal status summary after it.',
     );
     expect(skillContent).toContain(
-      'Do not mention a spawned task, task status, polling, or monitoring in those user-facing updates.',
+      'Do not mention a spawned task, task status, polling, monitoring, or await in those user-facing updates.',
     );
     expect(skillContent).not.toContain(
       'When the verification task completed cleanly, report that the spawned verification task completed.',

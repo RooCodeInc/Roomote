@@ -31,6 +31,7 @@ import { handleSearchTasks } from './search-tasks.js';
 import { handleLaunchTask } from './launch-task.js';
 import { handleGetTaskMessages } from './task-messages.js';
 import { handleGetTaskSummary } from './task-summary.js';
+import { handleAwaitTask } from './await-task.js';
 import { handleGetTaskComputeLogs } from './task-compute-logs.js';
 import { handleCancelTask } from './cancel-task.js';
 import { handleSendMessage } from './send-message.js';
@@ -397,6 +398,7 @@ const manageTasksToolDescription =
   'Use action "list_environments" to list launch targets (named environments and the org-wide target). ' +
   'Use action "search" to find tasks by query or status. ' +
   `Use action "get_summary" to inspect a specific task's latest status and failure details (requires taskId). ` +
+  'Use action "await" to block until a task settles (Completed/Failed/Canceled/Ready/Idle/NeedsInput) or timeoutMs elapses, polling server-side so the current tool call stays mid-turn (requires taskId). Prefer await after launch when this task must own the outcome of a follow-up task such as environment verification. ' +
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
@@ -408,6 +410,7 @@ const manageTasksInputSchema = {
     .enum([
       'search',
       'get_summary',
+      'await',
       'get_compute_logs',
       'get_messages',
       'launch',
@@ -416,13 +419,13 @@ const manageTasksInputSchema = {
       'list_environments',
     ])
     .describe(
-      'The task action to perform. Call "list_environments" immediately before "launch".',
+      'The task action to perform. Call "list_environments" immediately before "launch". After launch, preferred follow-up ownership uses "await" with the returned taskId.',
     ),
   taskId: z
     .string()
     .optional()
     .describe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'The task ID (required for get_summary, await, get_compute_logs, get_messages, cancel, and send_message)',
     ),
   message: z
     .string()
@@ -471,6 +474,24 @@ const manageTasksInputSchema = {
         'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
     ),
   branch: z.string().optional().describe('Branch to use (for launch)'),
+  timeoutMs: z
+    .number()
+    .int()
+    .min(5_000)
+    .max(45 * 60_000)
+    .optional()
+    .describe(
+      'Optional max wait for action "await" in milliseconds (default 1500000 / 25 minutes, min 5000, max 2700000 / 45 minutes). Environment prepares can exceed 5 minutes.',
+    ),
+  pollIntervalMs: z
+    .number()
+    .int()
+    .min(1_000)
+    .max(60_000)
+    .optional()
+    .describe(
+      'Optional poll interval for action "await" in milliseconds (default 5000, min 1000, max 60000).',
+    ),
 } satisfies Record<string, z.ZodTypeAny>;
 
 roomoteMcpServer.registerTool(
@@ -510,6 +531,19 @@ roomoteMcpServer.registerTool(
           return errorResult('taskId is required for get_summary');
         }
         return handleGetTaskSummary({ taskId: params.taskId }, config);
+      }
+      case 'await': {
+        if (!params.taskId?.trim()) {
+          return errorResult('taskId is required for await');
+        }
+        return handleAwaitTask(
+          {
+            taskId: params.taskId,
+            timeoutMs: params.timeoutMs,
+            pollIntervalMs: params.pollIntervalMs,
+          },
+          config,
+        );
       }
       case 'get_compute_logs': {
         if (!params.taskId?.trim()) {
