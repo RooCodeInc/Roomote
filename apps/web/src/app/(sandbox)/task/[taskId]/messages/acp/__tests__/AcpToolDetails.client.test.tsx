@@ -53,11 +53,30 @@ describe('AcpToolDetails', () => {
     toolInputSpy.mockClear();
   });
 
-  it('hides expanded details for subagent rows', () => {
-    const { container } = render(
+  it('shows the subagent launch prompt when expanding without debug mode', () => {
+    render(
       <AcpToolDetails
         msg={buildMessage({
           prompt: 'Review the current branch and summarize the state.',
+          model: 'gpt-5.4',
+          reasoningEffort: 'low',
+          isSubagentSpawn: true,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText('Review the current branch and summarize the state.'),
+    ).toBeInTheDocument();
+    expect(toolInputSpy).not.toHaveBeenCalled();
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('hides expanded details for subagent rows without a prompt', () => {
+    const { container } = render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: null,
           model: 'gpt-5.4',
           reasoningEffort: 'low',
           isSubagentSpawn: true,
