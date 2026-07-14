@@ -105,6 +105,13 @@ Roomote uses local defaults for development services:
 - MinIO API: `http://localhost:19000`
 - MinIO console: `http://localhost:19001`
 
+Roomote keeps server-side MinIO access on the local API port. Presigned
+artifact URLs default to `R_PUBLIC_URL`, and the local Caddy edge proxies the
+signed `/<bucket>/*` paths to MinIO. This lets E2B, Modal, Daytona, and other
+hosted workers upload artifacts through the same public edge they use for API
+callbacks. Set `S3_PRESIGN_ENDPOINT` explicitly only when using a separate
+worker-reachable object-storage endpoint.
+
 Start the database, Redis, and artifact-storage services:
 
 ```sh
