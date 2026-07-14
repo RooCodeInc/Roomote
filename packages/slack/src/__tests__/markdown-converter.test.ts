@@ -29,6 +29,41 @@ describe('convertMarkdownLinksToSlack', () => {
       '**hello** plain text',
     );
   });
+
+  it('converts links whose URL contains balanced parentheses', () => {
+    expect(
+      convertMarkdownLinksToSlack(
+        '[label](https://example.com/path_(section))',
+      ),
+    ).toBe('<https://example.com/path_(section)|label>');
+  });
+
+  it('handles pathological unbalanced-paren input without catastrophic backtracking', () => {
+    const pathological = '[x](' + '('.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownLinksToSlack(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
+  it('handles pathological unclosed-label input without quadratic scanning', () => {
+    const pathological = '['.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownLinksToSlack(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
+  it('handles repeated unmatched label openers without quadratic scanning', () => {
+    const pathological = '[a'.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownLinksToSlack(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
 });
 
 describe('convertMarkdownToSlack', () => {
