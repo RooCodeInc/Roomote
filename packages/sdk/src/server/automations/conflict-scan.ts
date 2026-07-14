@@ -450,25 +450,12 @@ export async function conflictScanJob(
         result.skippedReason ??= 'No labeled conflict candidates found.';
       }
 
-      await recordAutomationRunOutcome(db, {
-        key: 'conflict_resolver',
-        status: candidateCount > 0 ? 'succeeded' : 'skipped',
-        at: new Date(),
-      });
-
       console.log(
         `${LOG_PREFIX} Installation ${installationId}: ${candidateCount} candidates, ${conflictingCount} conflicting, ${launchedTaskCount} launched, ${notificationCount} notified`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result.errors.push(message);
-
-      await recordAutomationRunOutcome(db, {
-        key: 'conflict_resolver',
-        status: 'failed',
-        at: new Date(),
-        error: message,
-      });
 
       console.error(
         `${LOG_PREFIX} Error scanning installation ${installationId}:`,
@@ -488,6 +475,28 @@ export async function conflictScanJob(
 
     totalCandidates += providerCounts.candidateCount;
     totalConflicting += providerCounts.conflictingCount;
+  }
+
+  // Record one combined outcome covering both the GitHub and provider-neutral
+  // sections. Per-section recording let the later section overwrite the
+  // earlier one — including clearing a GitHub failure from lastError when the
+  // provider-neutral pass then succeeded or skipped.
+  if (installations.length > 0 || providerNeutralRepos.length > 0) {
+    const combinedStatus =
+      result.errors.length > 0
+        ? 'failed'
+        : totalCandidates > 0
+          ? 'succeeded'
+          : 'skipped';
+
+    await recordAutomationRunOutcome(db, {
+      key: 'conflict_resolver',
+      status: combinedStatus,
+      at: new Date(),
+      ...(combinedStatus === 'failed'
+        ? { error: result.errors.join('; ') }
+        : {}),
+    });
   }
 
   console.log(
@@ -679,25 +688,12 @@ async function scanProviderNeutralRepos({
       result.skippedReason ??= 'No labeled conflict candidates found.';
     }
 
-    await recordAutomationRunOutcome(db, {
-      key: 'conflict_resolver',
-      status: candidateCount > 0 ? 'succeeded' : 'skipped',
-      at: new Date(),
-    });
-
     console.log(
       `${LOG_PREFIX} Provider-neutral repos: ${candidateCount} candidates, ${conflictingCount} conflicting, ${launchedTaskCount} launched`,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     result.errors.push(message);
-
-    await recordAutomationRunOutcome(db, {
-      key: 'conflict_resolver',
-      status: 'failed',
-      at: new Date(),
-      error: message,
-    });
 
     console.error(
       `${LOG_PREFIX} Error scanning provider-neutral repositories:`,

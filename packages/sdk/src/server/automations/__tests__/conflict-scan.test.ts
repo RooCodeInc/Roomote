@@ -230,6 +230,7 @@ describe('conflictScanJob', () => {
 
     await conflictScanJob();
 
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -677,6 +678,113 @@ describe('conflictScanJob', () => {
           repository: 'acme/Platform/backend',
           prNumber: 42,
         }),
+      }),
+    );
+  });
+
+  it('records a single failed outcome when the GitHub scan fails and the provider-neutral scan succeeds', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+
+    // Select order: eligible installations, then provider-neutral repos. The
+    // installation's GitHub repos are never fetched because the octokit
+    // lookup fails first.
+    mockSelectWhere.mockReset();
+    mockSelectWhere
+      .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
+      .mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          sourceControlProvider: 'gitlab',
+          host: null,
+          installationId: null,
+          externalRepoId: '101',
+          fullName: 'acme/backend',
+          htmlUrl: 'https://gitlab.com/acme/backend',
+        },
+      ])
+      .mockResolvedValue([]);
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+
+    mockGetInstallationOctokit.mockReset();
+    mockGetInstallationOctokit.mockRejectedValueOnce(
+      new Error('GitHub API exploded'),
+    );
+
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 11, taskId: 'task-11' });
+
+    const result = await conflictScanJob();
+
+    // The provider-neutral scan still ran and launched work.
+    expect(result.launchedTaskId).toBe('task-11');
+    expect(result.errors).toEqual(['GitHub API exploded']);
+
+    // One combined outcome: failed, preserving the GitHub error instead of
+    // letting the successful provider-neutral pass clear it.
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'conflict_resolver',
+        status: 'failed',
+        error: expect.stringContaining('GitHub API exploded'),
+      }),
+    );
+  });
+
+  it('records a single succeeded outcome when only the provider-neutral scan finds candidates', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+
+    // Select order: eligible installations, provider-neutral repos, then the
+    // installation's GitHub repos (which yield no PRs).
+    mockSelectWhere.mockReset();
+    mockSelectWhere
+      .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
+      .mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          sourceControlProvider: 'gitlab',
+          host: null,
+          installationId: null,
+          externalRepoId: '101',
+          fullName: 'acme/backend',
+          htmlUrl: 'https://gitlab.com/acme/backend',
+        },
+      ])
+      .mockResolvedValueOnce([
+        { fullName: 'Roomote/example-app', orgId: 'org-1' },
+      ])
+      .mockResolvedValue([]);
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 12, taskId: 'task-12' });
+
+    const result = await conflictScanJob();
+
+    expect(result.launchedTaskId).toBe('task-12');
+    expect(result.errors).toEqual([]);
+
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'conflict_resolver',
+        status: 'succeeded',
       }),
     );
   });

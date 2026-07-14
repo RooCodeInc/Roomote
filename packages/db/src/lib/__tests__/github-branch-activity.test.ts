@@ -306,6 +306,100 @@ describe('findActiveGitHubBranchWork', () => {
     });
   });
 
+  it('does not let a GitHub branch run suppress lookups for another provider', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-cross-provider';
+    const prNumber = 352;
+    const branchName = 'feature/cross-provider';
+
+    // Legacy GitHub payload: no sourceControlProvider field, which defaults
+    // to 'github' at runtime.
+    const githubRun = await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        description: 'GitHub work on the branch',
+      },
+    });
+
+    // A GitLab scan for the same repository fullName + branch must not match
+    // the GitHub run.
+    const gitlabResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(gitlabResult).toBeNull();
+
+    // The default (GitHub) lookup still matches the legacy payload.
+    const githubResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+    });
+
+    expect(githubResult).toMatchObject({
+      runId: githubRun.id,
+      match: 'branch',
+    });
+  });
+
+  it('matches provider-tagged branch runs only for the same provider', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-gitlab-branch';
+    const prNumber = 353;
+    const branchName = 'feature/gitlab-branch';
+
+    const gitlabRun = await runFactory.create({
+      actingUserId: user.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        sourceControlProvider: 'gitlab',
+        description: 'GitLab work on the branch',
+      },
+    });
+
+    const gitlabResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(gitlabResult).toMatchObject({
+      runId: gitlabRun.id,
+      match: 'branch',
+    });
+
+    // The GitLab-tagged run must not suppress GitHub or ADO lookups.
+    const githubResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+    });
+
+    expect(githubResult).toBeNull();
+
+    const adoResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'ado',
+    });
+
+    expect(adoResult).toBeNull();
+  });
+
   it('ignores runs that are not actively running anymore', async () => {
     const { user } = await createActor();
     const repoFullName = 'owner/repo-inactive';

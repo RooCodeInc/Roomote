@@ -165,6 +165,7 @@ export async function findActiveGitHubBranchWork({
     .where(
       and(
         ...baseConditions,
+        payloadProviderCondition(sourceControlProvider),
         sql`${taskRuns.payload}->>'repo' = ${repoFullName}`,
         sql`(
           ${taskRuns.payload}->>'branch' = ${branchName}
@@ -176,6 +177,20 @@ export async function findActiveGitHubBranchWork({
     .limit(10);
 
   return pickActiveWork(branchRows, 'branch');
+}
+
+/**
+ * Payload-side provider scoping for the branch fallback lookups. Payloads
+ * written before provider-neutral support omit `sourceControlProvider` and
+ * mean GitHub at runtime (see `normalizeSourceControlProvider`), so missing
+ * or empty values are treated as `'github'`. This keeps a same-named
+ * repo/branch on another provider from cross-matching GitHub work and vice
+ * versa.
+ */
+function payloadProviderCondition(
+  sourceControlProvider: SourceControlProvider,
+) {
+  return sql`COALESCE(NULLIF(${taskRuns.payload}->>'sourceControlProvider', ''), 'github') = ${sourceControlProvider}`;
 }
 
 /**
