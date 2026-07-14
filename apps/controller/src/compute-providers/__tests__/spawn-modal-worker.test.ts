@@ -14,6 +14,7 @@ const mockCreateComputeProviderMutationEventRecorder = vi.fn(
 const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
 const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
 const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
+const mockFindTask = vi.fn();
 const mockUpdateTaskRunMachine = vi.fn();
 const mockGetNamedPortsForTaskRun = vi.fn();
 const mockShouldEnableAuthBypassForTaskRun = vi.fn(
@@ -26,6 +27,7 @@ function mockTaskRun(
 ): TaskRun {
   return {
     id: 123,
+    taskId: 'task_123',
     vendor: 'modal',
     sourceSnapshotId: null,
     payload: { repo: 'test/repo' },
@@ -40,6 +42,12 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     ...actual,
     db: {
       ...actual.db,
+      query: {
+        ...actual.db.query,
+        tasks: {
+          findFirst: (...args: unknown[]) => mockFindTask(...args),
+        },
+      },
       update: () => mockDbUpdate(),
     },
     createComputeProviderMutationEventRecorder:
@@ -87,6 +95,7 @@ describe('spawnModalWorker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockShouldEnableAuthBypassForTaskRun.mockReturnValue(true);
+    mockFindTask.mockResolvedValue({ workflow: 'standard' });
     delete process.env.PREVIEW_PROXY_BASE_URL;
 
     mockCreateModalMachine.mockResolvedValue({
@@ -175,6 +184,39 @@ describe('spawnModalWorker', () => {
       }),
     );
     expect(mockCreateModalMachine).toHaveBeenCalled();
+    expect(mockFindTask).not.toHaveBeenCalled();
+  });
+
+  it('uses a Modal VM sandbox for setup onboarding before an environment config exists', async () => {
+    mockFindTask.mockResolvedValue({ workflow: 'setup_onboarding' });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockFindTask).toHaveBeenCalledOnce();
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'modal',
+        config: expect.objectContaining({
+          vmRuntime: true,
+          cpu: 2,
+          memoryMiB: 4096,
+        }),
+      }),
+    );
+    expect(mockCreateModalMachine).toHaveBeenCalled();
   });
 
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {
@@ -219,6 +261,7 @@ describe('spawnModalWorker', () => {
       computeProvider: 'modal',
       computeProviderId: 'modal-machine-123',
       runId: 123,
+      taskId: 'task_123',
       context: 'Fresh Modal launch',
     });
   });
