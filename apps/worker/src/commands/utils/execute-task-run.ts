@@ -501,8 +501,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
 
     const {
       preparedWorkspace,
-      backgroundOrganizationEnvironmentSetup:
-        backgroundOrganizationEnvironmentSetupPromise,
+      backgroundEnvironmentSetup: backgroundEnvironmentSetupPromise,
     } = await recordWorkerPhase({
       label: 'setupWorkspace',
       recordWorkerRuntimeEvent,
@@ -510,7 +509,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
         payloadKind: taskRun.payloadKind,
         setupMode,
         workspaceType: workspace.type,
-        backgroundOrganizationEnvironmentSetup: runEnvironmentSetupInBackground,
+        backgroundEnvironmentSetup: runEnvironmentSetupInBackground,
       },
       fn: async () =>
         await setup({
@@ -531,8 +530,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
           },
           logger: startupLogger,
           workerEnv: currentWorkerEnv,
-          backgroundOrganizationEnvironmentSetup:
-            runEnvironmentSetupInBackground,
+          backgroundEnvironmentSetup: runEnvironmentSetupInBackground,
           recordPhase: ({
             label,
             startedAtMs,
@@ -557,7 +555,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
     backgroundEnvironmentSetupController =
       new BackgroundEnvironmentSetupController({
         taskRun,
-        backgroundSetupPromise: backgroundOrganizationEnvironmentSetupPromise,
+        backgroundSetupPromise: backgroundEnvironmentSetupPromise,
         recordWorkerRuntimeEvent,
       });
 

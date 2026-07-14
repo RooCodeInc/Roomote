@@ -133,6 +133,31 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
 });
 
 describe('buildSandboxInstruction', () => {
+  it('tells the agent that Docker project startup may still be running', () => {
+    const instruction = buildSandboxInstruction(false, {
+      name: 'Sandbox',
+      repositories: [{ repository: 'owner/repo' }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+        },
+      ],
+    });
+
+    expect(instruction).toContain(
+      'They may still be building or waiting for health checks when your task begins.',
+    );
+    expect(instruction).toContain(
+      'Inspect them with `docker compose ps` and `docker compose logs`',
+    );
+    expect(instruction).not.toContain(
+      'were built and started with Docker Compose before your task began',
+    );
+  });
+
   it('does not leak non-whitelisted or secret fields into the serialized JSON block', () => {
     const environmentConfig: EnvironmentConfig = {
       name: 'Sandbox',

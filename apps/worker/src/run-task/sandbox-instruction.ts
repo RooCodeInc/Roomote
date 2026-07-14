@@ -202,7 +202,7 @@ export function buildSandboxInstruction(
     if (environmentConfig.docker_projects?.length) {
       lines.push(
         '',
-        'Configured Docker projects were built and started with Docker Compose before your task began. Use `docker compose` with the configured project files when inspecting them, and do not start duplicate copies.',
+        'Roomote starts configured Docker projects with Docker Compose during environment setup. They may still be building or waiting for health checks when your task begins. Inspect them with `docker compose ps` and `docker compose logs`, wait for the existing startup when necessary, and do not start duplicate copies.',
       );
     }
 

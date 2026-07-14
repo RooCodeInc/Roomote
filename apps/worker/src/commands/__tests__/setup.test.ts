@@ -352,7 +352,7 @@ describe('setup mode behavior', () => {
     });
   });
 
-  it('can continue after minimal environment setup while repository commands run in the background', async () => {
+  it('can continue after minimal environment setup while Docker projects and repository commands run in the background', async () => {
     const deferredBackgroundWarnings = [
       {
         message:
@@ -360,6 +360,14 @@ describe('setup mode behavior', () => {
       },
     ];
     let releaseBackgroundSetup: (() => void) | undefined;
+    let releaseDockerProjects: (() => void) | undefined;
+
+    mockInitializeDockerProjects.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          releaseDockerProjects = resolve;
+        }),
+    );
 
     mockExecuteOrganizationEnvironmentRepositoryCommands.mockImplementationOnce(
       async () => {
@@ -375,10 +383,11 @@ describe('setup mode behavior', () => {
       workspace: environmentWorkspaceOptions,
       logger,
       workerEnv: mockWorkerEnv,
-      backgroundOrganizationEnvironmentSetup: true,
+      backgroundEnvironmentSetup: true,
     });
 
     expect(mockSetupOrganizationEnvironment).not.toHaveBeenCalled();
+    expect(mockInitializeDockerProjects).toHaveBeenCalledTimes(1);
     expect(mockInstallOrganizationEnvironmentSkills).toHaveBeenCalledWith(
       logger,
       expect.objectContaining({
@@ -387,35 +396,81 @@ describe('setup mode behavior', () => {
     );
     expect(
       mockExecuteOrganizationEnvironmentRepositoryCommands,
-    ).toHaveBeenCalledWith(
-      logger,
-      expect.objectContaining({
-        environment: environmentWorkspaceOptions.workspace,
-        continueRepositoryCommandFailures: true,
-      }),
+    ).not.toHaveBeenCalled();
+    expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
+      {
+        message:
+          'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
+      },
+    ]);
+    expect(result.backgroundEnvironmentSetup).toBeDefined();
+
+    releaseDockerProjects?.();
+    await vi.waitFor(() => {
+      expect(
+        mockExecuteOrganizationEnvironmentRepositoryCommands,
+      ).toHaveBeenCalledWith(
+        logger,
+        expect.objectContaining({
+          environment: environmentWorkspaceOptions.workspace,
+          continueRepositoryCommandFailures: true,
+        }),
+      );
+    });
+    releaseBackgroundSetup?.();
+    await expect(result.backgroundEnvironmentSetup).resolves.toEqual(
+      deferredBackgroundWarnings,
     );
     expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
       {
         message:
-          'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.',
-      },
-    ]);
-    expect(result.backgroundOrganizationEnvironmentSetup).toBeDefined();
-
-    releaseBackgroundSetup?.();
-    await expect(
-      result.backgroundOrganizationEnvironmentSetup,
-    ).resolves.toEqual(deferredBackgroundWarnings);
-    expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
-      {
-        message:
-          'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.',
+          'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
       },
       {
         message:
           'Optional environment command "pnpm install" failed for owner/repo: Command failed with exit code 1',
       },
     ]);
+  });
+
+  it('reports a background Docker project failure without failing task startup', async () => {
+    mockInitializeDockerProjects.mockRejectedValueOnce(
+      new Error('backend failed its health check'),
+    );
+
+    const result = await setup({
+      mode: 'full',
+      workspace: environmentWorkspaceOptions,
+      logger,
+      workerEnv: mockWorkerEnv,
+      backgroundEnvironmentSetup: true,
+    });
+
+    await expect(result.backgroundEnvironmentSetup).resolves.toEqual([
+      {
+        message:
+          'Background Docker project setup failed: backend failed its health check',
+      },
+    ]);
+    expect(result.preparedWorkspace?.environmentSetupWarnings).toContainEqual({
+      message:
+        'Background Docker project setup failed: backend failed its health check',
+    });
+  });
+
+  it('keeps Docker project failures blocking when background setup is disabled', async () => {
+    mockInitializeDockerProjects.mockRejectedValueOnce(
+      new Error('backend failed its health check'),
+    );
+
+    await expect(
+      setup({
+        mode: 'full',
+        workspace: environmentWorkspaceOptions,
+        logger,
+        workerEnv: mockWorkerEnv,
+      }),
+    ).rejects.toThrow('backend failed its health check');
   });
 
   it('continues after environment service startup failures for standard tasks', async () => {
