@@ -131,6 +131,9 @@ describe('resolveGitLabBaseUrl', () => {
     expect(normalizeGitLabBaseUrl('gitlab.com/roomote/')).toBe(
       'https://gitlab.com',
     );
+    expect(normalizeGitLabBaseUrl('gitlab.example.com////////')).toBe(
+      'https://gitlab.example.com',
+    );
   });
 });
 

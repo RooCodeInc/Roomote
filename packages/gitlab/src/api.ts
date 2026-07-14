@@ -113,8 +113,18 @@ export type ListGitLabProjectsOptions = {
   stopAfter?: number;
 };
 
+function removeTrailingSlashes(value: string): string {
+  let end = value.length;
+
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+}
+
 export function normalizeGitLabBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const trimmed = removeTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('GITLAB_BASE_URL cannot be empty.');
@@ -131,7 +141,7 @@ export function normalizeGitLabBaseUrl(baseUrl: string): string {
     url.pathname = url.pathname.slice(0, -apiPathSuffix.length) || '/';
   }
 
-  return url.toString().replace(/\/+$/, '');
+  return removeTrailingSlashes(url.toString());
 }
 
 export async function resolveGitLabToken(): Promise<string | null> {

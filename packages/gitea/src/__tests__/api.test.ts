@@ -127,6 +127,9 @@ describe('Gitea API helpers', () => {
     expect(normalizeGiteaBaseUrl('git.example.com/')).toBe(
       'https://git.example.com',
     );
+    expect(normalizeGiteaBaseUrl('git.example.com////////')).toBe(
+      'https://git.example.com',
+    );
   });
 
   it('lists authenticated Gitea repositories with token auth and pagination', async () => {

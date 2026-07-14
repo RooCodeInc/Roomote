@@ -100,8 +100,18 @@ export type GiteaWebhookEnsureResult = {
   error?: string;
 };
 
+function removeTrailingSlashes(value: string): string {
+  let end = value.length;
+
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+}
+
 export function normalizeGiteaBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const trimmed = removeTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('GITEA_BASE_URL cannot be empty.');
@@ -118,7 +128,7 @@ export function normalizeGiteaBaseUrl(baseUrl: string): string {
     url.pathname = url.pathname.slice(0, -apiPathSuffix.length) || '/';
   }
 
-  return url.toString().replace(/\/+$/, '');
+  return removeTrailingSlashes(url.toString());
 }
 
 export async function resolveGiteaToken(): Promise<string | null> {
