@@ -14,7 +14,6 @@ import {
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
-import { loadAutomationThreadFeedbackContext } from './automation-thread-feedback';
 import {
   buildDestinationTaskPayloadFields,
   resolveAutomationRuntimeDestination,
@@ -29,14 +28,12 @@ import {
   type AutomationRunOpts,
 } from './types';
 
-// Manual Run now only; webhook is primary. Cap matches the old max act items.
-const MANUAL_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const MAX_MANUAL_TASKS = 3;
 const LOG_PREFIX = '[ci-failure-triage]';
 
 /**
- * Manual "Run now" launches up to three environment-backed investigate-and-fix
- * standard tasks (one per repository). No agent scan / work-item hop.
+ * Manual "Run now" launches a single environment-backed investigate-and-fix
+ * task for the first eligible repository that is free of an active claim.
+ * The task focuses on the latest default-branch failure only.
  */
 export async function ciFailureTriageJob(
   opts: AutomationRunOpts = {},
@@ -90,22 +87,15 @@ export async function ciFailureTriageJob(
     }
 
     const channelId = destination.channelId;
-    const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
-      automationKey: 'ci_failure_triage',
-      slackChannelId: channelId,
-    });
-    const scanWindowStart = new Date(Date.now() - MANUAL_SCAN_WINDOW_MS);
-    const candidates = environmentBacked.slice(0, MAX_MANUAL_TASKS);
     let launched = 0;
 
-    for (const coverage of candidates) {
+    for (const coverage of environmentBacked) {
       const environmentId = coverage.targetEnvironmentId;
       if (!environmentId) {
         continue;
       }
 
-      // Same fingerprint scheme as webhooks so manual uses the repo-level claim
-      // that webhook investigations already hold for this repository.
+      // Repo claim blocks double-start against an active webhook investigation.
       const fingerprint = buildCiFailureTriageFingerprint({
         repositoryFullName: coverage.repositoryFullName,
         workflowName: 'manual-run-now',
@@ -144,9 +134,7 @@ export async function ciFailureTriageJob(
                   channelId,
                   repositoryFullNames: [coverage.repositoryFullName],
                   repositoryCoverage: coverageSlice,
-                  scanWindowStart,
                   trigger: 'manual',
-                  recentThreadFeedback,
                 }),
                 ...buildDestinationTaskPayloadFields(destination),
                 visibleInTranscript: false,
@@ -162,8 +150,10 @@ export async function ciFailureTriageJob(
           { launchClass: 'automation' },
         );
 
-        result.launchedTaskId ??= launchResult.taskId;
-        launched++;
+        result.launchedTaskId = launchResult.taskId;
+        launched = 1;
+        // One failure at a time — do not fan out.
+        break;
       } catch (enqueueError) {
         await releaseCiFailureTriageInvestigation({
           repositoryFullName: coverage.repositoryFullName,
@@ -190,10 +180,14 @@ export async function ciFailureTriageJob(
 
     if (launched === 0) {
       result.skippedReason =
-        'No CI failure fix tasks were launched (no eligible repos or all claims held).';
+        result.errors.length > 0
+          ? 'Failed to launch the CI failure fix task.'
+          : 'No CI failure fix task was launched (no eligible repo or claim held).';
     }
 
-    console.log(`${LOG_PREFIX} Manual Run now launched ${launched} task(s)`);
+    console.log(
+      `${LOG_PREFIX} Manual Run now launched ${launched} task for latest failure focus`,
+    );
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

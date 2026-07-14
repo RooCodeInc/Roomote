@@ -14,23 +14,20 @@ export type CiFailureTriageTriggeringRun = {
 };
 
 /**
- * Builds the one-task CI failure prompt: investigate the red run in this
- * environment-backed workspace and fix it in the same task when actionable.
+ * Builds the one-task CI failure prompt: inspect the latest relevant red run
+ * and fix it in this same task when it is real and fixable.
  */
 export function buildCiFailureTriagePrompt({
   channelId,
   repositoryFullNames,
   repositoryCoverage,
-  scanWindowStart,
   trigger,
   triggeringRun,
   hasAnnouncementThread,
-  recentThreadFeedback,
 }: {
   channelId: string;
   repositoryFullNames: string[];
   repositoryCoverage: RepositoryCoverage[];
-  scanWindowStart: Date;
   trigger: CiFailureTriageTrigger;
   triggeringRun?: CiFailureTriageTriggeringRun | null;
   /**
@@ -38,16 +35,18 @@ export function buildCiFailureTriagePrompt({
    * message; this same task must resolve that thread.
    */
   hasAnnouncementThread?: boolean;
-  recentThreadFeedback?: string | null;
 }): string {
-  const repositoryScope =
-    repositoryFullNames.length > 0
-      ? repositoryFullNames.map((fullName) => `- ${fullName}`).join('\n')
-      : 'No repositories from configured Roomote environments are eligible.';
-  const repositoryEnvironmentScope =
-    formatRepositoryEnvironmentLines(repositoryCoverage);
-  const repositoryEnvironmentSection = repositoryEnvironmentScope
-    ? `\nRepository environments:\n${repositoryEnvironmentScope}\n`
+  const repository =
+    repositoryFullNames[0] ??
+    triggeringRun?.repositoryFullName ??
+    'the target repository';
+  const environmentLine = formatRepositoryEnvironmentLines(
+    repositoryCoverage.filter(
+      (entry) => entry.repositoryFullName === repository,
+    ),
+  );
+  const environmentSection = environmentLine
+    ? `\nEnvironment:\n${environmentLine}\n`
     : '';
   const triggeringRunSection = triggeringRun
     ? `\n  <triggering_run>
@@ -58,53 +57,38 @@ export function buildCiFailureTriagePrompt({
     <head_sha>${triggeringRun.headSha}</head_sha>
   </triggering_run>`
     : '';
-  const openingInstruction = triggeringRun
-    ? `A workflow run just failed on the default branch (see triggering_run). Start from that run with \`gh run view\` / \`gh run view --log-failed\`, then check the workflow's recent history on the same branch to judge whether the failure is persistent, a flake, or already fixed.`
-    : `This task owns exactly one repository from repository_scope. Use \`gh run list\` against that repository's default branch to find workflow runs that failed since the scan window start, pick the highest-blast-radius persistent failure (or conclude nothing needs action), and \`gh run view\` / \`gh run view --log-failed\` to inspect it.`;
 
-  const slackInstructions = hasAnnouncementThread
-    ? `An "investigating" announcement has already been posted in the Slack thread for this run. Every terminal outcome must resolve that thread with send_chat_reply purpose "closeout":
-- If the failure needs no action (already fixed by a newer run, a one-off flake, or covered by an open Roomote PR), say so with evidence.
-- If you open a PR, report the PR and what changed (plain language).
-- If you hit a setup/auth/blocker, report it in the thread, free of raw GitHub CLI commands, \`gh api\` invocations, or command transcripts.
-Do not post progress updates, and never leave the announcement thread unresolved.`
-    : `Stay silent on Slack while work is in flight. Create Slack output only if you need input, hit a blocker, or finish with a meaningful result (including a PR or an evidence-backed no-op when humans would otherwise wonder what happened on a manual Run now). Prefer the configured channel (\`slack_channel_id\`) when you must report. Keep Slack plain-language and never paste raw GitHub CLI commands, \`gh api\` invocations, or command transcripts.`;
+  const focus = triggeringRun
+    ? `Work only the failing run in triggering_run. Inspect it with \`gh run view\` / \`gh run view --log-failed\`. Do not dig through unrelated older runs.`
+    : `In ${repository}, find only the single most recent failed workflow run on the default branch (\`gh run list --branch <default> --status failure --limit 1\`). Inspect that run. Skip older failures.`;
+
+  const slack = hasAnnouncementThread
+    ? `An investigating Slack thread already exists for this run. Always close it out with send_chat_reply purpose "closeout" (no-op with evidence, PR link, or blocker). No progress spam.`
+    : `Stay quiet on Slack unless you need input, hit a blocker, or finish with a result. Prefer channel \`${channelId}\`.`;
 
   return `$ci-failure-triage
 
 <task_context>
   <source>background-automation</source>
   <run_mode>investigate_and_fix</run_mode>
-  <trigger>${trigger}</trigger>
-  <scan_window>failed default-branch workflow runs since ${scanWindowStart.toISOString()}</scan_window>${triggeringRunSection}
+  <trigger>${trigger}</trigger>${triggeringRunSection}
   <slack_channel_id>${channelId}</slack_channel_id>
-  <repository_scope>
-${repositoryScope}
-  </repository_scope>
+  <repository>${repository}</repository>
 </task_context>
 
-You are the single Roomote task for this CI failure. This environment already matches the target repository. Investigate, then fix in this same task when the failure is real and fixable. Do **not** call \`submit_automation_work_items\`. Do **not** launch another task. Do not re-run GitHub Actions workflows.
+You own this CI failure end-to-end in this environment-backed workspace. Investigate and, when the failure is real and fixable, fix and open a PR in this same task. Do not re-run GitHub Actions workflows.
 
-${openingInstruction}
+${focus}
 
-Classify the failure:
-- Skip when a newer run of the same workflow on the same branch already passes (already fixed).
-- Skip one-off infrastructure or runner flakes that did not recur.
-- Skip when an open Roomote PR already addresses the same failure.
-- Treat as actionable when it is the most recent run of its workflow on the default branch and the logs point at a concrete job, step, test, or command.
+If it is already green on a newer run, clearly flaky, or already covered by an open Roomote PR: close out with short evidence and stop.
 
-If the failure is not actionable, close out with evidence and stop without code changes.
+If it is real:
+1. Reproduce the failing job commands in this environment.
+2. Make the smallest fix.
+3. Re-verify.
+4. Open a draft PR.
+5. If it does not reproduce, no-op with evidence — do not change code.
 
-If it is actionable, continue in this same task as an implement-changes style fix:
-1. Reproduce the failure by running the failing job's commands from the workflow definition inside this environment.
-2. Identify the introducing commit or root cause when history makes that cheap.
-3. Implement the smallest fix that makes the failing job pass.
-4. Re-run those verification commands.
-5. Open a draft PR through the normal delivery path.
-6. If the failure does not reproduce, report a no-op with evidence (flaky test or transient infrastructure) and do not change code.
-
-${slackInstructions}
-
-${repositoryEnvironmentSection}
-${recentThreadFeedback?.trim() ? `Recent feedback from earlier CI failure triage threads:\n${recentThreadFeedback.trim()}\n` : ''}`;
+${slack}
+${environmentSection}`;
 }

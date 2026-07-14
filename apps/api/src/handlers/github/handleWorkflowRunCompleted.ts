@@ -38,9 +38,6 @@ const LOG_PREFIX = '[handleWorkflowRunCompleted]';
 // one investigation per repository covers the burst.
 const TRIAGE_DEBOUNCE_SECONDS = 15 * 60;
 
-// Bounds how far back the task correlates run history for classification.
-const WEBHOOK_SCAN_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 interface WorkflowRunCompletedPayload {
   action: string;
   workflow_run: {
@@ -328,7 +325,6 @@ export async function handleWorkflowRunCompleted(
               channelId,
               repositoryFullNames: [match.repositoryFullName],
               repositoryCoverage,
-              scanWindowStart: new Date(Date.now() - WEBHOOK_SCAN_WINDOW_MS),
               trigger: 'webhook',
               triggeringRun: {
                 repositoryFullName: match.repositoryFullName,
