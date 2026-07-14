@@ -84,7 +84,8 @@ export interface SourceControlPullRequestReadResponse {
   success: true;
   provider: SourceControlProvider;
   repositoryFullName: string;
-  number: number;
+  /** Present for single-PR reads; list_pull_requests returns pullRequests instead. */
+  number?: number;
   warnings: string[];
   [key: string]: unknown;
 }
