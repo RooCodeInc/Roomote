@@ -21,6 +21,7 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
 import {
   getGiteaAutomationTargets,
   getGiteaUsername,
@@ -102,6 +103,22 @@ export async function handleGiteaPullRequest(
       : ('closed' as const);
 
     await updateTaskPrStatus('gitea', repoFullName, payload.number, status);
+
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitea',
+      repositoryFullName: repoFullName,
+      pullRequest: {
+        number: payload.number,
+        externalId: pullRequest.id ?? null,
+        title: pullRequest.title,
+        url: getPullRequestUrl(payload),
+        authorLogin: getGiteaUsername(pullRequest.user) ?? null,
+        state: status,
+        createdAt: pullRequest.created_at ?? null,
+        updatedAt: pullRequest.updated_at ?? null,
+        mergedAt: pullRequest.merged_at ?? null,
+      },
+    });
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({

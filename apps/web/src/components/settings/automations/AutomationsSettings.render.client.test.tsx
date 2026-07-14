@@ -459,10 +459,11 @@ describe('AutomationsSettings', () => {
 
     // Generalized manager automations support every chat surface.
     expect((await screen.findAllByText('All chat channels')).length).toBe(6);
-    // Suggester, announcer, and Sentry triage scan any source control provider.
-    expect(screen.getAllByText('All source control').length).toBe(3);
-    // Dependabot/CI triage, auditors, manager stats, and conflict resolver.
-    expect(screen.getAllByText('GitHub only').length).toBe(5);
+    // Suggester, announcer, Sentry triage, and both merged-PR auditors scan
+    // any source control provider.
+    expect(screen.getAllByText('All source control').length).toBe(5);
+    // Dependabot/CI triage and manager stats stay GitHub-only.
+    expect(screen.getAllByText('GitHub only').length).toBe(3);
     // conflict_resolver now supports GitHub, GitLab, and Azure DevOps
     expect(screen.getAllByText('GitHub · GitLab · Azure DevOps').length).toBe(
       1,

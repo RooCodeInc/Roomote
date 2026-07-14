@@ -21,6 +21,7 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -106,6 +107,22 @@ export async function handleBitbucketPullRequest(
     const status = merged ? ('merged' as const) : ('closed' as const);
 
     await updateTaskPrStatus('bitbucket', repoFullName, prNumber, status);
+
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'bitbucket',
+      repositoryFullName: repoFullName,
+      pullRequest: {
+        number: prNumber,
+        title: pullRequest.title,
+        url: getBitbucketPullRequestUrl(payload),
+        authorLogin: getBitbucketUsername(pullRequest.author) ?? null,
+        state: status,
+        createdAt: pullRequest.created_on ?? null,
+        // Bitbucket exposes no merge timestamp; updated_on is the terminal
+        // activity time on a merged/declined PR.
+        updatedAt: pullRequest.updated_on ?? null,
+      },
+    });
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({

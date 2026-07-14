@@ -27,6 +27,7 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -187,6 +188,35 @@ async function getAdoSyncReviewDecision({
   return { shouldEnqueue: true };
 }
 
+function scheduleAdoPullRequestFactSync(
+  payload: AdoPullRequestWebhook,
+  repoFullName: string,
+  status: 'merged' | 'closed',
+): void {
+  const pullRequest = payload.resource;
+
+  scheduleSourceControlPullRequestFactSync({
+    provider: 'ado',
+    repositoryFullName: repoFullName,
+    pullRequest: {
+      number: pullRequest.pullRequestId,
+      title: pullRequest.title,
+      url: getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+      authorLogin: getAdoIdentityName(pullRequest.createdBy) ?? null,
+      state: status,
+      createdAt: pullRequest.creationDate ?? null,
+      // Azure DevOps webhooks carry no last-updated timestamp; closedDate is
+      // the terminal-event time.
+      updatedAt: pullRequest.closedDate ?? null,
+      mergedAt: status === 'merged' ? (pullRequest.closedDate ?? null) : null,
+    },
+  });
+}
+
 export async function handleAdoPullRequest(
   payload: AdoPullRequestWebhook,
   context: AdoPullRequestWebhookContext = {},
@@ -211,6 +241,8 @@ export async function handleAdoPullRequest(
       pullRequest.pullRequestId,
       'closed',
     );
+
+    scheduleAdoPullRequestFactSync(payload, repoFullName, 'closed');
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({
@@ -255,6 +287,8 @@ export async function handleAdoPullRequest(
       pullRequest.pullRequestId,
       'merged',
     );
+
+    scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({

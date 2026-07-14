@@ -1,4 +1,7 @@
-import { syncGitHubPullRequestFactsForAllOrgs } from '@roomote/sdk/server';
+import {
+  syncGitHubPullRequestFactsForAllOrgs,
+  syncSourceControlPullRequestFacts,
+} from '@roomote/sdk/server';
 
 const LOG_PREFIX = '[pullRequestAnalyticsSync]';
 
@@ -9,7 +12,12 @@ export async function pullRequestAnalyticsSyncJob(
     `${LOG_PREFIX} Starting sync${opts.manualTrigger ? ' (manual)' : ''}`,
   );
 
-  const results = await syncGitHubPullRequestFactsForAllOrgs();
+  // GitHub facts come from the analytics sync; the provider-neutral sync
+  // covers merged PRs on GitLab/Gitea/Azure DevOps/Bitbucket repositories.
+  const results = [
+    ...(await syncGitHubPullRequestFactsForAllOrgs()),
+    await syncSourceControlPullRequestFacts(),
+  ];
   const totals = results.reduce(
     (acc, result) => ({
       eligibleRepositories:

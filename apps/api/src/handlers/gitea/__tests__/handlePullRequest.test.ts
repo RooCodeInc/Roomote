@@ -5,6 +5,7 @@ const {
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
   mockScheduleNotifyPullRequestTerminalStatus,
+  mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -13,6 +14,7 @@ const {
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
+  mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
 }));
 
@@ -47,6 +49,11 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
   scheduleNotifyPullRequestTerminalStatus:
     mockScheduleNotifyPullRequestTerminalStatus,
+}));
+
+vi.mock('../../pull-request-fact-sync', () => ({
+  scheduleSourceControlPullRequestFactSync:
+    mockScheduleSourceControlPullRequestFactSync,
 }));
 
 vi.mock('../getGiteaAutomationTargets', async () => {
@@ -215,7 +222,16 @@ describe('handleGiteaPullRequest', () => {
 
   it('updates tracked task PR status and notifications for merged pull requests', async () => {
     await expect(
-      handleGiteaPullRequest(makePayload('closed', { merged: true })),
+      handleGiteaPullRequest(
+        makePayload('closed', {
+          merged: true,
+          id: 900,
+          created_at: '2026-07-01T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          user: { id: 4, login: 'gitea-user' },
+        }),
+      ),
     ).resolves.toEqual({ status: 'ok' });
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -224,6 +240,21 @@ describe('handleGiteaPullRequest', () => {
       42,
       'merged',
     );
+    expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
+      provider: 'gitea',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 42,
+        externalId: 900,
+        title: 'Update backend',
+        url: 'https://git.example.com/acme/backend/pulls/42',
+        authorLogin: 'gitea-user',
+        state: 'merged',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-10T00:00:00Z',
+        mergedAt: '2026-07-10T00:00:00Z',
+      },
+    });
     expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
       {
         sourceControlProvider: 'gitea',

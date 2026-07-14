@@ -21,6 +21,7 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -103,6 +104,23 @@ export async function handleGitLabMergeRequest(
         : ('closed' as const);
 
     await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status);
+
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitlab',
+      repositoryFullName: repoFullName,
+      pullRequest: {
+        number: mergeRequest.iid,
+        externalId: mergeRequest.id ?? null,
+        title: mergeRequest.title,
+        url: mergeRequest.url,
+        // The merge-request webhook carries the acting user, not the MR
+        // author; the scheduled sync backfills authorLogin.
+        authorLogin: null,
+        state: status,
+        createdAt: mergeRequest.created_at ?? null,
+        updatedAt: mergeRequest.updated_at ?? null,
+      },
+    });
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({

@@ -139,6 +139,12 @@ export type SourceControlPullRequestCommentsResult = {
 
 export type SourceControlPullRequestSummary = {
   number: number;
+  /**
+   * The provider's globally unique pull request id when the list payload
+   * exposes one distinct from the per-repository number (GitHub, GitLab,
+   * Gitea). Null when the provider only has the number (Bitbucket, ADO).
+   */
+  externalId: number | null;
   url: string;
   title: string;
   state: 'open' | 'closed' | 'merged';
@@ -149,6 +155,10 @@ export type SourceControlPullRequestSummary = {
   /** Null when the provider's list payload has no last-updated timestamp (Azure DevOps). */
   updatedAt: string | null;
   createdAt: string | null;
+  /** Null for open PRs and when the provider exposes no merge timestamp (Bitbucket). */
+  mergedAt: string | null;
+  /** Null for open PRs and when the provider exposes no close timestamp (Bitbucket). */
+  closedAt: string | null;
   labels: string[];
   headSha: string | null;
   baseSha: string | null;
@@ -491,9 +501,12 @@ const gitHubReviewThreadsQueryResponseSchema = z.object({
 
 const gitLabMergeRequestListItemSchema = z
   .object({
+    id: z.number().int().optional(),
     iid: z.number().int(),
     title: z.string(),
     state: z.string(),
+    merged_at: z.string().nullable().optional(),
+    closed_at: z.string().nullable().optional(),
     web_url: z.string().url().optional(),
     draft: z.boolean().optional(),
     work_in_progress: z.boolean().optional(),
@@ -519,11 +532,14 @@ const gitLabMergeRequestListPageSchema = z.array(
 );
 
 const giteaPullRequestListItemSchema = giteaPullRequestDetailsSchema.extend({
+  id: z.number().int().optional(),
   labels: z
     .array(z.object({ name: z.string().optional() }).passthrough())
     .optional(),
   created_at: z.string().nullable().optional(),
   updated_at: z.string().nullable().optional(),
+  merged_at: z.string().nullable().optional(),
+  closed_at: z.string().nullable().optional(),
   user: z
     .object({ id: z.number().optional(), login: z.string().optional() })
     .nullable()
@@ -552,6 +568,7 @@ const bitbucketPullRequestListPageSchema = z.object({
 
 const adoPullRequestListItemSchema = adoPullRequestDetailsSchema.extend({
   creationDate: z.string().optional(),
+  closedDate: z.string().optional(),
   labels: z
     .array(z.object({ name: z.string().optional() }).passthrough())
     .optional(),
@@ -710,6 +727,82 @@ export async function getSourceControlPullRequestDetailsForRepository({
 }
 
 /**
+ * The list states the per-provider implementations support. 'open' maps to
+ * each provider's open/active filter; 'merged' maps to the closest
+ * server-side filter (GitLab state=merged, ADO status=completed, Bitbucket
+ * state=MERGED) plus a client-side merged check where the provider's closed
+ * list mixes in unmerged PRs (GitHub, Gitea).
+ */
+type PullRequestListState = 'open' | 'merged';
+
+async function listSourceControlPullRequestsForRepository({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  limit?: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const effectiveLimit = Math.min(
+    limit ?? DEFAULT_LIST_PULL_REQUESTS_LIMIT,
+    MAX_LIST_PULL_REQUESTS_LIMIT,
+  );
+
+  switch (provider) {
+    case 'github':
+      return listGitHubPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+      });
+    case 'gitlab':
+      return listGitLabMergeRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'gitea':
+      return listGiteaPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'bitbucket':
+      return listBitbucketPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'ado':
+      return listAdoPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        fetchImpl,
+      });
+  }
+}
+
+/**
  * Open pull requests for a resolved repository row, dispatched by provider.
  * Exported for server-side automations (e.g. the conflict scan) that operate
  * outside a task run; the task-run entry point above adds scope checks before
@@ -726,47 +819,56 @@ export async function listOpenSourceControlPullRequestsForRepository({
   limit?: number;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
-  const effectiveLimit = Math.min(
-    limit ?? DEFAULT_LIST_PULL_REQUESTS_LIMIT,
-    MAX_LIST_PULL_REQUESTS_LIMIT,
-  );
+  return listSourceControlPullRequestsForRepository({
+    repository,
+    provider,
+    limit,
+    state: 'open',
+    fetchImpl,
+  });
+}
 
-  switch (provider) {
-    case 'github':
-      return listGitHubOpenPullRequests({
-        repository,
-        provider,
-        limit: effectiveLimit,
-      });
-    case 'gitlab':
-      return listGitLabOpenMergeRequests({
-        repository,
-        provider,
-        limit: effectiveLimit,
-        fetchImpl,
-      });
-    case 'gitea':
-      return listGiteaOpenPullRequests({
-        repository,
-        provider,
-        limit: effectiveLimit,
-        fetchImpl,
-      });
-    case 'bitbucket':
-      return listBitbucketOpenPullRequests({
-        repository,
-        provider,
-        limit: effectiveLimit,
-        fetchImpl,
-      });
-    case 'ado':
-      return listAdoOpenPullRequests({
-        repository,
-        provider,
-        limit: effectiveLimit,
-        fetchImpl,
-      });
+/**
+ * Merged pull requests for a resolved repository row, dispatched by provider.
+ * Used by the provider-neutral merged-PR facts sync. `updatedAfter` narrows
+ * the result to PRs updated after the given time: server-side on GitLab
+ * (updated_after) and via early pagination cut-off on the update-sorted
+ * GitHub/Gitea/Bitbucket lists; ADO lists carry no update ordering, so ADO is
+ * only filtered client-side here. Rows without any usable timestamp are kept.
+ */
+export async function listMergedSourceControlPullRequestsForRepository({
+  repository,
+  provider,
+  limit,
+  updatedAfter,
+  fetchImpl = fetch,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  limit?: number;
+  updatedAfter?: Date | null;
+  fetchImpl?: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const result = await listSourceControlPullRequestsForRepository({
+    repository,
+    provider,
+    limit,
+    state: 'merged',
+    updatedAfter,
+    fetchImpl,
+  });
+
+  if (!updatedAfter) {
+    return result;
   }
+
+  return {
+    ...result,
+    pullRequests: result.pullRequests.filter((pullRequest) => {
+      const timestamp = pullRequest.updatedAt ?? pullRequest.mergedAt;
+      return !timestamp || new Date(timestamp) > updatedAfter;
+    }),
+  };
 }
 
 async function getGitHubPullRequestDetails({
@@ -1830,48 +1932,96 @@ function mapProviderPullRequestState(state: {
   return state.merged ? 'merged' : state.closed ? 'closed' : 'open';
 }
 
-function truncationWarning(limit: number): string {
-  return `Result truncated to the ${limit} most relevant open pull requests; more exist.`;
+function truncationWarning(limit: number, state: PullRequestListState): string {
+  return `Result truncated to the ${limit} most relevant ${state} pull requests; more exist.`;
 }
 
-async function listGitHubOpenPullRequests({
+/**
+ * True when a page of update-sorted rows ended at or before `updatedAfter`,
+ * meaning later pages can only contain older rows.
+ */
+function reachedUpdatedAfterCutoff(
+  lastRowUpdatedAt: string | null | undefined,
+  updatedAfter: Date | null | undefined,
+): boolean {
+  return Boolean(
+    updatedAfter &&
+    lastRowUpdatedAt &&
+    new Date(lastRowUpdatedAt) <= updatedAfter,
+  );
+}
+
+async function listGitHubPullRequests({
   repository,
   provider,
   limit,
+  state,
+  updatedAfter,
 }: {
   repository: RepositoryRow;
   provider: 'github';
   limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
 }): Promise<SourceControlPullRequestListResult> {
   const { octokit, owner, repo } = await createGitHubReadClient(
     repository,
     provider,
   );
   const warnings: string[] = [];
+  let fetched = 0;
 
-  const pulls = await octokit.paginate(octokit.rest.pulls.list, {
-    owner,
-    repo,
-    state: 'open',
-    sort: 'updated',
-    direction: 'desc',
-    per_page: 100,
-  });
+  const pulls = await octokit.paginate(
+    octokit.rest.pulls.list,
+    {
+      owner,
+      repo,
+      // GitHub has no merged filter; merged PRs are the closed list minus
+      // the closed-without-merging ones.
+      state: state === 'open' ? ('open' as const) : ('closed' as const),
+      sort: 'updated',
+      direction: 'desc',
+      per_page: 100,
+    },
+    (response, done) => {
+      fetched += response.data.length;
 
-  if (pulls.length > limit) {
-    warnings.push(truncationWarning(limit));
+      if (
+        fetched > limit ||
+        reachedUpdatedAfterCutoff(
+          response.data.at(-1)?.updated_at,
+          updatedAfter,
+        )
+      ) {
+        done();
+      }
+
+      return response.data;
+    },
+  );
+
+  const rows =
+    state === 'merged'
+      ? pulls.filter((pull) => Boolean(pull.merged_at))
+      : pulls;
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
   }
 
-  warnings.push(
-    'GitHub does not include mergeability in pull request lists; use get_pull_request for a per-PR mergeable signal.',
-  );
+  if (state === 'open') {
+    warnings.push(
+      'GitHub does not include mergeability in pull request lists; use get_pull_request for a per-PR mergeable signal.',
+    );
+  }
 
   return {
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    pullRequests: pulls.slice(0, limit).map((pull) => ({
+    pullRequests: rows.slice(0, limit).map((pull) => ({
       number: pull.number,
+      externalId: pull.id ?? null,
       url: pull.html_url,
       title: pull.title,
       state: mapProviderPullRequestState({
@@ -1886,6 +2036,8 @@ async function listGitHubOpenPullRequests({
         : null,
       updatedAt: pull.updated_at ?? null,
       createdAt: pull.created_at ?? null,
+      mergedAt: pull.merged_at ?? null,
+      closedAt: pull.closed_at ?? null,
       labels: pull.labels
         .map((label) => label.name)
         .filter((name): name is string => Boolean(name)),
@@ -1905,15 +2057,19 @@ async function listGitHubOpenPullRequests({
 
 const GITLAB_MR_LIST_PAGE_SIZE = 100;
 
-async function listGitLabOpenMergeRequests({
+async function listGitLabMergeRequests({
   repository,
   provider,
   limit,
+  state,
+  updatedAfter,
   fetchImpl,
 }: {
   repository: RepositoryRow;
   provider: 'gitlab';
   limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { projectId, token, apiBaseUrl } =
@@ -1929,11 +2085,15 @@ async function listGitLabOpenMergeRequests({
         apiBaseUrl,
         `/projects/${encodeURIComponent(projectId)}/merge_requests`,
         {
-          state: 'opened',
+          state: state === 'open' ? 'opened' : 'merged',
           order_by: 'updated_at',
           sort: 'desc',
           per_page: GITLAB_MR_LIST_PAGE_SIZE,
           page,
+          // GitLab filters updated_after server-side.
+          ...(updatedAfter
+            ? { updated_after: updatedAfter.toISOString() }
+            : {}),
         },
       ),
       tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
@@ -1948,7 +2108,7 @@ async function listGitLabOpenMergeRequests({
   }
 
   if (rows.length > limit) {
-    warnings.push(truncationWarning(limit));
+    warnings.push(truncationWarning(limit, state));
   }
 
   return {
@@ -1957,6 +2117,7 @@ async function listGitLabOpenMergeRequests({
     repositoryFullName: repository.fullName,
     pullRequests: rows.slice(0, limit).map((mergeRequest) => ({
       number: mergeRequest.iid,
+      externalId: mergeRequest.id ?? null,
       url:
         mergeRequest.web_url ??
         buildPullRequestUrl({
@@ -1984,6 +2145,8 @@ async function listGitLabOpenMergeRequests({
         : null,
       updatedAt: mergeRequest.updated_at ?? null,
       createdAt: mergeRequest.created_at ?? null,
+      mergedAt: mergeRequest.merged_at ?? null,
+      closedAt: mergeRequest.closed_at ?? null,
       labels: mergeRequest.labels ?? [],
       headSha: mergeRequest.sha ?? null,
       // The GitLab MR list payload has no diff_refs, so the base sha is unknown.
@@ -2007,15 +2170,19 @@ async function listGitLabOpenMergeRequests({
 
 const GITEA_PULLS_LIST_PAGE_SIZE = 50;
 
-async function listGiteaOpenPullRequests({
+async function listGiteaPullRequests({
   repository,
   provider,
   limit,
+  state,
+  updatedAfter,
   fetchImpl,
 }: {
   repository: RepositoryRow;
   provider: 'gitea';
   limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { apiBaseUrl, baseUrl, owner, repo, token } =
@@ -2030,21 +2197,36 @@ async function listGiteaOpenPullRequests({
       url: buildApiUrl(
         apiBaseUrl,
         `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
-        { state: 'open', limit: GITEA_PULLS_LIST_PAGE_SIZE, page },
+        {
+          // Gitea has no merged filter; merged PRs are the closed list
+          // filtered by the merged flag below.
+          state: state === 'open' ? 'open' : 'closed',
+          limit: GITEA_PULLS_LIST_PAGE_SIZE,
+          page,
+          ...(state === 'merged' ? { sort: 'recentupdate' } : {}),
+        },
       ),
       tokenHeader: { name: 'Authorization', value: `token ${token}` },
       schema: giteaPullRequestListPageSchema,
     });
 
-    rows.push(...pageRows);
+    rows.push(
+      ...(state === 'merged'
+        ? pageRows.filter((row) => Boolean(row.merged))
+        : pageRows),
+    );
 
-    if (rows.length > limit || pageRows.length < GITEA_PULLS_LIST_PAGE_SIZE) {
+    if (
+      rows.length > limit ||
+      pageRows.length < GITEA_PULLS_LIST_PAGE_SIZE ||
+      reachedUpdatedAfterCutoff(pageRows.at(-1)?.updated_at, updatedAfter)
+    ) {
       break;
     }
   }
 
   if (rows.length > limit) {
-    warnings.push(truncationWarning(limit));
+    warnings.push(truncationWarning(limit, state));
   }
 
   return {
@@ -2057,6 +2239,7 @@ async function listGiteaOpenPullRequests({
 
       return {
         number,
+        externalId: pullRequest.id ?? null,
         url:
           pullRequest.html_url ??
           buildPullRequestUrl({
@@ -2084,6 +2267,8 @@ async function listGiteaOpenPullRequests({
           : null,
         updatedAt: pullRequest.updated_at ?? null,
         createdAt: pullRequest.created_at ?? null,
+        mergedAt: pullRequest.merged_at ?? null,
+        closedAt: pullRequest.closed_at ?? null,
         labels: (pullRequest.labels ?? [])
           .map((label) => label.name)
           .filter((name): name is string => Boolean(name)),
@@ -2103,15 +2288,19 @@ async function listGiteaOpenPullRequests({
   };
 }
 
-async function listBitbucketOpenPullRequests({
+async function listBitbucketPullRequests({
   repository,
   provider,
   limit,
+  state,
+  updatedAfter,
   fetchImpl,
 }: {
   repository: RepositoryRow;
   provider: 'bitbucket';
   limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
@@ -2124,7 +2313,11 @@ async function listBitbucketOpenPullRequests({
     `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
       repo,
     )}/pullrequests`,
-    { state: 'OPEN', pagelen: 50 },
+    {
+      state: state === 'open' ? 'OPEN' : 'MERGED',
+      pagelen: 50,
+      ...(state === 'merged' ? { sort: '-updated_on' } : {}),
+    },
   );
 
   for (let page = 1; nextUrl && page <= LIST_PULL_REQUESTS_MAX_PAGES; page++) {
@@ -2139,18 +2332,31 @@ async function listBitbucketOpenPullRequests({
     rows.push(...pageResult.values);
     nextUrl = pageResult.next ?? null;
 
-    if (rows.length > limit) {
+    if (
+      rows.length > limit ||
+      (state === 'merged' &&
+        reachedUpdatedAfterCutoff(
+          pageResult.values.at(-1)?.updated_on,
+          updatedAfter,
+        ))
+    ) {
       break;
     }
   }
 
   if (rows.length > limit) {
-    warnings.push(truncationWarning(limit));
+    warnings.push(truncationWarning(limit, state));
   }
 
   warnings.push(
     'Bitbucket does not expose a mergeable signal or labels; mergeable is null and labels are empty.',
   );
+
+  if (state === 'merged') {
+    warnings.push(
+      'Bitbucket does not expose merge/close timestamps in pull request lists; mergedAt and closedAt are null and updatedAt approximates the merge time.',
+    );
+  }
 
   return {
     success: true,
@@ -2162,6 +2368,9 @@ async function listBitbucketOpenPullRequests({
 
       return {
         number: pullRequest.id,
+        // Bitbucket PR ids are already the per-repository number; there is
+        // no separate global id.
+        externalId: null,
         url:
           pullRequest.links?.html?.href ??
           buildPullRequestUrl({
@@ -2190,6 +2399,8 @@ async function listBitbucketOpenPullRequests({
           : null,
         updatedAt: pullRequest.updated_on ?? null,
         createdAt: pullRequest.created_on ?? null,
+        mergedAt: null,
+        closedAt: null,
         labels: [],
         headSha: pullRequest.source?.commit?.hash ?? null,
         baseSha: pullRequest.destination?.commit?.hash ?? null,
@@ -2211,15 +2422,17 @@ async function listBitbucketOpenPullRequests({
 
 const ADO_PULLS_LIST_PAGE_SIZE = 100;
 
-async function listAdoOpenPullRequests({
+async function listAdoPullRequests({
   repository,
   provider,
   limit,
+  state,
   fetchImpl,
 }: {
   repository: RepositoryRow;
   provider: 'ado';
   limit: number;
+  state: PullRequestListState;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token } =
@@ -2233,7 +2446,8 @@ async function listAdoOpenPullRequests({
       fetchImpl,
       url: buildApiUrl(organizationApiBaseUrl, repositoryPullRequestsPath, {
         'api-version': ADO_API_VERSION,
-        'searchCriteria.status': 'active',
+        // Azure DevOps calls merged PRs "completed".
+        'searchCriteria.status': state === 'open' ? 'active' : 'completed',
         $top: ADO_PULLS_LIST_PAGE_SIZE,
         $skip: page * ADO_PULLS_LIST_PAGE_SIZE,
       }),
@@ -2255,7 +2469,7 @@ async function listAdoOpenPullRequests({
   }
 
   if (rows.length > limit) {
-    warnings.push(truncationWarning(limit));
+    warnings.push(truncationWarning(limit, state));
   }
 
   if (rows.some((pullRequest) => pullRequest.labels === undefined)) {
@@ -2270,6 +2484,8 @@ async function listAdoOpenPullRequests({
     repositoryFullName: repository.fullName,
     pullRequests: rows.slice(0, limit).map((pullRequest) => ({
       number: pullRequest.pullRequestId,
+      // Azure DevOps pullRequestId is the only PR identifier it exposes.
+      externalId: null,
       url: buildPullRequestUrl({
         provider,
         host,
@@ -2296,6 +2512,11 @@ async function listAdoOpenPullRequests({
       // Azure DevOps pull request lists carry no last-updated timestamp.
       updatedAt: null,
       createdAt: pullRequest.creationDate ?? null,
+      mergedAt:
+        pullRequest.status === 'completed'
+          ? (pullRequest.closedDate ?? null)
+          : null,
+      closedAt: pullRequest.closedDate ?? null,
       labels: (pullRequest.labels ?? [])
         .map((label) => label.name)
         .filter((name): name is string => Boolean(name)),
