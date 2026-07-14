@@ -161,11 +161,7 @@ export async function spawnModalWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
-  if (environmentConfig?.docker_projects?.length) {
-    throw new NonRetryableSpawnError(
-      'Modal does not currently support Docker Compose or Dockerfile projects. Choose E2B, Daytona, Blaxel, or Local Docker for this environment.',
-    );
-  }
+  const needsVmRuntime = Boolean(environmentConfig?.docker_projects?.length);
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
@@ -255,6 +251,9 @@ export async function spawnModalWorker(
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
+    ...(needsVmRuntime
+      ? { configuredCpuCores: 2, configuredMemoryMiB: 4096 }
+      : {}),
   });
   const modalConfig = {
     tokenId: modalTokenId,
@@ -272,6 +271,7 @@ export async function spawnModalWorker(
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
     ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
+    ...(needsVmRuntime ? { vmRuntime: true } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),

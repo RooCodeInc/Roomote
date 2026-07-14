@@ -48,7 +48,9 @@ to newly created or resumed sandboxes, not sandboxes that are already running.
 Environments with
 [Docker projects](/environments/definition#docker-projects) automatically
 use Modal's beta VM sandbox runtime so Docker and Docker Compose can run inside
-the task. Other Modal tasks continue to use the standard sandbox runtime.
+the task. Roomote starts Docker as the VM sandbox's primary service and requests
+2 CPU cores and 4 GiB of memory for these tasks. Other Modal tasks continue to
+use the standard sandbox runtime and its lower default resource request.
 Container builds and services share the task sandbox's CPU and memory.
 
 ## Verify setup
