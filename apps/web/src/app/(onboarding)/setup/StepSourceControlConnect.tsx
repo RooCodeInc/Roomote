@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -213,7 +213,7 @@ export function StepSourceControlConnect({
       !giteaOAuthConfigured ||
       oauthAutoSyncMarkerPresent);
 
-  const handleSyncRepositories = async () => {
+  const handleSyncRepositories = useCallback(async () => {
     if (
       provider === 'ado' &&
       adoAuthMode === 'delegated' &&
@@ -229,7 +229,13 @@ export function StepSourceControlConnect({
     }
 
     syncRepositories.mutate();
-  };
+  }, [
+    adoAuthMode,
+    adoLinkedAccount.data?.account,
+    provider,
+    saveAdoLinkedAccount,
+    syncRepositories,
+  ]);
 
   const autoSyncAttempted = useRef(false);
   useEffect(() => {

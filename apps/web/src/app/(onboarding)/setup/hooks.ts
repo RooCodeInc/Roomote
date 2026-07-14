@@ -17,7 +17,7 @@ import { useSetupAsyncSession } from './setup-session';
 import { hasSeenSetupWelcome } from './welcome-seen';
 
 export type OpenRouterOauthEntryStatus = 'connected' | 'error';
-export type SetupStepTransitionDirection = 'forward' | 'backward';
+type SetupStepTransitionDirection = 'forward' | 'backward';
 
 type SetupEntryContext = {
   step: SetupStep | null;
