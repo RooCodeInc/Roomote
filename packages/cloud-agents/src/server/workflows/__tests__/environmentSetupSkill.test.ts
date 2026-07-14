@@ -146,16 +146,16 @@ describe('environment-setup guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'prefer a top-level `container_projects` entry over translating its containers into Roomote-managed `services` or detached repository commands',
+      'prefer a top-level `docker_projects` entry over translating its containers into Roomote-managed `services` or detached repository commands',
     );
     expect(skillContent).toContain(
       'run `docker compose config --quiet` against the selected files or an equivalent generated one-service Compose model',
     );
     expect(skillContent).toContain(
-      '<field name="container_projects" required="false" type="ContainerProject[]" />',
+      '<field name="docker_projects" required="false" type="DockerProject[]" />',
     );
-    expect(skillContent).toContain('<container_project_config>');
-    expect(skillContent).toContain('<container_project_port>');
+    expect(skillContent).toContain('<docker_project_config>');
+    expect(skillContent).toContain('<docker_project_port>');
   });
 
   it('launches a follow-up verification task after persisting the environment', () => {

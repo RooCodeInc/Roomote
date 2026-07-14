@@ -134,8 +134,8 @@ export async function spawnDockerWorker(
     ? taskRun.sourceSnapshotId!
     : getDockerWorkerContainerName(taskRun.id);
   const sourceRunId = getDockerSourceRunId(containerName);
-  const usesContainerProjects = Boolean(
-    environmentConfig?.container_projects?.length,
+  const usesDockerProjects = Boolean(
+    environmentConfig?.docker_projects?.length,
   );
   const taskDaemonContainerName =
     getDockerTaskDaemonContainerName(containerName);
@@ -198,7 +198,7 @@ export async function spawnDockerWorker(
           ? ['--add-host', 'host.docker.internal:host-gateway']
           : []),
         ...portArgs,
-        ...(usesContainerProjects
+        ...(usesDockerProjects
           ? ['--volume', `${taskWorkspaceVolumeName}:${DOCKER_WORKER_ROOT}`]
           : []),
         config.image,
@@ -220,7 +220,7 @@ export async function spawnDockerWorker(
         platform: config.platform,
       });
     } else {
-      if (usesContainerProjects) {
+      if (usesDockerProjects) {
         await docker([
           'volume',
           'create',
@@ -291,7 +291,7 @@ export async function spawnDockerWorker(
         DOCKER_INSTALL_WORKER_SCRIPT,
       ]);
 
-      if (usesContainerProjects) {
+      if (usesDockerProjects) {
         await docker([
           'run',
           '-d',
@@ -319,7 +319,7 @@ export async function spawnDockerWorker(
       }
     }
 
-    if (isStandbyResume && usesContainerProjects) {
+    if (isStandbyResume && usesDockerProjects) {
       await resumeDockerTaskDaemon(taskDaemonContainerName);
     }
 
@@ -393,7 +393,7 @@ export async function spawnDockerWorker(
           ROOMOTE_PREVIEW_DOMAIN:
             resolvedPreviewRuntimeConfig.effective.roomotePreviewDomain,
         }),
-        ...(usesContainerProjects && {
+        ...(usesDockerProjects && {
           DOCKER_HOST: 'tcp://127.0.0.1:2375',
           DOCKER_TLS_CERTDIR: '',
         }),

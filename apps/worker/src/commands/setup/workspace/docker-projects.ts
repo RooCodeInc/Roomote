@@ -5,7 +5,7 @@ import { execa } from 'execa';
 import YAML from 'yaml';
 
 import {
-  type ContainerProject,
+  type DockerProject,
   type EnvironmentConfig,
   isServicesEnabledTaskPayloadKind,
 } from '@roomote/types';
@@ -48,8 +48,8 @@ const runContainerCommand: ContainerCommandRunner = async (
   return { stdout: result.stdout, stderr: result.stderr };
 };
 
-interface ResolvedContainerProject {
-  project: ContainerProject;
+interface ResolvedDockerProject {
+  project: DockerProject;
   projectName: string;
   projectRoot: string;
   composeFiles: string[];
@@ -153,7 +153,7 @@ function findNamedPort(config: EnvironmentConfig, namedPort: string): number {
 }
 
 function buildPortOverrides(
-  project: ContainerProject,
+  project: DockerProject,
   config: EnvironmentConfig,
 ): Record<string, { ports: Array<{ target: number; published: number }> }> {
   const services: Record<
@@ -186,14 +186,14 @@ async function writeGeneratedComposeFile({
   suffix,
 }: {
   preparedWorkspace: PrepareWorkspaceResult;
-  project: ContainerProject;
+  project: DockerProject;
   contents: unknown;
   suffix: string;
 }): Promise<string> {
   const outputDirectory = path.join(
     preparedWorkspace.workspacePath,
     '.roomote',
-    'container-projects',
+    'docker-projects',
   );
   await fs.mkdir(outputDirectory, { recursive: true });
   const outputPath = path.join(
@@ -204,21 +204,21 @@ async function writeGeneratedComposeFile({
   return outputPath;
 }
 
-async function resolveContainerProject({
+async function resolveDockerProject({
   project,
   config,
   preparedWorkspace,
   baseEnv,
 }: {
-  project: ContainerProject;
+  project: DockerProject;
   config: EnvironmentConfig;
   preparedWorkspace: PrepareWorkspaceResult;
   baseEnv: Record<string, string>;
-}): Promise<ResolvedContainerProject> {
+}): Promise<ResolvedDockerProject> {
   const repositoryRoot = preparedWorkspace.repoPaths?.[project.repository];
   if (!repositoryRoot) {
     throw new Error(
-      `Prepared repository path missing for container project '${project.name}': ${project.repository}`,
+      `Prepared repository path missing for Docker project '${project.name}': ${project.repository}`,
     );
   }
 
@@ -304,7 +304,7 @@ async function resolveContainerProject({
 }
 
 function buildComposeArgs(
-  resolved: ResolvedContainerProject,
+  resolved: ResolvedDockerProject,
   subcommand: string[],
 ): string[] {
   const args = ['compose', '--project-name', resolved.projectName];
@@ -332,7 +332,7 @@ function redactContainerDiagnostics(
 }
 
 async function collectContainerDiagnostics(
-  resolved: ResolvedContainerProject,
+  resolved: ResolvedDockerProject,
   runCommand: ContainerCommandRunner,
   commandOptions: ContainerCommandOptions,
 ): Promise<string> {
@@ -364,13 +364,13 @@ async function collectContainerDiagnostics(
   return sections.join('\n\n');
 }
 
-async function startContainerProject({
+async function startDockerProject({
   logger,
   resolved,
   runCommand,
 }: {
   logger: StartupLogger;
-  resolved: ResolvedContainerProject;
+  resolved: ResolvedDockerProject;
   runCommand: ContainerCommandRunner;
 }): Promise<void> {
   const timeoutSeconds =
@@ -381,9 +381,7 @@ async function startContainerProject({
     timeoutMs: timeoutSeconds * 1_000,
   };
 
-  logger.userLog.log(
-    `Validating container project ${resolved.project.name}...`,
-  );
+  logger.userLog.log(`Validating Docker project ${resolved.project.name}...`);
   const configResult = await runCommand(
     'docker',
     buildComposeArgs(resolved, ['config', '--quiet']),
@@ -392,7 +390,7 @@ async function startContainerProject({
   if (configResult.stdout) logger.debug.log(configResult.stdout);
 
   logger.userLog.log(
-    `Building and starting container project ${resolved.project.name}...`,
+    `Building and starting Docker project ${resolved.project.name}...`,
   );
   const services =
     resolved.project.type === 'compose'
@@ -436,10 +434,10 @@ async function startContainerProject({
   }
   if (startResult.stdout) logger.debug.log(startResult.stdout);
   if (startResult.stderr) logger.debug.log(startResult.stderr);
-  logger.userLog.log(`Container project ${resolved.project.name} is ready`);
+  logger.userLog.log(`Docker project ${resolved.project.name} is ready`);
 }
 
-export async function initializeContainerProjects(
+export async function initializeDockerProjects(
   logger: StartupLogger,
   options: PrepareWorkspaceOptions,
   preparedWorkspace: PrepareWorkspaceResult,
@@ -453,7 +451,7 @@ export async function initializeContainerProjects(
   }
 
   const config = options.workspace.environmentConfig;
-  const projects = config.container_projects ?? [];
+  const projects = config.docker_projects ?? [];
   if (projects.length === 0) return;
 
   const baseEnv = getDefinedEnv(options.envVars);
@@ -469,15 +467,15 @@ export async function initializeContainerProjects(
 
   for (const project of projects) {
     try {
-      const resolved = await resolveContainerProject({
+      const resolved = await resolveDockerProject({
         project,
         config,
         preparedWorkspace,
         baseEnv,
       });
-      await startContainerProject({ logger, resolved, runCommand });
+      await startDockerProject({ logger, resolved, runCommand });
     } catch (error) {
-      const message = `Container project '${project.name}' failed to start: ${error instanceof Error ? error.message : String(error)}`;
+      const message = `Docker project '${project.name}' failed to start: ${error instanceof Error ? error.message : String(error)}`;
       if (project.required === false) {
         logger.userLog.warn(`${message} Continuing because it is optional.`);
         logger.debug.error(error);

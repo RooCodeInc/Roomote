@@ -68,7 +68,7 @@ The controller reconciles replacement API and preview-proxy containers onto
 running task networks, removes empty task networks periodically, and reaps
 stale provisioning containers after a restart.
 
-Environments that use [container projects](/environments/definition#container-projects)
+Environments that use [Docker projects](/environments/definition#docker-projects)
 also receive a dedicated Docker daemon and workspace volume. Customer Compose
 services share the task's network namespace so configured preview ports keep
 the same task-scoped routing, while their Docker control plane is not exposed

@@ -1,8 +1,8 @@
 'use client';
 
 import type {
-  ContainerProject,
-  ContainerProjectPort,
+  DockerProject,
+  DockerProjectPort,
   EnvironmentRepositoryConfig,
   NamedPort,
 } from '@roomote/types';
@@ -31,18 +31,18 @@ function splitList(value: string): string[] | undefined {
   return values.length > 0 ? values : undefined;
 }
 
-export function ContainerProjectListEditor({
+export function DockerProjectListEditor({
   projects,
   repositories,
   ports,
   onChange,
 }: {
-  projects?: ContainerProject[];
+  projects?: DockerProject[];
   repositories: EnvironmentRepositoryConfig[];
   ports?: NamedPort[];
-  onChange: (projects: ContainerProject[] | undefined) => void;
+  onChange: (projects: DockerProject[] | undefined) => void;
 }) {
-  const updateProject = (index: number, project: ContainerProject) => {
+  const updateProject = (index: number, project: DockerProject) => {
     const next = [...(projects ?? [])];
     next[index] = project;
     onChange(next);
@@ -57,13 +57,13 @@ export function ContainerProjectListEditor({
         >
           <div className="flex items-center justify-between gap-3">
             <span className="text-sm font-medium">
-              {project.name || `Container project ${index + 1}`}
+              {project.name || `Docker project ${index + 1}`}
             </span>
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              aria-label={`Remove container project ${index + 1}`}
+              aria-label={`Remove Docker project ${index + 1}`}
               onClick={() => {
                 const next = (projects ?? []).filter(
                   (_, projectIndex) => projectIndex !== index,
@@ -77,9 +77,9 @@ export function ContainerProjectListEditor({
 
           <div className="grid gap-3 md:grid-cols-2">
             <FieldShell>
-              <Label htmlFor={`container-project-name-${index}`}>Name</Label>
+              <Label htmlFor={`docker-project-name-${index}`}>Name</Label>
               <Input
-                id={`container-project-name-${index}`}
+                id={`docker-project-name-${index}`}
                 value={project.name}
                 placeholder="app"
                 onChange={(event) =>
@@ -140,7 +140,7 @@ export function ContainerProjectListEditor({
                   updateProject(index, { ...project, repository })
                 }
               >
-                <SelectTrigger aria-label="Container project repository">
+                <SelectTrigger aria-label="Docker project repository">
                   <SelectValue placeholder="Select repository" />
                 </SelectTrigger>
                 <SelectContent>
@@ -159,11 +159,11 @@ export function ContainerProjectListEditor({
             </FieldShell>
 
             <FieldShell>
-              <Label htmlFor={`container-project-working-dir-${index}`}>
+              <Label htmlFor={`docker-project-working-dir-${index}`}>
                 Working directory
               </Label>
               <Input
-                id={`container-project-working-dir-${index}`}
+                id={`docker-project-working-dir-${index}`}
                 value={project.working_dir ?? ''}
                 placeholder="."
                 onChange={(event) => {
@@ -179,11 +179,11 @@ export function ContainerProjectListEditor({
             {project.type === 'compose' ? (
               <>
                 <FieldShell>
-                  <Label htmlFor={`container-project-files-${index}`}>
+                  <Label htmlFor={`docker-project-files-${index}`}>
                     Compose files
                   </Label>
                   <Input
-                    id={`container-project-files-${index}`}
+                    id={`docker-project-files-${index}`}
                     value={project.files.join(', ')}
                     placeholder="compose.yaml"
                     onChange={(event) =>
@@ -195,11 +195,11 @@ export function ContainerProjectListEditor({
                   />
                 </FieldShell>
                 <FieldShell>
-                  <Label htmlFor={`container-project-services-${index}`}>
+                  <Label htmlFor={`docker-project-services-${index}`}>
                     Services (optional)
                   </Label>
                   <Input
-                    id={`container-project-services-${index}`}
+                    id={`docker-project-services-${index}`}
                     value={project.services?.join(', ') ?? ''}
                     placeholder="web, api"
                     onChange={(event) => {
@@ -212,11 +212,11 @@ export function ContainerProjectListEditor({
                   />
                 </FieldShell>
                 <FieldShell>
-                  <Label htmlFor={`container-project-profiles-${index}`}>
+                  <Label htmlFor={`docker-project-profiles-${index}`}>
                     Profiles (optional)
                   </Label>
                   <Input
-                    id={`container-project-profiles-${index}`}
+                    id={`docker-project-profiles-${index}`}
                     value={project.profiles?.join(', ') ?? ''}
                     placeholder="development"
                     onChange={(event) => {
@@ -232,11 +232,11 @@ export function ContainerProjectListEditor({
             ) : (
               <>
                 <FieldShell>
-                  <Label htmlFor={`container-project-context-${index}`}>
+                  <Label htmlFor={`docker-project-context-${index}`}>
                     Build context
                   </Label>
                   <Input
-                    id={`container-project-context-${index}`}
+                    id={`docker-project-context-${index}`}
                     value={project.context ?? ''}
                     placeholder="."
                     onChange={(event) => {
@@ -249,11 +249,11 @@ export function ContainerProjectListEditor({
                   />
                 </FieldShell>
                 <FieldShell>
-                  <Label htmlFor={`container-project-dockerfile-${index}`}>
+                  <Label htmlFor={`docker-project-dockerfile-${index}`}>
                     Dockerfile path
                   </Label>
                   <Input
-                    id={`container-project-dockerfile-${index}`}
+                    id={`docker-project-dockerfile-${index}`}
                     value={project.dockerfile ?? ''}
                     placeholder="Dockerfile"
                     onChange={(event) => {
@@ -266,11 +266,11 @@ export function ContainerProjectListEditor({
                   />
                 </FieldShell>
                 <FieldShell>
-                  <Label htmlFor={`container-project-target-${index}`}>
+                  <Label htmlFor={`docker-project-target-${index}`}>
                     Build target (optional)
                   </Label>
                   <Input
-                    id={`container-project-target-${index}`}
+                    id={`docker-project-target-${index}`}
                     value={project.target ?? ''}
                     onChange={(event) => {
                       const target = event.target.value.trim();
@@ -333,7 +333,7 @@ export function ContainerProjectListEditor({
         }}
       >
         <Plus />
-        Add container project
+        Add Docker project
       </Button>
     </div>
   );
@@ -344,9 +344,9 @@ function ContainerPortMappings({
   ports,
   onChange,
 }: {
-  project: ContainerProject;
+  project: DockerProject;
   ports?: NamedPort[];
-  onChange: (ports: ContainerProjectPort[]) => void;
+  onChange: (ports: DockerProjectPort[]) => void;
 }) {
   const mappings = project.ports ?? [];
   return (

@@ -92,10 +92,10 @@ export function EnvironmentPreviewContent({
         </div>
       </PreviewSection>
 
-      {config.container_projects?.length ? (
-        <PreviewSection icon={Container} title="Containers">
+      {config.docker_projects?.length ? (
+        <PreviewSection icon={Container} title="Docker Compose & Dockerfile">
           <div className="space-y-2">
-            {config.container_projects.map((project) => (
+            {config.docker_projects.map((project) => (
               <div
                 key={project.name}
                 className="flex flex-wrap items-center gap-2 rounded border border-border/70 px-3 py-2 text-sm"

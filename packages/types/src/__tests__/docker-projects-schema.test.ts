@@ -8,11 +8,11 @@ const baseConfig = {
   ports: [{ name: 'WEB', port: 3000 }],
 };
 
-describe('container project environment schema', () => {
+describe('Docker project environment schema', () => {
   it('accepts a Compose project tied to a configured repository and port', () => {
     const result = environmentConfigSchema.safeParse({
       ...baseConfig,
-      container_projects: [
+      docker_projects: [
         {
           type: 'compose',
           name: 'development',
@@ -30,7 +30,7 @@ describe('container project environment schema', () => {
   it('accepts a Dockerfile project', () => {
     const result = environmentConfigSchema.safeParse({
       ...baseConfig,
-      container_projects: [
+      docker_projects: [
         {
           type: 'dockerfile',
           name: 'api',
@@ -49,7 +49,7 @@ describe('container project environment schema', () => {
   it('rejects repositories, named ports, and paths outside the environment', () => {
     const result = environmentConfigSchema.safeParse({
       ...baseConfig,
-      container_projects: [
+      docker_projects: [
         {
           type: 'compose',
           name: 'development',
@@ -66,17 +66,17 @@ describe('container project environment schema', () => {
     const messages = result.error?.issues.map((issue) => issue.message) ?? [];
     expect(messages).toContain('Path must stay within the selected repository');
     expect(messages).toContain(
-      "Container project repository 'acme/other' is not configured in this environment",
+      "Docker project repository 'acme/other' is not configured in this environment",
     );
     expect(messages).toContain(
-      "Container project port 'MISSING' is not configured in the environment ports list",
+      "Docker project port 'MISSING' is not configured in the environment ports list",
     );
   });
 
   it('requires Compose port mappings to name a service', () => {
     const result = environmentConfigSchema.safeParse({
       ...baseConfig,
-      container_projects: [
+      docker_projects: [
         {
           type: 'compose',
           name: 'development',
@@ -96,7 +96,7 @@ describe('container project environment schema', () => {
   it('requires unique project names and named port ownership', () => {
     const result = environmentConfigSchema.safeParse({
       ...baseConfig,
-      container_projects: [
+      docker_projects: [
         {
           type: 'dockerfile',
           name: 'api',
@@ -114,9 +114,9 @@ describe('container project environment schema', () => {
 
     expect(result.success).toBe(false);
     const messages = result.error?.issues.map((issue) => issue.message) ?? [];
-    expect(messages).toContain('Duplicate container project name: API');
+    expect(messages).toContain('Duplicate Docker project name: API');
     expect(messages).toContain(
-      "Environment port 'web' can only be mapped by one container project",
+      "Environment port 'web' can only be mapped by one Docker project",
     );
   });
 });

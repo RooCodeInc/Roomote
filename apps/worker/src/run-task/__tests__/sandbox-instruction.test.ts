@@ -64,7 +64,7 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
-      container_projects: [
+      docker_projects: [
         {
           type: 'compose',
           name: 'app',
@@ -120,7 +120,7 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
-      container_projects: [
+      docker_projects: [
         {
           type: 'compose',
           name: 'app',

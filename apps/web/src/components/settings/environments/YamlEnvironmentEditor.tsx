@@ -92,7 +92,7 @@ ${repoLines}
 
 # Optional: Build and start a Docker Compose project or a single Dockerfile
 # after its repository is cloned. Paths are relative to the selected repo.
-# container_projects:
+# docker_projects:
 #   - type: compose
 #     name: app
 #     repository: owner/repo-name

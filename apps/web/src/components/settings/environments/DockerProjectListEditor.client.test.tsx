@@ -1,12 +1,12 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 
-import { ContainerProjectListEditor } from './ContainerProjectListEditor';
+import { DockerProjectListEditor } from './DockerProjectListEditor';
 
-describe('ContainerProjectListEditor', () => {
+describe('DockerProjectListEditor', () => {
   it('adds a Compose project tied to the first configured repository', () => {
     const onChange = vi.fn();
     render(
-      <ContainerProjectListEditor
+      <DockerProjectListEditor
         repositories={[{ repository: 'acme/web' }]}
         ports={[{ name: 'WEB', port: 3000 }]}
         onChange={onChange}
@@ -14,7 +14,7 @@ describe('ContainerProjectListEditor', () => {
     );
 
     fireEvent.click(
-      screen.getByRole('button', { name: /Add container project/i }),
+      screen.getByRole('button', { name: /Add docker project/i }),
     );
 
     expect(onChange).toHaveBeenCalledWith([
@@ -31,7 +31,7 @@ describe('ContainerProjectListEditor', () => {
   it('adds a named preview mapping for a Dockerfile', () => {
     const onChange = vi.fn();
     render(
-      <ContainerProjectListEditor
+      <DockerProjectListEditor
         projects={[
           {
             type: 'dockerfile',
