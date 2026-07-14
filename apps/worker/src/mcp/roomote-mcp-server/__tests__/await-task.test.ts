@@ -32,6 +32,46 @@ function summary(
 }
 
 describe('isTaskActiveForAwait', () => {
+  it('keeps stopped/shutting_down running phases active', () => {
+    expect(
+      isTaskActiveForAwait(
+        summary({
+          taskRunStatus: 'running',
+          taskPhase: 'stopped',
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isTaskActiveForAwait(
+        summary({
+          taskRunStatus: 'running',
+          taskPhase: 'shutting_down',
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('prioritizes latest failed/canceled status over aggregate completed', () => {
+    expect(
+      isTaskActiveForAwait(
+        summary({
+          completed: true,
+          taskRunStatus: 'failed',
+          taskPhase: null,
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isTaskActiveForAwait(
+        summary({
+          completed: true,
+          taskRunStatus: 'canceled',
+          taskPhase: null,
+        }),
+      ),
+    ).toBe(false);
+  });
+
   it('treats completed and exited runs as settled', () => {
     expect(isTaskActiveForAwait(summary({ completed: true }))).toBe(false);
     expect(
@@ -103,6 +143,38 @@ describe('classifySettledSummary', () => {
       terminalLabel: 'Completed',
       ready: true,
       errorSummary: null,
+    });
+  });
+
+  it('classifies failed/canceled above aggregate completed', () => {
+    expect(
+      classifySettledSummary(
+        summary({
+          completed: true,
+          taskRunStatus: 'failed',
+          taskPhase: null,
+          taskRunError: 'boot failed after resume',
+        }),
+      ),
+    ).toEqual({
+      terminalLabel: 'Failed',
+      ready: false,
+      errorSummary: 'boot failed after resume',
+    });
+
+    expect(
+      classifySettledSummary(
+        summary({
+          completed: true,
+          taskRunStatus: 'canceled',
+          taskPhase: null,
+          taskRunError: null,
+        }),
+      ),
+    ).toEqual({
+      terminalLabel: 'Canceled',
+      ready: false,
+      errorSummary: 'Task was canceled',
     });
   });
 

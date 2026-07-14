@@ -59,21 +59,25 @@ const TERMINAL_EXITED = new Set(['failed', 'canceled', 'completed']);
  * Whether the target task is still usefully in-flight for `await`.
  * Settled Ready/Idle (post-turn keepalive) is not active — environments that
  * finish a one-shot verification turn look Idle/Ready, not Failed/Completed.
+ * Prefer the latest run's terminal status when it conflicts with the aggregate
+ * completed flag (failed/canceled resumes can leave completed=true).
  */
 export function isTaskActiveForAwait(summary: TaskSummaryResponse): boolean {
+  const status = summary.taskRunStatus;
+
+  // Latest run status always wins: a failed/canceled (or status-completed) run
+  // is settled even when the task aggregate completed flag is inconsistent.
+  if (status && TERMINAL_EXITED.has(status)) {
+    return false;
+  }
+
   if (summary.completed) {
     return false;
   }
 
-  const status = summary.taskRunStatus;
-
   if (!status) {
     // No run row yet: keep waiting a bit during enqueue.
     return true;
-  }
-
-  if (TERMINAL_EXITED.has(status)) {
-    return false;
   }
 
   const phase = summary.taskPhase;
@@ -89,15 +93,12 @@ export function isTaskActiveForAwait(summary: TaskSummaryResponse): boolean {
 
   if (status === 'running') {
     // waiting_for_prompt / idle phase => Ready/Idle labels (turn ended).
-    if (
-      phase === 'waiting_for_prompt' ||
-      phase === 'idle' ||
-      phase === 'stopped' ||
-      phase === 'shutting_down'
-    ) {
+    // stopped / shutting_down usually precede a final failed/canceled/idle
+    // status transition — keep polling instead of treating them as ready.
+    if (phase === 'waiting_for_prompt' || phase === 'idle') {
       return false;
     }
-    // null/unknown or running/working phases: still active.
+    // null/unknown, running, stopped, shutting_down: still active.
     return true;
   }
 
@@ -113,14 +114,8 @@ export function classifySettledSummary(
     ? summary.taskRunError.trim()
     : null;
 
-  if (summary.completed || summary.taskRunStatus === 'completed') {
-    return {
-      terminalLabel: 'Completed',
-      ready: !errorSummary,
-      errorSummary,
-    };
-  }
-
+  // Prefer the latest run terminal status over the aggregate completed flag so
+  // a failed/canceled resume is never reported as a successful completion.
   if (summary.taskRunStatus === 'failed') {
     return {
       terminalLabel: 'Failed',
@@ -134,6 +129,14 @@ export function classifySettledSummary(
       terminalLabel: 'Canceled',
       ready: false,
       errorSummary: errorSummary ?? 'Task was canceled',
+    };
+  }
+
+  if (summary.taskRunStatus === 'completed' || summary.completed) {
+    return {
+      terminalLabel: 'Completed',
+      ready: !errorSummary,
+      errorSummary,
     };
   }
 
@@ -166,11 +169,13 @@ export function classifySettledSummary(
     };
   }
 
-  // Fallback for unexpected settled shapes
+  // Fallback for unexpected settled shapes — never claim ready here.
   return {
     terminalLabel: statusLabel === 'Failed' ? 'Failed' : 'Idle',
-    ready: !errorSummary && statusLabel !== 'Failed',
-    errorSummary,
+    ready: false,
+    errorSummary:
+      errorSummary ??
+      `Task settled in an unexpected state (${statusLabel}) and readiness was not confirmed`,
   };
 }
 

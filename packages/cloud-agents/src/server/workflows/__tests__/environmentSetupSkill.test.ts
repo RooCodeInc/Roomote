@@ -177,16 +177,19 @@ describe('environment-setup guidance', () => {
       'Prefer this single blocking await over model-driven `get_summary` poll loops or `bash` sleep',
     );
     expect(skillContent).toContain(
+      'After await settles without an explicit failure',
+    );
+    expect(skillContent).toContain(
+      'always call `action: "get_messages"` for that `taskId` before claiming success',
+    );
+    expect(skillContent).toContain(
+      'do not infer readiness from Terminal/Ready alone',
+    );
+    expect(skillContent).not.toContain(
+      'optionally call `action: "get_messages"`',
+    );
+    expect(skillContent).toContain(
       'Before or while that await runs, narrate one concise plain-language progress update',
-    );
-    expect(skillContent).toContain(
-      'Preparing the environment can take 5 minutes or more — use the default await timeout',
-    );
-    expect(skillContent).toContain(
-      'If await returns `Terminal: Ready`, `Idle`, or `NeedsInput`',
-    );
-    expect(skillContent).toContain(
-      'Treat the await result as the source of truth for verification settlement.',
     );
     expect(skillContent).toContain(
       'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, await the new taskId, and repeat instead of stopping after the first failure.',
