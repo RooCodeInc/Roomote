@@ -678,11 +678,13 @@ describe('opencode-server bootstrap', () => {
     );
 
     expect(baseConfig.agent?.advisor).toEqual({
-      description: expect.stringContaining('stuck'),
+      description: expect.stringContaining('user contradicts or challenges it'),
       mode: 'subagent',
       model: 'openrouter/anthropic/claude-opus-4.7',
       options: { reasoning: { effort: 'high' } },
-      prompt: expect.stringContaining('coding advisor support'),
+      prompt: expect.stringContaining(
+        'user contradicts or challenges its approach',
+      ),
       permission: {
         read: 'allow',
         list: 'allow',
@@ -702,11 +704,19 @@ describe('opencode-server bootstrap', () => {
     });
     expect(config.agent).toEqual(baseConfig.agent);
     expect(config.instructions).toContain(advisorModelInstructionsPath);
-    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
-      'advisor',
+    const advisorModelInstructions = fs.readFileSync(
+      advisorModelInstructionsPath,
+      'utf8',
     );
-    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
+    expect(advisorModelInstructions).toContain('advisor');
+    expect(advisorModelInstructions).toContain(
       'delegate one focused consultation',
+    );
+    expect(advisorModelInstructions).toContain(
+      'user contradicts or challenges',
+    );
+    expect(advisorModelInstructions).toContain(
+      'repeated or insurmountable failures',
     );
   });
 
