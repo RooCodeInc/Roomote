@@ -51,7 +51,6 @@ const sourceControlProviderCopy: Record<
   {
     icon: string;
     description: string;
-    example?: string;
   }
 > = {
   github: {
@@ -61,11 +60,10 @@ const sourceControlProviderCopy: Record<
   gitlab: {
     icon: 'gitlab',
     description: `Mention @roomote in a comment on any merge request.`,
-    example: '@roomote address the merge request feedback above',
   },
   gitea: {
     icon: 'gitea',
-    description: `Start work from connected Gitea pull requests and repositories.`,
+    description: `Mention @roomote in a comment on any pull request.`,
   },
   bitbucket: {
     icon: 'bitbucket',
