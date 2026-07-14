@@ -33,18 +33,36 @@ function readOpenRouterOauthStatus(
 }
 
 /**
- * Steps that stay visible when deep-linked even though their saved values
- * already satisfy the flow: the credential config steps, so users can fix
- * saved-but-wrong credentials (e.g. a GitHub App key that fails at connect),
- * and the sandbox provider picker, so the deployment default can be switched
- * after setup.
+ * Steps a user can intentionally revisit (Back, goToStep, or an in-range deep
+ * link) even when saved values already satisfy the flow. Kept broad so
+ * provider and connection choices can be fixed mid-setup.
  */
-const REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
+const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
+  'auth-provider',
   'auth-env-vars',
+  'slack',
   'env-vars',
+  'source-control-provider',
+  'source-control-config',
+  'source-control-connect',
   'compute-provider',
   'compute-config',
+];
+
+/**
+ * Steps that may open from a deep link even when earlier setup is still
+ * pending — used for credential/error recovery (e.g. GitHub callback → config)
+ * and sandbox provider switches. Broader choice steps still pin when revisiting
+ * at or behind the first pending step via PINNABLE_SETUP_STEPS.
+ */
+const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
+  'auth-provider',
+  'auth-env-vars',
+  'env-vars',
+  'source-control-provider',
   'source-control-config',
+  'compute-provider',
+  'compute-config',
 ];
 
 function readUrlEntryContext(): SetupEntryContext {
@@ -524,23 +542,30 @@ export function useSetupFlow(
         return findNextStep(0);
       }
 
-      // Explicit links to credential config steps always render, even when
-      // earlier steps are pending or the step's saved values already satisfy
-      // the flow — this is how users get back to fix saved-but-wrong
-      // credentials (e.g. from the GitHub callback error page).
-      if (REVISITABLE_SETUP_STEPS.includes(requested)) {
+      // Credential/config recovery links can open even when earlier steps are
+      // still pending (for example GitHub callback → config).
+      if (DEEP_LINK_REVISITABLE_SETUP_STEPS.includes(requested)) {
         pinnedUrlStepRef.current = requested;
         return requested;
       }
 
-      pinnedUrlStepRef.current = null;
       const firstPendingStep = findNextStep(0);
 
       if (
         SETUP_STEPS.indexOf(requested) > SETUP_STEPS.indexOf(firstPendingStep)
       ) {
+        pinnedUrlStepRef.current = null;
         return firstPendingStep;
       }
+
+      // Allow revisiting an already-satisfying choice that is at or behind the
+      // first pending step (browser Back / reload / in-range deep link).
+      if (shouldSkip(requested) && PINNABLE_SETUP_STEPS.includes(requested)) {
+        pinnedUrlStepRef.current = requested;
+        return requested;
+      }
+
+      pinnedUrlStepRef.current = null;
 
       if (shouldSkip(requested)) {
         return findNextStep(SETUP_STEPS.indexOf(requested) + 1);
@@ -694,9 +719,13 @@ export function useSetupFlow(
 
   const goToStep = useCallback(
     (nextStep: SetupStep, options: { revisit?: boolean } = {}) => {
-      // Revisit navigations pin the step so the auto-skip watchdog leaves it
-      // visible even though its saved state already satisfies the flow.
-      pinnedUrlStepRef.current = options.revisit ? nextStep : null;
+      // Pin choice/config steps (and any explicit revisit) so the auto-skip
+      // watchdog leaves them visible even when saved state already satisfies
+      // the flow — e.g. Back to a provider picker after the choice was saved.
+      pinnedUrlStepRef.current =
+        options.revisit || PINNABLE_SETUP_STEPS.includes(nextStep)
+          ? nextStep
+          : null;
       setStep(nextStep);
       pushStepUrl(nextStep);
     },

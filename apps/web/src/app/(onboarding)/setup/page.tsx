@@ -438,6 +438,7 @@ export default function SetupPage() {
             setupSession.setCommunicationStepState('skipped');
             goToNextStep();
           }}
+          onBack={() => goToStep('welcome')}
         />
       )}
       {step === 'auth-env-vars' &&
@@ -448,7 +449,10 @@ export default function SetupPage() {
               setPendingAuthProvider(null);
               goToNextStep();
             }}
-            onBack={() => goToStep('auth-provider')}
+            onBack={() => {
+              setPendingAuthProvider(null);
+              goToStep('auth-provider', { revisit: true });
+            }}
           />
         ) : (
           <StepAuthEnvVars
@@ -458,7 +462,10 @@ export default function SetupPage() {
               setPendingAuthProvider(null);
               goToNextStep();
             }}
-            onBack={() => goToStep('auth-provider')}
+            onBack={() => {
+              setPendingAuthProvider(null);
+              goToStep('auth-provider', { revisit: true });
+            }}
             bootstrapMode={false}
           />
         ))}
@@ -468,6 +475,26 @@ export default function SetupPage() {
           openRouterOauthStatus={entryContext.openrouterOauthStatus}
           openRouterOauthErrorReason={entryContext.openrouterOauthErrorReason}
           onContinue={goToNextStep}
+          onBack={() => {
+            const communicationProvider =
+              status.authSetup.selectedProvider ??
+              status.authSetup.runtimeConfiguredProvider;
+            const communicationSkipped =
+              setupSession.session.communicationStep.state === 'skipped';
+
+            // Slack/Teams connect is optional; only send users back there when
+            // that step is actually part of their path.
+            if (
+              !communicationSkipped &&
+              (communicationProvider === 'slack' ||
+                communicationProvider === 'microsoft')
+            ) {
+              goToStep('slack', { revisit: true });
+              return;
+            }
+
+            goToStep('auth-env-vars', { revisit: true });
+          }}
         />
       )}
       {step === 'source-control-provider' && (
@@ -476,6 +503,7 @@ export default function SetupPage() {
           onContinue={(provider) => {
             saveSourceControlProviderChoice.mutate({ provider });
           }}
+          onBack={() => goToStep('env-vars', { revisit: true })}
           disabled={saveSourceControlProviderChoice.isPending}
         />
       )}
@@ -487,13 +515,17 @@ export default function SetupPage() {
             setPendingSourceControlProvider(null);
             goToStep('source-control-connect');
           }}
-          onBack={() => goToStep('source-control-provider')}
+          onBack={() => {
+            setPendingSourceControlProvider(null);
+            goToStep('source-control-provider', { revisit: true });
+          }}
         />
       )}
       {step === 'source-control-connect' && (
         <StepSourceControlConnect
           sourceControlSetup={status.sourceControlSetup}
           onContinue={goToNextStep}
+          onBack={() => goToStep('source-control-config', { revisit: true })}
         />
       )}
       {step === 'qualification-blocked' &&
@@ -506,6 +538,7 @@ export default function SetupPage() {
           onContinue={(provider) => {
             saveComputeProviderChoice.mutate({ provider });
           }}
+          onBack={() => goToStep('source-control-connect', { revisit: true })}
           disabled={saveComputeProviderChoice.isPending}
         />
       )}
@@ -517,7 +550,10 @@ export default function SetupPage() {
             setPendingComputeProvider(null);
             goToNextStep();
           }}
-          onBack={() => goToStep('compute-provider')}
+          onBack={() => {
+            setPendingComputeProvider(null);
+            goToStep('compute-provider', { revisit: true });
+          }}
         />
       )}
       {step === 'slack' && (
@@ -528,6 +564,7 @@ export default function SetupPage() {
             setupSession.setCommunicationStepState('skipped');
             goToNextStep();
           }}
+          onBack={() => goToStep('auth-env-vars', { revisit: true })}
           returnPath={getSetupStepPath('slack')}
         />
       )}
@@ -551,6 +588,7 @@ export default function SetupPage() {
             goToStep('compute-provider', { revisit: true })
           }
           onContinue={() => goToStep('invoke')}
+          onBack={() => goToStep('compute-config', { revisit: true })}
           onSkip={() => {
             setupSession.unlockPostOnboardingFlow();
             goToNextPostOnboardingStep(true);

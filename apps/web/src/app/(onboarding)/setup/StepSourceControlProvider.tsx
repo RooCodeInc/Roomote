@@ -18,6 +18,7 @@ const SOURCE_CONTROL_PROVIDER_STEP = getSetupStepDefinition(
 export function StepSourceControlProvider({
   sourceControlSetup,
   onContinue,
+  onBack,
   disabled = false,
 }: {
   sourceControlSetup: {
@@ -31,6 +32,7 @@ export function StepSourceControlProvider({
     }>;
   };
   onContinue: (provider: SourceControlProvider) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -75,6 +77,16 @@ export function StepSourceControlProvider({
             );
           })}
         </div>
+
+        {onBack ? (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            onClick={onBack}
+          >
+            Back
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -73,6 +73,7 @@ function getRetryCopy(reason: SetupRetryReason): string {
 export function StepRepoSelection({
   onContinue,
   onSkip,
+  onBack,
   onReviewComputeProvider,
   initialSelectedRepositoryIds = [],
   initialSetupGuidance = '',
@@ -83,6 +84,7 @@ export function StepRepoSelection({
 }: {
   onContinue: (onboardingTaskId: string) => void;
   onSkip: () => void;
+  onBack?: () => void;
   onReviewComputeProvider?: () => void;
   initialSelectedRepositoryIds?: string[];
   initialSetupGuidance?: string;
@@ -551,6 +553,17 @@ export function StepRepoSelection({
                   onValueChange={setSelectedModelId}
                   disabled={isBusy}
                 />
+                {onBack ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={onBack}
+                    disabled={isBusy}
+                  >
+                    Back
+                  </Button>
+                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -580,6 +593,11 @@ export function StepRepoSelection({
       </Card>
       {!showForm ? (
         <div className="flex flex-wrap gap-2">
+          {onBack ? (
+            <Button type="button" size="sm" variant="outline" onClick={onBack}>
+              Back
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"

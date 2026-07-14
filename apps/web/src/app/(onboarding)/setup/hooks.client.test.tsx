@@ -1283,6 +1283,195 @@ describe('useSetupFlow', () => {
     expect(window.location.search).toBe('?step=compute-provider');
   });
 
+  it('keeps auth-provider visible after a choice was already saved', async () => {
+    mockStatus({
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: false,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        computeProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=auth-provider');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-provider');
+    });
+
+    expect(routerMock.replace).not.toHaveBeenCalled();
+    expect(window.location.search).toBe('?step=auth-provider');
+  });
+
+  it('keeps source-control-provider after goToStep when a provider is already saved', async () => {
+    mockStatus({
+      sourceControlSetup: {
+        setupSatisfied: false,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: null,
+        providers: [
+          {
+            provider: 'github',
+            label: 'GitHub',
+            connectionMode: 'app',
+            fields: [],
+            runtimeConfigSatisfied: false,
+            savedConfigSatisfied: true,
+            configSatisfied: true,
+            configSatisfiedByRuntimeEnv: false,
+            connected: false,
+            repositoryCount: 0,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: null,
+        modelProvider: null,
+        computeProvider: null,
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result, rerender } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).not.toBe('welcome');
+    });
+
+    act(() => {
+      result.current.goToStep('source-control-provider');
+    });
+
+    expect(result.current.step).toBe('source-control-provider');
+    expect(routerMock.push).toHaveBeenCalledWith(
+      '/setup?step=source-control-provider',
+    );
+
+    // A status refresh that still treats the picker as skippable must not
+    // auto-advance while the user is intentionally reviewing their choice.
+    act(() => {
+      mockStatus({
+        sourceControlSetup: {
+          setupSatisfied: false,
+          setupSatisfiedByRuntimeEnv: false,
+          selectedProvider: 'github',
+          preselectedProvider: 'github',
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          lockReason: null,
+          connectedProvider: null,
+          providers: [
+            {
+              provider: 'github',
+              label: 'GitHub',
+              connectionMode: 'app',
+              fields: [],
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: true,
+              configSatisfied: true,
+              configSatisfiedByRuntimeEnv: false,
+              connected: false,
+              repositoryCount: 0,
+            },
+          ],
+        },
+        setupNewState: {
+          authProvider: null,
+          modelProvider: null,
+          computeProvider: null,
+          sourceControlProvider: 'github',
+          selectedRepositoryIds: [],
+          onboardingTaskId: null,
+          onboardingTaskStartedAt: null,
+          slackChannel: null,
+          slackThreadTs: null,
+        },
+      });
+      rerender();
+    });
+
+    expect(result.current.step).toBe('source-control-provider');
+  });
+
+  it('keeps messaging connect step when deep-linking after Slack is already connected', async () => {
+    mockStatus({
+      hasSlack: true,
+      hasSlackInstallation: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: false,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: null,
+        computeProvider: null,
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=slack');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('slack');
+    });
+
+    expect(routerMock.replace).not.toHaveBeenCalled();
+  });
+
   it('strips transient callback params but preserves the step in the URL', async () => {
     mockStatus();
     setLocationSearch('?step=compute-provider&openrouter=connected');
@@ -1361,6 +1550,62 @@ describe('useSetupFlow', () => {
 
     await waitFor(() => {
       expect(result.current.step).toBe('env-vars');
+    });
+  });
+
+  it('keeps a satisfied pinnable step when browser history lands on it', async () => {
+    mockStatus({
+      sourceControlSetup: {
+        setupSatisfied: false,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: null,
+        providers: [
+          {
+            provider: 'github',
+            label: 'GitHub',
+            connectionMode: 'app',
+            fields: [],
+            runtimeConfigSatisfied: false,
+            savedConfigSatisfied: true,
+            configSatisfied: true,
+            configSatisfiedByRuntimeEnv: false,
+            connected: false,
+            repositoryCount: 0,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: null,
+        modelProvider: null,
+        computeProvider: null,
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=source-control-config');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-config');
+    });
+
+    act(() => {
+      setLocationSearch('?step=source-control-provider');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-provider');
     });
   });
 

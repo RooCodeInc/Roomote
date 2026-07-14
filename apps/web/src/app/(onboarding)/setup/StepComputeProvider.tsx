@@ -21,10 +21,12 @@ const BRAND_ICON_BY_PROVIDER = {
 export function StepComputeProvider({
   computeSetup,
   onContinue,
+  onBack,
   disabled = false,
 }: {
   computeSetup: SetupComputeStatus;
   onContinue: (provider: ComputeProvider) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }) {
   // All providers are offered. Hosted providers whose worker image is not yet
@@ -73,6 +75,16 @@ export function StepComputeProvider({
             );
           })}
         </div>
+
+        {onBack ? (
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+            onClick={onBack}
+          >
+            Back
+          </button>
+        ) : null}
       </div>
     </div>
   );

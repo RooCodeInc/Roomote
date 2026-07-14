@@ -67,9 +67,11 @@ function getTokenBackedConnectCopy({
 export function StepSourceControlConnect({
   sourceControlSetup,
   onContinue,
+  onBack,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -203,7 +205,14 @@ export function StepSourceControlConnect({
               : 'repositories'}
             .
           </p>
-          <Button onClick={onContinue}>Continue</Button>
+          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+            {onBack ? (
+              <Button type="button" variant="outline" onClick={onBack}>
+                Back
+              </Button>
+            ) : null}
+            <Button onClick={onContinue}>Continue</Button>
+          </div>
         </div>
       ) : needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
@@ -236,11 +245,21 @@ export function StepSourceControlConnect({
               Connect with your Microsoft account
             </Button>
           )}
+          {onBack ? (
+            <Button type="button" variant="outline" onClick={onBack}>
+              Back
+            </Button>
+          ) : null}
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
           <p>{githubCopy}</p>
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+            {onBack ? (
+              <Button type="button" variant="outline" onClick={onBack}>
+                Back
+              </Button>
+            ) : null}
             <Button
               className="w-full sm:w-auto"
               onClick={() =>
@@ -265,6 +284,11 @@ export function StepSourceControlConnect({
             </p>
           ) : null}
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+            {onBack ? (
+              <Button type="button" variant="outline" onClick={onBack}>
+                Back
+              </Button>
+            ) : null}
             <Button
               className="w-full sm:w-auto"
               onClick={() => void handleSyncRepositories()}

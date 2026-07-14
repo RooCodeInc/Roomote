@@ -31,11 +31,13 @@ export function StepCommunicationConnect({
   authSetup,
   onContinue,
   onSkip,
+  onBack,
   returnPath = '/setup?step=slack',
 }: {
   authSetup: SetupAuthStatus;
   onContinue: () => void;
   onSkip: () => void;
+  onBack?: () => void;
   returnPath?: string;
 }) {
   const provider = getCommunicationProvider(authSetup);
@@ -55,6 +57,15 @@ export function StepCommunicationConnect({
       Do this later
     </button>
   );
+  const backLink = onBack ? (
+    <button
+      type="button"
+      className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+      onClick={onBack}
+    >
+      Back
+    </button>
+  ) : null;
 
   if (provider === 'microsoft') {
     const teamsStatus = teamsIntegrationStatus.data;
@@ -140,7 +151,10 @@ export function StepCommunicationConnect({
               missing from this deployment.
             </p>
           )}
-          {skipLink}
+          <div className="flex flex-col items-start gap-2">
+            {skipLink}
+            {backLink}
+          </div>
         </div>
       </div>
     );
@@ -167,7 +181,10 @@ export function StepCommunicationConnect({
           Connect to Slack
         </Button>
       </div>
-      {skipLink}
+      <div className="flex flex-col items-start gap-2">
+        {skipLink}
+        {backLink}
+      </div>
     </div>
   );
 }

@@ -66,11 +66,13 @@ export function StepInferenceProvider({
   openRouterOauthStatus = null,
   openRouterOauthErrorReason = null,
   onContinue,
+  onBack,
 }: {
   modelSetup: SetupModelStatus;
   openRouterOauthStatus?: OpenRouterOauthEntryStatus | null;
   openRouterOauthErrorReason?: string | null;
   onContinue: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -320,6 +322,11 @@ export function StepInferenceProvider({
       />
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {onBack ? (
+          <Button type="button" variant="outline" onClick={onBack}>
+            Back
+          </Button>
+        ) : null}
         <Button
           type="button"
           onClick={() => void handleContinue()}
