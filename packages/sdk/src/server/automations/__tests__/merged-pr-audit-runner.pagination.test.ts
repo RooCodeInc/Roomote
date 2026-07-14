@@ -13,7 +13,11 @@ import {
 } from '@roomote/db/server';
 import type { SourceControlProvider } from '@roomote/types';
 
-import { getMergedPullRequests } from '../merged-pr-audit-runner';
+import {
+  findAmbiguousRepositoryIdentities,
+  getMergedPullRequests,
+  type MergedPullRequest,
+} from '../merged-pr-audit-runner';
 
 /**
  * Real-database regression coverage for the merged-PR audit manifest:
@@ -39,15 +43,39 @@ async function createRepository(params: {
   linkedByUserId: string;
   fullName: string;
   provider: SourceControlProvider;
+  host?: string;
+  isActive?: boolean;
 }) {
   const repository = await repositoryFactory.create({
     sourceControlProvider: params.provider,
     linkedByUserId: params.linkedByUserId,
     fullName: params.fullName,
     externalRepoId: randomUUID(),
+    ...(params.host ? { host: params.host } : {}),
+    ...(params.isActive === undefined ? {} : { isActive: params.isActive }),
   });
   repositoryIds.push(repository.id);
   return repository;
+}
+
+function manifestEntry(params: {
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+  repositoryHost?: string | null;
+  prNumber?: number;
+}): MergedPullRequest {
+  const prNumber = params.prNumber ?? 1;
+
+  return {
+    externalPullRequestId: prNumber,
+    repositoryFullName: params.repositoryFullName,
+    sourceControlProvider: params.provider,
+    repositoryHost: params.repositoryHost ?? null,
+    prNumber,
+    title: `PR ${prNumber}`,
+    htmlUrl: `https://example.com/${params.repositoryFullName}/pull-requests/${prNumber}`,
+    mergedAt: new Date('2026-07-10T00:00:00Z'),
+  };
 }
 
 async function insertMergedFacts(
@@ -154,6 +182,110 @@ describe('getMergedPullRequests', () => {
         .map((pullRequest) => pullRequest.sourceControlProvider)
         .sort(),
     ).toEqual(['bitbucket', 'gitlab']);
+  });
+
+  it('carries each entry repository host so the scheduler can partition by (provider, host)', async () => {
+    const user = await createUser();
+    const fullName = `acme/self-managed-${randomUUID()}`;
+    const hostA = 'gitlab.host-a.example';
+    const hostB = 'gitlab.host-b.example';
+    const repoA = await createRepository({
+      linkedByUserId: user.id,
+      fullName,
+      provider: 'gitlab',
+      host: hostA,
+    });
+    const repoB = await createRepository({
+      linkedByUserId: user.id,
+      fullName,
+      provider: 'gitlab',
+      host: hostB,
+    });
+
+    const mergedAt = new Date('2026-07-10T00:00:00Z');
+    await insertMergedFacts([
+      {
+        repositoryId: repoA.id,
+        repositoryFullName: fullName,
+        provider: 'gitlab',
+        prNumber: 3,
+        mergedAt,
+      },
+      {
+        repositoryId: repoB.id,
+        repositoryFullName: fullName,
+        provider: 'gitlab',
+        prNumber: 3,
+        mergedAt,
+      },
+    ]);
+
+    const batch = await getMergedPullRequests(
+      { kind: 'interval', since: new Date('2026-07-09T00:00:00Z') },
+      new Date('2026-07-11T00:00:00Z'),
+    );
+
+    // Same provider, same fullName, same PR number: only the host (via the
+    // repository row) distinguishes the two entries.
+    expect(batch.pullRequests).toHaveLength(2);
+    expect(
+      batch.pullRequests
+        .map((pullRequest) => pullRequest.repositoryHost)
+        .sort(),
+    ).toEqual([hostA, hostB]);
+  });
+
+  it('flags (provider, fullName) pairs active on multiple hosts as ambiguous', async () => {
+    const user = await createUser();
+    const sharedName = `acme/shared-${randomUUID()}`;
+    const uniqueName = `acme/unique-${randomUUID()}`;
+
+    await createRepository({
+      linkedByUserId: user.id,
+      fullName: sharedName,
+      provider: 'gitlab',
+      host: 'gitlab.host-a.example',
+    });
+    await createRepository({
+      linkedByUserId: user.id,
+      fullName: sharedName,
+      provider: 'gitlab',
+      host: 'gitlab.host-b.example',
+    });
+    await createRepository({
+      linkedByUserId: user.id,
+      fullName: uniqueName,
+      provider: 'gitlab',
+      host: 'gitlab.host-a.example',
+    });
+    // An inactive same-name row is not a resolution hazard: the launched
+    // task's repository lookup only considers active rows.
+    await createRepository({
+      linkedByUserId: user.id,
+      fullName: uniqueName,
+      provider: 'gitlab',
+      host: 'gitlab.host-b.example',
+      isActive: false,
+    });
+
+    // The shared-name manifest entry references host A only; the host B twin
+    // has no PRs in the window but still makes (provider, fullName)
+    // resolution ambiguous for the launched task.
+    const ambiguous = await findAmbiguousRepositoryIdentities([
+      manifestEntry({
+        provider: 'gitlab',
+        repositoryFullName: sharedName,
+        repositoryHost: 'gitlab.host-a.example',
+      }),
+      manifestEntry({
+        provider: 'gitlab',
+        repositoryFullName: uniqueName,
+        repositoryHost: 'gitlab.host-a.example',
+        prNumber: 2,
+      }),
+    ]);
+
+    expect(ambiguous).toEqual(new Set([`gitlab\u0000${sharedName}`]));
   });
 
   it('resumes past a page boundary with duplicate timestamps and PR numbers', async () => {

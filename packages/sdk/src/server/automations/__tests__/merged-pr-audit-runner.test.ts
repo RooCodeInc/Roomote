@@ -30,12 +30,18 @@ const {
 vi.mock('@roomote/db/server', () => ({
   db: {
     select: vi.fn(() => {
+      // Thenable so queries without a terminal `.limit()` (the repository
+      // ambiguity lookup ends at `.where()`) resolve to the next queued rows.
       const chain = {
         from: () => chain,
         innerJoin: () => chain,
         where: () => chain,
         orderBy: () => chain,
         limit: () => mockSlackInstallationRows(),
+        then: (
+          resolve: (rows: unknown) => unknown,
+          reject: (error: unknown) => unknown,
+        ) => Promise.resolve(mockSlackInstallationRows()).then(resolve, reject),
       };
       return chain;
     }),
@@ -55,12 +61,19 @@ vi.mock('@roomote/db/server', () => ({
     repositoryId: 'repositoryId',
     state: 'state',
   },
-  repositories: { id: 'repositories.id', isActive: 'repositories.isActive' },
+  repositories: {
+    id: 'repositories.id',
+    isActive: 'repositories.isActive',
+    sourceControlProvider: 'repositories.sourceControlProvider',
+    fullName: 'repositories.fullName',
+    host: 'repositories.host',
+  },
   and: vi.fn(),
   asc: vi.fn(),
   eq: vi.fn(),
   gt: vi.fn(),
   gte: vi.fn(),
+  inArray: vi.fn(),
   isNotNull: vi.fn(),
   lte: vi.fn(),
   or: vi.fn(),
@@ -164,6 +177,7 @@ describe('buildMergedPullRequestTaskContext', () => {
           externalPullRequestId: 991,
           repositoryFullName: 'acme/backend',
           sourceControlProvider: 'gitlab',
+          repositoryHost: 'gitlab.com',
           prNumber: 42,
           title: 'Merged MR',
           htmlUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
@@ -198,6 +212,7 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     externalPullRequestId: number;
     repositoryFullName: string;
     sourceControlProvider: string;
+    repositoryHost: string | null;
     prNumber: number;
     title: string;
     htmlUrl: string;
@@ -208,14 +223,16 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
     index: number;
     provider: string;
     repositoryFullName: string;
+    host?: string;
     mergedAt?: Date;
   }): FactRow {
     return {
       factId: `fact-${params.index}`,
-      repositoryId: `repo-${params.provider}`,
+      repositoryId: `repo-${params.provider}-${params.host ?? 'default'}`,
       externalPullRequestId: params.index + 1,
       repositoryFullName: params.repositoryFullName,
       sourceControlProvider: params.provider,
+      repositoryHost: params.host ?? null,
       prNumber: params.index + 1,
       title: `PR ${params.index + 1}`,
       htmlUrl: `https://example.com/${params.repositoryFullName}/pulls/${params.index + 1}`,
@@ -234,7 +251,10 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockHasAnyActiveRepository.mockResolvedValue(true);
-    // First select: active Slack installations; second select: merged facts.
+    // Selects resolve in execution order: (1) active Slack installations,
+    // (2) merged facts (queued per test), (3) the active-repository ambiguity
+    // lookup, which defaults to no rows (nothing ambiguous).
+    mockSlackInstallationRows.mockResolvedValue([]);
     mockSlackInstallationRows.mockResolvedValueOnce([{ id: 'slack-1' }]);
     mockGetAutomationRuntime.mockResolvedValue({
       enabled: true,
@@ -337,6 +357,147 @@ describe('createMergedPullRequestAuditJob provider partitioning', () => {
       mockUpdateAutomationScanCursor.mock.invocationCallOrder[0]!;
     for (const enqueueOrder of mockEnqueueTask.mock.invocationCallOrder) {
       expect(cursorOrder).toBeGreaterThan(enqueueOrder);
+    }
+  });
+
+  it('launches one task per (provider, host) partition for same-provider repos on different hosts', async () => {
+    mockSlackInstallationRows.mockResolvedValueOnce([
+      factRow({
+        index: 0,
+        provider: 'gitlab',
+        repositoryFullName: 'acme/self-managed',
+        host: 'gitlab.example.com',
+      }),
+      factRow({
+        index: 1,
+        provider: 'gitlab',
+        repositoryFullName: 'acme/cloud',
+        host: 'gitlab.com',
+      }),
+    ]);
+    // One active repository row per (provider, fullName): unambiguous, so
+    // both hosts stay auditable.
+    mockSlackInstallationRows.mockResolvedValueOnce([
+      { sourceControlProvider: 'gitlab', fullName: 'acme/self-managed' },
+      { sourceControlProvider: 'gitlab', fullName: 'acme/cloud' },
+    ]);
+
+    const result = await job();
+
+    expect(result.errors).toEqual([]);
+    // Same provider, two hosts: two tasks, so neither manifest mixes hosts.
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(2);
+
+    const [firstPayload, secondPayload] = enqueuedPayloads();
+
+    // Hosts launch in lexicographic order: gitlab.com < gitlab.example.com.
+    expect(firstPayload!.sourceControlProvider).toBe('gitlab');
+    expect(firstPayload!.selectedRepositories).toEqual(['acme/cloud']);
+    expect(secondPayload!.sourceControlProvider).toBe('gitlab');
+    expect(secondPayload!.selectedRepositories).toEqual(['acme/self-managed']);
+
+    const manifests = buildPrompt.mock.calls.map(([params]) =>
+      params.mergedPullRequests.map((pullRequest) => pullRequest.prNumber),
+    );
+    expect(manifests).toEqual([[2], [1]]);
+  });
+
+  it('excludes same-name repositories on multiple hosts from every manifest, with a warning', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      mockSlackInstallationRows.mockResolvedValueOnce([
+        factRow({
+          index: 0,
+          provider: 'gitlab',
+          repositoryFullName: 'acme/shared',
+          host: 'gitlab.host-a.example',
+        }),
+        factRow({
+          index: 1,
+          provider: 'gitlab',
+          repositoryFullName: 'acme/shared',
+          host: 'gitlab.host-b.example',
+        }),
+        factRow({
+          index: 2,
+          provider: 'gitlab',
+          repositoryFullName: 'acme/unique',
+          host: 'gitlab.host-a.example',
+        }),
+      ]);
+      // acme/shared matches two active repository rows, so the launched
+      // task's (provider, fullName) lookup could resolve the wrong host.
+      mockSlackInstallationRows.mockResolvedValueOnce([
+        { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/unique' },
+      ]);
+
+      const result = await job();
+
+      expect(result.errors).toEqual([]);
+      // Only the unambiguous entry launches; no task can audit the wrong host.
+      expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+
+      const [payload] = enqueuedPayloads();
+      expect(payload!.sourceControlProvider).toBe('gitlab');
+      expect(payload!.selectedRepositories).toEqual(['acme/unique']);
+
+      const manifests = buildPrompt.mock.calls.map(([params]) =>
+        params.mergedPullRequests.map((pullRequest) => pullRequest.prNumber),
+      );
+      expect(manifests).toEqual([[3]]);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('skipping 2 merged PR entries'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('advances the cursor past skipped ambiguous entries instead of stalling on them', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    try {
+      // 251 rows overflow the 250-row page; the gitlab half is ambiguous
+      // across two hosts and gets skipped, the github half launches.
+      const rows = Array.from({ length: 251 }, (_, index) =>
+        factRow({
+          index,
+          provider: index % 2 === 0 ? 'github' : 'gitlab',
+          repositoryFullName: index % 2 === 0 ? 'acme/gh' : 'acme/shared',
+          host: index % 2 === 0 ? 'github.com' : 'gitlab.host-a.example',
+        }),
+      );
+      mockSlackInstallationRows.mockResolvedValueOnce(rows);
+      mockSlackInstallationRows.mockResolvedValueOnce([
+        { sourceControlProvider: 'github', fullName: 'acme/gh' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
+        { sourceControlProvider: 'gitlab', fullName: 'acme/shared' },
+      ]);
+
+      const result = await job();
+
+      expect(result.errors).toEqual([]);
+      expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+
+      const [payload] = enqueuedPayloads();
+      expect('sourceControlProvider' in payload!).toBe(false);
+      expect(payload!.selectedRepositories).toEqual(['acme/gh']);
+
+      // The cursor still covers the full 250-row page, including the skipped
+      // ambiguous gitlab rows: deliberate exclusions must not stall the scan.
+      expect(mockUpdateAutomationScanCursor).toHaveBeenCalledTimes(1);
+      const cursorArgs = mockUpdateAutomationScanCursor.mock.calls[0]![1];
+      expect(cursorArgs.cursor).toEqual({
+        mergedAt: rows[249]!.mergedAt.toISOString(),
+        factId: 'fact-249',
+        externalPullRequestId: 250,
+      });
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 

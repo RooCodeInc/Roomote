@@ -12,6 +12,7 @@ import {
   getAutomationRuntime,
   gt,
   gte,
+  inArray,
   isNotNull,
   lte,
   or,
@@ -61,6 +62,12 @@ export interface MergedPullRequest {
   externalPullRequestId: number;
   repositoryFullName: string;
   sourceControlProvider: SourceControlProvider;
+  /**
+   * Source-control host of the repository row backing this facts entry.
+   * Null for historical rows written before hosts were backfilled; those
+   * behave as the provider's default host.
+   */
+  repositoryHost: string | null;
   prNumber: number;
   title: string;
   htmlUrl: string;
@@ -277,6 +284,7 @@ export async function getMergedPullRequests(
       externalPullRequestId: pullRequestFacts.externalPullRequestId,
       repositoryFullName: pullRequestFacts.repositoryFullName,
       sourceControlProvider: pullRequestFacts.sourceControlProvider,
+      repositoryHost: repositories.host,
       prNumber: pullRequestFacts.prNumber,
       title: pullRequestFacts.title,
       htmlUrl: pullRequestFacts.htmlUrl,
@@ -320,6 +328,7 @@ export async function getMergedPullRequests(
       externalPullRequestId: row.externalPullRequestId,
       repositoryFullName: row.repositoryFullName,
       sourceControlProvider: row.sourceControlProvider,
+      repositoryHost: row.repositoryHost,
       prNumber: row.prNumber,
       title: row.title,
       htmlUrl: row.htmlUrl,
@@ -343,6 +352,71 @@ function getSelectedRepositories(
     ),
   ].sort((left, right) => left.localeCompare(right));
 }
+
+function repositoryIdentityKey(
+  provider: SourceControlProvider,
+  repositoryFullName: string,
+): string {
+  // NUL (\u0000) cannot appear in either component, so the key never collides.
+  return `${provider}\u0000${repositoryFullName}`;
+}
+
+/**
+ * Finds (provider, fullName) pairs in the manifest that match more than one
+ * active repository row, i.e. same-name repositories linked from multiple
+ * hosts (self-managed GitLab/Gitea/ADO instances). The launched task's
+ * pull-request tools resolve repositories by (provider, fullName) alone --
+ * see resolveRepositoryRow in
+ * lib/pull-requests/source-control-pull-request-shared.ts -- so for these
+ * pairs a task could silently audit the wrong host's repository.
+ *
+ * Ambiguity is checked against the repositories table rather than the
+ * manifest itself: a same-name repository on another host is a resolution
+ * hazard even when none of its PRs appear in this scan window.
+ */
+export async function findAmbiguousRepositoryIdentities(
+  mergedPullRequests: MergedPullRequest[],
+): Promise<Set<string>> {
+  const repositoryFullNames = [
+    ...new Set(
+      mergedPullRequests.map((pullRequest) => pullRequest.repositoryFullName),
+    ),
+  ];
+
+  if (repositoryFullNames.length === 0) {
+    return new Set();
+  }
+
+  const rows = await db
+    .select({
+      sourceControlProvider: repositories.sourceControlProvider,
+      fullName: repositories.fullName,
+    })
+    .from(repositories)
+    .where(
+      and(
+        eq(repositories.isActive, true),
+        inArray(repositories.fullName, repositoryFullNames),
+      ),
+    );
+
+  const activeRowCounts = new Map<string, number>();
+
+  for (const row of rows) {
+    const key = repositoryIdentityKey(row.sourceControlProvider, row.fullName);
+    activeRowCounts.set(key, (activeRowCounts.get(key) ?? 0) + 1);
+  }
+
+  return new Set(
+    [...activeRowCounts].filter(([, count]) => count > 1).map(([key]) => key),
+  );
+}
+
+type ManifestPartition = {
+  provider: SourceControlProvider;
+  host: string | null;
+  pullRequests: MergedPullRequest[];
+};
 
 async function processDeployment(
   config: MergedPullRequestAuditConfig,
@@ -439,36 +513,70 @@ async function processDeployment(
       now,
     });
     // The pull-request read/write tools bind each task to a single
-    // source-control provider (resolved from the task payload), so a manifest
-    // spanning several providers must launch one scan task per provider.
-    // Iterating the provider enum keeps the launch order deterministic.
-    const manifestPartitions = new Map<
-      SourceControlProvider,
-      MergedPullRequest[]
-    >();
+    // source-control provider (resolved from the task payload) and look
+    // repositories up by (provider, fullName), so a manifest must never mix
+    // providers or hosts: one scan task launches per (provider, host) pair.
+    //
+    // The task payload has no host field, so a launched task cannot tell the
+    // tools which host it means; a manifest entry is only safe when its
+    // (provider, fullName) resolves to exactly one active repository row.
+    // Entries whose full name is active on more than one host would let the
+    // task audit the wrong host's repository, so they are excluded from
+    // every launched manifest instead.
+    // TODO(follow-up): thread host disambiguation through the task payload
+    // and resolveRepositoryRow so same-name repositories on multiple hosts
+    // become auditable instead of skipped.
+    const ambiguousIdentities =
+      await findAmbiguousRepositoryIdentities(mergedPullRequests);
+    const auditablePullRequests = mergedPullRequests.filter(
+      (pullRequest) =>
+        !ambiguousIdentities.has(
+          repositoryIdentityKey(
+            pullRequest.sourceControlProvider,
+            pullRequest.repositoryFullName,
+          ),
+        ),
+    );
+    const skippedAmbiguousCount =
+      mergedPullRequests.length - auditablePullRequests.length;
 
-    for (const pullRequest of mergedPullRequests) {
-      const partition = manifestPartitions.get(
-        pullRequest.sourceControlProvider,
+    if (skippedAmbiguousCount > 0) {
+      console.warn(
+        `${logPrefix} Same-name repositories on multiple hosts are not yet auditable — skipping ${skippedAmbiguousCount} merged PR entries`,
       );
+    }
+
+    const manifestPartitions = new Map<string, ManifestPartition>();
+
+    for (const pullRequest of auditablePullRequests) {
+      const partitionKey = `${pullRequest.sourceControlProvider}\u0000${pullRequest.repositoryHost ?? ''}`;
+      const partition = manifestPartitions.get(partitionKey);
 
       if (partition) {
-        partition.push(pullRequest);
+        partition.pullRequests.push(pullRequest);
       } else {
-        manifestPartitions.set(pullRequest.sourceControlProvider, [
-          pullRequest,
-        ]);
+        manifestPartitions.set(partitionKey, {
+          provider: pullRequest.sourceControlProvider,
+          host: pullRequest.repositoryHost,
+          pullRequests: [pullRequest],
+        });
       }
     }
 
+    // Iterating the provider enum, then hosts in lexicographic order, keeps
+    // the launch order deterministic.
+    const orderedPartitions = sourceControlProviders.flatMap((provider) =>
+      [...manifestPartitions.values()]
+        .filter((partition) => partition.provider === provider)
+        .sort((left, right) =>
+          (left.host ?? '').localeCompare(right.host ?? ''),
+        ),
+    );
+
     let firstLaunchedTaskId: string | null = null;
 
-    for (const provider of sourceControlProviders) {
-      const partitionPullRequests = manifestPartitions.get(provider);
-
-      if (!partitionPullRequests) {
-        continue;
-      }
+    for (const partition of orderedPartitions) {
+      const { provider, pullRequests: partitionPullRequests } = partition;
 
       const selectedRepositories = getSelectedRepositories(
         partitionPullRequests,
@@ -529,11 +637,15 @@ async function processDeployment(
       firstLaunchedTaskId ??= launchResult.taskId;
     }
 
-    // The scan cursor tracks the whole scanned page and the provider
-    // partitions exactly tile that page, so advancing the cursor only after
-    // every partition has launched keeps cursor coverage equal to the union
-    // of launched manifests. If a partition launch throws, the run fails
-    // without advancing the cursor and the next run rescans the same page:
+    // The scan cursor tracks the whole scanned page: the (provider, host)
+    // partitions plus any skipped-ambiguous entries exactly tile that page,
+    // so advancing the cursor only after every partition has launched keeps
+    // cursor coverage equal to the union of launched manifests plus the
+    // deliberate exclusions. Skipped-ambiguous entries advance with the
+    // cursor by design: they are excluded until host disambiguation lands,
+    // and letting them pin the cursor would stall the scan on every later
+    // PR instead. If a partition launch throws, the run fails without
+    // advancing the cursor and the next run rescans the same page:
     // partitions that already launched are re-audited once rather than any
     // PR being skipped.
     if (pullRequestBatch.hasMore && pullRequestBatch.nextCursor) {
