@@ -9,6 +9,7 @@ import {
 interface BuildStartedBlocksOptions {
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  kickoffMessage?: string | null;
   runId?: number | null;
   otherRunningTasksCount?: number;
   taskId?: string | null;
@@ -37,6 +38,7 @@ export function buildStartedBlocks(
   const {
     workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
     runId,
     otherRunningTasksCount,
     taskId,
@@ -75,6 +77,7 @@ export function buildStartedBlocks(
   const text = buildTaskStartingText({
     workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
   });
   const blocks: SlackBlock[] = [
     { type: 'section', text: { type: 'mrkdwn', text } },

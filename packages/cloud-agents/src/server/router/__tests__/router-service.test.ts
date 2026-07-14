@@ -55,6 +55,8 @@ describe('routeTask', () => {
         workspaceValue: 'Full Stack',
         reasoning: 'Full Stack is the best fit.',
         confidence: 0.92,
+        kickoffMessage:
+          'looking into daily environment snapshots for faster startup',
         needsExternalLookup: false,
         externalReference: null,
       },
@@ -79,6 +81,8 @@ describe('routeTask', () => {
     expect(result.result).toMatchObject({
       workspaceOnly: true,
       reasoning: 'Full Stack is the best fit.',
+      kickoffMessage:
+        'looking into daily environment snapshots for faster startup',
       workspace: {
         type: 'environment',
         id: 'env-full-stack',

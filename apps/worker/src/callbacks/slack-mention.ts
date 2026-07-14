@@ -183,6 +183,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       const blocks = buildStartedBlocks({
         workspaceDisplayName: startedData.workspaceDisplayName,
         modelDisplayName: startedData.modelDisplayName,
+        kickoffMessage: startedData.kickoffMessage,
         runId: taskRun.id,
         otherRunningTasksCount: startedData.otherRunningTasksCount,
         taskId: taskRun.taskId,

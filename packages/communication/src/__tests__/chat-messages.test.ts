@@ -95,6 +95,40 @@ describe('chat message copy builders', () => {
     ).toBe(
       'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model',
     );
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage:
+          'looking into daily environment snapshots for faster startup',
+      }),
+    ).toBe(
+      'Getting started: looking into daily environment snapshots for faster startup',
+    );
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: 'checking login redirects',
+        modelDisplayName: 'Anthropic Claude Fable 5',
+      }),
+    ).toBe(
+      'Getting started: checking login redirects using Anthropic Claude Fable 5 as the coding model',
+    );
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: 'Getting started on environment snapshot checks',
+      }),
+    ).toBe('Getting started: environment snapshot checks');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: "I'm checking environment snapshots",
+      }),
+    ).toBe("Getting started: I'm checking environment snapshots");
   });
 
   it('only returns model names the router treated as an explicit preference', () => {

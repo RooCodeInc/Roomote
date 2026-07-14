@@ -138,23 +138,85 @@ export function resolveUserFacingModelDisplayName({
   return previous || undefined;
 }
 
+/**
+ * Stable prefix for fallback and dynamic kickoff copy. Slack started-message
+ * detection matches on this shared leading phrase when no stored message TS is
+ * available.
+ */
+export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started';
+
+const KICKOFF_MESSAGE_MAX_LENGTH = 120;
+
+/**
+ * Normalize a router-generated kickoff phrase into short, display-safe text.
+ * Returns undefined when the value is empty or not meaningful so callers can
+ * fall back to the workspace-based kickoff copy.
+ */
+export function normalizeKickoffMessage(
+  value?: string | null,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  let text = value.replace(/\s+/g, ' ').trim();
+  text = text.replace(/^["'`“”]+|["'`“”]+$/g, '').trim();
+  text = text.replace(/\.+$/, '').trim();
+
+  if (!text) {
+    return undefined;
+  }
+
+  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
+    const truncated = text
+      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
+      .replace(/\s+\S*$/, '')
+      .trim();
+    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 119)}…`;
+  }
+
+  return text;
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
+  kickoffMessage,
   formatWorkspaceName = identity,
   formatModelName = identity,
 }: {
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  /**
+   * Optional short router-generated phrase describing the task. When present,
+   * replaces the static "Getting started on your task in <env>" boilerplate.
+   */
+  kickoffMessage?: string | null;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
-  const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
     ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
+  const kickoff = normalizeKickoffMessage(kickoffMessage);
 
-  return `Getting started on your task in ${workspace}${model}`;
+  if (kickoff) {
+    // Strip a redundant leading "Getting started" the model may have added so
+    // we always emit one stable, detectable prefix form.
+    const phrase = kickoff
+      .replace(
+        /^(?:getting started(?:\s*:\s*|\s+on\s+your\s+task(?:\s+in\s+\S+)?\s*|\s+on\s+|\s+))/i,
+        '',
+      )
+      .trim();
+    const body = phrase || kickoff;
+
+    return `${TASK_STARTING_MESSAGE_PREFIX}: ${body}${model}`;
+  }
+
+  const workspace = formatWorkspaceName(workspaceDisplayName);
+
+  return `${TASK_STARTING_MESSAGE_PREFIX} on your task in ${workspace}${model}`;
 }
 
 export function buildOtherRunningTasksText(

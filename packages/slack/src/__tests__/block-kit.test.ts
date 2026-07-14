@@ -147,6 +147,21 @@ describe('Slack routing blocks', () => {
     );
   });
 
+  it('uses a router kickoff phrase in started messages when present', () => {
+    const blocks = buildStartedBlocks({
+      workspaceDisplayName: 'App',
+      kickoffMessage:
+        'looking into daily environment snapshots for faster startup',
+      runId: 123,
+      taskId: 'task-123',
+      initiatingSlackUserId: 'U123',
+    });
+
+    expect(getPrimarySectionText(blocks)).toBe(
+      'Getting started: looking into daily environment snapshots for faster startup',
+    );
+  });
+
   it('appends the other-running-task count when provided', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',

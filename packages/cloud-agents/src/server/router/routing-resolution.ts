@@ -43,6 +43,14 @@ export const workspaceResponseSchema = z.object({
     .string()
     .describe('Brief explanation of your workspace decision'),
   confidence: confidenceField,
+  kickoffMessage: z
+    .string()
+    .nullable()
+    .describe(
+      'Short task-relevant kickoff phrase (roughly 6-14 words) that compresses what the user asked for. Describe the work, not the workspace or model. Prefer progressive phrasing like "looking into daily environment snapshots for faster startup". No emojis, markdown, quotes, or "Getting started" prefix. Write in sentence case without a trailing period. Always provide a non-empty phrase when routing a real task.',
+    )
+    .optional()
+    .default(null),
   needsExternalLookup: needsExternalLookupField.optional().default(false),
   externalReference: externalReferenceField.optional().default(null),
   requestedModelId: z

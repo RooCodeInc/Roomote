@@ -134,5 +134,21 @@ When the request includes an **Available Models** list, also populate the \`requ
 - Model selection is independent of workspace selection: a model preference does not change the workspace, and the absence of a model preference does not affect routing.
 
 ${EXTERNAL_LOOKUP_RULES}
+
+## Kickoff Message
+
+Also always set \`kickoffMessage\` to a short, task-relevant phrase the product will show when the task starts:
+
+- Write roughly 6-14 words that compress what the user asked for.
+- Describe the work itself, not the environment/workspace and not the model.
+- Prefer progressive phrasing such as "looking into…", "checking…", "investigating…", "adding…".
+- Examples of good kickoffMessage values:
+  - "looking into daily environment snapshots for faster startup"
+  - "checking whether login redirects loop on mobile"
+  - "adding cancel action to the task dashboard"
+- Do not include the words "Getting started".
+- Do not include emojis, markdown, quotes, or a trailing period.
+- Use sentence case.
+- Always produce a non-empty kickoffMessage for real routed tasks. Internal reasoning stays in \`reasoning\`; user-facing ack copy stays in \`kickoffMessage\`.
 `;
 }

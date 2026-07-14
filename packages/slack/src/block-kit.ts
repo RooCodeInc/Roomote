@@ -350,6 +350,7 @@ interface RoutingPrefillData {
   workspaceDisplayName: string;
   modelId?: string;
   modelDisplayName?: string;
+  kickoffMessage?: string;
   workspaceType: 'environment' | 'all_repositories';
   teamId: string;
   teamDomain?: string;
@@ -1087,6 +1088,7 @@ export async function showTaskConfiguration({
             modelDisplayName: getUserRequestedModelDisplayName(
               routingResult.model,
             ),
+            kickoffMessage: routingResult.kickoffMessage,
             reasoning: routingResult.reasoning,
             routingDebug: routingResult.debug,
             routingDurationMs: suggestedRoutingDurationMs,
@@ -1141,6 +1143,9 @@ export async function showTaskConfiguration({
         workspaceDisplayName,
         modelId: routingResult.model?.id,
         modelDisplayName: getUserRequestedModelDisplayName(routingResult.model),
+        ...(routingResult.kickoffMessage
+          ? { kickoffMessage: routingResult.kickoffMessage }
+          : {}),
         workspaceType: routingResult.workspace.type,
         teamId: slackInstallation.teamId,
         teamDomain: slackInstallation.teamDomain ?? undefined,
@@ -1653,6 +1658,9 @@ export async function handleTaskConfiguration(
         agentName,
         initiatingSlackUserId: payload.user.id,
         workspaceDisplayName,
+        ...(prefill?.kickoffMessage
+          ? { kickoffMessage: prefill.kickoffMessage }
+          : {}),
         workspaceOnly: false,
       },
     });
@@ -1710,6 +1718,7 @@ export async function handleTaskConfiguration(
 
     const blocks = buildStartedBlocks({
       workspaceDisplayName,
+      kickoffMessage: prefill?.kickoffMessage,
       runId: taskRun.id,
       taskId: taskRun.taskId,
       initiatingSlackUserId: payload.user.id,
@@ -1727,6 +1736,9 @@ export async function handleTaskConfiguration(
         agentName,
         initiatingSlackUserId: payload.user.id,
         workspaceDisplayName,
+        ...(prefill?.kickoffMessage
+          ? { kickoffMessage: prefill.kickoffMessage }
+          : {}),
         workspaceOnly: false,
       });
     }
@@ -1833,6 +1845,7 @@ async function startImmediateSlackTask({
   latestOwnBotReply,
   modelId,
   modelDisplayName,
+  kickoffMessage,
   reasoning,
   routingDebug,
   routingDurationMs,
@@ -1856,6 +1869,7 @@ async function startImmediateSlackTask({
   latestOwnBotReply?: Pick<SlackThreadMessage, 'text' | 'ts'>;
   modelId?: string;
   modelDisplayName?: string;
+  kickoffMessage?: string;
   reasoning?: string;
   routingDebug?: RoutingDebugInfo;
   routingDurationMs?: number;
@@ -1912,6 +1926,7 @@ async function startImmediateSlackTask({
             initiatingSlackUserId: event.user,
             workspaceDisplayName: workspace.workspaceDisplayName,
             ...(modelDisplayName ? { modelDisplayName } : {}),
+            ...(kickoffMessage ? { kickoffMessage } : {}),
             workspaceOnly,
           },
         }
@@ -1952,6 +1967,7 @@ async function startImmediateSlackTask({
     agentName,
     workspaceDisplayName: workspace.workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
     workspaceType,
     workspaceValue,
     workspaceOnly,
@@ -2077,6 +2093,9 @@ async function createRunFromPrefill({
             workspaceDisplayName: prefill.workspaceDisplayName,
             ...(prefill.modelDisplayName
               ? { modelDisplayName: prefill.modelDisplayName }
+              : {}),
+            ...(prefill.kickoffMessage
+              ? { kickoffMessage: prefill.kickoffMessage }
               : {}),
             workspaceOnly: prefill.workspaceOnly,
           },
@@ -2226,6 +2245,8 @@ export async function autoConfirmRouting(
       initiatingSlackUserId: prefill.slackUserId,
       agentName: prefill.agentName,
       workspaceDisplayName: prefill.workspaceDisplayName,
+      modelDisplayName: prefill.modelDisplayName,
+      kickoffMessage: prefill.kickoffMessage,
       workspaceType: prefill.workspaceType,
       workspaceValue: prefill.workspaceValue,
       workspaceOnly: prefill.workspaceOnly,
@@ -2534,6 +2555,9 @@ export async function handleSlackRoutingCorrection({
         workspaceDisplayName: newWorkspaceDisplayName,
         modelId: result.model?.id ?? oldPrefill.modelId,
         modelDisplayName,
+        ...(result.kickoffMessage
+          ? { kickoffMessage: result.kickoffMessage }
+          : {}),
         workspaceType: result.workspace.type,
         teamId: slackInstallation.teamId,
         teamDomain: slackInstallation.teamDomain ?? oldPrefill.teamDomain,
@@ -2778,6 +2802,8 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
       initiatingSlackUserId: prefill.slackUserId,
       agentName: prefill.agentName,
       workspaceDisplayName: prefill.workspaceDisplayName,
+      modelDisplayName: prefill.modelDisplayName,
+      kickoffMessage: prefill.kickoffMessage,
       workspaceType: prefill.workspaceType,
       workspaceValue: prefill.workspaceValue,
       workspaceOnly: prefill.workspaceOnly,
