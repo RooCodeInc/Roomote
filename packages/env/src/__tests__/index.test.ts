@@ -96,6 +96,7 @@ describe('Env', () => {
       expect(env.DOCKER_WORKER_RELEASE_PATH).toBeUndefined();
       expect(env.DOCKER_WORKER_CPU_LIMIT).toBe(2);
       expect(env.DOCKER_WORKER_MEMORY_LIMIT).toBe('4g');
+      expect(env.DOCKER_TASK_DAEMON_MEMORY_LIMIT).toBe('8g');
       expect(env.DOCKER_WORKER_PIDS_LIMIT).toBe(512);
       expect(env.DOCKER_WORKER_DISK_LIMIT).toBe('20g');
       expect(env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK).toBe(false);

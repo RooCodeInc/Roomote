@@ -9,6 +9,12 @@ const mockRecordMutation = vi.fn();
 const mockUpdateTaskRunMachine = vi.fn();
 const mockGetNamedPortsForTaskRun = vi.fn();
 const mockStampTaskRunMilestone = vi.fn();
+const mockCreateComputeProviderClient = vi.fn((_arg?: unknown) => ({
+  runCommand: mockRunCommand,
+  destroyInstance: mockDestroyInstance,
+  enterStandby: mockEnterStandby,
+}));
+const mockFindTask = vi.fn();
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/db/server')>();
@@ -16,6 +22,10 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     ...actual,
     db: {
       ...actual.db,
+      query: {
+        ...actual.db.query,
+        tasks: { findFirst: (...args: unknown[]) => mockFindTask(...args) },
+      },
       update: vi.fn(() => ({
         set: vi.fn(() => ({ where: vi.fn().mockResolvedValue(undefined) })),
       })),
@@ -36,11 +46,8 @@ vi.mock('@roomote/compute-providers', async (importOriginal) => {
     ...actual,
     createBlaxelMachine: (...args: unknown[]) =>
       mockCreateBlaxelMachine(...args),
-    createComputeProviderClient: vi.fn(() => ({
-      runCommand: mockRunCommand,
-      destroyInstance: mockDestroyInstance,
-      enterStandby: mockEnterStandby,
-    })),
+    createComputeProviderClient: (arg: unknown) =>
+      mockCreateComputeProviderClient(arg),
     buildBlaxelWorkerEnv: vi.fn(() => ({ AUTH_TOKEN: 'auth-token' })),
   };
 });
@@ -80,6 +87,7 @@ describe('spawnBlaxelWorker', () => {
     mockEnterStandby.mockResolvedValue({
       resumeHandle: 'roomote-blaxel-standby',
     });
+    mockFindTask.mockResolvedValue({ workflow: 'standard' });
   });
 
   it('reconnects SnapshotResume runs using task standby mode', async () => {
@@ -126,6 +134,41 @@ describe('spawnBlaxelWorker', () => {
         cmd: 'worker',
         args: ['resume', '321'],
         detached: true,
+      }),
+    );
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'blaxel',
+        config: expect.objectContaining({ memoryMiB: 4096 }),
+      }),
+    );
+  });
+
+  it('uses 8 GiB for setup tasks before an environment config exists', async () => {
+    mockFindTask.mockResolvedValue({ workflow: 'setup_onboarding' });
+
+    await spawnBlaxelWorker(
+      {
+        id: 323,
+        taskId: 'task-323',
+        vendor: 'blaxel',
+        payloadKind: TaskPayloadKind.StandardTask,
+        sourceSnapshotId: null,
+        payload: { repo: 'test/repo' },
+      } as TaskRun,
+      'auth-token',
+      {
+        blaxelApiKey: 'key',
+        blaxelWorkspace: 'workspace',
+        blaxelImage: 'sandbox/roomote-worker:test',
+        blaxelTimeoutMs: 5 * 60 * 60 * 1_000,
+      },
+    );
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'blaxel',
+        config: expect.objectContaining({ memoryMiB: 8192 }),
       }),
     );
   });

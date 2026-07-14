@@ -47,6 +47,7 @@ import {
   restoreDockerStandbyNetworking,
   type DockerWorkerEgressPolicy,
 } from './docker-sandbox-security';
+import { taskNeedsNestedDocker } from './task-sandbox-resources';
 
 const DOCKER_CONTAINER_READY_COMMAND = 'sleep';
 const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
@@ -67,6 +68,7 @@ export async function spawnDockerWorker(
     dockerTimeoutMs: number;
     cpuLimit: number;
     memoryLimit: string;
+    taskDaemonMemoryLimit: string;
     pidsLimit: number;
     diskLimit: string;
     allowUnboundedDisk: boolean;
@@ -134,8 +136,9 @@ export async function spawnDockerWorker(
     ? taskRun.sourceSnapshotId!
     : getDockerWorkerContainerName(taskRun.id);
   const sourceRunId = getDockerSourceRunId(containerName);
-  const usesDockerProjects = Boolean(
-    environmentConfig?.docker_projects?.length,
+  const usesDockerProjects = await taskNeedsNestedDocker(
+    taskRun,
+    environmentConfig,
   );
   const taskDaemonContainerName =
     getDockerTaskDaemonContainerName(containerName);
@@ -305,7 +308,10 @@ export async function spawnDockerWorker(
           '--privileged',
           '--env',
           'DOCKER_TLS_CERTDIR=',
-          ...buildDockerTaskDaemonResourceArgs(config),
+          ...buildDockerTaskDaemonResourceArgs({
+            ...config,
+            memoryLimit: config.taskDaemonMemoryLimit,
+          }),
           ...buildDockerWorkerLabels({
             taskRunId: taskRun.id,
             autoRemove: autoRemoveContainer,

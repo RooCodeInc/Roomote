@@ -138,6 +138,7 @@ describe('spawnModalWorker', () => {
         provider: 'modal',
         config: expect.objectContaining({
           regions: ['us', 'us-west'],
+          memoryMiB: 4096,
         }),
       }),
     );

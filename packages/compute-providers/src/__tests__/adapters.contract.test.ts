@@ -562,6 +562,7 @@ describe('compute provider adapter contracts', () => {
         apiKey: 'daytona-key',
         snapshotName: 'roomote-worker',
         timeoutMs: 30 * 60_000,
+        memoryGiB: 8,
       },
     });
 
@@ -587,6 +588,7 @@ describe('compute provider adapter contracts', () => {
         public: true,
         autoStopInterval: 30,
         labels: { app_environment: 'development' },
+        resources: { memory: 8 },
       }),
     );
 
@@ -689,6 +691,7 @@ describe('compute provider adapter contracts', () => {
       expect.objectContaining({
         snapshot: snapshot.snapshotId,
         public: true,
+        resources: { memory: 8 },
       }),
     );
 

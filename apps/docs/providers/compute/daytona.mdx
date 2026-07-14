@@ -45,8 +45,8 @@ Roomote's Daytona worker snapshot includes Docker and Docker Compose, so
 environments can run
 [Docker projects](/environments/definition#docker-projects). Daytona
 runs these through Docker-in-Docker inside the task sandbox. Container builds
-and services share the sandbox's resources; allocate at least 2 vCPU and 4 GiB
-of memory for typical multi-container projects.
+and services share the sandbox's resources. Roomote requests 8 GiB for these
+tasks and 4 GiB for tasks that do not need nested Docker.
 
 ## Verify setup
 
