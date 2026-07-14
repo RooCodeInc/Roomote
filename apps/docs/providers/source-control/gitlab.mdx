@@ -4,18 +4,23 @@ icon: 'https://api.iconify.design/simple-icons:gitlab.svg?color=currentColor'
 description: Configure GitLab repository sync and merge request webhooks for Roomote.
 ---
 
-GitLab support uses a deployment-owned token. There is no self-serve GitLab App
-or OAuth installation flow yet, so an operator provides a GitLab token, syncs
-repositories from Settings, and configures webhooks when review automation is
-needed.
+GitLab does not have a GitHub-style App installation flow. GitLab OAuth
+applications are for delegated user access, not for granting Roomote an
+independent installation identity. Roomote therefore uses a deployment-owned
+automation token for repository sync, task execution, merge-request notes, and
+webhook management. Use a dedicated bot or service identity rather than a
+personal developer account.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Create a GitLab bot token
+## Create a GitLab automation token
 
-Create a dedicated GitLab bot or service-account user and add it to the groups
-or projects Roomote should access. Create an access token for that identity
-with scopes that match the behavior you want:
+Add a dedicated GitLab bot or service-account identity to the groups or projects
+Roomote should access. Prefer a group or project access token when it fits your
+GitLab plan and repository layout. If Roomote needs to enumerate repositories
+across memberships or create short-lived project tokens, create a personal
+access token for the dedicated bot account instead—not for an individual
+operator. Give the token scopes that match the behavior you want:
 
 | Scope              | Needed for                                       |
 | ------------------ | ------------------------------------------------ |
@@ -31,9 +36,10 @@ GITLAB_TOKEN=<gitlab-token>
 
 For self-managed GitLab, also set `GITLAB_BASE_URL`.
 
-The setup flow asks only for the access token and, when needed, the self-managed
-GitLab base URL. OAuth and webhook verification settings remain available under
-Settings for deployments that need them.
+The setup flow asks only for the automation token and, when needed, the
+self-managed GitLab base URL. OAuth is configured separately and is optional;
+it is only needed when teammates should link their GitLab accounts for
+merge-request comment triggers.
 
 ## Sync repositories
 
@@ -75,8 +81,7 @@ GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
 
 Users can trigger Roomote tasks by mentioning `@roomote` in merge request
 comments, but only after linking their personal GitLab account in Roomote's
-Personal settings. That linking flow requires a GitLab OAuth application, so
-create one even though the fields are optional:
+Personal settings. This is a separate, optional GitLab OAuth application:
 
 1. Open **Applications** in GitLab — on the bot account
    (`/-/user_settings/applications`), a group, or the admin area for a

@@ -114,7 +114,7 @@ function buildSourceControlSetup(
           {
             envVarName: 'GITLAB_TOKEN',
             acceptedEnvVarNames: ['GITLAB_TOKEN'],
-            label: 'GitLab Personal Access Token',
+            label: 'GitLab Automation Token',
             secret: true,
             runtimeSatisfied: false,
             savedSatisfied: false,
@@ -239,7 +239,7 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
   });
 
-  it('guides GitLab token creation without showing OAuth configuration', () => {
+  it('guides GitLab automation token setup', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('gitlab')}
@@ -248,18 +248,21 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(
-      screen.getByText('GitLab Personal Access Token'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
+    expect(screen.getByText('GitLab Automation Token')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute(
       'href',
       'https://gitlab.com/-/user_settings/personal_access_tokens',
     );
     expect(
-      screen.getByText(/avatar → Edit profile → Access tokens/),
+      screen.getByText(
+        /avatar → Edit profile → Access → Personal access tokens/,
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/GitLab OAuth Client ID/),
+      screen.getByText(/OAuth application setup is separate and optional/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Recommended: create a GitLab OAuth application/),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/GitLab Webhook Secret/)).not.toBeInTheDocument();
     expect(

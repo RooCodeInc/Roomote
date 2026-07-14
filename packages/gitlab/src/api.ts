@@ -108,14 +108,25 @@ export type ListGitLabProjectsOptions = {
   stopAfter?: number;
 };
 
-function normalizeBaseUrl(baseUrl: string): string {
+export function normalizeGitLabBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
     throw new Error('GITLAB_BASE_URL cannot be empty.');
   }
 
-  return new URL(trimmed).toString().replace(/\/+$/, '');
+  const url = new URL(
+    /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+  );
+  const apiPathSuffix = /\/api\/v4$/;
+
+  if (url.hostname === 'gitlab.com') {
+    url.pathname = '/';
+  } else if (apiPathSuffix.test(url.pathname)) {
+    url.pathname = url.pathname.replace(apiPathSuffix, '') || '/';
+  }
+
+  return url.toString().replace(/\/+$/, '');
 }
 
 export async function resolveGitLabToken(): Promise<string | null> {
@@ -203,19 +214,19 @@ export async function createGitLabMergeRequestNote({
 
 export async function resolveGitLabBaseUrl(): Promise<string> {
   const baseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
-  return normalizeBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
+  return normalizeGitLabBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
 }
 
 export function buildGitLabApiBaseUrl(baseUrl: string): string {
-  return new URL('api/v4', `${normalizeBaseUrl(baseUrl)}/`).toString();
+  return new URL('api/v4', `${normalizeGitLabBaseUrl(baseUrl)}/`).toString();
 }
 
 function hostFromBaseUrl(baseUrl: string): string {
-  return new URL(normalizeBaseUrl(baseUrl)).host;
+  return new URL(normalizeGitLabBaseUrl(baseUrl)).host;
 }
 
 function buildGitLabWebUrl(baseUrl: string, path: string): string {
-  return new URL(path.replace(/^\//, ''), `${normalizeBaseUrl(baseUrl)}/`)
+  return new URL(path.replace(/^\//, ''), `${normalizeGitLabBaseUrl(baseUrl)}/`)
     .toString()
     .replace(/\/+$/, '');
 }

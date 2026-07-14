@@ -243,7 +243,7 @@ function buildProviderFields(
         {
           envVarName: 'GITLAB_TOKEN',
           acceptedEnvVarNames: ['GITLAB_TOKEN'],
-          label: 'GitLab Personal Access Token',
+          label: 'GitLab Automation Token',
           secret: true,
         },
         {

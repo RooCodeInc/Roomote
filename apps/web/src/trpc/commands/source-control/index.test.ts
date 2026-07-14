@@ -56,8 +56,13 @@ vi.mock('@roomote/gitea', () => ({
 }));
 
 vi.mock('@roomote/gitlab', () => ({
+  buildGitLabApiBaseUrl: (value: string) =>
+    `${value.replace(/\/+$/, '')}/api/v4`,
   ensureGitLabWebhooksForProjects: vi.fn(),
+  normalizeGitLabBaseUrl: (value: string) =>
+    value.startsWith('http') ? value : `https://${value}`,
   removeGitLabWebhooksForProjects: mockRemoveGitLabWebhooksForProjects,
+  resolveGitLabBaseUrl: vi.fn().mockResolvedValue('https://gitlab.com'),
   syncGitLabRepositories: vi.fn(),
   validateGitLabToken: vi.fn().mockResolvedValue({ status: 'valid' }),
 }));

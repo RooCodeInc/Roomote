@@ -73,6 +73,7 @@ import {
   revokeGitLabScopedProjectToken,
   type GitLabProject,
   listGitLabProjects,
+  normalizeGitLabBaseUrl,
   validateGitLabToken,
 } from '../api';
 
@@ -112,6 +113,17 @@ describe('resolveGitLabBaseUrl', () => {
 
     await expect(resolveGitLabBaseUrl()).resolves.toBe(
       'https://gitlab.example.com',
+    );
+  });
+
+  it('accepts scheme-less URLs and removes API or hosted-account paths', async () => {
+    process.env.GITLAB_BASE_URL = 'gitlab.example.com/api/v4/';
+
+    await expect(resolveGitLabBaseUrl()).resolves.toBe(
+      'https://gitlab.example.com',
+    );
+    expect(normalizeGitLabBaseUrl('gitlab.com/roomote/')).toBe(
+      'https://gitlab.com',
     );
   });
 });

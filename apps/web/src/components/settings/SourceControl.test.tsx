@@ -564,7 +564,7 @@ describe('SourceControl settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
 
     expect(
-      screen.getByRole('link', { name: /GitLab access token/ }),
+      screen.getByRole('link', { name: /GitLab automation token/ }),
     ).toHaveAttribute(
       'href',
       'https://gitlab.com/-/user_settings/personal_access_tokens',

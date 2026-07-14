@@ -73,6 +73,27 @@ function filterValuesToFields(
   return next;
 }
 
+function normalizeGitLabSetupUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return 'https://gitlab.com';
+  }
+
+  try {
+    const url = new URL(
+      /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+    );
+    if (url.hostname === 'gitlab.com') {
+      url.pathname = '/';
+    } else if (/\/api\/v4$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/api\/v4$/, '') || '/';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return 'https://gitlab.com';
+  }
+}
+
 export function StepSourceControlConfig({
   sourceControlSetup,
   selectedProviderId,
@@ -287,11 +308,9 @@ export function StepSourceControlConfig({
     values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
   const configuredGitLabBaseUrl =
     sourceControlSetup.gitlabBaseUrl?.trim().replace(/\/+$/, '') ?? '';
-  const effectiveGitLabBaseUrl = /^https?:\/\//.test(typedGitLabBaseUrl)
-    ? typedGitLabBaseUrl
-    : /^https?:\/\//.test(configuredGitLabBaseUrl)
-      ? configuredGitLabBaseUrl
-      : 'https://gitlab.com';
+  const effectiveGitLabBaseUrl = normalizeGitLabSetupUrl(
+    typedGitLabBaseUrl || configuredGitLabBaseUrl,
+  );
   const creationHref =
     selectedProvider?.provider === 'gitlab'
       ? `${effectiveGitLabBaseUrl}/-/user_settings/personal_access_tokens`

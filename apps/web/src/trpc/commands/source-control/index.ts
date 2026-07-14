@@ -644,7 +644,9 @@ export async function saveSourceControlConfigValues(params: {
         value:
           field.envVarName === 'GITEA_BASE_URL'
             ? Gitea.normalizeGiteaBaseUrl(nextValue)
-            : nextValue,
+            : field.envVarName === 'GITLAB_BASE_URL'
+              ? GitLab.normalizeGitLabBaseUrl(nextValue)
+              : nextValue,
       },
     ];
   });
@@ -775,8 +777,13 @@ export async function assertValidSourceControlConfigInput(params: {
   }
 
   if (nextGitLabToken) {
+    const nextGitLabBaseUrl =
+      (params.values?.['GITLAB_BASE_URL']?.trim()
+        ? GitLab.normalizeGitLabBaseUrl(params.values['GITLAB_BASE_URL'])
+        : undefined) ?? (await GitLab.resolveGitLabBaseUrl());
     const validation = await GitLab.validateGitLabToken({
       token: nextGitLabToken,
+      apiBaseUrl: GitLab.buildGitLabApiBaseUrl(nextGitLabBaseUrl),
     });
 
     if (validation.status === 'invalid') {

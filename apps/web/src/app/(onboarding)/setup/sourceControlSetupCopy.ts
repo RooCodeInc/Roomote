@@ -18,15 +18,14 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
-    creationHref: 'https://gitlab.com/-/user_settings/personal_access_tokens',
-    setupLabel: 'GitLab access token',
+    setupLabel: 'GitLab automation token',
     creationHint:
-      'In GitLab, go to your avatar → Edit profile → Access tokens → Add new token. Select the api scope. Use a bot or service account that belongs to the groups Roomote should access and can manage project webhooks.',
+      'In GitLab, go to your avatar → Edit profile → Access → Personal access tokens → Add new token. If you go with fine-grained, make sure to add full read/write permissions for repositories, and "all groups and projects I\'member of" if you want to use your org\'s repos.',
   },
   gitea: {
     setupLabel: 'Gitea access token',
     creationHint:
-      'In your Gitea instance, go to your avatar → Settings → Applications → Manage Access Tokens → Generate Token. Use a bot or service account with read and write access to the repositories Roomote should use and permission to manage their webhooks.',
+      'In your Gitea instance, go to your avatar → Settings → Applications → Manage Access Tokens → Generate Token. Give it at least read + write access to repositories.',
   },
   bitbucket: {
     creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',
