@@ -2,7 +2,6 @@ import {
   type EnvironmentConfig,
   RunStatus,
   PRODUCT_NAME,
-  ENVIRONMENT_SETUP_SKILL_INVOCATION,
 } from '@roomote/types';
 
 import { configToYaml } from '@/components/settings/environments/yaml-utils';
@@ -106,7 +105,7 @@ export function buildUpdateEnvironmentDefinitionPrompt(input: {
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
 
-  return `${ENVIRONMENT_SETUP_SKILL_INVOCATION}
+  return `$environment-setup
 
 Update the existing ${PRODUCT_NAME} environment definition instead of creating a new one.
 

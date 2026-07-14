@@ -62,7 +62,6 @@ export async function getTaskSummary(
       taskRunStatus: latestRun?.status ?? null,
       taskPhase: latestRun?.taskPhase ?? null,
       taskRunError: latestRun?.error ?? null,
-      environmentSetupState: latestRun?.environmentSetupState ?? null,
       linkedEnvironmentId: linkedEnvironmentId ?? null,
       linkedEnvironmentName: linkedEnvironment?.name ?? null,
     });

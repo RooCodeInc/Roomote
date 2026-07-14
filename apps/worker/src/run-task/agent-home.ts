@@ -781,7 +781,7 @@ function createArchitectAgentConfig(options: {
 }
 
 function createProofRunnerAgentConfig(
-  browserTarget: string | null,
+  browserTarget: string,
 ): Record<string, unknown> {
   return {
     description:
@@ -1308,18 +1308,10 @@ export function generateOpenCodeConfig({
 
   const proofBrowserTarget = runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET?.trim();
   delete runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET;
-  // Environment-setup tasks discover the app URL mid-task while validating a
-  // not-yet-persisted config, so they get the proof runner without a baked
-  // target: each delegation brief names the URL instead.
-  const proofBrowserTargetFromBrief =
-    runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF === '1';
-  delete runtimeEnv.ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF;
 
-  if (proofBrowserTarget || proofBrowserTargetFromBrief) {
-    const resolvedProofBrowserTarget = proofBrowserTarget || null;
-
+  if (proofBrowserTarget) {
     operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
-      createProofRunnerAgentConfig(resolvedProofBrowserTarget);
+      createProofRunnerAgentConfig(proofBrowserTarget);
 
     const proofRunnerInstructionsPath = path.join(
       openCodeConfigDir,
@@ -1327,7 +1319,7 @@ export function generateOpenCodeConfig({
     );
     fs.writeFileSync(
       proofRunnerInstructionsPath,
-      createProofRunnerModelInstructions(resolvedProofBrowserTarget),
+      createProofRunnerModelInstructions(proofBrowserTarget),
       'utf8',
     );
     instructions.push(proofRunnerInstructionsPath);
