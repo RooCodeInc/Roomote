@@ -434,6 +434,83 @@ describe('useSetupFlow', () => {
     });
   });
 
+  it('requires a new choice when the saved compute provider is excluded', async () => {
+    mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
+      computeSetup: {
+        setupSatisfied: true,
+        selectedProvider: 'modal',
+        preselectedProvider: 'modal',
+        runtimeDefaultProvider: 'modal',
+        persistedDefaultProvider: null,
+        excludedProviders: ['docker'],
+        providers: [
+          {
+            provider: 'modal',
+            label: 'Modal',
+            description: '',
+            supportsSnapshots: true,
+            fields: [],
+            runtimeConfigSatisfied: true,
+            savedConfigSatisfied: false,
+            configSatisfied: true,
+          },
+        ],
+      },
+      sourceControlSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: 'github',
+        providers: [],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: 'openrouter',
+        computeProvider: 'docker',
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('compute-provider');
+    });
+  });
+
   it('shows compute-config when a compute provider is chosen but not yet configured', async () => {
     mockStatus({
       hasSlack: true,

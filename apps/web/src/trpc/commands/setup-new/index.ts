@@ -2282,6 +2282,22 @@ export async function startSetupNewOnboardingTaskCommand(
       };
     }
 
+    if (currentState.computeProvider) {
+      const persistedRuntimeComputeConfig =
+        await getPersistedRuntimeComputeConfig(tx);
+      const computeSetup = buildSetupComputeStatus({
+        runtimeEnv: process.env,
+        persistedComputeConfig: persistedRuntimeComputeConfig,
+        selectedProvider: currentState.computeProvider,
+      });
+
+      if (computeSetup.selectedProvider !== currentState.computeProvider) {
+        throw new Error(
+          'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
+        );
+      }
+    }
+
     const { normalizedRepositoryIds, selectedRepositories } =
       await resolveSelectedRepositories(currentState.selectedRepositoryIds);
     await assertHasCommittedRepositorySelection(normalizedRepositoryIds);

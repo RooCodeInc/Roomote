@@ -1011,6 +1011,11 @@ describe('setup-new onboarding task start command', () => {
           },
         ]),
       );
+      if (setupNewState?.computeProvider) {
+        mockTxSelect.mockReturnValueOnce(
+          createSelectChain([{ runtimeComputeConfig: null }]),
+        );
+      }
       mockTxSelect.mockReturnValueOnce(
         createSelectChain(slackInstallation ? [slackInstallation] : []),
       );
@@ -1096,6 +1101,22 @@ describe('setup-new onboarding task start command', () => {
         }),
       }),
     );
+  });
+
+  it('rejects a stale excluded compute provider before launch', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { computeProvider: 'docker' },
+    });
+
+    await expect(
+      startSetupNewOnboardingTaskCommand(buildMockAuth()),
+    ).rejects.toThrow(
+      'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
+    );
+
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it('creates the onboarding task without dispatching while first-time E2B provisioning is running', async () => {
