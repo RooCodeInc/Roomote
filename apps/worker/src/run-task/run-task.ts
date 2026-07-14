@@ -620,13 +620,14 @@ export const runTask = async ({
       }),
       // Consumed (and removed) by generateOpenCodeConfig, which registers the
       // hidden proof-runner subagent only when a browser surface exists.
-      // Environment-setup tasks have no browser surface at launch (they are
-      // creating it), so they get the proof runner in brief-supplied-target
-      // mode to verify the app they bring up mid-task.
-      ...(environmentConfig?.initialUrl
-        ? { ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl }
-        : isEnvironmentSetupTaskPrompt(prompt) && {
-            ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF: '1',
+      // Environment-setup tasks always get brief-supplied-target mode — even
+      // when launched against an existing environment whose initialUrl is
+      // set, that URL is the thing under revision, so baking it would pin the
+      // proof runner to a possibly stale surface.
+      ...(isEnvironmentSetupTaskPrompt(prompt)
+        ? { ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF: '1' }
+        : environmentConfig?.initialUrl && {
+            ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
           }),
     };
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

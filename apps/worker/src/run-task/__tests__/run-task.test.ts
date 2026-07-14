@@ -1637,6 +1637,61 @@ describe('runTask', () => {
     );
   });
 
+  it('prefers the brief-targeted proof runner for environment-setup prompts even when the environment has an initialUrl', async () => {
+    await runTask({
+      taskRun: {
+        id: 159,
+        taskId: 'task-159',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt:
+        '$environment-setup\n\nUpdate the existing Roomote environment definition instead of creating a new one.',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: {
+        initialUrl: 'http://localhost:3000/auth/dev-login',
+      } as never,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.objectContaining({
+          ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF: '1',
+        }),
+      }),
+    );
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.not.objectContaining({
+          ROOMOTE_PROOF_BROWSER_TARGET: expect.any(String),
+        }),
+      }),
+    );
+  });
+
   it('does not register any proof runner for plain prompts without a browser surface', async () => {
     await runTask({
       taskRun: {
