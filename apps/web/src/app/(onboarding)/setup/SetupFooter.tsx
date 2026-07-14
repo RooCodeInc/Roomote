@@ -21,7 +21,6 @@ export function SetupFooter({
       {onBack ? (
         <Button
           type="button"
-          size="sm"
           variant="outline"
           onClick={onBack}
           disabled={backDisabled}
