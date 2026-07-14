@@ -28,6 +28,7 @@ import {
   DEFAULT_ADO_AUTH_MODE,
 } from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
+import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -390,16 +391,22 @@ export function StepSourceControlConfig({
         </NumberedStep>
       )}
 
-      {isAdo ? (
+      {isAdo || selectedProvider?.provider === 'gitea' ? (
         <NumberedStep number={2}>
-          <AdoSourceControlInstructions
-            authMode={adoAuthMode}
-            publicOrigin={publicOrigin}
-          />
+          {isAdo ? (
+            <AdoSourceControlInstructions
+              authMode={adoAuthMode}
+              publicOrigin={publicOrigin}
+            />
+          ) : (
+            <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
+          )}
         </NumberedStep>
       ) : null}
 
-      <NumberedStep number={isAdo ? 3 : 2}>
+      <NumberedStep
+        number={isAdo || selectedProvider?.provider === 'gitea' ? 3 : 2}
+      >
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
           integration.
@@ -428,16 +435,6 @@ export function StepSourceControlConfig({
               </code>
               . Authorize GitLab with the dedicated service account after saving
               the application credentials.
-            </p>
-          )}
-          {selectedProvider?.provider === 'gitea' && (
-            <p className="text-sm text-muted-foreground">
-              OAuth redirect URI:{' '}
-              <code>
-                {publicOrigin}/api/source-control/gitea/oauth/callback
-              </code>
-              . Create the application in Gitea 1.23 or newer, then authorize it
-              with the dedicated service account.
             </p>
           )}
 
