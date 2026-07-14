@@ -80,6 +80,7 @@ import {
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
+  type SetupComputeStatus,
   type SetupModelProviderId,
   type SetupProvisionableComputeProvider,
   type SourceControlProvider,
@@ -538,6 +539,19 @@ type SetupOnboardingComputeGate = {
   waiting: boolean;
   error: string | null;
 };
+
+function findAvailableSetupComputeProvider(
+  computeSetup: SetupComputeStatus,
+  provider: ComputeProvider,
+) {
+  if (computeSetup.excludedProviders?.includes(provider)) {
+    return undefined;
+  }
+
+  return computeSetup.providers.find(
+    (candidate) => candidate.provider === provider,
+  );
+}
 
 async function getSetupOnboardingComputeGate(
   setupNewState: PersistedSetupNewState,
@@ -1537,8 +1551,9 @@ export async function saveSetupNewComputeProviderChoiceCommand(
       persistedComputeConfig: persistedRuntimeComputeConfig,
       selectedProvider: input.provider,
     });
-    const providerStatus = computeSetup.providers.find(
-      (candidate) => candidate.provider === input.provider,
+    const providerStatus = findAvailableSetupComputeProvider(
+      computeSetup,
+      input.provider,
     );
 
     if (!providerStatus) {
@@ -1602,12 +1617,6 @@ export async function saveSetupNewComputeConfigCommand(
         templateRef: string;
       } | null = null;
 
-      if (isSetupProvisionableComputeProvider(input.provider)) {
-        await acquireComputeProvisioningLock(input.provider, tx);
-      }
-
-      await purgeSavedDeploymentWorkerImage(tx);
-
       const [
         currentState,
         persistedRuntimeComputeConfig,
@@ -1635,13 +1644,20 @@ export async function saveSetupNewComputeConfigCommand(
         persistedComputeConfig: persistedRuntimeComputeConfig,
         selectedProvider: input.provider,
       });
-      const providerStatus = computeSetup.providers.find(
-        (candidate) => candidate.provider === input.provider,
+      const providerStatus = findAvailableSetupComputeProvider(
+        computeSetup,
+        input.provider,
       );
 
       if (!providerStatus) {
         throw new Error('Selected sandbox provider is unavailable.');
       }
+
+      if (isSetupProvisionableComputeProvider(input.provider)) {
+        await acquireComputeProvisioningLock(input.provider, tx);
+      }
+
+      await purgeSavedDeploymentWorkerImage(tx);
 
       // Derive MODAL_BASE_IMAGE_REF when not env-provided or already saved.
       // Form submissions are ignored (deployment-managed like E2B/Daytona

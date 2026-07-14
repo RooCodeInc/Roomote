@@ -664,6 +664,32 @@ describe('setup-new compute config commands', () => {
     expect(result.runtimeComputeConfig.defaultProvider).toBe('docker');
   });
 
+  it('rejects an excluded provider choice', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+
+    await expect(
+      saveSetupNewComputeProviderChoiceCommand(buildMockAuth(), {
+        provider: 'docker',
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+  });
+
+  it('rejects configuration for an excluded provider', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'modal');
+
+    await expect(
+      saveSetupNewComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_TOKEN_ID: 'token-id',
+          MODAL_TOKEN_SECRET: 'token-secret',
+        },
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('persists a Modal base image derived from the worker image', async () => {
     vi.stubEnv(
       'DOCKER_WORKER_IMAGE',
