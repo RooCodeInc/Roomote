@@ -11,6 +11,7 @@ export enum FeatureFlag {
   AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
   DynamicKickoffMessage = 'DynamicKickoffMessage',
+  CodeMode = 'CodeMode',
 }
 
 export type FeatureFlagValue =
@@ -97,6 +98,7 @@ export interface MetadataRecord {
   authorship_rules?: boolean;
   background_subagents?: boolean;
   dynamic_kickoff_message?: boolean;
+  opencode_code_mode?: boolean;
   previews_enabled?: boolean;
   deployment_disabled?: boolean;
   anonymous_analytics_enabled?: boolean;

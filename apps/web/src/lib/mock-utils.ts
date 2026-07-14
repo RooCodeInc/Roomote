@@ -11,6 +11,7 @@ export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
   [FeatureFlag.AuthorshipRules]: false,
   [FeatureFlag.BackgroundSubagents]: false,
   [FeatureFlag.DynamicKickoffMessage]: false,
+  [FeatureFlag.CodeMode]: false,
 };
 
 export const mockUserResource: UserResource = {

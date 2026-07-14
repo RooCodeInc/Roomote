@@ -70,6 +70,16 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     description:
       'Let the task router generate short free-form kickoff sentences for chat started messages (instead of the static “Getting started on your task in <env>” template). Off by default.',
   },
+
+  [FeatureFlag.CodeMode]: {
+    // Off by default: keeps every MCP tool schema in the agent tool list. When
+    // enabled, the worker injects OPENCODE_EXPERIMENTAL_CODE_MODE so OpenCode
+    // defers MCP tools behind the CodeMode execute runtime ($codemode.search).
+    defaultValue: false,
+    metadataKey: 'opencode_code_mode',
+    description:
+      'Enable OpenCode CodeMode so rarely used MCP tools stay deferred: tools are discovered via CodeMode search instead of loading every MCP schema into the main tool list each turn.',
+  },
 };
 
 /**
