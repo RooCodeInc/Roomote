@@ -23,9 +23,11 @@ import {
 } from '@roomote/db/server';
 import {
   ALL_REPOSITORIES,
+  sourceControlProviders,
   TaskPayloadKind,
   type AutomationScanCursor,
   type BackgroundAutomationKey,
+  type SourceControlProvider,
   type TaskSuggestionSource,
 } from '@roomote/types';
 
@@ -58,6 +60,7 @@ export type MergedPullRequestAuditScanCursor = AutomationScanCursor;
 export interface MergedPullRequest {
   externalPullRequestId: number;
   repositoryFullName: string;
+  sourceControlProvider: SourceControlProvider;
   prNumber: number;
   title: string;
   htmlUrl: string;
@@ -273,6 +276,7 @@ export async function getMergedPullRequests(
       repositoryId: pullRequestFacts.repositoryId,
       externalPullRequestId: pullRequestFacts.externalPullRequestId,
       repositoryFullName: pullRequestFacts.repositoryFullName,
+      sourceControlProvider: pullRequestFacts.sourceControlProvider,
       prNumber: pullRequestFacts.prNumber,
       title: pullRequestFacts.title,
       htmlUrl: pullRequestFacts.htmlUrl,
@@ -315,6 +319,7 @@ export async function getMergedPullRequests(
     deduped.set(`${row.repositoryId}#${row.prNumber}`, {
       externalPullRequestId: row.externalPullRequestId,
       repositoryFullName: row.repositoryFullName,
+      sourceControlProvider: row.sourceControlProvider,
       prNumber: row.prNumber,
       title: row.title,
       htmlUrl: row.htmlUrl,
@@ -433,54 +438,104 @@ async function processDeployment(
       surface: destination.provider,
       now,
     });
-    const selectedRepositories = getSelectedRepositories(mergedPullRequests);
-    // Follow-up tasks validate in a configured environment when one covers
-    // the target repository, so the prompt advertises the mapping.
-    const repositoryCoverage =
-      await buildRepositoryCoverage(selectedRepositories);
+    // The pull-request read/write tools bind each task to a single
+    // source-control provider (resolved from the task payload), so a manifest
+    // spanning several providers must launch one scan task per provider.
+    // Iterating the provider enum keeps the launch order deterministic.
+    const manifestPartitions = new Map<
+      SourceControlProvider,
+      MergedPullRequest[]
+    >();
 
-    // Automation scans run as the deployment service principal; a manual
-    // trigger is still an automation launch, just with a manual trigger
-    // kind on the task record. Non-Slack destinations ride along as
-    // communication payload fields so the surface-generic worker tools
-    // target the destination conversation.
-    const launchResult = await enqueueTask({
-      task: {
-        type: TaskPayloadKind.Scan,
-        payload: {
-          repo: ALL_REPOSITORIES,
-          selectedRepositories,
-          description: config.buildPrompt({
-            channelId,
-            destination,
-            hasMorePullRequests: pullRequestBatch.hasMore,
-            mergedPullRequests,
-            manualTrigger: opts.manualTrigger === true,
-            repositoryCoverage,
-            scanMode,
-            recentThreadFeedback: recentThreadFeedback.promptText,
-          }),
-          trigger: 'scheduled',
-          ...(destination.provider === 'slack'
-            ? { notifySlack: true, slackChannel: channelId }
-            : {}),
-          ...buildDestinationTaskPayloadFields(destination),
-          suggestionSource: config.suggestionSource ?? config.automationKey,
-          historicalThreadFeedbackDebugSnippet:
-            recentThreadFeedback.debugSnippet,
-          visibleInTranscript: false,
+    for (const pullRequest of mergedPullRequests) {
+      const partition = manifestPartitions.get(
+        pullRequest.sourceControlProvider,
+      );
+
+      if (partition) {
+        partition.push(pullRequest);
+      } else {
+        manifestPartitions.set(pullRequest.sourceControlProvider, [
+          pullRequest,
+        ]);
+      }
+    }
+
+    let firstLaunchedTaskId: string | null = null;
+
+    for (const provider of sourceControlProviders) {
+      const partitionPullRequests = manifestPartitions.get(provider);
+
+      if (!partitionPullRequests) {
+        continue;
+      }
+
+      const selectedRepositories = getSelectedRepositories(
+        partitionPullRequests,
+      );
+      // Follow-up tasks validate in a configured environment when one covers
+      // the target repository, so the prompt advertises the mapping.
+      const repositoryCoverage =
+        await buildRepositoryCoverage(selectedRepositories);
+
+      // Automation scans run as the deployment service principal; a manual
+      // trigger is still an automation launch, just with a manual trigger
+      // kind on the task record. Non-Slack destinations ride along as
+      // communication payload fields so the surface-generic worker tools
+      // target the destination conversation.
+      const launchResult = await enqueueTask({
+        task: {
+          type: TaskPayloadKind.Scan,
+          payload: {
+            repo: ALL_REPOSITORIES,
+            selectedRepositories,
+            // GitHub partitions omit the provider field: the runtime default
+            // is GitHub, and omitting it keeps all-GitHub manifests launching
+            // with exactly the pre-partitioning payload shape.
+            ...(provider === 'github'
+              ? {}
+              : { sourceControlProvider: provider }),
+            description: config.buildPrompt({
+              channelId,
+              destination,
+              hasMorePullRequests: pullRequestBatch.hasMore,
+              mergedPullRequests: partitionPullRequests,
+              manualTrigger: opts.manualTrigger === true,
+              repositoryCoverage,
+              scanMode,
+              recentThreadFeedback: recentThreadFeedback.promptText,
+            }),
+            trigger: 'scheduled',
+            ...(destination.provider === 'slack'
+              ? { notifySlack: true, slackChannel: channelId }
+              : {}),
+            ...buildDestinationTaskPayloadFields(destination),
+            suggestionSource: config.suggestionSource ?? config.automationKey,
+            historicalThreadFeedbackDebugSnippet:
+              recentThreadFeedback.debugSnippet,
+            visibleInTranscript: false,
+          },
         },
-      },
-      initiator: { kind: 'automation', key: config.automationKey },
-      workflow: 'scan',
-      surface: 'system',
-      trigger: opts.manualTrigger ? 'manual' : 'schedule',
-      visibility: 'hidden',
-      ...(destination.provider === 'slack'
-        ? { channels: { slackChannelId: channelId } }
-        : {}),
-    });
+        initiator: { kind: 'automation', key: config.automationKey },
+        workflow: 'scan',
+        surface: 'system',
+        trigger: opts.manualTrigger ? 'manual' : 'schedule',
+        visibility: 'hidden',
+        ...(destination.provider === 'slack'
+          ? { channels: { slackChannelId: channelId } }
+          : {}),
+      });
 
+      firstLaunchedTaskId ??= launchResult.taskId;
+    }
+
+    // The scan cursor tracks the whole scanned page and the provider
+    // partitions exactly tile that page, so advancing the cursor only after
+    // every partition has launched keeps cursor coverage equal to the union
+    // of launched manifests. If a partition launch throws, the run fails
+    // without advancing the cursor and the next run rescans the same page:
+    // partitions that already launched are re-audited once rather than any
+    // PR being skipped.
     if (pullRequestBatch.hasMore && pullRequestBatch.nextCursor) {
       await updateAutomationScanCursor(db, {
         key: config.automationKey,
@@ -505,7 +560,7 @@ async function processDeployment(
           : scanUpperBound,
     });
 
-    return { kind: 'processed', launchedTaskId: launchResult.taskId };
+    return { kind: 'processed', launchedTaskId: firstLaunchedTaskId };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 

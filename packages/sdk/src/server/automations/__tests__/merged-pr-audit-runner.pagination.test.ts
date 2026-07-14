@@ -146,6 +146,14 @@ describe('getMergedPullRequests', () => {
     // distinguishes them, so a fullName-keyed dedupe would drop one PR.
     expect(batch.pullRequests).toHaveLength(2);
     expect(batch.hasMore).toBe(false);
+
+    // Each manifest entry carries its provider so the audit scheduler can
+    // partition the manifest into one provider-stamped task per provider.
+    expect(
+      batch.pullRequests
+        .map((pullRequest) => pullRequest.sourceControlProvider)
+        .sort(),
+    ).toEqual(['bitbucket', 'gitlab']);
   });
 
   it('resumes past a page boundary with duplicate timestamps and PR numbers', async () => {
