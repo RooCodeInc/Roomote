@@ -172,9 +172,9 @@ export interface RoutingResult {
   model?: RoutingTaskModelSelection;
   reasoning: string;
   /**
-   * Short user-facing kickoff phrase generated alongside the workspace pick.
-   * Callers that post a "getting started" chat ack should prefer this over a
-   * static "Getting started on your task in <env>" template when present.
+   * Full short user-facing kickoff sentence generated with the routing decision.
+   * Should naturally include the chosen environment (and model override when
+   * the user requested one). Surfaces may post this directly when valid.
    */
   kickoffMessage?: string;
   requestedWorkKindDecision?: RequestedWorkKindDecision;

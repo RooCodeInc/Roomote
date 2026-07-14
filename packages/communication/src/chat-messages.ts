@@ -139,20 +139,20 @@ export function resolveUserFacingModelDisplayName({
 }
 
 /**
- * Legacy started-message prefix used by older Ambient/template kickoff copy.
- * New dynamic kickoffs are deferred to action-block / stored-message-ts detection.
+ * Legacy started-message prefix used by the static kickoff template.
+ * Dynamic LLM kickoffs are free-form and are detected via stored message ts
+ * and/or Follow/Cancel action blocks instead of a shared prefix.
  */
 export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started on your task';
 
-const KICKOFF_PHRASE_MAX_LENGTH = 90;
+const KICKOFF_MESSAGE_MAX_LENGTH = 160;
 
 const SLACK_CONTROL_TOKEN_PATTERN =
   /<@[^>\s]+>|<![^>\s]+>|<#C[^|>\s]+(?:\|[^>]+)?>|@everyone|@channel|@here/gi;
 
 /**
- * Normalize a router-generated kickoff phrase into short, display-safe text.
- * Returns undefined when the value is empty or not meaningful so callers can
- * fall back to the workspace-based kickoff copy.
+ * Normalize a router-generated kickoff into short, display-safe text.
+ * Returns undefined when empty so callers fall back to the template path.
  */
 export function normalizeKickoffMessage(
   value?: string | null,
@@ -173,28 +173,13 @@ export function normalizeKickoffMessage(
     return undefined;
   }
 
-  // Drop a redundant "Getting started..." lead the model may repeat; the
-  // builder always attaches workspace + model below.
-  text = text
-    .replace(/^getting started on your task[\s:,-]*/i, '')
-    .replace(/^getting started on[\s:,-]*/i, '')
-    .replace(/^getting started[\s:,-]*/i, '')
-    .trim();
-
-  if (!text) {
-    return undefined;
-  }
-
-  if (text.length > KICKOFF_PHRASE_MAX_LENGTH) {
+  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
     const truncated = text
-      .slice(0, KICKOFF_PHRASE_MAX_LENGTH - 1)
+      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
       .replace(/\s+\S*$/, '')
       .trim();
-    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 89)}…`;
+    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 159)}…`;
   }
-
-  // Prefer sentence-case progressive phrasing without a trailing period.
-  text = text.charAt(0).toUpperCase() + text.slice(1);
 
   return text;
 }
@@ -215,6 +200,15 @@ function stripMatchingEdgeQuotes(value: string): string {
   return value.slice(start, end);
 }
 
+function includesDisplayName(text: string, displayName: string): boolean {
+  const needle = displayName.trim().toLowerCase();
+  if (!needle) {
+    return false;
+  }
+
+  return text.toLowerCase().includes(needle);
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
@@ -225,25 +219,33 @@ export function buildTaskStartingText({
   workspaceDisplayName: string;
   modelDisplayName?: string;
   /**
-   * Optional short router-generated phrase describing the task. When present,
-   * becomes the dynamic lead of the kickoff while env name (and model override,
-   * when set) are still appended by this builder.
+   * Optional full router-generated kickoff string. When present and it naturally
+   * includes the workspace (and model override when one is set), it is used as-is.
+   * Incomplete strings fall back to the template that keeps env + model explicit.
    */
   kickoffMessage?: string | null;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
-  const workspace = formatWorkspaceName(workspaceDisplayName);
-  const model = modelDisplayName?.trim()
-    ? ` using ${formatModelName(modelDisplayName)} as the coding model`
-    : '';
+  const workspacePlain = workspaceDisplayName.trim();
+  const modelPlain = modelDisplayName?.trim() || '';
   const kickoff = normalizeKickoffMessage(kickoffMessage);
 
-  if (kickoff) {
-    // Always preserve the same information surface as the template path:
-    // task-relevant lead + environment name + optional model override.
-    return `${kickoff} in ${workspace}${model}`;
+  // Dynamic kickoffs come as complete free-form sentences from the router and
+  // are posted as-is. Only fall through to the template when required env/model
+  // details are missing so information is never silently dropped.
+  if (
+    kickoff &&
+    includesDisplayName(kickoff, workspacePlain) &&
+    (!modelPlain || includesDisplayName(kickoff, modelPlain))
+  ) {
+    return kickoff;
   }
+
+  const workspace = formatWorkspaceName(workspacePlain || workspaceDisplayName);
+  const model = modelPlain
+    ? ` using ${formatModelName(modelPlain)} as the coding model`
+    : '';
 
   return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}`;
 }

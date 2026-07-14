@@ -47,7 +47,7 @@ export const workspaceResponseSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'Short task-relevant lead phrase (roughly 4-12 words) for the chat start ack. Name the work only; the product appends the environment name and any model override. Prefer progressive phrasing like "Looking into daily environment snapshots for faster startup". No emojis, markdown, quotes, mentions, environment/model names, or "Getting started" prefix. No trailing period. Always provide a non-empty phrase when routing a real task.',
+      'Full short user-facing kickoff sentence posted in chat (about 8-18 words). Naturally include the exact chosen environment name, and when requestedModelId is a real model also naturally include that model display name from the Available Models list. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, mentions, or trailing period. Always provide a non-empty value for real routed tasks.',
     )
     .optional()
     .default(null),

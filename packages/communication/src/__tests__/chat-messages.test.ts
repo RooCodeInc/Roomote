@@ -100,7 +100,7 @@ describe('chat message copy builders', () => {
       buildTaskStartingText({
         workspaceDisplayName: 'App',
         kickoffMessage:
-          'looking into daily environment snapshots for faster startup',
+          'Looking into daily environment snapshots for faster startup in App',
       }),
     ).toBe(
       'Looking into daily environment snapshots for faster startup in App',
@@ -109,26 +109,38 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        kickoffMessage: 'checking login redirects',
+        kickoffMessage: 'Checking login redirects in App with Fable 5',
         modelDisplayName: 'Anthropic Claude Fable 5',
       }),
     ).toBe(
-      'Checking login redirects in App using Anthropic Claude Fable 5 as the coding model',
+      // Model display name missing from the freeform string → safe template
+      // fallback keeps env + model override information.
+      'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model',
     );
 
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        kickoffMessage: 'Getting started on environment snapshot checks',
+        kickoffMessage:
+          'Checking login redirects in App with Anthropic Claude Fable 5',
+        modelDisplayName: 'Anthropic Claude Fable 5',
       }),
-    ).toBe('Environment snapshot checks in App');
+    ).toBe('Checking login redirects in App with Anthropic Claude Fable 5');
 
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        kickoffMessage: "<!channel> looking into <@U123>'s auth bug",
+        // Missing env name → fall back to template
+        kickoffMessage: 'Looking into environment snapshot checks',
       }),
-    ).toBe("Looking into 's auth bug in App");
+    ).toBe('Getting started on your task in App');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: '<!channel> Looking into auth bugs in App',
+      }),
+    ).toBe('Looking into auth bugs in App');
   });
 
   it('only returns model names the router treated as an explicit preference', () => {

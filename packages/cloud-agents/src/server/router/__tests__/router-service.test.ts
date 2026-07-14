@@ -56,7 +56,7 @@ describe('routeTask', () => {
         reasoning: 'Full Stack is the best fit.',
         confidence: 0.92,
         kickoffMessage:
-          'looking into daily environment snapshots for faster startup',
+          'Looking into daily environment snapshots for faster startup in Full Stack',
         needsExternalLookup: false,
         externalReference: null,
       },
@@ -82,7 +82,7 @@ describe('routeTask', () => {
       workspaceOnly: true,
       reasoning: 'Full Stack is the best fit.',
       kickoffMessage:
-        'looking into daily environment snapshots for faster startup',
+        'Looking into daily environment snapshots for faster startup in Full Stack',
       workspace: {
         type: 'environment',
         id: 'env-full-stack',

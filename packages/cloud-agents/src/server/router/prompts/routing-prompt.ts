@@ -137,17 +137,19 @@ ${EXTERNAL_LOOKUP_RULES}
 
 ## Kickoff Message
 
-Also always set \`kickoffMessage\` to a short, task-relevant lead phrase. Roomote will append the chosen environment name and any explicit model override after it, so keep those out of this field:
+Also always set \`kickoffMessage\` to the full short user-facing kickoff for chat (one brief sentence). Roomote posts this text as-is, so weave the details in naturally instead of using a fixed template:
 
-- Write roughly 4-12 words that name what the task is about.
-- Prefer progressive phrasing such as "Looking into…", "Checking…", "Investigating…", "Adding…".
-- Examples of good kickoffMessage values:
-  - "Looking into daily environment snapshots for faster startup"
-  - "Checking whether login redirects loop on mobile"
-  - "Adding cancel action to the task dashboard"
-- Do not include the environment/workspace name or model name.
-- Do not include the words "Getting started".
+- Keep it short (about 8-18 words).
+- Naturally include the exact environment name from your \`workspaceValue\` choice.
+- When \`requestedModelId\` is a real model id (not \`__no_model__\`), naturally include that model's **display name** from the Available Models list. When the choice is \`__no_model__\`, do not mention a model.
+- Be dynamic and varied: do not always say "Getting started on your task in…".
+- Prefer lively, progressive phrasing such as "Diving into…", "Looking into…", "Checking…", "Spinning up on…".
+- Good examples:
+  - "Looking into daily environment snapshots for faster startup in App"
+  - "Checking mobile login redirects in Payments with Opus 4.8"
+  - "Digging into the flaky checkout email race in Full Stack"
 - Do not include emojis, markdown, quotes, @-mentions, Slack markup, or a trailing period.
-- Always produce a non-empty kickoffMessage for real routed tasks. Internal reasoning stays in \`reasoning\`; user-facing lead copy stays in \`kickoffMessage\`.
+- Do not invent environment or model names that are not in the provided lists.
+- Always produce a non-empty kickoffMessage for real routed tasks. Keep routing justification in \`reasoning\`; keep the spoken kickoff in \`kickoffMessage\`.
 `;
 }
