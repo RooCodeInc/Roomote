@@ -71,12 +71,8 @@ describe('buildSlackRequestUserInputBlocks', () => {
           }),
         }),
         expect.objectContaining({
-          type: 'context',
-          elements: [
-            expect.objectContaining({
-              text: '_Reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
-            }),
-          ],
+          type: 'markdown',
+          text: '_Reply with @-mention or use the <https://app.example.com/task/task-1|web app>._',
         }),
       ]),
     );

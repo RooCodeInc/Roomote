@@ -84,7 +84,7 @@ function formatSummaryFields(
 ): string {
   return fields
     .filter((field) => Boolean(field.value))
-    .map((field) => `• *${field.label}:* ${field.value}`)
+    .map((field) => `- **${field.label}:** ${field.value}`)
     .join('\n');
 }
 
@@ -119,7 +119,7 @@ export async function postRouterDebugMessage(
     const reasoning = truncate(params.reasoning, 2500) || '(none)';
 
     const sourceText = params.sourceLink
-      ? `<${params.sourceLink}|${params.source}>`
+      ? `[${params.source}](${params.sourceLink})`
       : params.source;
 
     const environmentValue =
@@ -160,42 +160,30 @@ export async function postRouterDebugMessage(
 
     const blocks: RouterDebugBlocks = [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `🔍 *Router* | ${sourceText}`,
-        },
+        type: 'markdown',
+        text: `🔍 **Router** | ${sourceText}`,
       },
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: formatSummaryFields([
-            { label: 'Environment', value: environmentValue },
-            {
-              label: 'User override',
-              value: params.userRoute,
-            },
-            { label: 'Model', value: modelValue },
-          ]),
-        },
+        type: 'markdown',
+        text: formatSummaryFields([
+          { label: 'Environment', value: environmentValue },
+          {
+            label: 'User override',
+            value: params.userRoute,
+          },
+          { label: 'Model', value: modelValue },
+        ]),
       },
     ];
 
     blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*Message*\n${quote(task)}`,
-      },
+      type: 'markdown',
+      text: `**Message**\n${quote(task)}`,
     });
 
     blocks.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*Why this route*\n${quote(reasoning)}`,
-      },
+      type: 'markdown',
+      text: `**Why this route**\n${quote(reasoning)}`,
     });
 
     const rejectedPick = params.routingDebug?.selectedTaskModel?.rejectedPick;
@@ -211,21 +199,15 @@ export async function postRouterDebugMessage(
           : 'below threshold';
 
       blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Rejected model pick:* ${truncate(rejectedPick.displayName, 80)} \`${truncate(rejectedPick.id, 80)}\` — confidence ${rejectedConfidenceText} (${rejectedReasonText})`,
-        },
+        type: 'markdown',
+        text: `**Rejected model pick:** ${truncate(rejectedPick.displayName, 80)} \`${truncate(rejectedPick.id, 80)}\` — confidence ${rejectedConfidenceText} (${rejectedReasonText})`,
       });
     }
 
     if (params.routingDebug?.workspaceRemapped) {
       blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '⚠️ *Environment remapped:* Suggested environment was unavailable, so the final route fell back to the resolved selection above.',
-        },
+        type: 'markdown',
+        text: '⚠️ **Environment remapped:** Suggested environment was unavailable, so the final route fell back to the resolved selection above.',
       });
     }
 
@@ -245,13 +227,8 @@ export async function postRouterDebugMessage(
 
     if (footerParts.length > 0) {
       blocks.push({
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: footerParts.join('   •   '),
-          },
-        ],
+        type: 'markdown',
+        text: footerParts.join('   •   '),
       });
     }
 

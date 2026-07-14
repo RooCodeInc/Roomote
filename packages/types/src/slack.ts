@@ -14,6 +14,7 @@ export type SlackBlock =
     }
   | {
       type: 'markdown';
+      block_id?: string;
       text: string;
     }
   | {

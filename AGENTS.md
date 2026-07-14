@@ -48,3 +48,10 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Treat absolute home-directory skill paths such as `/home/roomote/.agents/skills/...` as activated or installed runtime copies, not as the checked-in source of truth for repository changes.
 - Treat workflow prompts and instructions as a first-class control surface. When agent behavior is off, debug prompt clarity before defaulting to code enforcement.
 - `apps/docs/` is the public product documentation site (published at `https://docs.roomote.dev`) and should be kept in sync with user-facing product changes.
+
+## Slack message formatting
+
+- Prefer Slack `markdown` blocks (`{ type: 'markdown', text }`) and standard markdown content over legacy Block Kit `mrkdwn` text objects whenever the surface allows it.
+- Use standard markdown for those payloads: `[label](url)`, `**bold**`, lists, tables, and code fences. Do not convert markdown body text into mrkdwn (`*bold*`, `<url|label>`) before posting `markdown` blocks.
+- Keep `type: 'mrkdwn'` only where Slack requires it: `section` text beside an `accessory`, Work Object unfurl payloads that still expect section/mrkdwn, and inbound parsing of legacy Slack messages.
+- When reading inbound Slack message blocks, continue to accept both `markdown` blocks and legacy `mrkdwn` text objects.

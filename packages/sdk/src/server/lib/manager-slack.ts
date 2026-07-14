@@ -55,7 +55,7 @@ export function buildManagerSlackSettingsUrl(
 export function buildManagerSlackFooterText(
   hash = MANAGER_CHANNEL_SETTINGS_HASH,
 ) {
-  return `Manage manager posts: <${buildManagerSlackSettingsUrl(hash)}|Settings>.`;
+  return `Manage manager posts: [Settings](${buildManagerSlackSettingsUrl(hash)}).`;
 }
 
 export function appendManagerSlackFooter(
@@ -71,21 +71,16 @@ export function buildAutomationSettingsContextText(hash: string) {
   const settingsDescriptor = getBackgroundAutomationSettingsDescriptor(hash);
 
   if (!settingsDescriptor) {
-    return `Configure this in <${buildManagerSlackSettingsUrl(hash)}|automation settings>.`;
+    return `Configure this in [automation settings](${buildManagerSlackSettingsUrl(hash)}).`;
   }
 
-  return `Configure the ${settingsDescriptor.label} automation in <${buildManagerSlackSettingsUrl(hash)}|automation settings>.`;
+  return `Configure the ${settingsDescriptor.label} automation in [automation settings](${buildManagerSlackSettingsUrl(hash)}).`;
 }
 
 export function buildAutomationSettingsContextBlock(hash: string) {
   return {
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: buildAutomationSettingsContextText(hash),
-      },
-    ],
+    type: 'markdown',
+    text: buildAutomationSettingsContextText(hash),
   };
 }
 
@@ -99,11 +94,8 @@ export function buildAutomationSettingsMessage(
     text: trimmedText,
     blocks: [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: trimmedText,
-        },
+        type: 'markdown',
+        text: trimmedText,
       },
       buildAutomationSettingsContextBlock(hash),
     ],
@@ -111,10 +103,9 @@ export function buildAutomationSettingsMessage(
 }
 
 /**
- * Degrades Slack mrkdwn automation text to standard markdown for non-Slack
- * communication providers: `<url|label>` links become `[label](url)` and
- * single-asterisk bold becomes double-asterisk bold. Other mrkdwn forms
- * (italic `_text_`, bullets, plain URLs) already read correctly as markdown.
+ * Degrades Slack-oriented automation copy to portable markdown for non-Slack
+ * communication providers. Converts residual mrkdwn links/bold when present;
+ * standard markdown links and bold are left as-is.
  */
 export function degradeSlackMrkdwnToMarkdown(text: string): string {
   return convertSlackLinksToMarkdown(text).replace(

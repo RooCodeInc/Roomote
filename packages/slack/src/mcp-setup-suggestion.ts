@@ -18,10 +18,10 @@ export function buildSlackMcpSetupSuggestionText(
       : copyVariant === 'deployment_auth_required_non_admin'
         ? `ask a ${PRODUCT_NAME} admin to finish connecting ${serviceName}`
         : copyVariant === 'deployment_disabled_admin'
-          ? `<${settingsUrl}|enable the ${serviceName} integration>`
+          ? `[enable the ${serviceName} integration](${settingsUrl})`
           : copyVariant === 'deployment_auth_required_admin'
-            ? `<${settingsUrl}|finish connecting ${serviceName}>`
-            : `<${settingsUrl}|link your ${serviceName} account>`;
+            ? `[finish connecting ${serviceName}](${settingsUrl})`
+            : `[link your ${serviceName} account](${settingsUrl})`;
 
   return `That looks like a ${serviceName} link. I don't have ${serviceName} access yet — ${action} if you want me to be able to use it.`;
 }
@@ -31,13 +31,8 @@ export function buildSlackMcpSetupSuggestionBlocks(
 ): SlackBlock[] {
   return [
     {
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: buildSlackMcpSetupSuggestionText(suggestion),
-        },
-      ],
+      type: 'markdown',
+      text: buildSlackMcpSetupSuggestionText(suggestion),
     },
   ];
 }

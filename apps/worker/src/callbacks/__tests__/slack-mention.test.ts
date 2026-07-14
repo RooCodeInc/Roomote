@@ -660,7 +660,7 @@ describe('slackMentionCallbacks', () => {
       blocks: [
         {
           type: 'markdown',
-          text: 'I need a private answer before I can continue. Please answer in Roomote: <http://localhost:13000/task/task_row_123?utm_source=slack|Open task>.',
+          text: 'I need a private answer before I can continue. Please answer in Roomote: [Open task](http://localhost:13000/task/task_row_123?utm_source=slack).',
         },
       ],
     });
@@ -707,7 +707,7 @@ describe('slackMentionCallbacks', () => {
       blocks: [
         {
           type: 'markdown',
-          text: 'I need a private answer before I can continue. Please answer in Roomote: <http://localhost:13000/setup?utm_source=slack|Open setup>.',
+          text: 'I need a private answer before I can continue. Please answer in Roomote: [Open setup](http://localhost:13000/setup?utm_source=slack).',
         },
       ],
     });
@@ -840,12 +840,8 @@ describe('slackMentionCallbacks', () => {
           text: '**Question:**\n\nNeed anything else?',
         },
         {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: ' ' }],
-        },
-        {
-          type: 'section',
-          text: { type: 'mrkdwn', text: '*Suggestions:*' },
+          type: 'markdown',
+          text: '**Suggestions:**',
         },
         {
           type: 'section',
@@ -858,13 +854,8 @@ describe('slackMentionCallbacks', () => {
           },
         },
         {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: '_You can also @-mention me with a custom response._',
-            },
-          ],
+          type: 'markdown',
+          text: '_You can also @-mention me with a custom response._',
         },
       ],
     });

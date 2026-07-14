@@ -668,8 +668,8 @@ async function postTaskSuggestionsThreadToSlack(params: {
     const footerContextBlock = footer
       ? [
           {
-            type: 'context' as const,
-            elements: [{ type: 'mrkdwn' as const, text: footer }],
+            type: 'markdown' as const,
+            text: footer,
           },
         ]
       : [];
@@ -682,8 +682,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
         params.suggestionType,
       );
       // The fallback `text` keeps the footer inline; the rich `blocks` split it
-      // into a small muted Slack `context` block so the bottom line renders as
-      // secondary metadata instead of normal-size body text.
+      // into a trailing markdown block so the bottom line stays secondary metadata.
       text = buildSuggestionSlackText(
         {
           title: suggestion.title,

@@ -177,29 +177,21 @@ export function buildMcpRecommendationBlocks(params: {
 
   if (params.includeCategoryHeading) {
     blocks.push({
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: `*${CATEGORY_LABELS[params.recommendation.category]}*`,
-        },
-      ],
+      type: 'markdown',
+      text: `**${CATEGORY_LABELS[params.recommendation.category]}**`,
     });
   }
 
   blocks.push({
-    type: 'section',
-    text: {
-      type: 'mrkdwn',
-      text: [
-        `*${params.recommendation.name}*`,
-        getSlackEnableDescription(params.recommendation),
-        getRecommendationWhyLine(params.recommendation),
-      ]
-        .filter(Boolean)
-        .map((line, index) => (index === 2 ? `_${line}_` : line))
-        .join('\n'),
-    },
+    type: 'markdown',
+    text: [
+      `**${params.recommendation.name}**`,
+      getSlackEnableDescription(params.recommendation),
+      getRecommendationWhyLine(params.recommendation),
+    ]
+      .filter(Boolean)
+      .map((line, index) => (index === 2 ? `_${line}_` : line))
+      .join('\n'),
   });
 
   blocks.push({
@@ -305,11 +297,8 @@ export async function postSetupMcpRecommendationsToSlack(params: {
     text: SETUP_MCP_RECOMMENDATION_PARENT_TEXT,
     blocks: [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: SETUP_MCP_RECOMMENDATION_PARENT_TEXT,
-        },
+        type: 'markdown',
+        text: SETUP_MCP_RECOMMENDATION_PARENT_TEXT,
       },
     ],
   });

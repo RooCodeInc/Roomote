@@ -249,13 +249,8 @@ describe('Slack MCP setup suggestion flow', () => {
         thread_ts: '111.222',
         blocks: [
           expect.objectContaining({
-            type: 'context',
-            elements: [
-              expect.objectContaining({
-                type: 'mrkdwn',
-                text: expect.stringContaining('link your Notion account'),
-              }),
-            ],
+            type: 'markdown',
+            text: expect.stringContaining('link your Notion account'),
           }),
         ],
       }),
@@ -418,15 +413,15 @@ describe('buildSlackMcpSetupSuggestionText', () => {
   it.each([
     [
       'user_auth_required',
-      '<https://app.example.com/settings|link your Zero account>',
+      '[link your Zero account](https://app.example.com/settings)',
     ],
     [
       'deployment_disabled_admin',
-      '<https://app.example.com/settings|enable the Zero integration>',
+      '[enable the Zero integration](https://app.example.com/settings)',
     ],
     [
       'deployment_auth_required_admin',
-      '<https://app.example.com/settings|finish connecting Zero>',
+      '[finish connecting Zero](https://app.example.com/settings)',
     ],
     ['deployment_disabled_non_admin', 'ask a'],
     ['deployment_auth_required_non_admin', 'ask a'],
@@ -442,7 +437,7 @@ describe('buildSlackMcpSetupSuggestionText', () => {
     expect(text).toContain(expected);
   });
 
-  it('builds a single context block', () => {
+  it('builds a single markdown block', () => {
     const blocks = buildSlackMcpSetupSuggestionBlocks({
       serviceId: 'zero',
       serviceName: 'Zero',
@@ -452,18 +447,13 @@ describe('buildSlackMcpSetupSuggestionText', () => {
 
     expect(blocks).toEqual([
       {
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: buildSlackMcpSetupSuggestionText({
-              serviceId: 'zero',
-              serviceName: 'Zero',
-              settingsUrl: 'https://app.example.com/settings',
-              copyVariant: 'user_auth_required',
-            }),
-          },
-        ],
+        type: 'markdown',
+        text: buildSlackMcpSetupSuggestionText({
+          serviceId: 'zero',
+          serviceName: 'Zero',
+          settingsUrl: 'https://app.example.com/settings',
+          copyVariant: 'user_auth_required',
+        }),
       },
     ]);
   });

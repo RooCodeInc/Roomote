@@ -20,20 +20,12 @@ vi.mock('../../lib/manager-slack', () => ({
     text: text.trim(),
     blocks: [
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: text.trim(),
-        },
+        type: 'markdown',
+        text: text.trim(),
       },
       {
-        type: 'context',
-        elements: [
-          {
-            type: 'mrkdwn',
-            text: `Configure this in <https://app.example.com/automations#${hash}|automation settings>.`,
-          },
-        ],
+        type: 'markdown',
+        text: `Configure this in [automation settings](https://app.example.com/automations#${hash}).`,
       },
     ],
   }),
@@ -120,19 +112,14 @@ describe('formatManagerStatsMessage', () => {
     expect(message.text).not.toContain('LOC added / removed');
   });
 
-  it('adds an automation-settings context footer', () => {
+  it('adds an automation-settings markdown footer', () => {
     const message = formatManagerStatsMessage({
       stats,
     });
 
     expect(message.blocks).toContainEqual({
-      type: 'context',
-      elements: [
-        {
-          type: 'mrkdwn',
-          text: 'Configure this in <https://app.example.com/automations#weekly-manager-stats|automation settings>.',
-        },
-      ],
+      type: 'markdown',
+      text: 'Configure this in [automation settings](https://app.example.com/automations#weekly-manager-stats).',
     });
   });
 });

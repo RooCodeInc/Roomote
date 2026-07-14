@@ -178,11 +178,8 @@ describe('handleTaskCancellation', () => {
         replace_original: true,
         blocks: [
           {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: 'Task is no longer running.',
-            },
+            type: 'markdown',
+            text: 'Task is no longer running.',
           },
           {
             type: 'actions',

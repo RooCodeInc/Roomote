@@ -227,14 +227,11 @@ async function notifySlackThreadsAboutArtifactBuild({
         artifactVersion !== undefined ? ` (v${artifactVersion})` : ''
       }`
     : 'this artifact';
-  const text = `Started a new task to build ${artifactLabel}. <${taskUrl}|Open task>`;
+  const text = `Started a new task to build ${artifactLabel}. [Open task](${taskUrl})`;
   const blocks = [
     {
-      type: 'section' as const,
-      text: {
-        type: 'mrkdwn' as const,
-        text,
-      },
+      type: 'markdown' as const,
+      text,
     },
   ];
 

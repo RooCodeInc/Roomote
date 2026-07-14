@@ -56,16 +56,23 @@ describe('thread-reply-footer-ops', () => {
       explicitMentionRequired: false,
     });
     mockBuildFooterText.mockReturnValue(
-      '_Working on <https://github.com/o/r/pull/7|PR #7>, reply or use the <https://app.example.com/task/t1|web app>._',
+      '_Working on [PR #7](https://github.com/o/r/pull/7), reply or use the [web app](https://app.example.com/task/t1)._',
     );
   });
 
   it('detects footer context blocks by block_id and text shape', () => {
     expect(
       isSlackThreadReplyFooterBlock({
-        type: 'context',
+        type: 'markdown',
         block_id: 'roomote_thread_reply_footer',
-        elements: [{ type: 'mrkdwn', text: 'x' }],
+        text: 'x',
+      }),
+    ).toBe(true);
+
+    expect(
+      isSlackThreadReplyFooterBlock({
+        type: 'markdown',
+        text: '_Working on [PR #1](https://example.com), reply or use the [web app](https://app)._',
       }),
     ).toBe(true);
 
@@ -93,11 +100,11 @@ describe('thread-reply-footer-ops', () => {
     const slack = {
       postMessage: vi.fn().mockResolvedValue('222.000'),
       getMessageBlocks: vi.fn().mockResolvedValue([
-        { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
+        { type: 'markdown', text: 'old body' },
         {
-          type: 'context',
+          type: 'markdown',
           block_id: 'roomote_thread_reply_footer',
-          elements: [{ type: 'mrkdwn', text: 'old footer' }],
+          text: 'old footer',
         },
       ]),
       updateMessage: vi.fn().mockResolvedValue(true),
@@ -119,7 +126,7 @@ describe('thread-reply-footer-ops', () => {
         text: 'review summary',
         blocks: expect.arrayContaining([
           expect.objectContaining({
-            type: 'context',
+            type: 'markdown',
             block_id: 'roomote_thread_reply_footer',
           }),
         ]),
@@ -135,9 +142,7 @@ describe('thread-reply-footer-ops', () => {
         channel: 'C1',
         ts: '111.000',
         message: {
-          blocks: [
-            { type: 'section', text: { type: 'mrkdwn', text: 'old body' } },
-          ],
+          blocks: [{ type: 'markdown', text: 'old body' }],
         },
       }),
     );
@@ -167,9 +172,7 @@ describe('thread-reply-footer-ops', () => {
     const slack = {
       getMessageBlocks: vi
         .fn()
-        .mockResolvedValue([
-          { type: 'section', text: { type: 'mrkdwn', text: 'body' } },
-        ]),
+        .mockResolvedValue([{ type: 'markdown', text: 'body' }]),
       updateMessage: vi.fn(),
     };
 

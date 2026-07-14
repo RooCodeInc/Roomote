@@ -51,7 +51,6 @@ export function buildSlackThreadFooterText(params: {
     linkedPr: params.linkedPr,
     livePreviewUrl: params.livePreviewUrl,
     explicitMentionRequired: params.explicitMentionRequired,
-    formatLink: (label, url) => `<${url}|${label}>`,
   });
 }
 

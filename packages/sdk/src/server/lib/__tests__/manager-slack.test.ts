@@ -60,36 +60,28 @@ describe('manager slack helpers', () => {
     expect(
       buildAutomationSettingsContextText(SUGGEST_IDEAS_SETTINGS_HASH),
     ).toBe(
-      'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
+      'Configure the Suggest Ideas automation in [automation settings](https://app.example.com/automations#suggest-ideas).',
     );
     expect(
       buildAutomationSettingsContextText(SENTRY_TRIAGE_SETTINGS_HASH),
     ).toBe(
-      'Configure the Triage Sentry Issues automation in <https://app.example.com/automations#sentry-triage|automation settings>.',
+      'Configure the Triage Sentry Issues automation in [automation settings](https://app.example.com/automations#sentry-triage).',
     );
   });
 
-  it('wraps automation text in a section and context footer', () => {
+  it('wraps automation text in markdown body and settings footer blocks', () => {
     expect(
       buildAutomationSettingsMessage('  Hello managers  ', 'suggest-ideas'),
     ).toEqual({
       text: 'Hello managers',
       blocks: [
         {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Hello managers',
-          },
+          type: 'markdown',
+          text: 'Hello managers',
         },
         {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
-            },
-          ],
+          type: 'markdown',
+          text: 'Configure the Suggest Ideas automation in [automation settings](https://app.example.com/automations#suggest-ideas).',
         },
       ],
     });
@@ -115,20 +107,12 @@ describe('manager slack helpers', () => {
       text: '- Do the important thing\n\nReact on a thread item to start it.',
       blocks: [
         {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: '- Do the important thing\n\nReact on a thread item to start it.',
-          },
+          type: 'markdown',
+          text: '- Do the important thing\n\nReact on a thread item to start it.',
         },
         {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
-            },
-          ],
+          type: 'markdown',
+          text: 'Configure the Suggest Ideas automation in [automation settings](https://app.example.com/automations#suggest-ideas).',
         },
       ],
     });

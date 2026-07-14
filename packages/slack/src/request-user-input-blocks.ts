@@ -161,13 +161,8 @@ export function buildSlackRequestUserInputBlocks(
   });
 
   blocks.push({
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: state.footerText ?? buildFooterText(question),
-      },
-    ],
+    type: 'markdown',
+    text: state.footerText ?? buildFooterText(question),
   });
 
   return blocks;
