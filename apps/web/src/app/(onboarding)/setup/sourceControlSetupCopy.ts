@@ -18,9 +18,9 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
-    setupLabel: 'GitLab automation token',
+    setupLabel: 'GitLab OAuth application',
     creationHint:
-      'In GitLab, go to your avatar → Edit profile → Access → Personal access tokens → Add new token. If you go with fine-grained, make sure to add full read/write permissions for repositories, and "all groups and projects I\'member of" if you want to use your org\'s repos.',
+      'Create an OAuth application in GitLab with api, read_repository, and write_repository scopes. Use the exact redirect URI shown by Roomote, then authorize it with the dedicated service account. Existing PAT deployments can use the advanced migration path.',
   },
   gitea: {
     setupLabel: 'Gitea access token',

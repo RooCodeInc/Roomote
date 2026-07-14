@@ -15,6 +15,10 @@ import {
   inArray,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
+import {
+  isGitLabOAuthAccessToken,
+  resolveGitLabOAuthAccessToken,
+} from './oauth';
 
 const GITLAB_PROVIDER = 'gitlab' satisfies SourceControlProvider;
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
@@ -130,7 +134,8 @@ export function normalizeGitLabBaseUrl(baseUrl: string): string {
 }
 
 export async function resolveGitLabToken(): Promise<string | null> {
-  return resolveDeploymentEnvVar('GITLAB_TOKEN');
+  const oauthToken = await resolveGitLabOAuthAccessToken();
+  return oauthToken ?? (await resolveDeploymentEnvVar('GITLAB_TOKEN'));
 }
 
 let cachedGitLabDeploymentUser: {
@@ -301,7 +306,9 @@ async function requestGitLab(
       method,
       headers: {
         Accept: 'application/json',
-        'PRIVATE-TOKEN': token,
+        ...(isGitLabOAuthAccessToken(token)
+          ? { Authorization: `Bearer ${token}` }
+          : { 'PRIVATE-TOKEN': token }),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -1146,6 +1153,26 @@ export async function createTaskRunScopedGitLabTokens(
   const apiBaseUrl = options?.apiBaseUrl ?? buildGitLabApiBaseUrl(baseUrl);
   const host = hostFromBaseUrl(baseUrl);
   const repositoriesList = await resolveGitLabRepositoryRowsForTaskRun(taskRun);
+
+  // OAuth grants are deployment-scoped and already carry the repository
+  // permissions needed by the worker. Do not attempt to mint GitLab project
+  // tokens with an OAuth access token; this also keeps the refresh token out
+  // of task artifacts and preserves the PAT-only isolation path below.
+  if (isGitLabOAuthAccessToken(deploymentToken)) {
+    return {
+      credentials: [],
+      proxyCredentials: repositoriesList.map((repository) => ({
+        host,
+        repositoryFullName: repository.repositoryFullName,
+        username: 'oauth2',
+        token: deploymentToken,
+      })),
+      artifactsPatch: {
+        [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
+      },
+    };
+  }
+
   const persistedDescriptors = new Map(
     readScopedProjectTokenDescriptors(taskRun.artifacts).map((descriptor) => [
       descriptor.repositoryFullName,

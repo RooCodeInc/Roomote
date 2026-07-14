@@ -173,6 +173,18 @@ export function StepSourceControlConnect({
     provider,
     providerLabel,
   });
+  const gitlabOAuthConfigured =
+    provider === 'gitlab' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
 
   const handleSyncRepositories = async () => {
     if (
@@ -265,6 +277,18 @@ export function StepSourceControlConnect({
       ) : (
         <div className="space-y-4">
           <p>{tokenBackedCopy}</p>
+          {gitlabOAuthConfigured ? (
+            <p className="text-sm text-muted-foreground">
+              Authorize the GitLab application with the dedicated service
+              account before syncing repositories.
+              <a
+                className="ml-1 underline"
+                href="/api/source-control/gitlab/oauth/authorize"
+              >
+                Authorize GitLab
+              </a>
+            </p>
+          ) : null}
           {syncedWithZeroRepos ? (
             <p className="text-sm text-muted-foreground">
               No repositories were found. Check your token permissions and base

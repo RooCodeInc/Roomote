@@ -116,6 +116,8 @@ export function StepSourceControlConfig({
   >({});
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
+  const [showGitlabAdvancedConfig, setShowGitlabAdvancedConfig] =
+    useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
     DEFAULT_ADO_AUTH_MODE,
   );
@@ -168,7 +170,9 @@ export function StepSourceControlConfig({
   const visibleFields = useMemo(
     () =>
       getSetupSourceControlVisibleFields(providerFields, {
-        showAdvancedConfig: isAdo && showAdoAdvancedConfig,
+        showAdvancedConfig:
+          (isAdo && showAdoAdvancedConfig) ||
+          (selectedProvider?.provider === 'gitlab' && showGitlabAdvancedConfig),
       }).filter((field) =>
         !isAdo
           ? true
@@ -205,6 +209,7 @@ export function StepSourceControlConfig({
     setEditingSavedValues({});
     setShowManualGitHubValues(false);
     setShowAdoAdvancedConfig(false);
+    setShowGitlabAdvancedConfig(false);
     const hasAdoEntraCredentials = providerFields.some(
       (field) =>
         ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID'].includes(
@@ -403,6 +408,16 @@ export function StepSourceControlConfig({
               Roomote should use.
             </p>
           )}
+          {selectedProvider?.provider === 'gitlab' && (
+            <p className="text-sm text-muted-foreground">
+              OAuth redirect URI:{' '}
+              <code>
+                {publicOrigin}/api/source-control/gitlab/oauth/callback
+              </code>
+              . Authorize GitLab with the dedicated service account after saving
+              the application credentials.
+            </p>
+          )}
 
           {(isAdo ? baseFields : visibleFields).map((field) => (
             <SourceControlFieldInput
@@ -433,20 +448,26 @@ export function StepSourceControlConfig({
               }
             />
           ))}
-          {isAdo && advancedFields.length > 0 ? (
+          {(isAdo || selectedProvider?.provider === 'gitlab') &&
+          advancedFields.length > 0 ? (
             <div className="pt-1">
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-                onClick={() => setShowAdoAdvancedConfig((current) => !current)}
+                onClick={() =>
+                  isAdo
+                    ? setShowAdoAdvancedConfig((current) => !current)
+                    : setShowGitlabAdvancedConfig((current) => !current)
+                }
               >
-                {showAdoAdvancedConfig
+                {(isAdo ? showAdoAdvancedConfig : showGitlabAdvancedConfig)
                   ? 'Hide advanced config'
                   : 'Show advanced config'}
               </button>
             </div>
           ) : null}
-          {isAdo && showAdoAdvancedConfig
+          {(isAdo ? showAdoAdvancedConfig : showGitlabAdvancedConfig) &&
+          advancedFields.length > 0
             ? advancedFields.map((field) => (
                 <SourceControlFieldInput
                   key={field.envVarName}

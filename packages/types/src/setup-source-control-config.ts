@@ -245,6 +245,8 @@ function buildProviderFields(
           acceptedEnvVarNames: ['GITLAB_TOKEN'],
           label: 'GitLab Automation Token',
           secret: true,
+          required: false,
+          advanced: true,
         },
         {
           envVarName: 'GITLAB_BASE_URL',
@@ -257,7 +259,6 @@ function buildProviderFields(
           acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
           label: 'GitLab OAuth Client ID',
           required: false,
-          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_CLIENT_SECRET',
@@ -265,7 +266,6 @@ function buildProviderFields(
           label: 'GitLab OAuth Client Secret',
           secret: true,
           required: false,
-          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SIGNING_TOKEN',

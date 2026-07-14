@@ -719,6 +719,16 @@ export async function assertValidSourceControlConfigInput(params: {
     params.provider === 'gitlab'
       ? params.values?.['GITLAB_TOKEN']?.trim()
       : undefined;
+  const nextGitLabClientId =
+    params.provider === 'gitlab'
+      ? (params.values?.['GITLAB_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('GITLAB_CLIENT_ID')))
+      : undefined;
+  const nextGitLabClientSecret =
+    params.provider === 'gitlab'
+      ? (params.values?.['GITLAB_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('GITLAB_CLIENT_SECRET')))
+      : undefined;
   const nextGiteaToken =
     params.provider === 'gitea'
       ? params.values?.['GITEA_TOKEN']?.trim()
@@ -789,6 +799,16 @@ export async function assertValidSourceControlConfigInput(params: {
     if (validation.status === 'invalid') {
       throw new Error(validation.error);
     }
+  }
+
+  if (
+    params.provider === 'gitlab' &&
+    !nextGitLabToken &&
+    !(nextGitLabClientId && nextGitLabClientSecret)
+  ) {
+    throw new Error(
+      'Configure the GitLab OAuth client ID and secret, or use the advanced PAT migration path.',
+    );
   }
 
   if (nextGiteaToken) {
