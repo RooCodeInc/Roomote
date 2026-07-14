@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 
 import {
   type TaskPayload,
@@ -117,17 +117,26 @@ function pickActiveWork(
  * PR association lives exclusively on `task_pull_requests` (populated at
  * enqueue for PR-triggered launches and at extraction time for agent-created
  * PRs), so PR matches are a `task_runs JOIN task_pull_requests` lookup.
+ *
+ * When a non-null `host` is given, both lookups are host-scoped: an
+ * association row or payload stamped with a different host is a same-name
+ * repository on another self-managed instance and must not match. Rows with
+ * a NULL host and payloads without `sourceControlHost` (written before host
+ * stamping) still match, mirroring the legacy tolerance in
+ * resolveRepositoryRow. Without `host`, behavior is unchanged.
  */
 export async function findActiveGitHubBranchWork({
   repoFullName,
   prNumber,
   branchName,
   sourceControlProvider = 'github',
+  host,
 }: {
   repoFullName: string;
   prNumber: number;
   branchName: string;
   sourceControlProvider?: SourceControlProvider;
+  host?: string | null;
 }): Promise<ActiveGitHubBranchWork | null> {
   const baseConditions = [
     inArray(taskRuns.status, [...ACTIVE_WORK_STATUSES]),
@@ -145,6 +154,9 @@ export async function findActiveGitHubBranchWork({
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
@@ -171,6 +183,14 @@ export async function findActiveGitHubBranchWork({
           ${taskRuns.payload}->>'branch' = ${branchName}
           OR ${taskRuns.payload}->>'headRef' = ${branchName}
         )`,
+        ...(host
+          ? [
+              sql`(
+                ${taskRuns.payload}->>'sourceControlHost' = ${host}
+                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+              )`,
+            ]
+          : []),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))

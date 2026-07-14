@@ -124,6 +124,7 @@ vi.mock('@roomote/db/server', () => {
       sourceControlProvider: 'sourceControlProvider',
       repository: 'repository',
       prNumber: 'prNumber',
+      host: 'taskPullRequests.host',
     },
     taskRuns: {
       id: 'id',
@@ -139,11 +140,15 @@ vi.mock('@roomote/db/server', () => {
     isNull: vi.fn(),
     eq: vi.fn(),
     and: vi.fn(),
+    or: vi.fn(),
     inArray: vi.fn(),
   };
 });
 
 import { conflictScanJob } from '../conflict-scan';
+// The mocked condition builders let tests verify how the active-run dedup
+// guard scopes its query.
+import { eq as mockedEq, or as mockedOr } from '@roomote/db/server';
 
 describe('conflictScanJob', () => {
   beforeEach(() => {
@@ -592,7 +597,15 @@ describe('conflictScanJob', () => {
       prNumber: 42,
       branchName: 'feature/work',
       sourceControlProvider: 'gitlab',
+      host: null,
     });
+    // Without a recorded repo host, the active-run dedup guard does not
+    // constrain on the association host column.
+    expect(mockedEq).not.toHaveBeenCalledWith(
+      'taskPullRequests.host',
+      expect.anything(),
+    );
+    expect(mockedOr).not.toHaveBeenCalled();
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -624,11 +637,16 @@ describe('conflictScanJob', () => {
       }),
     );
     // A legacy repository row without a recorded host omits the payload
-    // host field entirely so resolution falls back to (provider, fullName).
+    // host field entirely so resolution falls back to (provider, fullName),
+    // and the task association carries no host either.
     const [enqueueArg] = mockEnqueueTask.mock.calls[0]! as unknown as [
-      { task: { payload: Record<string, unknown> } },
+      {
+        task: { payload: Record<string, unknown> };
+        prLinkage: Record<string, unknown>;
+      },
     ];
     expect('sourceControlHost' in enqueueArg.task.payload).toBe(false);
+    expect('host' in enqueueArg.prLinkage).toBe(false);
     expect(result.launchedTaskId).toBe('task-9');
   });
 
@@ -654,6 +672,24 @@ describe('conflictScanJob', () => {
 
     await conflictScanJob();
 
+    // The active-run dedup guard constrains on the association host column
+    // (exact host OR legacy NULL host), so an active run recorded for a
+    // same-name PR on a different host cannot suppress this launch.
+    expect(mockedEq).toHaveBeenCalledWith(
+      'taskPullRequests.host',
+      'gitlab.example.com',
+    );
+    expect(mockedOr).toHaveBeenCalled();
+
+    // The branch-activity guard receives the host for the same reason.
+    expect(mockFindActiveGitHubBranchWork).toHaveBeenCalledWith({
+      repoFullName: 'acme/backend',
+      prNumber: 42,
+      branchName: 'feature/work',
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.example.com',
+    });
+
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
@@ -666,6 +702,14 @@ describe('conflictScanJob', () => {
             // a same-name repository on another host cannot be picked up.
             sourceControlHost: 'gitlab.example.com',
           }),
+        }),
+        // The task association is host-scoped so later dedup lookups for a
+        // same-name PR on another host do not match this run.
+        prLinkage: expect.objectContaining({
+          provider: 'gitlab',
+          repository: 'acme/backend',
+          prNumber: 42,
+          host: 'gitlab.example.com',
         }),
       }),
     );
