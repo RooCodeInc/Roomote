@@ -60,18 +60,18 @@ interface SetupOptions {
   logger: StartupLogger;
   workerEnv: WorkerEnv;
   recordPhase?: PhaseRecorder;
-  backgroundOrganizationEnvironmentSetup?: boolean;
+  backgroundEnvironmentSetup?: boolean;
 }
 
 interface SetupResult {
   preparedWorkspace?: PrepareWorkspaceResult;
   workerEnv: WorkerEnv;
-  backgroundOrganizationEnvironmentSetup?: Promise<EnvironmentSetupWarning[]>;
+  backgroundEnvironmentSetup?: Promise<EnvironmentSetupWarning[]>;
 }
 
 interface RunSetupResult {
   preparedWorkspace?: PrepareWorkspaceResult;
-  backgroundOrganizationEnvironmentSetup?: Promise<EnvironmentSetupWarning[]>;
+  backgroundEnvironmentSetup?: Promise<EnvironmentSetupWarning[]>;
 }
 
 function shouldContinueEnvironmentSetupFailures({
@@ -101,7 +101,7 @@ function buildEnvironmentServicesWarning(error: unknown): string {
 }
 
 function buildBackgroundEnvironmentSetupWarning(): string {
-  return 'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.';
+  return 'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.';
 }
 
 /**
@@ -114,7 +114,7 @@ export async function setup({
   logger,
   workerEnv,
   recordPhase,
-  backgroundOrganizationEnvironmentSetup = false,
+  backgroundEnvironmentSetup = false,
 }: SetupOptions): Promise<SetupResult> {
   const setupStartedAt = Date.now();
   const harness = resolveWorkerCodingHarness(workspaceOpts.harness);
@@ -142,7 +142,7 @@ export async function setup({
     },
   };
   let result: PrepareWorkspaceResult | undefined;
-  let backgroundOrganizationEnvironmentSetupPromise:
+  let backgroundEnvironmentSetupPromise:
     | Promise<EnvironmentSetupWarning[]>
     | undefined;
 
@@ -165,11 +165,10 @@ export async function setup({
       workspaceOptions,
       initializeServicesFn: initializeAllServices,
       recordPhase,
-      backgroundOrganizationEnvironmentSetup,
+      backgroundEnvironmentSetup,
     });
     result = setupResult.preparedWorkspace;
-    backgroundOrganizationEnvironmentSetupPromise =
-      setupResult.backgroundOrganizationEnvironmentSetup;
+    backgroundEnvironmentSetupPromise = setupResult.backgroundEnvironmentSetup;
   }
 
   logger.userLog.log(
@@ -194,8 +193,7 @@ export async function setup({
   return {
     preparedWorkspace: result,
     workerEnv,
-    backgroundOrganizationEnvironmentSetup:
-      backgroundOrganizationEnvironmentSetupPromise,
+    backgroundEnvironmentSetup: backgroundEnvironmentSetupPromise,
   };
 }
 
@@ -204,9 +202,9 @@ async function runSetup({
   workspaceOptions,
   initializeServicesFn,
   recordPhase,
-  backgroundOrganizationEnvironmentSetup = false,
+  backgroundEnvironmentSetup = false,
 }: SetupExecutionContext & {
-  backgroundOrganizationEnvironmentSetup?: boolean;
+  backgroundEnvironmentSetup?: boolean;
 }): Promise<RunSetupResult> {
   const environmentSetupWarnings: EnvironmentSetupWarning[] = [];
   const continueEnvironmentSetupFailures =
@@ -272,6 +270,10 @@ async function runSetup({
   );
 
   let initializeRepositoriesResult: PrepareWorkspaceResult | undefined;
+  const backgroundSetupTasks: Array<Promise<EnvironmentSetupWarning[]>> = [];
+  let backgroundDockerProjectsTask:
+    | Promise<EnvironmentSetupWarning[]>
+    | undefined;
 
   const systemSetup: Promise<void>[] = [
     timedStep(
@@ -326,17 +328,54 @@ async function runSetup({
   );
 
   if (initializeRepositoriesResult) {
-    await timedStep(
-      logger,
-      'initializeDockerProjects',
-      () =>
-        initializeDockerProjects(
+    const initializeDockerProjectsTask = async (): Promise<
+      EnvironmentSetupWarning[]
+    > => {
+      try {
+        await initializeDockerProjects(
           logger,
           workspaceOptions,
           initializeRepositoriesResult!,
-        ),
-      recordPhase,
-    );
+        );
+        return [];
+      } catch (error) {
+        if (!backgroundEnvironmentSetup) {
+          throw error;
+        }
+
+        const warning = `Background Docker project setup failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        const warningDetails = { message: warning };
+        environmentSetupWarnings.push(warningDetails);
+        logger.userLog.warn(
+          `${warning} Continuing without a fully configured environment.`,
+        );
+        logger.debug.warn(
+          `Background Docker project setup failed:\n${formatEnvironmentSetupErrorDetails(
+            error,
+          )}`,
+        );
+        return [warningDetails];
+      }
+    };
+
+    const dockerProjectsStep = () =>
+      timedStep(
+        logger,
+        backgroundEnvironmentSetup
+          ? 'initializeDockerProjects (background)'
+          : 'initializeDockerProjects',
+        initializeDockerProjectsTask,
+        recordPhase,
+      );
+
+    if (backgroundEnvironmentSetup) {
+      backgroundDockerProjectsTask = dockerProjectsStep();
+      backgroundSetupTasks.push(backgroundDockerProjectsTask);
+    } else {
+      await dockerProjectsStep();
+    }
   }
 
   await timedStep(
@@ -345,10 +384,6 @@ async function runSetup({
     () => installPython(logger),
     recordPhase,
   );
-
-  let backgroundOrganizationEnvironmentSetupPromise:
-    | Promise<EnvironmentSetupWarning[]>
-    | undefined;
 
   await timedStep(
     logger,
@@ -360,7 +395,7 @@ async function runSetup({
         return;
       }
 
-      if (!backgroundOrganizationEnvironmentSetup) {
+      if (!backgroundEnvironmentSetup) {
         const warnings =
           (await setupOrganizationEnvironment(logger, {
             environment: workspace,
@@ -382,50 +417,62 @@ async function runSetup({
         preparedWorkspace: initializeRepositoriesResult,
       });
 
-      const backgroundWarning = buildBackgroundEnvironmentSetupWarning();
-      environmentSetupWarnings.push({ message: backgroundWarning });
-      logger.userLog.log(
-        'Continuing task startup while environment repository commands finish in the background',
-      );
+      backgroundSetupTasks.push(
+        timedStep(
+          logger,
+          'setupOrganizationEnvironmentCommands (background)',
+          async () => {
+            try {
+              await backgroundDockerProjectsTask;
+              const warnings =
+                await executeOrganizationEnvironmentRepositoryCommands(logger, {
+                  environment: workspace,
+                  envVars: workspaceOptions.envVars,
+                  userEnvVars: workspaceOptions.userEnvVars,
+                  preparedWorkspace: initializeRepositoriesResult,
+                  continueRepositoryCommandFailures: true,
+                });
 
-      backgroundOrganizationEnvironmentSetupPromise = timedStep(
-        logger,
-        'setupOrganizationEnvironmentCommands (background)',
-        async () => {
-          try {
-            const warnings =
-              await executeOrganizationEnvironmentRepositoryCommands(logger, {
-                environment: workspace,
-                envVars: workspaceOptions.envVars,
-                userEnvVars: workspaceOptions.userEnvVars,
-                preparedWorkspace: initializeRepositoriesResult,
-                continueRepositoryCommandFailures: true,
-              });
-
-            environmentSetupWarnings.push(...warnings);
-            return warnings;
-          } catch (error) {
-            const warning = `Background environment setup failed unexpectedly: ${
-              error instanceof Error ? error.message : String(error)
-            }`;
-            const warningDetails = { message: warning };
-            environmentSetupWarnings.push(warningDetails);
-            logger.userLog.warn(
-              `${warning} Continuing without a fully configured environment.`,
-            );
-            logger.debug.warn(
-              `Background environment setup failed unexpectedly:\n${formatEnvironmentSetupErrorDetails(
-                error,
-              )}`,
-            );
-            return [warningDetails];
-          }
-        },
-        recordPhase,
+              environmentSetupWarnings.push(...warnings);
+              return warnings;
+            } catch (error) {
+              const warning = `Background environment setup failed unexpectedly: ${
+                error instanceof Error ? error.message : String(error)
+              }`;
+              const warningDetails = { message: warning };
+              environmentSetupWarnings.push(warningDetails);
+              logger.userLog.warn(
+                `${warning} Continuing without a fully configured environment.`,
+              );
+              logger.debug.warn(
+                `Background environment setup failed unexpectedly:\n${formatEnvironmentSetupErrorDetails(
+                  error,
+                )}`,
+              );
+              return [warningDetails];
+            }
+          },
+          recordPhase,
+        ),
       );
     },
     recordPhase,
   );
+
+  let backgroundEnvironmentSetupPromise:
+    | Promise<EnvironmentSetupWarning[]>
+    | undefined;
+
+  if (backgroundSetupTasks.length > 0) {
+    const backgroundWarning = buildBackgroundEnvironmentSetupWarning();
+    environmentSetupWarnings.push({ message: backgroundWarning });
+    logger.userLog.log(
+      'Continuing task startup while Docker projects and environment repository commands finish in the background',
+    );
+    backgroundEnvironmentSetupPromise = Promise.all(backgroundSetupTasks).then(
+      (warnings) => warnings.flat(),
+    );
+  }
 
   if (initializeRepositoriesResult && environmentSetupWarnings.length > 0) {
     initializeRepositoriesResult.environmentSetupWarnings =
@@ -434,7 +481,6 @@ async function runSetup({
 
   return {
     preparedWorkspace: initializeRepositoriesResult,
-    backgroundOrganizationEnvironmentSetup:
-      backgroundOrganizationEnvironmentSetupPromise,
+    backgroundEnvironmentSetup: backgroundEnvironmentSetupPromise,
   };
 }

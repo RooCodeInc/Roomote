@@ -370,7 +370,7 @@ describe('executeTaskRun', () => {
     );
   });
 
-  it('starts eligible environment-backed tasks before repository commands finish', async () => {
+  it('starts eligible environment-backed tasks before background environment setup finishes', async () => {
     let releaseBackgroundSetup: (() => void) | undefined;
     const runFn = vi.fn().mockResolvedValue({
       status: RunStatus.Idle,
@@ -383,11 +383,11 @@ describe('executeTaskRun', () => {
         environmentSetupWarnings: [
           {
             message:
-              'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.',
+              'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
           },
         ],
       },
-      backgroundOrganizationEnvironmentSetup: new Promise((resolve) => {
+      backgroundEnvironmentSetup: new Promise((resolve) => {
         releaseBackgroundSetup = () =>
           resolve([
             {
@@ -435,7 +435,7 @@ describe('executeTaskRun', () => {
     expect(finalizeJobMock).not.toHaveBeenCalled();
     expect(setupMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundOrganizationEnvironmentSetup: true,
+        backgroundEnvironmentSetup: true,
       }),
     );
 
@@ -498,7 +498,7 @@ describe('executeTaskRun', () => {
 
     expect(setupMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundOrganizationEnvironmentSetup: false,
+        backgroundEnvironmentSetup: false,
       }),
     );
   });
@@ -544,7 +544,7 @@ describe('executeTaskRun', () => {
 
     expect(setupMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundOrganizationEnvironmentSetup: false,
+        backgroundEnvironmentSetup: false,
       }),
     );
   });
@@ -589,7 +589,7 @@ describe('executeTaskRun', () => {
 
     expect(setupMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        backgroundOrganizationEnvironmentSetup: false,
+        backgroundEnvironmentSetup: false,
       }),
     );
   });
