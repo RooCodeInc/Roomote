@@ -76,7 +76,7 @@ services:
     ports:
       - '127.0.0.1:18080:18080'
     volumes:
-      - ./.docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.docker/caddy:/etc/caddy:ro
     extra_hosts:
       - 'host.docker.internal:host-gateway'
 

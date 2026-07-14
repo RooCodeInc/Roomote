@@ -302,7 +302,10 @@ describe('uploadToPresignedUrl', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('should PUT content to presigned URL', async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({ ok: true });
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ etag: '"artifact-etag"' }),
+    });
 
     const content = Buffer.from('hello');
     await uploadToPresignedUrl(
@@ -337,6 +340,23 @@ describe('uploadToPresignedUrl', () => {
         'text/plain',
       ),
     ).rejects.toThrow('Failed to upload to S3: 500 Internal Server Error');
+  });
+
+  it('rejects a non-S3 success response without an ETag', async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      headers: new Headers({ 'content-type': 'text/html' }),
+    });
+
+    await expect(
+      uploadToPresignedUrl(
+        'https://s3.example.com/upload',
+        Buffer.from('x'),
+        'text/plain',
+      ),
+    ).rejects.toThrow(
+      'Failed to upload to S3: successful response did not include an ETag',
+    );
   });
 });
 
@@ -384,7 +404,10 @@ describe('uploadArtifact', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ etag: '"artifact-etag"' }),
+      })
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -418,7 +441,10 @@ describe('uploadArtifact', () => {
           artifactType: 'general',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers({ etag: '"artifact-etag"' }),
+      })
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
