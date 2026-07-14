@@ -457,8 +457,9 @@ describe('AutomationsSettings', () => {
   it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot/CI triage and manager stats stay GitHub-only.
-    expect((await screen.findAllByText('GitHub only')).length).toBe(3);
+    // Dependabot and CI failure triage stay GitHub-only; manager stats is
+    // provider-neutral now and shows no source-control badge.
+    expect((await screen.findAllByText('GitHub only')).length).toBe(2);
     // Suggester and CI failure triage still report to Slack only.
     expect(screen.getAllByText('Slack only').length).toBe(2);
     // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no

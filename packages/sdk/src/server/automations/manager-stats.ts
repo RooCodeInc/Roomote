@@ -24,7 +24,7 @@ import {
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
 } from './destination';
-import { hasActiveGitHubInstallation } from './github-deployment-scope';
+import { hasAnyActiveRepository } from './github-deployment-scope';
 import {
   isWeeklyRunDueOnLocalDay,
   resolveSlackWorkspaceTimezone,
@@ -43,7 +43,12 @@ const WINDOW_DAYS = 7;
 interface DeploymentContext {
   slackBotToken: string | null;
   slackTeamId: string | null;
-  actorUserId: string;
+  /**
+   * User the GitHub data path runs as; null when the deployment has no Slack
+   * installer and no GitHub installation (e.g. GitLab + Teams). The digest
+   * then covers the non-GitHub repositories only, which is the whole set.
+   */
+  actorUserId: string | null;
 }
 
 function buildAnalyticsUrl() {
@@ -66,7 +71,12 @@ function formatManagerStatsText({
     `· Active users: *${stats.activeUsers}*`,
     `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})* — ${stats.authoredPullRequests} authored, ${stats.reviewedPullRequests} reviewed`,
     `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.authoredPullRequests} authored)*`,
-    `· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`,
+    // Line counts are only available from GitHub; when the digest includes
+    // PRs from other providers the number would be partial, so omit the line
+    // entirely rather than annotate it.
+    ...(stats.locScope === 'all'
+      ? [`· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`]
+      : []),
     `· Most active repo: ${
       stats.mostActiveRepo
         ? `*${stats.mostActiveRepo.fullName}* (${stats.mostActiveRepo.pullRequestCount} PRs)`
@@ -94,7 +104,9 @@ export function formatManagerStatsMessage({
 }
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
-  if (!(await hasActiveGitHubInstallation())) {
+  // PR stats come from the provider-neutral digest, so any active repository
+  // qualifies regardless of source-control provider.
+  if (!(await hasAnyActiveRepository())) {
     return [];
   }
 
@@ -113,7 +125,8 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
 
   // No Slack: the deployment is still eligible when another comms provider
   // can carry the stats report. GitHub calls then run as the user who
-  // installed the GitHub App.
+  // installed the GitHub App; without a GitHub installation there is no
+  // GitHub data path to authenticate, so no actor is needed.
   const connectedProviders = await listConnectedCommunicationProviders();
 
   if (connectedProviders.length === 0) {
@@ -126,15 +139,13 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
     .where(isNull(githubInstallations.suspendedAt))
     .limit(1);
 
-  return installation
-    ? [
-        {
-          slackBotToken: null,
-          slackTeamId: null,
-          actorUserId: installation.actorUserId,
-        },
-      ]
-    : [];
+  return [
+    {
+      slackBotToken: null,
+      slackTeamId: null,
+      actorUserId: installation?.actorUserId ?? null,
+    },
+  ];
 }
 
 /**
@@ -185,7 +196,7 @@ export async function managerStatsJob(
 
   if (eligibleDeployments.length === 0) {
     result.skippedReason =
-      'GitHub and a communication provider must both be connected.';
+      'A repository and a communication provider must both be connected.';
   }
 
   let processed = 0;
