@@ -6,8 +6,8 @@ import {
   SETUP_COMPUTE_PROVIDER_IDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   deriveModalBaseImageRefDefault,
+  resolveEffectiveDockerWorkerImage,
   resolveDerivedModalBaseImageRef,
-  deriveWorkerImageFromReleaseVersion,
   isRequiredComputeField,
   isComputeProvider,
   normalizeDeploymentComputeConfig,
@@ -211,9 +211,7 @@ export async function resolveComputeProviderEnvValues(
   const missingEnvVarNames: string[] = [];
 
   const effectiveRuntimeWorkerImage =
-    runtimeEnv.DOCKER_WORKER_IMAGE?.trim() ||
-    deriveWorkerImageFromReleaseVersion(runtimeEnv) ||
-    undefined;
+    resolveEffectiveDockerWorkerImage(runtimeEnv) ?? undefined;
   const runtimeManagedModalBaseImage =
     provider === 'modal' && !runtimeEnv.MODAL_BASE_IMAGE_REF
       ? deriveModalBaseImageRefDefault(effectiveRuntimeWorkerImage)
