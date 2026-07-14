@@ -352,6 +352,42 @@ describe('awaitTaskSettlement', () => {
     expect(result.errorSummary).toBe('Sandbox failed to boot worker process');
     expect(result.status).toBe('Failed');
   });
+
+  it('absorbs a transient poll failure and keeps waiting for settlement', async () => {
+    const getTaskSummary = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('502 Bad Gateway'))
+      .mockResolvedValueOnce(
+        summary({ taskRunStatus: 'running', taskPhase: 'running' }),
+      )
+      .mockResolvedValueOnce(
+        summary({
+          completed: true,
+          taskRunStatus: 'completed',
+          taskPhase: null,
+        }),
+      );
+
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    let now = 0;
+    const result = await awaitTaskSettlement(
+      { taskId: 'task-1', timeoutMs: 600_000, pollIntervalMs: 1_000 },
+      config,
+      {
+        getTaskSummary,
+        sleep,
+        now: () => {
+          now += 1_000;
+          return now;
+        },
+      },
+    );
+
+    expect(getTaskSummary).toHaveBeenCalledTimes(3);
+    expect(result.terminalLabel).toBe('Completed');
+    expect(result.ready).toBe(true);
+    expect(result.timedOut).toBe(false);
+  });
 });
 
 describe('handleAwaitTask', () => {
@@ -377,12 +413,21 @@ describe('handleAwaitTask', () => {
     expect(text).toContain('Linked Environment: Demo');
   });
 
-  it('surfaces API errors', async () => {
+  it('surfaces API errors after the transient-failure grace window', async () => {
+    const getTaskSummary = vi.fn().mockRejectedValue(new Error('Not found'));
+    let clock = 0;
     const failed = await handleAwaitTask({ taskId: 'missing' }, config, {
-      getTaskSummary: vi.fn().mockRejectedValue(new Error('Not found')),
-      sleep: vi.fn(),
-      now: () => 0,
+      getTaskSummary,
+      sleep: vi.fn().mockResolvedValue(undefined),
+      now: () => {
+        const value = clock;
+        clock += 60_000;
+        return value;
+      },
     });
+    // The read failed on every poll, but await retried across the grace window
+    // instead of aborting on the first failure.
+    expect(getTaskSummary.mock.calls.length).toBeGreaterThan(1);
     expect(failed.content[0]?.text).toContain('Not found');
     expect(failed.content[0]?.text).toContain('"success":false');
   });

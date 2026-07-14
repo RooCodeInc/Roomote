@@ -14,6 +14,15 @@ const MAX_AWAIT_TASK_TIMEOUT_MS = 45 * 60_000;
 const DEFAULT_AWAIT_TASK_POLL_INTERVAL_MS = 5_000;
 const MIN_AWAIT_TASK_POLL_INTERVAL_MS = 1_000;
 const MAX_AWAIT_TASK_POLL_INTERVAL_MS = 60_000;
+/**
+ * Grace window for consecutive failed status polls. A single failed read
+ * (platform-API stall, a rolling restart, or a launch/enqueue race before the
+ * run row exists) must not abort a multi-minute await, so transient failures
+ * are absorbed and the poll is retried. Only once reads keep failing for this
+ * long — well under the overall wait budget — is the failure surfaced as a
+ * retryable tool error instead of silently burning the full timeout.
+ */
+const MAX_CONSECUTIVE_POLL_ERROR_MS = 2 * 60_000;
 
 type AwaitTaskTerminalLabel =
   | 'Completed'
@@ -214,6 +223,14 @@ function formatAwaitResult(result: AwaitTaskResult): string {
   return lines.join('\n');
 }
 
+/**
+ * Blocks the current tool call, polling the task summary until it settles or
+ * the timeout elapses. Holding one tool call open for minutes is deliberate and
+ * only safe because of two OpenCode-runtime properties: the client waits on an
+ * MCP tool indefinitely (no per-call request timeout), and the turn-stall
+ * watchdog re-arms instead of aborting while a tool part is still `running`. If
+ * either assumption changes, this long block needs its own keepalive.
+ */
 export async function awaitTaskSettlement(
   params: {
     taskId: string;
@@ -239,9 +256,44 @@ export async function awaitTaskSettlement(
 
   const startedAt = deps.now();
   let lastSummary: TaskSummaryResponse | null = null;
+  let firstPollErrorAt: number | null = null;
+  let lastPollError: Error | null = null;
 
   while (true) {
-    const summary = await deps.getTaskSummary(config, taskId);
+    let summary: TaskSummaryResponse;
+    try {
+      summary = await deps.getTaskSummary(config, taskId);
+    } catch (error) {
+      // A single failed poll must not abort a multi-minute await. Absorb
+      // transient read failures and keep polling; surface only once failures
+      // persist past the grace window or the overall budget runs out.
+      lastPollError = error instanceof Error ? error : new Error(String(error));
+      const erroredAt = deps.now();
+      if (firstPollErrorAt === null) {
+        firstPollErrorAt = erroredAt;
+      }
+
+      const elapsed = erroredAt - startedAt;
+      if (elapsed >= timeoutMs) {
+        break;
+      }
+
+      const erroringForMs = erroredAt - firstPollErrorAt;
+      if (erroringForMs >= Math.min(MAX_CONSECUTIVE_POLL_ERROR_MS, timeoutMs)) {
+        throw new Error(
+          `Unable to read task ${taskId} status for ${Math.round(
+            erroringForMs / 1000,
+          )}s: ${lastPollError.message}`,
+        );
+      }
+
+      await deps.sleep(Math.min(pollIntervalMs, timeoutMs - elapsed));
+      continue;
+    }
+
+    // A successful read clears any transient-failure streak.
+    firstPollErrorAt = null;
+    lastPollError = null;
     lastSummary = summary;
 
     if (!isTaskActiveForAwait(summary)) {
@@ -286,7 +338,9 @@ export async function awaitTaskSettlement(
       ready: false,
       timedOut: true,
       waitedMs: deps.now() - startedAt,
-      errorSummary: `Timed out after ${timeoutMs}ms waiting for task ${taskId}`,
+      errorSummary: lastPollError
+        ? `Timed out after ${timeoutMs}ms; last status read for task ${taskId} failed: ${lastPollError.message}`
+        : `Timed out after ${timeoutMs}ms waiting for task ${taskId}`,
       taskRunStatus: null,
       taskPhase: null,
       completed: false,
