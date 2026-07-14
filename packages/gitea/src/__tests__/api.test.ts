@@ -130,6 +130,15 @@ describe('Gitea API helpers', () => {
     expect(buildGiteaApiBaseUrl('https://git.example.com/')).toBe(
       'https://git.example.com/api/v1',
     );
+    expect(buildGiteaApiBaseUrl('https://git.example.com/api/v1')).toBe(
+      'https://git.example.com/api/v1',
+    );
+    expect(buildGiteaApiBaseUrl('https://git.example.com/gitea/api/v1/')).toBe(
+      'https://git.example.com/gitea/api/v1',
+    );
+    expect(buildGiteaApiBaseUrl('https://gitea.com/roocode/')).toBe(
+      'https://gitea.com/api/v1',
+    );
   });
 
   it('lists authenticated Gitea repositories with token auth and pagination', async () => {

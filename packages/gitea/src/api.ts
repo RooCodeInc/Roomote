@@ -107,7 +107,16 @@ function normalizeBaseUrl(baseUrl: string): string {
     throw new Error('GITEA_BASE_URL cannot be empty.');
   }
 
-  return new URL(trimmed).toString().replace(/\/+$/, '');
+  const url = new URL(trimmed);
+  const apiPathSuffix = /\/api\/v1$/;
+
+  if (url.hostname === 'gitea.com') {
+    url.pathname = '/';
+  } else if (apiPathSuffix.test(url.pathname)) {
+    url.pathname = url.pathname.replace(apiPathSuffix, '') || '/';
+  }
+
+  return url.toString().replace(/\/+$/, '');
 }
 
 export async function resolveGiteaToken(): Promise<string | null> {
