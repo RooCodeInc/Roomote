@@ -3,7 +3,6 @@ import { AGENT_DISPLAY_NAME, formatErrorForLog } from '@roomote/types';
 import { findSlackConversationSubjectByUserId } from '@roomote/sdk/server';
 import {
   buildStartedBlocks,
-  convertMarkdownToSlack,
   setSlackStartedMessageTs,
   type SlackNotifier,
 } from '@roomote/slack';
@@ -45,16 +44,14 @@ export async function postSlackThreadMarkdownMessage({
     }
   }
 
-  const slackMrkdwnText = convertMarkdownToSlack(text);
-
   const messageTs = await slack.postMessage({
     channel,
     thread_ts: threadTs,
-    text: slackMrkdwnText,
+    text,
     blocks: [
       {
         type: 'markdown',
-        text: slackMrkdwnText,
+        text,
       },
     ],
   });

@@ -48,3 +48,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Treat absolute home-directory skill paths such as `/home/roomote/.agents/skills/...` as activated or installed runtime copies, not as the checked-in source of truth for repository changes.
 - Treat workflow prompts and instructions as a first-class control surface. When agent behavior is off, debug prompt clarity before defaulting to code enforcement.
 - `apps/docs/` is the public product documentation site (published at `https://docs.roomote.dev`) and should be kept in sync with user-facing product changes.
+
+## Slack message formatting
+
+- Present LLM / agent narrative output in Slack as `markdown` blocks (`{ type: 'markdown', text }`) with standard markdown (`[label](url)`, `**bold**`, lists, tables, code fences) whenever possible. Do not convert that body text into legacy mrkdwn (`*bold*`, `<url|label>`) before posting a `markdown` block.
+- Do not migrate hardcoded product UI Block Kit (routing confirmations, sticky footers, unfurls, accessory sections, etc.) for style alone; keep `mrkdwn` there when those builders already rely on it or Slack requires it (for example `section` text with an `accessory`).
+- When reading inbound Slack message blocks, continue to accept both `markdown` blocks and legacy `mrkdwn` text objects.
