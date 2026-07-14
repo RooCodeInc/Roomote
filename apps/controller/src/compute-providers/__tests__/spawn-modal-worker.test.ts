@@ -128,6 +128,7 @@ describe('spawnModalWorker', () => {
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'image-ref',
         modalRegions: ' us , us-west ',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -169,6 +170,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'image-ref',
+        modalVmMemoryMiB: 12_288,
         modalTimeoutMs: 60_000,
       },
     );
@@ -179,7 +181,7 @@ describe('spawnModalWorker', () => {
         config: expect.objectContaining({
           vmRuntime: true,
           cpu: 2,
-          memoryMiB: 4096,
+          memoryMiB: 12_288,
         }),
       }),
     );
@@ -201,6 +203,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'image-ref',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -212,7 +215,7 @@ describe('spawnModalWorker', () => {
         config: expect.objectContaining({
           vmRuntime: true,
           cpu: 2,
-          memoryMiB: 4096,
+          memoryMiB: 8192,
         }),
       }),
     );
@@ -244,6 +247,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'image-ref',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -286,6 +290,7 @@ describe('spawnModalWorker', () => {
           modalTokenId: 'token-id',
           modalTokenSecret: 'token-secret',
           modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
           modalTimeoutMs: 60_000,
         },
       ),
@@ -347,6 +352,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -379,6 +385,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -410,6 +417,7 @@ describe('spawnModalWorker', () => {
         modalTokenId: 'token-id',
         modalTokenSecret: 'token-secret',
         modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
       },
     );
@@ -443,6 +451,7 @@ describe('spawnModalWorker', () => {
           modalTokenId: 'token-id',
           modalTokenSecret: 'token-secret',
           modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
           modalTimeoutMs: 60_000,
         },
       ),
