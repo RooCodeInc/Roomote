@@ -398,19 +398,14 @@ async function runSetup({
 
       // Publish the command plan to <workspace>/.roomote/setup-status.json
       // before the agent can start, so the sandbox always has an observable
-      // answer to "have the repository setup commands finished?".
-      let setupStatusWriter: EnvironmentSetupStatusWriter | undefined;
-
-      if (
-        workspace.environmentConfig.repositories.some(
-          (repository) => (repository.commands?.length ?? 0) > 0,
-        )
-      ) {
-        setupStatusWriter = new EnvironmentSetupStatusWriter(
-          initializeRepositoriesResult.workspacePath,
-        );
-        setupStatusWriter.initialize(workspace.environmentConfig.repositories);
-      }
+      // answer to "has environment setup finished?". Created for every
+      // environment workspace — including Docker-only or command-less
+      // setups — because the sandbox instruction and the settle notification
+      // point the agent at this file and must be able to rely on it existing.
+      const setupStatusWriter = new EnvironmentSetupStatusWriter(
+        initializeRepositoriesResult.workspacePath,
+      );
+      setupStatusWriter.initialize(workspace.environmentConfig.repositories);
 
       if (!backgroundEnvironmentSetup) {
         const warnings =

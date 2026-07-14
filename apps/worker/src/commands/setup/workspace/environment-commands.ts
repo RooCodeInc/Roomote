@@ -78,6 +78,9 @@ export async function executeOrganizationEnvironmentRepositoryCommands(
   const warnings: EnvironmentSetupWarning[] = [];
 
   if (!repoPaths) {
+    // Nothing to execute, but the status file must still reach a terminal
+    // state — a reader should never see `running` forever.
+    setupStatusWriter?.finalize();
     return warnings;
   }
 

@@ -68,6 +68,16 @@ describe('EnvironmentSetupStatusWriter', () => {
     ) as EnvironmentSetupStatus;
   }
 
+  it('publishes a running status even when no repository has commands', () => {
+    const writer = new EnvironmentSetupStatusWriter(workspacePath);
+    writer.initialize([{ repository: 'owner/other', commands: [] }]);
+
+    expect(readStatus()).toMatchObject({ state: 'running', commands: [] });
+
+    writer.finalize({ warnings: [] });
+    expect(readStatus().state).toBe('completed');
+  });
+
   it('publishes the full pending command plan on initialize', () => {
     const writer = new EnvironmentSetupStatusWriter(workspacePath);
     writer.initialize(REPOSITORIES);
