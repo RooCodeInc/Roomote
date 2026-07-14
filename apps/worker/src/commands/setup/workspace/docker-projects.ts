@@ -540,8 +540,13 @@ export async function initializeDockerProjects(
         ? redactContainerDiagnostics(message, resolved.sensitiveValues)
         : message;
       if (project.required === false) {
-        logger.userLog.warn(`${message} Continuing because it is optional.`);
-        logger.debug.error(error);
+        logger.userLog.warn(
+          `${redactedMessage} Continuing because it is optional.`,
+        );
+        // Log the redacted message, not the Error: its cause chain still
+        // holds the original Compose error with unredacted stderr, and the
+        // startup logger serializes causes into harness.log.
+        logger.debug.error(redactedMessage);
         await appendDockerProjectLog(
           project.name,
           `[roomote] ${redactedMessage} Continuing because it is optional.`,

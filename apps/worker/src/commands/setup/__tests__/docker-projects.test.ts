@@ -468,4 +468,61 @@ describe('initializeDockerProjects', () => {
     expect(appendedText).toContain('APP_SECRET=[redacted]');
     expect(appendedText).not.toContain('project-secret-value');
   });
+
+  it('keeps optional-project failure logging redacted', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('up')) {
+        throw new Error('compose failed: APP_SECRET=project-secret-value');
+      }
+      return { stdout: '' };
+    });
+
+    await expect(
+      initializeDockerProjects(
+        logger,
+        {
+          workspace: {
+            type: 'environment',
+            environmentId: 'env-1',
+            environmentConfig: {
+              name: 'Test',
+              repositories: [{ repository: 'acme/app' }],
+              docker_projects: [
+                {
+                  type: 'compose',
+                  name: 'optional',
+                  repository: 'acme/app',
+                  files: ['compose.yaml'],
+                  env: { APP_SECRET: '${PROJECT_SECRET}' },
+                  required: false,
+                },
+              ],
+            },
+          },
+          envVars: { PROJECT_SECRET: 'project-secret-value' },
+          taskRunType: TaskPayloadKind.StandardTask,
+        },
+        {
+          workspacePath,
+          repoPaths: { 'acme/app': repositoryPath },
+        },
+        runCommand,
+      ),
+    ).resolves.toBeUndefined();
+
+    const loggedText = [
+      ...vi.mocked(logger.userLog.warn).mock.calls,
+      ...vi.mocked(logger.debug.error).mock.calls,
+      ...vi.mocked(appendDockerProjectLog).mock.calls.map((call) => [call[1]]),
+    ]
+      .flat()
+      .map(String)
+      .join('\n');
+    expect(loggedText).toContain('APP_SECRET=[redacted]');
+    expect(loggedText).not.toContain('project-secret-value');
+  });
 });
