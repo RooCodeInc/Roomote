@@ -23,7 +23,7 @@ export function StepTelegramSetup({
   onBack,
 }: {
   onContinue: () => void;
-  onBack: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();

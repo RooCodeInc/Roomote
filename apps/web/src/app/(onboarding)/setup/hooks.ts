@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -491,6 +491,21 @@ export function useSetupFlow(
     [hasPostOnboardingAccess, shouldSkip],
   );
 
+  const findPreviousStep = useCallback(
+    (fromIndex: number): SetupStep | null => {
+      for (let index = fromIndex - 1; index >= 0; index -= 1) {
+        const candidate = SETUP_STEPS[index];
+
+        if (candidate && !shouldSkip(candidate)) {
+          return candidate;
+        }
+      }
+
+      return null;
+    },
+    [shouldSkip],
+  );
+
   const findNextPostOnboardingStep = useCallback(
     ({
       fromIndex = SETUP_STEPS.indexOf('invoke'),
@@ -719,18 +734,30 @@ export function useSetupFlow(
 
   const goToStep = useCallback(
     (nextStep: SetupStep, options: { revisit?: boolean } = {}) => {
-      // Pin choice/config steps (and any explicit revisit) so the auto-skip
-      // watchdog leaves them visible even when saved state already satisfies
-      // the flow — e.g. Back to a provider picker after the choice was saved.
-      pinnedUrlStepRef.current =
-        options.revisit || PINNABLE_SETUP_STEPS.includes(nextStep)
-          ? nextStep
-          : null;
+      // Only explicit review/revisit navigations pin a step. Normal forward
+      // navigation must remain subject to the skip rules on the next status
+      // refresh.
+      pinnedUrlStepRef.current = options.revisit ? nextStep : null;
       setStep(nextStep);
       pushStepUrl(nextStep);
     },
     [pushStepUrl],
   );
+
+  const previousStep = useMemo(
+    () => findPreviousStep(SETUP_STEPS.indexOf(step)),
+    [findPreviousStep, step],
+  );
+
+  const goToPreviousStep = useCallback(() => {
+    if (!previousStep) {
+      return;
+    }
+
+    pinnedUrlStepRef.current = null;
+    setStep(previousStep);
+    pushStepUrl(previousStep);
+  }, [previousStep, pushStepUrl]);
 
   const goToNextStep = useCallback(() => {
     const currentIndex = SETUP_STEPS.indexOf(step);
@@ -767,6 +794,7 @@ export function useSetupFlow(
     step,
     entryContext,
     goToStep,
+    goToPreviousStep,
     goToNextStep,
     goToNextPostOnboardingStep,
     advancePostOnboardingStep,
@@ -775,5 +803,6 @@ export function useSetupFlow(
     isError,
     error,
     setupSession,
+    canGoBack: previousStep !== null,
   };
 }
