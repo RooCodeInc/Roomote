@@ -65,7 +65,7 @@ describe('buildDockerTaskDaemonResourceArgs', () => {
   it('bounds the daemon without dropping networking capabilities it needs', () => {
     const args = buildDockerTaskDaemonResourceArgs({
       cpuLimit: 2,
-      memoryLimit: '4g',
+      memoryLimit: '8g',
       pidsLimit: 512,
       diskLimit: '20g',
       logMaxSize: '10m',
@@ -73,6 +73,9 @@ describe('buildDockerTaskDaemonResourceArgs', () => {
     });
 
     expect(args).toContain('--pids-limit');
+    expect(args).toEqual(
+      expect.arrayContaining(['--memory', '8g', '--memory-swap', '8g']),
+    );
     expect(args).not.toContain('--cap-drop');
     expect(args).not.toContain('--storage-opt');
   });

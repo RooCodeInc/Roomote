@@ -204,7 +204,8 @@ as per-task auth tokens or workspace paths.
 | `DOCKER_WORKER_NETWORK`              | Self-host Docker  | Docker network for worker containers in Compose/self-host mode.                                                                          |
 | `DOCKER_WORKER_RELEASE_PATH`         | Optional          | Path to a packaged worker release archive used by Docker worker bootstrap.                                                               |
 | `DOCKER_WORKER_CPU_LIMIT`            | Optional          | CPU limit per Docker task. Defaults to `2`.                                                                                              |
-| `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit per Docker task. Defaults to `4g`.                                                                          |
+| `DOCKER_WORKER_MEMORY_LIMIT`         | Optional          | Memory and memory+swap limit for each Docker worker. Defaults to `4g`.                                                                   |
+| `DOCKER_TASK_DAEMON_MEMORY_LIMIT`    | Optional          | Memory and memory+swap limit for the nested Docker daemon used by Docker-project tasks. Defaults to `8g`.                                |
 | `DOCKER_WORKER_PIDS_LIMIT`           | Optional          | Process limit per Docker task. Defaults to `512`.                                                                                        |
 | `DOCKER_WORKER_DISK_LIMIT`           | Optional          | Writable-layer limit. Defaults to `20g`; tasks fail closed when the Docker storage driver cannot enforce it.                             |
 | `DOCKER_WORKER_ALLOW_UNBOUNDED_DISK` | Optional          | Explicitly permits startup without `--storage-opt size`. Defaults to `false`; use only with an equivalent host-level quota.              |

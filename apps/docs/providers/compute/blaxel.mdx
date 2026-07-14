@@ -43,7 +43,9 @@ and appear as locked values in Settings.
 Roomote's provisioned Blaxel worker image includes Docker, Docker Compose, and
 the legacy iptables backend required for
 [Docker projects](/environments/definition#docker-projects). Container
-builds and services share the task sandbox's memory allocation.
+builds and services share the task sandbox's memory allocation. Roomote
+requests 8 GiB for these tasks and 4 GiB for tasks that do not need nested
+Docker.
 
 ## Verify setup
 

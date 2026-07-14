@@ -26,6 +26,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 
 export async function spawnBlaxelWorker(
   taskRun: TaskRun,
@@ -66,6 +67,10 @@ export async function spawnBlaxelWorker(
 
   const { namedPorts, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
+  const sandboxResources = await resolveTaskSandboxMemoryMiB(
+    taskRun,
+    environmentConfig,
+  );
   const authBypassEnabled = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
@@ -96,6 +101,7 @@ export async function spawnBlaxelWorker(
       image: config.blaxelImage,
       region: config.blaxelRegion,
       timeoutMs: config.blaxelTimeoutMs,
+      memoryMiB: sandboxResources.memoryMiB,
     },
   });
 
@@ -136,6 +142,7 @@ export async function spawnBlaxelWorker(
       sourceSnapshotId: machine.sourceSnapshotId ?? null,
       authBypassValue,
       authBypassHeaderName,
+      configuredMemoryMiB: sandboxResources.memoryMiB,
     });
     await stampTaskRunMilestone({
       runId: taskRun.id,
