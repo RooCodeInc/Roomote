@@ -169,7 +169,7 @@ describe('useLogFiles', () => {
         { label: 'harness.log', filePath: '/tmp/harness.log' },
         { label: 'Start Redis', filePath: '/tmp/roomote-redis.log' },
         {
-          label: 'Setup: Install toolchain and dependencies (Roomote)',
+          label: 'Setup: Install toolchain and dependencies',
           filePath:
             '.roomote/setup-logs/RooCodeInc/Roomote/install-toolchain-and-dependencies.log',
         },

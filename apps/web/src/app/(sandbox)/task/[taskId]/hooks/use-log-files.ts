@@ -153,7 +153,6 @@ export function useLogFiles(
 
 function logfilesFromSetupStatus(
   commands: Array<{
-    repository: string;
     name: string;
     logFile?: string;
   }>,
@@ -166,7 +165,7 @@ function logfilesFromSetupStatus(
     }
 
     result.push({
-      label: setupLogLabel(command.repository, command.name),
+      label: setupLogLabel(command.name),
       filePath: command.logFile,
     });
   }
@@ -174,12 +173,8 @@ function logfilesFromSetupStatus(
   return result;
 }
 
-function setupLogLabel(repository: string, commandName: string): string {
-  const shortRepo = repository.includes('/')
-    ? (repository.split('/').pop() ?? repository)
-    : repository;
-
-  return `Setup: ${commandName} (${shortRepo})`;
+function setupLogLabel(commandName: string): string {
+  return `Setup: ${commandName}`;
 }
 
 function mergeLogFiles(
