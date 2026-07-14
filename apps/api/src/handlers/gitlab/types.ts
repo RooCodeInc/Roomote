@@ -27,6 +27,9 @@ const gitLabMergeRequestAttributesSchema = z
     url: z.string(),
     state: z.string().optional(),
     draft: z.boolean().optional(),
+    // GitLab webhook timestamps use `YYYY-MM-DD HH:MM:SS UTC`.
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
     source_branch: z.string().optional(),
     target_branch: z.string().optional(),
     oldrev: z.string().optional(),

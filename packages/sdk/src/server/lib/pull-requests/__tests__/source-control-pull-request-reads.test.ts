@@ -89,9 +89,11 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import {
+  listMergedSourceControlPullRequestsForRepository,
   readSourceControlPullRequestForTaskRun,
   sourceControlPullRequestReadInputSchema,
 } from '../source-control-pull-request-reads';
+import type { RepositoryRow } from '../source-control-pull-request-shared';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
@@ -610,10 +612,12 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     const paginate = vi.fn().mockResolvedValue([
       {
         number: 55,
+        id: 5501,
         html_url: 'https://github.com/acme/backend/pull/55',
         title: '[Fix] Read surface',
         state: 'open',
         merged_at: null,
+        closed_at: null,
         draft: false,
         created_at: '2026-06-30T00:00:00Z',
         updated_at: '2026-07-01T00:00:00Z',
@@ -664,14 +668,18 @@ describe('readSourceControlPullRequestForTaskRun', () => {
       },
     });
 
-    expect(paginate).toHaveBeenCalledWith(pullsList, {
-      owner: 'acme',
-      repo: 'backend',
-      state: 'open',
-      sort: 'updated',
-      direction: 'desc',
-      per_page: 100,
-    });
+    expect(paginate).toHaveBeenCalledWith(
+      pullsList,
+      {
+        owner: 'acme',
+        repo: 'backend',
+        state: 'open',
+        sort: 'updated',
+        direction: 'desc',
+        per_page: 100,
+      },
+      expect.any(Function),
+    );
 
     if (!('pullRequests' in result)) {
       throw new Error('Expected a list result.');
@@ -680,6 +688,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     expect(result.pullRequests).toEqual([
       {
         number: 55,
+        externalId: 5501,
         url: 'https://github.com/acme/backend/pull/55',
         title: '[Fix] Read surface',
         state: 'open',
@@ -689,6 +698,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         author: { id: '9', login: 'octocat' },
         updatedAt: '2026-07-01T00:00:00Z',
         createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
         labels: ['auto-resolve-conflicts'],
         headSha: 'head-sha',
         baseSha: 'base-sha',
@@ -763,6 +774,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     expect(result.pullRequests).toEqual([
       {
         number: 42,
+        externalId: null,
         url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         title: 'Conflicting MR',
         state: 'open',
@@ -772,6 +784,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         author: { id: '7', login: 'gitlab-user' },
         updatedAt: '2026-07-01T00:00:00Z',
         createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
         labels: ['auto-resolve-conflicts'],
         headSha: 'head-sha',
         baseSha: null,
@@ -894,6 +908,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     expect(result.pullRequests).toEqual([
       {
         number: 8,
+        externalId: null,
         url: 'https://git.example.com/acme/backend/pulls/8',
         title: 'WIP: Gitea PR',
         state: 'open',
@@ -903,6 +918,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         author: { id: '4', login: 'gitea-user' },
         updatedAt: '2026-07-01T00:00:00Z',
         createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
         labels: ['auto-resolve-conflicts'],
         headSha: 'head-sha',
         baseSha: 'base-sha',
@@ -1149,5 +1166,310 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     );
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('listMergedSourceControlPullRequestsForRepository', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveGitLabToken.mockResolvedValue('gitlab-token');
+    mockResolveGiteaToken.mockResolvedValue('gitea-token');
+    mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
+    mockBuildGiteaApiBaseUrl.mockReturnValue('https://git.example.com/api/v1');
+    mockResolveAdoToken.mockResolvedValue('ado-token');
+    mockResolveAdoBaseUrl.mockResolvedValue('https://dev.azure.com');
+    mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
+      'https://dev.azure.com/acme',
+    );
+  });
+
+  function makeRepositoryRow(overrides: Partial<RepositoryRow>): RepositoryRow {
+    return {
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: null,
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://example.com/acme/backend',
+      ...overrides,
+    };
+  }
+
+  it('lists merged GitLab MRs server-side with an updated_after cursor', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 991,
+          iid: 42,
+          title: 'Merged MR',
+          state: 'merged',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+          source_branch: 'feature/work',
+          target_branch: 'main',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          closed_at: null,
+          author: { id: 7, username: 'gitlab-user' },
+        },
+      ]),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '101',
+      }),
+      provider: 'gitlab',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://gitlab.com/api/v4/projects/101/merge_requests?state=merged&order_by=updated_at&sort=desc&per_page=100&page=1&updated_after=2026-07-01T00%3A00%3A00.000Z',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'gitlab-token' }),
+      }),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 42,
+        externalId: 991,
+        state: 'merged',
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: null,
+        updatedAt: '2026-07-10T00:00:00Z',
+        author: { id: '7', login: 'gitlab-user' },
+      }),
+    ]);
+  });
+
+  it('lists Gitea merged PRs from the closed list, dropping unmerged rows', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 800,
+          number: 8,
+          title: 'Merged PR',
+          state: 'closed',
+          merged: true,
+          html_url: 'https://git.example.com/acme/backend/pulls/8',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-09T00:00:00Z',
+          merged_at: '2026-07-09T00:00:00Z',
+          closed_at: '2026-07-09T00:00:00Z',
+          user: { id: 4, login: 'gitea-user' },
+        },
+        {
+          id: 801,
+          number: 9,
+          title: 'Closed without merging',
+          state: 'closed',
+          merged: false,
+          updated_at: '2026-07-08T00:00:00Z',
+        },
+      ]),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({ sourceControlProvider: 'gitea' }),
+      provider: 'gitea',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/repos/acme/backend/pulls?state=closed&limit=50&page=1&sort=recentupdate',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'token gitea-token',
+        }),
+      }),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 8,
+        externalId: 800,
+        state: 'merged',
+        mergedAt: '2026-07-09T00:00:00Z',
+        closedAt: '2026-07-09T00:00:00Z',
+      }),
+    ]);
+  });
+
+  it('lists merged Bitbucket PRs with null merge timestamps and filters by updatedAfter', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        values: [
+          {
+            id: 3,
+            title: 'Recently merged',
+            state: 'MERGED',
+            created_on: '2026-06-30T00:00:00Z',
+            updated_on: '2026-07-10T00:00:00Z',
+            author: { uuid: '{u-1}', nickname: 'bb-user' },
+            source: { branch: { name: 'feature/one' } },
+            destination: { branch: { name: 'main' } },
+          },
+          {
+            id: 2,
+            title: 'Old merge',
+            state: 'MERGED',
+            created_on: '2026-05-01T00:00:00Z',
+            updated_on: '2026-06-01T00:00:00Z',
+            source: { branch: { name: 'feature/two' } },
+            destination: { branch: { name: 'main' } },
+          },
+        ],
+        next: null,
+      }),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({ sourceControlProvider: 'bitbucket' }),
+      provider: 'bitbucket',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    const [requestedUrl] = fetchImpl.mock.calls[0]!;
+    expect(String(requestedUrl)).toContain('state=MERGED');
+    expect(String(requestedUrl)).toContain('sort=-updated_on');
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 3,
+        externalId: null,
+        state: 'merged',
+        mergedAt: null,
+        closedAt: null,
+        updatedAt: '2026-07-10T00:00:00Z',
+      }),
+    ]);
+    expect(result.warnings).toContain(
+      'Bitbucket does not expose merge/close timestamps in pull request lists; mergedAt and closedAt are null and updatedAt approximates the merge time.',
+    );
+  });
+
+  it('lists completed Azure DevOps PRs using closedDate for merge timestamps', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        value: [
+          {
+            pullRequestId: 7,
+            title: 'Completed PR',
+            status: 'completed',
+            creationDate: '2026-06-30T00:00:00Z',
+            closedDate: '2026-07-10T00:00:00Z',
+            sourceRefName: 'refs/heads/feature/work',
+            targetRefName: 'refs/heads/main',
+            createdBy: { id: 'user-guid', uniqueName: 'author@acme.com' },
+          },
+          {
+            pullRequestId: 6,
+            title: 'Old completed PR',
+            status: 'completed',
+            creationDate: '2026-05-01T00:00:00Z',
+            closedDate: '2026-06-01T00:00:00Z',
+            sourceRefName: 'refs/heads/feature/two',
+            targetRefName: 'refs/heads/main',
+          },
+        ],
+      }),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      }),
+      provider: 'ado',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    const [requestedUrl] = fetchImpl.mock.calls[0]!;
+    expect(String(requestedUrl)).toContain('searchCriteria.status=completed');
+    // ADO rows have no updatedAt, so the updatedAfter filter falls back to
+    // the closedDate-derived mergedAt and drops the June merge.
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 7,
+        externalId: null,
+        state: 'merged',
+        updatedAt: null,
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: '2026-07-10T00:00:00Z',
+        author: { id: 'user-guid', login: 'author@acme.com' },
+      }),
+    ]);
+  });
+
+  it('lists merged GitHub PRs from the closed list, dropping unmerged rows', async () => {
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const paginate = vi.fn().mockResolvedValue([
+      {
+        number: 55,
+        id: 5501,
+        html_url: 'https://github.com/acme/backend/pull/55',
+        title: 'Merged PR',
+        state: 'closed',
+        merged_at: '2026-07-10T00:00:00Z',
+        closed_at: '2026-07-10T00:00:00Z',
+        draft: false,
+        created_at: '2026-06-30T00:00:00Z',
+        updated_at: '2026-07-10T00:00:00Z',
+        labels: [],
+        head: { ref: 'feature/one', sha: 'head-sha', repo: null },
+        base: { ref: 'develop', sha: 'base-sha', repo: null },
+        user: { id: 9, login: 'octocat' },
+      },
+      {
+        number: 54,
+        id: 5401,
+        html_url: 'https://github.com/acme/backend/pull/54',
+        title: 'Closed without merging',
+        state: 'closed',
+        merged_at: null,
+        closed_at: '2026-07-09T00:00:00Z',
+        draft: false,
+        created_at: '2026-06-29T00:00:00Z',
+        updated_at: '2026-07-09T00:00:00Z',
+        labels: [],
+        head: { ref: 'feature/two', sha: 'sha-2', repo: null },
+        base: { ref: 'develop', sha: 'base-sha', repo: null },
+        user: null,
+      },
+    ]);
+    const pullsList = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      paginate,
+      rest: { pulls: { list: pullsList } },
+    });
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'github',
+        installationId: 'installation-1',
+        fullName: 'acme/backend',
+      }),
+      provider: 'github',
+    });
+
+    expect(paginate).toHaveBeenCalledWith(
+      pullsList,
+      expect.objectContaining({ state: 'closed' }),
+      expect.any(Function),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 55,
+        externalId: 5501,
+        state: 'merged',
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: '2026-07-10T00:00:00Z',
+      }),
+    ]);
   });
 });

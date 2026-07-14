@@ -191,10 +191,11 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Security Auditor',
     availability: 'stable',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    // Merged-PR audits read the provider-neutral pullRequestFacts table.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'security_auditor',
   },
   {
@@ -202,10 +203,11 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Code Quality Auditor',
     availability: 'stable',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    // Merged-PR audits read the provider-neutral pullRequestFacts table.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
     supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'code_quality_auditor',
   },
   {

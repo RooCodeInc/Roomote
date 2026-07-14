@@ -29,7 +29,7 @@ ${buildMergedPullRequestTaskContext(params)}
 
 Review the merged pull requests listed above from a security standpoint and for adherence to secure coding best practices.
 
-Use the installed \`security-review\` and \`security-best-practices\` skills while working through this audit. For each listed PR, use \`gh\` or local git history to inspect the actual diff before suggesting follow-up work; do not rely only on titles or summaries. Do not update scheduler checkpoints or audit PRs outside the provided manifest; follow-up scheduler runs will handle any remaining PRs when has_more_prs is true.
+Use the installed \`security-review\` and \`security-best-practices\` skills while working through this audit. For each listed PR, inspect the actual diff before suggesting follow-up work — use local git history (the PR's merge commit) or, on GitHub repositories, \`gh\`; do not rely only on titles or summaries. Do not update scheduler checkpoints or audit PRs outside the provided manifest; follow-up scheduler runs will handle any remaining PRs when has_more_prs is true.
 
 ${followUpInstructions}
 

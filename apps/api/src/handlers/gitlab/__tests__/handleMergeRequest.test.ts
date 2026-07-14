@@ -5,6 +5,7 @@ const {
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
   mockScheduleNotifyPullRequestTerminalStatus,
+  mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -13,6 +14,7 @@ const {
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
   mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
+  mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
 }));
 
@@ -47,6 +49,11 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
   scheduleNotifyPullRequestTerminalStatus:
     mockScheduleNotifyPullRequestTerminalStatus,
+}));
+
+vi.mock('../../pull-request-fact-sync', () => ({
+  scheduleSourceControlPullRequestFactSync:
+    mockScheduleSourceControlPullRequestFactSync,
 }));
 
 vi.mock('../getGitLabAutomationTargets', () => ({
@@ -219,7 +226,12 @@ describe('handleGitLabMergeRequest', () => {
 
   it('updates tracked task PR status for merged merge requests', async () => {
     await expect(
-      handleGitLabMergeRequest(makePayload('merge')),
+      handleGitLabMergeRequest(
+        makePayload('merge', {
+          created_at: '2026-07-01 00:00:00 UTC',
+          updated_at: '2026-07-10 00:00:00 UTC',
+        }),
+      ),
     ).resolves.toEqual({ status: 'ok' });
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -228,6 +240,20 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'merged',
     );
+    expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 42,
+        externalId: 999,
+        title: 'Update backend',
+        url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        authorLogin: null,
+        state: 'merged',
+        createdAt: '2026-07-01 00:00:00 UTC',
+        updatedAt: '2026-07-10 00:00:00 UTC',
+      },
+    });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 

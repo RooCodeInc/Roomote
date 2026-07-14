@@ -196,6 +196,11 @@ export {
   syncGitHubPullRequestFactsForOrg,
   upsertGitHubPullRequestFactFromWebhook,
 } from './lib/pull-requests/github-pull-request-facts';
+export {
+  syncSourceControlPullRequestFacts,
+  upsertSourceControlPullRequestFactFromWebhook,
+} from './lib/pull-requests/source-control-pull-request-facts';
+export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
 
 export * from './lib/auth';
 

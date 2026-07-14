@@ -6,6 +6,7 @@ const {
   mockRepositoriesFindFirst,
   mockDedupSelect,
   mockScheduleNotifyPullRequestTerminalStatus,
+  mockScheduleSourceControlPullRequestFactSync,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetAdoAutomationTargets: vi.fn(),
@@ -16,6 +17,7 @@ const {
   // dedup lookup, in call order.
   mockDedupSelect: vi.fn(),
   mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
+  mockScheduleSourceControlPullRequestFactSync: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -89,6 +91,11 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
   scheduleNotifyPullRequestTerminalStatus:
     mockScheduleNotifyPullRequestTerminalStatus,
+}));
+
+vi.mock('../../pull-request-fact-sync', () => ({
+  scheduleSourceControlPullRequestFactSync:
+    mockScheduleSourceControlPullRequestFactSync,
 }));
 
 vi.mock('../getAdoAutomationTargets', async () => {
@@ -353,7 +360,11 @@ describe('handleAdoPullRequest', () => {
   it('updates tracked task PR status and notifications for completed pull requests', async () => {
     await expect(
       handleAdoPullRequest(
-        makePayload('git.pullrequest.updated', { status: 'completed' }),
+        makePayload('git.pullrequest.updated', {
+          status: 'completed',
+          creationDate: '2026-07-01T00:00:00Z',
+          closedDate: '2026-07-10T00:00:00Z',
+        }),
         { updatedNotificationType: 'StatusUpdateNotification' },
       ),
     ).resolves.toEqual({ status: 'ok' });
@@ -364,6 +375,20 @@ describe('handleAdoPullRequest', () => {
       42,
       'merged',
     );
+    expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
+      provider: 'ado',
+      repositoryFullName: 'acme/Platform/backend',
+      pullRequest: {
+        number: 42,
+        title: 'Update backend',
+        url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+        authorLogin: 'roomote-bot@acme.example',
+        state: 'merged',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-10T00:00:00Z',
+        mergedAt: '2026-07-10T00:00:00Z',
+      },
+    });
     expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
       {
         sourceControlProvider: 'ado',
