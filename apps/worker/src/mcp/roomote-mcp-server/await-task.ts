@@ -8,14 +8,14 @@ import type {
 } from './types.js';
 
 /** Default wait budget for environment prepare / verification boots. */
-export const DEFAULT_AWAIT_TASK_TIMEOUT_MS = 25 * 60_000;
-export const MIN_AWAIT_TASK_TIMEOUT_MS = 5_000;
-export const MAX_AWAIT_TASK_TIMEOUT_MS = 45 * 60_000;
-export const DEFAULT_AWAIT_TASK_POLL_INTERVAL_MS = 5_000;
-export const MIN_AWAIT_TASK_POLL_INTERVAL_MS = 1_000;
-export const MAX_AWAIT_TASK_POLL_INTERVAL_MS = 60_000;
+const DEFAULT_AWAIT_TASK_TIMEOUT_MS = 25 * 60_000;
+const MIN_AWAIT_TASK_TIMEOUT_MS = 5_000;
+const MAX_AWAIT_TASK_TIMEOUT_MS = 45 * 60_000;
+const DEFAULT_AWAIT_TASK_POLL_INTERVAL_MS = 5_000;
+const MIN_AWAIT_TASK_POLL_INTERVAL_MS = 1_000;
+const MAX_AWAIT_TASK_POLL_INTERVAL_MS = 60_000;
 
-export type AwaitTaskTerminalLabel =
+type AwaitTaskTerminalLabel =
   | 'Completed'
   | 'Failed'
   | 'Canceled'
@@ -24,7 +24,7 @@ export type AwaitTaskTerminalLabel =
   | 'Ready'
   | 'Idle';
 
-export type AwaitTaskResult = {
+type AwaitTaskResult = {
   taskId: string;
   title: string | null;
   status: string;
@@ -41,7 +41,7 @@ export type AwaitTaskResult = {
   linkedEnvironmentName: string | null;
 };
 
-export type AwaitTaskDeps = {
+type AwaitTaskDeps = {
   getTaskSummary: typeof getTaskSummary;
   sleep: (ms: number) => Promise<void>;
   now: () => number;
