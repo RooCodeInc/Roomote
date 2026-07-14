@@ -9,6 +9,15 @@ interface ToolDetailVisibilityOptions {
   showSubagentPayload?: boolean;
 }
 
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 export function getSubagentPrompt(msg: AcpToolUiMessage): string | null {
   if (!(msg.kind === 'tool_call' || msg.kind === 'tool_result')) {
     return null;
@@ -18,14 +27,20 @@ export function getSubagentPrompt(msg: AcpToolUiMessage): string | null {
     return null;
   }
 
-  const prompt = msg.data.prompt;
+  const data = msg.data as unknown as Record<string, unknown>;
+  const topLevelPrompt = asNonEmptyString(data.prompt);
 
-  if (typeof prompt !== 'string') {
+  if (topLevelPrompt) {
+    return topLevelPrompt;
+  }
+
+  const rawInput = data.rawInput;
+
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
     return null;
   }
 
-  const trimmed = prompt.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  return asNonEmptyString((rawInput as Record<string, unknown>).prompt);
 }
 
 export function hidesExpandedToolResult(

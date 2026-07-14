@@ -174,6 +174,30 @@ describe('AcpToolMessage', () => {
     expect(toolDetailsSpy).not.toHaveBeenCalled();
   });
 
+  it('expands OpenCode task rows when the launch prompt lives on rawInput', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('subagent', {
+          prompt: null,
+          agentType: 'explore',
+          isSubagentSpawn: true,
+          rawInput: {
+            prompt:
+              'Inspect the OpenCode task tool payload path for expandable prompts.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolCallUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
+  });
+
   it('does not render returned child text for completed subagent rows', () => {
     render(
       <AcpToolMessage

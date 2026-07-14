@@ -89,6 +89,26 @@ describe('AcpToolDetails', () => {
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
+  it('shows the launch prompt from rawInput for OpenCode task rows', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: null,
+          isSubagentSpawn: true,
+          rawInput: {
+            prompt: 'Inspect the OpenCode task tool prompt payload.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(
+      screen.getByText('Inspect the OpenCode task tool prompt payload.'),
+    ).toBeInTheDocument();
+    expect(toolInputSpy).not.toHaveBeenCalled();
+  });
+
   it('shows structured payload details for subagent rows in debug mode', () => {
     render(
       <AcpToolDetails
