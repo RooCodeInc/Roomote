@@ -2,9 +2,9 @@ import type { TaskArtifact } from '@/types';
 
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
-export const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
+const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
 
-export type VisualProofUploadExtraction = {
+type VisualProofUploadExtraction = {
   artifactId: string;
   artifactType: 'visual-proof';
   viewUrl: string;
@@ -156,12 +156,6 @@ export function extractVisualProofUploadFromToolMessage(
   }
 
   return null;
-}
-
-export function isVisualProofToolResultMessage(
-  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-): boolean {
-  return extractVisualProofUploadFromToolMessage(msg) !== null;
 }
 
 export function resolveVisualProofDisplayMedia(
