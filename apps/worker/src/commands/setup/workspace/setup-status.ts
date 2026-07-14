@@ -77,7 +77,11 @@ function slugify(value: string): string {
 export class EnvironmentSetupStatusWriter {
   private readonly statusPath: string;
   private readonly logsDir: string;
-  private readonly commandIndex = new Map<string, number>();
+  // Duplicate command names are valid in the environment schema, so each
+  // (repository, name) key maps to every matching entry in plan order.
+  // Commands execute sequentially per repository, so lifecycle callbacks
+  // always target the earliest entry still in the expected state.
+  private readonly commandIndex = new Map<string, number[]>();
   private readonly accumulatedWarnings: string[] = [];
   private status: EnvironmentSetupStatus;
 
@@ -102,12 +106,10 @@ export class EnvironmentSetupStatusWriter {
     for (const repoConfig of repositories) {
       for (const command of repoConfig.commands ?? []) {
         const key = commandKey(repoConfig.repository, command.name);
+        const indices = this.commandIndex.get(key) ?? [];
 
-        if (this.commandIndex.has(key)) {
-          continue;
-        }
-
-        this.commandIndex.set(key, this.status.commands.length);
+        indices.push(this.status.commands.length);
+        this.commandIndex.set(key, indices);
         this.status.commands.push({
           repository: repoConfig.repository,
           name: command.name,
@@ -136,23 +138,27 @@ export class EnvironmentSetupStatusWriter {
   }
 
   markCommandRunning(repository: string, commandName: string): void {
-    const entry = this.findCommand(repository, commandName);
+    const found = this.findCommand(repository, commandName, ['pending']);
 
-    if (!entry) {
+    if (!found) {
       return;
     }
 
-    entry.state = 'running';
-    entry.startedAt = new Date().toISOString();
+    found.entry.state = 'running';
+    found.entry.startedAt = new Date().toISOString();
     this.write();
   }
 
   markCommandResult(repository: string, result: ExecutionResult): void {
-    const entry = this.findCommand(repository, result.command.name);
+    const found =
+      this.findCommand(repository, result.command.name, ['running']) ??
+      this.findCommand(repository, result.command.name, ['pending']);
 
-    if (!entry) {
+    if (!found) {
       return;
     }
+
+    const { entry, occurrence } = found;
 
     if (result.command.detached) {
       // Detached commands return immediately and keep running under PM2;
@@ -164,7 +170,7 @@ export class EnvironmentSetupStatusWriter {
       }
     } else {
       entry.state = result.success ? 'succeeded' : 'failed';
-      entry.logFile = this.writeCommandLog(repository, result);
+      entry.logFile = this.writeCommandLog(repository, result, occurrence);
     }
 
     entry.finishedAt = new Date().toISOString();
@@ -214,23 +220,40 @@ export class EnvironmentSetupStatusWriter {
     this.write();
   }
 
+  /**
+   * Locate the earliest entry for `(repository, commandName)` whose state is
+   * one of `states`. `occurrence` is the entry's position among same-named
+   * commands, used to keep duplicate commands' log files distinct.
+   */
   private findCommand(
     repository: string,
     commandName: string,
-  ): EnvironmentSetupCommandStatus | undefined {
-    const index = this.commandIndex.get(commandKey(repository, commandName));
+    states: EnvironmentSetupCommandStatus['state'][],
+  ): { entry: EnvironmentSetupCommandStatus; occurrence: number } | undefined {
+    const indices =
+      this.commandIndex.get(commandKey(repository, commandName)) ?? [];
 
-    return index === undefined ? undefined : this.status.commands[index];
+    for (let occurrence = 0; occurrence < indices.length; occurrence += 1) {
+      const entry = this.status.commands[indices[occurrence]!];
+
+      if (entry && states.includes(entry.state)) {
+        return { entry, occurrence };
+      }
+    }
+
+    return undefined;
   }
 
   private writeCommandLog(
     repository: string,
     result: ExecutionResult,
+    occurrence: number,
   ): string | undefined {
+    const suffix = occurrence > 0 ? `-${occurrence + 1}` : '';
     const relativePath = path.join(
       SETUP_LOGS_RELATIVE_DIR,
       repository,
-      `${slugify(result.command.name)}.log`,
+      `${slugify(result.command.name)}${suffix}.log`,
     );
     const absolutePath = path.join(this.workspacePath, relativePath);
 

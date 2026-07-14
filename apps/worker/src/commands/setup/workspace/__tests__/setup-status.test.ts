@@ -186,6 +186,50 @@ describe('EnvironmentSetupStatusWriter', () => {
     ]);
   });
 
+  it('tracks duplicate command names as separate entries with distinct logs', () => {
+    const writer = new EnvironmentSetupStatusWriter(workspacePath);
+    writer.initialize([
+      {
+        repository: 'owner/repo',
+        commands: [
+          {
+            name: 'Install deps',
+            run: 'pnpm install',
+            timeout: 600,
+            continue_on_error: false,
+          },
+          {
+            name: 'Install deps',
+            run: 'pnpm install --dir other',
+            timeout: 600,
+            continue_on_error: false,
+          },
+        ],
+      },
+    ]);
+
+    expect(readStatus().commands).toHaveLength(2);
+
+    // Commands run sequentially, so lifecycle callbacks target the earliest
+    // entry still in the expected state.
+    writer.markCommandRunning('owner/repo', 'Install deps');
+    writer.markCommandResult('owner/repo', successResult('Install deps'));
+    writer.markCommandRunning('owner/repo', 'Install deps');
+    writer.markCommandResult('owner/repo', {
+      ...successResult('Install deps'),
+      success: false,
+      exitCode: 1,
+      error: 'Command failed with exit code 1',
+    });
+
+    const status = readStatus();
+    expect(status.commands[0]).toMatchObject({ state: 'succeeded' });
+    expect(status.commands[1]).toMatchObject({ state: 'failed', exitCode: 1 });
+    expect(status.commands[0]!.logFile).toBeDefined();
+    expect(status.commands[1]!.logFile).toBeDefined();
+    expect(status.commands[0]!.logFile).not.toBe(status.commands[1]!.logFile);
+  });
+
   it('folds accumulated warnings from other setup steps into the final state', () => {
     const writer = new EnvironmentSetupStatusWriter(workspacePath);
     writer.initialize(REPOSITORIES);
