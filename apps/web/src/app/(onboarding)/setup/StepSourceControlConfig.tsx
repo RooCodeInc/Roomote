@@ -118,6 +118,7 @@ export function StepSourceControlConfig({
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
   const [showGitlabAdvancedConfig, setShowGitlabAdvancedConfig] =
     useState(false);
+  const [showGiteaAdvancedConfig, setShowGiteaAdvancedConfig] = useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
     DEFAULT_ADO_AUTH_MODE,
   );
@@ -172,7 +173,9 @@ export function StepSourceControlConfig({
       getSetupSourceControlVisibleFields(providerFields, {
         showAdvancedConfig:
           (isAdo && showAdoAdvancedConfig) ||
-          (selectedProvider?.provider === 'gitlab' && showGitlabAdvancedConfig),
+          (selectedProvider?.provider === 'gitlab' &&
+            showGitlabAdvancedConfig) ||
+          (selectedProvider?.provider === 'gitea' && showGiteaAdvancedConfig),
       }).filter((field) =>
         !isAdo
           ? true
@@ -182,7 +185,15 @@ export function StepSourceControlConfig({
               field.envVarName !== 'ADO_TENANT_ID'
             : field.envVarName !== 'ADO_TOKEN',
       ),
-    [providerFields, isAdo, showAdoAdvancedConfig, adoAuthMode],
+    [
+      providerFields,
+      isAdo,
+      showAdoAdvancedConfig,
+      showGitlabAdvancedConfig,
+      showGiteaAdvancedConfig,
+      adoAuthMode,
+      selectedProvider?.provider,
+    ],
   );
 
   // Key off field content, not array identity — parent refreshes create a new
@@ -210,6 +221,7 @@ export function StepSourceControlConfig({
     setShowManualGitHubValues(false);
     setShowAdoAdvancedConfig(false);
     setShowGitlabAdvancedConfig(false);
+    setShowGiteaAdvancedConfig(false);
     const hasAdoEntraCredentials = providerFields.some(
       (field) =>
         ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID'].includes(
@@ -318,7 +330,7 @@ export function StepSourceControlConfig({
   );
   const creationHref =
     selectedProvider?.provider === 'gitlab'
-      ? `${effectiveGitLabBaseUrl}/-/user_settings/personal_access_tokens`
+      ? `${effectiveGitLabBaseUrl}/-/user_settings/applications`
       : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
@@ -418,6 +430,16 @@ export function StepSourceControlConfig({
               the application credentials.
             </p>
           )}
+          {selectedProvider?.provider === 'gitea' && (
+            <p className="text-sm text-muted-foreground">
+              OAuth redirect URI:{' '}
+              <code>
+                {publicOrigin}/api/source-control/gitea/oauth/callback
+              </code>
+              . Create the application in Gitea 1.23 or newer, then authorize it
+              with the dedicated service account.
+            </p>
+          )}
 
           {(isAdo ? baseFields : visibleFields).map((field) => (
             <SourceControlFieldInput
@@ -448,7 +470,9 @@ export function StepSourceControlConfig({
               }
             />
           ))}
-          {(isAdo || selectedProvider?.provider === 'gitlab') &&
+          {(isAdo ||
+            selectedProvider?.provider === 'gitlab' ||
+            selectedProvider?.provider === 'gitea') &&
           advancedFields.length > 0 ? (
             <div className="pt-1">
               <button
@@ -457,17 +481,28 @@ export function StepSourceControlConfig({
                 onClick={() =>
                   isAdo
                     ? setShowAdoAdvancedConfig((current) => !current)
-                    : setShowGitlabAdvancedConfig((current) => !current)
+                    : selectedProvider?.provider === 'gitlab'
+                      ? setShowGitlabAdvancedConfig((current) => !current)
+                      : setShowGiteaAdvancedConfig((current) => !current)
                 }
               >
-                {(isAdo ? showAdoAdvancedConfig : showGitlabAdvancedConfig)
+                {(
+                  isAdo
+                    ? showAdoAdvancedConfig
+                    : selectedProvider?.provider === 'gitlab'
+                      ? showGitlabAdvancedConfig
+                      : showGiteaAdvancedConfig
+                )
                   ? 'Hide advanced config'
                   : 'Show advanced config'}
               </button>
             </div>
           ) : null}
-          {(isAdo ? showAdoAdvancedConfig : showGitlabAdvancedConfig) &&
-          advancedFields.length > 0
+          {(isAdo
+            ? showAdoAdvancedConfig
+            : selectedProvider?.provider === 'gitlab'
+              ? showGitlabAdvancedConfig
+              : showGiteaAdvancedConfig) && advancedFields.length > 0
             ? advancedFields.map((field) => (
                 <SourceControlFieldInput
                   key={field.envVarName}

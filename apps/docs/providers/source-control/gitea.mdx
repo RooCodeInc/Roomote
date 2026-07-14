@@ -17,9 +17,11 @@ Use `<public-url>` below for your stable public Roomote URL.
 ## Create a Gitea bot token
 
 Create a dedicated Gitea bot or service-account user and give it access to the
-organizations or repositories Roomote should use. Create an access token with
-repository read/write permissions appropriate for cloning, branch creation, and
-commits.
+organizations or repositories Roomote should use. New deployments use a Gitea
+1.23+ OAuth application and a dedicated service account. Create the application
+with the redirect URI shown by Roomote and authorize it with the scopes
+`read:user`, `read:repository`, `write:repository`, `write:issue`, and
+`read:organization`.
 
 If Roomote should configure webhooks automatically, the token identity also
 needs repository admin access for the synced repositories.
@@ -29,22 +31,22 @@ Save the instance URL and token in setup, deployment env vars, or local
 
 ```sh
 GITEA_BASE_URL=https://git.example.com
-GITEA_TOKEN=<gitea-token>
+GITEA_CLIENT_ID=<oauth-client-id>
+GITEA_CLIENT_SECRET=<oauth-client-secret>
 ```
 
 Optional values:
 
 ```sh
-GITEA_USERNAME=<token-owner-username>
 GITEA_WEBHOOK_SECRET=<webhook-secret>
 ```
 
-When `GITEA_USERNAME` is omitted, Roomote resolves the token owner through the
-Gitea API and uses that login for Git-over-HTTPS credentials.
+Roomote runs deployment operations as the authorized service account and uses
+that login for Git-over-HTTPS credentials.
 
-The setup flow asks only for the Gitea instance URL and access token. Roomote
-generates the webhook secret during repository sync; optional username and OAuth
-settings remain available under Settings.
+The setup flow asks for the Gitea instance URL and OAuth application
+credentials, then sends the operator through the authorization flow. Roomote
+generates the webhook secret during repository sync.
 
 ## Sync repositories
 
@@ -54,8 +56,8 @@ repositories from the Gitea API and stores them as Gitea repository rows.
 
 Gitea-backed tasks clone from the synced repository row, so sync must run
 before launching a Gitea-backed task. Worker tasks route selected Gitea HTTPS
-clone traffic through a local proxy instead of exporting `GITEA_TOKEN` into
-task shells.
+clone traffic through a local proxy instead of exposing OAuth tokens to task
+shells.
 
 After repository sync, Roomote best-effort creates or refreshes a repository
 webhook for each synced Gitea repository. The webhook target is:
@@ -80,9 +82,9 @@ existing PR owner task when possible, or enqueue a new review task.
 
 ## Current limits
 
-Gitea does not yet have a self-serve OAuth/App installation flow, personal
-linked-account flow, or repository permission delegation UI. Gitea support is
-deployment-token backed.
+Personal Gitea account linking reuses the same OAuth application but stores a
+separate `authAccounts` grant with only `read:user`; the deployment service
+account grant is never used to identify a pull-request commenter.
 
 ## Verify setup
 

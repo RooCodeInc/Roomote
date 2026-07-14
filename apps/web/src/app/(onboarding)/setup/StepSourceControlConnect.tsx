@@ -185,6 +185,18 @@ export function StepSourceControlConnect({
         field.envVarName === 'GITLAB_CLIENT_SECRET' &&
         (field.runtimeSatisfied || field.savedSatisfied),
     );
+  const giteaOAuthConfigured =
+    provider === 'gitea' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
 
   const handleSyncRepositories = async () => {
     if (
@@ -286,6 +298,18 @@ export function StepSourceControlConnect({
                 href="/api/source-control/gitlab/oauth/authorize"
               >
                 Authorize GitLab
+              </a>
+            </p>
+          ) : null}
+          {giteaOAuthConfigured ? (
+            <p className="text-sm text-muted-foreground">
+              Authorize the Gitea application with the dedicated service account
+              before syncing repositories.
+              <a
+                className="ml-1 underline"
+                href="/api/source-control/gitea/oauth/authorize"
+              >
+                Authorize Gitea
               </a>
             </p>
           ) : null}

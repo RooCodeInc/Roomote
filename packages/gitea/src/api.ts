@@ -15,11 +15,11 @@ import {
   inArray,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
+import { getGiteaOAuthConnection, resolveGiteaOAuthAccessToken } from './oauth';
 
 const GITEA_PROVIDER = 'gitea' satisfies SourceControlProvider;
 const GITEA_REPOSITORIES_PER_PAGE = 50;
 const GITEA_WEBHOOK_ENSURE_CONCURRENCY = 5;
-const GITEA_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 
 const GITEA_WEBHOOK_EVENTS = [
   'pull_request',
@@ -122,7 +122,7 @@ export function normalizeGiteaBaseUrl(baseUrl: string): string {
 }
 
 export async function resolveGiteaToken(): Promise<string | null> {
-  return resolveDeploymentEnvVar('GITEA_TOKEN');
+  return resolveGiteaOAuthAccessToken();
 }
 
 let cachedGiteaDeploymentUser: {
@@ -137,7 +137,7 @@ export async function resolveGiteaBaseUrl(): Promise<string | null> {
 }
 
 export async function resolveGiteaUsername(): Promise<string | null> {
-  return resolveDeploymentEnvVar('GITEA_USERNAME');
+  return (await getGiteaOAuthConnection())?.username || null;
 }
 
 export function buildGiteaApiBaseUrl(baseUrl: string): string {
@@ -184,7 +184,7 @@ async function requestGiteaJson<T>({
     method,
     headers: {
       Accept: 'application/json',
-      Authorization: `token ${token}`,
+      Authorization: `Bearer ${token}`,
       ...(body ? { 'Content-Type': 'application/json' } : {}),
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
@@ -226,54 +226,6 @@ export class GiteaApiError extends Error {
   }
 }
 
-export type GiteaTokenValidationResult =
-  | { status: 'valid'; login: string }
-  | { status: 'invalid'; error: string }
-  | { status: 'unknown'; error: string };
-
-export async function validateGiteaToken({
-  token,
-  baseUrl,
-  apiBaseUrl,
-  fetchImpl = fetch,
-  timeoutMs = GITEA_TOKEN_VALIDATION_TIMEOUT_MS,
-}: {
-  token: string;
-  baseUrl?: string;
-  apiBaseUrl?: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<GiteaTokenValidationResult> {
-  const timedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-
-  try {
-    const { login } = await getGiteaAuthenticatedUser({
-      token,
-      baseUrl,
-      apiBaseUrl,
-      fetchImpl: timedFetch,
-    });
-
-    return { status: 'valid', login };
-  } catch (error) {
-    if (error instanceof GiteaApiError && [401, 403].includes(error.status)) {
-      return {
-        status: 'invalid',
-        error:
-          'Gitea rejected the token. Confirm the token is active and has repository access.',
-      };
-    }
-
-    return {
-      status: 'unknown',
-      error: `Could not verify the Gitea token: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
-}
-
 export async function listGiteaRepositories({
   token,
   baseUrl,
@@ -284,7 +236,7 @@ export async function listGiteaRepositories({
   const giteaToken = token ?? (await resolveGiteaToken());
 
   if (!giteaToken?.trim()) {
-    throw new Error('GITEA_TOKEN is required to sync Gitea repositories.');
+    throw new Error('Gitea OAuth connection is required to sync repositories.');
   }
 
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
@@ -584,7 +536,9 @@ export async function getGiteaAuthenticatedUser({
   const giteaToken = token ?? (await resolveGiteaToken());
 
   if (!giteaToken?.trim()) {
-    throw new Error('GITEA_TOKEN is required for Gitea source control jobs.');
+    throw new Error(
+      'Gitea OAuth connection is required for source control jobs.',
+    );
   }
 
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
@@ -688,7 +642,7 @@ export async function createGiteaPullRequestComment({
 
   if (!giteaToken?.trim()) {
     throw new Error(
-      'GITEA_TOKEN is required to create Gitea pull request comments.',
+      'Gitea OAuth connection is required to create pull request comments.',
     );
   }
 
@@ -860,7 +814,9 @@ export async function ensureGiteaWebhooksForRepositories({
   const giteaToken = token ?? (await resolveGiteaToken());
 
   if (!giteaToken?.trim()) {
-    throw new Error('GITEA_TOKEN is required to configure Gitea webhooks.');
+    throw new Error(
+      'Gitea OAuth connection is required to configure webhooks.',
+    );
   }
 
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
@@ -957,7 +913,7 @@ async function removeGiteaRepositoryWebhook({
       method: 'DELETE',
       headers: {
         Accept: 'application/json',
-        Authorization: `token ${token}`,
+        Authorization: `Bearer ${token}`,
       },
     },
   );
@@ -994,7 +950,9 @@ export async function removeGiteaWebhooksForRepositories({
   const giteaToken = token ?? (await resolveGiteaToken());
 
   if (!giteaToken?.trim()) {
-    throw new Error('GITEA_TOKEN is required to configure Gitea webhooks.');
+    throw new Error(
+      'Gitea OAuth connection is required to configure webhooks.',
+    );
   }
 
   const resolvedBaseUrl = baseUrl ?? (await resolveGiteaBaseUrl());
@@ -1059,7 +1017,9 @@ export async function createTaskRunGiteaCredentials(
   const deploymentToken = options?.token ?? (await resolveGiteaToken());
 
   if (!deploymentToken?.trim()) {
-    throw new Error('GITEA_TOKEN is required for Gitea source control jobs.');
+    throw new Error(
+      'Gitea OAuth connection is required for source control jobs.',
+    );
   }
 
   const baseUrl = options?.baseUrl ?? (await resolveGiteaBaseUrl());

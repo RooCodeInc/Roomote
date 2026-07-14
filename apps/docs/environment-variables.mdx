@@ -236,45 +236,42 @@ as per-task auth tokens or workspace paths.
 
 ### Source control providers
 
-| Env var                        | Required     | Used for                                                                                         |
-| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------------ |
-| `R_GITHUB_APP_SLUG`            | GitHub       | GitHub App slug.                                                                                 |
-| `R_GITHUB_APP_ID`              | GitHub       | GitHub App ID.                                                                                   |
-| `R_GITHUB_APP_PRIVATE_KEY`     | GitHub       | Raw GitHub App private key PEM, usually with newlines escaped as `\\n`.                          |
-| `R_GITHUB_CLIENT_ID`           | GitHub       | GitHub OAuth client ID.                                                                          |
-| `R_GITHUB_CLIENT_SECRET`       | GitHub       | GitHub OAuth client secret.                                                                      |
-| `R_GITHUB_WEBHOOK_SECRET`      | GitHub       | GitHub webhook secret.                                                                           |
-| `GITHUB_MCP_SERVER_URL`        | Optional     | GitHub MCP server URL override.                                                                  |
-| `GITHUB_AUTOMATED_SKIP_REPOS`  | Optional     | Repository skip list for automated GitHub processing.                                            |
-| `GITHUB_AUTOMATED_SKIP_OWNERS` | Optional     | Owner skip list for automated GitHub processing.                                                 |
-| `GITLAB_TOKEN`                 | GitLab       | GitLab automation token for source-control setup; prefer a dedicated bot/service identity over a personal user account. |
-| `GITLAB_BASE_URL`              | Optional     | GitLab base URL for self-managed GitLab.                                                         |
-| `GITLAB_CLIENT_ID`             | Optional     | GitLab OAuth application ID for personal account linking and merge request comment triggers.     |
-| `GITLAB_CLIENT_SECRET`         | Optional     | GitLab OAuth application secret for personal account linking and merge request comment triggers. |
-| `GITLAB_WEBHOOK_SIGNING_TOKEN` | Optional     | GitLab webhook signing token.                                                                    |
-| `GITLAB_WEBHOOK_SECRET`        | Optional     | GitLab webhook secret.                                                                           |
-| `GITEA_BASE_URL`               | Gitea        | Gitea base URL.                                                                                  |
-| `GITEA_TOKEN`                  | Gitea        | Gitea access token.                                                                              |
-| `GITEA_USERNAME`               | Optional     | Gitea username.                                                                                  |
-| `GITEA_CLIENT_ID`              | Optional     | Gitea OAuth client ID.                                                                           |
-| `GITEA_CLIENT_SECRET`          | Optional     | Gitea OAuth client secret.                                                                       |
-| `GITEA_WEBHOOK_SECRET`         | Optional     | Gitea webhook secret.                                                                            |
-| `BITBUCKET_TOKEN`              | Bitbucket    | Atlassian API token with Bitbucket scopes.                                                       |
-| `BITBUCKET_USERNAME`           | Bitbucket    | Atlassian account email that owns the API token.                                                 |
-| `BITBUCKET_BASE_URL`           | Optional     | Bitbucket base URL. Defaults to `https://bitbucket.org` (Cloud only).                            |
-| `BITBUCKET_CLIENT_ID`          | Optional     | Bitbucket OAuth client ID for personal account linking.                                          |
-| `BITBUCKET_CLIENT_SECRET`      | Optional     | Bitbucket OAuth client secret for personal account linking.                                      |
-| `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                        |
-| `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                       |
-| `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                       |
-| `ADO_AUTH_MODE`                | Optional     | `pat`, `entra`, or `delegated`; omitted values retain legacy PAT/Entra inference.                |
-| `ADO_LINKED_ACCOUNT_ID`        | Optional     | Linked Azure DevOps account key used by delegated authentication.                                |
-| `ADO_BASE_URL`                 | Optional     | Azure DevOps base URL.                                                                           |
-| `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                           |
-| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps service-principal authentication.                     |
-| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps service-principal authentication.                 |
-| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps service-principal authentication.                     |
-| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret. Generated automatically when Roomote configures service hooks.      |
+| Env var                        | Required     | Used for                                                                                    |
+| ------------------------------ | ------------ | ------------------------------------------------------------------------------------------- |
+| `R_GITHUB_APP_SLUG`            | GitHub       | GitHub App slug.                                                                            |
+| `R_GITHUB_APP_ID`              | GitHub       | GitHub App ID.                                                                              |
+| `R_GITHUB_APP_PRIVATE_KEY`     | GitHub       | Raw GitHub App private key PEM, usually with newlines escaped as `\\n`.                     |
+| `R_GITHUB_CLIENT_ID`           | GitHub       | GitHub OAuth client ID.                                                                     |
+| `R_GITHUB_CLIENT_SECRET`       | GitHub       | GitHub OAuth client secret.                                                                 |
+| `R_GITHUB_WEBHOOK_SECRET`      | GitHub       | GitHub webhook secret.                                                                      |
+| `GITHUB_MCP_SERVER_URL`        | Optional     | GitHub MCP server URL override.                                                             |
+| `GITHUB_AUTOMATED_SKIP_REPOS`  | Optional     | Repository skip list for automated GitHub processing.                                       |
+| `GITHUB_AUTOMATED_SKIP_OWNERS` | Optional     | Owner skip list for automated GitHub processing.                                            |
+| `GITLAB_BASE_URL`              | Optional     | GitLab base URL for self-managed GitLab.                                                    |
+| `GITLAB_CLIENT_ID`             | GitLab       | GitLab OAuth application ID.                                                                |
+| `GITLAB_CLIENT_SECRET`         | GitLab       | GitLab OAuth application secret.                                                            |
+| `GITLAB_WEBHOOK_SIGNING_TOKEN` | Optional     | GitLab webhook signing token.                                                               |
+| `GITLAB_WEBHOOK_SECRET`        | Optional     | GitLab webhook secret.                                                                      |
+| `GITEA_BASE_URL`               | Gitea        | Gitea base URL.                                                                             |
+| `GITEA_CLIENT_ID`              | Gitea        | Gitea OAuth application client ID for deployment and personal account-linking grants.       |
+| `GITEA_CLIENT_SECRET`          | Gitea        | Gitea OAuth application client secret.                                                      |
+| `GITEA_WEBHOOK_SECRET`         | Optional     | Gitea webhook secret.                                                                       |
+| `BITBUCKET_TOKEN`              | Bitbucket    | Atlassian API token with Bitbucket scopes.                                                  |
+| `BITBUCKET_USERNAME`           | Bitbucket    | Atlassian account email that owns the API token.                                            |
+| `BITBUCKET_BASE_URL`           | Optional     | Bitbucket base URL. Defaults to `https://bitbucket.org` (Cloud only).                       |
+| `BITBUCKET_CLIENT_ID`          | Optional     | Bitbucket OAuth client ID for personal account linking.                                     |
+| `BITBUCKET_CLIENT_SECRET`      | Optional     | Bitbucket OAuth client secret for personal account linking.                                 |
+| `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                   |
+| `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                  |
+| `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                  |
+| `ADO_AUTH_MODE`                | Optional     | `pat`, `entra`, or `delegated`; omitted values retain legacy PAT/Entra inference.           |
+| `ADO_LINKED_ACCOUNT_ID`        | Optional     | Linked Azure DevOps account key used by delegated authentication.                           |
+| `ADO_BASE_URL`                 | Optional     | Azure DevOps base URL.                                                                      |
+| `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                      |
+| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps service-principal authentication.                |
+| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps service-principal authentication.            |
+| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps service-principal authentication.                |
+| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret. Generated automatically when Roomote configures service hooks. |
 
 ### Communications and sign-in
 

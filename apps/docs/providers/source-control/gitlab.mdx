@@ -4,48 +4,37 @@ icon: 'https://api.iconify.design/simple-icons:gitlab.svg?color=currentColor'
 description: Configure GitLab repository sync and merge request webhooks for Roomote.
 ---
 
-GitLab does not have a GitHub-style App installation flow. GitLab OAuth
-applications are for delegated user access, not for granting Roomote an
-independent installation identity. Roomote therefore uses a deployment-owned
-automation token for repository sync, task execution, merge-request notes, and
-webhook management. Use a dedicated bot or service identity rather than a
-personal developer account.
+GitLab does not have a GitHub-style App installation flow. Configure a GitLab
+OAuth application for Roomote's deployment, then authorize it once so Roomote
+can sync repositories, run tasks, add merge-request notes, and manage webhooks.
 
 Use `<public-url>` below for your stable public Roomote URL.
 
-## Create a GitLab automation token
+## Create a GitLab OAuth application
 
-Add a dedicated GitLab bot or service-account identity to the groups or projects
-Roomote should access. Prefer a group or project access token when it fits your
-GitLab plan and repository layout. If Roomote needs to enumerate repositories
-across memberships or create short-lived project tokens, create a personal
-access token for the dedicated bot account instead—not for an individual
-operator. Give the token scopes that match the behavior you want:
+Create the application on the GitLab account, group, or instance that should
+own Roomote's access. Use these settings:
 
-| Scope              | Needed for                                       |
-| ------------------ | ------------------------------------------------ |
-| `api`              | project listing and repository sync through REST |
-| `read_repository`  | cloning private repositories over Git-over-HTTPS |
-| `write_repository` | pushing branches or commits from Roomote tasks   |
+- **Confidential**: enabled
+- **Redirect URI**: `<public-url>/api/source-control/gitlab/oauth/callback`
+- **Scopes**: `api`
 
-Save the token in setup, deployment env vars, or local `.env.local`:
+Save the application credentials in setup, deployment env vars, or local
+`.env.local`:
 
 ```sh
-GITLAB_TOKEN=<gitlab-token>
+GITLAB_CLIENT_ID=<application-id>
+GITLAB_CLIENT_SECRET=<application-secret>
 ```
 
 For self-managed GitLab, also set `GITLAB_BASE_URL`.
 
-The setup flow asks only for the automation token and, when needed, the
-self-managed GitLab base URL. OAuth is configured separately and is optional;
-it is only needed when teammates should link their GitLab accounts for
-merge-request comment triggers.
-
 ## Sync repositories
 
-After the token is available, open Settings, go to the Environments page, and
-use the Source Control section's GitLab sync button. Roomote lists the GitLab
-projects visible to the token and stores them as GitLab repository rows.
+After the application credentials are configured, open Settings, go to the
+Environments page, authorize GitLab, and use the Source Control section's sync
+button. Roomote lists the projects visible to the authorized GitLab account and
+stores them as GitLab repository rows.
 
 GitLab-backed tasks clone from the synced repository row, so sync must run
 before launching a GitLab-backed task.
@@ -79,31 +68,9 @@ GITLAB_WEBHOOK_SECRET=<legacy-secret-token>
 
 ## Enable merge request comment triggers (recommended)
 
-Users can trigger Roomote tasks by mentioning `@roomote` in merge request
-comments, but only after linking their personal GitLab account in Roomote's
-Personal settings. This is a separate, optional GitLab OAuth application:
-
-1. Open **Applications** in GitLab — on the bot account
-   (`/-/user_settings/applications`), a group, or the admin area for a
-   self-managed instance.
-2. Create an application with:
-   - **Name**: `Roomote` (upload the Roomote logo if you want)
-   - **Redirect URI**: `<public-url>/api/auth/oauth2/callback/gitlab`
-   - **Confidential**: enabled
-   - **Scopes**: `read_user` only
-3. Save the generated Application ID and Secret in setup, deployment env vars,
-   or local `.env.local`:
-
-```sh
-GITLAB_CLIENT_ID=<application-id>
-GITLAB_CLIENT_SECRET=<application-secret>
-```
-
-Once configured, a GitLab row appears under Personal settings > Linked
-Accounts, and users who link their account can trigger tasks from merge
-request comments. Without these credentials, automatic merge request review
-still works, but `@roomote` comment mentions reply with account-linking
-instructions instead of starting work.
+Once the application is configured, users can link their personal GitLab
+accounts in Roomote's Personal settings and trigger tasks by mentioning
+`@roomote` in merge request comments.
 
 ## Enable review automation
 

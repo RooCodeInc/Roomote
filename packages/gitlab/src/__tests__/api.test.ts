@@ -7,10 +7,12 @@ const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
+  mockGitLabOAuthAccessToken,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
+  mockGitLabOAuthAccessToken: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -60,6 +62,11 @@ vi.mock('@roomote/db/encryption', () => ({
   decryptSecrets: vi.fn(async (value: unknown) => value),
 }));
 
+vi.mock('../oauth', () => ({
+  isGitLabOAuthAccessToken: () => false,
+  resolveGitLabOAuthAccessToken: () => mockGitLabOAuthAccessToken(),
+}));
+
 import {
   buildGitLabApiBaseUrl,
   buildGitLabRepositoryValues,
@@ -74,7 +81,6 @@ import {
   type GitLabProject,
   listGitLabProjects,
   normalizeGitLabBaseUrl,
-  validateGitLabToken,
 } from '../api';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
@@ -210,7 +216,7 @@ describe('listGitLabProjects', () => {
 
   it('requires a token', async () => {
     await expect(listGitLabProjects({ token: '' })).rejects.toThrow(
-      'GITLAB_TOKEN is required to sync GitLab repositories.',
+      'GitLab OAuth authorization is required to sync repositories.',
     );
   });
 
@@ -290,12 +296,11 @@ describe('buildGitLabRepositoryValues', () => {
 });
 
 describe('createTaskRunScopedGitLabTokens', () => {
-  const originalGitLabToken = process.env.GITLAB_TOKEN;
   const originalGitLabBaseUrl = process.env.GITLAB_BASE_URL;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.GITLAB_TOKEN = 'glpat_deployment_token';
+    mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
     delete process.env.GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -308,12 +313,6 @@ describe('createTaskRunScopedGitLabTokens', () => {
   });
 
   afterEach(() => {
-    if (originalGitLabToken === undefined) {
-      delete process.env.GITLAB_TOKEN;
-    } else {
-      process.env.GITLAB_TOKEN = originalGitLabToken;
-    }
-
     if (originalGitLabBaseUrl === undefined) {
       delete process.env.GITLAB_BASE_URL;
     } else {
@@ -750,21 +749,14 @@ describe('createTaskRunScopedGitLabTokens', () => {
 });
 
 describe('getGitLabDeploymentUser', () => {
-  const originalGitLabToken = process.env.GITLAB_TOKEN;
-
   beforeEach(() => {
     vi.clearAllMocks();
     clearGitLabDeploymentUserCache();
-    process.env.GITLAB_TOKEN = 'glpat_deployment_token';
+    mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
   });
 
   afterEach(() => {
     clearGitLabDeploymentUserCache();
-    if (originalGitLabToken === undefined) {
-      delete process.env.GITLAB_TOKEN;
-    } else {
-      process.env.GITLAB_TOKEN = originalGitLabToken;
-    }
   });
 
   it('resolves the deployment identity via GET /user and caches it', async () => {
@@ -842,7 +834,7 @@ describe('createGitLabMergeRequestNote', () => {
         fetchImpl: vi.fn<typeof fetch>(),
       }),
     ).rejects.toThrow(
-      'GITLAB_TOKEN is required to create GitLab merge request notes.',
+      'GitLab OAuth authorization is required to create merge request notes.',
     );
   });
 });

@@ -18,14 +18,15 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
+    creationHref: 'https://gitlab.com/-/user_settings/applications',
     setupLabel: 'GitLab OAuth application',
     creationHint:
-      'Create an OAuth application in GitLab with api, read_repository, and write_repository scopes. Use the exact redirect URI shown by Roomote, then authorize it with the dedicated service account. Existing PAT deployments can use the advanced migration path.',
+      'Create an OAuth application in GitLab with api scope. Use the exact redirect URI shown by Roomote, then authorize it with the dedicated service account.',
   },
   gitea: {
-    setupLabel: 'Gitea access token',
+    setupLabel: 'Gitea OAuth application',
     creationHint:
-      'In your Gitea instance, go to your avatar → Settings → Applications → Manage Access Tokens → Generate Token. Give it at least read + write access to repositories.',
+      'Create an OAuth application in Gitea 1.23+ with the exact redirect URI shown by Roomote. Authorize it with the dedicated service account and request read:user, read:repository, write:repository, write:issue, and read:organization scopes.',
   },
   bitbucket: {
     creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',

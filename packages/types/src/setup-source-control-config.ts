@@ -241,14 +241,6 @@ function buildProviderFields(
     case 'gitlab':
       return [
         {
-          envVarName: 'GITLAB_TOKEN',
-          acceptedEnvVarNames: ['GITLAB_TOKEN'],
-          label: 'GitLab Automation Token',
-          secret: true,
-          required: false,
-          advanced: true,
-        },
-        {
           envVarName: 'GITLAB_BASE_URL',
           acceptedEnvVarNames: ['GITLAB_BASE_URL'],
           label: 'GitLab Base URL',
@@ -258,14 +250,12 @@ function buildProviderFields(
           envVarName: 'GITLAB_CLIENT_ID',
           acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
           label: 'GitLab OAuth Client ID',
-          required: false,
         },
         {
           envVarName: 'GITLAB_CLIENT_SECRET',
           acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
           label: 'GitLab OAuth Client Secret',
           secret: true,
-          required: false,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SIGNING_TOKEN',
@@ -292,32 +282,17 @@ function buildProviderFields(
           label: 'Gitea Base URL',
         },
         {
-          envVarName: 'GITEA_TOKEN',
-          acceptedEnvVarNames: ['GITEA_TOKEN'],
-          label: 'Gitea Access Token',
-          secret: true,
-        },
-        {
-          envVarName: 'GITEA_USERNAME',
-          acceptedEnvVarNames: ['GITEA_USERNAME'],
-          label: 'Gitea Username',
-          required: false,
-          setupHidden: true,
-        },
-        {
           envVarName: 'GITEA_CLIENT_ID',
           acceptedEnvVarNames: ['GITEA_CLIENT_ID'],
           label: 'Gitea OAuth Client ID',
-          required: false,
-          setupHidden: true,
+          required: true,
         },
         {
           envVarName: 'GITEA_CLIENT_SECRET',
           acceptedEnvVarNames: ['GITEA_CLIENT_SECRET'],
           label: 'Gitea OAuth Client Secret',
           secret: true,
-          required: false,
-          setupHidden: true,
+          required: true,
         },
         {
           envVarName: 'GITEA_WEBHOOK_SECRET',
@@ -492,15 +467,18 @@ export function buildSetupSourceControlStatus(input: {
     });
 
     const requiredFields = fields.filter(isRequiredField);
-    const runtimeConfigSatisfied = requiredFields.every(
+    const requiredFieldsSatisfied = requiredFields.every(
       (field) => field.runtimeSatisfied,
     );
-    const savedConfigSatisfied = requiredFields.every(
+    const requiredSavedFieldsSatisfied = requiredFields.every(
       (field) => field.savedSatisfied,
     );
-    const standardConfigSatisfied = requiredFields.every(
+    const standardRequiredFieldsSatisfied = requiredFields.every(
       (field) => field.runtimeSatisfied || field.savedSatisfied,
     );
+    const runtimeConfigSatisfied = requiredFieldsSatisfied;
+    const savedConfigSatisfied = requiredSavedFieldsSatisfied;
+    const standardConfigSatisfied = standardRequiredFieldsSatisfied;
     const adoCredentialSatisfied =
       descriptor.provider !== 'ado' ||
       isAdoCredentialConfigured(fields, 'effective');

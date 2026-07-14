@@ -112,10 +112,9 @@ function buildSourceControlSetup(
         repositoryCount: 0,
         fields: [
           {
-            envVarName: 'GITLAB_TOKEN',
-            acceptedEnvVarNames: ['GITLAB_TOKEN'],
-            label: 'GitLab Automation Token',
-            secret: true,
+            envVarName: 'GITLAB_CLIENT_ID',
+            acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+            label: 'GitLab OAuth Client ID',
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -239,7 +238,7 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
   });
 
-  it('guides GitLab automation token setup', () => {
+  it('guides GitLab OAuth application setup', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('gitlab')}
@@ -248,29 +247,17 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText('GitLab Automation Token')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Open' })).toHaveAttribute(
-      'href',
-      'https://gitlab.com/-/user_settings/personal_access_tokens',
-    );
     expect(
-      screen.getByText(
-        /avatar → Edit profile → Access → Personal access tokens/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/OAuth application setup is separate and optional/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Recommended: create a GitLab OAuth application/),
-    ).not.toBeInTheDocument();
+      screen.getAllByText(/GitLab OAuth application/).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText(/OAuth application in GitLab/)).toBeInTheDocument();
     expect(screen.queryByText(/GitLab Webhook Secret/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Create GitHub App' }),
     ).not.toBeInTheDocument();
   });
 
-  it('guides Gitea token creation without optional credentials', () => {
+  it('guides Gitea OAuth application setup', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('gitea')}
@@ -280,15 +267,12 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(screen.getByText('Gitea Base URL')).toBeInTheDocument();
-    expect(screen.getByText('Gitea Access Token')).toBeInTheDocument();
-    expect(
-      screen.getByRole('link', { name: /View Gitea guide/ }),
-    ).toHaveAttribute('href', 'https://docs.gitea.com/development/api-usage');
-    expect(
-      screen.getByText(/Settings → Applications → Manage Access Tokens/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Gitea OAuth Client ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Gitea OAuth Client Secret/)).toBeInTheDocument();
+    expect(screen.getByText(/Gitea 1\.23 or newer/)).toBeInTheDocument();
+    expect(screen.getByText(/read:user, read:repository/)).toBeInTheDocument();
+    expect(screen.queryByText('Gitea Access Token')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Username')).not.toBeInTheDocument();
-    expect(screen.queryByText('Gitea OAuth Client ID')).not.toBeInTheDocument();
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
   });
 

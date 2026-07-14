@@ -134,8 +134,7 @@ export function normalizeGitLabBaseUrl(baseUrl: string): string {
 }
 
 export async function resolveGitLabToken(): Promise<string | null> {
-  const oauthToken = await resolveGitLabOAuthAccessToken();
-  return oauthToken ?? (await resolveDeploymentEnvVar('GITLAB_TOKEN'));
+  return resolveGitLabOAuthAccessToken();
 }
 
 let cachedGitLabDeploymentUser: {
@@ -199,7 +198,7 @@ export async function createGitLabMergeRequestNote({
 
   if (!gitLabToken?.trim()) {
     throw new Error(
-      'GITLAB_TOKEN is required to create GitLab merge request notes.',
+      'GitLab OAuth authorization is required to create merge request notes.',
     );
   }
 
@@ -370,7 +369,9 @@ export async function listGitLabProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to sync GitLab repositories.');
+    throw new Error(
+      'GitLab OAuth authorization is required to sync repositories.',
+    );
   }
 
   const resolvedApiBaseUrl =
@@ -613,7 +614,9 @@ export async function ensureGitLabWebhooksForProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to configure GitLab webhooks.');
+    throw new Error(
+      'GitLab OAuth authorization is required to configure webhooks.',
+    );
   }
 
   const results: GitLabWebhookEnsureResult[] = [];
@@ -686,7 +689,9 @@ export async function removeGitLabWebhooksForProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to configure GitLab webhooks.');
+    throw new Error(
+      'GitLab OAuth authorization is required to configure webhooks.',
+    );
   }
 
   const results: GitLabWebhookRemoveResult[] = [];
@@ -1146,7 +1151,9 @@ export async function createTaskRunScopedGitLabTokens(
   const deploymentToken = await resolveGitLabToken();
 
   if (!deploymentToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required for GitLab source control jobs.');
+    throw new Error(
+      'GitLab OAuth authorization is required for source-control jobs.',
+    );
   }
 
   const baseUrl = options?.baseUrl ?? (await resolveGitLabBaseUrl());

@@ -715,10 +715,6 @@ export async function assertValidSourceControlConfigInput(params: {
   values?: Partial<Record<string, string>>;
   allowIncompleteDelegated?: boolean;
 }): Promise<void> {
-  const nextGitLabToken =
-    params.provider === 'gitlab'
-      ? params.values?.['GITLAB_TOKEN']?.trim()
-      : undefined;
   const nextGitLabClientId =
     params.provider === 'gitlab'
       ? (params.values?.['GITLAB_CLIENT_ID']?.trim() ??
@@ -729,9 +725,15 @@ export async function assertValidSourceControlConfigInput(params: {
       ? (params.values?.['GITLAB_CLIENT_SECRET']?.trim() ??
         (await resolveDeploymentEnvVar('GITLAB_CLIENT_SECRET')))
       : undefined;
-  const nextGiteaToken =
+  const nextGiteaClientId =
     params.provider === 'gitea'
-      ? params.values?.['GITEA_TOKEN']?.trim()
+      ? (params.values?.['GITEA_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('GITEA_CLIENT_ID')))
+      : undefined;
+  const nextGiteaClientSecret =
+    params.provider === 'gitea'
+      ? (params.values?.['GITEA_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('GITEA_CLIENT_SECRET')))
       : undefined;
   const nextBitbucketToken =
     params.provider === 'bitbucket'
@@ -786,49 +788,20 @@ export async function assertValidSourceControlConfigInput(params: {
     );
   }
 
-  if (nextGitLabToken) {
-    const nextGitLabBaseUrl =
-      (params.values?.['GITLAB_BASE_URL']?.trim()
-        ? GitLab.normalizeGitLabBaseUrl(params.values['GITLAB_BASE_URL'])
-        : undefined) ?? (await GitLab.resolveGitLabBaseUrl());
-    const validation = await GitLab.validateGitLabToken({
-      token: nextGitLabToken,
-      apiBaseUrl: GitLab.buildGitLabApiBaseUrl(nextGitLabBaseUrl),
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
+  if (
+    params.provider === 'gitlab' &&
+    !(nextGitLabClientId && nextGitLabClientSecret)
+  ) {
+    throw new Error('Configure the GitLab OAuth client ID and secret.');
   }
 
   if (
-    params.provider === 'gitlab' &&
-    !nextGitLabToken &&
-    !(nextGitLabClientId && nextGitLabClientSecret)
+    params.provider === 'gitea' &&
+    !(nextGiteaClientId && nextGiteaClientSecret)
   ) {
     throw new Error(
-      'Configure the GitLab OAuth client ID and secret, or use the advanced PAT migration path.',
+      'Configure the Gitea OAuth client ID and secret to continue.',
     );
-  }
-
-  if (nextGiteaToken) {
-    const nextGiteaBaseUrl =
-      (params.values?.['GITEA_BASE_URL']?.trim()
-        ? Gitea.normalizeGiteaBaseUrl(params.values['GITEA_BASE_URL'])
-        : undefined) ?? (await Gitea.resolveGiteaBaseUrl());
-
-    if (!nextGiteaBaseUrl) {
-      return;
-    }
-
-    const validation = await Gitea.validateGiteaToken({
-      token: nextGiteaToken,
-      baseUrl: nextGiteaBaseUrl,
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
   }
 
   if (nextBitbucketToken) {
