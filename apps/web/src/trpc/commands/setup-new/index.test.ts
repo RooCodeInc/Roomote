@@ -1,5 +1,4 @@
 import type { FeatureFlag } from '@roomote/feature-flags';
-import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
