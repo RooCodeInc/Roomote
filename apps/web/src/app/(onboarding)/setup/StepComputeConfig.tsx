@@ -16,7 +16,6 @@ import {
 
 import { useTRPC } from '@/trpc/client';
 import {
-  ArrowLeft,
   ArrowRight,
   Alert,
   AlertCircle,
@@ -29,6 +28,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getComputeCredentialsHint } from './computeSetupCopy';
 import { getSetupStepDefinition } from './types';
 
@@ -508,20 +508,13 @@ export function StepComputeConfig({
         </Alert>
       ) : null}
 
-      <div
-        className={`flex flex-col gap-2 sm:flex-row sm:items-center ${templateBuildRunning || templateBuildFailed ? 'mt-2' : 'mt-8'}`}
+      <SetupFooter
+        onBack={onBack}
+        backDisabled={saveComputeConfig.isPending}
+        className={
+          templateBuildRunning || templateBuildFailed ? 'mt-2' : 'mt-8'
+        }
       >
-        {onBack ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={saveComputeConfig.isPending}
-          >
-            <ArrowLeft />
-            Back
-          </Button>
-        ) : null}
         <Button
           type="button"
           onClick={() => void handleContinue()}
@@ -536,7 +529,7 @@ export function StepComputeConfig({
                 : 'Save and continue'}
           {saveComputeConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }

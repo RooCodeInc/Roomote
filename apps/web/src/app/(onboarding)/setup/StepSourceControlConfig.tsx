@@ -12,7 +12,6 @@ import {
 
 import { useTRPC } from '@/trpc/client';
 import {
-  ArrowLeft,
   ArrowRight,
   Button,
   Check,
@@ -22,6 +21,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { NumberedStep } from './NumberedStep';
 import {
   AdoSourceControlConfig,
@@ -479,18 +479,11 @@ export function StepSourceControlConfig({
         </div>
       </NumberedStep>
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-        {onBack ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={saveSourceControlConfig.isPending}
-          >
-            <ArrowLeft />
-            Back
-          </Button>
-        ) : null}
+      <SetupFooter
+        onBack={onBack}
+        backDisabled={saveSourceControlConfig.isPending}
+        className="mt-8"
+      >
         <Button
           type="button"
           onClick={() => void handleContinue()}
@@ -503,7 +496,7 @@ export function StepSourceControlConfig({
               : 'Save and continue'}
           {saveSourceControlConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }

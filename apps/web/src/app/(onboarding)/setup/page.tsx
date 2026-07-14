@@ -147,7 +147,9 @@ export default function SetupPage() {
     step,
     entryContext,
     goToStep,
+    goToPreviousStep,
     goToNextStep,
+    canGoBack,
     goToNextPostOnboardingStep,
     status,
     setupSession,
@@ -438,6 +440,7 @@ export default function SetupPage() {
             setupSession.setCommunicationStepState('skipped');
             goToNextStep();
           }}
+          onBack={canGoBack ? goToPreviousStep : undefined}
         />
       )}
       {step === 'auth-env-vars' &&
@@ -448,7 +451,14 @@ export default function SetupPage() {
               setPendingAuthProvider(null);
               goToNextStep();
             }}
-            onBack={() => goToStep('auth-provider')}
+            onBack={
+              canGoBack
+                ? () => {
+                    setPendingAuthProvider(null);
+                    goToPreviousStep();
+                  }
+                : undefined
+            }
           />
         ) : (
           <StepAuthEnvVars
@@ -458,7 +468,14 @@ export default function SetupPage() {
               setPendingAuthProvider(null);
               goToNextStep();
             }}
-            onBack={() => goToStep('auth-provider')}
+            onBack={
+              canGoBack
+                ? () => {
+                    setPendingAuthProvider(null);
+                    goToPreviousStep();
+                  }
+                : undefined
+            }
             bootstrapMode={false}
           />
         ))}
@@ -468,6 +485,7 @@ export default function SetupPage() {
           openRouterOauthStatus={entryContext.openrouterOauthStatus}
           openRouterOauthErrorReason={entryContext.openrouterOauthErrorReason}
           onContinue={goToNextStep}
+          onBack={canGoBack ? goToPreviousStep : undefined}
         />
       )}
       {step === 'source-control-provider' && (
@@ -476,6 +494,7 @@ export default function SetupPage() {
           onContinue={(provider) => {
             saveSourceControlProviderChoice.mutate({ provider });
           }}
+          onBack={canGoBack ? goToPreviousStep : undefined}
           disabled={saveSourceControlProviderChoice.isPending}
         />
       )}
@@ -487,13 +506,21 @@ export default function SetupPage() {
             setPendingSourceControlProvider(null);
             goToStep('source-control-connect');
           }}
-          onBack={() => goToStep('source-control-provider')}
+          onBack={
+            canGoBack
+              ? () => {
+                  setPendingSourceControlProvider(null);
+                  goToPreviousStep();
+                }
+              : undefined
+          }
         />
       )}
       {step === 'source-control-connect' && (
         <StepSourceControlConnect
           sourceControlSetup={status.sourceControlSetup}
           onContinue={goToNextStep}
+          onBack={canGoBack ? goToPreviousStep : undefined}
         />
       )}
       {step === 'qualification-blocked' &&
@@ -506,6 +533,7 @@ export default function SetupPage() {
           onContinue={(provider) => {
             saveComputeProviderChoice.mutate({ provider });
           }}
+          onBack={canGoBack ? goToPreviousStep : undefined}
           disabled={saveComputeProviderChoice.isPending}
         />
       )}
@@ -517,7 +545,14 @@ export default function SetupPage() {
             setPendingComputeProvider(null);
             goToNextStep();
           }}
-          onBack={() => goToStep('compute-provider')}
+          onBack={
+            canGoBack
+              ? () => {
+                  setPendingComputeProvider(null);
+                  goToPreviousStep();
+                }
+              : undefined
+          }
         />
       )}
       {step === 'slack' && (
@@ -528,6 +563,7 @@ export default function SetupPage() {
             setupSession.setCommunicationStepState('skipped');
             goToNextStep();
           }}
+          onBack={canGoBack ? goToPreviousStep : undefined}
           returnPath={getSetupStepPath('slack')}
         />
       )}
@@ -551,6 +587,7 @@ export default function SetupPage() {
             goToStep('compute-provider', { revisit: true })
           }
           onContinue={() => goToStep('invoke')}
+          onBack={canGoBack ? goToPreviousStep : undefined}
           onSkip={() => {
             setupSession.unlockPostOnboardingFlow();
             goToNextPostOnboardingStep(true);

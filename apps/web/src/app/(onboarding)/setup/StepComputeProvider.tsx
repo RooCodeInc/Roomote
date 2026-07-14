@@ -6,6 +6,7 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const COMPUTE_PROVIDER_STEP = getSetupStepDefinition('compute-provider');
@@ -21,10 +22,12 @@ const BRAND_ICON_BY_PROVIDER = {
 export function StepComputeProvider({
   computeSetup,
   onContinue,
+  onBack,
   disabled = false,
 }: {
   computeSetup: SetupComputeStatus;
   onContinue: (provider: ComputeProvider) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }) {
   // All providers are offered. Hosted providers whose worker image is not yet
@@ -73,6 +76,8 @@ export function StepComputeProvider({
             );
           })}
         </div>
+
+        <SetupFooter onBack={onBack} />
       </div>
     </div>
   );

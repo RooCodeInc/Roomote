@@ -25,6 +25,7 @@ import {
 import { useSyncRepositories } from '@/hooks/source-control/useSyncRepositories';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const SOURCE_CONTROL_CONNECT_STEP = getSetupStepDefinition(
@@ -67,9 +68,11 @@ function getTokenBackedConnectCopy({
 export function StepSourceControlConnect({
   sourceControlSetup,
   onContinue,
+  onBack,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -203,7 +206,9 @@ export function StepSourceControlConnect({
               : 'repositories'}
             .
           </p>
-          <Button onClick={onContinue}>Continue</Button>
+          <SetupFooter onBack={onBack}>
+            <Button onClick={onContinue}>Continue</Button>
+          </SetupFooter>
         </div>
       ) : needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
@@ -211,36 +216,38 @@ export function StepSourceControlConnect({
             Connect your Azure DevOps account with Microsoft before syncing
             repositories.
           </p>
-          {adoLinkedAccount.isPending ? (
-            <Spinner />
-          ) : adoLinkedAccount.data?.configured === false ? (
-            <p className="text-sm text-destructive">
-              The Microsoft Entra service-principal settings are not ready yet.
-              Go back and save the Azure DevOps app credentials first.
-            </p>
-          ) : (
-            <Button
-              className="w-full sm:w-auto"
-              onClick={() =>
-                authenticateAdoAccount.mutate(
-                  `${window.location.pathname}?step=source-control-connect`,
-                )
-              }
-              disabled={authenticateAdoAccount.isPending}
-            >
-              {authenticateAdoAccount.isPending ? (
-                <Spinner />
-              ) : (
-                <BrandIcon name="ADO" icon="ado" />
-              )}
-              Connect with your Microsoft account
-            </Button>
-          )}
+          <SetupFooter onBack={onBack}>
+            {adoLinkedAccount.isPending ? (
+              <Spinner />
+            ) : adoLinkedAccount.data?.configured === false ? (
+              <p className="text-sm text-destructive">
+                The Microsoft Entra service-principal settings are not ready
+                yet. Go back and save the Azure DevOps app credentials first.
+              </p>
+            ) : (
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() =>
+                  authenticateAdoAccount.mutate(
+                    `${window.location.pathname}?step=source-control-connect`,
+                  )
+                }
+                disabled={authenticateAdoAccount.isPending}
+              >
+                {authenticateAdoAccount.isPending ? (
+                  <Spinner />
+                ) : (
+                  <BrandIcon name="ADO" icon="ado" />
+                )}
+                Connect with your Microsoft account
+              </Button>
+            )}
+          </SetupFooter>
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
           <p>{githubCopy}</p>
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+          <SetupFooter onBack={onBack}>
             <Button
               className="w-full sm:w-auto"
               onClick={() =>
@@ -253,7 +260,7 @@ export function StepSourceControlConnect({
               {createInstallation.isPending ? <Spinner /> : <Github />}
               Connect to GitHub
             </Button>
-          </div>
+          </SetupFooter>
         </div>
       ) : (
         <div className="space-y-4">
@@ -264,7 +271,7 @@ export function StepSourceControlConnect({
               URL, then try again.
             </p>
           ) : null}
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+          <SetupFooter onBack={onBack}>
             <Button
               className="w-full sm:w-auto"
               onClick={() => void handleSyncRepositories()}
@@ -279,7 +286,7 @@ export function StepSourceControlConnect({
               )}
               Sync repositories
             </Button>
-          </div>
+          </SetupFooter>
         </div>
       )}
     </div>

@@ -26,6 +26,7 @@ import {
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 import type { OpenRouterOauthEntryStatus } from './hooks';
 
@@ -66,11 +67,13 @@ export function StepInferenceProvider({
   openRouterOauthStatus = null,
   openRouterOauthErrorReason = null,
   onContinue,
+  onBack,
 }: {
   modelSetup: SetupModelStatus;
   openRouterOauthStatus?: OpenRouterOauthEntryStatus | null;
   openRouterOauthErrorReason?: string | null;
   onContinue: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -319,7 +322,7 @@ export function StepInferenceProvider({
         }}
       />
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+      <SetupFooter onBack={onBack}>
         <Button
           type="button"
           onClick={() => void handleContinue()}
@@ -336,7 +339,7 @@ export function StepInferenceProvider({
             </>
           )}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }
