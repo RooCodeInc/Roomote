@@ -55,7 +55,7 @@ function getTokenBackedConnectCopy({
     case 'gitlab':
       return 'Sync your GitLab projects so Roomote can access your codebase. Roomote also configures merge request webhooks on the synced projects so it can review merge requests automatically.';
     case 'gitea':
-      return 'Sync your Gitea repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
       return 'Sync your Bitbucket repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
     case 'ado':
@@ -301,18 +301,7 @@ export function StepSourceControlConnect({
               </a>
             </p>
           ) : null}
-          {giteaOAuthConfigured ? (
-            <p className="text-sm text-muted-foreground">
-              Authorize the Gitea application with the dedicated service account
-              before syncing repositories.
-              <a
-                className="ml-1 underline"
-                href="/api/source-control/gitea/oauth/authorize"
-              >
-                Authorize Gitea
-              </a>
-            </p>
-          ) : null}
+
           {syncedWithZeroRepos ? (
             <p className="text-sm text-muted-foreground">
               No repositories were found. Check your token permissions and base

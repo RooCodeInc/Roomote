@@ -26,7 +26,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
   gitea: {
     setupLabel: 'Gitea OAuth application',
     creationHint:
-      'Create an OAuth application in Gitea 1.23+ for the dedicated service account. The next step shows the callback URL and required scopes.',
+      'In Gitea 1.23+, go to your org → Settings → Application → New OAuth2 app.',
   },
   bitbucket: {
     creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',
