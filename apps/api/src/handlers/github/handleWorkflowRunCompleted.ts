@@ -4,6 +4,9 @@ import {
   buildRepositoryCoverage,
   enqueueTask,
   getTaskUrl,
+  tryClaimCiFailureTriageInvestigation,
+  releaseCiFailureTriageInvestigation,
+  buildCiFailureTriageFingerprint,
 } from '@roomote/cloud-agents/server';
 import {
   and,
@@ -32,12 +35,8 @@ import { resolveScheduledSuggestionSlackConfig } from '../tasks/background-autom
 const LOG_PREFIX = '[handleWorkflowRunCompleted]';
 
 // A broken default branch usually fails several workflows within minutes;
-// one scan per repository covers all of them, so collapse the burst.
+// one investigation per repository covers the burst.
 const TRIAGE_DEBOUNCE_SECONDS = 15 * 60;
-
-// The triggered scan inspects current failing state; the window only bounds
-// how far back it correlates run history.
-const WEBHOOK_SCAN_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 interface WorkflowRunCompletedPayload {
   action: string;
@@ -82,8 +81,8 @@ type AnnouncementSlackTarget = Awaited<
 
 /**
  * Post the "investigating" root message so humans know the failure is being
- * handled the moment it happens. Best-effort: when posting fails, the scan
- * still launches and falls back to the channel-level reporting rules.
+ * handled the moment it happens. Best-effort: when posting fails, the task
+ * still launches and falls back to channel-level reporting rules.
  */
 async function postInvestigationAnnouncement(params: {
   slackTarget: NonNullable<AnnouncementSlackTarget>;
@@ -117,34 +116,32 @@ async function postInvestigationAnnouncement(params: {
 }
 
 /**
- * An announced thread must never dangle: when the scan fails to launch after
+ * An announced thread must never dangle: when the task fails to launch after
  * the opener was posted, resolve the thread with a terminal failure reply.
  */
-async function postAnnouncementLaunchFailureReply(params: {
+async function postAnnouncementThreadReply(params: {
   slackTarget: NonNullable<AnnouncementSlackTarget>;
   channelId: string;
   threadTs: string;
+  text: string;
 }): Promise<void> {
-  const text =
-    "I couldn't start the investigation for this failure. I'll pick it up on the next failing run or a manual scan from the Automations page.";
-
   try {
     await params.slackTarget.slack.postMessage({
       channel: params.channelId,
       thread_ts: params.threadTs,
-      text,
+      text: params.text,
       unfurl_links: false,
       unfurl_media: false,
       blocks: [
         {
           type: 'markdown',
-          text,
+          text: params.text,
         },
       ],
     });
   } catch (error) {
     console.warn(
-      `${LOG_PREFIX} Failed to post launch-failure reply to the investigation thread: ${
+      `${LOG_PREFIX} Failed to post investigation-thread reply: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -152,10 +149,8 @@ async function postAnnouncementLaunchFailureReply(params: {
 }
 
 /**
- * Launch an immediate CI failure triage scan when a workflow run fails on a
- * repository's default branch. This is the primary trigger for the
- * ci_failure_triage automation; the scheduled job is only a fallback sweep
- * for dropped webhook deliveries.
+ * Launch one environment-backed investigate-and-fix task when a workflow run
+ * fails on a repository's default branch.
  */
 export async function handleWorkflowRunCompleted(
   payload: WorkflowRunCompletedPayload,
@@ -211,8 +206,6 @@ export async function handleWorkflowRunCompleted(
     return { status: 'ok', message: 'CI failure triage is disabled' };
   }
 
-  // Two-level fallback resolved by the settings projection: automation
-  // target -> shared manager channel.
   const channelId = settings.ciFailureTriageSlackChannelId;
 
   if (!channelId) {
@@ -222,8 +215,9 @@ export async function handleWorkflowRunCompleted(
   const repositoryCoverage = await buildRepositoryCoverage([
     match.repositoryFullName,
   ]);
+  const environmentId = repositoryCoverage[0]?.targetEnvironmentId;
 
-  if (!repositoryCoverage[0]?.targetEnvironmentId) {
+  if (!environmentId) {
     return {
       status: 'ok',
       message: 'Repository has no configured environment for CI triage',
@@ -247,6 +241,24 @@ export async function handleWorkflowRunCompleted(
   }
 
   const workflowName = run.name ?? payload.workflow?.name ?? 'unknown';
+  const fingerprint = buildCiFailureTriageFingerprint({
+    repositoryFullName: match.repositoryFullName,
+    workflowName,
+    headBranch: run.head_branch,
+  });
+  const investigationClaimed = await tryClaimCiFailureTriageInvestigation({
+    repositoryFullName: match.repositoryFullName,
+    fingerprint,
+    marker: run.html_url,
+  });
+
+  if (!investigationClaimed) {
+    return {
+      status: 'ok',
+      message: 'CI failure triage fingerprint already has an active task',
+    };
+  }
+
   const announcementText = buildAnnouncementText({
     repositoryFullName: match.repositoryFullName,
     defaultBranch: payload.repository.default_branch,
@@ -279,8 +291,6 @@ export async function handleWorkflowRunCompleted(
     : null;
 
   if (announcementTs) {
-    // Track the announcement as this run's automation thread so later thread
-    // replies feed the automation's feedback context.
     try {
       await upsertBackgroundAutomationSlackThread(db, {
         surface: 'slack',
@@ -303,19 +313,18 @@ export async function handleWorkflowRunCompleted(
   }
 
   try {
-    // CI failure triage runs as the deployment service principal.
     const launchResult = await enqueueTask(
       {
         task: {
-          type: TaskPayloadKind.Scan,
+          type: TaskPayloadKind.StandardTask,
           payload: {
             repo: match.repositoryFullName,
+            environmentId,
             selectedRepositories: [match.repositoryFullName],
             description: buildCiFailureTriagePrompt({
               channelId,
               repositoryFullNames: [match.repositoryFullName],
               repositoryCoverage,
-              scanWindowStart: new Date(Date.now() - WEBHOOK_SCAN_WINDOW_MS),
               trigger: 'webhook',
               triggeringRun: {
                 repositoryFullName: match.repositoryFullName,
@@ -326,9 +335,6 @@ export async function handleWorkflowRunCompleted(
               },
               hasAnnouncementThread: announcementTs !== null,
             }),
-            trigger: 'scheduled',
-            notifySlack: true,
-            suggestionSource: 'ci_failure_triage',
             ...(announcementTs
               ? {
                   channel: channelId,
@@ -341,7 +347,7 @@ export async function handleWorkflowRunCompleted(
           },
         },
         initiator: { kind: 'automation', key: 'ci_failure_triage' },
-        workflow: 'scan',
+        workflow: 'standard',
         surface: 'github',
         trigger: 'webhook',
         visibility: 'hidden',
@@ -392,7 +398,20 @@ export async function handleWorkflowRunCompleted(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    // Dispatch failures land on the automations row (lastFailedAt/lastError).
+    // Launch failed: free claims so the next webhook/manual retry can run.
+    await releaseCiFailureTriageInvestigation({
+      repositoryFullName: match.repositoryFullName,
+      fingerprint,
+    }).catch((releaseError: unknown) => {
+      console.warn(
+        `${LOG_PREFIX} Failed to release investigation claims after launch error: ${
+          releaseError instanceof Error
+            ? releaseError.message
+            : String(releaseError)
+        }`,
+      );
+    });
+
     await recordAutomationRunOutcome(db, {
       key: 'ci_failure_triage',
       status: 'failed',
@@ -409,10 +428,11 @@ export async function handleWorkflowRunCompleted(
     });
 
     if (slackTarget && announcementTs) {
-      await postAnnouncementLaunchFailureReply({
+      await postAnnouncementThreadReply({
         slackTarget,
         channelId,
         threadTs: announcementTs,
+        text: "I couldn't start the investigation for this failure. I'll pick it up on the next failing run or a manual scan from the Automations page.",
       });
     }
 
