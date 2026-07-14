@@ -89,6 +89,7 @@ function buildProviderSetup(
     includeMultiCredentialProviders?: boolean;
     bedrockSavedKey?: boolean;
     bedrockRegion?: string;
+    roomoteCloudManaged?: boolean;
   } = {},
 ): { providerSetup: SetupModelStatus } {
   return {
@@ -100,6 +101,22 @@ function buildProviderSetup(
       persistedProviderId: null,
       preselectedProvider: 'openrouter' as const,
       providers: [
+        ...(overrides.roomoteCloudManaged
+          ? [
+              {
+                id: 'roomote' as SetupModelProviderId,
+                label: 'Roomote Cloud',
+                envVarName: undefined,
+                envVarLabel: 'Managed inference',
+                defaultRoomoteModel: 'roomote/default',
+                authKind: 'managed' as const,
+                suggestedTaskModels: [],
+                runtimeApiKeySatisfied: true,
+                savedApiKeySatisfied: false,
+                additionalEnvValues: {} satisfies Record<string, string>,
+              },
+            ]
+          : []),
         {
           id: 'openrouter' as SetupModelProviderId,
           label: 'OpenRouter',
@@ -529,6 +546,26 @@ describe('InferenceProviderSection', () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Save OpenRouter API key' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows Roomote Cloud inference as managed and non-editable', () => {
+    providerSetupData.current = buildProviderSetup({
+      roomoteCloudManaged: true,
+    });
+
+    renderInferenceProviderSection();
+
+    expect(
+      screen.getByLabelText('Managed inference for Roomote Cloud'),
+    ).toHaveValue('Included with Roomote Cloud credits');
+    expect(
+      screen.getByLabelText('Roomote Cloud inference is platform-managed'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Delete Roomote Cloud provider',
+      }),
     ).not.toBeInTheDocument();
   });
 

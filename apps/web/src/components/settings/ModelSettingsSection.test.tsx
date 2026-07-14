@@ -293,6 +293,20 @@ function buildProviderSetupData(
       persistedProviderId: null,
       preselectedProvider: 'openrouter' as const,
       providers: [
+        {
+          id: 'roomote' as SetupModelProviderId,
+          label: 'Roomote Cloud',
+          envVarName: undefined,
+          envVarLabel: 'Managed inference',
+          defaultRoomoteModel: 'roomote/default',
+          authKind: 'managed' as const,
+          suggestedTaskModels: [
+            { id: 'roomote/default', displayName: 'Roomote Default' },
+          ],
+          runtimeApiKeySatisfied: connectedProviderIds.includes('roomote'),
+          savedApiKeySatisfied: false,
+          additionalEnvValues: {},
+        },
         buildProvider('openrouter', 'OpenRouter', 'OPENROUTER_API_KEY'),
         buildProvider('openai', 'OpenAI', 'OPENAI_API_KEY'),
         buildProvider('anthropic', 'Anthropic', 'ANTHROPIC_API_KEY'),
@@ -755,6 +769,25 @@ describe('ModelSettingsSection', () => {
     expect(
       screen.getByText(
         'Connect an inference provider above to add its models.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps managed aliases read-only when Roomote Cloud is the only provider', () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['roomote'],
+    });
+
+    renderModelSettingsSection();
+
+    expect(
+      screen.queryByRole('combobox', { name: 'New model provider' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('New model slug')).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Managed model aliases are controlled by Roomote Cloud.',
       ),
     ).toBeInTheDocument();
   });

@@ -287,30 +287,53 @@ export async function getTaskModelSettingsCommand(
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
   ]);
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+  });
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: persistedRuntimeModelConfig,
+  });
+  const runtimeCodingModelId = runtimeModels.codingModel.effectiveModelId;
+  const managedRuntimeProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) =>
+      provider.authKind === 'managed' &&
+      provider.id === getTaskModelProviderId(runtimeCodingModelId ?? '') &&
+      connectedProviderIds.has(provider.id),
+  );
+  const baseCatalog = getTaskModelCatalog(settings).filter(
+    (model) =>
+      !managedRuntimeProvider ||
+      connectedProviderIds.has(getTaskModelProviderId(model.id) ?? ''),
+  );
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
   // disabled until an operator enables them.
   const catalog = appendRecommendedTaskModels({
-    models: getTaskModelCatalog(settings),
-    connectedProviderIds: collectConnectedTaskModelProviderIds({
-      runtimeEnv: process.env,
-      persistedEnvVarNames,
-      chatgptConnected,
-    }),
+    models: baseCatalog,
+    connectedProviderIds,
   });
+  const managedModelIds = new Set(
+    managedRuntimeProvider?.suggestedTaskModels.map((model) => model.id) ?? [],
+  );
+  const effectiveDefaultModelId =
+    managedRuntimeProvider && runtimeCodingModelId
+      ? runtimeCodingModelId
+      : settings.defaultModelId;
 
   return {
-    defaultModelId: settings.defaultModelId,
+    defaultModelId: effectiveDefaultModelId,
     models: catalog.map((option) => ({
       ...option,
       metadata: option.metadata ?? null,
-      enabled: settings.allowedModelIds.includes(option.id),
-      isDefault: settings.defaultModelId === option.id,
+      enabled:
+        managedModelIds.has(option.id) ||
+        settings.allowedModelIds.includes(option.id),
+      isDefault: effectiveDefaultModelId === option.id,
     })),
-    runtimeModels: resolveRuntimeModelStatus({
-      settingsDefaultModelId: settings.defaultModelId,
-      persisted: persistedRuntimeModelConfig,
-    }),
+    runtimeModels,
     helperModelOptions: catalog.map(({ id, displayName, family }) => ({
       id,
       displayName,
@@ -417,6 +440,12 @@ export async function saveTaskModelProviderCommand(
   assertAdmin(auth);
 
   const provider = getSetupModelProvider(input.provider);
+
+  if (provider.authKind === 'managed') {
+    throw new Error(
+      `${provider.label} is connected through the Roomote Cloud compute configuration and does not accept provider credentials here.`,
+    );
+  }
 
   if (provider.authKind === 'oauth') {
     throw new Error(
@@ -612,6 +641,12 @@ export async function deleteTaskModelProviderCommand(
 
   const provider = getSetupModelProvider(input.provider);
 
+  if (provider.authKind === 'managed') {
+    throw new Error(
+      `${provider.label} is managed by the Roomote Cloud compute configuration and cannot be deleted here.`,
+    );
+  }
+
   if (provider.authKind === 'oauth') {
     throw new Error(
       `${provider.label} is connected with a ChatGPT account and cannot be deleted here.`,
@@ -703,6 +738,32 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
+  const runtimeDefaultModelId = isConfiguredEnvValue(process.env.R_MODEL)
+    ? normalizeTaskModelId(process.env.R_MODEL!)
+    : null;
+  const managedRuntimeProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) =>
+      provider.authKind === 'managed' &&
+      provider.id === getTaskModelProviderId(runtimeDefaultModelId ?? ''),
+  );
+
+  if (runtimeDefaultModelId && managedRuntimeProvider) {
+    const suggestion = managedRuntimeProvider.suggestedTaskModels.find(
+      (model) => model.id === runtimeDefaultModelId,
+    );
+    const defaultModel = buildTaskModelOption({
+      id: runtimeDefaultModelId,
+      displayName: suggestion?.displayName ?? runtimeDefaultModelId,
+      family: suggestion?.family,
+      metadata: null,
+    });
+
+    return {
+      defaultModelId: defaultModel.id,
+      models: [{ ...defaultModel, isDefault: true }],
+    };
+  }
+
   const settings = await getDeploymentTaskModelSettings();
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);

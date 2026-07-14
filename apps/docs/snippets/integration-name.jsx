@@ -1,5 +1,6 @@
 export function IntegrationName({ href, icon, name }) {
   const manualIcons = {
+    'roomote-cloud': '/favicon.svg',
     daytona: '/logo/integrations/daytona.svg',
     e2b: '/logo/integrations/e2b.svg',
     blaxel: '/logo/integrations/blaxel.svg',

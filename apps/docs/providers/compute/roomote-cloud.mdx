@@ -1,0 +1,53 @@
+---
+title: Roomote Cloud
+icon: cloud
+description: Run Roomote tasks with managed inference and sandboxes paid from prepaid credits.
+---
+
+Roomote Cloud is the managed sandbox provider for hosted Roomote deployments.
+It removes the need to create and configure separate inference and sandbox
+vendor accounts.
+
+## How it works
+
+Your Roomote deployment receives a deployment-scoped Roomote Cloud credential.
+When a task starts, Roomote Cloud:
+
+1. checks the workspace credit balance and concurrent-task limit
+2. reserves a task budget and issues a short-lived inference token
+3. launches an isolated worker through the configured Cloud compute backend
+4. meters inference and compute at provider cost plus the displayed markup
+5. settles the task against the prepaid credit balance when it stops
+
+The deployment and task worker never receive the underlying vendor credential.
+Roomote stores an opaque Cloud lease ID so timeout and stale-worker cleanup can
+stop the sandbox without learning which backend ran it.
+
+## Configuration
+
+Managed deployments receive these values automatically:
+
+```dotenv
+DEFAULT_COMPUTE_PROVIDER=roomote-cloud
+ROOMOTE_CLOUD_URL=https://cloud.example
+ROOMOTE_CLOUD_DEPLOYMENT_TOKEN=rcd_...
+R_MODEL=roomote/default
+R_SMALL_MODEL=roomote/fast
+R_CODE_REVIEW_MODEL=roomote/review
+```
+
+The `roomote/*` aliases register Roomote Cloud as a connected, read-only
+inference provider. Hosted onboarding therefore skips upstream API-key setup;
+the control plane chooses the underlying models and can update that mapping
+without reconfiguring the deployment.
+
+Self-hosted deployments can also add Roomote Cloud from **Settings >
+Sandboxes** if they have a deployment credential. Set both Cloud values
+together; partial configuration is rejected.
+
+## Current limitations
+
+Roomote Cloud supports fresh task sandboxes and Docker projects. Environment
+snapshots, snapshot resume, and retained standby sandboxes are not offered yet.
+Choose Modal, E2B, Daytona, Blaxel, or local Docker directly when you need a
+provider-specific lifecycle feature.

@@ -3,6 +3,7 @@ import type { DaytonaConfig, E2bConfig, ModalConfig } from '../types';
 
 const {
   modalClientMock,
+  roomoteCloudClientMock,
   dockerClientMock,
   daytonaClientMock,
   e2bClientMock,
@@ -13,6 +14,7 @@ const {
   modalCapabilities,
 } = vi.hoisted(() => ({
   modalClientMock: vi.fn(),
+  roomoteCloudClientMock: vi.fn(),
   dockerClientMock: vi.fn(),
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
@@ -40,6 +42,7 @@ const {
 }));
 
 vi.mock('../adapters', () => ({
+  RoomoteCloudClient: roomoteCloudClientMock,
   DockerClient: dockerClientMock,
   ModalClient: modalClientMock,
   DaytonaClient: daytonaClientMock,
@@ -59,6 +62,21 @@ describe('createComputeProviderClient', () => {
     vi.clearAllMocks();
     delete process.env.MODAL_REGISTRY_USERNAME;
     delete process.env.MODAL_REGISTRY_PASSWORD;
+  });
+
+  it('resolves Roomote Cloud control-plane credentials', () => {
+    createComputeProviderClient({
+      provider: 'roomote-cloud',
+      envFallback: {
+        ROOMOTE_CLOUD_URL: 'https://cloud.example',
+        ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
+      },
+    });
+
+    expect(roomoteCloudClientMock).toHaveBeenCalledWith({
+      baseUrl: 'https://cloud.example',
+      deploymentToken: 'deployment-token',
+    });
   });
 
   afterAll(() => {

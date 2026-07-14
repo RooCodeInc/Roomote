@@ -219,6 +219,23 @@ const computeProviderUsagePolicies: Record<
   ComputeProvider,
   ComputeProviderUsagePolicy
 > = {
+  'roomote-cloud': {
+    async deriveUsage(context) {
+      await recordComputeProviderUsageSampleIfPresent({
+        context,
+        provider: 'roomote-cloud',
+        source: 'worker_roomote_cloud_cgroup_poll',
+      });
+
+      return {
+        activeCpuDurationMs: context.inputActiveCpuDurationMs,
+        observedMemoryMibMilliseconds:
+          context.inputObservedMemoryMibMilliseconds,
+        detailPatch: { managedCloudRuntime: true },
+        preferredMeasurementSource: 'roomote_observation',
+      };
+    },
+  },
   modal: {
     async deriveUsage(context) {
       await recordModalUsageSample(context);

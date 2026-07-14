@@ -41,6 +41,7 @@ import { Section } from './Section';
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 
 const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
+  'roomote-cloud': 'roomote-cloud',
   modal: 'modal',
   docker: 'docker',
   daytona: 'daytona',

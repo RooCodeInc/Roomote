@@ -34,24 +34,30 @@ export async function spawnRoomoteCloudWorker(input: {
     environmentConfig,
     namedPorts,
   });
-  const workerEnv = buildDockerWorkerEnv({
-    authToken: input.authToken,
-    sandboxExpiresAtMs: Date.now() + input.timeoutMs,
-    deploymentSlug: input.deploymentSlug,
-    environmentId: input.taskRun.payload.environmentId,
-    image: 'roomote-cloud-managed',
-    extraEnv: {
-      ...input.managedRuntimeEnv,
-      SANDBOX_TIMEOUT_MS: String(input.timeoutMs),
-      TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
-      R_APP_URL: toContainerReachableUrl(
-        process.env.R_APP_URL ?? Env.R_APP_URL,
-      ),
-      ROOMOTE_APP_URL: toContainerReachableUrl(
-        process.env.R_APP_URL ?? Env.R_APP_URL,
-      ),
-    },
-  });
+  const workerEnv = {
+    ...buildDockerWorkerEnv({
+      authToken: input.authToken,
+      sandboxExpiresAtMs: Date.now() + input.timeoutMs,
+      deploymentSlug: input.deploymentSlug,
+      environmentId: input.taskRun.payload.environmentId,
+      image: 'roomote-cloud-managed',
+      extraEnv: {
+        ...input.managedRuntimeEnv,
+        SANDBOX_TIMEOUT_MS: String(input.timeoutMs),
+        TRPC_URL: toContainerReachableUrl(process.env.TRPC_URL ?? Env.TRPC_URL),
+        R_APP_URL: toContainerReachableUrl(
+          process.env.R_APP_URL ?? Env.R_APP_URL,
+        ),
+        ROOMOTE_APP_URL: toContainerReachableUrl(
+          process.env.R_APP_URL ?? Env.R_APP_URL,
+        ),
+      },
+    }),
+    // The worker sees the stable Cloud contract, never the broker vendor that
+    // Cloud may replace between leases.
+    COMPUTE_PROVIDER: 'roomote-cloud',
+    ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote-cloud',
+  };
   const lease = await launchRoomoteCloudCompute(input.cloudConfig, {
     runId: input.taskRun.id,
     taskId: String(input.taskRun.taskId),
@@ -71,8 +77,10 @@ export async function spawnRoomoteCloudWorker(input: {
 
   await updateTaskRunMachine({
     taskRun: input.taskRun,
-    vendor: lease.provider === 'e2b' ? 'e2b' : 'docker',
-    machineId: lease.machineId,
+    vendor: 'roomote-cloud',
+    // Roomote Cloud keeps the underlying vendor machine id private and owns
+    // its lifecycle. Local recovery addresses the opaque lease instead.
+    machineId: lease.id,
     namedPorts,
     domainFn: (port) => {
       const hostedUrl = lease.portUrls?.[String(port)];

@@ -1,4 +1,8 @@
-import { TaskPayloadKind, type ComputeProvider } from '@roomote/types';
+import {
+  NonRetryableSpawnError,
+  TaskPayloadKind,
+  type ComputeProvider,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   type TaskRun,
@@ -8,6 +12,7 @@ import {
 import { BaseController } from './BaseController';
 import {
   acquireRoomoteCloudRuntime,
+  closeRoomoteCloudRuntime,
   readRoomoteCloudRuntimeConfig,
 } from './roomote-cloud-runtime';
 import {
@@ -77,34 +82,55 @@ export class RoomoteController extends BaseController {
       // normalizes scalars before combining them with saved string values.
       runtimeEnv: Env,
     });
-    const cloudConfig = readRoomoteCloudRuntimeConfig(process.env);
-    const cloudRuntime =
-      cloudConfig && taskRun.payloadKind !== TaskPayloadKind.SnapshotEnvironment
-        ? await acquireRoomoteCloudRuntime(cloudConfig, {
-            taskId: String(taskRun.taskId),
-            runId: taskRun.id,
-            expiresInSeconds: Math.ceil(timeoutMs / 1000),
-          })
-        : null;
-    const extraEnv = cloudRuntime?.workerEnv;
-
-    if (
-      cloudConfig &&
-      cloudRuntime &&
-      taskRun.payloadKind !== TaskPayloadKind.SnapshotResume
-    ) {
-      await spawnRoomoteCloudWorker({
-        taskRun,
-        authToken,
-        deploymentSlug,
-        timeoutMs,
-        cloudConfig,
-        managedRuntimeEnv: cloudRuntime.workerEnv,
-      });
-      return;
-    }
-
     switch (provider) {
+      case 'roomote-cloud': {
+        if (
+          taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+          taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+        ) {
+          throw new NonRetryableSpawnError(
+            'Roomote Cloud does not support environment snapshots or snapshot resume yet',
+          );
+        }
+        const cloudConfig = readRoomoteCloudRuntimeConfig(resolvedEnv);
+        if (!cloudConfig) {
+          throw new Error(
+            'ROOMOTE_CLOUD_URL and ROOMOTE_CLOUD_DEPLOYMENT_TOKEN are required to spawn Roomote Cloud workers',
+          );
+        }
+        const cloudRuntime = await acquireRoomoteCloudRuntime(cloudConfig, {
+          taskId: String(taskRun.taskId),
+          runId: taskRun.id,
+          expiresInSeconds: Math.ceil(timeoutMs / 1000),
+        });
+        try {
+          await spawnRoomoteCloudWorker({
+            taskRun,
+            authToken,
+            deploymentSlug,
+            timeoutMs,
+            cloudConfig,
+            managedRuntimeEnv: cloudRuntime.workerEnv,
+          });
+        } catch (error) {
+          await closeRoomoteCloudRuntime(cloudConfig, {
+            reservationId: cloudRuntime.reservationId,
+            token: cloudRuntime.token,
+            outcome: 'failed',
+            platformFault: true,
+          }).catch((closeError) => {
+            console.error(
+              `[RoomoteController] Failed to close Roomote Cloud session after spawn failure: ${
+                closeError instanceof Error
+                  ? closeError.message
+                  : String(closeError)
+              }`,
+            );
+          });
+          throw error;
+        }
+        return;
+      }
       case 'modal': {
         const modalTokenId = resolvedEnv.MODAL_TOKEN_ID;
         const modalTokenSecret = resolvedEnv.MODAL_TOKEN_SECRET;
@@ -138,7 +164,6 @@ export class RoomoteController extends BaseController {
           modalRegions: resolvedEnv.MODAL_REGIONS,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
-          extraEnv,
         });
         return;
       }
@@ -158,7 +183,6 @@ export class RoomoteController extends BaseController {
           egressPolicy: Env.DOCKER_WORKER_EGRESS_POLICY,
           localWorkerReleasePath: this.localWorkerReleasePath,
           deploymentSlug: deploymentSlug,
-          extraEnv,
         });
         return;
       }
@@ -187,7 +211,6 @@ export class RoomoteController extends BaseController {
           daytonaSnapshotName,
           daytonaTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
-          extraEnv,
         });
         return;
       }
@@ -214,7 +237,6 @@ export class RoomoteController extends BaseController {
           // backstop reads the real deadline and winds the task run down first.
           e2bTimeoutMs: Math.min(timeoutMs, Env.E2B_MAX_SANDBOX_TIMEOUT_MS),
           localTarballPath: this.localWorkerReleasePath,
-          extraEnv,
         });
         return;
       }
@@ -236,7 +258,6 @@ export class RoomoteController extends BaseController {
           blaxelRegion: resolvedEnv.BLAXEL_REGION,
           blaxelTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
-          extraEnv,
         });
         return;
       }

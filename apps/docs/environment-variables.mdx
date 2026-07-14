@@ -198,8 +198,10 @@ as per-task auth tokens or workspace paths.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `roomote-cloud`, `docker`, `modal`, `e2b`, `daytona`, and `blaxel`. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
+| `ROOMOTE_CLOUD_URL`                  | Roomote Cloud     | Roomote Cloud control-plane URL. Set with `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`.                                                              |
+| `ROOMOTE_CLOUD_DEPLOYMENT_TOKEN`     | Roomote Cloud     | Deployment-scoped credential used for task admission and managed sandbox lifecycle.                                                     |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
 | `DOCKER_WORKER_PLATFORM`             | Optional          | Docker worker platform. Defaults to the host architecture (`linux/arm64` on arm hosts, `linux/amd64` otherwise).                         |

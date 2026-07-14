@@ -149,6 +149,22 @@ function openrouterProviderStatus(): SetupModelStatus['providers'][number] {
   };
 }
 
+function roomoteCloudProviderStatus(): SetupModelStatus['providers'][number] {
+  return {
+    id: 'roomote',
+    label: 'Roomote Cloud',
+    envVarName: undefined,
+    envVarLabel: 'Managed inference',
+    defaultRoomoteModel: 'roomote/default',
+    authKind: 'managed',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: true,
+    savedApiKeySatisfied: false,
+  };
+}
+
 function buildModelSetup(
   overrides: Partial<SetupModelStatus> = {},
 ): SetupModelStatus {
@@ -245,6 +261,34 @@ describe('StepInferenceProvider configured API key display', () => {
 
     fireEvent.focus(input);
     expect(input).toHaveValue('');
+  });
+
+  it('shows managed inference without asking for an API key', async () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'roomote',
+          providers: [
+            roomoteCloudProviderStatus(),
+            openrouterProviderStatus(),
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('Included with your Roomote Cloud credits'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/API key for Roomote Cloud/i),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenCalledWith({ provider: 'roomote' });
+    });
   });
 });
 

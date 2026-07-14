@@ -108,6 +108,35 @@ function BlaxelIcon({
   );
 }
 
+function RoomoteCloudIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M17.5 19H7a5 5 0 1 1 1.3-9.83A6 6 0 0 1 19.67 12 3.5 3.5 0 0 1 17.5 19Z" />
+      <path d="m10 12-2 2 2 2M14 12l2 2-2 2" />
+    </svg>
+  );
+}
+
 function SupermemoryIcon({
   name,
   className,
@@ -383,6 +412,16 @@ function SlackIcon({
 export function BrandIcon({ icon, name, className }: BrandIconProps) {
   const simpleIcon = SIMPLE_ICONS[icon];
   const isDecorative = name.length === 0;
+
+  if (icon === 'roomote-cloud') {
+    return (
+      <RoomoteCloudIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
 
   if (icon === 'neon') {
     return (

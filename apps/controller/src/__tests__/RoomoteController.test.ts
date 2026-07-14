@@ -11,6 +11,7 @@ const {
   mockSpawnRoomoteCloudWorker,
   mockReadRoomoteCloudRuntimeConfig,
   mockAcquireRoomoteCloudRuntime,
+  mockCloseRoomoteCloudRuntime,
 } = vi.hoisted(() => ({
   mockEnv: {
     MODAL_TOKEN_ID: 'modal-token-id',
@@ -49,6 +50,8 @@ const {
     BL_WORKSPACE: 'roomote',
     BLAXEL_IMAGE: 'ghcr.io/roomote/worker:test',
     BLAXEL_REGION: 'us-pdx-1',
+    ROOMOTE_CLOUD_URL: undefined,
+    ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: undefined,
   } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
@@ -59,6 +62,7 @@ const {
   mockSpawnRoomoteCloudWorker: vi.fn(),
   mockReadRoomoteCloudRuntimeConfig: vi.fn(),
   mockAcquireRoomoteCloudRuntime: vi.fn(),
+  mockCloseRoomoteCloudRuntime: vi.fn(),
 }));
 
 const { mockFinishRun } = vi.hoisted(() => ({
@@ -113,6 +117,8 @@ vi.mock('../roomote-cloud-runtime', () => ({
     mockReadRoomoteCloudRuntimeConfig(...args),
   acquireRoomoteCloudRuntime: (...args: unknown[]) =>
     mockAcquireRoomoteCloudRuntime(...args),
+  closeRoomoteCloudRuntime: (...args: unknown[]) =>
+    mockCloseRoomoteCloudRuntime(...args),
 }));
 
 import { RoomoteController } from '../RoomoteController';
@@ -154,12 +160,16 @@ describe('RoomoteController', () => {
     mockEnv.BL_WORKSPACE = 'roomote';
     mockEnv.BLAXEL_IMAGE = 'ghcr.io/roomote/worker:test';
     mockEnv.BLAXEL_REGION = 'us-pdx-1';
+    mockEnv.ROOMOTE_CLOUD_URL = undefined;
+    mockEnv.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN = undefined;
     mockSpawnDockerWorker.mockResolvedValue({ containerId: 'worker-47' });
     mockReadRoomoteCloudRuntimeConfig.mockReturnValue(null);
     mockAcquireRoomoteCloudRuntime.mockResolvedValue({
       reservationId: 'reservation-1',
+      token: 'scoped-token',
       workerEnv: { ROOMOTE_CLOUD_INFERENCE_TOKEN: 'scoped-token' },
     });
+    mockCloseRoomoteCloudRuntime.mockResolvedValue(undefined);
     mockSpawnRoomoteCloudWorker.mockResolvedValue({
       machineId: 'cloud-worker',
     });
@@ -216,11 +226,13 @@ describe('RoomoteController', () => {
     );
   });
 
-  it('routes fresh hosted runs through Roomote Cloud managed compute', async () => {
+  it('routes the Roomote Cloud provider through managed compute', async () => {
     const cloudConfig = {
       baseUrl: 'http://roomote-cloud',
       deploymentToken: 'deployment-token',
     };
+    mockEnv.ROOMOTE_CLOUD_URL = cloudConfig.baseUrl;
+    mockEnv.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN = cloudConfig.deploymentToken;
     mockReadRoomoteCloudRuntimeConfig.mockReturnValue(cloudConfig);
     const controller = new RoomoteController('production');
     const taskRun = {
@@ -237,10 +249,16 @@ describe('RoomoteController', () => {
           authToken: string,
           deploymentSlug: string,
           timeoutMs: number,
-          provider: 'docker',
+          provider: 'roomote-cloud',
         ) => Promise<void>;
       }
-    ).spawnFreshWorker(taskRun, 'auth-token', 'roomote', 60_000, 'docker');
+    ).spawnFreshWorker(
+      taskRun,
+      'auth-token',
+      'roomote',
+      60_000,
+      'roomote-cloud',
+    );
 
     expect(mockAcquireRoomoteCloudRuntime).toHaveBeenCalledWith(cloudConfig, {
       taskId: 'task-148',
@@ -258,6 +276,82 @@ describe('RoomoteController', () => {
       }),
     );
     expect(mockSpawnDockerWorker).not.toHaveBeenCalled();
+  });
+
+  it('does not intercept a BYO provider when Cloud credentials also exist', async () => {
+    mockReadRoomoteCloudRuntimeConfig.mockReturnValue({
+      baseUrl: 'http://roomote-cloud',
+      deploymentToken: 'deployment-token',
+    });
+    const controller = new RoomoteController('production');
+
+    await (
+      controller as unknown as {
+        spawnFreshWorker: (
+          taskRun: TaskRun,
+          authToken: string,
+          deploymentSlug: string,
+          timeoutMs: number,
+          provider: 'docker',
+        ) => Promise<void>;
+      }
+    ).spawnFreshWorker(
+      { id: 149, payload: { environmentId: 'env_123' } } as TaskRun,
+      'auth-token',
+      'roomote',
+      60_000,
+      'docker',
+    );
+
+    expect(mockSpawnDockerWorker).toHaveBeenCalledOnce();
+    expect(mockAcquireRoomoteCloudRuntime).not.toHaveBeenCalled();
+    expect(mockSpawnRoomoteCloudWorker).not.toHaveBeenCalled();
+  });
+
+  it('closes and reverses a managed session when compute launch fails', async () => {
+    const cloudConfig = {
+      baseUrl: 'http://roomote-cloud',
+      deploymentToken: 'deployment-token',
+    };
+    mockEnv.ROOMOTE_CLOUD_URL = cloudConfig.baseUrl;
+    mockEnv.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN = cloudConfig.deploymentToken;
+    mockReadRoomoteCloudRuntimeConfig.mockReturnValue(cloudConfig);
+    mockSpawnRoomoteCloudWorker.mockRejectedValueOnce(
+      new Error('compute launch failed'),
+    );
+    const controller = new RoomoteController('production');
+    const taskRun = {
+      id: 150,
+      taskId: 'task-150',
+      payloadKind: 'standard',
+      payload: { environmentId: 'env_123' },
+    } as TaskRun;
+
+    await expect(
+      (
+        controller as unknown as {
+          spawnFreshWorker: (
+            taskRun: TaskRun,
+            authToken: string,
+            deploymentSlug: string,
+            timeoutMs: number,
+            provider: 'roomote-cloud',
+          ) => Promise<void>;
+        }
+      ).spawnFreshWorker(
+        taskRun,
+        'auth-token',
+        'roomote',
+        60_000,
+        'roomote-cloud',
+      ),
+    ).rejects.toThrow('compute launch failed');
+    expect(mockCloseRoomoteCloudRuntime).toHaveBeenCalledWith(cloudConfig, {
+      reservationId: 'reservation-1',
+      token: 'scoped-token',
+      outcome: 'failed',
+      platformFault: true,
+    });
   });
 
   it('requires Modal credentials only when spawning a Modal worker', async () => {

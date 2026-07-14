@@ -138,6 +138,7 @@ export function StepInferenceProvider({
   const isChatGptProvider =
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  const isManagedProvider = selectedProviderStatus?.authKind === 'managed';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
@@ -148,10 +149,17 @@ export function StepInferenceProvider({
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
   const sortedModelProviderCatalog = useMemo(
     () =>
-      [...SETUP_MODEL_PROVIDER_CATALOG].sort((left, right) =>
-        left.label.localeCompare(right.label),
-      ),
-    [],
+      SETUP_MODEL_PROVIDER_CATALOG.filter((provider) => {
+        if (provider.authKind !== 'managed') {
+          return true;
+        }
+
+        const status = getProviderStatus(modelSetup, provider.id);
+        return Boolean(
+          status?.runtimeApiKeySatisfied || status?.savedApiKeySatisfied,
+        );
+      }).sort((left, right) => left.label.localeCompare(right.label)),
+    [modelSetup],
   );
   const shouldShowSavedValueMask =
     !hasRuntimeProviderKey &&
@@ -210,7 +218,11 @@ export function StepInferenceProvider({
           </SelectContent>
         </Select>
 
-        {isChatGptProvider ? null : (
+        {isChatGptProvider ? null : isManagedProvider ? (
+          <div className="flex h-9 w-full items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground">
+            Included with your Roomote Cloud credits
+          </div>
+        ) : (
           <Input
             secret={!hasRuntimeProviderKey}
             value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
@@ -264,6 +276,13 @@ export function StepInferenceProvider({
             </>
           )}
         </div>
+      ) : null}
+
+      {isManagedProvider ? (
+        <p className="max-w-lg text-sm text-muted-foreground">
+          Roomote Cloud selects and operates the upstream models. No vendor API
+          key is needed in this deployment.
+        </p>
       ) : null}
 
       {!hasRuntimeProviderKey &&

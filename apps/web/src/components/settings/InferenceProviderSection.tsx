@@ -81,14 +81,21 @@ function ConnectedProviderRow({
   onDelete: () => void;
 }) {
   const hasRuntimeKey = provider.runtimeApiKeySatisfied;
+  const isManagedProvider = provider.authKind === 'managed';
   const primaryCredentialLabel = provider.envVarLabel ?? 'API key';
-  const runtimeKeyTooltip = provider.envVarName
-    ? `Set by ${provider.envVarName}, not changeable in the UI.`
-    : 'Set by an environment variable, not changeable in the UI.';
-  const runtimeKeyLabel = provider.envVarName
-    ? `${provider.label} API key is managed by ${provider.envVarName}`
-    : `${provider.label} API key is managed by an environment variable`;
-  const inputValue = MASKED_VALUE;
+  const runtimeKeyTooltip = isManagedProvider
+    ? 'Inference is provided by Roomote Cloud and billed from workspace credits.'
+    : provider.envVarName
+      ? `Set by ${provider.envVarName}, not changeable in the UI.`
+      : 'Set by an environment variable, not changeable in the UI.';
+  const runtimeKeyLabel = isManagedProvider
+    ? `${provider.label} inference is platform-managed`
+    : provider.envVarName
+      ? `${provider.label} API key is managed by ${provider.envVarName}`
+      : `${provider.label} API key is managed by an environment variable`;
+  const inputValue = isManagedProvider
+    ? 'Included with Roomote Cloud credits'
+    : MASKED_VALUE;
 
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
@@ -110,7 +117,7 @@ function ConnectedProviderRow({
           />
         </div>
 
-        {hasRuntimeKey ? (
+        {hasRuntimeKey || isManagedProvider ? (
           <BasicTooltip content={runtimeKeyTooltip}>
             <Lock
               aria-label={runtimeKeyLabel}

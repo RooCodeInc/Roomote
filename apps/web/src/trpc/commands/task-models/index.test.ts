@@ -66,6 +66,7 @@ vi.mock('../environment-variables', () => ({
 
 import {
   getTaskModelProviderSetupCommand,
+  getLaunchTaskModelsCommand,
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
   lookupTaskModelCommand,
@@ -87,6 +88,8 @@ const PROVIDER_ENV_VAR_NAMES = [
   'GOOGLE_VERTEX_PROJECT',
   'GOOGLE_VERTEX_LOCATION',
   'GEMINI_API_KEY',
+  'ROOMOTE_CLOUD_URL',
+  'ROOMOTE_CLOUD_DEPLOYMENT_TOKEN',
   'R_MODEL',
 ] as const;
 
@@ -174,6 +177,67 @@ describe('lookupTaskModelCommand', () => {
       values: vi.fn(() => ({
         onConflictDoUpdate: mockUpdateDeploymentSettings,
       })),
+    });
+  });
+
+  it('offers a single managed default when Roomote Cloud owns inference', async () => {
+    process.env.R_MODEL = 'roomote/default';
+    process.env.ROOMOTE_CLOUD_URL = 'https://cloud.roomote.example';
+    process.env.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN = 'rcd_runtime';
+
+    await expect(getLaunchTaskModelsCommand(buildMockAuth())).resolves.toEqual({
+      defaultModelId: 'roomote/default',
+      models: [
+        expect.objectContaining({
+          id: 'roomote/default',
+          displayName: 'Roomote Default',
+          isDefault: true,
+        }),
+      ],
+    });
+  });
+
+  it('shows only Cloud-owned aliases when managed inference is configured', async () => {
+    process.env.R_MODEL = 'roomote/default';
+    process.env.R_SMALL_MODEL = 'roomote/fast';
+    process.env.R_CODE_REVIEW_MODEL = 'roomote/review';
+    process.env.ROOMOTE_CLOUD_URL = 'https://cloud.roomote.example';
+    process.env.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN = 'rcd_runtime';
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+
+    expect(result.defaultModelId).toBe('roomote/default');
+    expect(result.models).toEqual([
+      expect.objectContaining({
+        id: 'roomote/default',
+        enabled: true,
+        isDefault: true,
+      }),
+      expect.objectContaining({
+        id: 'roomote/fast',
+        enabled: true,
+        isDefault: false,
+      }),
+      expect.objectContaining({
+        id: 'roomote/review',
+        enabled: true,
+        isDefault: false,
+      }),
+    ]);
+    expect(result.runtimeModels).toMatchObject({
+      codingModel: {
+        effectiveModelId: 'roomote/default',
+        managedByEnv: true,
+      },
+      helperModel: {
+        effectiveModelId: 'roomote/fast',
+        managedByEnv: true,
+      },
+      codeReviewModel: {
+        effectiveModelId: 'roomote/review',
+        managedByEnv: true,
+      },
     });
   });
 

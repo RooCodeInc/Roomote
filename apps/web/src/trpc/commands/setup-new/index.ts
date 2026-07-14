@@ -1427,6 +1427,7 @@ export async function saveSetupNewModelConfigCommand(
   const { userId } = auth;
   const provider = getSetupModelProvider(input.provider);
   const isOauthProvider = provider.authKind === 'oauth';
+  const isManagedProvider = provider.authKind === 'managed';
 
   const chatgptConnected = await isChatGptSubscriptionConnected();
 
@@ -1450,7 +1451,22 @@ export async function saveSetupNewModelConfigCommand(
       ]);
     const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
 
-    if (!isOauthProvider) {
+    if (isManagedProvider) {
+      const managedProviderStatus = buildSetupModelStatus({
+        runtimeEnv: process.env,
+        persistedEnvVarNames,
+        selectedProvider: provider.id,
+      }).providers.find((candidate) => candidate.id === provider.id);
+
+      if (
+        !managedProviderStatus?.runtimeApiKeySatisfied &&
+        !managedProviderStatus?.savedApiKeySatisfied
+      ) {
+        throw new Error(
+          'Connect this deployment to Roomote Cloud before selecting managed inference.',
+        );
+      }
+    } else if (!isOauthProvider) {
       const { values: credentialValues, clearedEnvVarNames } =
         collectSetupModelProviderCredentialValues({
           provider,

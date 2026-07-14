@@ -71,6 +71,13 @@
       "when": 1783820516382,
       "tag": "0009_abnormal_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784047611635,
+      "tag": "0010_roomote_cloud_provider",
+      "breakpoints": true
     }
   ]
 }

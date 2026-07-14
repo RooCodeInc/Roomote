@@ -24,6 +24,7 @@ import {
  * `DIRECT_TASK_MODEL_PROVIDER_IDS`.
  */
 export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
+export const ROOMOTE_CLOUD_MODEL_PROVIDER_ID = 'roomote' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
@@ -38,7 +39,7 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
  * var (`envVarName`); OAuth providers are connected through a dedicated flow
  * and carry no env var.
  */
-export type SetupModelProviderAuthKind = 'api-key' | 'oauth';
+export type SetupModelProviderAuthKind = 'api-key' | 'oauth' | 'managed';
 
 /**
  * An additional credential value a provider needs beyond its primary API-key
@@ -88,6 +89,31 @@ export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
   'openrouter';
 
 export const SETUP_MODEL_PROVIDER_CATALOG = [
+  {
+    id: ROOMOTE_CLOUD_MODEL_PROVIDER_ID,
+    label: 'Roomote Cloud',
+    envVarName: undefined,
+    envVarLabel: 'Managed inference',
+    defaultRoomoteModel: 'roomote/default',
+    authKind: 'managed',
+    suggestedTaskModels: [
+      {
+        id: 'roomote/default',
+        displayName: 'Roomote Default',
+        family: 'Roomote Cloud',
+      },
+      {
+        id: 'roomote/fast',
+        displayName: 'Roomote Fast',
+        family: 'Roomote Cloud',
+      },
+      {
+        id: 'roomote/review',
+        displayName: 'Roomote Review',
+        family: 'Roomote Cloud',
+      },
+    ],
+  },
   {
     id: 'openrouter',
     label: 'OpenRouter',
@@ -814,6 +840,26 @@ export function buildSetupModelStatus(input: {
     DEFAULT_SETUP_MODEL_PROVIDER_ID;
 
   const providers = SETUP_MODEL_PROVIDER_CATALOG.map((provider) => {
+    if (provider.authKind === 'managed') {
+      const requiredEnvVarNames = [
+        'ROOMOTE_CLOUD_URL',
+        'ROOMOTE_CLOUD_DEPLOYMENT_TOKEN',
+      ];
+      const isRuntimeConfigured = (name: string) =>
+        isConfiguredEnvValue(runtimeEnv[name]);
+      const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
+
+      return {
+        ...provider,
+        additionalEnvValues: {},
+        runtimeApiKeySatisfied: requiredEnvVarNames.every(isRuntimeConfigured),
+        savedApiKeySatisfied:
+          requiredEnvVarNames.every(
+            (name) => isRuntimeConfigured(name) || isPersisted(name),
+          ) && requiredEnvVarNames.some(isPersisted),
+      };
+    }
+
     if (provider.authKind === 'oauth') {
       // OAuth providers carry no env var. Satisfaction comes from the
       // connection flag passed in by the caller (chatgptConnected).

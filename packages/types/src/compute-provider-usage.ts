@@ -55,6 +55,12 @@ export function resolveConfiguredComputeProviderResources(input: {
   configuredMemoryMiB?: number | null;
 }): ComputeProviderConfiguredResources {
   switch (input.provider) {
+    case 'roomote-cloud':
+      return {
+        configuredVcpus: null,
+        configuredCpuCores: null,
+        configuredMemoryMiB: null,
+      };
     case 'modal': {
       const configuredCpuCores =
         clampNonNegativeNumber(input.configuredCpuCores) ||

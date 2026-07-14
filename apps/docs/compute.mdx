@@ -39,6 +39,7 @@ Roomote supports local and hosted sandbox backends:
 
 | Provider                                                                            | Best for                                               | Notes                                                                   |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| <IntegrationName href="/providers/compute/roomote-cloud" icon="roomote-cloud" name="Roomote Cloud" /> | Hosted Roomote with no sandbox-vendor setup | Uses prepaid credits for managed inference and cloud-owned sandboxes. |
 | <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" />    | Local development and trusted single-host self-hosting | Retains stopped task containers so resumable work can restart in place. |
 | <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" />       | Hosted task sandboxes with snapshot support            | Uses a hosted runtime and can resume some sandboxes from snapshots.     |
 | <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" />             | Hosted task sandboxes with snapshot support            | Runs task sandboxes on E2B-managed infrastructure.                      |
@@ -49,6 +50,11 @@ Docker is the default because it works well for local development and simple
 self-hosted deployments. Hosted providers are useful when you want task work to
 run away from the Roomote server, scale beyond one host, or use provider-managed
 sandbox infrastructure.
+
+Roomote Cloud is the managed path: the hosted deployment receives one
+deployment credential, while Roomote Cloud selects and pays the underlying
+sandbox and inference vendors. You buy credits instead of configuring each
+vendor account in Roomote.
 
 For resumable Docker tasks, Roomote retains the stopped container and writable
 workspace so a follow-up can restart in place on the same host.

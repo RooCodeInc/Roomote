@@ -35,6 +35,25 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsDockerProjects: true,
 };
 
+/**
+ * Roomote Cloud owns the sandbox lifecycle and exposes only the operations the
+ * isolated deployment needs locally. The Cloud control plane launches the
+ * worker atomically with admission, while Roomote retains status and destroy
+ * access for stale-worker and timeout recovery.
+ */
+export const ROOMOTE_CLOUD_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: false,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: false,
+  supportsCommandOutputStreaming: false,
+  supportsCommandOutputLookup: false,
+  supportsSnapshots: false,
+  supportsStandbyResume: false,
+  supportsResume: false,
+  supportsFileWrite: false,
+  supportsDockerProjects: true,
+};
+
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCreateInstance: true,
   supportsDestroyInstance: true,
@@ -91,6 +110,8 @@ export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
   switch (provider) {
+    case 'roomote-cloud':
+      return ROOMOTE_CLOUD_CAPABILITIES;
     case 'modal':
       return MODAL_CAPABILITIES;
     case 'docker':

@@ -753,14 +753,21 @@ export function ModelSettingsSection({
       ),
     [connectedProviders],
   );
+  const configurableModelProviders = useMemo(
+    () =>
+      sortedConnectedProviders.filter(
+        (provider) => provider.authKind !== 'managed',
+      ),
+    [sortedConnectedProviders],
+  );
   const activeNewModelProvider = useMemo(
     () =>
-      sortedConnectedProviders.find(
+      configurableModelProviders.find(
         (provider) => provider.id === newModelProvider,
       ) ??
-      sortedConnectedProviders[0] ??
+      configurableModelProviders[0] ??
       null,
-    [sortedConnectedProviders, newModelProvider],
+    [configurableModelProviders, newModelProvider],
   );
   const normalizedNewModelId = newModelId.trim();
   const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 500);
@@ -788,6 +795,17 @@ export function ModelSettingsSection({
         connectedProviders.flatMap((provider) =>
           provider.suggestedTaskModels.map((suggestion) => suggestion.id),
         ),
+      ),
+    [connectedProviders],
+  );
+  const managedModelIds = useMemo(
+    () =>
+      new Set(
+        connectedProviders
+          .filter((provider) => provider.authKind === 'managed')
+          .flatMap((provider) =>
+            provider.suggestedTaskModels.map((suggestion) => suggestion.id),
+          ),
       ),
     [connectedProviders],
   );
@@ -1579,7 +1597,7 @@ export function ModelSettingsSection({
                       <SelectValue placeholder="Provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      {sortedConnectedProviders.map((provider) => (
+                      {configurableModelProviders.map((provider) => (
                         <SelectItem key={provider.id} value={provider.id}>
                           {provider.label}
                         </SelectItem>
@@ -1733,7 +1751,9 @@ export function ModelSettingsSection({
               <p className="text-sm text-muted-foreground">
                 {providerSetupPending
                   ? 'Loading inference providers...'
-                  : 'Connect an inference provider above to add its models.'}
+                  : connectedProviders.length > 0
+                    ? 'Managed model aliases are controlled by Roomote Cloud.'
+                    : 'Connect an inference provider above to add its models.'}
               </p>
             )}
           </div>
@@ -1745,6 +1765,7 @@ export function ModelSettingsSection({
                 {group.items.map((model) => {
                   const checked = enabledModelSet.has(model.id);
                   const isDefault = roleDrafts.coding.modelId === model.id;
+                  const isManagedModel = managedModelIds.has(model.id);
                   const summary = formatMetadataSummary(model.metadata ?? null);
                   const metadata = model.metadata ?? null;
 
@@ -1760,6 +1781,7 @@ export function ModelSettingsSection({
                           onCheckedChange={(value) =>
                             toggleModel(model.id, value)
                           }
+                          disabled={isManagedModel}
                           className="mt-0.5"
                         />
                         <div className="min-w-0 space-y-1">
@@ -1838,9 +1860,19 @@ export function ModelSettingsSection({
                         </div>
                         {recommendedModelIds.has(model.id) ? (
                           <span className="inline-flex w-9 justify-center">
-                            <BasicTooltip content="Recommended models stay listed while their provider is connected. Turn the model off to stop using it.">
+                            <BasicTooltip
+                              content={
+                                isManagedModel
+                                  ? 'This alias is selected and operated by Roomote Cloud.'
+                                  : 'Recommended models stay listed while their provider is connected. Turn the model off to stop using it.'
+                              }
+                            >
                               <Lock
-                                aria-label={`${model.displayName} is a recommended model`}
+                                aria-label={
+                                  isManagedModel
+                                    ? `${model.displayName} is managed by Roomote Cloud`
+                                    : `${model.displayName} is a recommended model`
+                                }
                                 className="size-4"
                               />
                             </BasicTooltip>

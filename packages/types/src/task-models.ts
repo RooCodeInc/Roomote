@@ -15,6 +15,7 @@ const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
  * `SETUP_MODEL_PROVIDER_IDS` derives from this list plus `openrouter`.
  */
 export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
+  'roomote',
   'vercel',
   'requesty',
   'baseten',

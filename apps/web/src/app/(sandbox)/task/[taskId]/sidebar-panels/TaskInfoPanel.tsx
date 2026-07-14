@@ -66,6 +66,7 @@ const HARNESS_ICONS = {
 } satisfies Record<CodingHarness, typeof Terminal>;
 
 const SANDBOX_PROVIDER_LABELS = {
+  'roomote-cloud': 'Roomote Cloud',
   docker: 'Local Docker',
   modal: 'Modal',
   daytona: 'Daytona',
@@ -74,6 +75,7 @@ const SANDBOX_PROVIDER_LABELS = {
 } satisfies Record<ComputeProvider, string>;
 
 const SANDBOX_PROVIDER_ICONS = {
+  'roomote-cloud': CloudIcon,
   docker: Container,
   modal: CloudIcon,
   daytona: CloudIcon,

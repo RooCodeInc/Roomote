@@ -20,6 +20,7 @@ describe('normalizeTaskModelId', () => {
   });
 
   it('preserves direct-provider model ids without an openrouter prefix', () => {
+    expect(normalizeTaskModelId('roomote/default')).toBe('roomote/default');
     expect(normalizeTaskModelId('anthropic/claude-sonnet-4')).toBe(
       'anthropic/claude-sonnet-4',
     );

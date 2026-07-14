@@ -6,6 +6,14 @@ type RoomoteCloudRuntimeSession = {
     baseUrl: string;
     defaultModel: string;
     availableModels: string[];
+    roleModels?: {
+      coding: string;
+      helper: string;
+      vision: string;
+      codeReview: string;
+      explore: string;
+      planning: string;
+    };
   };
 };
 
@@ -29,7 +37,7 @@ function normalizeBaseUrl(value: string): string {
 }
 
 export function readRoomoteCloudRuntimeConfig(
-  env: NodeJS.ProcessEnv,
+  env: Partial<Record<string, string | undefined>>,
 ): RoomoteCloudRuntimeConfig | null {
   const values = {
     baseUrl: env.ROOMOTE_CLOUD_URL?.trim(),
@@ -54,7 +62,11 @@ export async function acquireRoomoteCloudRuntime(
   config: RoomoteCloudRuntimeConfig,
   input: { taskId: string; runId: number; expiresInSeconds: number },
   fetchFn: typeof fetch = fetch,
-): Promise<{ reservationId: string; workerEnv: Record<string, string> }> {
+): Promise<{
+  reservationId: string;
+  token: string;
+  workerEnv: Record<string, string>;
+}> {
   const response = await fetchFn(`${config.baseUrl}/runtime/v1/sessions`, {
     method: 'POST',
     headers: {
@@ -76,21 +88,68 @@ export async function acquireRoomoteCloudRuntime(
   }
 
   const session = (await response.json()) as RoomoteCloudRuntimeSession;
-  if (!session.token || !session.reservationId || !session.inference?.baseUrl) {
+  if (
+    !session.token ||
+    !session.reservationId ||
+    !session.inference?.baseUrl ||
+    !session.inference.defaultModel
+  ) {
     throw new Error('Roomote Cloud returned an invalid runtime session');
   }
 
+  const roleModels = session.inference.roleModels;
+  const defaultModel = session.inference.defaultModel;
+
   return {
     reservationId: session.reservationId,
+    token: session.token,
     workerEnv: {
-      R_MODEL: session.inference.defaultModel,
-      R_SMALL_MODEL: session.inference.defaultModel,
+      R_MODEL: roleModels?.coding ?? defaultModel,
+      R_SMALL_MODEL: roleModels?.helper ?? defaultModel,
+      R_VISION_MODEL: roleModels?.vision ?? defaultModel,
+      R_CODE_REVIEW_MODEL: roleModels?.codeReview ?? defaultModel,
+      R_EXPLORE_MODEL: roleModels?.explore ?? defaultModel,
+      R_PLANNING_MODEL: roleModels?.planning ?? defaultModel,
       ROOMOTE_CLOUD_INFERENCE_BASE_URL: session.inference.baseUrl,
       ROOMOTE_CLOUD_INFERENCE_TOKEN: session.token,
       ROOMOTE_CLOUD_SESSION_URL: config.baseUrl,
       ROOMOTE_CLOUD_RESERVATION_ID: session.reservationId,
     },
   };
+}
+
+export async function closeRoomoteCloudRuntime(
+  config: RoomoteCloudRuntimeConfig,
+  input: {
+    reservationId: string;
+    token: string;
+    outcome: 'completed' | 'failed' | 'canceled';
+    platformFault: boolean;
+  },
+  fetchFn: typeof fetch = fetch,
+): Promise<void> {
+  const response = await fetchFn(
+    `${config.baseUrl}/runtime/v1/sessions/${encodeURIComponent(
+      input.reservationId,
+    )}/close`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${input.token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        outcome: input.outcome,
+        platformFault: input.platformFault,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 500);
+    throw new Error(
+      `Roomote Cloud runtime close failed (${response.status}): ${detail}`,
+    );
+  }
 }
 
 export async function launchRoomoteCloudCompute(

@@ -194,6 +194,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
   it('exposes the supported setup providers for the onboarding UI', () => {
     expect(SETUP_MODEL_PROVIDER_CATALOG.map((provider) => provider.id)).toEqual(
       [
+        'roomote',
         'openrouter',
         'vercel',
         'requesty',
@@ -321,6 +322,24 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       defaultRoomoteModel: 'openai/gpt-5.6-terra',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
+  });
+
+  it('registers Roomote Cloud as a managed provider with stable aliases', () => {
+    const roomoteCloudProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+      (provider) => provider.id === 'roomote',
+    );
+
+    expect(roomoteCloudProvider).toMatchObject({
+      label: 'Roomote Cloud',
+      authKind: 'managed',
+      defaultRoomoteModel: 'roomote/default',
+      suggestedTaskModels: [
+        { id: 'roomote/default' },
+        { id: 'roomote/fast' },
+        { id: 'roomote/review' },
+      ],
+    });
+    expect(roomoteCloudProvider?.envVarName).toBeUndefined();
   });
 
   it('maps Requesty to the REQUESTY_API_KEY env var', () => {
@@ -471,6 +490,62 @@ describe('reasoning effort labels', () => {
 });
 
 describe('buildSetupModelStatus', () => {
+  it('treats a complete Roomote Cloud runtime as managed inference setup', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'roomote/default',
+        ROOMOTE_CLOUD_URL: 'https://cloud.roomote.example',
+        ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'rcd_runtime',
+      },
+    });
+
+    expect(status.runtimeProviderId).toBe('roomote');
+    expect(status.preselectedProvider).toBe('roomote');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      authKind: 'managed',
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('does not satisfy managed inference with partial Cloud credentials', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        R_MODEL: 'roomote/default',
+        ROOMOTE_CLOUD_URL: 'https://cloud.roomote.example',
+      },
+    });
+
+    expect(status.preselectedProvider).toBe('roomote');
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(status.setupSatisfied).toBe(false);
+  });
+
+  it('accepts Roomote Cloud credentials split between env and saved config', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        ROOMOTE_CLOUD_URL: 'https://cloud.roomote.example',
+      },
+      persistedModelConfig: {
+        roomoteModel: 'roomote/default',
+      },
+      persistedEnvVarNames: ['ROOMOTE_CLOUD_DEPLOYMENT_TOKEN'],
+    });
+
+    expect(status.persistedProviderId).toBe('roomote');
+    expect(status.setupSatisfied).toBe(true);
+    expect(
+      status.providers.find((provider) => provider.id === 'roomote'),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+  });
+
   it('treats runtime env as the highest-precedence satisfied setup source', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
