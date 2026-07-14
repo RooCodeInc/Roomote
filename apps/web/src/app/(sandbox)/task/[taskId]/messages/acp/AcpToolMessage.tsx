@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 
 import {
@@ -24,11 +26,17 @@ import {
   ToolHeader,
 } from '@/components/ai-elements';
 
+import { useArtifactLink } from '../../hooks';
 import { messageAnchorId } from '../message-anchor';
 
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { AcpToolDetails } from './AcpToolDetails';
 import { hidesExpandedToolResult } from './tool-detail-visibility';
+import { VisualProofToolPreview } from './VisualProofToolPreview';
+import {
+  extractVisualProofUploadFromToolMessage,
+  resolveVisualProofDisplayMedia,
+} from './visual-proof-tool-result';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -41,6 +49,7 @@ export function AcpToolMessage({
   showSubagentPayload = false,
   children,
 }: AcpToolMessageProps) {
+  const artifactLink = useArtifactLink();
   const anchorId = messageAnchorId(msg.ts);
   const kind = msg.data.kind;
   const title = sanitizeSandboxPathString(msg.data.title ?? 'Tool use');
@@ -60,11 +69,19 @@ export function AcpToolMessage({
 
   const isMcp = msg.data.isMcp;
   const isMcpLabelPresent = Boolean(msg.data.toolName || msg.data.serverName);
-  const showExpandedDetails = !hidesExpandedToolResult(msg, {
-    showSubagentPayload,
-  });
+  const visualProofMedia = resolveVisualProofDisplayMedia(
+    extractVisualProofUploadFromToolMessage(msg),
+    artifactLink?.artifacts,
+  );
+  const showVisualProofPreview = visualProofMedia !== null;
+  const showExpandedDetails =
+    !showVisualProofPreview &&
+    !hidesExpandedToolResult(msg, {
+      showSubagentPayload,
+    });
   const showNestedActivity = Boolean(children);
-  const showToolContent = showExpandedDetails || showNestedActivity;
+  const showToolContent =
+    showVisualProofPreview || showExpandedDetails || showNestedActivity;
 
   const subagentActivity = readSubagentActivity(
     msg.data as unknown as Record<string, unknown>,
@@ -108,22 +125,35 @@ export function AcpToolMessage({
             icon={ToolIcon}
             state={toolState}
             params={sanitizedToolData}
-            collapsible={showToolContent}
+            collapsible={showToolContent && !showVisualProofPreview}
           />
           {showToolContent ? (
-            <ToolContent className="mt-2">
-              {showExpandedDetails ? (
-                <AcpToolDetails
-                  msg={msg}
-                  showSubagentPayload={showSubagentPayload}
-                />
-              ) : null}
-              {showNestedActivity ? (
-                <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
-                  {children}
-                </div>
-              ) : null}
-            </ToolContent>
+            showVisualProofPreview ? (
+              <div className="mt-2 space-y-2">
+                {visualProofMedia ? (
+                  <VisualProofToolPreview media={visualProofMedia} />
+                ) : null}
+                {showNestedActivity ? (
+                  <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
+                    {children}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <ToolContent className="mt-2">
+                {showExpandedDetails ? (
+                  <AcpToolDetails
+                    msg={msg}
+                    showSubagentPayload={showSubagentPayload}
+                  />
+                ) : null}
+                {showNestedActivity ? (
+                  <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
+                    {children}
+                  </div>
+                ) : null}
+              </ToolContent>
+            )
           ) : null}
         </Tool>
       </MessageContent>
