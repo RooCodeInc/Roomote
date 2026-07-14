@@ -47,6 +47,8 @@ vi.mock('@roomote/ado', () => ({
 
 vi.mock('@roomote/gitea', () => ({
   ensureGiteaWebhooksForRepositories: mockEnsureGiteaWebhooksForRepositories,
+  normalizeGiteaBaseUrl: (value: string) =>
+    value.startsWith('http') ? value : `https://${value}`,
   removeGiteaWebhooksForRepositories: mockRemoveGiteaWebhooksForRepositories,
   resolveGiteaBaseUrl: vi.fn().mockResolvedValue('https://gitea.example.com'),
   syncGiteaRepositories: mockSyncGiteaRepositories,

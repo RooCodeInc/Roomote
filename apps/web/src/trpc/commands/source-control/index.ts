@@ -641,7 +641,10 @@ export async function saveSourceControlConfigValues(params: {
     return [
       {
         name: field.envVarName,
-        value: nextValue,
+        value:
+          field.envVarName === 'GITEA_BASE_URL'
+            ? Gitea.normalizeGiteaBaseUrl(nextValue)
+            : nextValue,
       },
     ];
   });
@@ -783,8 +786,9 @@ export async function assertValidSourceControlConfigInput(params: {
 
   if (nextGiteaToken) {
     const nextGiteaBaseUrl =
-      params.values?.['GITEA_BASE_URL']?.trim() ??
-      (await Gitea.resolveGiteaBaseUrl());
+      (params.values?.['GITEA_BASE_URL']?.trim()
+        ? Gitea.normalizeGiteaBaseUrl(params.values['GITEA_BASE_URL'])
+        : undefined) ?? (await Gitea.resolveGiteaBaseUrl());
 
     if (!nextGiteaBaseUrl) {
       return;

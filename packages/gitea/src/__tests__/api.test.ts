@@ -62,6 +62,7 @@ vi.mock('@roomote/db/encryption', () => ({
 
 import {
   buildGiteaApiBaseUrl,
+  normalizeGiteaBaseUrl,
   buildGiteaRepositoryValues,
   createTaskRunGiteaCredentials,
   createGiteaPullRequestComment,
@@ -138,6 +139,10 @@ describe('Gitea API helpers', () => {
     );
     expect(buildGiteaApiBaseUrl('https://gitea.com/roocode/')).toBe(
       'https://gitea.com/api/v1',
+    );
+    expect(normalizeGiteaBaseUrl('gitea.com')).toBe('https://gitea.com');
+    expect(normalizeGiteaBaseUrl('git.example.com/')).toBe(
+      'https://git.example.com',
     );
   });
 

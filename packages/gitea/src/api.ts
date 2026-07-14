@@ -100,14 +100,16 @@ export type GiteaWebhookEnsureResult = {
   error?: string;
 };
 
-function normalizeBaseUrl(baseUrl: string): string {
+export function normalizeGiteaBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
   if (!trimmed) {
     throw new Error('GITEA_BASE_URL cannot be empty.');
   }
 
-  const url = new URL(trimmed);
+  const url = new URL(
+    /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+  );
   const apiPathSuffix = /\/api\/v1$/;
 
   if (url.hostname === 'gitea.com') {
@@ -131,7 +133,7 @@ let cachedGiteaDeploymentUser: {
 
 export async function resolveGiteaBaseUrl(): Promise<string | null> {
   const baseUrl = await resolveDeploymentEnvVar('GITEA_BASE_URL');
-  return baseUrl ? normalizeBaseUrl(baseUrl) : null;
+  return baseUrl ? normalizeGiteaBaseUrl(baseUrl) : null;
 }
 
 export async function resolveGiteaUsername(): Promise<string | null> {
@@ -139,7 +141,7 @@ export async function resolveGiteaUsername(): Promise<string | null> {
 }
 
 export function buildGiteaApiBaseUrl(baseUrl: string): string {
-  return new URL('api/v1', `${normalizeBaseUrl(baseUrl)}/`).toString();
+  return new URL('api/v1', `${normalizeGiteaBaseUrl(baseUrl)}/`).toString();
 }
 
 function buildGiteaApiUrl(
@@ -332,11 +334,11 @@ export async function listGiteaRepositories({
 }
 
 function hostFromBaseUrl(baseUrl: string): string {
-  return new URL(normalizeBaseUrl(baseUrl)).host;
+  return new URL(normalizeGiteaBaseUrl(baseUrl)).host;
 }
 
 function buildGiteaWebUrl(baseUrl: string, path: string): string {
-  return new URL(path.replace(/^\//, ''), `${normalizeBaseUrl(baseUrl)}/`)
+  return new URL(path.replace(/^\//, ''), `${normalizeGiteaBaseUrl(baseUrl)}/`)
     .toString()
     .replace(/\/+$/, '');
 }

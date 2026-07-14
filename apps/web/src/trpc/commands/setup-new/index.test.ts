@@ -51,6 +51,8 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/gitea', () => ({
+  normalizeGiteaBaseUrl: (value: string) =>
+    value.startsWith('http') ? value : `https://${value}`,
   resolveGiteaBaseUrl: mockResolveGiteaBaseUrl,
   validateGiteaToken: mockValidateGiteaToken,
 }));
@@ -532,7 +534,7 @@ describe('setup-new source-control config commands', () => {
       {
         provider: 'gitea',
         values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
+          GITEA_BASE_URL: 'gitea.example.com',
           GITEA_TOKEN: 'gitea-token',
         },
       },
@@ -548,7 +550,10 @@ describe('setup-new source-control config commands', () => {
       expect.objectContaining({
         userId: 'setup-test-user',
         values: expect.arrayContaining([
-          expect.objectContaining({ name: 'GITEA_BASE_URL' }),
+          expect.objectContaining({
+            name: 'GITEA_BASE_URL',
+            value: 'https://gitea.example.com',
+          }),
           expect.objectContaining({ name: 'GITEA_TOKEN' }),
         ]),
       }),
