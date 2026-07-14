@@ -88,6 +88,7 @@ export class DaytonaClient implements ComputeProviderClient {
         target: this.config.target ?? '(default)',
         snapshotName: this.config.snapshotName,
         timeoutMs: this.config.timeoutMs ?? '(default)',
+        memoryGiB: this.config.memoryGiB ?? '(default)',
       })}`,
     );
 
@@ -204,6 +205,9 @@ export class DaytonaClient implements ComputeProviderClient {
         promise: this.sdk.create({
           snapshot: this.config.snapshotName,
           public: true,
+          ...(this.config.memoryGiB
+            ? { resources: { memory: this.config.memoryGiB } }
+            : {}),
           ...(labels ? { labels } : {}),
           ...(this.config.timeoutMs
             ? {
@@ -649,6 +653,9 @@ export class DaytonaClient implements ComputeProviderClient {
         promise: this.sdk.create({
           snapshot: input.sourceSnapshotId,
           public: true,
+          ...(this.config.memoryGiB
+            ? { resources: { memory: this.config.memoryGiB } }
+            : {}),
           ...(labels ? { labels } : {}),
           ...(this.config.timeoutMs
             ? {

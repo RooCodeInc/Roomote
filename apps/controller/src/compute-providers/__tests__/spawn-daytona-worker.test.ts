@@ -13,6 +13,7 @@ const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
 const mockUpdateTaskRunMachine = vi.fn();
 const mockGetNamedPortsForTaskRun = vi.fn();
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
+const mockFindTask = vi.fn();
 
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/db/server')>();
@@ -21,6 +22,10 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
     ...actual,
     db: {
       ...actual.db,
+      query: {
+        ...actual.db.query,
+        tasks: { findFirst: (...args: unknown[]) => mockFindTask(...args) },
+      },
       update: () => mockDbUpdate(),
     },
     createComputeProviderMutationEventRecorder: vi.fn(() => mockRecordMutation),
@@ -76,6 +81,7 @@ describe('spawnDaytonaWorker', () => {
     });
     mockUpdateTaskRunMachine.mockResolvedValue(undefined);
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
+    mockFindTask.mockResolvedValue({ workflow: 'standard' });
   });
 
   it('launches environments with docker projects', async () => {
@@ -118,6 +124,15 @@ describe('spawnDaytonaWorker', () => {
         launchMode: 'fresh',
       }),
     );
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'daytona',
+        config: expect.objectContaining({ memoryGiB: 8 }),
+      }),
+    );
+    expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
+      expect.objectContaining({ configuredMemoryMiB: 8192 }),
+    );
     expect(mockRunCommand).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'daytona-machine-123',
@@ -130,5 +145,37 @@ describe('spawnDaytonaWorker', () => {
       machineId: 'daytona-machine-123',
       sandboxCmdId: 'cmd_123',
     });
+  });
+
+  it('uses 4 GiB for a task that does not need nested Docker', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [],
+      environmentSnapshotId: undefined,
+      environmentConfig: undefined,
+    });
+
+    await spawnDaytonaWorker(
+      {
+        id: 124,
+        taskId: 'task_124',
+        vendor: 'daytona',
+        sourceSnapshotId: null,
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo' },
+      } as unknown as TaskRun,
+      'auth_token',
+      {
+        daytonaApiKey: 'api-key',
+        daytonaSnapshotName: 'worker-snapshot',
+        daytonaTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'daytona',
+        config: expect.objectContaining({ memoryGiB: 4 }),
+      }),
+    );
   });
 });

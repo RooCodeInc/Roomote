@@ -27,6 +27,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 
 const DAYTONA_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 
@@ -134,6 +135,10 @@ export async function spawnDaytonaWorker(
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
+  const sandboxResources = await resolveTaskSandboxMemoryMiB(
+    taskRun,
+    environmentConfig,
+  );
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
@@ -224,6 +229,7 @@ export async function spawnDaytonaWorker(
       snapshotName: daytonaSnapshotName,
       ...(daytonaApiUrl ? { apiUrl: daytonaApiUrl } : {}),
       ...(daytonaTarget ? { target: daytonaTarget } : {}),
+      memoryGiB: sandboxResources.memoryMiB / 1024,
       timeoutMs: daytonaTimeoutMs,
     },
   });
@@ -273,6 +279,7 @@ export async function spawnDaytonaWorker(
       sourceSnapshotId: mutationContext.sourceSnapshotId,
       authBypassValue,
       authBypassHeaderName,
+      configuredMemoryMiB: sandboxResources.memoryMiB,
     });
 
     // Infrastructure is usable; worker.js hand-off follows.
