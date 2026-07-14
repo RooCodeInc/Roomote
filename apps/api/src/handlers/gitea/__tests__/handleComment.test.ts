@@ -118,6 +118,7 @@ describe('handleGiteaComment', () => {
         {
           id: 'gitea:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
@@ -167,6 +168,41 @@ describe('handleGiteaComment', () => {
         repositoryFullName: 'acme/backend',
         pullRequestNumber: 42,
         body: expect.stringContaining('I started a pull request review task'),
+      }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('stamps the repository host into mention review payloads when the repository row has one', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'git.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGiteaComment(makeCommentPayload());
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitea',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'git.example.com',
+          }),
+        }),
       }),
     );
   });

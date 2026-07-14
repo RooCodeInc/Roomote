@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   mockEnqueueTask,
+  mockGetBitbucketAutomationTargets,
   mockUpdateTaskPrStatus,
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
@@ -9,6 +10,7 @@ const {
   mockScheduleSourceControlPullRequestFactSync,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
+  mockGetBitbucketAutomationTargets: vi.fn(),
   mockUpdateTaskPrStatus: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
@@ -53,6 +55,12 @@ vi.mock('../../pull-request-fact-sync', () => ({
     mockScheduleSourceControlPullRequestFactSync,
 }));
 
+vi.mock('../getBitbucketAutomationTargets', () => ({
+  getBitbucketAutomationTargets: mockGetBitbucketAutomationTargets,
+  getBitbucketUsername: (user?: { nickname?: string }) => user?.nickname,
+  getBitbucketUserAccountKey: () => null,
+}));
+
 import { handleBitbucketPullRequest } from '../handlePullRequest';
 import type { BitbucketPullRequestWebhook } from '../types';
 
@@ -88,6 +96,80 @@ describe('handleBitbucketPullRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockGetBitbucketAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'bitbucket:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: null },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+    mockEnqueueTask.mockResolvedValue({ id: 1234, taskId: 'task-1' });
+  });
+
+  it('enqueues a review without a payload host when the repository row has none', async () => {
+    await expect(
+      handleBitbucketPullRequest(
+        makePayload({ state: 'OPEN' }),
+        'pullrequest:created',
+      ),
+    ).resolves.toEqual({ status: 'ok', metadata: { ids: [1234] } });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            sourceControlProvider: 'bitbucket',
+            prNumber: 42,
+          }),
+        }),
+      }),
+      expect.objectContaining({ launchClass: 'automation' }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('stamps the repository host into review payloads when the repository row has one', async () => {
+    mockGetBitbucketAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'bitbucket:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'bitbucket.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleBitbucketPullRequest(
+      makePayload({ state: 'OPEN' }),
+      'pullrequest:created',
+    );
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'bitbucket',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'bitbucket.example.com',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
   });
 
   it('updates tracked PR status and schedules a fact upsert for merged pull requests', async () => {

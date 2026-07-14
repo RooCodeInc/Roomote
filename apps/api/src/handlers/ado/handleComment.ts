@@ -396,6 +396,10 @@ export async function handleAdoComment(
   const reviewPayload = {
     repo: repoFullName,
     sourceControlProvider: 'ado',
+    // Pin repository resolution to the webhook repository's host so
+    // same-name repositories on other hosts cannot be picked up. Legacy
+    // rows without a recorded host omit the field.
+    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
     prNumber: pullRequest.pullRequestId,
     prTitle: pullRequest.title,
     prUrl: getAdoPullRequestUrl({

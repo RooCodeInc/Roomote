@@ -115,6 +115,7 @@ describe('handleGitLabNote', () => {
         {
           id: 'gitlab:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
@@ -168,6 +169,41 @@ describe('handleGitLabNote', () => {
         projectId: 123,
         mergeRequestIid: 42,
         body: expect.stringContaining('review task'),
+      }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('stamps the repository host into mention review payloads when the repository row has one', async () => {
+    mockGetGitLabAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitlab:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'gitlab.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGitLabNote(makeNotePayload());
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitlab',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
       }),
     );
   });

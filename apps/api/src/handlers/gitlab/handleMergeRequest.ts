@@ -210,7 +210,7 @@ export async function handleGitLabMergeRequest(
     payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -218,6 +218,12 @@ export async function handleGitLabMergeRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'gitlab',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: mergeRequest.iid,
             prTitle: mergeRequest.title,
             prUrl: mergeRequest.url,

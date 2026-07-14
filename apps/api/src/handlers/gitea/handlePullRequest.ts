@@ -206,7 +206,7 @@ export async function handleGiteaPullRequest(
   const prAuthorId =
     pullRequest.user?.id != null ? String(pullRequest.user.id) : prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -214,6 +214,12 @@ export async function handleGiteaPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'gitea',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: payload.number,
             prTitle: pullRequest.title,
             prUrl,

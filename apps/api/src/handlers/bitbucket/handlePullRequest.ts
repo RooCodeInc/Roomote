@@ -214,7 +214,7 @@ export async function handleBitbucketPullRequest(
   const prAuthorId =
     getBitbucketUserAccountKey(pullRequest.author) ?? prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -222,6 +222,12 @@ export async function handleBitbucketPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'bitbucket',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber,
             prTitle: pullRequest.title,
             prUrl,
