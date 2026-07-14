@@ -549,13 +549,15 @@ export function computeMostActiveRepo(
   }
 
   return (
-    [...repoCounts.values()].sort((left, right) => {
+    [...repoCounts.entries()].sort(([leftKey, left], [rightKey, right]) => {
       if (right.pullRequestCount !== left.pullRequestCount) {
         return right.pullRequestCount - left.pullRequestCount;
       }
 
-      return left.fullName.localeCompare(right.fullName);
-    })[0] ?? null
+      // Same-name repos on different providers tie on fullName too; the
+      // provider-qualified key keeps the selection deterministic.
+      return leftKey.localeCompare(rightKey);
+    })[0]?.[1] ?? null
   );
 }
 

@@ -677,4 +677,18 @@ describe('computeMostActiveRepo', () => {
   it('returns null when no Roomote PRs were counted', () => {
     expect(computeMostActiveRepo([])).toBeNull();
   });
+
+  it('breaks equal-count same-name ties deterministically by provider', () => {
+    const prs = [
+      { sourceControlProvider: 'gitlab', repoFullName: 'acme/app' },
+      { sourceControlProvider: 'github', repoFullName: 'acme/app' },
+    ] as never[];
+
+    const forward = computeMostActiveRepo(prs as never);
+    const reversed = computeMostActiveRepo(
+      [...(prs as never[])].reverse() as never,
+    );
+
+    expect(forward).toEqual(reversed);
+  });
 });
