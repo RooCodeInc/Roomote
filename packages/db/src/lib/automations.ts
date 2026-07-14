@@ -228,6 +228,8 @@ export function resolveAutomationSlackChannelId(
 export type AutomationDestination = {
   provider: 'slack' | 'teams' | 'telegram';
   channelId: string;
+  /** Which waterfall level produced this destination. */
+  source: 'automation_target' | 'manager_channel';
 };
 
 const DESTINATION_TARGET_KINDS = [
@@ -255,12 +257,16 @@ export function resolveAutomationDestination(
     )[0];
 
     if (channelId) {
-      return { provider, channelId };
+      return { provider, channelId, source: 'automation_target' };
     }
   }
 
   return managerSlackChannelId
-    ? { provider: 'slack', channelId: managerSlackChannelId }
+    ? {
+        provider: 'slack',
+        channelId: managerSlackChannelId,
+        source: 'manager_channel',
+      }
     : null;
 }
 

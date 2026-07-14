@@ -9,6 +9,7 @@ export { sentryTriageJob } from './sentry-triage';
 export { suggesterJob } from './suggester';
 export { getAutomationRunner, runAutomationNow } from './run-now';
 export {
+  findTeamsConversationDisplayName,
   listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,

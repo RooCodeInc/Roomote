@@ -9,5 +9,8 @@ export type {
 export { getBackgroundAgentSettingsCommand } from './settings-read';
 export { updateBackgroundAgentSettingsCommand } from './settings-update';
 export { listSlackChannelsCommand } from './slack-channels';
-export type { SlackChannelDisplayNames } from './types';
+export type {
+  ResolvedAutomationDestinations,
+  SlackChannelDisplayNames,
+} from './types';
 export { triggerAutomationCommand } from './trigger-agent';
