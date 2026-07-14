@@ -1,7 +1,7 @@
 import type { SourceControlProvider } from '@roomote/types';
 
 type SourceControlSetupCopy = {
-  creationHref: string;
+  creationHref?: string;
   creationLinkLabel?: string;
   setupLabel: string;
   /** Indefinite article for `setupLabel` ("a" unless the label needs "an"). */
@@ -24,8 +24,6 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
       'In GitLab, go to your avatar → Edit profile → Access tokens → Add new token. Select the api scope. Use a bot or service account that belongs to the groups Roomote should access and can manage project webhooks.',
   },
   gitea: {
-    creationHref: 'https://docs.gitea.com/development/api-usage',
-    creationLinkLabel: 'View Gitea guide',
     setupLabel: 'Gitea access token',
     creationHint:
       'In your Gitea instance, go to your avatar → Settings → Applications → Manage Access Tokens → Generate Token. Use a bot or service account with read and write access to the repositories Roomote should use and permission to manage their webhooks.',

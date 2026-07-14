@@ -319,16 +319,18 @@ export function StepSourceControlConfig({
             {providerSetupCopy ? (
               <>
                 Create a new {providerSetupCopy.setupLabel}.
-                <Button variant="outline" className="ml-2" asChild>
-                  <a
-                    href={creationHref ?? providerSetupCopy.creationHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
-                    <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                  </a>
-                </Button>
+                {creationHref && (
+                  <Button variant="outline" className="ml-2" asChild>
+                    <a
+                      href={creationHref ?? providerSetupCopy.creationHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
+                      <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                    </a>
+                  </Button>
+                )}
               </>
             ) : (
               <>Create a new {providerSetupLabel}.</>

@@ -146,6 +146,7 @@ export default function SetupPage() {
   );
   const {
     step,
+    transitionDirection,
     entryContext,
     goToStep,
     goToPreviousStep,
@@ -441,212 +442,214 @@ export default function SetupPage() {
             center: {
               opacity: 1,
               y: 0,
-              transition: { duration: 0.75, ease: 'easeOut' },
+              transition: { duration: 0.25, ease: 'easeOut' },
             },
             exit: (direction) => ({
               opacity: 0,
               y: direction === 'forward' ? -20 : 20,
-              transition: { duration: 0.75, ease: 'easeOut' },
+              transition: { duration: 0.25, ease: 'easeOut' },
             }),
           }}
           initial="enter"
           animate="center"
           exit="exit"
         >
-      {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
-      {step === 'auth-provider' && (
-        <StepAuthProvider
-          includeTelegram
-          onContinue={(provider) => {
-            setPendingAuthProvider(provider);
-            goToStep('auth-env-vars');
-          }}
-          onSkip={() => {
-            setupSession.setCommunicationStepState('skipped');
-            goToNextStep();
-          }}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-        />
-      )}
-      {step === 'auth-env-vars' &&
-        (pendingAuthProvider === 'telegram' ? (
-          <StepTelegramSetup
-            onContinue={() => {
-              setupSession.setCommunicationStepState('completed');
-              setPendingAuthProvider(null);
-              goToNextStep();
-            }}
-            onBack={
-              canGoBack
-                ? () => {
-                    setPendingAuthProvider(null);
-                    goToPreviousStep();
-                  }
-                : undefined
-            }
-          />
-        ) : (
-          <StepAuthEnvVars
-            authSetup={status.authSetup}
-            selectedProviderId={pendingAuthProvider}
-            onContinue={() => {
-              setPendingAuthProvider(null);
-              goToNextStep();
-            }}
-            onBack={
-              canGoBack
-                ? () => {
-                    setPendingAuthProvider(null);
-                    goToPreviousStep();
-                  }
-                : undefined
-            }
-            bootstrapMode={false}
-          />
-        ))}
-      {step === 'env-vars' && (
-        <StepInferenceProvider
-          modelSetup={status.modelSetup}
-          openRouterOauthStatus={entryContext.openrouterOauthStatus}
-          openRouterOauthErrorReason={entryContext.openrouterOauthErrorReason}
-          onContinue={goToNextStep}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-        />
-      )}
-      {step === 'source-control-provider' && (
-        <StepSourceControlProvider
-          sourceControlSetup={status.sourceControlSetup}
-          onContinue={(provider) => {
-            saveSourceControlProviderChoice.mutate({ provider });
-          }}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-          disabled={saveSourceControlProviderChoice.isPending}
-        />
-      )}
-      {step === 'source-control-config' && (
-        <StepSourceControlConfig
-          sourceControlSetup={status.sourceControlSetup}
-          selectedProviderId={pendingSourceControlProvider}
-          onContinue={() => {
-            setPendingSourceControlProvider(null);
-            goToStep('source-control-connect');
-          }}
-          onBack={
-            canGoBack
-              ? () => {
-                  setPendingSourceControlProvider(null);
-                  goToPreviousStep();
+          {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
+          {step === 'auth-provider' && (
+            <StepAuthProvider
+              includeTelegram
+              onContinue={(provider) => {
+                setPendingAuthProvider(provider);
+                goToStep('auth-env-vars');
+              }}
+              onSkip={() => {
+                setupSession.setCommunicationStepState('skipped');
+                goToNextStep();
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+            />
+          )}
+          {step === 'auth-env-vars' &&
+            (pendingAuthProvider === 'telegram' ? (
+              <StepTelegramSetup
+                onContinue={() => {
+                  setupSession.setCommunicationStepState('completed');
+                  setPendingAuthProvider(null);
+                  goToNextStep();
+                }}
+                onBack={
+                  canGoBack
+                    ? () => {
+                        setPendingAuthProvider(null);
+                        goToPreviousStep();
+                      }
+                    : undefined
                 }
-              : undefined
-          }
-        />
-      )}
-      {step === 'source-control-connect' && (
-        <StepSourceControlConnect
-          sourceControlSetup={status.sourceControlSetup}
-          onContinue={goToNextStep}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-        />
-      )}
-      {step === 'qualification-blocked' &&
-      status.setupQualification.activeBlock ? (
-        <StepQualificationBlocked />
-      ) : null}
-      {step === 'compute-provider' && (
-        <StepComputeProvider
-          computeSetup={status.computeSetup}
-          onContinue={(provider) => {
-            saveComputeProviderChoice.mutate({ provider });
-          }}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-          disabled={saveComputeProviderChoice.isPending}
-        />
-      )}
-      {step === 'compute-config' && (
-        <StepComputeConfig
-          computeSetup={status.computeSetup}
-          selectedProviderId={pendingComputeProvider}
-          onContinue={() => {
-            setPendingComputeProvider(null);
-            goToNextStep();
-          }}
-          onBack={
-            canGoBack
-              ? () => {
-                  setPendingComputeProvider(null);
-                  goToPreviousStep();
+              />
+            ) : (
+              <StepAuthEnvVars
+                authSetup={status.authSetup}
+                selectedProviderId={pendingAuthProvider}
+                onContinue={() => {
+                  setPendingAuthProvider(null);
+                  goToNextStep();
+                }}
+                onBack={
+                  canGoBack
+                    ? () => {
+                        setPendingAuthProvider(null);
+                        goToPreviousStep();
+                      }
+                    : undefined
                 }
-              : undefined
-          }
-        />
-      )}
-      {step === 'slack' && (
-        <StepCommunicationConnect
-          authSetup={status.authSetup}
-          onContinue={goToNextStep}
-          onSkip={() => {
-            setupSession.setCommunicationStepState('skipped');
-            goToNextStep();
-          }}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-          returnPath={getSetupStepPath('slack')}
-        />
-      )}
-      {step === 'repo-selection' && (
-        <StepRepoSelection
-          initialSelectedRepositoryIds={
-            status.setupNewState.selectedRepositoryIds
-          }
-          initialSetupGuidance={status.setupNewState.setupGuidance ?? ''}
-          initialSelectedModelId={status.setupNewState.selectedModelId}
-          retryReason={setupRetryReason}
-          computeProvisioningError={
-            computeProvisioning?.status === 'failed'
-              ? computeProvisioning.error
-              : null
-          }
-          onRetryComputeProvisioning={() =>
-            goToStep('compute-config', { revisit: true })
-          }
-          onReviewComputeProvider={() =>
-            goToStep('compute-provider', { revisit: true })
-          }
-          onContinue={() => goToStep('invoke')}
-          onBack={canGoBack ? goToPreviousStep : undefined}
-          onSkip={() => {
-            setupSession.unlockPostOnboardingFlow();
-            goToNextPostOnboardingStep(true);
-          }}
-        />
-      )}
-      {step === 'invoke' && (
-        <StepInvoke
-          onboardingTaskId={status.setupNewState.onboardingTaskId}
-          communicationProviders={
-            status.authSetup.selectedProvider
-              ? [status.authSetup.selectedProvider]
-              : status.hasSlack
-                ? ['slack']
-                : []
-          }
-          sourceControlProviders={
-            status.sourceControlSetup.connectedProvider
-              ? [status.sourceControlSetup.connectedProvider]
-              : status.sourceControlSetup.selectedProvider
-                ? [status.sourceControlSetup.selectedProvider]
-                : status.hasGitHub
-                  ? ['github']
-                  : []
-          }
-          includeLinear={status.hasLinear}
-          linkSuggestedTasks={hasPersistedSelectedSuggestedTasks}
-          computeProvisioning={computeProvisioning}
-          onRetryComputeProvisioning={() =>
-            goToStep('compute-config', { revisit: true })
-          }
-          onTryItOut={() => undefined}
-        />
-      )}
+                bootstrapMode={false}
+              />
+            ))}
+          {step === 'env-vars' && (
+            <StepInferenceProvider
+              modelSetup={status.modelSetup}
+              openRouterOauthStatus={entryContext.openrouterOauthStatus}
+              openRouterOauthErrorReason={
+                entryContext.openrouterOauthErrorReason
+              }
+              onContinue={goToNextStep}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+            />
+          )}
+          {step === 'source-control-provider' && (
+            <StepSourceControlProvider
+              sourceControlSetup={status.sourceControlSetup}
+              onContinue={(provider) => {
+                saveSourceControlProviderChoice.mutate({ provider });
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+              disabled={saveSourceControlProviderChoice.isPending}
+            />
+          )}
+          {step === 'source-control-config' && (
+            <StepSourceControlConfig
+              sourceControlSetup={status.sourceControlSetup}
+              selectedProviderId={pendingSourceControlProvider}
+              onContinue={() => {
+                setPendingSourceControlProvider(null);
+                goToStep('source-control-connect');
+              }}
+              onBack={
+                canGoBack
+                  ? () => {
+                      setPendingSourceControlProvider(null);
+                      goToPreviousStep();
+                    }
+                  : undefined
+              }
+            />
+          )}
+          {step === 'source-control-connect' && (
+            <StepSourceControlConnect
+              sourceControlSetup={status.sourceControlSetup}
+              onContinue={goToNextStep}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+            />
+          )}
+          {step === 'qualification-blocked' &&
+          status.setupQualification.activeBlock ? (
+            <StepQualificationBlocked />
+          ) : null}
+          {step === 'compute-provider' && (
+            <StepComputeProvider
+              computeSetup={status.computeSetup}
+              onContinue={(provider) => {
+                saveComputeProviderChoice.mutate({ provider });
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+              disabled={saveComputeProviderChoice.isPending}
+            />
+          )}
+          {step === 'compute-config' && (
+            <StepComputeConfig
+              computeSetup={status.computeSetup}
+              selectedProviderId={pendingComputeProvider}
+              onContinue={() => {
+                setPendingComputeProvider(null);
+                goToNextStep();
+              }}
+              onBack={
+                canGoBack
+                  ? () => {
+                      setPendingComputeProvider(null);
+                      goToPreviousStep();
+                    }
+                  : undefined
+              }
+            />
+          )}
+          {step === 'slack' && (
+            <StepCommunicationConnect
+              authSetup={status.authSetup}
+              onContinue={goToNextStep}
+              onSkip={() => {
+                setupSession.setCommunicationStepState('skipped');
+                goToNextStep();
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+              returnPath={getSetupStepPath('slack')}
+            />
+          )}
+          {step === 'repo-selection' && (
+            <StepRepoSelection
+              initialSelectedRepositoryIds={
+                status.setupNewState.selectedRepositoryIds
+              }
+              initialSetupGuidance={status.setupNewState.setupGuidance ?? ''}
+              initialSelectedModelId={status.setupNewState.selectedModelId}
+              retryReason={setupRetryReason}
+              computeProvisioningError={
+                computeProvisioning?.status === 'failed'
+                  ? computeProvisioning.error
+                  : null
+              }
+              onRetryComputeProvisioning={() =>
+                goToStep('compute-config', { revisit: true })
+              }
+              onReviewComputeProvider={() =>
+                goToStep('compute-provider', { revisit: true })
+              }
+              onContinue={() => goToStep('invoke')}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+              onSkip={() => {
+                setupSession.unlockPostOnboardingFlow();
+                goToNextPostOnboardingStep(true);
+              }}
+            />
+          )}
+          {step === 'invoke' && (
+            <StepInvoke
+              onboardingTaskId={status.setupNewState.onboardingTaskId}
+              communicationProviders={
+                status.authSetup.selectedProvider
+                  ? [status.authSetup.selectedProvider]
+                  : status.hasSlack
+                    ? ['slack']
+                    : []
+              }
+              sourceControlProviders={
+                status.sourceControlSetup.connectedProvider
+                  ? [status.sourceControlSetup.connectedProvider]
+                  : status.sourceControlSetup.selectedProvider
+                    ? [status.sourceControlSetup.selectedProvider]
+                    : status.hasGitHub
+                      ? ['github']
+                      : []
+              }
+              includeLinear={status.hasLinear}
+              linkSuggestedTasks={hasPersistedSelectedSuggestedTasks}
+              computeProvisioning={computeProvisioning}
+              onRetryComputeProvisioning={() =>
+                goToStep('compute-config', { revisit: true })
+              }
+              onTryItOut={() => undefined}
+            />
+          )}
         </motion.div>
       </AnimatePresence>
     </div>
