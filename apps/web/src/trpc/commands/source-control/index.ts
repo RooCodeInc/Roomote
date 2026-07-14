@@ -80,10 +80,10 @@ export async function getSourceControlConfigStatusCommand(
 
 /**
  * Most provider webhooks are only auto-created for synced repositories that
- * are mapped to at least one environment. GitLab is the exception because its
- * OAuth callback immediately triggers the first repository sync, before
- * onboarding creates environment mappings; its provider wrapper opts into
- * registering hooks for the OAuth-visible projects.
+ * are mapped to at least one environment. GitLab and Gitea are exceptions
+ * because their OAuth callbacks immediately trigger the first repository
+ * sync, before onboarding creates environment mappings; their provider
+ * wrappers opt into registering hooks for the OAuth-visible projects.
  */
 async function getEnvironmentMappedRepositoryIds(): Promise<Set<string>> {
   const mappingRows = await db
@@ -353,6 +353,10 @@ async function configureGiteaWebhooks(
     actorUserId,
     logPrefix: '[configureGiteaWebhooks]',
     removalDescription: 'remove webhooks from unmapped repositories',
+    // Gitea OAuth is followed immediately by the repository sync, before
+    // onboarding creates environment mappings. Register hooks for the
+    // repositories returned by OAuth instead of skipping them.
+    scopeToEnvironmentMappings: false,
   });
 }
 

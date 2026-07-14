@@ -255,7 +255,7 @@ describe('source-control commands', () => {
     });
   });
 
-  it('only hooks environment-mapped repositories and removes hooks from unmapped ones', async () => {
+  it('hooks all Gitea repositories returned by OAuth', async () => {
     mockSyncGiteaRepositories.mockResolvedValue({
       success: true,
       repositories: [
@@ -265,9 +265,39 @@ describe('source-control commands', () => {
     });
     mockEnsureGiteaWebhooksForRepositories.mockResolvedValue([
       { status: 'created', repositoryFullName: 'Roomote/gitea-app' },
+      { status: 'created', repositoryFullName: 'acme/private-work-repo' },
     ]);
-    mockRemoveGiteaWebhooksForRepositories.mockResolvedValue([
-      { status: 'removed', repositoryFullName: 'acme/private-work-repo' },
+
+    const result = await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitea',
+    });
+
+    expect(mockEnsureGiteaWebhooksForRepositories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositories: [
+          { repositoryFullName: 'Roomote/gitea-app' },
+          { repositoryFullName: 'acme/private-work-repo' },
+        ],
+      }),
+    );
+    expect(mockRemoveGiteaWebhooksForRepositories).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      success: true,
+      webhooks: {
+        status: 'configured',
+        created: 2,
+        updated: 0,
+        failed: [],
+        skippedUnmapped: 0,
+        removed: 0,
+      },
+    });
+  });
+
+  it('creates webhooks when no synced repository is environment-mapped', async () => {
+    mockEnvironmentMappingRows.rows = [];
+    mockEnsureGiteaWebhooksForRepositories.mockResolvedValue([
+      { status: 'created', repositoryFullName: 'Roomote/gitea-app' },
     ]);
 
     const result = await syncRepositoriesCommand(buildMockAuth(), {
@@ -279,10 +309,6 @@ describe('source-control commands', () => {
         repositories: [{ repositoryFullName: 'Roomote/gitea-app' }],
       }),
     );
-    expect(mockRemoveGiteaWebhooksForRepositories).toHaveBeenCalledWith({
-      repositories: [{ repositoryFullName: 'acme/private-work-repo' }],
-      webhookUrl: 'https://roomote.example.com/api/webhooks/gitea',
-    });
     expect(result).toMatchObject({
       success: true,
       webhooks: {
@@ -290,31 +316,7 @@ describe('source-control commands', () => {
         created: 1,
         updated: 0,
         failed: [],
-        skippedUnmapped: 1,
-        removed: 1,
-      },
-    });
-  });
-
-  it('does not create webhooks when no synced repository is environment-mapped', async () => {
-    mockEnvironmentMappingRows.rows = [];
-    mockRemoveGiteaWebhooksForRepositories.mockResolvedValue([
-      { status: 'not_found', repositoryFullName: 'Roomote/gitea-app' },
-    ]);
-
-    const result = await syncRepositoriesCommand(buildMockAuth(), {
-      provider: 'gitea',
-    });
-
-    expect(mockEnsureGiteaWebhooksForRepositories).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      success: true,
-      webhooks: {
-        status: 'configured',
-        created: 0,
-        updated: 0,
-        failed: [],
-        skippedUnmapped: 1,
+        skippedUnmapped: 0,
         removed: 0,
       },
     });
