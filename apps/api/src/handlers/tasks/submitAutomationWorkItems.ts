@@ -87,6 +87,16 @@ export async function submitAutomationWorkItems(
       );
     }
 
+    if (automationSource === 'ci_failure_triage') {
+      return c.json(
+        {
+          error:
+            'CI failure triage no longer uses automation work items. Investigate and fix in the launched standard task.',
+        },
+        400,
+      );
+    }
+
     try {
       return c.json(
         await submitAutoActWorkItems({
