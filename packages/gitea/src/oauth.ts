@@ -64,7 +64,7 @@ export function createGiteaOAuthAuthorizationUrl(input: {
 }): { url: string; state: string } {
   const state = input.state ?? randomBytes(32).toString('hex');
   const url = new URL(
-    '/login/oauth/authorize',
+    'login/oauth/authorize',
     `${input.baseUrl.replace(/\/$/, '')}/`,
   );
   url.searchParams.set('client_id', input.clientId);

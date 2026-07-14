@@ -183,11 +183,16 @@ export function StepInvoke({
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">
             <method.icon className="size-5 mt-0.5 shrink-0 text-foreground transition-transform group-hover:scale-120" />
-            <div className="space-y-0">
+            <div className="space-y-1">
               <p className="">
                 <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
+              {method.example ? (
+                <p className="text-sm text-muted-foreground">
+                  Example: <span className="font-mono">{method.example}</span>
+                </p>
+              ) : null}
             </div>
           </div>
         ))}

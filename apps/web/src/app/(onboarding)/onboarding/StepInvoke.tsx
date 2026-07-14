@@ -86,6 +86,11 @@ export function StepInvoke({
               <p className="text-sm text-muted-foreground cursor-default group-hover:text-foreground">
                 {method.description}
               </p>
+              {method.example ? (
+                <p className="text-sm text-muted-foreground">
+                  Example: <span className="font-mono">{method.example}</span>
+                </p>
+              ) : null}
             </div>
           </div>
         ))}

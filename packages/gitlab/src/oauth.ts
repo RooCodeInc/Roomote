@@ -58,7 +58,7 @@ export function createGitLabOAuthAuthorizationUrl(input: {
 }): { url: string; state: string } {
   const state = input.state ?? randomBytes(32).toString('hex');
   const url = new URL(
-    '/oauth/authorize',
+    'oauth/authorize',
     `${input.baseUrl.replace(/\/$/, '')}/`,
   );
   url.searchParams.set('client_id', input.clientId);

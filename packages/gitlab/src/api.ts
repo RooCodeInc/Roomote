@@ -80,6 +80,7 @@ export type GitLabScopedProjectTokenDescriptor = z.infer<
 >;
 export type GitLabScopedProjectTokenCredential = {
   host: string;
+  originBaseUrl: string;
   repositoryFullName: string;
   username: string;
   token: string;
@@ -948,6 +949,7 @@ async function createScopedProjectToken(params: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   host: string;
+  originBaseUrl: string;
   projectId: string;
   repositoryFullName: string;
   runId: number;
@@ -975,6 +977,7 @@ async function createScopedProjectToken(params: {
   return {
     credential: {
       host: params.host,
+      originBaseUrl: params.originBaseUrl,
       repositoryFullName: params.repositoryFullName,
       username: data.username?.trim() || 'oauth2',
       token: data.token,
@@ -991,6 +994,7 @@ async function rotateScopedProjectToken(params: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   host: string;
+  originBaseUrl: string;
   descriptor: GitLabScopedProjectTokenDescriptor;
   token: string;
 }): Promise<{
@@ -1013,6 +1017,7 @@ async function rotateScopedProjectToken(params: {
   return {
     credential: {
       host: params.host,
+      originBaseUrl: params.originBaseUrl,
       repositoryFullName: params.descriptor.repositoryFullName,
       username: data.username?.trim() || 'oauth2',
       token: data.token,
@@ -1114,6 +1119,7 @@ export async function createTaskRunScopedGitLabTokens(
       credentials: [],
       proxyCredentials: repositoriesList.map((repository) => ({
         host,
+        originBaseUrl: baseUrl,
         repositoryFullName: repository.repositoryFullName,
         username: 'oauth2',
         token: deploymentToken,
@@ -1156,6 +1162,7 @@ export async function createTaskRunScopedGitLabTokens(
             apiBaseUrl,
             fetchImpl: options?.fetchImpl,
             host,
+            originBaseUrl: baseUrl,
             descriptor: existingDescriptor,
             token: deploymentToken,
           }).catch(
@@ -1164,6 +1171,7 @@ export async function createTaskRunScopedGitLabTokens(
                 apiBaseUrl,
                 fetchImpl: options?.fetchImpl,
                 host,
+                originBaseUrl: baseUrl,
                 projectId: repository.projectId,
                 repositoryFullName: repository.repositoryFullName,
                 runId: taskRun.id,
@@ -1174,6 +1182,7 @@ export async function createTaskRunScopedGitLabTokens(
             apiBaseUrl,
             fetchImpl: options?.fetchImpl,
             host,
+            originBaseUrl: baseUrl,
             projectId: repository.projectId,
             repositoryFullName: repository.repositoryFullName,
             runId: taskRun.id,
@@ -1202,6 +1211,7 @@ export async function createTaskRunScopedGitLabTokens(
         credentials: [],
         proxyCredentials: repositoriesList.map((repository) => ({
           host,
+          originBaseUrl: baseUrl,
           repositoryFullName: repository.repositoryFullName,
           username: 'oauth2',
           token: deploymentToken,

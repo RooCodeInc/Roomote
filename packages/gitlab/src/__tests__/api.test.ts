@@ -345,6 +345,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       credentials: [
         {
           host: 'gitlab.com',
+          originBaseUrl: 'https://gitlab.com',
           repositoryFullName: 'group/project',
           username: 'oauth2',
           token: 'glptt_repo_scoped',
@@ -645,6 +646,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       proxyCredentials: [
         {
           host: 'gitlab.com',
+          originBaseUrl: 'https://gitlab.com',
           repositoryFullName: 'group/project',
           username: 'oauth2',
           token: 'oauth_access_token',
