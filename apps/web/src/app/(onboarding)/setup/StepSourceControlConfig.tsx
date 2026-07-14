@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
 import { toast } from 'sonner';
 import {
   getSetupSourceControlVisibleFields,
@@ -29,10 +28,13 @@ import {
   DEFAULT_ADO_AUTH_MODE,
 } from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
-import { GitLabSourceControlConfig } from './GitLabSourceControlConfig';
+import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
+import { GitLabSourceControlInstructions } from './GitLabSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
+const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
+const DEFAULT_GITEA_BASE_URL = 'https://gitea.com';
 
 type SourceControlField =
   SetupSourceControlStatus['providers'][number]['fields'][number];
@@ -54,6 +56,10 @@ function getNonSecretFieldInitialValues(
     const savedValue = field.savedValue?.trim();
     if (savedValue) {
       next[field.envVarName] = savedValue;
+    } else if (field.envVarName === 'GITLAB_BASE_URL') {
+      next[field.envVarName] = DEFAULT_GITLAB_BASE_URL;
+    } else if (field.envVarName === 'GITEA_BASE_URL') {
+      next[field.envVarName] = DEFAULT_GITEA_BASE_URL;
     }
   }
 
@@ -73,6 +79,27 @@ function filterValuesToFields(
   }
 
   return next;
+}
+
+function normalizeGitLabSetupUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, '');
+  if (!trimmed) {
+    return 'https://gitlab.com';
+  }
+
+  try {
+    const url = new URL(
+      /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+    );
+    if (url.hostname === 'gitlab.com') {
+      url.pathname = '/';
+    } else if (/\/api\/v4$/.test(url.pathname)) {
+      url.pathname = url.pathname.replace(/\/api\/v4$/, '') || '/';
+    }
+    return url.toString().replace(/\/+$/, '');
+  } catch {
+    return 'https://gitlab.com';
+  }
 }
 
 export function StepSourceControlConfig({
@@ -97,6 +124,9 @@ export function StepSourceControlConfig({
   >({});
   const [showManualGitHubValues, setShowManualGitHubValues] = useState(false);
   const [showAdoAdvancedConfig, setShowAdoAdvancedConfig] = useState(false);
+  const [showGitlabAdvancedConfig, setShowGitlabAdvancedConfig] =
+    useState(false);
+  const [showGiteaAdvancedConfig, setShowGiteaAdvancedConfig] = useState(false);
   const [adoAuthMode, setAdoAuthMode] = useState<'pat' | 'entra' | 'delegated'>(
     DEFAULT_ADO_AUTH_MODE,
   );
@@ -149,7 +179,11 @@ export function StepSourceControlConfig({
   const visibleFields = useMemo(
     () =>
       getSetupSourceControlVisibleFields(providerFields, {
-        showAdvancedConfig: isAdo && showAdoAdvancedConfig,
+        showAdvancedConfig:
+          (isAdo && showAdoAdvancedConfig) ||
+          (selectedProvider?.provider === 'gitlab' &&
+            showGitlabAdvancedConfig) ||
+          (selectedProvider?.provider === 'gitea' && showGiteaAdvancedConfig),
       }).filter((field) =>
         !isAdo
           ? true
@@ -159,7 +193,15 @@ export function StepSourceControlConfig({
               field.envVarName !== 'ADO_TENANT_ID'
             : field.envVarName !== 'ADO_TOKEN',
       ),
-    [providerFields, isAdo, showAdoAdvancedConfig, adoAuthMode],
+    [
+      providerFields,
+      isAdo,
+      showAdoAdvancedConfig,
+      showGitlabAdvancedConfig,
+      showGiteaAdvancedConfig,
+      adoAuthMode,
+      selectedProvider?.provider,
+    ],
   );
 
   // Key off field content, not array identity — parent refreshes create a new
@@ -186,6 +228,8 @@ export function StepSourceControlConfig({
     setEditingSavedValues({});
     setShowManualGitHubValues(false);
     setShowAdoAdvancedConfig(false);
+    setShowGitlabAdvancedConfig(false);
+    setShowGiteaAdvancedConfig(false);
     const hasAdoEntraCredentials = providerFields.some(
       (field) =>
         ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID'].includes(
@@ -274,6 +318,15 @@ export function StepSourceControlConfig({
           : {}),
       },
     });
+
+    if (
+      selectedProvider.provider === 'gitea' ||
+      selectedProvider.provider === 'gitlab'
+    ) {
+      window.location.assign(
+        `/api/source-control/${selectedProvider.provider}/oauth/authorize`,
+      );
+    }
   };
 
   const provider = selectedProvider?.label;
@@ -281,23 +334,20 @@ export function StepSourceControlConfig({
     ? getSourceControlSetupCopy(selectedProvider.provider)
     : null;
   const providerSetupLabel = providerSetupCopy?.setupLabel ?? 'source control';
-  const isGitLab = selectedProvider?.provider === 'gitlab';
   const publicOrigin =
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const gitlabRedirectUri = `${publicOrigin}/api/auth/oauth2/callback/gitlab`;
-  const typedGitLabBaseUrl =
-    values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
-  const configuredGitLabBaseUrl =
-    sourceControlSetup.gitlabBaseUrl?.trim().replace(/\/+$/, '') ?? '';
-  const effectiveGitLabBaseUrl = /^https?:\/\//.test(typedGitLabBaseUrl)
-    ? typedGitLabBaseUrl
-    : /^https?:\/\//.test(configuredGitLabBaseUrl)
-      ? configuredGitLabBaseUrl
-      : 'https://gitlab.com';
-  const gitlabApplicationsUrl = `${effectiveGitLabBaseUrl}/-/user_settings/applications`;
-  const valuesStepNumber = isGitLab ? 3 : 2;
+  const rawGitLabBaseUrl =
+    values['GITLAB_BASE_URL']?.trim() ||
+    sourceControlSetup.gitlabBaseUrl?.trim() ||
+    '';
+  const creationHref =
+    selectedProvider?.provider === 'gitlab'
+      ? rawGitLabBaseUrl
+        ? `${normalizeGitLabSetupUrl(rawGitLabBaseUrl)}/-/user_settings/applications`
+        : undefined
+      : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
     return (
@@ -321,15 +371,18 @@ export function StepSourceControlConfig({
             {providerSetupCopy ? (
               <>
                 Create a new {providerSetupCopy.setupLabel}.
-                <Button variant="outline" className="ml-2" asChild>
-                  <a
-                    href={providerSetupCopy.creationHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Go <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                  </a>
-                </Button>
+                {creationHref && (
+                  <Button variant="outline" className="ml-2" asChild>
+                    <a
+                      href={creationHref ?? providerSetupCopy.creationHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
+                      <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                    </a>
+                  </Button>
+                )}
               </>
             ) : (
               <>Create a new {providerSetupLabel}.</>
@@ -340,16 +393,6 @@ export function StepSourceControlConfig({
               {providerSetupCopy.creationHint}
             </p>
           ) : null}
-          <p className="text-sm text-muted-foreground">
-            If you need it,{' '}
-            <Link
-              className="underline underline-offset-4 hover:text-foreground"
-              href="/api/setup/roomote-logo"
-            >
-              here&apos;s our logo
-            </Link>
-            .
-          </p>
         </NumberedStep>
       ) : (
         <NumberedStep number={1} className="mt-6">
@@ -363,25 +406,32 @@ export function StepSourceControlConfig({
         </NumberedStep>
       )}
 
-      {isAdo ? (
+      {isAdo ||
+      selectedProvider?.provider === 'gitea' ||
+      selectedProvider?.provider === 'gitlab' ? (
         <NumberedStep number={2}>
-          <AdoSourceControlInstructions
-            authMode={adoAuthMode}
-            publicOrigin={publicOrigin}
-          />
+          {isAdo ? (
+            <AdoSourceControlInstructions
+              authMode={adoAuthMode}
+              publicOrigin={publicOrigin}
+            />
+          ) : selectedProvider?.provider === 'gitea' ? (
+            <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : (
+            <GitLabSourceControlInstructions publicOrigin={publicOrigin} />
+          )}
         </NumberedStep>
       ) : null}
 
-      {isGitLab ? (
-        <NumberedStep number={2}>
-          <GitLabSourceControlConfig
-            applicationsUrl={gitlabApplicationsUrl}
-            redirectUri={gitlabRedirectUri}
-          />
-        </NumberedStep>
-      ) : null}
-
-      <NumberedStep number={isAdo ? 3 : valuesStepNumber}>
+      <NumberedStep
+        number={
+          isAdo ||
+          selectedProvider?.provider === 'gitea' ||
+          selectedProvider?.provider === 'gitlab'
+            ? 3
+            : 2
+        }
+      >
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
           integration.
@@ -432,20 +482,39 @@ export function StepSourceControlConfig({
               }
             />
           ))}
-          {isAdo && advancedFields.length > 0 ? (
+          {(isAdo ||
+            selectedProvider?.provider === 'gitlab' ||
+            selectedProvider?.provider === 'gitea') &&
+          advancedFields.length > 0 ? (
             <div className="pt-1">
               <button
                 type="button"
                 className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
-                onClick={() => setShowAdoAdvancedConfig((current) => !current)}
+                onClick={() =>
+                  isAdo
+                    ? setShowAdoAdvancedConfig((current) => !current)
+                    : selectedProvider?.provider === 'gitlab'
+                      ? setShowGitlabAdvancedConfig((current) => !current)
+                      : setShowGiteaAdvancedConfig((current) => !current)
+                }
               >
-                {showAdoAdvancedConfig
+                {(
+                  isAdo
+                    ? showAdoAdvancedConfig
+                    : selectedProvider?.provider === 'gitlab'
+                      ? showGitlabAdvancedConfig
+                      : showGiteaAdvancedConfig
+                )
                   ? 'Hide advanced config'
                   : 'Show advanced config'}
               </button>
             </div>
           ) : null}
-          {isAdo && showAdoAdvancedConfig
+          {(isAdo
+            ? showAdoAdvancedConfig
+            : selectedProvider?.provider === 'gitlab'
+              ? showGitlabAdvancedConfig
+              : showGiteaAdvancedConfig) && advancedFields.length > 0
             ? advancedFields.map((field) => (
                 <SourceControlFieldInput
                   key={field.envVarName}

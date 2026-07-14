@@ -46,7 +46,6 @@ export {
   Copy,
   CopyIcon,
   CornerDownLeftIcon,
-  CornerDownRight,
   Cpu,
   CreditCardIcon,
   Database,

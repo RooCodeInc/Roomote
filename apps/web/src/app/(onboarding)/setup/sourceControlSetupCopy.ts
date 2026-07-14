@@ -1,7 +1,8 @@
 import type { SourceControlProvider } from '@roomote/types';
 
 type SourceControlSetupCopy = {
-  creationHref: string;
+  creationHref?: string;
+  creationLinkLabel?: string;
   setupLabel: string;
   /** Indefinite article for `setupLabel` ("a" unless the label needs "an"). */
   setupLabelArticle?: 'a' | 'an';
@@ -17,22 +18,21 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
-    creationHref: 'https://gitlab.com/-/user_settings/personal_access_tokens',
-    setupLabel: 'GitLab access token',
+    creationHref: 'https://gitlab.com/-/user_settings/applications',
+    setupLabel: 'GitLab OAuth application',
     creationHint:
-      'Create the token with the api scope. Prefer a bot or service account that is a member of the groups Roomote should access; Roomote syncs its projects and configures merge request webhooks automatically.',
+      'In GitLab, click on your avatar → Edit Profile → Applications → Add new application, granting the API read/write scope.',
   },
   gitea: {
-    creationHref: 'https://docs.gitea.com/development/api-usage',
-    setupLabel: 'Gitea access token',
+    setupLabel: 'Gitea OAuth application',
     creationHint:
-      'Create the token with repository access on the instance Roomote should use. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically.',
+      'In Gitea 1.23+, go to your org → Settings → Application → New OAuth2 app.',
   },
   bitbucket: {
     creationHref: 'https://id.atlassian.com/manage-profile/security/api-tokens',
     setupLabel: 'Bitbucket API token',
     creationHint:
-      'Create an API token with scopes covering repository, pull request, and webhook read/write, plus workspace read (read:workspace:bitbucket) and user read (read:user:bitbucket) so Roomote can discover workspaces and validate the credentials. Prefer a bot or service account that can administer repository webhooks; Roomote syncs repositories and configures pull request webhooks automatically. The Atlassian account email that owns the API token is required.',
+      'In Atlassian account settings, select Create API token with scopes → Bitbucket. Grant repository, pull request, and webhook read and write access, plus workspace and user read access. Use a bot or service account that can manage repository webhooks.',
   },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',

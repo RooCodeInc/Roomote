@@ -45,6 +45,7 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/gitlab', () => ({
   resolveGitLabToken: (...args: unknown[]) => mockResolveGitLabToken(...args),
+  isGitLabOAuthAccessToken: () => false,
   resolveGitLabBaseUrl: async () => 'https://gitlab.com',
   buildGitLabApiBaseUrl: (baseUrl: string) =>
     `${baseUrl.replace(/\/+$/, '')}/api/v4`,

@@ -21,6 +21,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('../../logging', () => ({
   apiLogger: {
     debug: vi.fn(),
+    info: vi.fn(),
   },
   logApiError: vi.fn(),
 }));
@@ -220,6 +221,48 @@ describe('gitea webhook router', () => {
         issue: expect.objectContaining({ number: 42 }),
       }),
     );
+  });
+
+  it('ignores issue_comment webhooks when Gitea omits is_pull', async () => {
+    const payload = {
+      action: 'created',
+      sender: { id: 7, login: 'alice' },
+      repository: {
+        id: 123,
+        full_name: 'acme/backend',
+        html_url: 'https://git.example.com/acme/backend',
+      },
+      issue: {
+        number: 42,
+        title: 'Update backend',
+      },
+      comment: {
+        id: 900,
+        body: 'Hey @roomote please take a look',
+        user: { id: 7, login: 'alice' },
+      },
+    };
+    const body = JSON.stringify(payload);
+
+    const response = await app.request('http://localhost/api/webhooks/gitea', {
+      method: 'POST',
+      headers: {
+        'x-gitea-signature': sign(body),
+        'x-gitea-event': 'issue_comment',
+        'x-gitea-delivery': 'delivery-comment-3',
+      },
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-comment-3',
+      'issue_comment.created',
+      expect.objectContaining({ action: 'created' }),
+      expect.any(Function),
+      { provider: 'gitea' },
+    );
+    expect(mockHandleGiteaComment).not.toHaveBeenCalled();
   });
 
   it('rejects invalid signatures', async () => {

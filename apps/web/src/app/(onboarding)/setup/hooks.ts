@@ -17,6 +17,7 @@ import { useSetupAsyncSession } from './setup-session';
 import { hasSeenSetupWelcome } from './welcome-seen';
 
 export type OpenRouterOauthEntryStatus = 'connected' | 'error';
+type SetupStepTransitionDirection = 'forward' | 'backward';
 
 type SetupEntryContext = {
   step: SetupStep | null;
@@ -261,6 +262,9 @@ export function useSetupFlow(
   );
 
   const [step, setStep] = useState<SetupStep>('welcome');
+  const [transitionDirection, setTransitionDirection] =
+    useState<SetupStepTransitionDirection>('forward');
+  const stepRef = useRef<SetupStep>('welcome');
   const [entryContext] = useState<SetupEntryContext>(() =>
     readUrlEntryContext(),
   );
@@ -273,6 +277,21 @@ export function useSetupFlow(
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
+  stepRef.current = step;
+
+  const setStepWithTransition = useCallback((nextStep: SetupStep) => {
+    const currentIndex = SETUP_STEPS.indexOf(stepRef.current);
+    const nextIndex = SETUP_STEPS.indexOf(nextStep);
+
+    if (nextStep !== stepRef.current) {
+      setTransitionDirection(
+        nextIndex >= currentIndex ? 'forward' : 'backward',
+      );
+    }
+
+    stepRef.current = nextStep;
+    setStep(nextStep);
+  }, []);
   const communicationStepResolved =
     setupSession.session.communicationStep.state === 'skipped' ||
     setupSession.session.communicationStep.state === 'completed';
@@ -615,7 +634,7 @@ export function useSetupFlow(
     initialized.current = true;
     const requestedStep = entryContext.step;
     const resolvedStep = resolveDeepLinkStep(requestedStep);
-    setStep(resolvedStep);
+    setStepWithTransition(resolvedStep);
 
     if (resolvedStep === requestedStep) {
       // Valid deep link: keep the canonical `step` in the URL and only drop
@@ -631,6 +650,7 @@ export function useSetupFlow(
     entryContext.step,
     replaceStepUrl,
     resolveDeepLinkStep,
+    setStepWithTransition,
     setupSession.hydrated,
     status,
   ]);
@@ -643,23 +663,22 @@ export function useSetupFlow(
     }
 
     const fallbackStep = findNextStep(0);
+    const currentStep = stepRef.current;
 
-    setStep((currentStep) => {
-      if (isInitialReplayVisit(status)) {
-        return currentStep;
-      }
-
-      if (currentStep === pinnedUrlStepRef.current) {
-        return currentStep;
-      }
-
-      if (shouldSkip(currentStep)) {
-        return fallbackStep;
-      }
-
-      return currentStep;
-    });
-  }, [findNextStep, setupSession.hydrated, shouldSkip, status]);
+    if (
+      !isInitialReplayVisit(status) &&
+      currentStep !== pinnedUrlStepRef.current &&
+      shouldSkip(currentStep)
+    ) {
+      setStepWithTransition(fallbackStep);
+    }
+  }, [
+    findNextStep,
+    setStepWithTransition,
+    setupSession.hydrated,
+    shouldSkip,
+    status,
+  ]);
 
   // Keep the URL in sync with the active step. User navigation and deep-link
   // corrections write the URL themselves (recorded in lastUrlStepRef); any
@@ -717,12 +736,18 @@ export function useSetupFlow(
         replaceStepUrl(resolvedStep);
       }
 
-      setStep(resolvedStep);
+      setStepWithTransition(resolvedStep);
     };
 
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [replaceStepUrl, resolveDeepLinkStep, setupSession.hydrated, status]);
+  }, [
+    replaceStepUrl,
+    resolveDeepLinkStep,
+    setStepWithTransition,
+    setupSession.hydrated,
+    status,
+  ]);
 
   useEffect(() => {
     if (
@@ -759,10 +784,10 @@ export function useSetupFlow(
       // navigation must remain subject to the skip rules on the next status
       // refresh.
       pinnedUrlStepRef.current = options.revisit ? nextStep : null;
-      setStep(nextStep);
+      setStepWithTransition(nextStep);
       pushStepUrl(nextStep);
     },
-    [pushStepUrl, step],
+    [pushStepUrl, setStepWithTransition, step],
   );
 
   const previousStep = useMemo(
@@ -793,9 +818,9 @@ export function useSetupFlow(
       navigationHistoryRef.current.push(step);
     }
     pinnedUrlStepRef.current = null;
-    setStep(nextStep);
+    setStepWithTransition(nextStep);
     pushStepUrl(nextStep);
-  }, [findNextStep, pushStepUrl, step]);
+  }, [findNextStep, pushStepUrl, setStepWithTransition, step]);
 
   const goToNextPostOnboardingStep = useCallback(
     (forceUnlocked = false) => {
@@ -804,10 +829,10 @@ export function useSetupFlow(
         navigationHistoryRef.current.push(step);
       }
       pinnedUrlStepRef.current = null;
-      setStep(nextStep);
+      setStepWithTransition(nextStep);
       pushStepUrl(nextStep);
     },
-    [findNextPostOnboardingStep, pushStepUrl, step],
+    [findNextPostOnboardingStep, pushStepUrl, setStepWithTransition, step],
   );
 
   const advancePostOnboardingStep = useCallback(
@@ -820,14 +845,15 @@ export function useSetupFlow(
         navigationHistoryRef.current.push(resolvedStep);
       }
       pinnedUrlStepRef.current = null;
-      setStep(nextStep);
+      setStepWithTransition(nextStep);
       pushStepUrl(nextStep);
     },
-    [findNextPostOnboardingStep, pushStepUrl],
+    [findNextPostOnboardingStep, pushStepUrl, setStepWithTransition],
   );
 
   return {
     step,
+    transitionDirection,
     entryContext,
     goToStep,
     goToPreviousStep,

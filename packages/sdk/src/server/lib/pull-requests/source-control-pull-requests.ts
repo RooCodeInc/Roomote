@@ -47,6 +47,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
@@ -588,7 +589,7 @@ async function createOrUpdateGitLabMergeRequest({
           )}/merge_requests/${existing.iid}`,
           {},
         ),
-        tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+        tokenHeader: buildGitLabTokenHeader(token),
         body: {
           ...common,
           ...(input.labels.length > 0
@@ -607,7 +608,7 @@ async function createOrUpdateGitLabMergeRequest({
           )}/merge_requests`,
           {},
         ),
-        tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+        tokenHeader: buildGitLabTokenHeader(token),
         body: {
           source_branch: input.sourceBranch,
           target_branch: targetBranch,
@@ -666,7 +667,7 @@ async function listGitLabMergeRequests({
         per_page: 2,
       },
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabMergeRequestListSchema,
   });
 }

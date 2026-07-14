@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -53,13 +53,13 @@ function getTokenBackedConnectCopy({
 
   switch (provider) {
     case 'gitlab':
-      return 'Sync your GitLab projects so Roomote can access your codebase. Roomote also configures merge request webhooks on the synced projects so it can review merge requests automatically.';
+      return 'Sync your GitLab projects so Roomote can access your codebase.';
     case 'gitea':
-      return 'Sync your Gitea repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
-      return 'Sync your Bitbucket repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Bitbucket repositories so Roomote can access your codebase.';
     case 'ado':
-      return 'Sync your Azure DevOps repositories so Roomote can access your codebase. Roomote also configures pull request service hooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Azure DevOps repositories so Roomote can access your codebase.';
     default:
       return `Sync your ${providerLabel} repositories so Roomote can access your codebase.`;
   }
@@ -173,8 +173,47 @@ export function StepSourceControlConnect({
     provider,
     providerLabel,
   });
+  const gitlabOAuthConfigured =
+    provider === 'gitlab' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
+  const giteaOAuthConfigured =
+    provider === 'gitea' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
 
-  const handleSyncRepositories = async () => {
+  const oauthAutoSyncMarkerPresent =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('sync') === '1';
+  const shouldAutoSync =
+    isSourceControlTokenBackedProvider(provider) &&
+    providerStatus?.configSatisfied === true &&
+    !alreadyConnected &&
+    !needsAdoMicrosoftConnection &&
+    (provider !== 'gitlab' ||
+      !gitlabOAuthConfigured ||
+      oauthAutoSyncMarkerPresent) &&
+    (provider !== 'gitea' ||
+      !giteaOAuthConfigured ||
+      oauthAutoSyncMarkerPresent);
+
+  const handleSyncRepositories = useCallback(async () => {
     if (
       provider === 'ado' &&
       adoAuthMode === 'delegated' &&
@@ -190,7 +229,36 @@ export function StepSourceControlConnect({
     }
 
     syncRepositories.mutate();
-  };
+  }, [
+    adoAuthMode,
+    adoLinkedAccount.data?.account,
+    provider,
+    saveAdoLinkedAccount,
+    syncRepositories,
+  ]);
+
+  const autoSyncAttempted = useRef(false);
+  useEffect(() => {
+    if (!shouldAutoSync || autoSyncAttempted.current) {
+      return;
+    }
+
+    autoSyncAttempted.current = true;
+    void handleSyncRepositories();
+
+    if (oauthAutoSyncMarkerPresent) {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('sync');
+      const query = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        query
+          ? `${window.location.pathname}?${query}`
+          : window.location.pathname,
+      );
+    }
+  }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
 
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">

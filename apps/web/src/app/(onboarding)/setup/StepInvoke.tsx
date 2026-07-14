@@ -16,7 +16,6 @@ import {
   Loader2,
   ArrowRight,
   Checkbox,
-  CornerDownRight,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
@@ -184,17 +183,16 @@ export function StepInvoke({
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">
             <method.icon className="size-5 mt-0.5 shrink-0 text-foreground transition-transform group-hover:scale-120" />
-            <div className="space-y-0">
+            <div className="space-y-1">
               <p className="">
                 <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
-              {'example' in method && (
-                <p className="text-[0.9em] text-foreground font-mono cursor-default group-hover:text-foreground py-1.5">
-                  <CornerDownRight className="inline size-4 mr-2 relative -top-0.5" />
-                  {method.example}
+              {method.example ? (
+                <p className="text-sm text-muted-foreground">
+                  Example: <span className="font-mono">{method.example}</span>
                 </p>
-              )}
+              ) : null}
             </div>
           </div>
         ))}

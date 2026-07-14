@@ -34,6 +34,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
@@ -1138,7 +1139,7 @@ async function getGitLabMergeRequestDetails({
       `/projects/${encodeURIComponent(projectId)}/merge_requests/${prNumber}`,
       {},
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabMergeRequestDetailsSchema,
   });
 
@@ -1208,7 +1209,7 @@ async function listGitLabMergeRequestComments({
       `/projects/${encodeURIComponent(projectId)}/merge_requests/${prNumber}/discussions`,
       { per_page: 100 },
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabDiscussionListSchema,
   });
 

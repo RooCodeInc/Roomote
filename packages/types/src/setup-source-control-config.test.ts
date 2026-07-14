@@ -5,6 +5,37 @@ import {
 } from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
+  it('does not treat GitLab as configured when no credentials are present', () => {
+    const status = buildSetupSourceControlStatus({});
+    const gitlab = status.providers.find((p) => p.provider === 'gitlab');
+
+    expect(gitlab).toMatchObject({
+      runtimeConfigSatisfied: false,
+      savedConfigSatisfied: false,
+      configSatisfied: false,
+    });
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.lockReason).toBeNull();
+  });
+
+  it('accepts GitLab OAuth credentials', () => {
+    const status = buildSetupSourceControlStatus({
+      runtimeEnv: {
+        GITLAB_CLIENT_ID: 'client-id',
+        GITLAB_CLIENT_SECRET: 'client-secret',
+      },
+    });
+
+    expect(status.runtimeConfiguredProvider).toBe('gitlab');
+    expect(status.lockReason).toBe('runtime_env');
+    expect(status.providers.find((p) => p.provider === 'gitlab')).toMatchObject(
+      {
+        runtimeConfigSatisfied: true,
+        configSatisfied: true,
+      },
+    );
+  });
+
   it('returns plain-text savedValue for non-secret fields only', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
@@ -77,7 +108,8 @@ describe('buildSetupSourceControlStatus', () => {
   it('does not mark setup satisfied when config is present but no repositories are connected', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITLAB_TOKEN: 'gitlab-token',
+        GITLAB_CLIENT_ID: 'client-id',
+        GITLAB_CLIENT_SECRET: 'client-secret',
       },
     });
 
@@ -95,7 +127,7 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('prefers a connected provider when preselecting even without runtime config', () => {
     const status = buildSetupSourceControlStatus({
-      persistedEnvVarNames: ['GITLAB_TOKEN'],
+      persistedEnvVarNames: ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'],
       connectedProviders: ['gitlab'],
       repositoryCounts: { gitlab: 2 },
     });
@@ -118,7 +150,8 @@ describe('buildSetupSourceControlStatus', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
         GITEA_BASE_URL: 'https://gitea.example.com',
-        GITEA_TOKEN: 'gitea-token',
+        GITEA_CLIENT_ID: 'gitea-client-id',
+        GITEA_CLIENT_SECRET: 'gitea-client-secret',
       },
     });
 
@@ -137,7 +170,10 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('honors the selected provider override', () => {
     const status = buildSetupSourceControlStatus({
-      runtimeEnv: { GITLAB_TOKEN: 'gitlab-token' },
+      runtimeEnv: {
+        GITLAB_CLIENT_ID: 'client-id',
+        GITLAB_CLIENT_SECRET: 'client-secret',
+      },
       selectedProvider: 'ado',
     });
 
@@ -147,7 +183,7 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('preselects saved config without locking or selecting the provider', () => {
     const status = buildSetupSourceControlStatus({
-      persistedEnvVarNames: ['GITLAB_TOKEN'],
+      persistedEnvVarNames: ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'],
     });
 
     expect(status.preselectedProvider).toBe('gitlab');
@@ -166,7 +202,8 @@ describe('buildSetupSourceControlStatus', () => {
         R_GITHUB_CLIENT_SECRET: 'client-secret',
         R_GITHUB_WEBHOOK_SECRET: 'webhook-secret',
         R_GITHUB_APP_SLUG: 'roomote',
-        GITLAB_TOKEN: 'gitlab-token',
+        GITLAB_CLIENT_ID: 'gitlab-client-id',
+        GITLAB_CLIENT_SECRET: 'gitlab-client-secret',
       },
     });
 
@@ -233,20 +270,22 @@ describe('buildSetupSourceControlStatus', () => {
 
     const gitlabStatus = buildSetupSourceControlStatus({
       runtimeEnv: {
-        GITLAB_TOKEN: 'gitlab-token',
+        GITLAB_CLIENT_ID: 'client-id',
+        GITLAB_CLIENT_SECRET: 'client-secret',
       },
     });
     const gitlab = gitlabStatus.providers.find((p) => p.provider === 'gitlab');
-    const optionalGitLabClientId = gitlab?.fields.find(
+    const requiredGitLabClientId = gitlab?.fields.find(
       (field) => field.envVarName === 'GITLAB_CLIENT_ID',
     );
-    const optionalGitLabClientSecret = gitlab?.fields.find(
+    const requiredGitLabClientSecret = gitlab?.fields.find(
       (field) => field.envVarName === 'GITLAB_CLIENT_SECRET',
     );
     const giteaStatus = buildSetupSourceControlStatus({
       runtimeEnv: {
         GITEA_BASE_URL: 'https://gitea.example.com',
-        GITEA_TOKEN: 'gitea-token',
+        GITEA_CLIENT_ID: 'gitea-client-id',
+        GITEA_CLIENT_SECRET: 'gitea-client-secret',
       },
     });
     const gitea = giteaStatus.providers.find((p) => p.provider === 'gitea');
@@ -254,16 +293,16 @@ describe('buildSetupSourceControlStatus', () => {
       (field) => field.envVarName === 'GITEA_WEBHOOK_SECRET',
     );
 
-    expect(optionalGitLabClientId).toMatchObject({
-      required: false,
-      runtimeSatisfied: false,
+    expect(requiredGitLabClientId).toMatchObject({
+      runtimeSatisfied: true,
       savedSatisfied: false,
     });
-    expect(optionalGitLabClientSecret).toMatchObject({
-      required: false,
-      runtimeSatisfied: false,
+    expect(requiredGitLabClientSecret).toMatchObject({
+      runtimeSatisfied: true,
       savedSatisfied: false,
     });
+    expect(requiredGitLabClientId?.required).not.toBe(false);
+    expect(requiredGitLabClientSecret?.required).not.toBe(false);
     expect(optionalGiteaWebhookSecret).toMatchObject({
       required: false,
       runtimeSatisfied: false,
@@ -316,18 +355,21 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('treats runtime env as the highest-precedence satisfaction source', () => {
     const status = buildSetupSourceControlStatus({
-      runtimeEnv: { GITLAB_TOKEN: 'runtime-token' },
-      persistedEnvVarNames: ['GITLAB_TOKEN'],
+      runtimeEnv: {
+        GITLAB_CLIENT_ID: 'runtime-client-id',
+        GITLAB_CLIENT_SECRET: 'runtime-client-secret',
+      },
+      persistedEnvVarNames: ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'],
     });
 
     const gitlab = status.providers.find((p) => p.provider === 'gitlab');
-    const tokenField = gitlab?.fields.find(
-      (f) => f.envVarName === 'GITLAB_TOKEN',
+    const clientIdField = gitlab?.fields.find(
+      (f) => f.envVarName === 'GITLAB_CLIENT_ID',
     );
-    expect(tokenField).toMatchObject({
+    expect(clientIdField).toMatchObject({
       runtimeSatisfied: true,
       savedSatisfied: true,
-      satisfiedByEnvVarName: 'GITLAB_TOKEN',
+      satisfiedByEnvVarName: 'GITLAB_CLIENT_ID',
     });
   });
 
@@ -365,7 +407,10 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('reports setup satisfied by runtime env when the connected provider is runtime-configured', () => {
     const status = buildSetupSourceControlStatus({
-      runtimeEnv: { GITLAB_TOKEN: 'runtime-token' },
+      runtimeEnv: {
+        GITLAB_CLIENT_ID: 'runtime-client-id',
+        GITLAB_CLIENT_SECRET: 'runtime-client-secret',
+      },
       persistedEnvVarNames: [],
       connectedProviders: ['gitlab'],
       repositoryCounts: { gitlab: 1 },
@@ -377,7 +422,7 @@ describe('buildSetupSourceControlStatus', () => {
 
   it('does not report setup satisfied by runtime env when the connected provider is only saved-configured', () => {
     const status = buildSetupSourceControlStatus({
-      persistedEnvVarNames: ['GITLAB_TOKEN'],
+      persistedEnvVarNames: ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'],
       connectedProviders: ['gitlab'],
       repositoryCounts: { gitlab: 1 },
     });
@@ -429,4 +474,23 @@ describe('getSetupSourceControlVisibleFields', () => {
 
     expect(names).not.toContain('ADO_WEBHOOK_SECRET');
   });
+
+  it.each([
+    ['gitlab', ['GITLAB_BASE_URL', 'GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET']],
+    ['gitea', ['GITEA_BASE_URL', 'GITEA_CLIENT_ID', 'GITEA_CLIENT_SECRET']],
+    ['bitbucket', ['BITBUCKET_TOKEN', 'BITBUCKET_USERNAME']],
+  ] as const)(
+    'keeps %s setup focused on required connection values',
+    (provider, expected) => {
+      const descriptor = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+        (candidate) => candidate.provider === provider,
+      );
+
+      expect(
+        getSetupSourceControlVisibleFields(descriptor?.fields ?? []).map(
+          (field) => field.envVarName,
+        ),
+      ).toEqual(expected);
+    },
+  );
 });

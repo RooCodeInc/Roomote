@@ -112,10 +112,9 @@ function buildSourceControlSetup(
         repositoryCount: 0,
         fields: [
           {
-            envVarName: 'GITLAB_TOKEN',
-            acceptedEnvVarNames: ['GITLAB_TOKEN'],
-            label: 'GitLab Personal Access Token',
-            secret: true,
+            envVarName: 'GITLAB_CLIENT_ID',
+            acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+            label: 'GitLab OAuth Client ID',
             runtimeSatisfied: false,
             savedSatisfied: false,
             satisfiedByEnvVarName: null,
@@ -125,6 +124,35 @@ function buildSourceControlSetup(
     ],
     ...overrides,
   };
+}
+
+function buildCatalogProviderSetup(
+  provider: 'gitlab' | 'gitea' | 'bitbucket',
+): SetupSourceControlStatus {
+  const descriptor = SETUP_SOURCE_CONTROL_PROVIDER_CATALOG.find(
+    (candidate) => candidate.provider === provider,
+  )!;
+
+  return buildSourceControlSetup({
+    preselectedProvider: provider,
+    providers: [
+      {
+        ...descriptor,
+        runtimeConfigSatisfied: false,
+        savedConfigSatisfied: false,
+        configSatisfied: false,
+        configSatisfiedByRuntimeEnv: false,
+        connected: false,
+        repositoryCount: 0,
+        fields: descriptor.fields.map((field) => ({
+          ...field,
+          runtimeSatisfied: false,
+          savedSatisfied: false,
+          satisfiedByEnvVarName: null,
+        })),
+      },
+    ],
+  });
 }
 
 describe('StepSourceControlConfig', () => {
@@ -210,20 +238,80 @@ describe('StepSourceControlConfig', () => {
     ).toBeInTheDocument();
   });
 
-  it('keeps token-backed providers on the existing config form', () => {
+  it('guides GitLab OAuth application setup', () => {
     render(
       <StepSourceControlConfig
-        sourceControlSetup={buildSourceControlSetup()}
+        sourceControlSetup={buildCatalogProviderSetup('gitlab')}
         selectedProviderId="gitlab"
         onContinue={vi.fn()}
       />,
     );
 
     expect(
-      screen.getByText('GitLab Personal Access Token'),
+      screen.getAllByText(/GitLab OAuth application/).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/In GitLab, click on your avatar/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/GitLab Webhook Secret/)).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Create GitHub App' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('guides Gitea OAuth application setup', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildCatalogProviderSetup('gitea')}
+        selectedProviderId="gitea"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Gitea Base URL')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://gitea.com')).toBeInTheDocument();
+    expect(screen.getByText(/Gitea OAuth Client ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Gitea OAuth Client Secret/)).toBeInTheDocument();
+    expect(screen.getByText(/Gitea 1\.23\+/)).toBeInTheDocument();
+    expect(screen.getByText('Deployment callback')).toBeInTheDocument();
+    expect(
+      screen.getByText(/api\/source-control\/gitea\/oauth\/callback/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText('Account linking callback'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/api\/auth\/oauth2\/callback\/gitea/),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('Gitea Access Token')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gitea Username')).not.toBeInTheDocument();
+    expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
+  });
+
+  it('guides Bitbucket token creation without optional credentials', () => {
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
+        selectedProviderId="bitbucket"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Bitbucket API Token')).toBeInTheDocument();
+    expect(screen.getByText('Atlassian Account Email')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
+      'href',
+      'https://id.atlassian.com/manage-profile/security/api-tokens',
+    );
+    expect(
+      screen.getByText(/Create API token with scopes → Bitbucket/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Bitbucket OAuth Client ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Bitbucket Webhook Secret'),
     ).not.toBeInTheDocument();
   });
 

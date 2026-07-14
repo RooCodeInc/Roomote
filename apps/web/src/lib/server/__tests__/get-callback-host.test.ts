@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 
 const mockEnvState = vi.hoisted(() => ({
   R_APP_URL: 'https://roomote.203-0-113-7.sslip.io',
+  R_PUBLIC_URL: undefined as string | undefined,
 }));
 
 vi.mock('../env', () => ({
@@ -39,6 +40,17 @@ describe('getCallbackHost', () => {
 
     expect(getCallbackHost(request)).toBe(
       'https://roomote.example.com/api/slack/callback?code=abc',
+    );
+  });
+
+  it('prefers the configured public URL for internal requests', () => {
+    mockEnvState.R_PUBLIC_URL = 'https://roomote.example.com';
+    const request = new NextRequest(
+      'http://localhost:13000/api/gitea/callback',
+    );
+
+    expect(getCallbackHost(request)).toBe(
+      'https://roomote.example.com/api/gitea/callback',
     );
   });
 });

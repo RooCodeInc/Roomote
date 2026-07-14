@@ -889,15 +889,19 @@ function ProviderSetupInstructions({
       <div className="space-y-2">
         <p className="text-sm font-semibold">
           Create {setupCopy.setupLabelArticle ?? 'a'}{' '}
-          <a
-            href={setupCopy.creationHref}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-4 hover:text-foreground"
-          >
-            {setupCopy.setupLabel}
-            <ExternalLink className="ml-1 inline size-4 -translate-y-0.5" />
-          </a>{' '}
+          {setupCopy.creationHref ? (
+            <a
+              href={setupCopy.creationHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-4 hover:text-foreground"
+            >
+              {setupCopy.setupLabel}
+              <ExternalLink className="ml-1 inline size-4 -translate-y-0.5" />
+            </a>
+          ) : (
+            setupCopy.setupLabel
+          )}{' '}
           for {title}.
         </p>
         <p className="text-sm text-muted-foreground">
