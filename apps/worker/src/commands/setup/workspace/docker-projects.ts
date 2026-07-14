@@ -427,21 +427,29 @@ async function startDockerProject({
       commandOptions,
     );
     if (diagnostics) logger.debug.error(diagnostics);
+    // error.message includes Compose stderr, which can echo project env
+    // values or build args — redact before this lands in the Logs panel.
     await appendDockerProjectLog(
       resolved.project.name,
-      [
-        `[roomote] Docker project ${resolved.project.name} failed to start: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        diagnostics,
-      ]
-        .filter(Boolean)
-        .join('\n\n'),
+      redactContainerDiagnostics(
+        [
+          `[roomote] Docker project ${resolved.project.name} failed to start: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          diagnostics,
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        resolved.sensitiveValues,
+      ),
     );
     throw new Error(
-      [error instanceof Error ? error.message : String(error), diagnostics]
-        .filter(Boolean)
-        .join('\n\n'),
+      redactContainerDiagnostics(
+        [error instanceof Error ? error.message : String(error), diagnostics]
+          .filter(Boolean)
+          .join('\n\n'),
+        resolved.sensitiveValues,
+      ),
       { cause: error },
     );
   }
@@ -513,8 +521,10 @@ export async function initializeDockerProjects(
   }
 
   for (const project of projects) {
+    let resolved: ResolvedDockerProject | undefined;
+
     try {
-      const resolved = await resolveDockerProject({
+      resolved = await resolveDockerProject({
         project,
         config,
         preparedWorkspace,
@@ -523,17 +533,26 @@ export async function initializeDockerProjects(
       await startDockerProject({ logger, resolved, runCommand });
     } catch (error) {
       const message = `Docker project '${project.name}' failed to start: ${error instanceof Error ? error.message : String(error)}`;
+      // Before resolution succeeds no project env has been substituted, so
+      // there is nothing to redact; afterwards the error can carry Compose
+      // stderr echoing sensitive values.
+      const redactedMessage = resolved
+        ? redactContainerDiagnostics(message, resolved.sensitiveValues)
+        : message;
       if (project.required === false) {
         logger.userLog.warn(`${message} Continuing because it is optional.`);
         logger.debug.error(error);
         await appendDockerProjectLog(
           project.name,
-          `[roomote] ${message} Continuing because it is optional.`,
+          `[roomote] ${redactedMessage} Continuing because it is optional.`,
         );
         continue;
       }
 
-      await appendDockerProjectLog(project.name, `[roomote] ${message}`);
+      await appendDockerProjectLog(
+        project.name,
+        `[roomote] ${redactedMessage}`,
+      );
       throw new Error(message, { cause: error });
     }
   }

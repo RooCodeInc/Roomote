@@ -413,4 +413,59 @@ describe('initializeDockerProjects', () => {
     await expect(result).rejects.toThrow('APP_SECRET=[redacted]');
     await expect(result).rejects.not.toThrow('project-secret-value');
   });
+
+  it('redacts project values from failure output written to the project log', async () => {
+    await fs.writeFile(
+      path.join(repositoryPath, 'compose.yaml'),
+      'services:\n  web:\n    image: nginx:alpine\n',
+    );
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('up')) {
+        // Compose stderr echoing a substituted project env value ends up on
+        // the thrown error message.
+        throw new Error('compose failed: APP_SECRET=project-secret-value');
+      }
+      return { stdout: '' };
+    });
+
+    const result = initializeDockerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            docker_projects: [
+              {
+                type: 'compose',
+                name: 'dev',
+                repository: 'acme/app',
+                files: ['compose.yaml'],
+                env: { APP_SECRET: '${PROJECT_SECRET}' },
+              },
+            ],
+          },
+        },
+        envVars: { PROJECT_SECRET: 'project-secret-value' },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    await expect(result).rejects.toThrow('APP_SECRET=[redacted]');
+    await expect(result).rejects.not.toThrow('project-secret-value');
+
+    const appendedText = vi
+      .mocked(appendDockerProjectLog)
+      .mock.calls.map((call) => call[1])
+      .join('\n');
+    expect(appendedText).toContain('APP_SECRET=[redacted]');
+    expect(appendedText).not.toContain('project-secret-value');
+  });
 });
