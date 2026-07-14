@@ -183,6 +183,30 @@ export type DockerfileDockerProject = z.infer<
 export type DockerProject = z.infer<typeof dockerProjectSchema>;
 
 /**
+ * Normalize a configured Docker project name into the Compose project name
+ * the worker uses (`--project-name`). Shared with the web app so both sides
+ * derive identical log file paths.
+ */
+export function toComposeProjectName(name: string): string {
+  return `roomote-${name}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .slice(0, 63);
+}
+
+export const DOCKER_PROJECT_LOGS_DIR = '/tmp/roomote-docker-projects';
+
+/**
+ * Well-known sandbox path of a Docker project's log file. The worker writes
+ * Compose startup output, failure diagnostics, and a live `docker compose
+ * logs --follow` stream here; the web Logs panel tails it by this path.
+ */
+export function getDockerProjectLogFilePath(name: string): string {
+  return `${DOCKER_PROJECT_LOGS_DIR}/${toComposeProjectName(name)}.log`;
+}
+
+/**
  * Default ports for each service.
  */
 export const serviceDefaultPorts: Record<ServiceName, number> = {

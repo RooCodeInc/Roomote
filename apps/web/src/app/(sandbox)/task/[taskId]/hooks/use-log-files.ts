@@ -1,6 +1,8 @@
 import { useContext, useEffect, useMemo } from 'react';
 import { useStore } from 'zustand';
 
+import { getDockerProjectLogFilePath } from '@roomote/types';
+
 import { useEnvironment } from '@/hooks/environments';
 
 import type { LogfileInfo } from './use-sandbox-store';
@@ -41,18 +43,27 @@ export function useLogFiles(
   const environmentLogfiles = useMemo<LogfileInfo[]>(() => {
     const config = environment.data?.config;
 
-    if (!config?.repositories) {
+    if (!config) {
       return [];
     }
 
     const result: LogfileInfo[] = [];
 
-    for (const repo of config.repositories) {
+    for (const repo of config.repositories ?? []) {
       for (const cmd of repo.commands ?? []) {
         if (cmd.logfile) {
           result.push({ label: cmd.name, filePath: cmd.logfile });
         }
       }
+    }
+
+    // The worker streams each Docker project's Compose startup output and a
+    // live `docker compose logs --follow` feed into a well-known file.
+    for (const project of config.docker_projects ?? []) {
+      result.push({
+        label: `${project.name} (Docker)`,
+        filePath: getDockerProjectLogFilePath(project.name),
+      });
     }
 
     return result;
