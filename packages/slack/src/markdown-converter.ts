@@ -34,7 +34,7 @@ export function convertMarkdownToSlack(text: string): string {
  */
 export function convertMarkdownLinksToSlack(text: string): string {
   return text.replace(
-    /\[([^\]]+)\]\(((?:[^()]+|\([^()]*\))+)\)/g,
+    /\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g,
     (match, label: string, target: string) => {
       if (/^(?:https?:\/\/|mailto:|tel:|ftp:\/\/|www\.)/i.test(target.trim())) {
         return `<${target}|${label}>`;
