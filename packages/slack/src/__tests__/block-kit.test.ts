@@ -150,6 +150,7 @@ describe('Slack routing blocks', () => {
   it('uses a router kickoff phrase in started messages when present', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
+      freeformKickoffEnabled: true,
       kickoffMessage:
         'Looking into daily environment snapshots for faster startup in App',
       runId: 123,
@@ -165,6 +166,7 @@ describe('Slack routing blocks', () => {
   it('keeps model override information with a router kickoff phrase', () => {
     const blocks = buildStartedBlocks({
       workspaceDisplayName: 'App',
+      freeformKickoffEnabled: true,
       kickoffMessage: 'Checking login redirects in App with Opus 4.8',
       modelDisplayName: 'Opus 4.8',
       runId: 123,
@@ -174,6 +176,22 @@ describe('Slack routing blocks', () => {
 
     expect(getPrimarySectionText(blocks)).toBe(
       'Checking login redirects in App with Opus 4.8',
+    );
+  });
+
+  it('ignores freeform kickoff when the feature is disabled', () => {
+    const blocks = buildStartedBlocks({
+      workspaceDisplayName: 'App',
+      freeformKickoffEnabled: false,
+      kickoffMessage:
+        'Looking into daily environment snapshots for faster startup in App',
+      runId: 123,
+      taskId: 'task-123',
+      initiatingSlackUserId: 'U123',
+    });
+
+    expect(getPrimarySectionText(blocks)).toBe(
+      'Getting started on your task in App',
     );
   });
 

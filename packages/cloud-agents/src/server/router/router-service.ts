@@ -7,6 +7,9 @@ import {
   isTaskModelIdAllowed,
 } from '@roomote/types';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
+import { FeatureFlag } from '@roomote/feature-flags';
+import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 
 import type {
   FollowUpClassification,
@@ -42,6 +45,17 @@ import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
 } from '../non-task-provider-usage';
+
+export async function isDynamicKickoffMessageEnabled(): Promise<boolean> {
+  try {
+    return await getFeatureFlagEvaluator(getRedis()).evaluate(
+      FeatureFlag.DynamicKickoffMessage,
+      { isDeploymentContext: true },
+    );
+  } catch {
+    return false;
+  }
+}
 
 const platformAnswerSchema = z.object({
   canAnswer: z
@@ -223,6 +237,9 @@ function resolveRoutedTaskModel(
 function buildStandardTaskRoutingResult(
   response: WorkspaceResponse,
   context: RoutingContext,
+  options?: {
+    includeKickoffMessage?: boolean;
+  },
 ): StandardTaskRoutingBuildResult {
   const workspace = mapWorkspace(response.workspaceValue, context);
   const workspaceRemapped = wasWorkspaceRemapped(
@@ -231,7 +248,10 @@ function buildStandardTaskRoutingResult(
   );
 
   if (workspace) {
-    const kickoffMessage = response.kickoffMessage?.replace(/\s+/g, ' ').trim();
+    const kickoffMessage =
+      options?.includeKickoffMessage === true
+        ? response.kickoffMessage?.replace(/\s+/g, ' ').trim()
+        : undefined;
 
     return {
       status: 'routed',
@@ -336,9 +356,11 @@ async function runRoutingDecision(
 
   try {
     const promptContext = context;
+    const includeKickoffMessage = await isDynamicKickoffMessageEnabled();
 
     const routingPrompt = buildWorkspaceRoutingPrompt({
       forceDisablePlatformWorkspace: options?.forceDisablePlatformWorkspace,
+      includeKickoffMessage,
     });
     const contextMessages = buildContextMessages(promptContext, {
       includePlatformWorkspace: !options?.forceDisablePlatformWorkspace,
@@ -356,6 +378,7 @@ async function runRoutingDecision(
       const built = buildStandardTaskRoutingResult(
         responseResult.response,
         promptContext,
+        { includeKickoffMessage },
       );
 
       if (built.status === 'fallback') {

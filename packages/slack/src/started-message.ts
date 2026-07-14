@@ -1,6 +1,7 @@
 import {
   type RoutingDebugInfo,
   getTaskUrl,
+  isDynamicKickoffMessageEnabled,
 } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
@@ -163,10 +164,16 @@ export async function finishRoutedStart({
     taskId,
   });
 
+  const freeformKickoffEnabled = await isDynamicKickoffMessageEnabled();
+  const effectiveKickoffMessage = freeformKickoffEnabled
+    ? kickoffMessage
+    : undefined;
+
   const blocks = buildStartedBlocks({
     workspaceDisplayName,
     modelDisplayName,
-    kickoffMessage,
+    kickoffMessage: effectiveKickoffMessage,
+    freeformKickoffEnabled,
     runId,
     taskId,
     initiatingSlackUserId,
@@ -193,7 +200,9 @@ export async function finishRoutedStart({
       initiatingSlackUserId,
       workspaceDisplayName,
       ...(modelDisplayName ? { modelDisplayName } : {}),
-      ...(kickoffMessage ? { kickoffMessage } : {}),
+      ...(effectiveKickoffMessage
+        ? { kickoffMessage: effectiveKickoffMessage }
+        : {}),
       workspaceOnly,
     });
   }

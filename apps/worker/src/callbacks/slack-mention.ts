@@ -14,6 +14,7 @@ import {
   convertMarkdownToSlack,
 } from '@roomote/slack/client';
 import { type TaskRun, sdk } from '@roomote/sdk/client';
+import { FeatureFlag } from '@roomote/feature-flags';
 
 import type {
   CallbackEvent,
@@ -180,10 +181,16 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       );
 
       // Rebuild the started message blocks with the Follow button included
+      const freeformKickoffEnabled = await sdk.featureFlags
+        .evaluate(FeatureFlag.DynamicKickoffMessage)
+        .catch(() => false);
       const blocks = buildStartedBlocks({
         workspaceDisplayName: startedData.workspaceDisplayName,
         modelDisplayName: startedData.modelDisplayName,
-        kickoffMessage: startedData.kickoffMessage,
+        kickoffMessage: freeformKickoffEnabled
+          ? startedData.kickoffMessage
+          : undefined,
+        freeformKickoffEnabled,
         runId: taskRun.id,
         otherRunningTasksCount: startedData.otherRunningTasksCount,
         taskId: taskRun.taskId,

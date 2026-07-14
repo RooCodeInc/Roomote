@@ -99,6 +99,7 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
+        freeformKickoffEnabled: true,
         kickoffMessage:
           'Looking into daily environment snapshots for faster startup in App',
       }),
@@ -109,23 +110,25 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
+        freeformKickoffEnabled: true,
         kickoffMessage:
           'Checking login redirects in App with Anthropic Claude Fable 5',
         modelDisplayName: 'Anthropic Claude Fable 5',
       }),
     ).toBe('Checking login redirects in App with Anthropic Claude Fable 5');
 
+    // Flag off (default): free-form is ignored in favor of the template.
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        // Free-form copy is used as-is even when it omits env/model details.
         kickoffMessage: 'Looking into environment snapshot checks',
       }),
-    ).toBe('Looking into environment snapshot checks');
+    ).toBe('Getting started on your task in App');
 
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
+        freeformKickoffEnabled: true,
         kickoffMessage: '<!channel> Looking into auth bugs in App',
       }),
     ).toBe('Looking into auth bugs in App');
@@ -133,6 +136,7 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'Full Stack',
+        freeformKickoffEnabled: true,
         kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
       }),
     ).toBe('Digging into the flaky checkout race in Full Stack');

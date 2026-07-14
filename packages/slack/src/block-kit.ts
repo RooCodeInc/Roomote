@@ -51,6 +51,7 @@ import {
   routeTask,
   classifyFollowUp,
   buildSlackRoutingContext,
+  isDynamicKickoffMessageEnabled,
 } from '@roomote/cloud-agents/server';
 
 import type {
@@ -1716,9 +1717,16 @@ export async function handleTaskConfiguration(
       taskId: taskRun.taskId,
     });
 
+    const freeformKickoffEnabled = await isDynamicKickoffMessageEnabled();
+    const effectiveKickoffMessage =
+      freeformKickoffEnabled && prefill?.kickoffMessage
+        ? prefill.kickoffMessage
+        : undefined;
+
     const blocks = buildStartedBlocks({
       workspaceDisplayName,
-      kickoffMessage: prefill?.kickoffMessage,
+      kickoffMessage: effectiveKickoffMessage,
+      freeformKickoffEnabled,
       runId: taskRun.id,
       taskId: taskRun.taskId,
       initiatingSlackUserId: payload.user.id,
@@ -1736,8 +1744,8 @@ export async function handleTaskConfiguration(
         agentName,
         initiatingSlackUserId: payload.user.id,
         workspaceDisplayName,
-        ...(prefill?.kickoffMessage
-          ? { kickoffMessage: prefill.kickoffMessage }
+        ...(effectiveKickoffMessage
+          ? { kickoffMessage: effectiveKickoffMessage }
           : {}),
         workspaceOnly: false,
       });

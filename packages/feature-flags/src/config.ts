@@ -63,6 +63,13 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     description:
       'Enable background subagents so the Task tool can launch subagents asynchronously via its background flag, and standard-task delivery ships the PR before visual proof instead of blocking on it. Off by default: proof runs foreground, before delivery.',
   },
+
+  [FeatureFlag.DynamicKickoffMessage]: {
+    defaultValue: false,
+    metadataKey: 'dynamic_kickoff_message',
+    description:
+      'Let the task router generate short free-form kickoff sentences for chat started messages (instead of the static “Getting started on your task in <env>” template). Off by default.',
+  },
 };
 
 /**
