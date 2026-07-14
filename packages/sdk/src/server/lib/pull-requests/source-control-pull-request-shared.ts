@@ -12,8 +12,18 @@ import {
   getSourceControlProviderLabel,
   type SourceControlProvider,
 } from '@roomote/types';
+import { isGitLabOAuthAccessToken } from '@roomote/gitlab';
 
 export type FetchImpl = typeof fetch;
+
+export function buildGitLabTokenHeader(token: string): {
+  name: string;
+  value: string;
+} {
+  return isGitLabOAuthAccessToken(token)
+    ? { name: 'Authorization', value: `Bearer ${token}` }
+    : { name: 'PRIVATE-TOKEN', value: token };
+}
 
 export type RepositoryRow = {
   id: string;

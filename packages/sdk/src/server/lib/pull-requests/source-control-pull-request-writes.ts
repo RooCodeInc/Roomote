@@ -33,6 +33,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   parseAdoRepositoryFullName,
@@ -591,7 +592,7 @@ async function writeGitLabMergeRequest({
 }): Promise<SourceControlPullRequestWriteResult> {
   const { projectId, token, apiBaseUrl } =
     await resolveGitLabWriteContext(repository);
-  const tokenHeader = { name: 'PRIVATE-TOKEN', value: token };
+  const tokenHeader = buildGitLabTokenHeader(token);
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
   switch (input.action) {
