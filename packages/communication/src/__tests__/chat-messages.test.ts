@@ -109,18 +109,6 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        kickoffMessage: 'Checking login redirects in App with Fable 5',
-        modelDisplayName: 'Anthropic Claude Fable 5',
-      }),
-    ).toBe(
-      // Model display name missing from the freeform string → safe template
-      // fallback keeps env + model override information.
-      'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model',
-    );
-
-    expect(
-      buildTaskStartingText({
-        workspaceDisplayName: 'App',
         kickoffMessage:
           'Checking login redirects in App with Anthropic Claude Fable 5',
         modelDisplayName: 'Anthropic Claude Fable 5',
@@ -130,10 +118,10 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        // Missing env name → fall back to template
+        // Free-form copy is used as-is even when it omits env/model details.
         kickoffMessage: 'Looking into environment snapshot checks',
       }),
-    ).toBe('Getting started on your task in App');
+    ).toBe('Looking into environment snapshot checks');
 
     expect(
       buildTaskStartingText({
@@ -142,38 +130,12 @@ describe('chat message copy builders', () => {
       }),
     ).toBe('Looking into auth bugs in App');
 
-    // Substring collision: env "App" must not match inside "authentication".
-    expect(
-      buildTaskStartingText({
-        workspaceDisplayName: 'App',
-        kickoffMessage: 'Mapping authentication flows for login',
-      }),
-    ).toBe('Getting started on your task in App');
-
-    // Multi-word env names still match as a delimited phrase.
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'Full Stack',
         kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
       }),
     ).toBe('Digging into the flaky checkout race in Full Stack');
-
-    // Reject free-form model claims when no preference model is being shown
-    // (e.g. low-confidence router picks that were demoted to the default).
-    expect(
-      buildTaskStartingText({
-        workspaceDisplayName: 'App',
-        kickoffMessage: 'Checking login redirects in App with Opus 4.8',
-      }),
-    ).toBe('Getting started on your task in App');
-
-    expect(
-      buildTaskStartingText({
-        workspaceDisplayName: 'App',
-        kickoffMessage:
-          'Checking login redirects in App using Claude as the coding model',
-      }),
-    ).toBe('Getting started on your task in App');
   });
 
   it('only returns model names the router treated as an explicit preference', () => {
