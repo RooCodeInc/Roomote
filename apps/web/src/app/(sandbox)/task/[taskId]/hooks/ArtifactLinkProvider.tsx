@@ -44,7 +44,7 @@ export function ArtifactLinkProvider({
     [openArtifactDetail],
   );
 
-  const artifacts = session.artifacts ?? [];
+  const artifacts = useMemo(() => session.artifacts ?? [], [session.artifacts]);
 
   const getArtifactById = useCallback(
     (artifactId: string) =>
