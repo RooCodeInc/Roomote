@@ -176,6 +176,25 @@ describe('EnvironmentSetupStatusWriter', () => {
     ]);
   });
 
+  it('folds accumulated warnings from other setup steps into the final state', () => {
+    const writer = new EnvironmentSetupStatusWriter(workspacePath);
+    writer.initialize(REPOSITORIES);
+    writer.addWarnings(['Background Docker project setup failed: build error']);
+
+    expect(readStatus().warnings).toEqual([
+      'Background Docker project setup failed: build error',
+    ]);
+
+    writer.markCommandResult('owner/repo', successResult('Install deps'));
+    writer.finalize({ warnings: [] });
+
+    const status = readStatus();
+    expect(status.state).toBe('completed_with_warnings');
+    expect(status.warnings).toEqual([
+      'Background Docker project setup failed: build error',
+    ]);
+  });
+
   it('finalizes as failed and marks mid-flight commands when setup aborts', () => {
     const writer = new EnvironmentSetupStatusWriter(workspacePath);
     writer.initialize(REPOSITORIES);

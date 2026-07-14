@@ -442,7 +442,18 @@ async function runSetup({
           'setupOrganizationEnvironmentCommands (background)',
           async () => {
             try {
-              await backgroundDockerProjectsTask;
+              const dockerProjectWarnings =
+                (await backgroundDockerProjectsTask) ?? [];
+
+              // Reflect Docker project failures in the workspace status file
+              // so it never reports a clean `completed` when part of
+              // environment setup went wrong.
+              if (dockerProjectWarnings.length > 0) {
+                setupStatusWriter?.addWarnings(
+                  dockerProjectWarnings.map((warning) => warning.message),
+                );
+              }
+
               const warnings =
                 await executeOrganizationEnvironmentRepositoryCommands(logger, {
                   environment: workspace,
