@@ -7,6 +7,7 @@ import { TaskStatusIndicator } from '@/components/sandbox';
 import { BasicTooltip } from '@/components/system';
 import { useSandboxTaskStatusDisplay } from '../hooks/SandboxProvider';
 import { parseSleepDeadlineMs } from '../hooks/sleep-deadline';
+import { EnvironmentSetupBadge } from './EnvironmentSetupBadge';
 
 const MINUTE_MS = 60 * 1_000;
 function getDisplaySleepMinutes(ms: number): number {
@@ -76,6 +77,7 @@ export function TaskStatus({ taskRun }: TaskStatusProps) {
 
   return (
     <div className="flex items-center gap-3">
+      <EnvironmentSetupBadge taskRun={taskRun} />
       <TaskStatusIndicator phase={phase} lastErrorMessage={lastErrorMessage} />
       {!hasError &&
         showSleepBadge &&
