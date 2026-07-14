@@ -6,7 +6,7 @@ import {
 
 import { publicProcedure } from '../trpc';
 
-export interface SetupStatusResult {
+interface SetupStatusResult {
   path: string;
   exists: boolean;
   status: EnvironmentSetupStatus | null;
