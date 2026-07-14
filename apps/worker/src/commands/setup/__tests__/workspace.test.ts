@@ -631,6 +631,8 @@ describe('setupOrganizationEnvironment', () => {
       undefined,
       {
         continueOnError: true,
+        onCommandStart: expect.any(Function),
+        onCommandResult: expect.any(Function),
         onCommandFailure: expect.any(Function),
       },
     );
@@ -730,6 +732,8 @@ describe('setupOrganizationEnvironment', () => {
       undefined,
       {
         continueOnError: true,
+        onCommandStart: expect.any(Function),
+        onCommandResult: expect.any(Function),
         onCommandFailure: expect.any(Function),
       },
     );
@@ -837,6 +841,8 @@ describe('setupOrganizationEnvironment', () => {
       undefined,
       {
         continueOnError: true,
+        onCommandStart: expect.any(Function),
+        onCommandResult: expect.any(Function),
         onCommandFailure: expect.any(Function),
       },
     );

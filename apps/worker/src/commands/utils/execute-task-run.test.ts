@@ -9,6 +9,7 @@ const {
   injectEnvVarsMock,
   sdkTaskRunsRecordEventMock,
   sdkTaskRunsStampMilestoneMock,
+  sdkTaskRunsUpdateEnvironmentSetupMock,
   sdkTaskRunsUpdateMock,
   setupMock,
   workerEnvFromProcessEnvMock,
@@ -27,6 +28,7 @@ const {
   injectEnvVarsMock: vi.fn(),
   sdkTaskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   sdkTaskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
+  sdkTaskRunsUpdateEnvironmentSetupMock: vi.fn().mockResolvedValue(undefined),
   sdkTaskRunsUpdateMock: vi.fn().mockResolvedValue(undefined),
   setupMock: vi.fn(),
   workerEnvFromProcessEnvMock: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@roomote/sdk/client', () => ({
       recordEvent: sdkTaskRunsRecordEventMock,
       stampMilestone: sdkTaskRunsStampMilestoneMock,
       update: sdkTaskRunsUpdateMock,
+      updateEnvironmentSetup: sdkTaskRunsUpdateEnvironmentSetupMock,
     },
   },
 }));
@@ -438,11 +441,29 @@ describe('executeTaskRun', () => {
         backgroundEnvironmentSetup: true,
       }),
     );
+    expect(runFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backgroundEnvironmentSetup: expect.objectContaining({
+          hasPendingBackgroundSetup: true,
+        }),
+      }),
+    );
+    expect(sdkTaskRunsUpdateEnvironmentSetupMock).toHaveBeenCalledWith({
+      runId: 42,
+      state: 'running',
+    });
 
     releaseBackgroundSetup?.();
     await executionPromise;
 
     expect(finalizeJobMock).toHaveBeenCalledTimes(1);
+    expect(sdkTaskRunsUpdateEnvironmentSetupMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 42,
+        state: 'completed_with_warnings',
+        completedAt: expect.any(Date),
+      }),
+    );
     expect(sdkTaskRunsRecordEventMock).toHaveBeenCalledWith(
       expect.objectContaining({
         eventType: 'decision',

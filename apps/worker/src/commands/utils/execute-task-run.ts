@@ -24,6 +24,7 @@ import type { WorkspaceConfig } from '../../workspace';
 import type { RepoLocalSkill } from '../../workspace/repo-local-skills';
 import { callbackMap } from '../../callbacks';
 import type { RunTaskCallbacks, RunTaskContext } from '../../run-task';
+import type { BackgroundEnvironmentSetupNotifier } from '../../run-task/types';
 import { createWorkerRuntimeEventRecorder } from '../../run-task/task-run-events';
 import { createWorkerHeartbeatInterval } from '../../run-task/polling/worker-heartbeat';
 import { createComputeProviderUsageInterval } from '../../run-task/polling/compute-provider-usage';
@@ -73,6 +74,7 @@ interface ExecuteTaskRunConfig<TJobContext extends PreparedTaskRunBase> {
     repoPaths?: Record<string, string>;
     repoLocalSkills?: RepoLocalSkill[];
     workspaceReadinessWarnings?: string[];
+    backgroundEnvironmentSetup: BackgroundEnvironmentSetupNotifier;
     cancelSignal: AbortSignal;
     callbacks: RunTaskCallbacks;
     context: RunTaskContext;
@@ -606,6 +608,35 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       field: 'setupCompletedAt',
     });
 
+    // setupCompletedAt only marks the blocking portion of setup; environment
+    // setup may keep running in the background. Track its real lifecycle so
+    // the UI can distinguish "setup still running" from "setup done" after
+    // the agent starts. The controller writes the terminal state on settle.
+    if (workspace.type === 'environment') {
+      try {
+        if (backgroundEnvironmentSetupPromise) {
+          await sdk.taskRuns.updateEnvironmentSetup({
+            runId: taskRun.id,
+            state: 'running',
+          });
+        } else {
+          const setupWarningCount =
+            preparedWorkspace?.environmentSetupWarnings?.length ?? 0;
+
+          await sdk.taskRuns.updateEnvironmentSetup({
+            runId: taskRun.id,
+            state:
+              setupWarningCount > 0 ? 'completed_with_warnings' : 'completed',
+            completedAt: new Date(),
+          });
+        }
+      } catch (error) {
+        startupLogger.debug.warn(
+          `Failed to persist environment setup state for task run ${taskRun.id}: ${describeError(error)}`,
+        );
+      }
+    }
+
     writeBashrc(workerEnv.buildUserFacingEnv());
 
     if (taskRun.canceledAt) {
@@ -632,6 +663,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
         preparedWorkspace?.environmentSetupWarnings?.map(
           (warning) => warning.message,
         ),
+      backgroundEnvironmentSetup: backgroundEnvironmentSetupController,
       cancelSignal: backgroundEnvironmentSetupController.cancelSignal,
       callbacks,
       context,

@@ -8,6 +8,7 @@ export {
   executeOrganizationEnvironmentRepositoryCommands,
   setupOrganizationEnvironment,
 } from './workspace/environment-commands';
+export { EnvironmentSetupStatusWriter } from './workspace/setup-status';
 export { initializeRepositories } from './workspace/repositories';
 export { initializeDockerProjects } from './workspace/docker-projects';
 export {

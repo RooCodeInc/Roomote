@@ -21,6 +21,7 @@ const {
   mockInstallOrganizationEnvironmentSkills,
   mockExecuteOrganizationEnvironmentRepositoryCommands,
   mockSetupOrganizationEnvironment,
+  mockEnvironmentSetupStatusWriter,
   mockTimedStep,
   mockGetRuntimeEnv,
   mockSetUserEnv,
@@ -47,6 +48,15 @@ const {
     mockInstallOrganizationEnvironmentSkills: vi.fn(),
     mockExecuteOrganizationEnvironmentRepositoryCommands: vi.fn(),
     mockSetupOrganizationEnvironment: vi.fn(),
+    mockEnvironmentSetupStatusWriter: vi.fn(function () {
+      return {
+        initialize: vi.fn(),
+        addWarnings: vi.fn(),
+        markCommandRunning: vi.fn(),
+        markCommandResult: vi.fn(),
+        finalize: vi.fn(),
+      };
+    }),
     mockTimedStep: vi.fn(
       async <T>(
         _logger: unknown,
@@ -103,6 +113,7 @@ vi.mock('../setup/workspace', () => ({
   executeOrganizationEnvironmentRepositoryCommands:
     mockExecuteOrganizationEnvironmentRepositoryCommands,
   setupOrganizationEnvironment: mockSetupOrganizationEnvironment,
+  EnvironmentSetupStatusWriter: mockEnvironmentSetupStatusWriter,
 }));
 
 import { setup } from '../setup';
@@ -321,6 +332,8 @@ describe('setup mode behavior', () => {
         workspacePath: '/tmp/workspace',
       },
       continueRepositoryCommandFailures: true,
+      setupStatusWriter: expect.anything(),
+      recordPhase: undefined,
     });
   });
 
@@ -349,6 +362,8 @@ describe('setup mode behavior', () => {
         workspacePath: '/tmp/workspace',
       },
       continueRepositoryCommandFailures: false,
+      setupStatusWriter: expect.anything(),
+      recordPhase: undefined,
     });
   });
 

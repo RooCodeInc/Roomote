@@ -170,6 +170,11 @@ export function buildSandboxInstruction(
   environmentConfig?: EnvironmentConfig,
   options?: {
     envVars?: Record<string, string | undefined>;
+    /**
+     * True when repository setup commands are still running in the background
+     * at instruction-build time, so the agent must not assume they finished.
+     */
+    backgroundEnvironmentSetupPending?: boolean;
   },
 ): string | undefined {
   const lines: string[] = [
@@ -187,10 +192,17 @@ export function buildSandboxInstruction(
     );
 
     if (hasRepositoryCommands(environmentConfig)) {
-      lines.push(
-        '',
-        'Repository setup commands from this environment configuration were already executed before your task started.',
-      );
+      if (options?.backgroundEnvironmentSetupPending) {
+        lines.push(
+          '',
+          'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. You will receive a message when background environment setup finishes. Never re-run a setup command that is still marked as running.',
+        );
+      } else {
+        lines.push(
+          '',
+          'Repository setup commands from this environment configuration were already executed before your task started. Per-command results are recorded in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
+        );
+      }
     }
 
     if (hasDetachedCommands(environmentConfig)) {

@@ -47,6 +47,7 @@ export async function resume(runId: number): Promise<boolean> {
       repoPaths,
       repoLocalSkills,
       workspaceReadinessWarnings,
+      backgroundEnvironmentSetup,
       callbacks: defaultCallbacks,
       context,
       logger,
@@ -96,6 +97,7 @@ export async function resume(runId: number): Promise<boolean> {
         repoPaths,
         repoLocalSkills,
         workspaceReadinessWarnings,
+        backgroundEnvironmentSetup,
         orgAgentInstructions: jobContext.orgAgentInstructions,
         styleGuidance: jobContext.styleGuidance,
         agentInstructions:
