@@ -6,6 +6,7 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const COMPUTE_PROVIDER_STEP = getSetupStepDefinition('compute-provider');
@@ -76,15 +77,7 @@ export function StepComputeProvider({
           })}
         </div>
 
-        {onBack ? (
-          <button
-            type="button"
-            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-            onClick={onBack}
-          >
-            Back
-          </button>
-        ) : null}
+        <SetupFooter onBack={onBack} />
       </div>
     </div>
   );

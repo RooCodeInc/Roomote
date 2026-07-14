@@ -41,6 +41,7 @@ import {
 } from '@/components/system';
 import { EnvironmentRepositorySelector } from '@/components/settings/environments/EnvironmentRepositorySelector';
 import { ModelSelect } from '@/components/tasks';
+import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
 
@@ -547,23 +548,16 @@ export function StepRepoSelection({
                   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH * 0.8 &&
                   charCounter}
               </p>
-              <div className="flex w-full flex-wrap items-center gap-3">
+              <SetupFooter
+                onBack={onBack}
+                backDisabled={isBusy}
+                className="w-full flex-wrap"
+              >
                 <ModelSelect
                   value={effectiveSelectedModelId}
                   onValueChange={setSelectedModelId}
                   disabled={isBusy}
                 />
-                {onBack ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={onBack}
-                    disabled={isBusy}
-                  >
-                    Back
-                  </Button>
-                ) : null}
                 <Button
                   type="button"
                   size="sm"
@@ -586,18 +580,13 @@ export function StepRepoSelection({
                 >
                   do this later
                 </Button>
-              </div>
+              </SetupFooter>
             </div>
           ) : null}
         </CardContent>
       </Card>
       {!showForm ? (
-        <div className="flex flex-wrap gap-2">
-          {onBack ? (
-            <Button type="button" size="sm" variant="outline" onClick={onBack}>
-              Back
-            </Button>
-          ) : null}
+        <SetupFooter onBack={onBack} className="flex-wrap">
           <Button
             type="button"
             size="sm"
@@ -632,7 +621,7 @@ export function StepRepoSelection({
           <p className="self-center text-sm text-muted-foreground">
             Not recommended
           </p>
-        </div>
+        </SetupFooter>
       ) : null}
     </div>
   );

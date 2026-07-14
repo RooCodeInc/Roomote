@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
-import { ArrowLeft, ArrowRight, Button, Spinner } from '@/components/system';
+import { ArrowRight, Button, Spinner } from '@/components/system';
 import { TelegramLinkAccountStep } from '@/components/settings/TelegramLinkAccountStep';
 import { useTelegramLinkedAccount } from '@/hooks/linked-accounts';
 
@@ -16,6 +16,7 @@ import {
   ProviderSetupExperience,
 } from './ProviderSetupExperience';
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 
 export function StepTelegramSetup({
   onContinue,
@@ -132,11 +133,7 @@ export function StepTelegramSetup({
         <Spinner />
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-        <Button type="button" variant="outline" onClick={onBack}>
-          <ArrowLeft />
-          Back
-        </Button>
+      <SetupFooter onBack={onBack} className="mt-8">
         <Button
           type="button"
           disabled={
@@ -161,7 +158,7 @@ export function StepTelegramSetup({
               : 'Save and link account'}
           {save.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }

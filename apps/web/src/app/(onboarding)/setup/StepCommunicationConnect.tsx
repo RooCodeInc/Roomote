@@ -15,6 +15,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const COMMUNICATION_CONNECT_STEP = getSetupStepDefinition('slack');
@@ -57,16 +58,6 @@ export function StepCommunicationConnect({
       Do this later
     </button>
   );
-  const backLink = onBack ? (
-    <button
-      type="button"
-      className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-      onClick={onBack}
-    >
-      Back
-    </button>
-  ) : null;
-
   if (provider === 'microsoft') {
     const teamsStatus = teamsIntegrationStatus.data;
     const openInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
@@ -118,7 +109,7 @@ export function StepCommunicationConnect({
                   the connection
                 </p>
               </div>
-              <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+              <SetupFooter onBack={onBack}>
                 <Button asChild variant="outline">
                   <a
                     href={openInTeamsUrl}
@@ -143,7 +134,7 @@ export function StepCommunicationConnect({
                   Continue
                   <ArrowRight />
                 </Button>
-              </div>
+              </SetupFooter>
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
@@ -151,10 +142,7 @@ export function StepCommunicationConnect({
               missing from this deployment.
             </p>
           )}
-          <div className="flex flex-col items-start gap-2">
-            {skipLink}
-            {backLink}
-          </div>
+          <SetupFooter onBack={onBack}>{skipLink}</SetupFooter>
         </div>
       </div>
     );
@@ -167,7 +155,7 @@ export function StepCommunicationConnect({
         This deployment is already configured for Slack. Connect the Slack app
         so Roomote can talk with your workspace.
       </p>
-      <div className="flex flex-col items-stretch gap-3 sm:items-start">
+      <SetupFooter onBack={onBack}>
         <Button
           className="w-full sm:w-auto"
           onClick={() => connectSlack.mutate()}
@@ -180,11 +168,8 @@ export function StepCommunicationConnect({
           )}
           Connect to Slack
         </Button>
-      </div>
-      <div className="flex flex-col items-start gap-2">
         {skipLink}
-        {backLink}
-      </div>
+      </SetupFooter>
     </div>
   );
 }

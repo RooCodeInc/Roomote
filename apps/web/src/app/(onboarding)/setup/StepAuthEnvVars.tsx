@@ -9,15 +9,10 @@ import type { SetupAuthStatus } from '@roomote/types';
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
 import { useTRPC } from '@/trpc/client';
-import {
-  ArrowLeft,
-  ArrowRight,
-  BrandIcon,
-  Button,
-  Spinner,
-} from '@/components/system';
+import { ArrowRight, BrandIcon, Button, Spinner } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
@@ -331,18 +326,11 @@ export function StepAuthEnvVars({
       ) : null}
 
       {providerOwnsActions ? null : (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-          {onBack ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onBack}
-              disabled={saveAuthConfig.isPending}
-            >
-              <ArrowLeft />
-              Back
-            </Button>
-          ) : null}
+        <SetupFooter
+          onBack={onBack}
+          backDisabled={saveAuthConfig.isPending}
+          className="mt-8"
+        >
           <Button
             type="button"
             onClick={() => void handleContinue()}
@@ -359,7 +347,7 @@ export function StepAuthEnvVars({
                     : 'Save and continue'}
             {saveAuthConfig.isPending ? <Spinner /> : <ArrowRight />}
           </Button>
-        </div>
+        </SetupFooter>
       )}
     </div>
   );
