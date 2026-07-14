@@ -387,7 +387,7 @@ describe('buildAcpRenderBlocks', () => {
       'evaluator.ts',
       'task-runs.ts',
     ]);
-    expect(entries[0].items.map((item) => item.stepKind)).toEqual([
+    expect(entries[0].items.map((item) => item.displayKind)).toEqual([
       'read',
       'read',
       'read',
@@ -453,7 +453,8 @@ describe('buildAcpRenderBlocks', () => {
   });
 
   it('keeps a stable group id and ts as results stream in', () => {
-    // Before the results arrive, only the tool_call messages are present.
+    // Before either result arrives, fewer than two calls are complete so the
+    // run stays expanded as individual messages.
     const streamingEntries = buildAcpRenderBlocks([
       readFileToolCallMessage({
         id: 'tool-1-call',
@@ -469,8 +470,13 @@ describe('buildAcpRenderBlocks', () => {
       }),
     ]);
 
-    // After the results arrive, the deduped items flip to tool_result, but the
-    // group id/ts must stay anchored to the first message in the run.
+    expect(streamingEntries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+    ]);
+
+    // After the results arrive, the run collapses. The group id/ts must stay
+    // anchored to the first message in the consecutive run.
     const settledEntries = buildAcpRenderBlocks([
       readFileToolCallMessage({
         id: 'tool-1-call',
@@ -500,29 +506,19 @@ describe('buildAcpRenderBlocks', () => {
       }),
     ]);
 
-    if (
-      streamingEntries[0]?.kind !== 'tool_group' ||
-      settledEntries[0]?.kind !== 'tool_group'
-    ) {
-      throw new Error('Expected tool_group entries');
+    if (settledEntries[0]?.kind !== 'tool_group') {
+      throw new Error('Expected tool_group entry');
     }
 
-    expect(streamingEntries[0].id).toBe('tool-1-call');
-    expect(streamingEntries[0].ts).toBe(1);
     expect(settledEntries[0].id).toBe('tool-1-call');
     expect(settledEntries[0].ts).toBe(1);
-    // The representative items did flip from tool_call to tool_result.
-    expect(streamingEntries[0].items.map((item) => item.msg.kind)).toEqual([
-      'tool_call',
-      'tool_call',
-    ]);
     expect(settledEntries[0].items.map((item) => item.msg.kind)).toEqual([
       'tool_result',
       'tool_result',
     ]);
   });
 
-  it('keeps an in-progress tool_call when no paired tool_result has arrived', () => {
+  it('does not collapse until the second same-type call completes', () => {
     const entries = buildAcpRenderBlocks([
       readFileToolMessage({
         id: 'tool-1-result',
@@ -538,19 +534,47 @@ describe('buildAcpRenderBlocks', () => {
       }),
     ]);
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      kind: 'tool_group',
-      objectSummary: '2 files',
-    });
+    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
+    if (entries[0]?.kind !== 'message' || entries[1]?.kind !== 'message') {
+      throw new Error('Expected plain message entries');
+    }
 
+    expect(entries[0].msg.kind).toBe('tool_result');
+    expect(entries[1].msg.kind).toBe('tool_call');
+  });
+
+  it('appends later the third completed same-type call into the collapsed group', () => {
+    const entries = buildAcpRenderBlocks([
+      readFileToolMessage({
+        id: 'tool-1',
+        ts: 1,
+        title: 'Read server.ts',
+        text: 'server content',
+      }),
+      readFileToolMessage({
+        id: 'tool-2',
+        ts: 2,
+        title: 'Read evaluator.ts',
+        text: 'evaluator content',
+      }),
+      readFileToolMessage({
+        id: 'tool-3',
+        ts: 3,
+        title: 'Read task-runs.ts',
+        text: 'task runs content',
+      }),
+    ]);
+
+    expect(entries).toHaveLength(1);
     if (entries[0]?.kind !== 'tool_group') {
       throw new Error('Expected tool_group entry');
     }
 
-    expect(entries[0].items.map((item) => item.msg.kind)).toEqual([
-      'tool_result',
-      'tool_call',
+    expect(entries[0].objectSummary).toBe('3 files');
+    expect(entries[0].items.map((item) => item.msg.id)).toEqual([
+      'tool-1',
+      'tool-2',
+      'tool-3',
     ]);
   });
 
@@ -588,7 +612,7 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[0].msg.data.title).toBe('Read server.ts');
   });
 
-  it('groups search, list, and read steps into one exploration block', () => {
+  it('does not mix different tool types into one collapsed group', () => {
     const entries = buildAcpRenderBlocks([
       searchFilesToolMessage({
         id: 'tool-search',
@@ -607,43 +631,26 @@ describe('buildAcpRenderBlocks', () => {
       }),
     ]);
 
-    expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({
-      kind: 'tool_group',
-      action: 'Exploring',
-      objectSummary: '1 search, 1 listing and 1 file',
-    });
-
-    if (entries[0]?.kind !== 'tool_group') {
-      throw new Error('Expected tool_group entry');
-    }
-
-    expect(entries[0].items.map((item) => item.stepKind)).toEqual([
-      'search',
-      'list',
-      'read',
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
     ]);
   });
 
   it('uses payload labels when grouped MCP items have no descriptive title', () => {
     const entries = buildAcpRenderBlocks([
-      searchFilesToolMessage({
-        id: 'tool-search',
+      readFileToolMessage({
+        id: 'tool-read-1',
         ts: 1,
         title: null,
-        payload: { query: 'Button.tsx' },
-      }),
-      listFilesToolMessage({
-        id: 'tool-list',
-        ts: 2,
-        title: null,
-        payload: { path: 'src/components' },
+        payload: { path: 'src/components/Button.tsx' },
       }),
       readFileToolMessage({
-        id: 'tool-read',
-        ts: 3,
+        id: 'tool-read-2',
+        ts: 2,
         title: null,
-        payload: { path: 'src/components/Button.tsx' },
+        payload: { path: 'src/components/Input.tsx' },
       }),
     ]);
 
@@ -654,39 +661,16 @@ describe('buildAcpRenderBlocks', () => {
     }
 
     expect(entries[0].items.map((item) => item.objectLabel)).toEqual([
-      'Button.tsx',
-      'src/components',
       'src/components/Button.tsx',
+      'src/components/Input.tsx',
     ]);
   });
 
   it('uses nested rawInput arguments when grouped MCP items omit top-level labels', () => {
     const entries = buildAcpRenderBlocks([
-      searchFilesToolMessage({
-        id: 'tool-search',
-        ts: 1,
-        title: null,
-        payload: {
-          rawInput: {
-            tool: 'search_files',
-            arguments: { query: 'Button.tsx' },
-          },
-        },
-      }),
-      listFilesToolMessage({
-        id: 'tool-list',
-        ts: 2,
-        title: null,
-        payload: {
-          rawInput: {
-            tool: 'list_files',
-            arguments: { path: 'src/components' },
-          },
-        },
-      }),
       readFileToolMessage({
-        id: 'tool-read',
-        ts: 3,
+        id: 'tool-read-1',
+        ts: 1,
         title: null,
         payload: {
           rawInput: {
@@ -695,6 +679,17 @@ describe('buildAcpRenderBlocks', () => {
           },
         },
       }),
+      readFileToolMessage({
+        id: 'tool-read-2',
+        ts: 2,
+        title: null,
+        payload: {
+          rawInput: {
+            tool: 'read_file',
+            arguments: { path: 'src/components/Input.tsx' },
+          },
+        },
+      }),
     ]);
 
     expect(entries).toHaveLength(1);
@@ -704,9 +699,8 @@ describe('buildAcpRenderBlocks', () => {
     }
 
     expect(entries[0].items.map((item) => item.objectLabel)).toEqual([
-      'Button.tsx',
-      'src/components',
       'src/components/Button.tsx',
+      'src/components/Input.tsx',
     ]);
   });
 
@@ -742,7 +736,7 @@ describe('buildAcpRenderBlocks', () => {
     ]);
   });
 
-  it('does not group execute tools even when commands look like exploration', () => {
+  it('groups consecutive completed shell commands into one block', () => {
     const entries = buildAcpRenderBlocks([
       executeExplorationToolMessage({
         id: 'tool-search',
@@ -758,7 +752,49 @@ describe('buildAcpRenderBlocks', () => {
       }),
     ]);
 
-    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      kind: 'tool_group',
+      action: 'Ran',
+      objectSummary: '2 commands',
+      displayKind: 'execute',
+    });
+
+    if (entries[0]?.kind !== 'tool_group') {
+      throw new Error('Expected tool_group entry');
+    }
+
+    expect(entries[0].items.map((item) => item.objectLabel)).toEqual([
+      'rg Button src/components',
+      'cat src/components/Button.tsx',
+    ]);
+  });
+
+  it('does not mix shell commands with other tool types', () => {
+    const entries = buildAcpRenderBlocks([
+      executeExplorationToolMessage({
+        id: 'tool-execute-1',
+        ts: 1,
+        title: 'Run ls',
+        command: 'ls',
+      }),
+      executeExplorationToolMessage({
+        id: 'tool-execute-2',
+        ts: 2,
+        title: 'Run pwd',
+        command: 'pwd',
+      }),
+      readFileToolMessage({
+        id: 'tool-read',
+        ts: 3,
+        title: 'Read package.json',
+      }),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'tool_group',
+      'message',
+    ]);
   });
 
   it('does not group across non-tool messages', () => {

@@ -17,9 +17,17 @@ import type {
 import {
   isSubagentSpawnRowMessage,
   isSubagentToolMessage,
+  isSubagentToolPayload,
 } from './subagent-tool';
 
 export type ExplorationStepKind = 'list' | 'read' | 'search';
+
+export type GroupedToolDisplayKind =
+  | ExplorationStepKind
+  | 'execute'
+  | 'edit'
+  | 'subagent'
+  | 'tool';
 
 const EXPLORATION_TOOL_NAMES: Record<ExplorationStepKind, Set<string>> = {
   search: new Set(['search', 'search_file', 'search_files']),
@@ -52,10 +60,33 @@ const STEP_KIND_DATA_KEYS: Record<ExplorationStepKind, string[]> = {
   read: ['path', 'filePath', 'file_path', 'filename', 'file', 'uri'],
 };
 
+const GENERIC_TOOL_DATA_KEYS = [
+  'path',
+  'filePath',
+  'file_path',
+  'filename',
+  'file',
+  'uri',
+  'query',
+  'pattern',
+  'search',
+  'directory',
+  'dir',
+  'cwd',
+  'target',
+  'command',
+];
+
+/** Minimum completed/failed same-type tool invocations before collapsing. */
+const TOOL_GROUP_MIN_SETTLED = 2;
+
 export interface GroupedToolCallItem {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
   objectLabel: string;
-  stepKind: ExplorationStepKind;
+  groupKey: string;
+  displayKind: GroupedToolDisplayKind;
+  /** @deprecated Prefer displayKind; kept for exploration-item icons. */
+  stepKind: ExplorationStepKind | null;
 }
 
 interface SingleAcpRenderBlock {
@@ -70,6 +101,8 @@ export interface GroupedToolCallRenderBlock {
   ts: number;
   action: string;
   objectSummary: string;
+  groupKey: string;
+  displayKind: GroupedToolDisplayKind;
   items: GroupedToolCallItem[];
 }
 
@@ -124,7 +157,7 @@ type HiddenBehavior = 'boundary' | 'transparent';
 type MessageRenderState =
   | {
       visibility: 'render';
-      stepKind: ExplorationStepKind | null;
+      groupKey: string | null;
     }
   | {
       visibility: 'hidden';
@@ -254,6 +287,17 @@ function extractLabelFromToolData(
   return extractStringByKeys(argumentsRecord as Record<string, unknown>, keys);
 }
 
+function isExecuteToolMessage(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): boolean {
+  const data = msg.data as unknown as Record<string, unknown>;
+  return (
+    msg.data.kind === 'execute' ||
+    msg.data.kind === 'execute_command' ||
+    data.isExecute === true
+  );
+}
+
 function resolveExplorationStepKind(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): ExplorationStepKind | null {
@@ -271,6 +315,10 @@ function resolveExplorationStepKind(
     return 'search';
   }
 
+  if (msg.data.kind === 'list') {
+    return 'list';
+  }
+
   if (msg.data.kind === 'read') {
     return 'read';
   }
@@ -278,31 +326,104 @@ function resolveExplorationStepKind(
   return null;
 }
 
-function formatHumanList(values: string[]): string {
-  if (values.length === 0) {
-    return '';
+/**
+ * Stable identity for consecutive same-type collapsing. Different tools never
+ * share a key, even when both are MCP exploration-style helpers.
+ */
+function resolveToolGroupKey(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): string | null {
+  // Subagent rows own nested child-session output and should stay standalone.
+  if (isSubagentToolPayload(msg.data)) {
+    return null;
   }
 
-  if (values.length === 1) {
-    return values[0]!;
+  if (isExecuteToolMessage(msg)) {
+    return 'execute';
   }
 
-  if (values.length === 2) {
-    return `${values[0]} and ${values[1]}`;
+  const toolName = (msg.data.toolName ?? msg.data.mcpToolName ?? '')
+    .trim()
+    .toLowerCase();
+  const serverName = (msg.data.serverName ?? msg.data.mcpServerName ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (toolName) {
+    return serverName ? `mcp:${serverName}:${toolName}` : `tool:${toolName}`;
   }
 
-  const head = values.slice(0, -1).join(', ');
-  const tail = values[values.length - 1];
-  return `${head} and ${tail}`;
+  const kind = (msg.data.kind ?? '').trim().toLowerCase();
+
+  if (kind && kind !== 'mcp') {
+    return `kind:${kind}`;
+  }
+
+  return null;
 }
 
-const TITLE_PREFIX_RE = /^(?:search|read|list|find)\s+(.+)$/i;
+function resolveGroupedToolDisplayKind(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  groupKey: string,
+): GroupedToolDisplayKind {
+  if (groupKey === 'execute' || isExecuteToolMessage(msg)) {
+    return 'execute';
+  }
+
+  const explorationStep = resolveExplorationStepKind(msg);
+
+  if (explorationStep) {
+    return explorationStep;
+  }
+
+  if (msg.data.kind === 'edit') {
+    return 'edit';
+  }
+
+  if (msg.data.kind === 'subagent') {
+    return 'subagent';
+  }
+
+  return 'tool';
+}
+
+function isSettledToolMessage(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): boolean {
+  if (msg.partial === true) {
+    return false;
+  }
+
+  return msg.data.status === 'completed' || msg.data.status === 'failed';
+}
+
+function formatToolNameLabel(value: string): string {
+  return value
+    .split(/[_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+const TITLE_PREFIX_RE =
+  /^(?:search|read|list|find|run|using|used|ran|running)\s+(.+)$/i;
 
 function extractObjectLabel(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
-  stepKind: ExplorationStepKind,
+  displayKind: GroupedToolDisplayKind,
 ): string {
+  if (displayKind === 'execute') {
+    const command = msg.data.command?.trim();
+    if (command) {
+      return command;
+    }
+  }
+
   const title = msg.data.title?.trim();
+  const dataKeys =
+    displayKind === 'search' || displayKind === 'list' || displayKind === 'read'
+      ? STEP_KIND_DATA_KEYS[displayKind]
+      : GENERIC_TOOL_DATA_KEYS;
 
   if (title) {
     const match = TITLE_PREFIX_RE.exec(title);
@@ -311,43 +432,73 @@ function extractObjectLabel(
       return match[1].trim();
     }
 
-    const payloadLabel = extractLabelFromToolData(
-      msg.data,
-      STEP_KIND_DATA_KEYS[stepKind],
-    );
+    const payloadLabel = extractLabelFromToolData(msg.data, dataKeys);
 
     return payloadLabel ?? title;
   }
 
-  return (
-    extractLabelFromToolData(msg.data, STEP_KIND_DATA_KEYS[stepKind]) ?? 'Tool'
-  );
+  return extractLabelFromToolData(msg.data, dataKeys) ?? 'Tool';
 }
 
-function summarizeGroupObject(items: GroupedToolCallItem[]): string {
-  const counts = new Map<ExplorationStepKind, number>();
+function summarizeSameTypeGroup(
+  items: GroupedToolCallItem[],
+  displayKind: GroupedToolDisplayKind,
+  groupKey: string,
+): { action: string; objectSummary: string } {
+  const count = items.length;
 
-  for (const item of items) {
-    counts.set(item.stepKind, (counts.get(item.stepKind) ?? 0) + 1);
+  if (displayKind === 'execute') {
+    return {
+      action: 'Ran',
+      objectSummary: `${count} ${count === 1 ? 'command' : 'commands'}`,
+    };
   }
 
-  const summaryParts = STEP_KIND_ORDER.flatMap((stepKind) => {
-    const count = counts.get(stepKind) ?? 0;
+  if (
+    displayKind === 'search' ||
+    displayKind === 'list' ||
+    displayKind === 'read'
+  ) {
+    const labels = STEP_KIND_LABELS[displayKind];
+    return {
+      action: 'Exploring',
+      objectSummary: `${count} ${count === 1 ? labels.singular : labels.plural}`,
+    };
+  }
 
-    if (count === 0) {
-      return [];
-    }
+  const toolNameMatch = /^(?:mcp:[^:]+:|tool:)(.+)$/.exec(groupKey);
+  const toolName = toolNameMatch?.[1]
+    ? formatToolNameLabel(toolNameMatch[1])
+    : 'tools';
 
-    const labels = STEP_KIND_LABELS[stepKind];
-    return [`${count} ${count === 1 ? labels.singular : labels.plural}`];
-  });
+  return {
+    action: 'Used',
+    objectSummary: `${count} ${toolName}`,
+  };
+}
 
-  return formatHumanList(summaryParts) || `${items.length} exploration steps`;
+function buildGroupedToolItem(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  groupKey: string,
+): GroupedToolCallItem {
+  const displayKind = resolveGroupedToolDisplayKind(msg, groupKey);
+  const stepKind =
+    displayKind === 'search' || displayKind === 'list' || displayKind === 'read'
+      ? displayKind
+      : null;
+
+  return {
+    msg,
+    groupKey,
+    displayKind,
+    stepKind,
+    objectLabel: extractObjectLabel(msg, displayKind),
+  };
 }
 
 /**
  * Collapse the paired `tool_call` and `tool_result` messages for the same
- * invocation into a single group item so the exploration summary counts each
+ * invocation into a single group item so the collapsed summary counts each
  * invocation once instead of twice. The `tool_result` is preferred when both
  * are present because it carries the populated title and output; the
  * `tool_call` is kept as a fallback for in-progress invocations that have not
@@ -557,13 +708,13 @@ function resolveMessageRenderState(
   if (!isToolMessage(msg)) {
     return {
       visibility: 'render',
-      stepKind: null,
+      groupKey: null,
     };
   }
 
   return {
     visibility: 'render',
-    stepKind: resolveExplorationStepKind(msg),
+    groupKey: resolveToolGroupKey(msg),
   };
 }
 
@@ -598,6 +749,38 @@ function buildAcpRenderBlocksInScope(
   const blocks: AcpRenderBlock[] = [];
   let cursor = 0;
 
+  const pushSingleMessage = (msg: AcpUiMessage): boolean => {
+    const currentMessage = dedupeRenderableMessageImages(msg, seenImageUris);
+
+    if (isEmptyCompletedTextMessage(currentMessage)) {
+      return false;
+    }
+
+    state.hasRenderedVisibleBlock = true;
+    const childMessages =
+      subagentChildSessionLookup.parentMessageToChildMessages.get(
+        currentMessage.id,
+      ) ?? [];
+    const childBlocks =
+      childMessages.length > 0
+        ? buildAcpRenderBlocksInScope(
+            childMessages,
+            options,
+            subagentChildSessionLookup,
+            seenImageUris,
+            state,
+            currentMessage.id,
+          )
+        : undefined;
+
+    blocks.push({
+      kind: 'message',
+      msg: currentMessage,
+      ...(childBlocks?.length ? { childBlocks } : {}),
+    });
+    return true;
+  };
+
   while (cursor < messages.length) {
     const current = messages[cursor]!;
     const currentParentMessageId = current.sessionId
@@ -628,49 +811,15 @@ function buildAcpRenderBlocksInScope(
       continue;
     }
 
-    if (!currentState.stepKind || !isToolMessage(current)) {
-      const currentMessage = dedupeRenderableMessageImages(
-        current,
-        seenImageUris,
-      );
-
-      if (isEmptyCompletedTextMessage(currentMessage)) {
-        cursor += 1;
-        continue;
-      }
-
-      state.hasRenderedVisibleBlock = true;
-      const childMessages =
-        subagentChildSessionLookup.parentMessageToChildMessages.get(
-          current.id,
-        ) ?? [];
-      const childBlocks =
-        childMessages.length > 0
-          ? buildAcpRenderBlocksInScope(
-              childMessages,
-              options,
-              subagentChildSessionLookup,
-              seenImageUris,
-              state,
-              current.id,
-            )
-          : undefined;
-
-      blocks.push({
-        kind: 'message',
-        msg: currentMessage,
-        ...(childBlocks?.length ? { childBlocks } : {}),
-      });
+    if (!currentState.groupKey || !isToolMessage(current)) {
+      pushSingleMessage(current);
       cursor += 1;
       continue;
     }
 
+    const runGroupKey = currentState.groupKey;
     const items: GroupedToolCallItem[] = [
-      {
-        msg: current,
-        objectLabel: extractObjectLabel(current, currentState.stepKind),
-        stepKind: currentState.stepKind,
-      },
+      buildGroupedToolItem(current, runGroupKey),
     ];
     let runCursor = cursor + 1;
 
@@ -702,60 +851,58 @@ function buildAcpRenderBlocksInScope(
         continue;
       }
 
-      if (!nextState.stepKind || !isToolMessage(next)) {
+      // Only collapse identical tool types consecutively.
+      if (
+        !nextState.groupKey ||
+        nextState.groupKey !== runGroupKey ||
+        !isToolMessage(next)
+      ) {
         break;
       }
 
-      items.push({
-        msg: next,
-        objectLabel: extractObjectLabel(next, nextState.stepKind),
-        stepKind: nextState.stepKind,
-      });
+      items.push(buildGroupedToolItem(next, nextState.groupKey));
       runCursor += 1;
     }
 
     if (items.length < 2) {
-      const currentMessage = dedupeRenderableMessageImages(
-        current,
-        seenImageUris,
-      );
-
-      if (isEmptyCompletedTextMessage(currentMessage)) {
-        cursor += 1;
-        continue;
-      }
-
-      blocks.push({ kind: 'message', msg: currentMessage });
-      state.hasRenderedVisibleBlock = true;
+      pushSingleMessage(current);
       cursor += 1;
       continue;
     }
 
     const dedupedItems = dedupeGroupItemsByToolCallId(items);
+    const settledCount = dedupedItems.filter((item) =>
+      isSettledToolMessage(item.msg),
+    ).length;
 
-    if (dedupedItems.length < 2) {
-      const representativeMessage = dedupeRenderableMessageImages(
-        dedupedItems[0]!.msg,
-        seenImageUris,
-      );
-
-      if (isEmptyCompletedTextMessage(representativeMessage)) {
-        cursor += 1;
-        continue;
+    // Keep individuals until the second same-type call has completed. Once the
+    // threshold is met, the whole consecutive same-type run collapses — including
+    // trailing in-progress invocations so later completions append into the same
+    // multi-call entry instead of spawning a new separate row.
+    if (dedupedItems.length < 2 || settledCount < TOOL_GROUP_MIN_SETTLED) {
+      for (const item of dedupedItems) {
+        pushSingleMessage(item.msg);
       }
 
-      blocks.push({ kind: 'message', msg: representativeMessage });
-      state.hasRenderedVisibleBlock = true;
       cursor = runCursor;
       continue;
     }
+
+    const displayKind = dedupedItems[0]!.displayKind;
+    const summary = summarizeSameTypeGroup(
+      dedupedItems,
+      displayKind,
+      runGroupKey,
+    );
 
     blocks.push({
       kind: 'tool_group',
       id: items[0]!.msg.id,
       ts: items[0]!.msg.ts,
-      action: 'Exploring',
-      objectSummary: summarizeGroupObject(dedupedItems),
+      action: summary.action,
+      objectSummary: summary.objectSummary,
+      groupKey: runGroupKey,
+      displayKind,
       items: dedupedItems,
     });
     state.hasRenderedVisibleBlock = true;

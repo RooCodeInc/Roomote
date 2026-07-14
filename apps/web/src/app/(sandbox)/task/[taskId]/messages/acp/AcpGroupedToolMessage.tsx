@@ -7,6 +7,9 @@ import {
   FolderIcon,
   Loader2,
   Search,
+  SquarePen,
+  Terminal,
+  Wrench,
 } from '@/components/system';
 import {
   Message,
@@ -21,8 +24,8 @@ import { messageAnchorId } from '../message-anchor';
 import { AcpToolDetails } from './AcpToolDetails';
 import { hidesExpandedToolResult } from './tool-detail-visibility';
 import type {
-  ExplorationStepKind,
   GroupedToolCallRenderBlock,
+  GroupedToolDisplayKind,
 } from './render-blocks';
 
 interface AcpGroupedToolMessageProps {
@@ -58,7 +61,11 @@ export function AcpGroupedToolMessage({
       ? 'input-available'
       : 'output-available';
 
-  const ToolIcon = groupedToolIcon({ hasFailed, hasRunning });
+  const ToolIcon = groupedToolIcon({
+    displayKind: group.displayKind,
+    hasFailed,
+    hasRunning,
+  });
 
   return (
     <Message from="assistant" className="chat-tool-use-message">
@@ -93,7 +100,7 @@ export function AcpGroupedToolMessage({
                   <section key={item.msg.id} className="space-y-2">
                     <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground">
                       <GroupedToolItemIcon
-                        stepKind={item.stepKind}
+                        displayKind={item.displayKind}
                         className="size-3 shrink-0"
                       />
                       <span className="truncate">{sectionTitle}</span>
@@ -117,28 +124,48 @@ export function AcpGroupedToolMessage({
 }
 
 function groupedToolIcon(params: {
+  displayKind: GroupedToolDisplayKind;
   hasRunning: boolean;
   hasFailed: boolean;
 }): LucideIcon {
   if (params.hasRunning) return Loader2;
   if (params.hasFailed) return AlertCircle;
-  return Search;
+  return groupedDisplayKindIcon(params.displayKind);
 }
 
 function GroupedToolItemIcon({
-  stepKind,
+  displayKind,
   className,
 }: {
-  stepKind: ExplorationStepKind;
+  displayKind: GroupedToolDisplayKind;
   className?: string;
 }) {
-  if (stepKind === 'search') {
-    return <Search className={className} />;
+  const Icon = groupedDisplayKindIcon(displayKind);
+  return <Icon className={className} />;
+}
+
+function groupedDisplayKindIcon(
+  displayKind: GroupedToolDisplayKind,
+): LucideIcon {
+  if (displayKind === 'search') {
+    return Search;
   }
 
-  if (stepKind === 'list') {
-    return <FolderIcon className={className} />;
+  if (displayKind === 'list') {
+    return FolderIcon;
   }
 
-  return <FileIcon className={className} />;
+  if (displayKind === 'read') {
+    return FileIcon;
+  }
+
+  if (displayKind === 'execute') {
+    return Terminal;
+  }
+
+  if (displayKind === 'edit') {
+    return SquarePen;
+  }
+
+  return Wrench;
 }
