@@ -62,20 +62,20 @@ gitea.post('/', async (c) => {
     const eventName = getGiteaEventName(headers);
     const deliveryId = getGiteaDeliveryId({ body, headers });
 
-    if (
-      eventName === 'pull_request_comment' ||
-      (eventName === 'issue_comment' &&
-        typeof parsedJson === 'object' &&
-        parsedJson !== null &&
-        (parsedJson as { is_pull?: unknown }).is_pull === true)
-    ) {
+    if (eventName === 'pull_request_comment' || eventName === 'issue_comment') {
       const payload = giteaPullRequestCommentWebhookSchema.parse(parsedJson);
 
       await recordWebhook(
         deliveryId,
         `${eventName}.${payload.action}`,
         payload,
-        () => handleGiteaComment(payload),
+        async () => {
+          const result = await handleGiteaComment(payload);
+          apiLogger.info?.(
+            `[Gitea] ${eventName}.${payload.action} delivery ${deliveryId}: ${result.message ?? result.status}`,
+          );
+          return result;
+        },
         { provider: 'gitea' },
       );
 

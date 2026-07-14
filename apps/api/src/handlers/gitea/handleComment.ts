@@ -3,10 +3,7 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import {
-  createGiteaPullRequestComment,
-  getGiteaDeploymentUser,
-} from '@roomote/gitea';
+import { createGiteaPullRequestComment } from '@roomote/gitea';
 import {
   type TaskPayload,
   TaskPayloadKind,
@@ -15,7 +12,10 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
-import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import {
+  buildSourceControlAccountLinkRequiredMessage,
+  buildSourceControlEnvironmentRequiredMessage,
+} from '../source-control-account-linking';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -40,23 +40,6 @@ type GiteaCommentPullRequest = NonNullable<
 
 function isGiteaMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(GITEA_MENTION_HANDLE);
-}
-
-async function isDeploymentTokenAuthor(username: string): Promise<boolean> {
-  try {
-    const deploymentUser = await getGiteaDeploymentUser();
-
-    return (
-      !!deploymentUser &&
-      deploymentUser.login.toLowerCase() === username.toLowerCase()
-    );
-  } catch (error) {
-    console.warn(
-      `[handleGiteaComment] failed to resolve Gitea deployment token identity: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return false;
-  }
 }
 
 async function postMentionResponseComment({
@@ -224,10 +207,7 @@ export async function handleGiteaComment(
     return { status: 'ok', message: 'no_comment_author' };
   }
 
-  if (
-    isRoomoteGiteaUsername(commenter) ||
-    (await isDeploymentTokenAuthor(commenter))
-  ) {
+  if (isRoomoteGiteaUsername(commenter)) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }
 
@@ -265,7 +245,10 @@ export async function handleGiteaComment(
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
           ? buildSourceControlAccountLinkRequiredMessage('gitea')
-          : buildReviewerGateMissComment(),
+          : targetsResult.status === 'error' &&
+              targetsResult.message.includes('no environment mapping')
+            ? buildSourceControlEnvironmentRequiredMessage('gitea')
+            : buildReviewerGateMissComment(),
     });
 
     return {

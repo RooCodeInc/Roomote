@@ -2,7 +2,6 @@ const {
   mockEnqueueTask,
   mockGetTaskUrl,
   mockGetGiteaAutomationTargets,
-  mockGetGiteaDeploymentUser,
   mockCreateGiteaPullRequestComment,
   mockFindActiveGitHubPrReviewTask,
   mockFindReusableGitHubPrFollowUpOwner,
@@ -12,7 +11,6 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
-  mockGetGiteaDeploymentUser: vi.fn(),
   mockCreateGiteaPullRequestComment: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
@@ -26,7 +24,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/gitea', () => ({
-  getGiteaDeploymentUser: mockGetGiteaDeploymentUser,
   createGiteaPullRequestComment: mockCreateGiteaPullRequestComment,
 }));
 
@@ -109,7 +106,6 @@ describe('handleGiteaComment', () => {
     mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
-    mockGetGiteaDeploymentUser.mockReset();
     mockCreateGiteaPullRequestComment.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
@@ -127,7 +123,6 @@ describe('handleGiteaComment', () => {
         },
       ],
     });
-    mockGetGiteaDeploymentUser.mockResolvedValue({ login: 'roomote-bot' });
     mockCreateGiteaPullRequestComment.mockResolvedValue({ id: 1 });
     mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
@@ -241,6 +236,24 @@ describe('handleGiteaComment', () => {
         body: expect.stringContaining(
           'ask an admin to add the Gitea OAuth client credentials',
         ),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('replies when no active environment target exists', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'error',
+      message:
+        'no environment mapping associated with [gitea:123, acme/backend]',
+    });
+
+    const result = await handleGiteaComment(makeCommentPayload());
+
+    expect(result).toEqual({ status: 'ok', message: 'reviewer_gate_miss' });
+    expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('settings/environments'),
       }),
     );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
