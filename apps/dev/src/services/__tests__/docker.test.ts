@@ -35,7 +35,8 @@ describe('DockerService.checkContainers', () => {
     vi.useRealTimers();
   });
 
-  it('does nothing when base infra containers are already running', async () => {
+  it('recreates the local edge when base infra containers are already running', async () => {
+    const expectedCwd = path.resolve(process.cwd(), '../..');
     const listContainers = vi
       .fn()
       .mockResolvedValueOnce([
@@ -58,9 +59,23 @@ describe('DockerService.checkContainers', () => {
       } as unknown as Docker;
     } as unknown as typeof Docker);
 
+    vi.mocked(execa).mockResolvedValue({} as Awaited<ReturnType<typeof execa>>);
+
     await DockerService.checkContainers(false);
 
-    expect(execa).not.toHaveBeenCalled();
+    expect(execa).toHaveBeenCalledWith(
+      'docker',
+      ['compose', 'up', 'caddy-dev', '-d', '--force-recreate', '--wait'],
+      expect.objectContaining({
+        cwd: expectedCwd,
+        extendEnv: false,
+      }),
+    );
+    expect(execa).not.toHaveBeenCalledWith(
+      'pnpm',
+      ['infra:up'],
+      expect.anything(),
+    );
   });
 
   it('starts full infra when redis is missing', async () => {

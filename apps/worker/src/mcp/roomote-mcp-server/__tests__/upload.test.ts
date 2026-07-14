@@ -7,6 +7,11 @@ import { handleUpload } from '../upload.js';
 import { resetPostedProofThreadsForTest } from '../chat-proof-auto-post.js';
 import type { ArtifactConfig } from '../types.js';
 
+const successfulS3UploadResponse = () => ({
+  ok: true,
+  headers: new Headers({ etag: '"artifact-etag"' }),
+});
+
 describe('handleUpload', () => {
   let testDir: string;
   const originalSlackChannel = process.env.ROOMOTE_SLACK_CHANNEL;
@@ -83,7 +88,7 @@ describe('handleUpload', () => {
           artifactType: 'general',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -156,7 +161,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -194,7 +199,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -259,7 +264,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -310,7 +315,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: false,
@@ -362,7 +367,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -399,7 +404,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -437,7 +442,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -454,7 +459,7 @@ describe('handleUpload', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-proof-2/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -516,7 +521,7 @@ describe('handleUpload', () => {
           artifactType: 'visual-proof',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -532,7 +537,7 @@ describe('handleUpload', () => {
           artifactType: 'visual-proof',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -595,7 +600,7 @@ describe('handleUpload', () => {
           artifactType: 'visual-proof',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true })
       .mockResolvedValueOnce({
         ok: true,
@@ -648,7 +653,7 @@ describe('handleUpload', () => {
             rawUrl: 'https://test-api.example.com/api/artifacts/art-2/raw',
           }),
         })
-        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce(successfulS3UploadResponse())
         .mockResolvedValueOnce({ ok: true });
       global.fetch = fetchMock;
 

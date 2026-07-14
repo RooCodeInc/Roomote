@@ -145,7 +145,7 @@ export class DockerService {
     stopSelfHost.succeed();
   }
 
-  static async checkContainers(_verbose: boolean): Promise<void> {
+  static async checkContainers(verbose: boolean): Promise<void> {
     const checkContainers = ora('Checking Docker containers').start();
     const rootDir = path.resolve(process.cwd(), '../..');
 
@@ -157,23 +157,39 @@ export class DockerService {
       .filter(([_, isRunning]) => !isRunning)
       .map(([name]) => name);
 
+    if (missing.length > 0) {
+      checkContainers.warn();
+
+      ora(`Starting Docker containers: ${missing.join(', ')}`).info();
+
+      await execa('pnpm', ['infra:up'], {
+        stdio: 'inherit',
+        cwd: path.resolve(process.cwd(), '../..'),
+        env: this.getInfraUpEnv(),
+        extendEnv: false,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+
+    // Caddy loads its config only when the container starts. Recreate the
+    // local edge on every dev startup so routing and environment changes from
+    // the checkout cannot be masked by an already-running stale container.
+    await execa(
+      'docker',
+      ['compose', 'up', 'caddy-dev', '-d', '--force-recreate', '--wait'],
+      {
+        cwd: rootDir,
+        env: this.getInfraUpEnv(),
+        extendEnv: false,
+        ...(verbose && { stdio: 'inherit' }),
+      },
+    );
+
     if (missing.length === 0) {
       checkContainers.succeed();
       return;
     }
-
-    checkContainers.warn();
-
-    ora(`Starting Docker containers: ${missing.join(', ')}`).info();
-
-    await execa('pnpm', ['infra:up'], {
-      stdio: 'inherit',
-      cwd: path.resolve(process.cwd(), '../..'),
-      env: this.getInfraUpEnv(),
-      extendEnv: false,
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
 
     // startContainers.succeed();
 
