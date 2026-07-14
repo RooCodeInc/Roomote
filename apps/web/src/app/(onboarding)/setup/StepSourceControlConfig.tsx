@@ -34,6 +34,7 @@ import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
+const DEFAULT_GITEA_BASE_URL = 'https://gitea.com';
 
 type SourceControlField =
   SetupSourceControlStatus['providers'][number]['fields'][number];
@@ -57,6 +58,8 @@ function getNonSecretFieldInitialValues(
       next[field.envVarName] = savedValue;
     } else if (field.envVarName === 'GITLAB_BASE_URL') {
       next[field.envVarName] = DEFAULT_GITLAB_BASE_URL;
+    } else if (field.envVarName === 'GITEA_BASE_URL') {
+      next[field.envVarName] = DEFAULT_GITEA_BASE_URL;
     }
   }
 

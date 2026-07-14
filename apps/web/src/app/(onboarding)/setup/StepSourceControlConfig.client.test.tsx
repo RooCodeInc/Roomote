@@ -269,6 +269,7 @@ describe('StepSourceControlConfig', () => {
     );
 
     expect(screen.getByText('Gitea Base URL')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://gitea.com')).toBeInTheDocument();
     expect(screen.getByText(/Gitea OAuth Client ID/)).toBeInTheDocument();
     expect(screen.getByText(/Gitea OAuth Client Secret/)).toBeInTheDocument();
     expect(screen.getByText(/Gitea 1\.23\+/)).toBeInTheDocument();
