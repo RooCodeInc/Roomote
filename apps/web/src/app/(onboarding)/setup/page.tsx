@@ -1,7 +1,7 @@
 'use client';
 
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
@@ -94,6 +94,14 @@ function getInitialBootstrapStep(): BootstrapStep {
   );
 }
 
+const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
+  'welcome',
+  'email-account',
+  'email-password',
+  'auth-provider',
+  'auth-env-vars',
+];
+
 export default function SetupPage() {
   const router = useRouter();
   const setupBootstrapOpen = useSetupBootstrapOpen();
@@ -105,6 +113,26 @@ export default function SetupPage() {
   const queryClient = useQueryClient();
   const [bootstrapStep, setBootstrapStep] = useState<BootstrapStep>(
     getInitialBootstrapStep,
+  );
+  const [bootstrapTransitionDirection, setBootstrapTransitionDirection] =
+    useState<'forward' | 'backward'>('forward');
+  const bootstrapStepRef = useRef(bootstrapStep);
+  bootstrapStepRef.current = bootstrapStep;
+  const setBootstrapStepWithTransition = useCallback(
+    (nextStep: BootstrapStep) => {
+      const currentIndex = BOOTSTRAP_STEPS.indexOf(bootstrapStepRef.current);
+      const nextIndex = BOOTSTRAP_STEPS.indexOf(nextStep);
+
+      if (nextStep !== bootstrapStepRef.current) {
+        setBootstrapTransitionDirection(
+          nextIndex >= currentIndex ? 'forward' : 'backward',
+        );
+      }
+
+      bootstrapStepRef.current = nextStep;
+      setBootstrapStep(nextStep);
+    },
+    [],
   );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<CommunicationProviderChoice | null>(null);
@@ -291,26 +319,36 @@ export default function SetupPage() {
       return;
     }
 
-    setBootstrapStep((currentStep) => {
-      if (currentStep === 'welcome') {
-        return currentStep;
-      }
+    const currentStep = bootstrapStepRef.current;
+    let nextStep = currentStep;
 
+    if (currentStep !== 'welcome') {
       if (currentStep === 'email-account' || currentStep === 'email-password') {
         const nextBootstrapStep = getBootstrapStepAfterWelcome(
           bootstrapStatus.authSetup,
         );
-        return nextBootstrapStep === 'email-account'
-          ? currentStep
-          : nextBootstrapStep;
+        nextStep =
+          nextBootstrapStep === 'email-account'
+            ? currentStep
+            : nextBootstrapStep;
+      } else {
+        nextStep = getNextBootstrapStep(
+          bootstrapStatus.authSetup,
+          pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
+        );
       }
+    }
 
-      return getNextBootstrapStep(
-        bootstrapStatus.authSetup,
-        pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
-      );
-    });
-  }, [bootstrapStatus, isSignedIn, pendingAuthProvider, router]);
+    if (nextStep !== currentStep) {
+      setBootstrapStepWithTransition(nextStep);
+    }
+  }, [
+    bootstrapStatus,
+    isSignedIn,
+    pendingAuthProvider,
+    router,
+    setBootstrapStepWithTransition,
+  ]);
 
   useEffect(() => {
     if (status?.setupNewState.authProvider) {
@@ -354,51 +392,83 @@ export default function SetupPage() {
 
     return (
       <div className="relative w-full">
-        {bootstrapStep === 'welcome' && (
-          <StepWelcome
-            onContinue={() => {
-              setBootstrapStep(
-                getBootstrapStepAfterWelcome(bootstrapStatus.authSetup),
-              );
+        <AnimatePresence
+          mode="wait"
+          initial={false}
+          custom={bootstrapTransitionDirection}
+        >
+          <motion.div
+            key={bootstrapStep}
+            custom={bootstrapTransitionDirection}
+            variants={{
+              enter: (direction) => ({
+                opacity: 0,
+                y: direction === 'forward' ? 20 : -20,
+              }),
+              center: {
+                opacity: 1,
+                y: 0,
+                transition: { duration: 0.75, ease: 'easeOut' },
+              },
+              exit: (direction) => ({
+                opacity: 0,
+                y: direction === 'forward' ? -20 : 20,
+                transition: { duration: 0.75, ease: 'easeOut' },
+              }),
             }}
-          />
-        )}
-        {bootstrapStep === 'email-account' && (
-          <StepBootstrapAccount
-            onUseProviderSignIn={(provider) => {
-              setPendingAuthProvider(provider);
-              setBootstrapStep(
-                getNextBootstrapStep(bootstrapStatus.authSetup, provider),
-              );
-            }}
-            onUseEmailPassword={() => setBootstrapStep('email-password')}
-          />
-        )}
-        {bootstrapStep === 'email-password' && (
-          <StepBootstrapEmailPassword
-            onBack={() => setBootstrapStep('email-account')}
-          />
-        )}
-        {bootstrapStep === 'auth-provider' && (
-          <StepAuthProvider
-            onContinue={(provider) => {
-              if (provider === 'telegram') return;
-              setPendingAuthProvider(provider);
-              setBootstrapStep('auth-env-vars');
-            }}
-            onBack={() => setBootstrapStep('email-account')}
-          />
-        )}
-        {bootstrapStep === 'auth-env-vars' && (
-          <StepAuthEnvVars
-            authSetup={bootstrapStatus.authSetup}
-            selectedProviderId={bootstrapAuthProvider}
-            onContinue={() => undefined}
-            onBack={() => setBootstrapStep('email-account')}
-            bootstrapMode={true}
-            setupToken={setupToken}
-          />
-        )}
+            initial="enter"
+            animate="center"
+            exit="exit"
+          >
+            {bootstrapStep === 'welcome' && (
+              <StepWelcome
+                onContinue={() => {
+                  setBootstrapStepWithTransition(
+                    getBootstrapStepAfterWelcome(bootstrapStatus.authSetup),
+                  );
+                }}
+              />
+            )}
+            {bootstrapStep === 'email-account' && (
+              <StepBootstrapAccount
+                onUseProviderSignIn={(provider) => {
+                  setPendingAuthProvider(provider);
+                  setBootstrapStepWithTransition(
+                    getNextBootstrapStep(bootstrapStatus.authSetup, provider),
+                  );
+                }}
+                onUseEmailPassword={() =>
+                  setBootstrapStepWithTransition('email-password')
+                }
+              />
+            )}
+            {bootstrapStep === 'email-password' && (
+              <StepBootstrapEmailPassword
+                onBack={() => setBootstrapStepWithTransition('email-account')}
+              />
+            )}
+            {bootstrapStep === 'auth-provider' && (
+              <StepAuthProvider
+                onContinue={(provider) => {
+                  if (provider === 'telegram') return;
+                  setPendingAuthProvider(provider);
+                  setBootstrapStepWithTransition('auth-env-vars');
+                }}
+                onBack={() => setBootstrapStepWithTransition('email-account')}
+              />
+            )}
+            {bootstrapStep === 'auth-env-vars' && (
+              <StepAuthEnvVars
+                authSetup={bootstrapStatus.authSetup}
+                selectedProviderId={bootstrapAuthProvider}
+                onContinue={() => undefined}
+                onBack={() => setBootstrapStepWithTransition('email-account')}
+                bootstrapMode={true}
+                setupToken={setupToken}
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
     );
   }
