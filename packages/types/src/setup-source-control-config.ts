@@ -249,12 +249,12 @@ function buildProviderFields(
         {
           envVarName: 'GITLAB_CLIENT_ID',
           acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
-          label: 'GitLab OAuth Client ID',
+          label: 'OAuth Application ID',
         },
         {
           envVarName: 'GITLAB_CLIENT_SECRET',
           acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
-          label: 'GitLab OAuth Client Secret',
+          label: 'OAuth App Secret',
           secret: true,
         },
         {

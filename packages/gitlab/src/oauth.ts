@@ -4,7 +4,10 @@ import { db, deploymentSecrets, eq } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 const SECRET_NAME = 'gitlab_deployment_oauth_connection';
-const DEFAULT_SCOPES = ['api', 'read_repository', 'write_repository'] as const;
+// GitLab OAuth applications use `api` for repository read/write access.
+// `read_repository` and `write_repository` are deploy/project token scopes,
+// not valid OAuth scopes.
+const DEFAULT_SCOPES = ['api'] as const;
 
 export type GitLabOAuthConnectionStatus = 'active' | 'reauthorization_required';
 

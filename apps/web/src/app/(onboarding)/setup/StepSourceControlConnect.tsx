@@ -53,13 +53,13 @@ function getTokenBackedConnectCopy({
 
   switch (provider) {
     case 'gitlab':
-      return 'Sync your GitLab projects so Roomote can access your codebase. Roomote also configures merge request webhooks on the synced projects so it can review merge requests automatically.';
+      return 'Sync your GitLab projects so Roomote can access your codebase.';
     case 'gitea':
       return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
-      return 'Sync your Bitbucket repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Bitbucket repositories so Roomote can access your codebase.';
     case 'ado':
-      return 'Sync your Azure DevOps repositories so Roomote can access your codebase. Roomote also configures pull request service hooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Azure DevOps repositories so Roomote can access your codebase.';
     default:
       return `Sync your ${providerLabel} repositories so Roomote can access your codebase.`;
   }
@@ -289,19 +289,6 @@ export function StepSourceControlConnect({
       ) : (
         <div className="space-y-4">
           <p>{tokenBackedCopy}</p>
-          {gitlabOAuthConfigured ? (
-            <p className="text-sm text-muted-foreground">
-              Authorize the GitLab application with the dedicated service
-              account before syncing repositories.
-              <a
-                className="ml-1 underline"
-                href="/api/source-control/gitlab/oauth/authorize"
-              >
-                Authorize GitLab
-              </a>
-            </p>
-          ) : null}
-
           {syncedWithZeroRepos ? (
             <p className="text-sm text-muted-foreground">
               No repositories were found. Check your token permissions and base

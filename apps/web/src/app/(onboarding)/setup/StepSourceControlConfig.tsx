@@ -29,9 +29,11 @@ import {
 } from './AdoSourceControlConfig';
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
 import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
+import { GitLabSourceControlInstructions } from './GitLabSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
+const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
 
 type SourceControlField =
   SetupSourceControlStatus['providers'][number]['fields'][number];
@@ -53,6 +55,8 @@ function getNonSecretFieldInitialValues(
     const savedValue = field.savedValue?.trim();
     if (savedValue) {
       next[field.envVarName] = savedValue;
+    } else if (field.envVarName === 'GITLAB_BASE_URL') {
+      next[field.envVarName] = DEFAULT_GITLAB_BASE_URL;
     }
   }
 
@@ -312,8 +316,13 @@ export function StepSourceControlConfig({
       },
     });
 
-    if (selectedProvider.provider === 'gitea') {
-      window.location.assign('/api/source-control/gitea/oauth/authorize');
+    if (
+      selectedProvider.provider === 'gitea' ||
+      selectedProvider.provider === 'gitlab'
+    ) {
+      window.location.assign(
+        `/api/source-control/${selectedProvider.provider}/oauth/authorize`,
+      );
     }
   };
 
@@ -326,16 +335,15 @@ export function StepSourceControlConfig({
     typeof window === 'undefined'
       ? 'https://your-deployment-url'
       : window.location.origin;
-  const typedGitLabBaseUrl =
-    values['GITLAB_BASE_URL']?.trim().replace(/\/+$/, '') ?? '';
-  const configuredGitLabBaseUrl =
-    sourceControlSetup.gitlabBaseUrl?.trim().replace(/\/+$/, '') ?? '';
-  const effectiveGitLabBaseUrl = normalizeGitLabSetupUrl(
-    typedGitLabBaseUrl || configuredGitLabBaseUrl,
-  );
+  const rawGitLabBaseUrl =
+    values['GITLAB_BASE_URL']?.trim() ||
+    sourceControlSetup.gitlabBaseUrl?.trim() ||
+    '';
   const creationHref =
     selectedProvider?.provider === 'gitlab'
-      ? `${effectiveGitLabBaseUrl}/-/user_settings/applications`
+      ? rawGitLabBaseUrl
+        ? `${normalizeGitLabSetupUrl(rawGitLabBaseUrl)}/-/user_settings/applications`
+        : undefined
       : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
@@ -395,21 +403,31 @@ export function StepSourceControlConfig({
         </NumberedStep>
       )}
 
-      {isAdo || selectedProvider?.provider === 'gitea' ? (
+      {isAdo ||
+      selectedProvider?.provider === 'gitea' ||
+      selectedProvider?.provider === 'gitlab' ? (
         <NumberedStep number={2}>
           {isAdo ? (
             <AdoSourceControlInstructions
               authMode={adoAuthMode}
               publicOrigin={publicOrigin}
             />
-          ) : (
+          ) : selectedProvider?.provider === 'gitea' ? (
             <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : (
+            <GitLabSourceControlInstructions publicOrigin={publicOrigin} />
           )}
         </NumberedStep>
       ) : null}
 
       <NumberedStep
-        number={isAdo || selectedProvider?.provider === 'gitea' ? 3 : 2}
+        number={
+          isAdo ||
+          selectedProvider?.provider === 'gitea' ||
+          selectedProvider?.provider === 'gitlab'
+            ? 3
+            : 2
+        }
       >
         <p className="font-semibold">
           Enter the values below for your {provider ?? 'source control'}{' '}
@@ -429,16 +447,6 @@ export function StepSourceControlConfig({
               Create a client secret, add the application to the Azure DevOps
               organization, and grant it access to the projects and repositories
               Roomote should use.
-            </p>
-          )}
-          {selectedProvider?.provider === 'gitlab' && (
-            <p className="text-sm text-muted-foreground">
-              OAuth redirect URI:{' '}
-              <code>
-                {publicOrigin}/api/source-control/gitlab/oauth/callback
-              </code>
-              . Authorize GitLab with the dedicated service account after saving
-              the application credentials.
             </p>
           )}
 

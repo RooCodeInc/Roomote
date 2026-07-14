@@ -18,10 +18,9 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     setupLabel: 'GitHub App',
   },
   gitlab: {
-    creationHref: 'https://gitlab.com/-/user_settings/applications',
     setupLabel: 'GitLab OAuth application',
     creationHint:
-      'Create an OAuth application in GitLab with api scope. Use the exact redirect URI shown by Roomote, then authorize it with the dedicated service account.',
+      'In GitLab, click on your avatar → Edit Profile → Applications → Add new application, granting the API read/write scope.',
   },
   gitea: {
     setupLabel: 'Gitea OAuth application',
