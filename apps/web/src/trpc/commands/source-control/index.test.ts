@@ -64,7 +64,6 @@ vi.mock('@roomote/gitlab', () => ({
   removeGitLabWebhooksForProjects: mockRemoveGitLabWebhooksForProjects,
   resolveGitLabBaseUrl: vi.fn().mockResolvedValue('https://gitlab.com'),
   syncGitLabRepositories: vi.fn(),
-  validateGitLabToken: vi.fn().mockResolvedValue({ status: 'valid' }),
 }));
 
 vi.mock('@roomote/db/server', () => ({

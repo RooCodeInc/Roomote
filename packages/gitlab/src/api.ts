@@ -143,7 +143,8 @@ let cachedGitLabDeploymentUser: {
 } | null = null;
 
 /**
- * Resolves the GitLab identity behind the deployment token via `GET /user`.
+ * Resolves the GitLab identity behind the deployment OAuth connection via
+ * `GET /user`.
  * The result is cached per token value so webhook handlers can call this on
  * every delivery without re-hitting the GitLab API.
  */
@@ -419,63 +420,6 @@ export async function listGitLabProjects({
   }
 
   return projects;
-}
-
-export type GitLabTokenValidationResult =
-  | { status: 'valid'; username: string }
-  | { status: 'invalid'; error: string }
-  | { status: 'unknown'; error: string };
-
-const GITLAB_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
-
-/**
- * Verifies that a GitLab token can authenticate against the GitLab API.
- * Returns `invalid` only for definitive auth failures so transient network
- * or GitLab availability issues do not block saving configuration. The
- * request is bounded by a timeout so callers are never held open by a slow
- * GitLab response.
- */
-export async function validateGitLabToken({
-  token,
-  apiBaseUrl,
-  fetchImpl = fetch,
-  timeoutMs = GITLAB_TOKEN_VALIDATION_TIMEOUT_MS,
-}: {
-  token: string;
-  apiBaseUrl?: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<GitLabTokenValidationResult> {
-  const timedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-
-  try {
-    const { data } = await requestGitLabJson({
-      apiBaseUrl,
-      fetchImpl: timedFetch,
-      path: '/user',
-      params: {},
-      token,
-      schema: gitLabUserSchema,
-    });
-
-    return { status: 'valid', username: data.username };
-  } catch (error) {
-    if (error instanceof GitLabApiError && [401, 403].includes(error.status)) {
-      return {
-        status: 'invalid',
-        error:
-          'GitLab rejected the token. Confirm the token is active and has the api scope.',
-      };
-    }
-
-    return {
-      status: 'unknown',
-      error: `Could not verify the GitLab token: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
 }
 
 const GITLAB_WEBHOOK_EVENT_FLAGS = {

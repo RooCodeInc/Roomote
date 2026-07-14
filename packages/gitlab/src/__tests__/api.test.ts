@@ -366,7 +366,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          'PRIVATE-TOKEN': 'glpat_deployment_token',
+          'PRIVATE-TOKEN': 'oauth_access_token',
           'Content-Type': 'application/json',
         }),
         body: expect.stringContaining('"write_repository"'),
@@ -647,7 +647,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
           host: 'gitlab.com',
           repositoryFullName: 'group/project',
           username: 'oauth2',
-          token: 'glpat_deployment_token',
+          token: 'oauth_access_token',
         },
       ],
       artifactsPatch: {
@@ -783,7 +783,7 @@ describe('getGitLabDeploymentUser', () => {
     );
   });
 
-  it('returns null when no deployment token is configured', async () => {
+  it('returns null when no GitLab OAuth connection is configured', async () => {
     mockGitLabOAuthAccessToken.mockResolvedValue(null);
     const fetchMock = vi.fn<typeof fetch>();
 
@@ -836,56 +836,6 @@ describe('createGitLabMergeRequestNote', () => {
     ).rejects.toThrow(
       'GitLab OAuth authorization is required to create merge request notes.',
     );
-  });
-});
-
-describe('validateGitLabToken', () => {
-  it('returns the authenticated username for a working token', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ id: 7, username: 'roomote-bot' }), {
-        status: 200,
-      }),
-    );
-
-    await expect(
-      validateGitLabToken({ token: 'glpat_test', fetchImpl: fetchMock }),
-    ).resolves.toEqual({ status: 'valid', username: 'roomote-bot' });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://gitlab.com/api/v4/user',
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'glpat_test' }),
-      }),
-    );
-  });
-
-  it('reports definitive auth failures as invalid', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ message: '401 Unauthorized' }), {
-        status: 401,
-        statusText: 'Unauthorized',
-      }),
-    );
-
-    const result = await validateGitLabToken({
-      token: 'glpat_bad',
-      fetchImpl: fetchMock,
-    });
-
-    expect(result.status).toBe('invalid');
-  });
-
-  it('reports transient failures as unknown instead of invalid', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockRejectedValue(new Error('network unreachable'));
-
-    const result = await validateGitLabToken({
-      token: 'glpat_test',
-      fetchImpl: fetchMock,
-    });
-
-    expect(result.status).toBe('unknown');
   });
 });
 
