@@ -22,7 +22,7 @@ a workspace grounded in your product. It is applied in a predictable order:
 
 1. shared workspace tool versions are installed
 2. requested services (databases, caches) are started while repositories clone
-3. configured container projects are built and started from cloned repositories
+3. configured Docker projects are built and started from cloned repositories
 4. each repository's setup commands run, in order
 5. named ports become live previews, and agent instructions are attached to
    every task
@@ -109,7 +109,7 @@ repositories:
         run: pnpm install
 
 # Start an existing Compose project after acme/web is cloned.
-container_projects:
+docker_projects:
   - type: compose
     name: app
     repository: acme/web
@@ -150,7 +150,7 @@ agentInstructions: |
 | `tool_versions`           | map               | no       | Tools installed at the shared workspace root via mise.                                                                    |
 | `env`                     | map               | no       | Workspace environment variables available to every task.                                                                  |
 | `services`                | list              | no       | Managed services to start. See [Services](#services).                                                                     |
-| `container_projects`      | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Container projects](#container-projects).                |
+| `docker_projects`         | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Docker projects](#docker-projects).                      |
 | `ports`                   | list              | no       | Named preview ports. See [Ports](#ports).                                                                                 |
 | `previews_enabled`        | boolean           | no       | Explicitly enable or disable live previews without deleting port definitions.                                             |
 | `oidc`                    | map               | no       | Sandbox OIDC targets. See [OIDC](#oidc).                                                                                  |
@@ -239,12 +239,12 @@ services:
 
 A service name cannot collide with a port name in the same environment.
 
-## Container projects
+## Docker projects
 
-`container_projects` runs container definitions already owned by a configured
-repository. Roomote validates the Compose model, builds images, starts services
-with `docker compose up --wait`, and treats startup as required unless
-`required: false` is set.
+`docker_projects` runs Docker Compose or Dockerfile definitions already owned
+by a configured repository. Roomote validates the Compose model, builds images,
+starts services with `docker compose up --wait`, and treats startup as required
+unless `required: false` is set.
 
 Common fields:
 
@@ -265,7 +265,7 @@ startup to those services. Each port mapping requires `named_port`, `service`,
 and `container_port`.
 
 ```yaml
-container_projects:
+docker_projects:
   - type: compose
     name: development
     repository: acme/web
@@ -284,7 +284,7 @@ For `type: dockerfile`, Roomote generates a one-service Compose project.
 `service` because the generated service is implicit.
 
 ```yaml
-container_projects:
+docker_projects:
   - type: dockerfile
     name: web
     repository: acme/web
@@ -296,7 +296,7 @@ container_projects:
         container_port: 3000
 ```
 
-All paths must be relative and stay inside the selected repository. Container
+All paths must be relative and stay inside the selected repository. Docker
 projects are supported by all sandbox providers. Modal runs them in its beta VM
 sandbox runtime.
 

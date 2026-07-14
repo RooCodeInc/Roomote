@@ -102,19 +102,19 @@ export const serviceConfigSchema = z.union([
 export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
 /**
- * Container projects run customer-owned Docker Compose or Dockerfile services
+ * Docker projects run customer-owned Docker Compose or Dockerfile services
  * inside the task sandbox after their repository has been prepared.
  */
-const containerProjectNameSchema = z
+const dockerProjectNameSchema = z
   .string()
-  .min(1, 'Container project name is required')
+  .min(1, 'Docker project name is required')
   .max(50)
   .regex(
     /^[a-zA-Z][a-zA-Z0-9_-]*$/,
-    'Container project name must start with a letter and contain only letters, numbers, underscores, and hyphens',
+    'Docker project name must start with a letter and contain only letters, numbers, underscores, and hyphens',
   );
 
-const containerProjectRelativePathSchema = z
+const dockerProjectRelativePathSchema = z
   .string()
   .min(1)
   .refine(
@@ -129,7 +129,7 @@ const containerProjectRelativePathSchema = z
     { message: 'Path must stay within the selected repository' },
   );
 
-export const containerProjectPortSchema = z.object({
+export const dockerProjectPortSchema = z.object({
   /** Name of an entry in the environment's top-level `ports` list. */
   named_port: z.string().min(1),
   /** Compose service that owns the container port. Omitted for Dockerfiles. */
@@ -137,52 +137,50 @@ export const containerProjectPortSchema = z.object({
   container_port: z.number().int().min(1).max(65535),
 });
 
-const containerProjectCommonShape = {
-  name: containerProjectNameSchema,
+const dockerProjectCommonShape = {
+  name: dockerProjectNameSchema,
   repository: z
     .string()
     .regex(
       /^[^/]+(?:\/[^/]+)+$/,
       'Must reference a configured slash-separated repository name',
     ),
-  working_dir: containerProjectRelativePathSchema.optional(),
+  working_dir: dockerProjectRelativePathSchema.optional(),
   env: z.record(z.string()).optional(),
-  ports: z.array(containerProjectPortSchema).optional(),
+  ports: z.array(dockerProjectPortSchema).optional(),
   required: z.boolean().optional(),
   startup_timeout_seconds: z.number().int().positive().max(3600).optional(),
 };
 
-export const composeContainerProjectSchema = z.object({
-  ...containerProjectCommonShape,
+export const composeDockerProjectSchema = z.object({
+  ...dockerProjectCommonShape,
   type: z.literal('compose'),
-  files: z.array(containerProjectRelativePathSchema).min(1),
+  files: z.array(dockerProjectRelativePathSchema).min(1),
   profiles: z.array(z.string().min(1)).optional(),
   services: z.array(z.string().min(1)).optional(),
 });
 
-export const dockerfileContainerProjectSchema = z.object({
-  ...containerProjectCommonShape,
+export const dockerfileDockerProjectSchema = z.object({
+  ...dockerProjectCommonShape,
   type: z.literal('dockerfile'),
-  context: containerProjectRelativePathSchema.optional(),
-  dockerfile: containerProjectRelativePathSchema.optional(),
+  context: dockerProjectRelativePathSchema.optional(),
+  dockerfile: dockerProjectRelativePathSchema.optional(),
   target: z.string().min(1).optional(),
   build_args: z.record(z.string()).optional(),
   command: z.array(z.string()).min(1).optional(),
 });
 
-export const containerProjectSchema = z.discriminatedUnion('type', [
-  composeContainerProjectSchema,
-  dockerfileContainerProjectSchema,
+export const dockerProjectSchema = z.discriminatedUnion('type', [
+  composeDockerProjectSchema,
+  dockerfileDockerProjectSchema,
 ]);
 
-export type ContainerProjectPort = z.infer<typeof containerProjectPortSchema>;
-export type ComposeContainerProject = z.infer<
-  typeof composeContainerProjectSchema
+export type DockerProjectPort = z.infer<typeof dockerProjectPortSchema>;
+export type ComposeDockerProject = z.infer<typeof composeDockerProjectSchema>;
+export type DockerfileDockerProject = z.infer<
+  typeof dockerfileDockerProjectSchema
 >;
-export type DockerfileContainerProject = z.infer<
-  typeof dockerfileContainerProjectSchema
->;
-export type ContainerProject = z.infer<typeof containerProjectSchema>;
+export type DockerProject = z.infer<typeof dockerProjectSchema>;
 
 /**
  * Default ports for each service.
@@ -640,7 +638,7 @@ export const environmentConfigSchema = z
      * Customer-owned Docker Compose projects or Dockerfiles to start after
      * their repositories have been prepared.
      */
-    container_projects: z.array(containerProjectSchema).optional(),
+    docker_projects: z.array(dockerProjectSchema).optional(),
     /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and
@@ -833,7 +831,7 @@ export const environmentConfigSchema = z
       }
     }
 
-    if (data.container_projects && data.container_projects.length > 0) {
+    if (data.docker_projects && data.docker_projects.length > 0) {
       const configuredRepositories = new Set(
         data.repositories.map((repository) => repository.repository),
       );
@@ -843,13 +841,13 @@ export const environmentConfigSchema = z
       const seenProjectNames = new Set<string>();
       const seenNamedPorts = new Set<string>();
 
-      data.container_projects.forEach((project, projectIndex) => {
+      data.docker_projects.forEach((project, projectIndex) => {
         const normalizedProjectName = project.name.toLowerCase();
         if (seenProjectNames.has(normalizedProjectName)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: `Duplicate container project name: ${project.name}`,
-            path: ['container_projects', projectIndex, 'name'],
+            message: `Duplicate Docker project name: ${project.name}`,
+            path: ['docker_projects', projectIndex, 'name'],
           });
         }
         seenProjectNames.add(normalizedProjectName);
@@ -857,8 +855,8 @@ export const environmentConfigSchema = z
         if (!configuredRepositories.has(project.repository)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
-            message: `Container project repository '${project.repository}' is not configured in this environment`,
-            path: ['container_projects', projectIndex, 'repository'],
+            message: `Docker project repository '${project.repository}' is not configured in this environment`,
+            path: ['docker_projects', projectIndex, 'repository'],
           });
         }
 
@@ -867,9 +865,9 @@ export const environmentConfigSchema = z
           if (!configuredPortNames.has(normalizedPortName)) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Container project port '${port.named_port}' is not configured in the environment ports list`,
+              message: `Docker project port '${port.named_port}' is not configured in the environment ports list`,
               path: [
-                'container_projects',
+                'docker_projects',
                 projectIndex,
                 'ports',
                 portIndex,
@@ -881,9 +879,9 @@ export const environmentConfigSchema = z
           if (seenNamedPorts.has(normalizedPortName)) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
-              message: `Environment port '${port.named_port}' can only be mapped by one container project`,
+              message: `Environment port '${port.named_port}' can only be mapped by one Docker project`,
               path: [
-                'container_projects',
+                'docker_projects',
                 projectIndex,
                 'ports',
                 portIndex,
@@ -898,7 +896,7 @@ export const environmentConfigSchema = z
               code: z.ZodIssueCode.custom,
               message: 'Compose port mappings require a service name',
               path: [
-                'container_projects',
+                'docker_projects',
                 projectIndex,
                 'ports',
                 portIndex,

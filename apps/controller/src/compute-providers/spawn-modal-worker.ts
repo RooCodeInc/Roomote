@@ -161,7 +161,7 @@ export async function spawnModalWorker(
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
 
-  if (environmentConfig?.container_projects?.length) {
+  if (environmentConfig?.docker_projects?.length) {
     throw new NonRetryableSpawnError(
       'Modal does not currently support Docker Compose or Dockerfile projects. Choose E2B, Daytona, Blaxel, or Local Docker for this environment.',
     );

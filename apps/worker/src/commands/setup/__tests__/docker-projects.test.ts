@@ -5,14 +5,14 @@ import * as path from 'node:path';
 import { TaskPayloadKind } from '@roomote/types';
 
 import type { StartupLogger } from '../../../logging';
-import { initializeContainerProjects } from '../workspace/container-projects';
+import { initializeDockerProjects } from '../workspace/docker-projects';
 
 const logger = {
   userLog: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   debug: { log: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 } as unknown as StartupLogger;
 
-describe('initializeContainerProjects', () => {
+describe('initializeDockerProjects', () => {
   let workspacePath: string;
   let repositoryPath: string;
 
@@ -36,7 +36,7 @@ describe('initializeContainerProjects', () => {
     );
     const runCommand = vi.fn().mockResolvedValue({ stdout: '' });
 
-    await initializeContainerProjects(
+    await initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -46,7 +46,7 @@ describe('initializeContainerProjects', () => {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
             ports: [{ name: 'WEB', port: 3000 }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'compose',
                 name: 'dev',
@@ -85,7 +85,7 @@ describe('initializeContainerProjects', () => {
     );
 
     const generatedFiles = await fs.readdir(
-      path.join(workspacePath, '.roomote', 'container-projects'),
+      path.join(workspacePath, '.roomote', 'docker-projects'),
     );
     expect(generatedFiles).toContain('roomote-dev.ports.yaml');
   });
@@ -97,7 +97,7 @@ describe('initializeContainerProjects', () => {
     );
     const runCommand = vi.fn().mockResolvedValue({ stdout: '' });
 
-    await initializeContainerProjects(
+    await initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -106,7 +106,7 @@ describe('initializeContainerProjects', () => {
           environmentConfig: {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'dockerfile',
                 name: 'web',
@@ -129,7 +129,7 @@ describe('initializeContainerProjects', () => {
       path.join(
         workspacePath,
         '.roomote',
-        'container-projects',
+        'docker-projects',
         'roomote-web.dockerfile.yaml',
       ),
       'utf8',
@@ -149,7 +149,7 @@ describe('initializeContainerProjects', () => {
       .mockRejectedValueOnce(new Error('Docker daemon is unavailable'))
       .mockResolvedValue({ stdout: '' });
 
-    await initializeContainerProjects(
+    await initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -158,7 +158,7 @@ describe('initializeContainerProjects', () => {
           environmentConfig: {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'compose',
                 name: 'dev',
@@ -199,7 +199,7 @@ describe('initializeContainerProjects', () => {
       .mockRejectedValueOnce(new Error('Docker daemon is unavailable'))
       .mockResolvedValue({ stdout: '' });
 
-    await initializeContainerProjects(
+    await initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -208,7 +208,7 @@ describe('initializeContainerProjects', () => {
           environmentConfig: {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'compose',
                 name: 'dev',
@@ -249,7 +249,7 @@ describe('initializeContainerProjects', () => {
     );
     const runCommand = vi.fn().mockResolvedValue({ stdout: '' });
 
-    await initializeContainerProjects(
+    await initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -258,7 +258,7 @@ describe('initializeContainerProjects', () => {
           environmentConfig: {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'compose',
                 name: 'dev',
@@ -300,7 +300,7 @@ describe('initializeContainerProjects', () => {
       .mockRejectedValueOnce(new Error('invalid compose'));
 
     await expect(
-      initializeContainerProjects(
+      initializeDockerProjects(
         logger,
         {
           workspace: {
@@ -309,7 +309,7 @@ describe('initializeContainerProjects', () => {
             environmentConfig: {
               name: 'Test',
               repositories: [{ repository: 'acme/app' }],
-              container_projects: [
+              docker_projects: [
                 {
                   type: 'compose',
                   name: 'optional',
@@ -351,7 +351,7 @@ describe('initializeContainerProjects', () => {
       return { stdout: '' };
     });
 
-    const result = initializeContainerProjects(
+    const result = initializeDockerProjects(
       logger,
       {
         workspace: {
@@ -360,7 +360,7 @@ describe('initializeContainerProjects', () => {
           environmentConfig: {
             name: 'Test',
             repositories: [{ repository: 'acme/app' }],
-            container_projects: [
+            docker_projects: [
               {
                 type: 'compose',
                 name: 'dev',

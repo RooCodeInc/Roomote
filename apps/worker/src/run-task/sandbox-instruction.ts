@@ -1,6 +1,6 @@
 import type {
   Command,
-  ContainerProject,
+  DockerProject,
   EnvironmentConfig,
   EnvironmentRepositoryConfig,
   NamedPort,
@@ -16,8 +16,8 @@ function withDefinedEntries<T extends Record<string, unknown>>(
   );
 }
 
-function sanitizeContainerProjectForPrompt(
-  project: ContainerProject,
+function sanitizeDockerProjectForPrompt(
+  project: DockerProject,
 ): Record<string, unknown> {
   const common = {
     type: project.type,
@@ -121,8 +121,8 @@ export function sanitizeEnvironmentConfigForPrompt(
       sanitizeRepositoryForPrompt,
     ),
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
-    container_projects: environmentConfig.container_projects?.map(
-      sanitizeContainerProjectForPrompt,
+    docker_projects: environmentConfig.docker_projects?.map(
+      sanitizeDockerProjectForPrompt,
     ),
   });
 }
@@ -199,10 +199,10 @@ export function buildSandboxInstruction(
       );
     }
 
-    if (environmentConfig.container_projects?.length) {
+    if (environmentConfig.docker_projects?.length) {
       lines.push(
         '',
-        'Configured container projects were built and started with Docker Compose before your task began. Use `docker compose` with the configured project files when inspecting them, and do not start duplicate copies.',
+        'Configured Docker projects were built and started with Docker Compose before your task began. Use `docker compose` with the configured project files when inspecting them, and do not start duplicate copies.',
       );
     }
 

@@ -80,9 +80,9 @@ describe('configToYaml', () => {
     expect(yaml).toContain('tool_versions:');
   });
 
-  it('preserves container projects when serializing environment config', () => {
+  it('preserves docker projects when serializing environment config', () => {
     const config: EnvironmentConfig = {
-      name: 'Container Projects Env',
+      name: 'Docker Projects Env',
       repositories: [{ repository: 'Roomote/example-app' }],
       ports: [
         {
@@ -90,7 +90,7 @@ describe('configToYaml', () => {
           port: 3000,
         },
       ],
-      container_projects: [
+      docker_projects: [
         {
           name: 'compose-app',
           type: 'compose',
@@ -126,8 +126,8 @@ describe('configToYaml', () => {
     const yaml = configToYaml(config);
     const parsed = YAML.parse(yaml);
 
-    expect(parsed.container_projects).toEqual(config.container_projects);
-    expect(yaml).toContain('container_projects:');
+    expect(parsed.docker_projects).toEqual(config.docker_projects);
+    expect(yaml).toContain('docker_projects:');
   });
 
   it('preserves manualSkills when serializing environment config', () => {

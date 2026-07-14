@@ -133,12 +133,12 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it('rejects environments with container projects before starting Modal', async () => {
+  it('rejects environments with docker projects before starting Modal', async () => {
     mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
       environmentConfig: {
-        container_projects: [
+        docker_projects: [
           {
             name: 'app',
             type: 'compose',

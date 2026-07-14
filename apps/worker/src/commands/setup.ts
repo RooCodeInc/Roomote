@@ -35,7 +35,7 @@ import {
   ensurePython3,
   installPython,
   initializeRepositories,
-  initializeContainerProjects,
+  initializeDockerProjects,
   initializeAllServices,
   installOrganizationEnvironmentSkills,
   executeOrganizationEnvironmentRepositoryCommands,
@@ -328,9 +328,9 @@ async function runSetup({
   if (initializeRepositoriesResult) {
     await timedStep(
       logger,
-      'initializeContainerProjects',
+      'initializeDockerProjects',
       () =>
-        initializeContainerProjects(
+        initializeDockerProjects(
           logger,
           workspaceOptions,
           initializeRepositoriesResult!,

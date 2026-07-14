@@ -84,7 +84,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
           <action>For long-running service commands (for example `dev`, `start`, `serve`, `preview`, watchers), set `detached: true` and include a `logfile` path.</action>
           <action>Do not wrap long-running commands in `pm2 start` yourself. Roomote runs environment repository commands marked `detached: true` under PM2 supervision, so the `run` value should be the foreground command the app normally uses.</action>
           <action>Include only services clearly required by the repository.</action>
-          <action>When a checked-in Docker Compose project or Dockerfile is the repository's supported development startup path, prefer a top-level `container_projects` entry over translating its containers into Roomote-managed `services` or detached repository commands. Reference the exact task-provided repository identifier and only relative paths that stay inside that repository.</action>
+          <action>When a checked-in Docker Compose project or Dockerfile is the repository's supported development startup path, prefer a top-level `docker_projects` entry over translating its containers into Roomote-managed `services` or detached repository commands. Reference the exact task-provided repository identifier and only relative paths that stay inside that repository.</action>
           <action>For Compose, include the smallest evidence-backed `files`, `profiles`, and `services` selection. For a single Dockerfile, include evidence-backed `context`, `dockerfile`, `target`, `build_args`, and `command` values. Do not copy secrets or literal credentials from Compose files into the environment definition.</action>
           <action>Include `tool_versions` only when clearly discoverable.</action>
           <action>When the repository exposes a browser UI or a stable localhost landing page, populate `initialUrl` with the best validated absolute URL so the shared live browser does not start at `about:blank`.</action>
@@ -117,7 +117,7 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 8. When the test failure instead appears to be a clearly pre-existing repository or unit-test failure outside environment-setup scope, record the exact command and failure, keep the suite referenced in `agentInstructions`, and continue only if install/start/localhost validation is otherwise sufficient.
 9. If the app exposes an HTTP UI, set `initialUrl` to the best validated absolute localhost URL (or keep `about:blank` only when no better landing page exists), confirm that localhost URL through loopback HTTP reachability and startup evidence, and record the exact URL plus the evidence used. Do not use direct browser automation from `environment-setup`.
 10. When the config includes a `ports` entry for a validated HTTP surface, confirm its `port` number matches the actual validated listening port and that any `initial_path` responds successfully over loopback.
-10a. When the config includes `container_projects`, run `docker compose config --quiet` against the selected files or an equivalent generated one-service Compose model, start the selected services, wait for readiness, and confirm mapped HTTP ports over loopback. Capture `docker compose ps --all` and recent service logs when startup fails.
+10a. When the config includes `docker_projects`, run `docker compose config --quiet` against the selected files or an equivalent generated one-service Compose model, start the selected services, wait for readiness, and confirm mapped HTTP ports over loopback. Capture `docker compose ps --all` and recent service logs when startup fails.
 11. If the app exposes only an HTTP API or a non-browser surface, verify localhost reachability using loopback addresses only.
 12. If any command in the draft config fails or cannot be confirmed, either revise or remove that command from the YAML, or report the exact blocker; do not leave unrun or unconfirmed commands in the final config.
 13. As soon as repository evidence or early validation makes it clear that specific environment variables or secrets will be required and values are unavailable, request them immediately instead of waiting for a later failure.
@@ -215,16 +215,16 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <field name="env" required="false" type="Record<string, string>" />
 <field name="ports" required="false" type="NamedPort[]" />
 <field name="services" required="false" type="ServiceConfig[]" />
-<field name="container_projects" required="false" type="ContainerProject[]" />
+<field name="docker_projects" required="false" type="DockerProject[]" />
 </top_level_fields>
 
-<container_project_config>
+<docker_project_config>
 <field name="type" required="true" type="compose | dockerfile" />
 <field name="name" required="true" type="unique string starting with a letter" />
 <field name="repository" required="true" type="exact identifier from repositories[].repository" />
 <field name="working_dir" required="false" type="relative repository path" />
 <field name="env" required="false" type="Record<string, string>" />
-<field name="ports" required="false" type="ContainerProjectPort[]" />
+<field name="ports" required="false" type="DockerProjectPort[]" />
 <field name="required" required="false" type="boolean (defaults true)" />
 <field name="startup_timeout_seconds" required="false" type="integer (1-3600)" />
 <compose_fields>
@@ -239,13 +239,13 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <field name="build_args" required="false" type="Record<string, string>" />
 <field name="command" required="false" type="string[]" />
 </dockerfile_fields>
-</container_project_config>
+</docker_project_config>
 
-<container_project_port>
+<docker_project_port>
 <field name="named_port" required="true" type="name from the top-level ports list" />
 <field name="service" required="for compose" type="Compose service name" />
 <field name="container_port" required="true" type="integer (1-65535)" />
-</container_project_port>
+</docker_project_port>
 
 <named_port_config>
 <note>Each named port publishes a shareable live-preview URL for the environment and exposes a matching ROOMOTE host environment variable inside the sandbox (for example a port named WEB yields the `ROOMOTE_WEB_HOST` variable). Configure one entry per validated human-facing HTTP surface, particularly web app UIs.</note>
@@ -305,8 +305,8 @@ You are an expert Roomote environment analyst. Analyze the already-checked-out r
 <rule>When setup logic needs conditional or multiline behavior, prefer multiple simple command entries or one explicit shell wrapper command over raw multiline shell fragments.</rule>
 <rule>Prefer runtime-only configuration file modifications outside the git repository when possible to avoid unstaged repo changes.</rule>
 <rule>Include only services clearly required by repository evidence.</rule>
-<rule>Use `container_projects` only when a checked-in Compose project or Dockerfile is the evidence-backed development path, and validate the exact model before persistence.</rule>
-<rule>All container project paths must be relative and stay inside the selected configured repository.</rule>
+<rule>Use `docker_projects` only when a checked-in Compose project or Dockerfile is the evidence-backed development path, and validate the exact model before persistence.</rule>
+<rule>All Docker project paths must be relative and stay inside the selected configured repository.</rule>
 <rule>Include `tool_versions` only when clearly discoverable.</rule>
 <rule>When a repository exposes a browser UI or stable localhost landing page, set `initialUrl` to the best validated absolute URL unless `about:blank` is intentionally required.</rule>
 <rule>When a validated human-facing HTTP surface exists (particularly a web app UI), configure a matching top-level `ports` entry so the environment publishes a shareable preview URL for it; keep the `ports` list limited to validated human-facing surfaces and confirm each configured port number against the actual validated listening port.</rule>

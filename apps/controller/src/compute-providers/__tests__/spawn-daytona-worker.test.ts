@@ -78,12 +78,12 @@ describe('spawnDaytonaWorker', () => {
     mockPrimeEnvironmentOidcForMachine.mockResolvedValue(undefined);
   });
 
-  it('launches environments with container projects', async () => {
+  it('launches environments with docker projects', async () => {
     mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
       environmentConfig: {
-        container_projects: [
+        docker_projects: [
           {
             name: 'app',
             type: 'compose',

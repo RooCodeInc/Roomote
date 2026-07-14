@@ -14,7 +14,7 @@ const {
   mockInstallNodePty,
   mockInstallEmojiFont,
   mockInitializeWorkspaceRepositories,
-  mockInitializeContainerProjects,
+  mockInitializeDockerProjects,
   mockInitializeWorkspaceServices,
   mockInitializeSystemWorkspaceServices,
   mockInitializeEnvironmentWorkspaceServices,
@@ -40,7 +40,7 @@ const {
     mockInstallNodePty: vi.fn(),
     mockInstallEmojiFont: vi.fn(),
     mockInitializeWorkspaceRepositories: vi.fn(),
-    mockInitializeContainerProjects: vi.fn(),
+    mockInitializeDockerProjects: vi.fn(),
     mockInitializeWorkspaceServices: vi.fn(),
     mockInitializeSystemWorkspaceServices: vi.fn(),
     mockInitializeEnvironmentWorkspaceServices: vi.fn(),
@@ -94,7 +94,7 @@ vi.mock('../setup/logging', () => ({
 
 vi.mock('../setup/workspace', () => ({
   initializeRepositories: mockInitializeWorkspaceRepositories,
-  initializeContainerProjects: mockInitializeContainerProjects,
+  initializeDockerProjects: mockInitializeDockerProjects,
   initializeAllServices: mockInitializeWorkspaceServices,
   initializeSystemServices: mockInitializeSystemWorkspaceServices,
   initializeEnvironmentServices: mockInitializeEnvironmentWorkspaceServices,
@@ -149,7 +149,7 @@ describe('setup mode behavior', () => {
     mockInitializeWorkspaceRepositories.mockResolvedValue({
       workspacePath: '/tmp/workspace',
     });
-    mockInitializeContainerProjects.mockResolvedValue(undefined);
+    mockInitializeDockerProjects.mockResolvedValue(undefined);
     mockInitializeWorkspaceServices.mockResolvedValue({
       services: [],
       env: {},
@@ -216,8 +216,8 @@ describe('setup mode behavior', () => {
       installPythonOrder ?? 0,
     );
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledTimes(1);
-    expect(mockInitializeContainerProjects).toHaveBeenCalledTimes(1);
-    expect(mockInitializeContainerProjects).toHaveBeenCalledWith(
+    expect(mockInitializeDockerProjects).toHaveBeenCalledTimes(1);
+    expect(mockInitializeDockerProjects).toHaveBeenCalledWith(
       logger,
       expect.objectContaining({
         cleanupLegacyPaths: false,
@@ -265,7 +265,7 @@ describe('setup mode behavior', () => {
     expect(mockInstallNodePty).not.toHaveBeenCalled();
     expect(mockInstallEmojiFont).not.toHaveBeenCalled();
     expect(mockInitializeWorkspaceServices).not.toHaveBeenCalled();
-    expect(mockInitializeContainerProjects).not.toHaveBeenCalled();
+    expect(mockInitializeDockerProjects).not.toHaveBeenCalled();
     expect(mockInitializeSystemWorkspaceServices).not.toHaveBeenCalled();
     expect(mockSetupOrganizationEnvironment).not.toHaveBeenCalled();
     expect(mockSetUserEnv).toHaveBeenCalledWith({
@@ -285,19 +285,19 @@ describe('setup mode behavior', () => {
     const initializeRepositoriesOrder =
       mockInitializeWorkspaceRepositories.mock.invocationCallOrder[0];
     const installPythonOrder = mockInstallPython.mock.invocationCallOrder[0];
-    const initializeContainerProjectsOrder =
-      mockInitializeContainerProjects.mock.invocationCallOrder[0];
+    const initializeDockerProjectsOrder =
+      mockInitializeDockerProjects.mock.invocationCallOrder[0];
     const setupOrganizationEnvironmentOrder =
       mockSetupOrganizationEnvironment.mock.invocationCallOrder[0];
 
     expect(initializeRepositoriesOrder).toBeDefined();
     expect(installPythonOrder).toBeDefined();
-    expect(initializeContainerProjectsOrder).toBeDefined();
+    expect(initializeDockerProjectsOrder).toBeDefined();
     expect(setupOrganizationEnvironmentOrder).toBeDefined();
     expect(initializeRepositoriesOrder ?? 0).toBeLessThan(
-      initializeContainerProjectsOrder ?? 0,
+      initializeDockerProjectsOrder ?? 0,
     );
-    expect(initializeContainerProjectsOrder ?? 0).toBeLessThan(
+    expect(initializeDockerProjectsOrder ?? 0).toBeLessThan(
       installPythonOrder ?? 0,
     );
     expect(installPythonOrder ?? 0).toBeLessThan(
