@@ -79,12 +79,11 @@ export async function getSourceControlConfigStatusCommand(
 }
 
 /**
- * Webhooks are only auto-created for synced repositories that are mapped to
- * at least one environment. Hooking every project the deployment token can
- * administer leaks events from unrelated repositories (for example private
- * work projects visible to a personal PAT) to the Roomote URL, so sync
- * treats environment mappings as the operator's selection and removes the
- * Roomote webhook from synced-but-unmapped repositories.
+ * Most provider webhooks are only auto-created for synced repositories that
+ * are mapped to at least one environment. GitLab is the exception because its
+ * OAuth callback immediately triggers the first repository sync, before
+ * onboarding creates environment mappings; its provider wrapper opts into
+ * registering hooks for the OAuth-visible projects.
  */
 async function getEnvironmentMappedRepositoryIds(): Promise<Set<string>> {
   const mappingRows = await db
@@ -153,8 +152,12 @@ async function configureScopedProviderWebhooks<
   actorUserId: string;
   logPrefix: string;
   removalDescription: string;
+  scopeToEnvironmentMappings?: boolean;
 }): Promise<WebhookSetupSummary<TEnsureResult>> {
-  const mappedRepositoryIds = await getEnvironmentMappedRepositoryIds();
+  const scopeToEnvironmentMappings = params.scopeToEnvironmentMappings ?? true;
+  const mappedRepositoryIds = scopeToEnvironmentMappings
+    ? await getEnvironmentMappedRepositoryIds()
+    : new Set(params.repositories.map((repository) => repository.id));
   const mappedTargets = params.repositories
     .filter((repository) => mappedRepositoryIds.has(repository.id))
     .flatMap(params.toTarget);
@@ -291,6 +294,10 @@ async function configureGitLabWebhooks(
     actorUserId,
     logPrefix: '[configureGitLabWebhooks]',
     removalDescription: 'remove webhooks from unmapped projects',
+    // GitLab OAuth is followed immediately by the repository sync. At that
+    // point onboarding has not created environment mappings yet, so register
+    // hooks for the projects returned by OAuth instead of skipping them.
+    scopeToEnvironmentMappings: false,
   });
 }
 

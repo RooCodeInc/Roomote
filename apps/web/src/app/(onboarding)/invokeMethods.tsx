@@ -27,7 +27,6 @@ const communicationProviderCopy: Record<
     icon: string;
     title: string;
     description: string;
-    example?: string;
   }
 > = {
   slack: {
@@ -52,6 +51,7 @@ const sourceControlProviderCopy: Record<
   {
     icon: string;
     description: string;
+    example?: string;
   }
 > = {
   github: {

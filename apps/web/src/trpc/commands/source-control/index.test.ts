@@ -3,12 +3,14 @@ import type { UserAuthSuccess } from '@/types';
 const {
   mockEnsureAdoServiceHooksForRepositories,
   mockEnsureGiteaWebhooksForRepositories,
+  mockEnsureGitLabWebhooksForProjects,
   mockRemoveAdoServiceHooksForRepositories,
   mockRemoveGiteaWebhooksForRepositories,
   mockRemoveGitLabWebhooksForProjects,
   mockEnvironmentMappingRows,
   mockResolveDeploymentEnvVar,
   mockSyncAdoRepositories,
+  mockSyncGitLabRepositories,
   mockSyncGiteaRepositories,
   mockUpsertDeploymentEnvironmentVariables,
   mockResolveAdoOrganization,
@@ -18,12 +20,14 @@ const {
 } = vi.hoisted(() => ({
   mockEnsureAdoServiceHooksForRepositories: vi.fn(),
   mockEnsureGiteaWebhooksForRepositories: vi.fn(),
+  mockEnsureGitLabWebhooksForProjects: vi.fn(),
   mockRemoveAdoServiceHooksForRepositories: vi.fn(),
   mockRemoveGiteaWebhooksForRepositories: vi.fn(),
   mockRemoveGitLabWebhooksForProjects: vi.fn(),
   mockEnvironmentMappingRows: { rows: [] as { repositoryId: string }[] },
   mockResolveDeploymentEnvVar: vi.fn(),
   mockSyncAdoRepositories: vi.fn(),
+  mockSyncGitLabRepositories: vi.fn(),
   mockSyncGiteaRepositories: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
   mockResolveAdoOrganization: vi.fn(),
@@ -58,12 +62,12 @@ vi.mock('@roomote/gitea', () => ({
 vi.mock('@roomote/gitlab', () => ({
   buildGitLabApiBaseUrl: (value: string) =>
     `${value.replace(/\/+$/, '')}/api/v4`,
-  ensureGitLabWebhooksForProjects: vi.fn(),
+  ensureGitLabWebhooksForProjects: mockEnsureGitLabWebhooksForProjects,
   normalizeGitLabBaseUrl: (value: string) =>
     value.startsWith('http') ? value : `https://${value}`,
   removeGitLabWebhooksForProjects: mockRemoveGitLabWebhooksForProjects,
   resolveGitLabBaseUrl: vi.fn().mockResolvedValue('https://gitlab.com'),
-  syncGitLabRepositories: vi.fn(),
+  syncGitLabRepositories: mockSyncGitLabRepositories,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -150,6 +154,9 @@ describe('source-control commands', () => {
     mockRemoveGiteaWebhooksForRepositories.mockResolvedValue([]);
     mockRemoveAdoServiceHooksForRepositories.mockResolvedValue([]);
     mockRemoveGitLabWebhooksForProjects.mockResolvedValue([]);
+    mockEnsureGitLabWebhooksForProjects.mockResolvedValue([
+      { status: 'created', repositoryFullName: 'acme/gitlab-app' },
+    ]);
     mockEnsureGiteaWebhooksForRepositories.mockResolvedValue([
       { status: 'created', repositoryFullName: 'Roomote/gitea-app' },
       { status: 'updated', repositoryFullName: 'Roomote/gitea-api' },
@@ -165,6 +172,48 @@ describe('source-control commands', () => {
     mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
     mockResolveAdoOrganization.mockResolvedValue(null);
     mockValidateAdoToken.mockResolvedValue({ status: 'valid' });
+  });
+
+  it('creates GitLab webhooks during the OAuth-triggered repository sync', async () => {
+    mockSyncGitLabRepositories.mockResolvedValue({
+      success: true,
+      repositories: [
+        {
+          id: 'gitlab-repo-row-1',
+          externalRepoId: '42',
+          fullName: 'acme/gitlab-app',
+        },
+      ],
+    });
+
+    const result = await syncRepositoriesCommand(buildMockAuth(), {
+      provider: 'gitlab',
+    });
+
+    expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        values: [
+          expect.objectContaining({
+            name: 'GITLAB_WEBHOOK_SECRET',
+            value: expect.stringMatching(/^[a-f0-9]{64}$/),
+          }),
+        ],
+      }),
+    );
+    expect(mockEnsureGitLabWebhooksForProjects).toHaveBeenCalledWith({
+      projects: [{ projectId: '42', repositoryFullName: 'acme/gitlab-app' }],
+      webhookUrl: 'https://roomote.example.com/api/webhooks/gitlab',
+      secretToken: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(result).toMatchObject({
+      success: true,
+      webhooks: {
+        status: 'configured',
+        created: 1,
+        skippedUnmapped: 0,
+      },
+    });
   });
 
   it('syncs Gitea repositories and configures pull request webhooks', async () => {
