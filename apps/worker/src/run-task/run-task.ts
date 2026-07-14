@@ -1,6 +1,7 @@
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
+  isEnvironmentSetupTaskPrompt,
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
@@ -619,9 +620,14 @@ export const runTask = async ({
       }),
       // Consumed (and removed) by generateOpenCodeConfig, which registers the
       // hidden proof-runner subagent only when a browser surface exists.
-      ...(environmentConfig?.initialUrl && {
-        ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
-      }),
+      // Environment-setup tasks have no browser surface at launch (they are
+      // creating it), so they get the proof runner in brief-supplied-target
+      // mode to verify the app they bring up mid-task.
+      ...(environmentConfig?.initialUrl
+        ? { ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl }
+        : isEnvironmentSetupTaskPrompt(prompt) && {
+            ROOMOTE_PROOF_BROWSER_TARGET_FROM_BRIEF: '1',
+          }),
     };
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 

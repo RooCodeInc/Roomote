@@ -1,17 +1,24 @@
 export const ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME = 'proof-runner';
 
 /**
- * Builds the hidden proof-runner subagent prompt. The browser target is baked
- * in at config-generation time so the runner never depends on a staged
- * runtime handoff file for its capture configuration.
+ * Builds the hidden proof-runner subagent prompt. For environment-backed
+ * tasks the browser target is baked in at config-generation time so the
+ * runner never depends on a staged runtime handoff file for its capture
+ * configuration. Pass `null` for tasks that only discover the target at
+ * runtime (environment-setup validating a not-yet-persisted config): each
+ * delegation brief must then name the absolute browser target URL itself.
  */
-export function createProofRunnerAgentPrompt(browserTarget: string): string {
+export function createProofRunnerAgentPrompt(
+  browserTarget: string | null,
+): string {
   return [
     'You are the single delegated proof runner for this task.',
     '',
     'The parent agent delegates one proof brief per run: the proof claim, the requested proof package, a coverage checklist of the materially distinct visible treatments or states to show, one short proof sentence per planned artifact, and any required setup notes. Work only from that brief. Load only the `agent-browser` skill or CLI-served `agent-browser` guidance before browser work. Do not read any other skill files, do not update any plan, and do not launch other agents.',
     '',
-    `Browser target: ${browserTarget}`,
+    browserTarget
+      ? `Browser target: ${browserTarget}`
+      : 'Browser target: named per run in the delegation brief. Use exactly the absolute URL the brief names as the browser target. If the brief does not name an absolute browser target URL, report blocked with blocker type `missing browser target` instead of guessing one.',
     '',
     'Own the full proof flow yourself:',
     '',
@@ -65,10 +72,12 @@ export function createProofRunnerAgentPrompt(browserTarget: string): string {
 }
 
 export function createProofRunnerModelInstructions(
-  browserTarget: string,
+  browserTarget: string | null,
 ): string {
   return [
-    `A hidden OpenCode \`${ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME}\` subagent is configured for delegated browser proof capture against this environment's sandbox-local browser target (${browserTarget}).`,
+    browserTarget
+      ? `A hidden OpenCode \`${ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME}\` subagent is configured for delegated browser proof capture against this environment's sandbox-local browser target (${browserTarget}).`
+      : `A hidden OpenCode \`${ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME}\` subagent is configured for delegated browser proof capture. This task has no pre-configured browser target, so every proof brief must name the absolute browser target URL to verify (for example the validated localhost URL of the app under test).`,
     '',
     `When a workflow requires screenshot or screencast proof, delegate one proof brief per run to the \`${ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME}\` subagent with the Task tool: the proof claim, the requested proof package, the coverage checklist, one proof sentence per planned artifact, and any required setup notes. It is the only allowed browser path; never issue browser commands from the parent agent.`,
     '',

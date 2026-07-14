@@ -116,7 +116,19 @@ describe('environment-setup guidance', () => {
       'confirm that localhost URL through loopback HTTP reachability and startup evidence',
     );
     expect(skillContent).toContain(
-      'Do not use direct browser automation from `environment-setup`.',
+      'Do not issue browser commands directly from this workflow; browser-level verification belongs to the delegated `proof-runner` subagent.',
+    );
+    expect(skillContent).toContain(
+      'delegate one verification brief to the hidden `proof-runner` subagent with the Task tool',
+    );
+    expect(skillContent).toContain(
+      'name the exact validated absolute localhost URL as the browser target for that run',
+    );
+    expect(skillContent).toContain(
+      'Do not ask the proof runner to recover the environment, diagnose source code, or fix anything',
+    );
+    expect(skillContent).toContain(
+      'If the `proof-runner` subagent is unavailable in this task, fall back to loopback reachability and startup evidence alone',
     );
     expect(skillContent).not.toContain('agent-browser');
   });
@@ -171,6 +183,12 @@ describe('environment-setup guidance', () => {
       'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID',
     );
     expect(skillContent).toContain(
+      'This spawned task is the single final end-to-end confirmation that the platform provisions the persisted config correctly',
+    );
+    expect(skillContent).toContain(
+      "delegate one proof brief to your hidden proof-runner subagent with the claim that the app serves its expected landing page at the environment's initial URL, and relay its Blocked verdict and any uploaded screenshot URLs in your report",
+    );
+    expect(skillContent).toContain(
       'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`.',
     );
     expect(skillContent).toContain(
@@ -201,7 +219,7 @@ describe('environment-setup guidance', () => {
       'If the monitored summary reaches `Completed` without a surfaced startup or runtime failure, treat that as a successful spawned-task run and report that observed outcome directly instead of asking the user to confirm it manually.',
     );
     expect(skillContent).toContain(
-      'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
+      'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation including a fresh in-task proof-runner check when a browser surface exists, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
     );
     expect(skillContent).toContain(
       'Retry at most 2 additional full environment-update-plus-verification attempts after the first spawned verification task',
