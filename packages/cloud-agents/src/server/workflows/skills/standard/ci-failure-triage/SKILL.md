@@ -10,7 +10,7 @@ Investigate one CI failure and fix it in this same task when it is real.
 </role>
 
 <workflow>
-  <overview>Prefer `gh run view` / `gh run view --log-failed` for the trigger run, or the single most recent failed default-branch run when none is provided. No separate handoff task.</overview>
+  <overview>Use the source-control tools already available in the environment. Prefer the existing `gh run view` / `gh run view --log-failed` helpers for the trigger run, or `gh run list` plus those view helpers for the single most recent failed default-branch run when none is provided. Do not invent new CLI surfaces.</overview>
 
   <phase name="triage">
     <steps>
