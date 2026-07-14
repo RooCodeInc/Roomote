@@ -124,10 +124,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Resolve PR Conflicts',
     availability: 'stable',
     scheduleModes: CONFLICT_RESOLVER_SCHEDULE_MODES,
-    manualTriggerRequirements: ['github', 'repository'],
+    // Provider-neutral scan: any active repository qualifies, GitHub
+    // installation no longer required.
+    manualTriggerRequirements: ['repository'],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
-    supportedSourceControlProviders: ['github'],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado'],
   },
   {
     automationKey: 'suggester',

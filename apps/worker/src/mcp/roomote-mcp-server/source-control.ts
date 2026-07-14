@@ -12,6 +12,7 @@ type ManageSourceControlParams = {
   action:
     | 'create_or_update_pull_request'
     | 'get_pull_request'
+    | 'list_pull_requests'
     | 'list_pull_request_comments'
     | 'reply_to_pull_request_comment'
     | 'create_pull_request_comment'
@@ -20,6 +21,8 @@ type ManageSourceControlParams = {
     | 'update_pull_request_comment';
   repositoryFullName: string;
   prNumber?: number;
+  state?: 'open';
+  limit?: number;
   threadId?: string;
   commentId?: string;
   resolved?: boolean;
@@ -90,6 +93,18 @@ export async function handleManageSourceControl(
           result.url
         }`,
       });
+    }
+
+    if (params.action === 'list_pull_requests') {
+      return jsonResult(
+        await readSourceControl(config, taskId, {
+          action: params.action,
+          repositoryFullName: params.repositoryFullName,
+          state: params.state,
+          limit: params.limit,
+          sourceControlProvider: params.sourceControlProvider,
+        }),
+      );
     }
 
     if (

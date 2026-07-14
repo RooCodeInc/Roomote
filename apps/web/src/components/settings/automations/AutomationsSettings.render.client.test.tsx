@@ -462,7 +462,11 @@ describe('AutomationsSettings', () => {
     // Suggester, announcer, and Sentry triage scan any source control provider.
     expect(screen.getAllByText('All source control').length).toBe(3);
     // Dependabot/CI triage, auditors, manager stats, and conflict resolver.
-    expect(screen.getAllByText('GitHub only').length).toBe(6);
+    expect(screen.getAllByText('GitHub only').length).toBe(5);
+    // conflict_resolver now supports GitHub, GitLab, and Azure DevOps
+    expect(screen.getAllByText('GitHub · GitLab · Azure DevOps').length).toBe(
+      1,
+    );
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {

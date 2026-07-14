@@ -593,7 +593,8 @@ roomoteMcpServer.registerTool(
       'Provider-neutral pull request/merge request operations for the current task. ' +
       'Use action "create_or_update_pull_request" after committing and pushing a branch; ' +
       'when an open PR/MR already exists for sourceBranch, targetBranch may be omitted and defaults to its current base. ' +
-      'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs) and ' +
+      'Use action "get_pull_request" to read PR/MR details (state, branches, head/base SHAs), ' +
+      '"list_pull_requests" to list open PRs/MRs in a repository (summaries with branches, labels, and mergeability where the provider exposes it), and ' +
       '"list_pull_request_comments" to read review threads (with resolution state) and issue comments. ' +
       'Use "reply_to_pull_request_comment" to answer a review thread, "create_pull_request_comment" for a top-level comment, ' +
       '"resolve_pull_request_thread" to resolve or reopen a thread, and "submit_pull_request_review" to approve, request changes, or leave a review comment. ' +
@@ -605,6 +606,7 @@ roomoteMcpServer.registerTool(
         .enum([
           'create_or_update_pull_request',
           'get_pull_request',
+          'list_pull_requests',
           'list_pull_request_comments',
           'reply_to_pull_request_comment',
           'create_pull_request_comment',
@@ -613,7 +615,7 @@ roomoteMcpServer.registerTool(
           'update_pull_request_comment',
         ])
         .describe(
-          'create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
+          'create_or_update_pull_request creates or refreshes the PR/MR for a branch; get_pull_request reads PR/MR details; list_pull_requests lists open PRs/MRs in the repository; list_pull_request_comments reads review threads and issue comments; reply_to_pull_request_comment answers a review thread; create_pull_request_comment posts a top-level comment; resolve_pull_request_thread resolves or reopens a thread; submit_pull_request_review approves, requests changes, or leaves a review comment; update_pull_request_comment edits an existing comment in place.',
         ),
       repositoryFullName: z
         .string()
@@ -626,7 +628,22 @@ roomoteMcpServer.registerTool(
         .positive()
         .optional()
         .describe(
-          'Required for every action except create_or_update_pull_request: the PR/MR number (GitLab iid).',
+          'Required for every action except create_or_update_pull_request and list_pull_requests: the PR/MR number (GitLab iid).',
+        ),
+      state: z
+        .literal('open')
+        .optional()
+        .describe(
+          'Optional filter for list_pull_requests. Only "open" is supported; open pull requests are listed either way.',
+        ),
+      limit: z
+        .number()
+        .int()
+        .positive()
+        .max(200)
+        .optional()
+        .describe(
+          'Optional cap for list_pull_requests on how many pull requests to return (default 100, max 200).',
         ),
       threadId: z
         .string()
@@ -715,6 +732,8 @@ roomoteMcpServer.registerTool(
         action: params.action,
         repositoryFullName: params.repositoryFullName,
         prNumber: params.prNumber,
+        state: params.state,
+        limit: params.limit,
         threadId: params.threadId,
         commentId: params.commentId,
         resolved: params.resolved,

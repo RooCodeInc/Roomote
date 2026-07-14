@@ -181,6 +181,8 @@ export {
   type SourceControlPullRequestReadInput,
   type SourceControlPullRequestDetailsResult,
   type SourceControlPullRequestCommentsResult,
+  type SourceControlPullRequestListResult,
+  type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
   writeSourceControlPullRequestForTaskRun,

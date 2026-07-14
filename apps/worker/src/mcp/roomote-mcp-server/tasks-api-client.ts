@@ -274,9 +274,15 @@ export async function readSourceControl(
   config: RoomoteConfig,
   taskId: string,
   params: {
-    action: 'get_pull_request' | 'list_pull_request_comments';
+    action:
+      | 'get_pull_request'
+      | 'list_pull_request_comments'
+      | 'list_pull_requests';
     repositoryFullName: string;
-    prNumber: number;
+    // Required for the single-PR actions; unused by list_pull_requests.
+    prNumber?: number;
+    state?: 'open';
+    limit?: number;
     sourceControlProvider?: SourceControlProvider;
   },
 ): Promise<SourceControlPullRequestReadResponse> {
