@@ -572,7 +572,8 @@ describe('findActiveGitHubBranchWork', () => {
     });
 
     // A payload written before host stamping carries no sourceControlHost;
-    // it may be the same branch, so the host-scoped lookup still matches.
+    // with no linkage row recording a conflicting host, it may be the same
+    // branch, so the host-scoped lookup still matches.
     const result = await findActiveGitHubBranchWork({
       repoFullName,
       prNumber,
@@ -583,6 +584,108 @@ describe('findActiveGitHubBranchWork', () => {
 
     expect(result).toMatchObject({
       runId: unstampedRun.id,
+      match: 'branch',
+    });
+  });
+
+  it('does not let an unstamped payload suppress another host when the task linkage records a conflicting host', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-host-conflicting-linkage';
+    const prNumber = 366;
+    const branchName = 'feature/host-conflicting-linkage';
+
+    // The task is pinned to host A by its linkage row, but its payload
+    // predates host stamping (no sourceControlHost).
+    const taskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber,
+      userId: user.id,
+      sourceControlProvider: 'gitlab',
+      host: 'a.example.com',
+    });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        sourceControlProvider: 'gitlab',
+        description: 'Unstamped payload pinned to host A by linkage',
+      },
+    });
+
+    // A host-B lookup must not match on either tier: the linkage host
+    // excludes tier 1, and the conflicting linkage host disables the
+    // unstamped-payload tolerance on tier 2.
+    const hostBResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+      host: 'b.example.com',
+    });
+
+    expect(hostBResult).toBeNull();
+
+    // The host-A lookup still matches (tier 1, via the linkage row).
+    const hostAResult = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+      host: 'a.example.com',
+    });
+
+    expect(hostAResult).toMatchObject({
+      runId: run.id,
+      match: 'task_pull_request',
+    });
+  });
+
+  it('keeps the unstamped-payload tolerance when the task linkage has no recorded host', async () => {
+    const { user } = await createActor();
+    const repoFullName = 'owner/repo-host-null-linkage-branch';
+    const prNumber = 367;
+    const branchName = 'feature/host-null-linkage-branch';
+
+    // The linkage row references a different PR number so tier 1 cannot
+    // match; only the tier-2 branch fallback can. Its host is NULL, so it
+    // is not a conflicting pin.
+    const taskId = await createPrLinkedTask({
+      repoFullName,
+      prNumber: prNumber + 1,
+      userId: user.id,
+      sourceControlProvider: 'gitlab',
+    });
+
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      payload: {
+        repo: repoFullName,
+        branch: branchName,
+        sourceControlProvider: 'gitlab',
+        description: 'Unstamped payload with a null-host linkage',
+      },
+    });
+
+    const result = await findActiveGitHubBranchWork({
+      repoFullName,
+      prNumber,
+      branchName,
+      sourceControlProvider: 'gitlab',
+      host: 'a.example.com',
+    });
+
+    expect(result).toMatchObject({
+      runId: run.id,
       match: 'branch',
     });
   });

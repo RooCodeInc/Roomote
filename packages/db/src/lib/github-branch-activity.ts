@@ -123,7 +123,11 @@ function pickActiveWork(
  * repository on another self-managed instance and must not match. Rows with
  * a NULL host and payloads without `sourceControlHost` (written before host
  * stamping) still match, mirroring the legacy tolerance in
- * resolveRepositoryRow. Without `host`, behavior is unchanged.
+ * resolveRepositoryRow — except that an unstamped payload does NOT match
+ * when the task's own `task_pull_requests` linkage records a conflicting
+ * host: the linkage pins the task to another instance, so the legacy
+ * fallback applies only when no conflicting linkage host is known. Without
+ * `host`, behavior is unchanged.
  */
 export async function findActiveGitHubBranchWork({
   repoFullName,
@@ -185,9 +189,22 @@ export async function findActiveGitHubBranchWork({
         )`,
         ...(host
           ? [
+              // An exactly-stamped payload always matches. An unstamped
+              // (legacy) payload matches only when the task has no linkage
+              // row recording a different host — such a row pins the task
+              // to another instance, so it must not suppress this host's
+              // lookup.
               sql`(
                 ${taskRuns.payload}->>'sourceControlHost' = ${host}
-                OR ${taskRuns.payload}->>'sourceControlHost' IS NULL
+                OR (
+                  ${taskRuns.payload}->>'sourceControlHost' IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ${taskPullRequests}
+                    WHERE ${taskPullRequests.taskId} = ${taskRuns.taskId}
+                      AND ${taskPullRequests.host} IS NOT NULL
+                      AND ${taskPullRequests.host} <> ${host}
+                  )
+                )
               )`,
             ]
           : []),
