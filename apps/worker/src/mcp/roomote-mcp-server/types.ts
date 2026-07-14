@@ -46,6 +46,7 @@ export interface TaskSummaryResponse {
   taskRunStatus: string | null;
   taskPhase: string | null;
   taskRunError: string | null;
+  environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
 }

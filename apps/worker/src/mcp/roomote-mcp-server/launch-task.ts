@@ -9,6 +9,7 @@ export async function handleLaunchTask(
     prompt: string;
     branch?: string;
     environmentId: string;
+    notifyOnSettle?: boolean;
   },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
@@ -22,6 +23,7 @@ export async function handleLaunchTask(
           ? undefined
           : params.environmentId,
       type: 'standard',
+      ...(params.notifyOnSettle ? { notifyOnSettle: true } : {}),
     });
 
     if (!result.success) {

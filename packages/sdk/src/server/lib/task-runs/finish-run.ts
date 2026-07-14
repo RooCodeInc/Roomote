@@ -57,6 +57,7 @@ import {
   readConflictResolutionSummary,
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
+import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -225,6 +226,12 @@ export const finishRun = async ({
       createdAt: now,
     });
   });
+
+  // Deterministic spawned-task feedback: when this run was launched by
+  // another task's run with notify-on-settle requested, deliver the outcome
+  // into that launching run's session (waking it if idle) so the parent
+  // never has to poll for it. Never throws.
+  await notifySourceRunOnSettle(run, status);
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.

@@ -1239,7 +1239,23 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
   images: z.array(z.string()).optional(),
   blank: z.boolean().optional(),
   bootstrap: standardTaskBootstrapSchema,
+  /**
+   * When true, the platform notifies the launching run (`sourceRunId` on this
+   * task's first run) when a run of this task settles. Set at launch time via
+   * `notifyOnSettle`; read by the run-finalization path.
+   */
+  notifySourceRunOnSettle: z.boolean().optional(),
 });
+
+export function getNotifySourceRunOnSettleFromPayload(
+  payload: unknown,
+): boolean {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return false;
+  }
+
+  return (payload as Record<string, unknown>).notifySourceRunOnSettle === true;
+}
 
 export const standardTaskSchema = sharedTaskSchema.extend({
   type: z.literal(TaskPayloadKind.StandardTask),
