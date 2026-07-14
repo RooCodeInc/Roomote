@@ -60,7 +60,7 @@ export function buildCiFailureTriagePrompt({
 
   const focus = triggeringRun
     ? `Work only the failing run in triggering_run. Inspect it with \`gh run view\` / \`gh run view --log-failed\`. Do not dig through unrelated older runs.`
-    : `In ${repository}, find only the single most recent failed workflow run on the default branch (\`gh run list --branch <default> --status failure --limit 1\`). Inspect that run. Skip older failures.`;
+    : `In ${repository}, use \`gh run list\` against the default branch to find failing runs, then take only the single most recent failure and inspect it with \`gh run view\` / \`gh run view --log-failed\`. Skip older failures.`;
 
   const slack = hasAnnouncementThread
     ? `An investigating Slack thread already exists for this run. Always close it out with send_chat_reply purpose "closeout" (no-op with evidence, PR link, or blocker). No progress spam.`

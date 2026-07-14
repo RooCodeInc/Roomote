@@ -22,7 +22,11 @@ describe('buildCiFailureTriagePrompt', () => {
     expect(prompt).toContain('<run_mode>investigate_and_fix</run_mode>');
     expect(prompt).toContain('<trigger>manual</trigger>');
     expect(prompt).toContain('<repository>acme/api</repository>');
-    expect(prompt).toContain('single most recent failed workflow run');
+    expect(prompt).toContain('single most recent failure');
+    expect(prompt).toContain('gh run list');
+    expect(prompt).toContain('gh run view');
+    expect(prompt).not.toContain('--status failure');
+    expect(prompt).not.toContain('--limit 1');
     expect(prompt).toContain('Environment:\n- acme/api -> environment env-api');
     expect(prompt).not.toContain('acme/web -> environment');
     expect(prompt).toContain(
