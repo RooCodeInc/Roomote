@@ -46,6 +46,24 @@ describe('convertMarkdownLinksToSlack', () => {
     expect(result).toBe(pathological);
     expect(elapsedMs).toBeLessThan(2_000);
   });
+
+  it('handles pathological unclosed-label input without quadratic scanning', () => {
+    const pathological = '['.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownLinksToSlack(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
+
+  it('handles repeated unmatched label openers without quadratic scanning', () => {
+    const pathological = '[a'.repeat(50_000);
+    const start = performance.now();
+    const result = convertMarkdownLinksToSlack(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
 });
 
 describe('convertMarkdownToSlack', () => {

@@ -30,11 +30,13 @@ export function convertMarkdownToSlack(text: string): string {
  * - Non-linkable targets (e.g. local filesystem paths) are left unchanged
  *
  * The target capture handles one level of balanced parentheses
- * (e.g. Next.js route groups like `(sandbox)`).
+ * (e.g. Next.js route groups like `(sandbox)`). Labels must not contain
+ * square brackets — both character classes are disjoint from their
+ * delimiters so matching stays linear on untrusted input.
  */
 export function convertMarkdownLinksToSlack(text: string): string {
   return text.replace(
-    /\[([^\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g,
+    /\[([^[\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g,
     (match, label: string, target: string) => {
       if (/^(?:https?:\/\/|mailto:|tel:|ftp:\/\/|www\.)/i.test(target.trim())) {
         return `<${target}|${label}>`;
