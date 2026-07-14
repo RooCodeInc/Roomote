@@ -488,6 +488,7 @@ function getQueuedSnapshotResumeLinearMessages(
 
 const SLACK_PROOF_AUTO_POST_FLAG = FeatureFlag.SlackProofAutoPost;
 const BACKGROUND_SUBAGENTS_FLAG = FeatureFlag.BackgroundSubagents;
+const CODE_MODE_FLAG = FeatureFlag.CodeMode;
 
 export const runTask = async ({
   taskRun,
@@ -702,6 +703,18 @@ export const runTask = async ({
     } catch (error) {
       logger.warn(
         `[runTask] Failed to evaluate BackgroundSubagents feature flag: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    try {
+      const codeModeEnabled = await sdk.featureFlags.evaluate(CODE_MODE_FLAG);
+
+      if (codeModeEnabled) {
+        runtimeEnv.OPENCODE_EXPERIMENTAL_CODE_MODE = '1';
+      }
+    } catch (error) {
+      logger.warn(
+        `[runTask] Failed to evaluate CodeMode feature flag: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
