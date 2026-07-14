@@ -39,6 +39,7 @@ describe('scheduleSourceControlPullRequestFactSync', () => {
     expect(mockUpsertFact).toHaveBeenCalledWith({
       provider: 'gitea',
       repositoryFullName: 'acme/backend',
+      host: 'git.example.com',
       pullRequest: {
         authorLogin: 'gitea-user',
         closedAt: '2026-07-10T00:00:00.000Z',
@@ -114,6 +115,38 @@ describe('scheduleSourceControlPullRequestFactSync', () => {
     expect(snapshot.state).toBe('closed');
     expect(snapshot.mergedAt).toBeNull();
     expect(snapshot.closedAt).toBe('2026-07-10T00:00:00.000Z');
+  });
+
+  it('scopes the upsert to the instance host taken from the PR URL', () => {
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 9,
+        title: 'MR',
+        url: 'https://gitlab.internal.example.com:8443/acme/backend/-/merge_requests/9',
+        state: 'merged',
+      },
+    });
+
+    expect(mockUpsertFact.mock.calls[0]![0].host).toBe(
+      'gitlab.internal.example.com:8443',
+    );
+  });
+
+  it('passes a null host when the PR URL is relative or unparseable', () => {
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitea',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 11,
+        title: 'PR',
+        url: '/pulls/11',
+        state: 'merged',
+      },
+    });
+
+    expect(mockUpsertFact.mock.calls[0]![0].host).toBeNull();
   });
 
   it('swallows upsert failures', async () => {

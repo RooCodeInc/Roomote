@@ -42,6 +42,11 @@ export function scheduleSourceControlPullRequestFactSync(params: {
   upsertSourceControlPullRequestFactFromWebhook({
     provider: params.provider,
     repositoryFullName: params.repositoryFullName,
+    // The PR web URL carries the instance host for every non-GitHub provider,
+    // and `repositories.host` is derived from the same instance base URL, so
+    // this scopes the fact write to the webhook's own instance instead of
+    // every same-name repository across self-managed hosts.
+    host: toHostFromUrl(pullRequest.url),
     pullRequest: {
       authorLogin: pullRequest.authorLogin ?? null,
       closedAt: mergedAt ?? updatedAt,
@@ -61,6 +66,19 @@ export function scheduleSourceControlPullRequestFactSync(params: {
       }`,
     ),
   );
+}
+
+/**
+ * Extract the source-control instance host from a webhook-provided PR URL.
+ * Returns null for relative or unparseable URLs, in which case the fact
+ * upsert falls back to unscoped (provider, full name) matching.
+ */
+function toHostFromUrl(url: string): string | null {
+  try {
+    return new URL(url).host || null;
+  } catch {
+    return null;
+  }
 }
 
 /**

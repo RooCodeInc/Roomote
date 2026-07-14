@@ -61,6 +61,8 @@ vi.mock('@roomote/db/server', () => ({
     left,
     right,
   })),
+  isNull: vi.fn((column: unknown) => ({ type: 'isNull', column })),
+  or: vi.fn((...conditions: unknown[]) => ({ type: 'or', conditions })),
   sql: vi.fn(),
 }));
 

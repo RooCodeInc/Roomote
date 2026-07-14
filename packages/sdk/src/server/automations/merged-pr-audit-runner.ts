@@ -112,7 +112,11 @@ function describeMergedPullRequestScanWindow(
   scanMode: MergedPullRequestAuditScanMode,
 ): string {
   if (scanMode.kind === 'resume') {
-    return `resuming after PR ${scanMode.cursor.externalPullRequestId} merged ${scanMode.cursor.mergedAt}`;
+    const anchor =
+      scanMode.cursor.externalPullRequestId ??
+      scanMode.cursor.factId ??
+      'unknown';
+    return `resuming after PR ${anchor} merged ${scanMode.cursor.mergedAt}`;
   }
 
   return `merged PRs since ${scanMode.since.toISOString()}`;
@@ -239,26 +243,34 @@ async function findEligibleDeploymentContext(): Promise<AuditDeploymentContext |
   return connectedProviders.length > 0 ? { slackConnected: false } : null;
 }
 
-async function getMergedPullRequests(
+export async function getMergedPullRequests(
   scanMode: MergedPullRequestAuditScanMode,
   scanUpperBound: Date,
 ): Promise<MergedPullRequestBatch> {
+  // Pagination tie-breaks on the facts row's primary key: it is the only
+  // globally-unique ordering column (externalPullRequestId is the
+  // per-repository PR number for Bitbucket/ADO, so same-timestamp rows from
+  // different repositories would be skipped forever at a page boundary).
+  // Cursors written before factId existed resume from the timestamp alone,
+  // inclusively, so no rows are skipped; boundary-timestamp rows may be
+  // re-audited once.
   const cursorPredicate =
     scanMode.kind === 'resume'
-      ? or(
-          gt(pullRequestFacts.mergedAtRemote, scanMode.cursorDate),
-          and(
-            eq(pullRequestFacts.mergedAtRemote, scanMode.cursorDate),
-            gt(
-              pullRequestFacts.externalPullRequestId,
-              scanMode.cursor.externalPullRequestId,
+      ? scanMode.cursor.factId
+        ? or(
+            gt(pullRequestFacts.mergedAtRemote, scanMode.cursorDate),
+            and(
+              eq(pullRequestFacts.mergedAtRemote, scanMode.cursorDate),
+              gt(pullRequestFacts.id, scanMode.cursor.factId),
             ),
-          ),
-        )
+          )
+        : gte(pullRequestFacts.mergedAtRemote, scanMode.cursorDate)
       : gte(pullRequestFacts.mergedAtRemote, scanMode.since);
 
   const rows = await db
     .select({
+      factId: pullRequestFacts.id,
+      repositoryId: pullRequestFacts.repositoryId,
       externalPullRequestId: pullRequestFacts.externalPullRequestId,
       repositoryFullName: pullRequestFacts.repositoryFullName,
       prNumber: pullRequestFacts.prNumber,
@@ -277,22 +289,30 @@ async function getMergedPullRequests(
         lte(pullRequestFacts.mergedAtRemote, scanUpperBound),
       ),
     )
-    .orderBy(
-      asc(pullRequestFacts.mergedAtRemote),
-      asc(pullRequestFacts.externalPullRequestId),
-    )
+    .orderBy(asc(pullRequestFacts.mergedAtRemote), asc(pullRequestFacts.id))
     .limit(MAX_MERGED_PULL_REQUESTS_PER_RUN + 1);
 
   const hasMore = rows.length > MAX_MERGED_PULL_REQUESTS_PER_RUN;
   const rowsToAudit = rows.slice(0, MAX_MERGED_PULL_REQUESTS_PER_RUN);
+  // Keyed by the facts row's repository id: full names collide across
+  // providers and self-managed hosts, and prNumber only disambiguates within
+  // one repository. (The DB already enforces uniqueness on
+  // (repositoryId, prNumber), so this is defensive.)
   const deduped = new Map<string, MergedPullRequest>();
+  let lastRowCursor: MergedPullRequestAuditScanCursor | null = null;
 
   for (const row of rowsToAudit) {
     if (!row.mergedAt) {
       continue;
     }
 
-    deduped.set(`${row.repositoryFullName}#${row.prNumber}`, {
+    lastRowCursor = {
+      mergedAt: row.mergedAt.toISOString(),
+      factId: row.factId,
+      externalPullRequestId: row.externalPullRequestId,
+    };
+
+    deduped.set(`${row.repositoryId}#${row.prNumber}`, {
       externalPullRequestId: row.externalPullRequestId,
       repositoryFullName: row.repositoryFullName,
       prNumber: row.prNumber,
@@ -302,19 +322,10 @@ async function getMergedPullRequests(
     });
   }
 
-  const pullRequests = Array.from(deduped.values());
-  const lastPullRequest = pullRequests.at(-1);
-
   return {
-    pullRequests,
+    pullRequests: Array.from(deduped.values()),
     hasMore,
-    nextCursor:
-      hasMore && lastPullRequest
-        ? {
-            mergedAt: lastPullRequest.mergedAt.toISOString(),
-            externalPullRequestId: lastPullRequest.externalPullRequestId,
-          }
-        : null,
+    nextCursor: hasMore ? lastRowCursor : null,
   };
 }
 

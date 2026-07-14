@@ -43,6 +43,7 @@ vi.mock('@roomote/db/server', () => ({
   updateAutomationScanCursor: vi.fn(),
   slackInstallations: slackInstallationsTable,
   pullRequestFacts: {
+    id: 'pullRequestFacts.id',
     externalPullRequestId: 'externalPullRequestId',
     repositoryFullName: 'repositoryFullName',
     prNumber: 'prNumber',

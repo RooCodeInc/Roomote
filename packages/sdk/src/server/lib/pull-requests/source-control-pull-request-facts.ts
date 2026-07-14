@@ -3,6 +3,8 @@ import {
   db,
   eq,
   inArray,
+  isNull,
+  or,
   pullRequestSyncStates,
   repositories,
 } from '@roomote/db/server';
@@ -290,12 +292,23 @@ export async function syncSourceControlPullRequestFacts(params?: {
  * Upsert one PR fact from a provider webhook so merges are visible to the
  * merged-PR audit automations without waiting for the next sync pass.
  * Mirrors upsertGitHubPullRequestFactFromWebhook, keyed by
- * (provider, repository full name) since non-GitHub webhooks carry no
- * installation-scoped repo id.
+ * (provider, host, repository full name) since non-GitHub webhooks carry no
+ * installation-scoped repo id. Without the host, a terminal event for
+ * group/repo on one self-managed instance would write facts and sync cursors
+ * to every active same-name repository on other instances.
  */
 export async function upsertSourceControlPullRequestFactFromWebhook(params: {
   provider: SourceControlProvider;
   repositoryFullName: string;
+  /**
+   * Source-control instance host the webhook came from (for example
+   * `gitlab.example.com`), matching `repositories.host` as written by the
+   * provider repository sync (`new URL(baseUrl).host`). Rows with a NULL
+   * host (not yet backfilled) still match so legacy repositories keep
+   * receiving webhook facts. When omitted, matching falls back to
+   * (provider, full name) alone.
+   */
+  host?: string | null;
   pullRequest: PullRequestFactSnapshot;
   now?: Date;
 }) {
@@ -316,6 +329,9 @@ export async function upsertSourceControlPullRequestFactFromWebhook(params: {
         eq(repositories.sourceControlProvider, params.provider),
         eq(repositories.fullName, params.repositoryFullName),
         eq(repositories.isActive, true),
+        params.host
+          ? or(eq(repositories.host, params.host), isNull(repositories.host))
+          : undefined,
       ),
     );
 
