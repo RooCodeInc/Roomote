@@ -28,6 +28,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -333,6 +334,15 @@ export async function handleAdoPullRequest(
   const result = await getAdoAutomationTargets({
     workflow: 'pr_review',
     payload: { ...payload, repositoryFullName: repoFullName },
+    // The PR web URL (or the account/collection base URL it is built from)
+    // carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(
+      getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+    ),
   });
 
   if (result.status === 'error') {

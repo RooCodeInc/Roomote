@@ -24,6 +24,7 @@ import {
   isRoomoteGitLabUsername,
 } from './getGitLabAutomationTargets';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import { toHostFromUrl } from '../utils';
 import type { GitLabNoteWebhook } from './types';
 
 const GITLAB_MENTION_HANDLE = '@roomote';
@@ -244,6 +245,11 @@ export async function handleGitLabNote(
   const targetsResult = await getGitLabAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The MR (or project) web URL carries the instance host, matching
+    // repositories.host.
+    webhookHost: toHostFromUrl(
+      mergeRequest.url ?? payload.project.web_url ?? '',
+    ),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });

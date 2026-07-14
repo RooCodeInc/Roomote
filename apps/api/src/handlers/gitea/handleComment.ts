@@ -25,6 +25,7 @@ import {
   getGiteaUsername,
   isRoomoteGiteaUsername,
 } from './getGiteaAutomationTargets';
+import { toHostFromUrl } from '../utils';
 import type { GiteaPullRequestCommentWebhook } from './types';
 
 const GITEA_MENTION_HANDLE = '@roomote';
@@ -230,6 +231,14 @@ export async function handleGiteaComment(
       sender: payload.sender,
       commentAuthor: payload.comment.user,
     },
+    // The PR (or repository) web URL carries the instance host, matching
+    // repositories.host.
+    webhookHost: toHostFromUrl(
+      pullRequest.html_url ??
+        pullRequest.url ??
+        payload.repository.html_url ??
+        '',
+    ),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });

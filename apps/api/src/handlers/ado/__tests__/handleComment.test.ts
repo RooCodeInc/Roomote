@@ -214,6 +214,60 @@ describe('handleAdoComment', () => {
     expect('sourceControlHost' in task.payload).toBe(false);
   });
 
+  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
+    // Two active rows share the repository identity; only the host differs.
+    const rows = [
+      { id: 'repo-host-a', host: 'ado.host-a.example' },
+      { id: 'repo-host-b', host: 'ado.host-b.example' },
+    ];
+    mockGetAdoAutomationTargets.mockImplementation(
+      async ({ webhookHost }: { webhookHost?: string | null }) => {
+        const repo = rows.find((row) => row.host === webhookHost);
+        return repo
+          ? {
+              status: 'ok',
+              targets: [
+                {
+                  id: `ado:pr_review:${repo.id}`,
+                  settings: null,
+                  repo,
+                  repositoryIds: [repo.id],
+                  userId: 'user-1',
+                },
+              ],
+            }
+          : { status: 'error', message: 'no matching repository row' };
+      },
+    );
+
+    await handleAdoComment(
+      makeCommentPayload({
+        pullRequest: {
+          _links: {
+            web: {
+              href: 'https://ado.host-a.example/acme/Platform/_git/backend/pullrequest/42',
+            },
+          },
+        },
+      }),
+    );
+
+    // The handler derives the instance host from the webhook URL...
+    expect(mockGetAdoAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookHost: 'ado.host-a.example' }),
+    );
+    // ...and the launched payload pins the matching row's host.
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'ado.host-a.example',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('stamps the repository host into mention review payloads when the repository row has one', async () => {
     mockGetAdoAutomationTargets.mockResolvedValue({
       status: 'ok',

@@ -22,6 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -160,6 +161,8 @@ export async function handleBitbucketPullRequest(
   const result = await getBitbucketAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getBitbucketPullRequestUrl(payload)),
   });
 
   if (result.status === 'error') {

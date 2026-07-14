@@ -22,6 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { toHostFromUrl } from '../utils';
 import {
   getGiteaAutomationTargets,
   getGiteaUsername,
@@ -155,6 +156,8 @@ export async function handleGiteaPullRequest(
   const result = await getGiteaAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getPullRequestUrl(payload)),
   });
 
   if (result.status === 'error') {

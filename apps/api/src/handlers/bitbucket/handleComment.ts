@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 import {
   sendMessageToTask,
@@ -271,6 +272,8 @@ export async function handleBitbucketComment(
       actor: payload.actor,
       commentAuthor: payload.comment.user,
     },
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getBitbucketPullRequestUrl(payload)),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });

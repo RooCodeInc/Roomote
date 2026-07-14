@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -287,6 +288,15 @@ export async function handleAdoComment(
       repositoryFullName: repoFullName,
       commentAuthor: author,
     },
+    // The PR web URL (or the account/collection base URL it is built from)
+    // carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(
+      getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+    ),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });

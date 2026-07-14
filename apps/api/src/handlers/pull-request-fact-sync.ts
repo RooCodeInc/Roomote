@@ -1,6 +1,8 @@
 import { upsertSourceControlPullRequestFactFromWebhook } from '@roomote/sdk/server';
 import type { SourceControlProvider } from '@roomote/types';
 
+import { toHostFromUrl } from './utils';
+
 /**
  * Fire-and-forget PR-fact upsert for non-GitHub provider webhooks, mirroring
  * the GitHub handler's syncPullRequestFact. Terminal PR events (merged or
@@ -66,19 +68,6 @@ export function scheduleSourceControlPullRequestFactSync(params: {
       }`,
     ),
   );
-}
-
-/**
- * Extract the source-control instance host from a webhook-provided PR URL.
- * Returns null for relative or unparseable URLs, in which case the fact
- * upsert falls back to unscoped (provider, full name) matching.
- */
-function toHostFromUrl(url: string): string | null {
-  try {
-    return new URL(url).host || null;
-  } catch {
-    return null;
-  }
 }
 
 /**
