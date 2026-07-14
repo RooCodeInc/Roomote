@@ -1107,16 +1107,28 @@ export const runTask = async ({
     });
     // Close the loop on background environment setup: when it settles while
     // the agent is actively working, push a notification into the session so
-    // the agent stops guessing whether dependencies are installed. If the
-    // task is not mid-turn (settled before start, or already waiting for a
-    // prompt), skip the injection — waking an idle task would burn a turn for
-    // nothing, and .roomote/setup-status.json already has the ground truth.
-    backgroundEnvironmentSetup?.onSettled((outcome) => {
-      const currentManager = harnessManager;
+    // the agent stops guessing whether dependencies are installed. Delivery
+    // is deferred until the runtime signals taskStarted — the phase flips to
+    // running before the StartNewTask command carrying the initial prompt is
+    // delivered, so injecting earlier can race the initial user prompt and
+    // replace it as the session's first message. If the task is idle once
+    // both conditions hold, skip the injection — waking an idle task would
+    // burn a turn for nothing, and .roomote/setup-status.json already has
+    // the ground truth.
+    let pendingEnvironmentSetupOutcome:
+      | EnvironmentSetupSettledOutcome
+      | undefined;
+    let runtimeTaskStartedForSetupNotice = false;
 
-      if (!currentManager) {
+    const deliverEnvironmentSetupNotice = () => {
+      const currentManager = harnessManager;
+      const outcome = pendingEnvironmentSetupOutcome;
+
+      if (!currentManager || !outcome || !runtimeTaskStartedForSetupNotice) {
         return;
       }
+
+      pendingEnvironmentSetupOutcome = undefined;
 
       if (currentManager.getStatus().phase !== 'running') {
         return;
@@ -1137,6 +1149,17 @@ export const runTask = async ({
           delivered: sent,
         },
       });
+    };
+
+    backgroundEnvironmentSetup?.onSettled((outcome) => {
+      pendingEnvironmentSetupOutcome = outcome;
+      deliverEnvironmentSetupNotice();
+    });
+    harnessManager.on('taskStateEvent', (eventName) => {
+      if (eventName === 'taskStarted') {
+        runtimeTaskStartedForSetupNotice = true;
+        deliverEnvironmentSetupNotice();
+      }
     });
     harnessManager.on('taskStateEvent', (eventName) => {
       void recordWorkerRuntimeEvent({
