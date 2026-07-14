@@ -137,18 +137,17 @@ ${EXTERNAL_LOOKUP_RULES}
 
 ## Kickoff Message
 
-Also always set \`kickoffMessage\` to a short, task-relevant phrase the product will show when the task starts:
+Also always set \`kickoffMessage\` to a short, task-relevant lead phrase. Roomote will append the chosen environment name and any explicit model override after it, so keep those out of this field:
 
-- Write roughly 6-14 words that compress what the user asked for.
-- Describe the work itself, not the environment/workspace and not the model.
-- Prefer progressive phrasing such as "looking into…", "checking…", "investigating…", "adding…".
+- Write roughly 4-12 words that name what the task is about.
+- Prefer progressive phrasing such as "Looking into…", "Checking…", "Investigating…", "Adding…".
 - Examples of good kickoffMessage values:
-  - "looking into daily environment snapshots for faster startup"
-  - "checking whether login redirects loop on mobile"
-  - "adding cancel action to the task dashboard"
+  - "Looking into daily environment snapshots for faster startup"
+  - "Checking whether login redirects loop on mobile"
+  - "Adding cancel action to the task dashboard"
+- Do not include the environment/workspace name or model name.
 - Do not include the words "Getting started".
-- Do not include emojis, markdown, quotes, or a trailing period.
-- Use sentence case.
-- Always produce a non-empty kickoffMessage for real routed tasks. Internal reasoning stays in \`reasoning\`; user-facing ack copy stays in \`kickoffMessage\`.
+- Do not include emojis, markdown, quotes, @-mentions, Slack markup, or a trailing period.
+- Always produce a non-empty kickoffMessage for real routed tasks. Internal reasoning stays in \`reasoning\`; user-facing lead copy stays in \`kickoffMessage\`.
 `;
 }

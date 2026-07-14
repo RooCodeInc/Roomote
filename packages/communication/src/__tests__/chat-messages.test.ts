@@ -103,7 +103,7 @@ describe('chat message copy builders', () => {
           'looking into daily environment snapshots for faster startup',
       }),
     ).toBe(
-      'Getting started: looking into daily environment snapshots for faster startup',
+      'Looking into daily environment snapshots for faster startup in App',
     );
 
     expect(
@@ -113,7 +113,7 @@ describe('chat message copy builders', () => {
         modelDisplayName: 'Anthropic Claude Fable 5',
       }),
     ).toBe(
-      'Getting started: checking login redirects using Anthropic Claude Fable 5 as the coding model',
+      'Checking login redirects in App using Anthropic Claude Fable 5 as the coding model',
     );
 
     expect(
@@ -121,14 +121,14 @@ describe('chat message copy builders', () => {
         workspaceDisplayName: 'App',
         kickoffMessage: 'Getting started on environment snapshot checks',
       }),
-    ).toBe('Getting started: environment snapshot checks');
+    ).toBe('Environment snapshot checks in App');
 
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        kickoffMessage: "I'm checking environment snapshots",
+        kickoffMessage: "<!channel> looking into <@U123>'s auth bug",
       }),
-    ).toBe("Getting started: I'm checking environment snapshots");
+    ).toBe("Looking into 's auth bug in App");
   });
 
   it('only returns model names the router treated as an explicit preference', () => {

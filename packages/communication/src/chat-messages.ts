@@ -139,13 +139,15 @@ export function resolveUserFacingModelDisplayName({
 }
 
 /**
- * Stable prefix for fallback and dynamic kickoff copy. Slack started-message
- * detection matches on this shared leading phrase when no stored message TS is
- * available.
+ * Legacy started-message prefix used by older Ambient/template kickoff copy.
+ * New dynamic kickoffs are deferred to action-block / stored-message-ts detection.
  */
-export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started';
+export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started on your task';
 
-const KICKOFF_MESSAGE_MAX_LENGTH = 120;
+const KICKOFF_PHRASE_MAX_LENGTH = 90;
+
+const SLACK_CONTROL_TOKEN_PATTERN =
+  /<@[^>\s]+>|<![^>\s]+>|<#C[^|>\s]+(?:\|[^>]+)?>|@everyone|@channel|@here/gi;
 
 /**
  * Normalize a router-generated kickoff phrase into short, display-safe text.
@@ -160,22 +162,57 @@ export function normalizeKickoffMessage(
   }
 
   let text = value.replace(/\s+/g, ' ').trim();
-  text = text.replace(/^["'`“”]+|["'`“”]+$/g, '').trim();
+  text = stripMatchingEdgeQuotes(text);
+  // Neutralize Slack mrkdwn control tokens so router output cannot broadcast
+  // mentions or special link markup when inserted into a section block.
+  text = text.replace(SLACK_CONTROL_TOKEN_PATTERN, ' ').replace(/[<>]/g, ' ');
+  text = text.replace(/\s+/g, ' ').trim();
   text = text.replace(/\.+$/, '').trim();
 
   if (!text) {
     return undefined;
   }
 
-  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
-    const truncated = text
-      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
-      .replace(/\s+\S*$/, '')
-      .trim();
-    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 119)}…`;
+  // Drop a redundant "Getting started..." lead the model may repeat; the
+  // builder always attaches workspace + model below.
+  text = text
+    .replace(/^getting started on your task[\s:,-]*/i, '')
+    .replace(/^getting started on[\s:,-]*/i, '')
+    .replace(/^getting started[\s:,-]*/i, '')
+    .trim();
+
+  if (!text) {
+    return undefined;
   }
 
+  if (text.length > KICKOFF_PHRASE_MAX_LENGTH) {
+    const truncated = text
+      .slice(0, KICKOFF_PHRASE_MAX_LENGTH - 1)
+      .replace(/\s+\S*$/, '')
+      .trim();
+    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 89)}…`;
+  }
+
+  // Prefer sentence-case progressive phrasing without a trailing period.
+  text = text.charAt(0).toUpperCase() + text.slice(1);
+
   return text;
+}
+
+function stripMatchingEdgeQuotes(value: string): string {
+  const quotes = new Set(['"', "'", '`', '“', '”', '‘', '’']);
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && quotes.has(value.charAt(start))) {
+    start += 1;
+  }
+
+  while (end > start && quotes.has(value.charAt(end - 1))) {
+    end -= 1;
+  }
+
+  return value.slice(start, end);
 }
 
 export function buildTaskStartingText({
@@ -189,34 +226,26 @@ export function buildTaskStartingText({
   modelDisplayName?: string;
   /**
    * Optional short router-generated phrase describing the task. When present,
-   * replaces the static "Getting started on your task in <env>" boilerplate.
+   * becomes the dynamic lead of the kickoff while env name (and model override,
+   * when set) are still appended by this builder.
    */
   kickoffMessage?: string | null;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
+  const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
     ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
   const kickoff = normalizeKickoffMessage(kickoffMessage);
 
   if (kickoff) {
-    // Strip a redundant leading "Getting started" the model may have added so
-    // we always emit one stable, detectable prefix form.
-    const phrase = kickoff
-      .replace(
-        /^(?:getting started(?:\s*:\s*|\s+on\s+your\s+task(?:\s+in\s+\S+)?\s*|\s+on\s+|\s+))/i,
-        '',
-      )
-      .trim();
-    const body = phrase || kickoff;
-
-    return `${TASK_STARTING_MESSAGE_PREFIX}: ${body}${model}`;
+    // Always preserve the same information surface as the template path:
+    // task-relevant lead + environment name + optional model override.
+    return `${kickoff} in ${workspace}${model}`;
   }
 
-  const workspace = formatWorkspaceName(workspaceDisplayName);
-
-  return `${TASK_STARTING_MESSAGE_PREFIX} on your task in ${workspace}${model}`;
+  return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}`;
 }
 
 export function buildOtherRunningTasksText(

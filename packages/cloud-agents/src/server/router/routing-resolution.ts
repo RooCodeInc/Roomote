@@ -47,7 +47,7 @@ export const workspaceResponseSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'Short task-relevant kickoff phrase (roughly 6-14 words) that compresses what the user asked for. Describe the work, not the workspace or model. Prefer progressive phrasing like "looking into daily environment snapshots for faster startup". No emojis, markdown, quotes, or "Getting started" prefix. Write in sentence case without a trailing period. Always provide a non-empty phrase when routing a real task.',
+      'Short task-relevant lead phrase (roughly 4-12 words) for the chat start ack. Name the work only; the product appends the environment name and any model override. Prefer progressive phrasing like "Looking into daily environment snapshots for faster startup". No emojis, markdown, quotes, mentions, environment/model names, or "Getting started" prefix. No trailing period. Always provide a non-empty phrase when routing a real task.',
     )
     .optional()
     .default(null),

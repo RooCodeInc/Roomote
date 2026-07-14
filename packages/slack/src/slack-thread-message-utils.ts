@@ -3,6 +3,10 @@ import { TASK_STARTING_MESSAGE_PREFIX } from '@roomote/communication/chat-messag
 
 import type { SlackThreadMessage } from './types';
 
+// Text-only fallback for older template kickoffs only. Dynamic kickoffs are
+// not matched by prefix; they rely on the stored started-message ts and/or
+// Follow/Cancel action blocks so unrelated "Getting started…" bot replies are
+// not suppressed from task context.
 const SLACK_STARTED_MESSAGE_PREFIX = TASK_STARTING_MESSAGE_PREFIX;
 const PROMPT_CONTROL_ACTION_IDS = new Set(['follow_task', 'cancel_task']);
 
@@ -60,12 +64,11 @@ export function isSlackStartedTaskMessage(
   },
   startedMessageTs?: string | null,
 ): boolean {
-  const text = message.text.trim();
-
   return (
     (startedMessageTs != null && message.ts === startedMessageTs) ||
     (Boolean(message.bot_id) &&
-      text
+      message.text
+        .trim()
         .toLowerCase()
         .startsWith(SLACK_STARTED_MESSAGE_PREFIX.toLowerCase())) ||
     hasPromptControlActionBlocks(message.blocks)

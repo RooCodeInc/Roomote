@@ -2417,6 +2417,7 @@ export async function handleSlackRoutingCorrection({
         agentName: oldPrefill.agentName,
         workspaceDisplayName: oldPrefill.workspaceDisplayName,
         modelDisplayName: oldPrefill.modelDisplayName,
+        kickoffMessage: oldPrefill.kickoffMessage,
         workspaceType: oldPrefill.workspaceType,
         workspaceValue: oldPrefill.workspaceValue,
         workspaceOnly: oldPrefill.workspaceOnly,
