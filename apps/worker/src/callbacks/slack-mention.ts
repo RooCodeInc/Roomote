@@ -181,9 +181,15 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       );
 
       // Rebuild the started message blocks with the Follow button included
-      const freeformKickoffEnabled = await sdk.featureFlags
-        .evaluate(FeatureFlag.DynamicKickoffMessage)
-        .catch(() => false);
+      let freeformKickoffEnabled = false;
+      try {
+        freeformKickoffEnabled = await sdk.featureFlags.evaluate(
+          FeatureFlag.DynamicKickoffMessage,
+        );
+      } catch {
+        freeformKickoffEnabled = false;
+      }
+
       const blocks = buildStartedBlocks({
         workspaceDisplayName: startedData.workspaceDisplayName,
         modelDisplayName: startedData.modelDisplayName,
