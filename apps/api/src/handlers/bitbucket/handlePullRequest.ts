@@ -20,9 +20,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -57,9 +55,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: BitbucketPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -75,41 +74,19 @@ async function notifyMergedPullRequestThreads(
   }
 
   const prNumber = getBitbucketPullRequestNumber(payload.pullrequest);
-  const notificationParams = {
-    sourceControlProvider: 'bitbucket' as const,
-    repository: repoFullName,
-    prNumber,
-    prTitle: payload.pullrequest.title,
-    prUrl: getBitbucketPullRequestUrl(payload),
-    mergedBy: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
-  };
 
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'bitbucket',
-  }).catch((error) => {
-    console.error(
-      `[handleBitbucketPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'bitbucket',
+      repository: repoFullName,
+      prNumber,
+      prTitle: payload.pullrequest.title,
+      prUrl: getBitbucketPullRequestUrl(payload),
+      status,
+      actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
+    },
+    `PR #${prNumber}`,
+  );
 }
 
 export async function handleBitbucketPullRequest(
@@ -149,9 +126,7 @@ export async function handleBitbucketPullRequest(
       );
     });
 
-    if (merged) {
-      await notifyMergedPullRequestThreads(payload, repoFullName);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }

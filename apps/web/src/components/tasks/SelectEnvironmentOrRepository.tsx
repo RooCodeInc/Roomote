@@ -116,7 +116,13 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    if (allowAuto && repository) {
+    // Keep non-Auto allowAuto selections. When homepage starts on Auto with
+    // exactly one environment, fall through and default to that environment.
+    if (
+      allowAuto &&
+      repository &&
+      (repository !== AUTO_WORKSPACE_VALUE || sortedEnvironments.length !== 1)
+    ) {
       setHasAppliedDefaultWorkspace(true);
       return;
     }

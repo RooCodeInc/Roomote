@@ -64,6 +64,15 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+          env: { COMPOSE_SECRET: 'do-not-print' },
+        },
+      ],
     };
 
     expect(sanitizeEnvironmentConfigForPrompt(environmentConfig)).toEqual({
@@ -111,6 +120,14 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+        },
+      ],
     });
   });
 });

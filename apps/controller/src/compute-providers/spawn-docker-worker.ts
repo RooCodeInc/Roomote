@@ -32,10 +32,13 @@ import {
 import { resolveFromWorkspaceRoot } from '../repo-paths';
 import {
   attachDockerEgressPolicy,
+  buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerLabels,
   buildDockerWorkerResourceArgs,
   docker,
   getDockerTaskNetworkName,
+  getDockerTaskDaemonContainerName,
+  getDockerTaskWorkspaceVolumeName,
   getDockerWorkerContainerName,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
@@ -52,6 +55,7 @@ const DOCKER_WORKER_ROOT = '/sandbox';
 const DOCKER_INSTALL_WORKER_SCRIPT = `${DOCKER_WORKER_ROOT}/install-worker.sh`;
 const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
+const DOCKER_TASK_DAEMON_IMAGE = 'docker:28-dind';
 
 export async function spawnDockerWorker(
   taskRun: TaskRun,
@@ -131,6 +135,13 @@ export async function spawnDockerWorker(
     ? taskRun.sourceSnapshotId!
     : getDockerWorkerContainerName(taskRun.id);
   const sourceRunId = getDockerSourceRunId(containerName);
+  const usesDockerProjects = Boolean(
+    environmentConfig?.docker_projects?.length,
+  );
+  const taskDaemonContainerName =
+    getDockerTaskDaemonContainerName(containerName);
+  const taskWorkspaceVolumeName =
+    getDockerTaskWorkspaceVolumeName(containerName);
   const controlNetwork = config.network?.trim();
   const portArgs = controlNetwork
     ? []
@@ -188,6 +199,9 @@ export async function spawnDockerWorker(
           ? ['--add-host', 'host.docker.internal:host-gateway']
           : []),
         ...portArgs,
+        ...(usesDockerProjects
+          ? ['--volume', `${taskWorkspaceVolumeName}:${DOCKER_WORKER_ROOT}`]
+          : []),
         config.image,
         DOCKER_CONTAINER_READY_COMMAND,
         ...DOCKER_CONTAINER_READY_ARGS,
@@ -207,6 +221,18 @@ export async function spawnDockerWorker(
         platform: config.platform,
       });
     } else {
+      if (usesDockerProjects) {
+        await docker([
+          'volume',
+          'create',
+          ...buildDockerWorkerLabels({
+            taskRunId: taskRun.id,
+            autoRemove: autoRemoveContainer,
+          }),
+          taskWorkspaceVolumeName,
+        ]);
+      }
+
       try {
         containerId = await startContainer(config.diskLimit);
       } catch (error) {
@@ -265,6 +291,37 @@ export async function spawnDockerWorker(
         'bash',
         DOCKER_INSTALL_WORKER_SCRIPT,
       ]);
+
+      if (usesDockerProjects) {
+        await docker([
+          'run',
+          '-d',
+          ...(autoRemoveContainer ? ['--rm'] : []),
+          '--name',
+          taskDaemonContainerName,
+          '--platform',
+          config.platform,
+          '--network',
+          `container:${containerName}`,
+          '--privileged',
+          '--env',
+          'DOCKER_TLS_CERTDIR=',
+          ...buildDockerTaskDaemonResourceArgs(config),
+          ...buildDockerWorkerLabels({
+            taskRunId: taskRun.id,
+            autoRemove: autoRemoveContainer,
+          }),
+          '--volume',
+          `${taskWorkspaceVolumeName}:${DOCKER_WORKER_ROOT}`,
+          DOCKER_TASK_DAEMON_IMAGE,
+          '--host=tcp://0.0.0.0:2375',
+          '--tls=false',
+        ]);
+      }
+    }
+
+    if (isStandbyResume && usesDockerProjects) {
+      await resumeDockerTaskDaemon(taskDaemonContainerName);
     }
 
     const portMap = controlNetwork
@@ -338,6 +395,10 @@ export async function spawnDockerWorker(
           ROOMOTE_PREVIEW_DOMAIN:
             resolvedPreviewRuntimeConfig.effective.roomotePreviewDomain,
         }),
+        ...(usesDockerProjects && {
+          DOCKER_HOST: 'tcp://127.0.0.1:2375',
+          DOCKER_TLS_CERTDIR: '',
+        }),
       },
     });
 
@@ -381,6 +442,13 @@ export async function spawnDockerWorker(
     }
     throw error;
   }
+}
+
+export async function resumeDockerTaskDaemon(
+  containerName: string,
+  runDocker: typeof docker = docker,
+): Promise<void> {
+  await runDocker(['start', containerName], { allowFailure: true });
 }
 
 export function shouldRetryDockerWorkerWithoutDiskLimit(params: {

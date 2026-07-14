@@ -165,7 +165,7 @@ export function buildInvokeMethods({
     {
       icon: Zap,
       title: 'Automations',
-      description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed.`,
+      description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed look at the Automations tab.`,
     },
     {
       icon: AppWindow,

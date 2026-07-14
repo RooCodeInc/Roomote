@@ -5,9 +5,17 @@ import { toast } from 'sonner';
 
 import { useConnectSlack } from '@/hooks/slack';
 import { useTeamsIntegrationStatus } from '@/hooks/teams';
-import { BrandIcon, Button, ExternalLink, Spinner } from '@/components/system';
+import { TaskStatusIndicator } from '@/components/sandbox';
+import {
+  ArrowRight,
+  BrandIcon,
+  Button,
+  ExternalLink,
+  Spinner,
+} from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const COMMUNICATION_CONNECT_STEP = getSetupStepDefinition('slack');
@@ -24,11 +32,13 @@ export function StepCommunicationConnect({
   authSetup,
   onContinue,
   onSkip,
+  onBack,
   returnPath = '/setup?step=slack',
 }: {
   authSetup: SetupAuthStatus;
   onContinue: () => void;
   onSkip: () => void;
+  onBack?: () => void;
   returnPath?: string;
 }) {
   const provider = getCommunicationProvider(authSetup);
@@ -48,10 +58,10 @@ export function StepCommunicationConnect({
       Do this later
     </button>
   );
-
   if (provider === 'microsoft') {
     const teamsStatus = teamsIntegrationStatus.data;
     const openInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;
+    const teamsBotName = teamsStatus?.botName?.trim() || 'Roomote';
     const teamsReady =
       teamsStatus?.botConfigured === true &&
       teamsStatus.microsoftAuthConfigured &&
@@ -62,68 +72,78 @@ export function StepCommunicationConnect({
 
     return (
       <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
-        <StepTitle text="Connect Microsoft Teams" />
+        <StepTitle text="Finish connecting Teams" />
         <p className="text-foreground">
-          This deployment is already configured for Microsoft Teams. Open the
-          bot in Teams to finish connecting your workspace.
+          Almost there. Teams just needs you to send a message (just
+          &quot;Hi!&quot; works) to Roomote to finish.
         </p>
 
-        {teamsIntegrationStatus.isPending ? (
-          <Spinner />
-        ) : teamsIntegrationStatus.isError ? (
-          <p className="text-sm text-destructive">
-            Unable to load Microsoft Teams setup status. Refresh and try again.
-          </p>
-        ) : teamsReady ? (
-          <>
-            <p className="text-sm text-muted-foreground">
-              Haven&apos;t added Roomote to Teams yet?{' '}
-              <a
-                className="underline underline-offset-4 hover:text-foreground"
-                href="/api/teams/app-package"
-                download
-              >
-                Download the app package
-              </a>{' '}
-              and upload it in Teams under Apps → Manage your apps → Upload an
-              app.
+        <div className="space-y-4">
+          {teamsIntegrationStatus.isPending ? (
+            <Spinner />
+          ) : teamsIntegrationStatus.isError ? (
+            <p className="text-sm text-destructive">
+              Unable to load Microsoft Teams setup status. Refresh and try
+              again.
             </p>
-            {!primaryConversationReady ? (
-              <p className="text-sm text-muted-foreground">
-                Roomote has not received a Teams message yet. Open the bot and
-                send it one message so Roomote can capture the conversation that
-                setup and automation updates post into.
-              </p>
-            ) : null}
-            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-              <Button asChild className="w-full sm:w-auto">
-                <a
-                  href={openInTeamsUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+          ) : teamsReady ? (
+            <>
+              <div>
+                <div className="flex items-center gap-2 font-semibold">
+                  <TaskStatusIndicator
+                    phase={
+                      primaryConversationReady
+                        ? 'waiting_for_prompt'
+                        : 'stopped'
+                    }
+                    compact={true}
+                  />
+                  <span>
+                    {primaryConversationReady
+                      ? 'Received!'
+                      : 'Waiting for bot message'}
+                  </span>
+                </div>
+                <p className="pl-4 text-muted-foreground">
+                  Send a message to the {teamsBotName} bot on Teams to complete
+                  the connection
+                </p>
+              </div>
+              <SetupFooter onBack={onBack}>
+                <Button asChild variant="outline">
+                  <a
+                    href={openInTeamsUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <BrandIcon
+                      icon="teams"
+                      name=""
+                      className="size-4 shrink-0"
+                    />
+                    Open Microsoft Teams bot
+                    <ExternalLink className="size-4 shrink-0" />
+                  </a>
+                </Button>
+                <Button
+                  type="button"
+                  className="w-full sm:w-auto"
+                  onClick={onContinue}
+                  disabled={!primaryConversationReady}
                 >
-                  <BrandIcon icon="teams" name="" className="size-4 shrink-0" />
-                  Open Microsoft Teams bot
-                  <ExternalLink className="size-4 shrink-0" />
-                </a>
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-full sm:w-auto"
-                onClick={onContinue}
-              >
-                Continue
-              </Button>
-            </div>
-          </>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            Microsoft Teams is not ready to open because the bot app ID is
-            missing from this deployment.
-          </p>
-        )}
-        {skipLink}
+                  Continue
+                  <ArrowRight />
+                </Button>
+              </SetupFooter>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Microsoft Teams is not ready to open because the bot app ID is
+              missing from this deployment.
+            </p>
+          )}
+          <SetupFooter onBack={onBack}>{skipLink}</SetupFooter>
+        </div>
       </div>
     );
   }
@@ -135,7 +155,7 @@ export function StepCommunicationConnect({
         This deployment is already configured for Slack. Connect the Slack app
         so Roomote can talk with your workspace.
       </p>
-      <div className="flex flex-col items-stretch gap-3 sm:items-start">
+      <SetupFooter onBack={onBack}>
         <Button
           className="w-full sm:w-auto"
           onClick={() => connectSlack.mutate()}
@@ -148,8 +168,8 @@ export function StepCommunicationConnect({
           )}
           Connect to Slack
         </Button>
-      </div>
-      {skipLink}
+        {skipLink}
+      </SetupFooter>
     </div>
   );
 }

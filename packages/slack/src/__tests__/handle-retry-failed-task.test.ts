@@ -274,7 +274,7 @@ describe('handleRetryFailedTask', () => {
               type: 'section',
               text: {
                 type: 'mrkdwn',
-                text: 'Getting started on your task in `App`',
+                text: 'Getting started on your task in App',
               },
             },
             {

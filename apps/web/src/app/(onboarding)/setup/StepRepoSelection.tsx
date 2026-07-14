@@ -41,6 +41,7 @@ import {
 } from '@/components/system';
 import { EnvironmentRepositorySelector } from '@/components/settings/environments/EnvironmentRepositorySelector';
 import { ModelSelect } from '@/components/tasks';
+import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
 
@@ -73,19 +74,25 @@ function getRetryCopy(reason: SetupRetryReason): string {
 export function StepRepoSelection({
   onContinue,
   onSkip,
+  onBack,
   onReviewComputeProvider,
   initialSelectedRepositoryIds = [],
   initialSetupGuidance = '',
   initialSelectedModelId = null,
   retryReason = null,
+  computeProvisioningError = null,
+  onRetryComputeProvisioning,
 }: {
-  onContinue: () => void;
+  onContinue: (onboardingTaskId: string) => void;
   onSkip: () => void;
+  onBack?: () => void;
   onReviewComputeProvider?: () => void;
   initialSelectedRepositoryIds?: string[];
   initialSetupGuidance?: string;
   initialSelectedModelId?: string | null;
   retryReason?: SetupRetryReason | null;
+  computeProvisioningError?: string | null;
+  onRetryComputeProvisioning?: () => void;
 }) {
   const pathname = usePathname();
   const trpc = useTRPC();
@@ -102,15 +109,24 @@ export function StepRepoSelection({
   const [setupGuidance, setSetupGuidance] = useState(initialSetupGuidance);
   const [isRefreshPending, setIsRefreshPending] = useState(false);
   const refreshPromiseRef = useRef<Promise<unknown> | null>(null);
+  const hasAutoSelectedSingleRepoRef = useRef(
+    initialSelectedRepositoryIds.length > 0,
+  );
+  const savedLaunchInputRef = useRef<{
+    repositoryIds: string[];
+    setupGuidance?: string;
+    selectedModelId?: string;
+  } | null>(null);
 
   const saveSelection = useMutation(
     trpc.setupNew.saveSelection.mutationOptions({
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({
-          queryKey: trpc.setupNew.status.queryKey(),
-        });
-        onContinue();
+      onError: (error) => {
+        toast.error(error.message);
       },
+    }),
+  );
+  const startOnboardingTask = useMutation(
+    trpc.setupNew.startOnboardingTask.mutationOptions({
       onError: (error) => {
         toast.error(error.message);
       },
@@ -138,6 +154,33 @@ export function StepRepoSelection({
     [repositories.data],
   );
   const showRepositoryFilter = sortedRepositories.length > 5;
+
+  useEffect(() => {
+    if (hasAutoSelectedSingleRepoRef.current) {
+      return;
+    }
+
+    if (repositories.isPending || repositories.data === undefined) {
+      return;
+    }
+
+    if (selectedRepositoryIds.length > 0) {
+      hasAutoSelectedSingleRepoRef.current = true;
+      return;
+    }
+
+    if (sortedRepositories.length !== 1) {
+      return;
+    }
+
+    hasAutoSelectedSingleRepoRef.current = true;
+    setSelectedRepositoryIds([sortedRepositories[0]!.id]);
+  }, [
+    repositories.data,
+    repositories.isPending,
+    selectedRepositoryIds.length,
+    sortedRepositories,
+  ]);
 
   useEffect(() => {
     if (!showRepositoryFilter && repositoryFilter) {
@@ -223,21 +266,44 @@ export function StepRepoSelection({
       return;
     }
 
-    await saveSelection.mutateAsync({
+    const launchInput = {
       repositoryIds: selectedRepositoryIds,
       setupGuidance: setupGuidance.trim() || undefined,
       ...(effectiveSelectedModelId
         ? { selectedModelId: effectiveSelectedModelId }
         : {}),
-    });
+    };
+
+    try {
+      if (
+        JSON.stringify(savedLaunchInputRef.current) !==
+        JSON.stringify(launchInput)
+      ) {
+        await saveSelection.mutateAsync(launchInput);
+        savedLaunchInputRef.current = launchInput;
+      }
+
+      const result = await startOnboardingTask.mutateAsync();
+      await queryClient.invalidateQueries({
+        queryKey: trpc.setupNew.status.queryKey(),
+      });
+      onContinue(result.taskId);
+    } catch {
+      // Both mutations show the existing error toast. Keep local form state
+      // intact so the saved selection can be retried safely.
+    }
   }, [
     effectiveSelectedModelId,
+    onContinue,
+    queryClient,
     saveSelection,
     selectedRepositoryIds,
+    startOnboardingTask,
     setupGuidance,
+    trpc.setupNew.status,
   ]);
 
-  const isBusy = saveSelection.isPending;
+  const isBusy = saveSelection.isPending || startOnboardingTask.isPending;
   const isRefreshingRepositories = repositories.isFetching || isRefreshPending;
 
   if (repositories.isPending) {
@@ -370,6 +436,26 @@ export function StepRepoSelection({
         </Alert>
       ) : null}
 
+      {computeProvisioningError ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            <p>
+              Sandbox provider provisioning failed: {computeProvisioningError}{' '}
+              {onRetryComputeProvisioning ? (
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-4"
+                  onClick={onRetryComputeProvisioning}
+                >
+                  Retry provisioning
+                </button>
+              ) : null}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <Card className="p-3">
         <CardContent>
           <div className="space-y-3">
@@ -462,7 +548,11 @@ export function StepRepoSelection({
                   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH * 0.8 &&
                   charCounter}
               </p>
-              <div className="flex w-full flex-wrap items-center gap-3">
+              <SetupFooter
+                onBack={onBack}
+                backDisabled={isBusy}
+                className="w-full flex-wrap"
+              >
                 <ModelSelect
                   value={effectiveSelectedModelId}
                   onValueChange={setSelectedModelId}
@@ -490,13 +580,13 @@ export function StepRepoSelection({
                 >
                   do this later
                 </Button>
-              </div>
+              </SetupFooter>
             </div>
           ) : null}
         </CardContent>
       </Card>
       {!showForm ? (
-        <div className="flex flex-wrap gap-2">
+        <SetupFooter onBack={onBack} className="flex-wrap">
           <Button
             type="button"
             size="sm"
@@ -531,7 +621,7 @@ export function StepRepoSelection({
           <p className="self-center text-sm text-muted-foreground">
             Not recommended
           </p>
-        </div>
+        </SetupFooter>
       ) : null}
     </div>
   );

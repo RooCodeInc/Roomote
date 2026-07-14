@@ -20,9 +20,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import {
   getGiteaAutomationTargets,
   getGiteaUsername,
@@ -60,9 +58,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: GiteaPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -77,41 +76,18 @@ async function notifyMergedPullRequestThreads(
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'gitea' as const,
-    repository: repoFullName,
-    prNumber: payload.number,
-    prTitle: payload.pull_request.title,
-    prUrl: getPullRequestUrl(payload),
-    mergedBy: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'gitea',
-  }).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'gitea',
+      repository: repoFullName,
+      prNumber: payload.number,
+      prTitle: payload.pull_request.title,
+      prUrl: getPullRequestUrl(payload),
+      status,
+      actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
+    },
+    `PR #${payload.number}`,
+  );
 }
 
 export async function handleGiteaPullRequest(
@@ -145,9 +121,7 @@ export async function handleGiteaPullRequest(
       );
     });
 
-    if (pullRequest.merged) {
-      await notifyMergedPullRequestThreads(payload, repoFullName);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }

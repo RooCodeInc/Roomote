@@ -26,9 +26,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -75,9 +73,10 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: AdoPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -92,47 +91,24 @@ async function notifyMergedPullRequestThreads(
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'ado' as const,
-    repository: repoFullName,
-    prNumber: payload.resource.pullRequestId,
-    prTitle: payload.resource.title,
-    prUrl: getAdoPullRequestUrl({
-      resourceContainers: payload.resourceContainers,
-      pullRequest: payload.resource,
-      repositoryFullName: repoFullName,
-    }),
-    mergedBy:
-      getAdoIdentityName(payload.resource.closedBy) ??
-      'someone in Azure DevOps',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'ado',
-  }).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'ado',
+      repository: repoFullName,
+      prNumber: payload.resource.pullRequestId,
+      prTitle: payload.resource.title,
+      prUrl: getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest: payload.resource,
+        repositoryFullName: repoFullName,
+      }),
+      status,
+      actorLogin:
+        getAdoIdentityName(payload.resource.closedBy) ??
+        'someone in Azure DevOps',
+    },
+    `PR #${payload.resource.pullRequestId}`,
+  );
 }
 
 async function getAdoSyncReviewDecision({
@@ -260,6 +236,8 @@ export async function handleAdoPullRequest(
       );
     });
 
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'closed');
+
     return { status: 'ok' };
   }
 
@@ -302,7 +280,7 @@ export async function handleAdoPullRequest(
       );
     });
 
-    await notifyMergedPullRequestThreads(payload, repoFullName);
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
   }

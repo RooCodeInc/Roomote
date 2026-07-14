@@ -9,15 +9,10 @@ import type { SetupAuthStatus } from '@roomote/types';
 import { authClient } from '@/lib/auth-client';
 import { getAuthProviderCallbackUrl } from '@/lib/auth-provider-callback';
 import { useTRPC } from '@/trpc/client';
-import {
-  ArrowLeft,
-  ArrowRight,
-  BrandIcon,
-  Button,
-  Spinner,
-} from '@/components/system';
+import { ArrowRight, BrandIcon, Button, Spinner } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import {
   getSetupEffectiveFieldValue,
   getSetupSubmitValues,
@@ -72,6 +67,8 @@ export function StepAuthEnvVars({
   const [clearedSavedValues, setClearedSavedValues] = useState<
     Record<string, boolean>
   >({});
+  const [showMicrosoftAdvancedConfig, setShowMicrosoftAdvancedConfig] =
+    useState(false);
   const saveAuthConfig = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.saveAuthConfig
@@ -128,6 +125,7 @@ export function StepAuthEnvVars({
     setValues({});
     setEditingSavedValues({});
     setClearedSavedValues({});
+    setShowMicrosoftAdvancedConfig(false);
   }, [effectiveSelectedProviderId]);
 
   const selectedProvider = useMemo(
@@ -138,8 +136,11 @@ export function StepAuthEnvVars({
     [authSetup.providers, effectiveSelectedProviderId],
   );
   const visibleFields = useMemo(
-    () => getSetupVisibleFields(selectedProvider ?? null),
-    [selectedProvider],
+    () =>
+      getSetupVisibleFields(selectedProvider ?? null, {
+        showMicrosoftAdvancedConfig,
+      }),
+    [selectedProvider, showMicrosoftAdvancedConfig],
   );
   const isMicrosoftProvider = selectedProvider?.id === 'microsoft';
 
@@ -176,7 +177,11 @@ export function StepAuthEnvVars({
 
     await saveAuthConfig.mutateAsync({
       provider: selectedProvider.id,
-      values: getSetupSubmitValues({ provider: selectedProvider, values }),
+      values: getSetupSubmitValues({
+        provider: selectedProvider,
+        values,
+        showMicrosoftAdvancedConfig,
+      }),
       ...(bootstrapMode && setupToken ? { setupToken } : {}),
     });
   };
@@ -243,10 +248,16 @@ export function StepAuthEnvVars({
     selectedProvider.runtimeSatisfied;
   const selectedProviderHasEditableFields =
     visibleFields.some((field) => !field.runtimeSatisfied) ?? false;
+  // Slack "owns" the step actions only while its intro screen is shown, which
+  // is the same condition SlackSetupExperience uses to render that intro. If a
+  // saved (or runtime) config is being edited instead, the intro is hidden and
+  // this step must render its own action button — otherwise there is no way to
+  // continue. Keep this in sync with SlackSetupExperience's intro guard.
   const providerOwnsActions =
     selectedProvider?.id === 'slack' &&
     !showManualSlackValues &&
-    !selectedProvider.runtimeSatisfied;
+    !selectedProvider.runtimeSatisfied &&
+    !selectedProvider.savedSatisfied;
 
   if (bootstrapMode && selectedProviderRuntimeConfigured) {
     return (
@@ -290,7 +301,11 @@ export function StepAuthEnvVars({
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
           showManualSlackValues={showManualSlackValues}
+          showMicrosoftAdvancedConfig={showMicrosoftAdvancedConfig}
           onShowManualSlackValues={() => setShowManualSlackValues(true)}
+          onToggleMicrosoftAdvancedConfig={() =>
+            setShowMicrosoftAdvancedConfig((current) => !current)
+          }
           onBack={onBack}
           onValueChange={(envVarName, value) =>
             setValues((current) => ({ ...current, [envVarName]: value }))
@@ -311,18 +326,11 @@ export function StepAuthEnvVars({
       ) : null}
 
       {providerOwnsActions ? null : (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-          {onBack ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onBack}
-              disabled={saveAuthConfig.isPending}
-            >
-              <ArrowLeft />
-              Back
-            </Button>
-          ) : null}
+        <SetupFooter
+          onBack={onBack}
+          backDisabled={saveAuthConfig.isPending}
+          className="mt-8"
+        >
           <Button
             type="button"
             onClick={() => void handleContinue()}
@@ -339,7 +347,7 @@ export function StepAuthEnvVars({
                     : 'Save and continue'}
             {saveAuthConfig.isPending ? <Spinner /> : <ArrowRight />}
           </Button>
-        </div>
+        </SetupFooter>
       )}
     </div>
   );

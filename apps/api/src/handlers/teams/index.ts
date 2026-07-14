@@ -22,7 +22,7 @@ import {
   buildSnapshotResumeAcknowledgementText,
   buildTaskLaunchAcknowledgementText,
 } from '@roomote/communication/chat-messages';
-import { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
+import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 import {
   exchangeMicrosoftDelegatedGraphToken,
@@ -617,28 +617,13 @@ function teamsActivityHasHostedContentHint(activity: TeamsActivity): boolean {
 async function createTeamsCommunicationProviderWithGraph(
   userId: string,
 ): Promise<TeamsCommunicationProvider | null> {
-  const credentials = await resolveTeamsBotRuntimeCredentials();
-
-  if (!credentials.botAppId || !credentials.botAppPassword) {
-    return null;
-  }
-
   const graphTokenProvider = createDelegatedTeamsGraphTokenProvider(userId);
 
   if (!graphTokenProvider) {
     return null;
   }
 
-  return new TeamsCommunicationProvider({
-    appId: credentials.botAppId,
-    appPassword: credentials.botAppPassword,
-    ...(credentials.botTenantId ? { tenantId: credentials.botTenantId } : {}),
-    ...(credentials.botTokenEndpoint
-      ? { tokenEndpoint: credentials.botTokenEndpoint }
-      : {}),
-    ...(credentials.botOauthScope
-      ? { oauthScope: credentials.botOauthScope }
-      : {}),
+  return createTeamsCommunicationProviderFromRuntimeCredentials({
     graphTokenProvider,
   });
 }

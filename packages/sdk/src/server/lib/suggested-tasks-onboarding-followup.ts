@@ -138,6 +138,7 @@ export const TELEGRAM_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME =
 
 export const telegramSuggestedTasksOnboardingFollowupRequestSchema = z.object({
   chatId: z.string(),
+  threadId: z.string().optional(),
   introMessageId: z.string(),
   sourceTaskId: z.string(),
 });

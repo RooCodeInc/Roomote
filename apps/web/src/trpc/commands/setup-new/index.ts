@@ -65,6 +65,7 @@ import {
   isConfiguredEnvValue,
   isExitedRunStatus,
   isRequiredComputeField,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
   normalizeDeploymentComputeConfig,
@@ -75,13 +76,16 @@ import {
   normalizeSetupNewState,
   presentSetupNewComputeProvisioning,
   resolveDerivedModalBaseImageRef,
+  resolveTeamsBotCredentialEnvVarNames,
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
+  type SetupComputeStatus,
   type SetupModelProviderId,
   type SetupProvisionableComputeProvider,
   type SourceControlProvider,
   type TaskModelSettings,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -97,6 +101,7 @@ import {
 import { areAllRepositoriesEmpty } from '@/lib/repositories';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   findMatchingSetupNewEnvironment,
@@ -123,6 +128,7 @@ import {
   savePersistedRuntimeComputeConfig,
 } from '../compute';
 import {
+  acquireComputeProvisioningLock,
   createPendingComputeProvisioning,
   prepareComputeProvisioningStart,
   runComputeProvisioning,
@@ -529,6 +535,76 @@ async function getOnboardingTaskState(taskId: string | null) {
   };
 }
 
+type SetupOnboardingComputeGate = {
+  waiting: boolean;
+  error: string | null;
+};
+
+function findAvailableSetupComputeProvider(
+  computeSetup: SetupComputeStatus,
+  provider: ComputeProvider,
+) {
+  if (computeSetup.excludedProviders?.includes(provider)) {
+    return undefined;
+  }
+
+  return computeSetup.providers.find(
+    (candidate) => candidate.provider === provider,
+  );
+}
+
+async function getSetupOnboardingComputeGate(
+  setupNewState: PersistedSetupNewState,
+  executor: DatabaseOrTransaction,
+): Promise<SetupOnboardingComputeGate> {
+  const provider = setupNewState.computeProvider;
+
+  if (!provider || !isSetupProvisionableComputeProvider(provider)) {
+    return { waiting: false, error: null };
+  }
+
+  const persistedEnvVarNames =
+    await getPersistedEnvironmentVariableNames(executor);
+  const providerStatus = buildSetupComputeStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    selectedProvider: provider,
+  }).providers.find((candidate) => candidate.provider === provider);
+
+  // A configured artifact means this is a non-blocking replacement. The old
+  // artifact remains active while provisioning publishes its successor.
+  if (providerStatus?.configSatisfied) {
+    return { waiting: false, error: null };
+  }
+
+  const provisioning = presentSetupNewComputeProvisioning(
+    getSetupNewComputeProvisioningState(setupNewState, provider),
+  );
+  const error =
+    provisioning?.status === 'failed'
+      ? `Sandbox provider provisioning failed: ${
+          provisioning.error ?? 'The worker artifact could not be prepared.'
+        } Retry provisioning in Settings → Sandboxes.`
+      : null;
+
+  return { waiting: true, error };
+}
+
+function enqueueSetupOnboardingTask(
+  input: Parameters<typeof enqueueTask>[0],
+  computeGate: SetupOnboardingComputeGate,
+) {
+  if (!computeGate.waiting) {
+    return enqueueTask(input);
+  }
+
+  return enqueueTask(input, {
+    enqueue: false,
+    initialTaskPhase: WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
+    initialError: computeGate.error,
+  });
+}
+
 async function getPersistedTaskSuggestionRows(suggestionIds?: string[]) {
   if (suggestionIds && suggestionIds.length === 0) {
     return [];
@@ -912,11 +988,7 @@ export async function launchQueuedSetupTasksIfReady({
       ? {
           communicationProvider: nonSlackChatHandoffProvider,
           communicationChannelId: chatHandoffChannelId,
-          // Telegram treats communicationThreadId as a forum-topic
-          // message_thread_id, which the private primary chat does not have,
-          // so only Teams threads starter-task replies under the kickoff
-          // message.
-          ...(nonSlackChatHandoffProvider === 'teams' && chatHandoffThreadId
+          ...(chatHandoffThreadId
             ? { communicationThreadId: chatHandoffThreadId }
             : {}),
           ...(chatHandoffServiceUrl
@@ -1177,6 +1249,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeModelConfig,
     persistedRuntimeComputeConfig,
     envVarNames,
+    nonSecretAuthEnvValues,
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
@@ -1186,6 +1259,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeModelConfig(),
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
@@ -1271,6 +1345,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const authSetup = buildSetupAuthStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretAuthEnvValues,
     selectedProvider: setupNewState.authProvider,
   });
   const modelSetup = buildSetupModelStatus({
@@ -1296,6 +1371,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     ),
     daytonaSnapshotBuild: presentSetupNewComputeProvisioning(
       setupNewState.daytonaSnapshotBuild,
+    ),
+    blaxelImageBuild: presentSetupNewComputeProvisioning(
+      setupNewState.blaxelImageBuild,
     ),
   };
 
@@ -1473,8 +1551,9 @@ export async function saveSetupNewComputeProviderChoiceCommand(
       persistedComputeConfig: persistedRuntimeComputeConfig,
       selectedProvider: input.provider,
     });
-    const providerStatus = computeSetup.providers.find(
-      (candidate) => candidate.provider === input.provider,
+    const providerStatus = findAvailableSetupComputeProvider(
+      computeSetup,
+      input.provider,
     );
 
     if (!providerStatus) {
@@ -1487,6 +1566,7 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     const runtimeComputeConfig = hasCredentialFields
       ? persistedRuntimeComputeConfig
       : normalizeDeploymentComputeConfig({
+          ...persistedRuntimeComputeConfig,
           defaultProvider: input.provider,
         });
 
@@ -1537,8 +1617,6 @@ export async function saveSetupNewComputeConfigCommand(
         templateRef: string;
       } | null = null;
 
-      await purgeSavedDeploymentWorkerImage(tx);
-
       const [
         currentState,
         persistedRuntimeComputeConfig,
@@ -1566,13 +1644,20 @@ export async function saveSetupNewComputeConfigCommand(
         persistedComputeConfig: persistedRuntimeComputeConfig,
         selectedProvider: input.provider,
       });
-      const providerStatus = computeSetup.providers.find(
-        (candidate) => candidate.provider === input.provider,
+      const providerStatus = findAvailableSetupComputeProvider(
+        computeSetup,
+        input.provider,
       );
 
       if (!providerStatus) {
         throw new Error('Selected sandbox provider is unavailable.');
       }
+
+      if (isSetupProvisionableComputeProvider(input.provider)) {
+        await acquireComputeProvisioningLock(input.provider, tx);
+      }
+
+      await purgeSavedDeploymentWorkerImage(tx);
 
       // Derive MODAL_BASE_IMAGE_REF when not env-provided or already saved.
       // Form submissions are ignored (deployment-managed like E2B/Daytona
@@ -1887,15 +1972,40 @@ async function saveSetupAuthConfig(input: {
       ];
     });
 
+    const hasConfiguredAuthEnvVar = (name: string) =>
+      Boolean(process.env[name]?.trim()) ||
+      persistedEnvVarNames.includes(name) ||
+      Boolean(input.values?.[name]?.trim());
+
+    const microsoftTeamsBotResolution =
+      input.provider === 'microsoft'
+        ? resolveTeamsBotCredentialEnvVarNames({
+            hasConfiguredEnvVar: hasConfiguredAuthEnvVar,
+          })
+        : null;
+
     const hasMissingRequiredValue = providerStatus.fields.some((field) => {
       const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
 
-      return (
-        field.required !== false &&
-        !field.runtimeSatisfied &&
-        !field.savedSatisfied &&
-        nextValue.length === 0
-      );
+      if (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      ) {
+        return false;
+      }
+
+      if (
+        microsoftTeamsBotResolution?.source === 'microsoft_auth' &&
+        microsoftTeamsBotResolution.fieldSourceEnvVarNames[
+          field.envVarName as keyof typeof microsoftTeamsBotResolution.fieldSourceEnvVarNames
+        ]
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     if (hasMissingRequiredValue) {
@@ -1976,7 +2086,10 @@ async function saveSourceControlConfig(input: {
 }) {
   // Provider-API validation happens before the transaction so the external
   // HTTP round-trip never holds a pooled DB connection open.
-  await assertValidSourceControlConfigInput(input);
+  await assertValidSourceControlConfigInput({
+    ...input,
+    allowIncompleteDelegated: true,
+  });
 
   return db.transaction(async (tx) => {
     const currentState = await getPersistedSetupNewState(tx);
@@ -2036,10 +2149,12 @@ export async function getSetupBootstrapStatusCommand(input?: {
     };
   }
 
-  const [setupNewState, persistedEnvVarNames] = await Promise.all([
-    getPersistedSetupNewState(),
-    getPersistedEnvironmentVariableNames(),
-  ]);
+  const [setupNewState, persistedEnvVarNames, nonSecretAuthEnvValues] =
+    await Promise.all([
+      getPersistedSetupNewState(),
+      getPersistedEnvironmentVariableNames(),
+      getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    ]);
 
   return {
     setupOpen: bootstrapState.setupOpen,
@@ -2048,6 +2163,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
     authSetup: buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
       selectedProvider: setupNewState.authProvider,
     }),
   };
@@ -2166,6 +2282,22 @@ export async function startSetupNewOnboardingTaskCommand(
       };
     }
 
+    if (currentState.computeProvider) {
+      const persistedRuntimeComputeConfig =
+        await getPersistedRuntimeComputeConfig(tx);
+      const computeSetup = buildSetupComputeStatus({
+        runtimeEnv: process.env,
+        persistedComputeConfig: persistedRuntimeComputeConfig,
+        selectedProvider: currentState.computeProvider,
+      });
+
+      if (computeSetup.selectedProvider !== currentState.computeProvider) {
+        throw new Error(
+          'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
+        );
+      }
+    }
+
     const { normalizedRepositoryIds, selectedRepositories } =
       await resolveSelectedRepositories(currentState.selectedRepositoryIds);
     await assertHasCommittedRepositorySelection(normalizedRepositoryIds);
@@ -2176,6 +2308,9 @@ export async function startSetupNewOnboardingTaskCommand(
 
     const selectedRepositoryFullNames = selectedRepositories.map(
       (repository) => repository.fullName,
+    );
+    const onboardingTaskTitle = buildSetupEnvironmentTaskTitle(
+      selectedRepositoryFullNames,
     );
     const workspacePayload = buildSetupNewWorkspacePayload(
       selectedRepositoryFullNames,
@@ -2199,6 +2334,8 @@ export async function startSetupNewOnboardingTaskCommand(
       throw new Error(modelSelection.error);
     }
 
+    const computeGate = await getSetupOnboardingComputeGate(currentState, tx);
+
     const handoffTarget = await resolveSetupSlackHandoffTarget(
       {
         userId,
@@ -2218,13 +2355,30 @@ export async function startSetupNewOnboardingTaskCommand(
         const kickoffMessage = buildSetupKickoffText();
         let kickoffMessageId: string | null = null;
         let kickoffChannelId: string | null = null;
+        let kickoffThreadId: string | null = null;
 
         if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
             botToken: fallbackTarget.botToken,
           });
+          try {
+            const { hasTopicsEnabled } = await telegram.getBotInfo();
+            if (hasTopicsEnabled) {
+              const topic = await telegram.createForumTopic({
+                channelId: fallbackTarget.chatId,
+                name: 'Set up Roomote',
+              });
+              kickoffThreadId = topic.messageThreadId;
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Could not create a Telegram topic for the setup task; falling back to the primary chat.',
+              error,
+            );
+          }
           const posted = await telegram.postMessage({
             channelId: fallbackTarget.chatId,
+            ...(kickoffThreadId ? { threadId: kickoffThreadId } : {}),
             text: kickoffMessage,
             textFormat: 'markdown',
           });
@@ -2268,41 +2422,51 @@ export async function startSetupNewOnboardingTaskCommand(
 
         if (kickoffMessageId && kickoffChannelId) {
           const startedAt = new Date().toISOString();
-          const launchResult = await enqueueTask({
-            task: {
-              ...(modelSelection.harness
-                ? { harness: modelSelection.harness }
-                : {}),
-              type: TaskPayloadKind.StandardTask,
-              payload: {
-                ...workspacePayload,
-                ...(setupSourceControlProvider
-                  ? { sourceControlProvider: setupSourceControlProvider }
+          const launchResult = await enqueueSetupOnboardingTask(
+            {
+              title: onboardingTaskTitle,
+              task: {
+                ...(modelSelection.harness
+                  ? { harness: modelSelection.harness }
                   : {}),
-                description: prompt,
-                visibleInTranscript: false,
-                communicationProvider: fallbackTarget.provider,
-                communicationChannelId: kickoffChannelId,
-                communicationMessageId: kickoffMessageId,
-                ...(fallbackTarget.provider === 'teams'
-                  ? {
-                      communicationThreadId: kickoffMessageId,
-                      communicationServiceUrl: fallbackTarget.serviceUrl,
-                    }
-                  : {}),
-                ...(modelSelection.harnessModelOverrides
-                  ? {
-                      harnessModelOverrides:
-                        modelSelection.harnessModelOverrides,
-                    }
-                  : {}),
+                type: TaskPayloadKind.StandardTask,
+                payload: {
+                  ...workspacePayload,
+                  ...(setupSourceControlProvider
+                    ? { sourceControlProvider: setupSourceControlProvider }
+                    : {}),
+                  description: prompt,
+                  visibleInTranscript: false,
+                  communicationProvider: fallbackTarget.provider,
+                  communicationChannelId: kickoffChannelId,
+                  communicationMessageId: kickoffMessageId,
+                  ...(kickoffThreadId
+                    ? {
+                        communicationThreadId: kickoffThreadId,
+                        telegramTaskTopic: true,
+                      }
+                    : {}),
+                  ...(fallbackTarget.provider === 'teams'
+                    ? {
+                        communicationThreadId: kickoffMessageId,
+                        communicationServiceUrl: fallbackTarget.serviceUrl,
+                      }
+                    : {}),
+                  ...(modelSelection.harnessModelOverrides
+                    ? {
+                        harnessModelOverrides:
+                          modelSelection.harnessModelOverrides,
+                      }
+                    : {}),
+                },
               },
+              initiator: { kind: 'user', userId },
+              workflow: 'setup_onboarding',
+              surface: 'web',
+              trigger: 'manual',
             },
-            initiator: { kind: 'user', userId },
-            workflow: 'setup_onboarding',
-            surface: 'web',
-            trigger: 'manual',
-          });
+            computeGate,
+          );
 
           await savePersistedSetupNewState(
             normalizeSetupNewState({
@@ -2316,7 +2480,9 @@ export async function startSetupNewOnboardingTaskCommand(
               slackThreadTs: null,
               chatHandoffProvider: fallbackTarget.provider,
               chatHandoffChannelId: kickoffChannelId,
-              chatHandoffThreadId: kickoffMessageId,
+              chatHandoffThreadId:
+                kickoffThreadId ??
+                (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
               chatHandoffServiceUrl:
                 fallbackTarget.provider === 'teams'
                   ? fallbackTarget.serviceUrl
@@ -2335,31 +2501,35 @@ export async function startSetupNewOnboardingTaskCommand(
       }
 
       const startedAt = new Date().toISOString();
-      const launchResult = await enqueueTask({
-        task: {
-          ...(modelSelection.harness
-            ? { harness: modelSelection.harness }
-            : {}),
-          type: TaskPayloadKind.StandardTask,
-          payload: {
-            ...workspacePayload,
-            ...(setupSourceControlProvider
-              ? { sourceControlProvider: setupSourceControlProvider }
+      const launchResult = await enqueueSetupOnboardingTask(
+        {
+          title: onboardingTaskTitle,
+          task: {
+            ...(modelSelection.harness
+              ? { harness: modelSelection.harness }
               : {}),
-            description: prompt,
-            visibleInTranscript: false,
-            ...(modelSelection.harnessModelOverrides
-              ? {
-                  harnessModelOverrides: modelSelection.harnessModelOverrides,
-                }
-              : {}),
+            type: TaskPayloadKind.StandardTask,
+            payload: {
+              ...workspacePayload,
+              ...(setupSourceControlProvider
+                ? { sourceControlProvider: setupSourceControlProvider }
+                : {}),
+              description: prompt,
+              visibleInTranscript: false,
+              ...(modelSelection.harnessModelOverrides
+                ? {
+                    harnessModelOverrides: modelSelection.harnessModelOverrides,
+                  }
+                : {}),
+            },
           },
+          initiator: { kind: 'user', userId },
+          workflow: 'setup_onboarding',
+          surface: 'web',
+          trigger: 'manual',
         },
-        initiator: { kind: 'user', userId },
-        workflow: 'setup_onboarding',
-        surface: 'web',
-        trigger: 'manual',
-      });
+        computeGate,
+      );
 
       await savePersistedSetupNewState(
         normalizeSetupNewState({
@@ -2412,40 +2582,44 @@ export async function startSetupNewOnboardingTaskCommand(
     let launchResult: Awaited<ReturnType<typeof enqueueTask>>;
 
     try {
-      launchResult = await enqueueTask({
-        task: {
-          ...(modelSelection.harness
-            ? { harness: modelSelection.harness }
-            : {}),
-          type: TaskPayloadKind.SlackAppMention,
-          payload: {
-            ...workspacePayload,
-            ...(setupSourceControlProvider
-              ? { sourceControlProvider: setupSourceControlProvider }
+      launchResult = await enqueueSetupOnboardingTask(
+        {
+          title: onboardingTaskTitle,
+          task: {
+            ...(modelSelection.harness
+              ? { harness: modelSelection.harness }
               : {}),
-            channel: slackChannel,
-            user: handoffTarget.slackUserId,
-            text: prompt,
-            ts: slackThreadTs,
-            thread_ts: slackThreadTs,
-            webPath: '/setup',
-            visibleInTranscript: false,
-            ...(modelSelection.harnessModelOverrides
-              ? {
-                  harnessModelOverrides: modelSelection.harnessModelOverrides,
-                }
-              : {}),
+            type: TaskPayloadKind.SlackAppMention,
+            payload: {
+              ...workspacePayload,
+              ...(setupSourceControlProvider
+                ? { sourceControlProvider: setupSourceControlProvider }
+                : {}),
+              channel: slackChannel,
+              user: handoffTarget.slackUserId,
+              text: prompt,
+              ts: slackThreadTs,
+              thread_ts: slackThreadTs,
+              webPath: '/setup',
+              visibleInTranscript: false,
+              ...(modelSelection.harnessModelOverrides
+                ? {
+                    harnessModelOverrides: modelSelection.harnessModelOverrides,
+                  }
+                : {}),
+            },
+          },
+          initiator: { kind: 'user', userId },
+          workflow: 'setup_onboarding',
+          surface: 'slack',
+          trigger: 'manual',
+          channels: {
+            slackChannelId: slackChannel,
+            slackThreadTs,
           },
         },
-        initiator: { kind: 'user', userId },
-        workflow: 'setup_onboarding',
-        surface: 'slack',
-        trigger: 'manual',
-        channels: {
-          slackChannelId: slackChannel,
-          slackThreadTs,
-        },
-      });
+        computeGate,
+      );
     } catch (error) {
       await slack.deleteMessage({ channel: slackChannel, ts: slackThreadTs });
       throw error;

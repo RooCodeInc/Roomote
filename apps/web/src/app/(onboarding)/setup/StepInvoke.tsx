@@ -3,15 +3,26 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { PRODUCT_NAME } from '@roomote/types';
+import {
+  PRODUCT_NAME,
+  type SetupNewComputeProvisioningState,
+} from '@roomote/types';
 import type { SourceControlProvider } from '@roomote/types';
-import { Button, Loader2, ArrowRight, Checkbox } from '@/components/system';
+import {
+  Button,
+  Alert,
+  AlertCircle,
+  AlertDescription,
+  Loader2,
+  ArrowRight,
+  Checkbox,
+  CornerDownRight,
+} from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
-import { CornerDownRight } from 'lucide-react';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
@@ -19,26 +30,40 @@ type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
 
 export function StepInvoke({
   onTryItOut,
+  onboardingTaskId,
   linkSuggestedTasks = false,
   communicationProviders = [],
   sourceControlProviders = [],
   includeLinear = false,
+  computeProvisioning = null,
+  onRetryComputeProvisioning,
 }: {
   onTryItOut?: () => void;
+  onboardingTaskId?: string | null;
   linkSuggestedTasks?: boolean;
   communicationProviders?: readonly CommunicationProviderId[];
   sourceControlProviders?: readonly SourceControlProvider[];
   includeLinear?: boolean;
+  computeProvisioning?: SetupNewComputeProvisioningState | null;
+  onRetryComputeProvisioning?: () => void;
 } = {}) {
   const router = useRouter();
   const trpc = useTRPC();
   const queryClient = useQueryClient();
-  const environments = useEnvironments();
+  const environments = useEnvironments({ enabled: !onboardingTaskId });
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
+  const effectiveCommunicationProviders = [
+    ...communicationProviders,
+    ...(commsStatus.data?.providers?.some(
+      (provider) => provider.id === 'telegram' && provider.setupSatisfied,
+    ) && !communicationProviders.includes('telegram')
+      ? (['telegram'] as const)
+      : []),
+  ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
   const methods = buildInvokeMethods({
-    communicationProviders,
+    communicationProviders: effectiveCommunicationProviders,
     sourceControlProviders,
     includeLinear,
     invocationIdentities: commsStatus.data?.invocationIdentities,
@@ -55,6 +80,13 @@ export function StepInvoke({
         queryClient.setQueryData(trpc.onboarding.status.queryKey(), (old) =>
           old ? { ...old, onboardingCompletedAt: new Date() } : old,
         );
+
+        // When an onboarding task is already known (background env setup),
+        // leave for that task before any await. Yielding first lets /setup's
+        // completed-setup guard race and flash Home before the task page.
+        if (onboardingTaskId) {
+          router.replace(`/task/${onboardingTaskId}`);
+        }
 
         // setup.complete also marks onboarding as completed server-side.
         // Invalidate both route guards so the next page load cannot reuse
@@ -79,6 +111,22 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
+        if (onboardingTaskId) {
+          return;
+        }
+
+        const refreshedSetupNewStatus = await queryClient.fetchQuery(
+          trpc.setupNew.status.queryOptions(undefined, { staleTime: 0 }),
+        );
+        const targetTaskId =
+          refreshedSetupNewStatus.setupNewState.onboardingTaskId ??
+          onboardingTaskId;
+
+        if (targetTaskId) {
+          router.replace(`/task/${targetTaskId}`);
+          return;
+        }
+
         const envs = environments.data;
         const params = new URLSearchParams();
         const targetEnv = envs?.[0];
@@ -100,7 +148,38 @@ export function StepInvoke({
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={INVOKE_STEP.title} />
-      <p className="mb-4">How to work with {PRODUCT_NAME}:</p>
+      <p className="mb-4">
+        {onboardingTaskId
+          ? `Once your environment is ready, you can work with ${PRODUCT_NAME} in these ways:`
+          : `How to work with ${PRODUCT_NAME}:`}
+      </p>
+      {computeProvisioning?.status === 'building' ? (
+        <p className="text-sm text-muted-foreground">
+          The sandbox provider is still being prepared. Your environment task is
+          queued and will start automatically when it is ready.
+        </p>
+      ) : null}
+      {computeProvisioning?.status === 'failed' ? (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>
+            <p>
+              Sandbox provider provisioning failed:{' '}
+              {computeProvisioning.error ??
+                'The worker artifact could not be prepared.'}{' '}
+              {onRetryComputeProvisioning ? (
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-4"
+                  onClick={onRetryComputeProvisioning}
+                >
+                  Retry provisioning
+                </button>
+              ) : null}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <div className="space-y-5">
         {methods.map((method) => (
           <div key={method.title} className="flex items-start gap-3 group">
@@ -154,7 +233,7 @@ export function StepInvoke({
           {completeSetup.isPending && (
             <Loader2 className="animate-spin size-4 mr-2" />
           )}
-          Let&apos;s go
+          {onboardingTaskId ? 'Finish environment setup' : "Let's go"}
           <ArrowRight />
         </Button>
       </div>

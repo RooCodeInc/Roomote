@@ -41,6 +41,13 @@ DAYTONA_TARGET=...
 Use `DAYTONA_API_URL` for custom Daytona endpoints. Use `DAYTONA_TARGET` when
 your account or deployment needs a specific target or region.
 
+Roomote's Daytona worker snapshot includes Docker and Docker Compose, so
+environments can run
+[Docker projects](/environments/definition#docker-projects). Daytona
+runs these through Docker-in-Docker inside the task sandbox. Container builds
+and services share the sandbox's resources; allocate at least 2 vCPU and 4 GiB
+of memory for typical multi-container projects.
+
 ## Verify setup
 
 1. save `DAYTONA_API_KEY`
@@ -53,3 +60,5 @@ your account or deployment needs a specific target or region.
 
 - **The provider starts in the wrong region or target.** Set
   `DAYTONA_TARGET` to the intended target.
+- **Container startup is slow or runs out of memory.** Increase the Daytona
+  sandbox resources; Docker-in-Docker adds daemon and image-build overhead.

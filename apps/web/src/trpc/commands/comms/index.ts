@@ -4,6 +4,7 @@ import {
   invalidateTeamsBotRuntimeCredentialsCache,
   invalidateSlackSigningSecretCache,
   resolveInvocationIdentities,
+  normalizeTelegramBotToken,
   db,
   environmentVariables,
   and,
@@ -11,12 +12,14 @@ import {
   isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
+import { createTelegramCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
 import {
   buildSetupAuthStatus,
   getSetupAuthProvider,
+  NON_SECRET_AUTH_ENV_VAR_NAMES,
+  resolveTeamsBotCredentialEnvVarNames,
   SETUP_AUTH_PROVIDER_IDS,
   type SetupAuthProviderId,
   type SetupAuthStatus,
@@ -28,6 +31,7 @@ import type { UserAuthSuccess } from '@/types';
 import {
   assertAdmin,
   getPersistedEnvironmentVariableNames,
+  getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 
@@ -47,6 +51,7 @@ export type CommsProviderStatus = Omit<
 > & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
+  telegramBotUsername?: string | null;
 };
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
@@ -59,6 +64,8 @@ type TelegramWebhookStatus = {
   registeredUrl: string | null;
   expectedUrl: string;
   lastErrorMessage: string | null;
+  pendingUpdateCount: number;
+  lastErrorAtMs: number | null;
 };
 
 const TELEGRAM_WEBHOOK_REQUIRED_UPDATES = ['message', 'callback_query'];
@@ -78,18 +85,70 @@ function createTelegramBotApiFetch(): typeof fetch {
 
 const TELEGRAM_WEBHOOK_ERROR_RECENCY_MS = 60 * 60 * 1000;
 
-async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
+/** Map Bot API / network failures into admin-facing webhook check copy. */
+export function classifyTelegramWebhookCheckError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+  const errorName = error instanceof Error ? error.name : '';
 
-  if (!botToken) {
+  if (
+    errorName === 'TimeoutError' ||
+    errorName === 'AbortError' ||
+    lower.includes('aborted') ||
+    lower.includes('timeout') ||
+    lower.includes('timed out')
+  ) {
+    return 'Could not reach the Telegram Bot API to check the webhook (timed out).';
+  }
+
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('econnrefused') ||
+    lower.includes('enotfound') ||
+    lower.includes('econnreset') ||
+    lower.includes('network') ||
+    lower.includes('certificate') ||
+    lower.includes('getaddrinfo')
+  ) {
+    return 'Could not reach the Telegram Bot API to check the webhook.';
+  }
+
+  if (
+    lower.includes('unauthorized') ||
+    lower.includes('invalid token') ||
+    lower.includes('(401)') ||
+    // Malformed tokens often get HTTP 404 Not Found from Telegram.
+    lower.includes('(404)') ||
+    /(?:^|:\s*)not found\.?$/i.test(message.trim())
+  ) {
+    return 'Telegram rejected the bot token. Check the token from BotFather and save again.';
+  }
+
+  const telegramApiMatch = message.match(
+    /^Telegram getWebhookInfo failed(?:\s*\(\d+\))?:\s*(.+)$/i,
+  );
+  if (telegramApiMatch?.[1]) {
+    return `Telegram API error while checking the webhook: ${telegramApiMatch[1]}`;
+  }
+
+  if (message.trim().length > 0) {
+    return `Could not check the Telegram webhook: ${message}`;
+  }
+
+  return 'Could not reach the Telegram Bot API to check the webhook.';
+}
+
+async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null> {
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials({
+      fetch: createTelegramBotApiFetch(),
+    });
+
+  if (!provider) {
     return null;
   }
 
   const expectedUrl = buildExpectedTelegramWebhookUrl();
-  const provider = new TelegramCommunicationProvider({
-    botToken,
-    fetch: createTelegramBotApiFetch(),
-  });
 
   try {
     const rawInfo = await provider.getWebhookInfo();
@@ -109,6 +168,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
         registeredUrl: null,
         expectedUrl,
         lastErrorMessage: info.lastErrorMessage,
+        pendingUpdateCount: info.pendingUpdateCount,
+        lastErrorAtMs: info.lastErrorAtMs,
       };
     }
 
@@ -118,6 +179,8 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
         registeredUrl: info.url,
         expectedUrl,
         lastErrorMessage: info.lastErrorMessage,
+        pendingUpdateCount: info.pendingUpdateCount,
+        lastErrorAtMs: info.lastErrorAtMs,
       };
     }
 
@@ -130,13 +193,17 @@ async function getTelegramWebhookStatus(): Promise<TelegramWebhookStatus | null>
       registeredUrl: info.url,
       expectedUrl,
       lastErrorMessage: info.lastErrorMessage,
+      pendingUpdateCount: info.pendingUpdateCount,
+      lastErrorAtMs: info.lastErrorAtMs,
     };
-  } catch {
+  } catch (error) {
     return {
       status: 'error',
       registeredUrl: null,
       expectedUrl,
-      lastErrorMessage: null,
+      lastErrorMessage: classifyTelegramWebhookCheckError(error),
+      pendingUpdateCount: 0,
+      lastErrorAtMs: null,
     };
   }
 }
@@ -149,33 +216,44 @@ type TelegramWebhookRegistrationResult = {
 async function registerTelegramWebhookBestEffort(): Promise<TelegramWebhookRegistrationResult> {
   invalidateTelegramRuntimeCredentialsCache();
 
-  const { botToken, webhookSecret } = await resolveTelegramRuntimeCredentials();
+  const { webhookSecret } = await resolveTelegramRuntimeCredentials();
+  const provider =
+    await createTelegramCommunicationProviderFromRuntimeCredentials({
+      fetch: createTelegramBotApiFetch(),
+    });
 
-  if (!botToken || !webhookSecret) {
+  if (!provider || !webhookSecret) {
     return {
       registered: false,
       error: 'Telegram bot token or webhook secret is not configured.',
     };
   }
 
-  const provider = new TelegramCommunicationProvider({
-    botToken,
-    fetch: createTelegramBotApiFetch(),
-  });
-
   try {
-    await provider.registerWebhook({
-      url: buildExpectedTelegramWebhookUrl(),
-      secretToken: webhookSecret,
-    });
+    await Promise.all([
+      provider.registerWebhook({
+        url: buildExpectedTelegramWebhookUrl(),
+        secretToken: webhookSecret,
+      }),
+      provider.registerCommands(),
+    ]);
 
     return { registered: true, error: null };
   } catch (error) {
     return {
       registered: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: classifyTelegramWebhookCheckError(error),
     };
   }
+}
+
+export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const result = await registerTelegramWebhookBestEffort();
+  if (!result.registered) {
+    throw new Error(result.error ?? 'Could not repair Telegram connection.');
+  }
+  return { repaired: true };
 }
 
 function withTelegramProvider(
@@ -188,6 +266,9 @@ function withTelegramProvider(
 ): CommsStatus {
   const { persistedEnvVarNames, telegramWebhook, invocationIdentities } =
     options;
+  const telegramBotUsername =
+    invocationIdentities.find((identity) => identity.provider === 'telegram')
+      ?.displayName ?? null;
   const isSaved = (name: string) => persistedEnvVarNames.includes(name);
   const isRuntime = (name: string) => Boolean(process.env[name]?.trim());
   const isSatisfied = (name: string) => isRuntime(name) || isSaved(name);
@@ -196,6 +277,7 @@ function withTelegramProvider(
     label: string;
     secret?: boolean;
     required?: boolean;
+    savedValue?: string | null;
   }) => ({
     envVarName: input.envVarName,
     acceptedEnvVarNames: [input.envVarName],
@@ -204,6 +286,7 @@ function withTelegramProvider(
     ...(input.required === false ? { required: false as const } : {}),
     runtimeSatisfied: isRuntime(input.envVarName),
     savedSatisfied: isSaved(input.envVarName),
+    savedValue: input.secret ? null : (input.savedValue ?? null),
     satisfiedByEnvVarName: isSatisfied(input.envVarName)
       ? input.envVarName
       : null,
@@ -227,23 +310,14 @@ function withTelegramProvider(
             envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
             label: 'Telegram Webhook Secret',
             secret: true,
-          }),
-          buildField({
-            envVarName: 'R_TELEGRAM_BOT_USERNAME',
-            label: 'Telegram Bot Username',
             required: false,
           }),
         ],
-        runtimeSatisfied:
-          isRuntime('R_TELEGRAM_BOT_TOKEN') &&
-          isRuntime('R_TELEGRAM_WEBHOOK_SECRET'),
-        savedSatisfied:
-          isSaved('R_TELEGRAM_BOT_TOKEN') &&
-          isSaved('R_TELEGRAM_WEBHOOK_SECRET'),
-        setupSatisfied:
-          isSatisfied('R_TELEGRAM_BOT_TOKEN') &&
-          isSatisfied('R_TELEGRAM_WEBHOOK_SECRET'),
+        runtimeSatisfied: isRuntime('R_TELEGRAM_BOT_TOKEN'),
+        savedSatisfied: isSaved('R_TELEGRAM_BOT_TOKEN'),
+        setupSatisfied: isSatisfied('R_TELEGRAM_BOT_TOKEN'),
         telegramWebhook,
+        telegramBotUsername,
       },
     ],
   };
@@ -254,17 +328,23 @@ export async function getCommsStatusCommand(
 ): Promise<CommsStatus> {
   assertAdmin(auth);
 
-  const [persistedEnvVarNames, telegramWebhook, invocationIdentities] =
-    await Promise.all([
-      getPersistedEnvironmentVariableNames(),
-      getTelegramWebhookStatus(),
-      resolveInvocationIdentities(),
-    ]);
+  const [
+    persistedEnvVarNames,
+    nonSecretAuthEnvValues,
+    telegramWebhook,
+    invocationIdentities,
+  ] = await Promise.all([
+    getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    getTelegramWebhookStatus(),
+    resolveInvocationIdentities(),
+  ]);
 
   return withTelegramProvider(
     buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
+      persistedEnvVarValues: nonSecretAuthEnvValues,
     }),
     {
       persistedEnvVarNames,
@@ -301,12 +381,6 @@ export async function saveCommsAuthConfigCommand(
               acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
               label: 'Telegram Webhook Secret',
               secret: true,
-              required: false,
-            },
-            {
-              envVarName: 'R_TELEGRAM_BOT_USERNAME',
-              acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
-              label: 'Telegram Bot Username',
               required: false,
             },
           ],
@@ -374,7 +448,11 @@ export async function saveCommsAuthConfigCommand(
     }
 
     const valuesToSave = providerStatus.fields.flatMap((field) => {
-      const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
+      const rawValue = input.values?.[field.envVarName] ?? '';
+      const nextValue =
+        field.envVarName === 'R_TELEGRAM_BOT_TOKEN'
+          ? (normalizeTelegramBotToken(rawValue) ?? '')
+          : rawValue.trim();
 
       if (!nextValue) {
         return [];
@@ -404,15 +482,42 @@ export async function saveCommsAuthConfigCommand(
       }
     }
 
+    const hasConfiguredAuthEnvVar = (name: string) =>
+      Boolean(process.env[name]?.trim()) ||
+      persistedEnvVarNames.includes(name) ||
+      Boolean(input.values?.[name]?.trim());
+
+    const microsoftTeamsBotResolution =
+      input.provider === 'microsoft'
+        ? resolveTeamsBotCredentialEnvVarNames({
+            hasConfiguredEnvVar: hasConfiguredAuthEnvVar,
+          })
+        : null;
+
     const hasMissingRequiredValue = providerStatus.fields.some((field) => {
       const nextValue = input.values?.[field.envVarName]?.trim() ?? '';
 
-      return (
-        field.required !== false &&
-        !field.runtimeSatisfied &&
-        !field.savedSatisfied &&
-        nextValue.length === 0
-      );
+      if (
+        field.required === false ||
+        field.runtimeSatisfied ||
+        field.savedSatisfied ||
+        nextValue.length > 0
+      ) {
+        return false;
+      }
+
+      // Microsoft single-app setup can satisfy Teams bot fields from Microsoft
+      // sign-in values without writing explicit R_TEAMS_BOT_* snapshots.
+      if (
+        microsoftTeamsBotResolution?.source === 'microsoft_auth' &&
+        microsoftTeamsBotResolution.fieldSourceEnvVarNames[
+          field.envVarName as keyof typeof microsoftTeamsBotResolution.fieldSourceEnvVarNames
+        ]
+      ) {
+        return false;
+      }
+
+      return true;
     });
 
     if (hasMissingRequiredValue) {
@@ -460,6 +565,7 @@ export async function clearCommsAuthConfigCommand(
           fields: [
             { acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'] },
             { acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'] },
+            // Clean up the retired field for existing installations.
             { acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'] },
           ],
         }

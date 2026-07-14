@@ -22,6 +22,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { NumberedStep } from './NumberedStep';
 import { ProviderSetupInstructions } from './ProviderSetupInstructions';
 import { getProviderSetupCopy } from './providerSetupCopy';
 
@@ -43,22 +44,36 @@ const MASKED_VALUE = '•••••••••••••••••••�
 
 const MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
   ...Object.keys(MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES),
+  'R_TEAMS_BOT_NAME',
   'R_TEAMS_BOT_TOKEN_ENDPOINT',
   'R_TEAMS_BOT_OAUTH_SCOPE',
 ]);
 
-export function getSetupVisibleFields(provider: ProviderStatus | null) {
+const TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES = new Set([
+  'R_TELEGRAM_WEBHOOK_SECRET',
+]);
+
+export function getSetupVisibleFields(
+  provider: ProviderStatus | null,
+  options: { showMicrosoftAdvancedConfig?: boolean } = {},
+) {
   if (!provider) {
     return [];
   }
 
-  if (provider.id !== 'microsoft') {
-    return provider.fields;
+  if (provider.id === 'microsoft' && !options.showMicrosoftAdvancedConfig) {
+    return provider.fields.filter(
+      (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
   }
 
-  return provider.fields.filter(
-    (field) => !MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
-  );
+  if (provider.id === 'telegram') {
+    return provider.fields.filter(
+      (field) => !TELEGRAM_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+    );
+  }
+
+  return provider.fields;
 }
 
 export function getSetupEffectiveFieldValue({
@@ -70,10 +85,17 @@ export function getSetupEffectiveFieldValue({
   field: ProviderFieldStatus;
   values: Record<string, string>;
 }) {
-  const ownValue = values[field.envVarName] ?? '';
+  const ownValue = values[field.envVarName];
 
-  if (ownValue.length > 0) {
-    return ownValue;
+  if (
+    (ownValue?.length ?? 0) > 0 ||
+    (ownValue !== undefined && field.defaultValue !== undefined)
+  ) {
+    return ownValue ?? '';
+  }
+
+  if (field.secret !== true && field.savedValue?.trim()) {
+    return field.savedValue;
   }
 
   if (
@@ -89,15 +111,19 @@ export function getSetupEffectiveFieldValue({
       field.envVarName as keyof typeof MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES
     ];
 
-  return sourceEnvVarName ? (values[sourceEnvVarName] ?? '') : '';
+  return sourceEnvVarName
+    ? (values[sourceEnvVarName] ?? field.defaultValue ?? '')
+    : (field.defaultValue ?? '');
 }
 
 export function getSetupSubmitValues({
   provider,
   values,
+  showMicrosoftAdvancedConfig,
 }: {
   provider: ProviderStatus | null;
   values: Record<string, string>;
+  showMicrosoftAdvancedConfig?: boolean;
 }) {
   if (!provider) {
     return values;
@@ -105,7 +131,9 @@ export function getSetupSubmitValues({
 
   const nextValues = { ...values };
 
-  for (const field of getSetupVisibleFields(provider)) {
+  for (const field of getSetupVisibleFields(provider, {
+    showMicrosoftAdvancedConfig,
+  })) {
     if (nextValues[field.envVarName]?.trim()) {
       continue;
     }
@@ -121,42 +149,11 @@ export function getSetupSubmitValues({
     }
   }
 
-  if (provider.id === 'microsoft') {
-    for (const [envVarName, sourceEnvVarName] of Object.entries(
-      MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
-    )) {
-      if (nextValues[envVarName]?.trim()) {
-        continue;
-      }
-
-      const copiedValue = values[sourceEnvVarName];
-
-      if (copiedValue?.trim()) {
-        nextValues[envVarName] = copiedValue;
-      }
-    }
-  }
+  // Do not materialize inferred Teams bot env vars from Microsoft single-app
+  // credentials. Runtime resolution already borrows Microsoft values, and
+  // writing snapshots here locks derived config so client-id updates drift.
 
   return nextValues;
-}
-
-function NumberedStep({
-  number,
-  children,
-  className,
-}: {
-  number: number;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`flex gap-2 items-start ${className ?? ''}`}>
-      <span className="rounded-full bg-foreground text-background font-bold size-8 inline-flex items-center justify-center shrink-0">
-        {number}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1">{children}</div>
-    </div>
-  );
 }
 
 function InstructionUrl({ heading, url }: { heading: string; url: string }) {
@@ -177,11 +174,9 @@ function InstructionUrlContent({
       <p className="font-semibold text-foreground text-sm w-45 shrink-0">
         {heading}
       </p>
-      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
+      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1 overflow-hidden justify-end">
         <BasicTooltip content={url}>
-          <span className="font-mono text-xs text-foreground truncate">
-            {url}
-          </span>
+          <span className="text-[0.8em] text-foreground truncate">{url}</span>
         </BasicTooltip>
         <CopyIconButton
           aria-label={`Copy ${heading}`}
@@ -220,7 +215,9 @@ function ProviderFields({
       {fields.map((field) => {
         const explicitValue = values[field.envVarName] ?? '';
         const value = getSetupEffectiveFieldValue({ provider, field, values });
+        const isSecretField = field.secret === true;
         const shouldShowSavedValueMask =
+          isSecretField &&
           !field.runtimeSatisfied &&
           field.savedSatisfied &&
           explicitValue.length === 0 &&
@@ -241,10 +238,10 @@ function ProviderFields({
             <div>
               <div className="flex items-center gap-2">
                 <Input
-                  secret={field.secret && !field.runtimeSatisfied}
+                  secret={isSecretField && !field.runtimeSatisfied}
                   className="font-mono"
                   value={
-                    field.runtimeSatisfied
+                    isSecretField && field.runtimeSatisfied
                       ? MASKED_VALUE
                       : shouldShowSavedValueMask
                         ? MASKED_VALUE
@@ -271,7 +268,9 @@ function ProviderFields({
                       );
                     }
                   }}
-                  placeholder={field.runtimeSatisfied ? '' : field.label}
+                  placeholder={
+                    isSecretField && field.runtimeSatisfied ? '' : field.label
+                  }
                   disabled={disabled || field.runtimeSatisfied}
                   data-1p-ignore
                 />
@@ -294,9 +293,11 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
   envVarsInfoNote?: React.ReactNode;
   onShowManualSlackValues: () => void;
+  onToggleMicrosoftAdvancedConfig?: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
   onClearedSavedValueChange: (envVarName: string, cleared: boolean) => void;
@@ -387,7 +388,13 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
 }
 
 function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
-  const fields = getSetupVisibleFields(props.provider);
+  const fields = getSetupVisibleFields(props.provider, {
+    showMicrosoftAdvancedConfig: props.showMicrosoftAdvancedConfig,
+  });
+  const baseFields = getSetupVisibleFields(props.provider);
+  const advancedFields = props.provider.fields.filter((field) =>
+    MICROSOFT_SETUP_HIDDEN_ENV_VAR_NAMES.has(field.envVarName),
+  );
   const providerSetupCopy = getProviderSetupCopy(props.provider.id);
   const webRedirectUri = `${props.publicOrigin}/api/auth/oauth2/callback/microsoft-entra-id`;
   const teamsWebhookUrl = `${props.publicOrigin}/api/webhooks/teams`;
@@ -422,35 +429,58 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
         text="Configure Microsoft Teams app"
       />
 
+      <p className="max-w-xl">
+        First, let&apos;s take a deep breath together – MS doesn&apos;t make
+        this easy. Second, you may need to ask an admin to do some of this for
+        you.
+      </p>
+
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">Create a Microsoft Entra app.</p>
         <div className="space-y-3 max-w-xl">
           <p className="text-sm text-muted-foreground">
-            In Azure App registrations, click New registration → give it a name
-            and the URI below → Register. Register one single-tenant app for
-            both Microsoft sign-in and the Teams bot. Add this Web redirect URI
-            under Authentication, then create a client secret.
-          </p>
-          <InstructionUrl heading="Web redirect URI" url={webRedirectUri} />
-        </div>
-        <div className="mt-2">
-          <Button variant="outline" size="sm">
+            In{' '}
             <a
               href={providerSetupCopy.creationHref}
               target="_blank"
+              className="text-foreground underline font-semibold"
               rel="noopener noreferrer"
             >
-              Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
-            </a>
-          </Button>
+              Azure App registrations{' '}
+              <ExternalLink className="inline size-3 -mt-1 ml-1" />
+            </a>{' '}
+            click New registration → give it a name and the URI below →
+            Register.
+          </p>
+          <InstructionUrl heading="Web redirect URI" url={webRedirectUri} />
         </div>
       </NumberedStep>
 
       <NumberedStep number={2}>
         <p className="font-semibold">
-          Enter the Microsoft app generated values.
+          Enter the Microsoft Entra app generated values.
         </p>
-        <ProviderFields fields={fields} {...props} />
+        <p className="text-sm text-muted-foreground">
+          Paste the values below. For the secret, you need to create a client
+          secret first.
+        </p>
+        <ProviderFields fields={baseFields} {...props} />
+        {advancedFields.length > 0 && props.onToggleMicrosoftAdvancedConfig ? (
+          <div className="pt-1">
+            <button
+              type="button"
+              className="text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground cursor-pointer"
+              onClick={props.onToggleMicrosoftAdvancedConfig}
+            >
+              {props.showMicrosoftAdvancedConfig
+                ? 'Hide advanced config'
+                : 'Show advanced config'}
+            </button>
+          </div>
+        ) : null}
+        {props.showMicrosoftAdvancedConfig ? (
+          <ProviderFields fields={advancedFields} {...props} />
+        ) : null}
         {props.surface === 'settings' ? (
           <SettingsEnvVarsInfoNote
             runtimeConfigured={props.provider.runtimeSatisfied}
@@ -463,7 +493,17 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
           <p className="font-semibold">Upload Roomote to Microsoft Teams.</p>
           <p className="text-sm text-muted-foreground">
             Download your pre-filled Teams app package (manifest + icons), go to
-            the Teams Developer Portal → Import App.
+            the{' '}
+            <a
+              href="https://dev.teams.microsoft.com/home"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline font-semibold"
+            >
+              Teams Developer Portal{' '}
+              <ExternalLink className="inline size-3 -mt-1 ml-1" />
+            </a>{' '}
+            → Import App (you may need to ask your admin to do that).
           </p>
           {teamsAppPackageAvailable && props.teamsAppPackageHref ? (
             <div className="flex items-center gap-2">
@@ -473,24 +513,12 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
                   Download Teams app package
                 </a>
               </Button>
-              <Button variant="outline" size="sm">
-                <a
-                  href="https://dev.teams.microsoft.com/home"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
-                </a>
-              </Button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" disabled>
                 <Download />
                 Download Teams app package
-              </Button>
-              <Button variant="outline" size="sm" disabled>
-                Go <ExternalLink className="inline size-3 -mt-1 ml-1" />
               </Button>
             </div>
           )}
@@ -513,6 +541,13 @@ function MicrosoftSetupExperience(props: ProviderSetupExperienceProps) {
             disabled={!teamsAppPackageAvailable}
           />
         </div>
+      </NumberedStep>
+
+      <NumberedStep number={5} className={pendingStepClassName}>
+        <p className="font-semibold">Add the app</p>
+        <p className="text-sm text-muted-foreground">
+          Click on &quot;Preview in Teams&quot; → Add
+        </p>
       </NumberedStep>
     </div>
   );

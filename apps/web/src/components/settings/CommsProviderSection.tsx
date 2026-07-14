@@ -27,10 +27,13 @@ type TelegramWebhookStatus = {
   registeredUrl: string | null;
   expectedUrl: string;
   lastErrorMessage: string | null;
+  pendingUpdateCount?: number;
+  lastErrorAtMs?: number | null;
 };
 type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
+  telegramBotUsername?: string | null;
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -54,7 +57,7 @@ const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
     tone: 'warn',
   },
   error: {
-    label: 'Could not reach the Telegram Bot API to check the webhook',
+    label: 'Could not check the Telegram webhook status',
     tone: 'warn',
   },
 };
@@ -282,8 +285,8 @@ function SlackDiagnosticsChannel() {
           Slack channel that receives routing diagnostics posts.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-        <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1">
           <Select
             value={draftChannelId ?? ROUTER_DEBUG_CHANNEL_NONE_VALUE}
             disabled={selectDisabled}
@@ -336,6 +339,7 @@ function SlackDiagnosticsChannel() {
           type="button"
           variant="ghost"
           size="icon"
+          className="shrink-0"
           aria-label="Refresh Slack channels"
           title="Refresh Slack channels"
           disabled={!slackConnected || slackChannelsQuery.isFetching}
@@ -486,6 +490,19 @@ export function CommsProviderSection({
   savePending,
   clearPending,
 }: CommsProviderSectionProps) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const repairTelegram = useMutation(
+    trpc.comms.repairTelegram.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Telegram connection repaired');
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const isMicrosoftProvider = provider.id === 'microsoft';
   const teamsIntegrationStatus = useTeamsIntegrationStatus({
     enabled: isMicrosoftProvider,
@@ -500,7 +517,21 @@ export function CommsProviderSection({
       provider.savedSatisfied ||
       (isMicrosoftProvider && teamsBotConfigured),
   );
-  const [values, setValues] = useState<Record<string, string>>({});
+  const nonSecretValuesKey = provider.fields
+    .filter((field) => field.secret !== true)
+    .map(
+      (field) =>
+        `${field.envVarName}:${field.savedValue ?? ''}:${field.savedSatisfied}`,
+    )
+    .join('|');
+  const nonSecretInitialValues = Object.fromEntries(
+    provider.fields
+      .filter((field) => field.secret !== true && field.savedValue?.trim())
+      .map((field) => [field.envVarName, field.savedValue!.trim()]),
+  );
+  const [values, setValues] = useState<Record<string, string>>(
+    nonSecretInitialValues,
+  );
   const [editingSavedValues, setEditingSavedValues] = useState<
     Record<string, boolean>
   >({});
@@ -511,12 +542,19 @@ export function CommsProviderSection({
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
-    setValues({});
+    setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setClearedSavedValues({});
     setShowManualSlackValues(false);
     setRemoveDialogOpen(false);
-  }, [provider.id, provider.runtimeSatisfied, provider.savedSatisfied]);
+    // nonSecretInitialValues is content-keyed to avoid identity-only resets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+  }, [
+    provider.id,
+    provider.runtimeSatisfied,
+    provider.savedSatisfied,
+    nonSecretValuesKey,
+  ]);
 
   useEffect(() => {
     setExpanded(
@@ -538,10 +576,21 @@ export function CommsProviderSection({
   const visibleFields = getSetupVisibleFields(provider);
 
   const hasPendingValueChanges = visibleFields.some((field) => {
+    if (field.runtimeSatisfied) {
+      return false;
+    }
+
     const nextValue = values[field.envVarName]?.trim() ?? '';
+    if (field.secret !== true) {
+      const savedValue = field.savedValue?.trim() ?? '';
+      return (
+        nextValue !== savedValue ||
+        Boolean(clearedSavedValues[field.envVarName])
+      );
+    }
+
     return (
-      !field.runtimeSatisfied &&
-      (nextValue.length > 0 || Boolean(clearedSavedValues[field.envVarName]))
+      nextValue.length > 0 || Boolean(clearedSavedValues[field.envVarName])
     );
   });
 
@@ -665,7 +714,7 @@ export function CommsProviderSection({
               surface="settings"
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
-                  ? 'Roomote will generate the webhook secret if you leave it blank, register the webhook automatically when you save, and default Telegram task launches to the admin who saves this configuration.'
+                  ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
                   : undefined
               }
               onShowManualSlackValues={() => setShowManualSlackValues(true)}
@@ -696,15 +745,35 @@ export function CommsProviderSection({
                     <Info className="inline size-4 mt-0.5 shrink-0 text-amber-600" />
                   )}
                   <p className="text-sm">
-                    {
-                      TELEGRAM_WEBHOOK_STATUS_COPY[
-                        provider.telegramWebhook.status
-                      ].label
-                    }
-                    {provider.telegramWebhook.lastErrorMessage
+                    {provider.telegramWebhook.status === 'connected' &&
+                    provider.telegramBotUsername
+                      ? `Connected to @${provider.telegramBotUsername}`
+                      : provider.telegramWebhook.status === 'error'
+                        ? (provider.telegramWebhook.lastErrorMessage ??
+                          TELEGRAM_WEBHOOK_STATUS_COPY.error.label)
+                        : TELEGRAM_WEBHOOK_STATUS_COPY[
+                            provider.telegramWebhook.status
+                          ].label}
+                    {provider.telegramWebhook.status !== 'error' &&
+                    provider.telegramWebhook.lastErrorMessage
                       ? ` Last delivery error: ${provider.telegramWebhook.lastErrorMessage}`
                       : ''}
+                    {(provider.telegramWebhook.pendingUpdateCount ?? 0) > 0
+                      ? ` ${provider.telegramWebhook.pendingUpdateCount} update${provider.telegramWebhook.pendingUpdateCount === 1 ? '' : 's'} waiting for delivery.`
+                      : ''}
                   </p>
+                  {provider.telegramWebhook.status !== 'connected' ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={repairTelegram.isPending}
+                      onClick={() => repairTelegram.mutate()}
+                    >
+                      <RefreshCw />
+                      {repairTelegram.isPending ? 'Repairing...' : 'Repair'}
+                    </Button>
+                  ) : null}
                 </div>
               )}
               {provider.id === 'telegram' && hasConfiguredValues && (

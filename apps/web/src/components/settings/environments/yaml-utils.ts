@@ -87,6 +87,10 @@ export function configToYaml(config: EnvironmentConfig): string {
     });
   }
 
+  if (config.docker_projects && config.docker_projects.length > 0) {
+    cleanConfig.docker_projects = config.docker_projects;
+  }
+
   if (config.services && config.services.length > 0) {
     cleanConfig.services = config.services;
   }

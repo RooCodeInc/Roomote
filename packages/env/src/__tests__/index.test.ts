@@ -566,7 +566,6 @@ describe('Env', () => {
       R_TEAMS_BOT_OAUTH_SCOPE: '',
       R_TELEGRAM_BOT_TOKEN: '',
       R_TELEGRAM_WEBHOOK_SECRET: '',
-      R_TELEGRAM_BOT_USERNAME: '',
       R_SLACK_CLIENT_ID: '',
       R_SLACK_CLIENT_SECRET: '',
       R_SLACK_SIGNING_SECRET: '',
@@ -589,7 +588,6 @@ describe('Env', () => {
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
       expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
-      expect(env.R_TELEGRAM_BOT_USERNAME).toBeUndefined();
       expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
       expect(env.R_SLACK_SIGNING_SECRET).toBeUndefined();
       expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();

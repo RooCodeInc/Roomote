@@ -1,9 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import type { SetupAuthProviderId } from '@roomote/types';
+import {
+  getSetupNewComputeProvisioningState,
+  isSetupProvisionableComputeProvider,
+  type SetupAuthProviderId,
+} from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
 import { useUser } from '@/hooks/useUser';
@@ -29,18 +33,36 @@ function readOpenRouterOauthStatus(
 }
 
 /**
- * Steps that stay visible when deep-linked even though their saved values
- * already satisfy the flow: the credential config steps, so users can fix
- * saved-but-wrong credentials (e.g. a GitHub App key that fails at connect),
- * and the sandbox provider picker, so the deployment default can be switched
- * after setup.
+ * Steps a user can intentionally revisit (Back, goToStep, or an in-range deep
+ * link) even when saved values already satisfy the flow. Kept broad so
+ * provider and connection choices can be fixed mid-setup.
  */
-const REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
+const PINNABLE_SETUP_STEPS: readonly SetupStep[] = [
+  'auth-provider',
   'auth-env-vars',
+  'slack',
   'env-vars',
+  'source-control-provider',
+  'source-control-config',
+  'source-control-connect',
   'compute-provider',
   'compute-config',
+];
+
+/**
+ * Steps that may open from a deep link even when earlier setup is still
+ * pending — used for credential/error recovery (e.g. GitHub callback → config)
+ * and sandbox provider switches. Pure choice pickers (e.g. source-control-
+ * provider) stay off this list so they cannot jump ahead of pending earlier
+ * steps; PINNABLE_SETUP_STEPS still covers in-range revisits.
+ */
+const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
+  'auth-provider',
+  'auth-env-vars',
+  'env-vars',
   'source-control-config',
+  'compute-provider',
+  'compute-config',
 ];
 
 function readUrlEntryContext(): SetupEntryContext {
@@ -221,6 +243,17 @@ export function useSetupFlow(
     trpc.setupNew.status.queryOptions(undefined, {
       enabled: queryEnabled,
       staleTime: 5_000,
+      refetchInterval: (query) => {
+        const setupNewState = query.state.data?.setupNewState;
+        const provider = setupNewState?.computeProvider;
+
+        return provider &&
+          isSetupProvisionableComputeProvider(provider) &&
+          getSetupNewComputeProvisioningState(setupNewState, provider)
+            ?.status === 'building'
+          ? 2_000
+          : false;
+      },
     }),
   );
   const ensureDefaultAgents = useMutation(
@@ -233,14 +266,16 @@ export function useSetupFlow(
   );
   const initialized = useRef(false);
   const pinnedUrlStepRef = useRef<SetupStep | null>(null);
+  const navigationHistoryRef = useRef<SetupStep[]>([]);
   const lastUrlStepRef = useRef<SetupStep | null>(null);
   const syncedStepRef = useRef<SetupStep | null>(null);
   const ensuredTaskIdRef = useRef<string | null>(null);
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
-  const communicationStepSkipped =
-    setupSession.session.communicationStep.state === 'skipped';
+  const communicationStepResolved =
+    setupSession.session.communicationStep.state === 'skipped' ||
+    setupSession.session.communicationStep.state === 'completed';
   const hasUnlockedPostOnboardingFlow = useCallback(() => {
     if (!setupSession.session.onboardingTask.postOnboardingUnlocked) {
       return false;
@@ -271,24 +306,14 @@ export function useSetupFlow(
       return (
         !!status &&
         (status.onboardingSucceeded ||
+          (status.setupNewState.onboardingTaskId !== null &&
+            !status.onboardingFailed) ||
           forceUnlocked ||
           hasUnlockedPostOnboardingFlow())
       );
     },
     [hasUnlockedPostOnboardingFlow, status],
   );
-
-  const hasOnboardingProgress = useCallback(() => {
-    if (!status) {
-      return false;
-    }
-
-    return (
-      status.selectedRepositories.length > 0 ||
-      status.setupNewState.selectedRepositoryIds.length > 0 ||
-      status.setupNewState.onboardingTaskId !== null
-    );
-  }, [status]);
 
   const shouldSkip = useCallback(
     (candidate: SetupStep): boolean => {
@@ -312,6 +337,10 @@ export function useSetupFlow(
         status.setupNewState.authProvider ??
         status.authSetup.runtimeConfiguredProvider ??
         status.authSetup.selectedProvider;
+      const selectedComputeProvider = status.computeSetup.selectedProvider;
+      const hasStaleComputeProvider =
+        status.setupNewState.computeProvider !== null &&
+        selectedComputeProvider !== status.setupNewState.computeProvider;
 
       switch (candidate) {
         case 'welcome':
@@ -324,7 +353,7 @@ export function useSetupFlow(
               (hasSeenSetupWelcome() || hasRealProgress(status)))
           );
         case 'auth-provider':
-          return communicationStepSkipped || effectiveAuthProvider !== null;
+          return communicationStepResolved || effectiveAuthProvider !== null;
         case 'auth-env-vars':
           return (
             effectiveAuthProvider === null ||
@@ -364,16 +393,14 @@ export function useSetupFlow(
           return activeQualificationBlock === null;
         case 'compute-provider':
           return (
-            status.computeSetup.setupSatisfied ||
-            status.setupNewState.computeProvider != null
+            !hasStaleComputeProvider &&
+            (status.computeSetup.setupSatisfied ||
+              selectedComputeProvider !== null)
           );
         case 'compute-config': {
-          if (status.computeSetup.setupSatisfied) {
+          if (hasStaleComputeProvider || status.computeSetup.setupSatisfied) {
             return true;
           }
-
-          const selectedComputeProvider =
-            status.setupNewState.computeProvider ?? null;
 
           if (!selectedComputeProvider) {
             return true;
@@ -383,10 +410,20 @@ export function useSetupFlow(
             (provider) => provider.provider === selectedComputeProvider,
           );
 
+          if (
+            isSetupProvisionableComputeProvider(selectedComputeProvider) &&
+            getSetupNewComputeProvisioningState(
+              status.setupNewState,
+              selectedComputeProvider,
+            )?.status === 'building'
+          ) {
+            return true;
+          }
+
           return computeProviderStatus?.configSatisfied ?? false;
         }
         case 'slack':
-          if (communicationStepSkipped) {
+          if (communicationStepResolved) {
             return true;
           }
 
@@ -406,15 +443,8 @@ export function useSetupFlow(
         case 'repo-selection':
           return (
             !replayEntryVisit &&
-            hasOnboardingProgress() &&
+            status.setupNewState.onboardingTaskId !== null &&
             !status.onboardingFailed
-          );
-        case 'onboarding-agent':
-          return (
-            !hasOnboardingProgress() ||
-            status.onboardingSucceeded ||
-            hasUnlockedPostOnboardingFlow() ||
-            status.onboardingFailed
           );
         case 'invoke':
           return !hasPostOnboardingAccess();
@@ -423,10 +453,8 @@ export function useSetupFlow(
       }
     },
     [
-      communicationStepSkipped,
-      hasOnboardingProgress,
+      communicationStepResolved,
       hasPostOnboardingAccess,
-      hasUnlockedPostOnboardingFlow,
       pendingAuthProvider,
       status,
     ],
@@ -461,9 +489,37 @@ export function useSetupFlow(
         }
       }
 
-      return status?.onboardingSucceeded ? 'invoke' : 'onboarding-agent';
+      return hasPostOnboardingAccess() ? 'invoke' : 'repo-selection';
     },
-    [shouldSkip, status?.onboardingSucceeded],
+    [hasPostOnboardingAccess, shouldSkip],
+  );
+
+  const findPreviousStep = useCallback(
+    (fromIndex: number): SetupStep | null => {
+      for (let index = fromIndex - 1; index >= 0; index -= 1) {
+        const candidate = SETUP_STEPS[index];
+
+        if (candidate && !shouldSkip(candidate)) {
+          return candidate;
+        }
+      }
+
+      return null;
+    },
+    [shouldSkip],
+  );
+
+  const getPreviousNavigationStep = useCallback(
+    (currentStep: SetupStep): SetupStep | null => {
+      return (
+        navigationHistoryRef.current.at(-1) ??
+        findPreviousStep(SETUP_STEPS.indexOf(currentStep)) ??
+        (currentStep === 'source-control-connect'
+          ? 'source-control-provider'
+          : null)
+      );
+    },
+    [findPreviousStep],
   );
 
   const findNextPostOnboardingStep = useCallback(
@@ -517,23 +573,30 @@ export function useSetupFlow(
         return findNextStep(0);
       }
 
-      // Explicit links to credential config steps always render, even when
-      // earlier steps are pending or the step's saved values already satisfy
-      // the flow — this is how users get back to fix saved-but-wrong
-      // credentials (e.g. from the GitHub callback error page).
-      if (REVISITABLE_SETUP_STEPS.includes(requested)) {
+      // Credential/config recovery links can open even when earlier steps are
+      // still pending (for example GitHub callback → config).
+      if (DEEP_LINK_REVISITABLE_SETUP_STEPS.includes(requested)) {
         pinnedUrlStepRef.current = requested;
         return requested;
       }
 
-      pinnedUrlStepRef.current = null;
       const firstPendingStep = findNextStep(0);
 
       if (
         SETUP_STEPS.indexOf(requested) > SETUP_STEPS.indexOf(firstPendingStep)
       ) {
+        pinnedUrlStepRef.current = null;
         return firstPendingStep;
       }
+
+      // Allow revisiting an already-satisfying choice that is at or behind the
+      // first pending step (browser Back / reload / in-range deep link).
+      if (shouldSkip(requested) && PINNABLE_SETUP_STEPS.includes(requested)) {
+        pinnedUrlStepRef.current = requested;
+        return requested;
+      }
+
+      pinnedUrlStepRef.current = null;
 
       if (shouldSkip(requested)) {
         return findNextStep(SETUP_STEPS.indexOf(requested) + 1);
@@ -643,6 +706,7 @@ export function useSetupFlow(
       }
 
       const requestedStep = readUrlStep();
+      navigationHistoryRef.current = [];
       const resolvedStep = resolveDeepLinkStep(requestedStep);
 
       if (resolvedStep === requestedStep) {
@@ -687,18 +751,47 @@ export function useSetupFlow(
 
   const goToStep = useCallback(
     (nextStep: SetupStep, options: { revisit?: boolean } = {}) => {
-      // Revisit navigations pin the step so the auto-skip watchdog leaves it
-      // visible even though its saved state already satisfies the flow.
+      if (nextStep !== step) {
+        navigationHistoryRef.current.push(step);
+      }
+
+      // Only explicit review/revisit navigations pin a step. Normal forward
+      // navigation must remain subject to the skip rules on the next status
+      // refresh.
       pinnedUrlStepRef.current = options.revisit ? nextStep : null;
       setStep(nextStep);
       pushStepUrl(nextStep);
     },
-    [pushStepUrl],
+    [pushStepUrl, step],
   );
+
+  const previousStep = useMemo(
+    () => getPreviousNavigationStep(step),
+    [getPreviousNavigationStep, step],
+  );
+
+  const goToPreviousStep = useCallback(() => {
+    const nextStep =
+      navigationHistoryRef.current.pop() ?? getPreviousNavigationStep(step);
+
+    if (!nextStep) {
+      return;
+    }
+
+    // The originating step can become skippable as soon as its choice is
+    // saved (e.g. source-control-provider -> source-control-config). Pin it
+    // while returning so the user can still see the step they came from.
+    pinnedUrlStepRef.current = shouldSkip(nextStep) ? nextStep : null;
+    setStep(nextStep);
+    pushStepUrl(nextStep);
+  }, [getPreviousNavigationStep, pushStepUrl, shouldSkip, step]);
 
   const goToNextStep = useCallback(() => {
     const currentIndex = SETUP_STEPS.indexOf(step);
     const nextStep = findNextStep(currentIndex + 1);
+    if (nextStep !== step) {
+      navigationHistoryRef.current.push(step);
+    }
     pinnedUrlStepRef.current = null;
     setStep(nextStep);
     pushStepUrl(nextStep);
@@ -707,11 +800,14 @@ export function useSetupFlow(
   const goToNextPostOnboardingStep = useCallback(
     (forceUnlocked = false) => {
       const nextStep = findNextPostOnboardingStep({ forceUnlocked });
+      if (nextStep !== step) {
+        navigationHistoryRef.current.push(step);
+      }
       pinnedUrlStepRef.current = null;
       setStep(nextStep);
       pushStepUrl(nextStep);
     },
-    [findNextPostOnboardingStep, pushStepUrl],
+    [findNextPostOnboardingStep, pushStepUrl, step],
   );
 
   const advancePostOnboardingStep = useCallback(
@@ -720,6 +816,9 @@ export function useSetupFlow(
         fromIndex: SETUP_STEPS.indexOf(resolvedStep) + 1,
         forceUnlocked: true,
       });
+      if (nextStep !== resolvedStep) {
+        navigationHistoryRef.current.push(resolvedStep);
+      }
       pinnedUrlStepRef.current = null;
       setStep(nextStep);
       pushStepUrl(nextStep);
@@ -731,6 +830,7 @@ export function useSetupFlow(
     step,
     entryContext,
     goToStep,
+    goToPreviousStep,
     goToNextStep,
     goToNextPostOnboardingStep,
     advancePostOnboardingStep,
@@ -739,5 +839,6 @@ export function useSetupFlow(
     isError,
     error,
     setupSession,
+    canGoBack: previousStep !== null,
   };
 }

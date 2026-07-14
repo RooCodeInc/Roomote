@@ -11,24 +11,32 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH } from '@roomote/types';
 
-const { mockSaveSelection, mockCreateGitHubInstallation, mockToastError } =
-  vi.hoisted(() => ({
-    mockSaveSelection: vi.fn().mockResolvedValue({
-      setupNewState: {
-        version: 1,
-        authProvider: null,
-        selectedRepositoryIds: ['repo-1'],
-        setupGuidance: 'Run the API first.',
-        onboardingTaskId: null,
-        onboardingTaskStartedAt: null,
-        slackChannel: null,
-        slackThreadTs: null,
-        lastInteractedByUserId: 'user-1',
-      },
-    }),
-    mockCreateGitHubInstallation: vi.fn(),
-    mockToastError: vi.fn(),
-  }));
+const {
+  mockSaveSelection,
+  mockStartOnboardingTask,
+  mockCreateGitHubInstallation,
+  mockToastError,
+} = vi.hoisted(() => ({
+  mockSaveSelection: vi.fn().mockResolvedValue({
+    setupNewState: {
+      version: 1,
+      authProvider: null,
+      selectedRepositoryIds: ['repo-1'],
+      setupGuidance: 'Run the API first.',
+      onboardingTaskId: null,
+      onboardingTaskStartedAt: null,
+      slackChannel: null,
+      slackThreadTs: null,
+      lastInteractedByUserId: 'user-1',
+    },
+  }),
+  mockStartOnboardingTask: vi.fn().mockResolvedValue({
+    taskId: 'task-onboarding-1',
+    startedAt: '2026-07-10T10:00:00.000Z',
+  }),
+  mockCreateGitHubInstallation: vi.fn(),
+  mockToastError: vi.fn(),
+}));
 
 const { mockRefetchRepositories } = vi.hoisted(() => ({
   mockRefetchRepositories: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +85,12 @@ vi.mock('@/trpc/client', () => ({
       saveSelection: {
         mutationOptions: (options = {}) => ({
           mutationFn: mockSaveSelection,
+          ...options,
+        }),
+      },
+      startOnboardingTask: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: mockStartOnboardingTask,
           ...options,
         }),
       },
@@ -279,6 +293,15 @@ async function renderStepRepoSelection(
 describe('StepRepoSelection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSaveSelection.mockResolvedValue({
+      setupNewState: {
+        onboardingTaskId: null,
+      },
+    });
+    mockStartOnboardingTask.mockResolvedValue({
+      taskId: 'task-onboarding-1',
+      startedAt: '2026-07-10T10:00:00.000Z',
+    });
     mockUseRepositories.mockImplementation(() => ({
       data: [...mockRepositories],
       isPending: false,
@@ -786,6 +809,47 @@ describe('StepRepoSelection', () => {
     });
   });
 
+  it('auto-selects the only available repository by default', async () => {
+    mockRepositories.splice(0, mockRepositories.length, {
+      id: 'repo-1',
+      fullName: 'acme/api',
+      private: false,
+      defaultBranch: 'main',
+    });
+
+    await renderStepRepoSelection();
+
+    expect(screen.getByLabelText(/acme\/api/i)).toBeChecked();
+    expect(
+      screen.getByRole('button', {
+        name: 'Continue',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('does not re-select the only repository after the user unchecks it', async () => {
+    mockRepositories.splice(0, mockRepositories.length, {
+      id: 'repo-1',
+      fullName: 'acme/api',
+      private: false,
+      defaultBranch: 'main',
+    });
+
+    await renderStepRepoSelection();
+
+    const checkbox = screen.getByLabelText(/acme\/api/i);
+    expect(checkbox).toBeChecked();
+
+    fireEvent.click(checkbox);
+
+    expect(checkbox).not.toBeChecked();
+    expect(
+      screen.queryByRole('button', {
+        name: 'Continue',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it('requires at least one repository before Continue persists selection', async () => {
     const onContinue = vi.fn();
 
@@ -819,7 +883,72 @@ describe('StepRepoSelection', () => {
       setupGuidance: 'Run the API first.',
       selectedModelId: 'openrouter/openai/gpt-5.4',
     });
+    expect(mockStartOnboardingTask).toHaveBeenCalledTimes(1);
+    expect(mockSaveSelection.mock.invocationCallOrder[0]).toBeLessThan(
+      mockStartOnboardingTask.mock.invocationCallOrder[0]!,
+    );
     expect(onContinue).toHaveBeenCalledTimes(1);
+    expect(onContinue).toHaveBeenCalledWith('task-onboarding-1');
+  });
+
+  it('keeps Continue busy while saving and launching', async () => {
+    let resolveSave!: (value: unknown) => void;
+    let resolveLaunch!: (value: { taskId: string; startedAt: string }) => void;
+    mockSaveSelection.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveSave = resolve)),
+    );
+    mockStartOnboardingTask.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveLaunch = resolve)),
+    );
+
+    await renderStepRepoSelection();
+    fireEvent.click(screen.getByLabelText(/acme\/api/i));
+    const continueButton = screen.getByRole('button', { name: 'Continue' });
+    fireEvent.click(continueButton);
+
+    await waitFor(() => expect(continueButton).toBeDisabled());
+    resolveSave({ setupNewState: { onboardingTaskId: null } });
+    await waitFor(() => expect(mockStartOnboardingTask).toHaveBeenCalled());
+    expect(continueButton).toBeDisabled();
+
+    resolveLaunch({
+      taskId: 'task-onboarding-1',
+      startedAt: '2026-07-10T10:00:00.000Z',
+    });
+    await waitFor(() => expect(continueButton).toBeEnabled());
+  });
+
+  it('stays on selection after launch failure and retries without resaving unchanged values', async () => {
+    const onContinue = vi.fn();
+    mockStartOnboardingTask
+      .mockRejectedValueOnce(new Error('Failed to start setup'))
+      .mockResolvedValueOnce({
+        taskId: 'task-onboarding-retry',
+        startedAt: '2026-07-10T10:01:00.000Z',
+      });
+
+    await renderStepRepoSelection({ onContinue });
+    fireEvent.click(screen.getByLabelText(/acme\/api/i));
+    fireEvent.change(screen.getByPlaceholderText(/Optional agent guidance/i), {
+      target: { value: 'Keep this guidance.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith('Failed to start setup');
+    });
+    expect(onContinue).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText(/Optional agent guidance/i)).toHaveValue(
+      'Keep this guidance.',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => {
+      expect(onContinue).toHaveBeenCalledWith('task-onboarding-retry');
+    });
+    expect(mockSaveSelection).toHaveBeenCalledTimes(1);
+    expect(mockStartOnboardingTask).toHaveBeenCalledTimes(2);
   });
 
   it('selects the default model before the user changes it', async () => {

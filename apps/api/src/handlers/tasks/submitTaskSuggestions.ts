@@ -1017,6 +1017,7 @@ async function postSuggestedTasksSummaryToSlack(params: {
 
     if (postResult && shouldTrackAutomationThread) {
       await upsertBackgroundAutomationSlackThread(tx, {
+        surface: 'slack',
         automationKey: slackConfig.automationKey,
         slackChannelId: channel.channelId,
         threadTs: postResult.rootMessageTs,

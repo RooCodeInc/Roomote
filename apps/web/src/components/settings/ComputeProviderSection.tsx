@@ -33,6 +33,7 @@ import {
   EnvVarsInfoNote,
   Input,
   Spinner,
+  Switch,
   Trash2,
 } from '@/components/system';
 import { Section } from './Section';
@@ -99,6 +100,9 @@ type ComputeProviderSectionProps = {
   onClear: (provider: ComputeProvider) => void;
   savePending: boolean;
   clearPending: boolean;
+  localDockerEnabled?: boolean;
+  onLocalDockerToggle?: (enabled: boolean) => void;
+  localDockerTogglePending?: boolean;
 };
 
 export function ComputeProviderSection({
@@ -109,7 +113,11 @@ export function ComputeProviderSection({
   onClear,
   savePending,
   clearPending,
+  localDockerEnabled,
+  onLocalDockerToggle,
+  localDockerTogglePending = false,
 }: ComputeProviderSectionProps) {
+  const isLocalDocker = provider.provider === 'docker';
   const inputFields = provider.fields.filter(isComputeCredentialField);
   // Provider-specific routing, endpoint, and retention settings. Managed
   // worker artifacts are never form inputs. Runtime overrides remain visible
@@ -190,7 +198,14 @@ export function ComputeProviderSection({
       !field.runtimeSatisfied &&
       !field.savedSatisfied,
   );
+  const retryableProvisionableFields = provider.fields.filter(
+    (field) =>
+      isAutoProvisionedComputeArtifactField(field) &&
+      field.setupProvisionable &&
+      !field.runtimeSatisfied,
+  );
   const provisioningRunning = provisioning?.status === 'building';
+  const provisioningRefresh = provisioningRunning && provider.configSatisfied;
   const provisioningFailed = provisioning?.status === 'failed';
   // Credentials are already satisfied when a save can still start or retry
   // auto-provisioning without retyping values (existing installs that later
@@ -208,7 +223,7 @@ export function ComputeProviderSection({
   // long as the required credentials are already satisfied.
   const canRetryProvisioning =
     provisioning?.status === 'failed' &&
-    provisionableEnvOnlyFields.length > 0 &&
+    retryableProvisionableFields.length > 0 &&
     credentialsSatisfiedForProvisioning;
   // First-time (or re-)provisioning with already-saved credentials and no
   // field edits must still be actionable from Settings.
@@ -365,177 +380,208 @@ export function ComputeProviderSection({
           </>
         }
       >
-        {!expanded ? (
-          <p className="text-sm text-muted-foreground">
-            Not configured.{' '}
-            <button
-              type="button"
-              className="underline underline-offset-4 hover:text-accent-foreground cursor-pointer"
-              onClick={() => setExpanded(true)}
-            >
-              Set it up
-            </button>
-          </p>
-        ) : (
-          <div className="space-y-8">
+        {isLocalDocker && onLocalDockerToggle ? (
+          <div className="flex items-start gap-4">
+            <Switch
+              checked={localDockerEnabled ?? true}
+              onCheckedChange={onLocalDockerToggle}
+              disabled={localDockerTogglePending}
+              aria-label="Toggle Local Docker"
+              className="mt-1"
+            />
             <div>
-              <p className="font-semibold text-sm">
-                {credentialsHint
-                  ? getCreateAccountHeading(provider)
-                  : `Configure ${provider.label}`}
+              <p className="font-semibold">
+                Enable Local Docker
+                {localDockerTogglePending ? (
+                  <span className="relative left-2 text-sm text-muted-foreground">
+                    Saving...
+                  </span>
+                ) : null}
               </p>
-              <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                {credentialsHint ? (
-                  <>
-                    {credentialsHint.map((segment, index) =>
-                      typeof segment === 'string' ? (
-                        <Fragment key={index}>{segment}</Fragment>
-                      ) : (
-                        <a
-                          key={index}
-                          className="underline underline-offset-4 hover:text-foreground"
-                          href={segment.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                        >
-                          {segment.label}
-                        </a>
-                      ),
-                    )}
-                  </>
-                ) : (
-                  provider.description
-                )}
+              <p className="text-sm text-muted-foreground">
+                Make Local Docker available as a sandbox provider for new tasks.
               </p>
             </div>
+          </div>
+        ) : null}
 
-            {hasNoInputFields && (
-              <div>
-                <p className="font-semibold text-sm">Configuration values</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  No credentials needed.
-                </p>
-              </div>
-            )}
-
-            {inputFields.length > 0 && (
+        {(!isLocalDocker || (localDockerEnabled ?? true)) &&
+          (!expanded ? (
+            <p className="text-sm text-muted-foreground">
+              Not configured.{' '}
+              <button
+                type="button"
+                className="underline underline-offset-4 hover:text-accent-foreground cursor-pointer"
+                onClick={() => setExpanded(true)}
+              >
+                Set it up
+              </button>
+            </p>
+          ) : (
+            <div className="space-y-8">
               <div>
                 <p className="font-semibold text-sm">
-                  {hasConfiguredValues
-                    ? 'Configuration values'
-                    : 'Enter the values below:'}
+                  {credentialsHint
+                    ? getCreateAccountHeading(provider)
+                    : `Configure ${provider.label}`}
                 </p>
-                {hasMissingDefaultBlockingInfra ? (
-                  <p className="max-w-xl text-sm text-muted-foreground mt-1">
-                    Configure a registry-qualified worker image via{' '}
-                    <code className="font-mono text-xs">
-                      DOCKER_WORKER_IMAGE
-                    </code>{' '}
-                    before selecting {provider.label} as the default.
-                  </p>
-                ) : null}
-                <div className="space-y-2 mt-2">
-                  {inputFields.map((field) => renderFieldInput(field))}
-                </div>
+                <p className="max-w-xl text-sm text-muted-foreground mt-1">
+                  {credentialsHint ? (
+                    <>
+                      {credentialsHint.map((segment, index) =>
+                        typeof segment === 'string' ? (
+                          <Fragment key={index}>{segment}</Fragment>
+                        ) : (
+                          <a
+                            key={index}
+                            className="underline underline-offset-4 hover:text-foreground"
+                            href={segment.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {segment.label}
+                          </a>
+                        ),
+                      )}
+                    </>
+                  ) : (
+                    provider.description
+                  )}
+                </p>
               </div>
-            )}
 
-            {advancedInfraFields.length > 0 ? (
-              <Collapsible
-                open={advancedExpanded}
-                onOpenChange={setAdvancedExpanded}
-                className="max-w-xl"
-              >
-                <CollapsibleTrigger asChild>
-                  <button
-                    type="button"
-                    className="flex w-full cursor-pointer items-center justify-between rounded-md py-2 text-left text-sm font-semibold hover:text-accent-foreground"
-                  >
-                    <span>Advanced settings</span>
-                    <ChevronDown
-                      className={`size-4 transition-transform ${advancedExpanded ? 'rotate-180' : ''}`}
-                    />
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-3 pt-2">
-                  <p className="text-sm text-muted-foreground">
-                    Provider routing, endpoint, and standby retention overrides.
-                    Leave optional values blank to use provider defaults.
+              {hasNoInputFields && (
+                <div>
+                  <p className="font-semibold text-sm">Configuration values</p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    No credentials needed.
                   </p>
-                  <div className="space-y-3">
-                    {advancedInfraFields.map((field) =>
-                      renderFieldInput(field),
-                    )}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            ) : null}
-
-            {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
-              <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
-            )}
-
-            {provisioningFailed && (
-              <Alert variant="destructive" className="max-w-xl">
-                <AlertCircle />
-                <AlertDescription>
-                  {provisioning?.error
-                    ? `Provisioning failed: ${provisioning.error}`
-                    : 'Provisioning failed. Save to retry.'}
-                </AlertDescription>
-              </Alert>
-            )}
-
-            {provisioningRunning && (
-              <p className="max-w-xl text-sm text-muted-foreground">
-                Provisioning the worker base image. This can take a few minutes.
-              </p>
-            )}
-
-            {(hasSavedValues ||
-              hasEditableFields ||
-              canRetryProvisioning ||
-              canStartProvisioning) &&
-              (inputFields.length > 0 ||
-                advancedInfraFields.length > 0 ||
-                canRetryProvisioning ||
-                canStartProvisioning) && (
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  {hasSavedValues && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setRemoveDialogOpen(true)}
-                      disabled={clearPending}
-                    >
-                      <Trash2 />
-                      {clearPending ? 'Removing...' : 'Remove'}
-                      {clearPending ? <Spinner /> : null}
-                    </Button>
-                  )}
-                  {(hasEditableFields ||
-                    canRetryProvisioning ||
-                    canStartProvisioning) && (
-                    <Button
-                      type="button"
-                      onClick={handleSave}
-                      disabled={isActionDisabled || savePending}
-                    >
-                      <Check />
-                      {savePending
-                        ? 'Saving...'
-                        : provisioningRunning
-                          ? 'Provisioning...'
-                          : canRetryProvisioning && !hasPendingValueChanges
-                            ? 'Retry provisioning'
-                            : 'Save'}
-                      {savePending || provisioningRunning ? <Spinner /> : null}
-                    </Button>
-                  )}
                 </div>
               )}
-          </div>
-        )}
+
+              {inputFields.length > 0 && (
+                <div>
+                  <p className="font-semibold text-sm">
+                    {hasConfiguredValues
+                      ? 'Configuration values'
+                      : 'Enter the values below:'}
+                  </p>
+                  {hasMissingDefaultBlockingInfra ? (
+                    <p className="max-w-xl text-sm text-muted-foreground mt-1">
+                      Configure a registry-qualified worker image via{' '}
+                      <code className="font-mono text-xs">
+                        DOCKER_WORKER_IMAGE
+                      </code>{' '}
+                      before selecting {provider.label} as the default.
+                    </p>
+                  ) : null}
+                  <div className="space-y-2 mt-2">
+                    {inputFields.map((field) => renderFieldInput(field))}
+                  </div>
+                </div>
+              )}
+
+              {advancedInfraFields.length > 0 ? (
+                <Collapsible
+                  open={advancedExpanded}
+                  onOpenChange={setAdvancedExpanded}
+                  className="max-w-xl"
+                >
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full cursor-pointer items-center justify-between rounded-md py-2 text-left text-sm font-semibold hover:text-accent-foreground"
+                    >
+                      <span>Advanced settings</span>
+                      <ChevronDown
+                        className={`size-4 transition-transform ${advancedExpanded ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3 pt-2">
+                    <p className="text-sm text-muted-foreground">
+                      Provider routing, endpoint, and standby retention
+                      overrides. Leave optional values blank to use provider
+                      defaults.
+                    </p>
+                    <div className="space-y-3">
+                      {advancedInfraFields.map((field) =>
+                        renderFieldInput(field),
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              ) : null}
+
+              {(inputFields.length > 0 || advancedInfraFields.length > 0) && (
+                <EnvVarsInfoNote runtimeConfigured={runtimeConfigured} />
+              )}
+
+              {provisioningFailed && (
+                <Alert variant="destructive" className="max-w-xl">
+                  <AlertCircle />
+                  <AlertDescription>
+                    {provisioning?.error
+                      ? `Provisioning failed: ${provisioning.error}`
+                      : 'Provisioning failed. Save to retry.'}
+                  </AlertDescription>
+                </Alert>
+              )}
+
+              {provisioningRunning && (
+                <p className="max-w-xl text-sm text-muted-foreground">
+                  {provisioningRefresh
+                    ? 'Updating the worker base image in the background. This can take several minutes; existing tasks keep using the current image until the replacement is ready.'
+                    : 'Provisioning the worker base image. This can take several minutes and must finish before this provider can run tasks.'}
+                </p>
+              )}
+
+              {(hasSavedValues ||
+                hasEditableFields ||
+                canRetryProvisioning ||
+                canStartProvisioning) &&
+                (inputFields.length > 0 ||
+                  advancedInfraFields.length > 0 ||
+                  canRetryProvisioning ||
+                  canStartProvisioning) && (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    {hasSavedValues && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => setRemoveDialogOpen(true)}
+                        disabled={clearPending}
+                      >
+                        <Trash2 />
+                        {clearPending ? 'Removing...' : 'Remove'}
+                        {clearPending ? <Spinner /> : null}
+                      </Button>
+                    )}
+                    {(hasEditableFields ||
+                      canRetryProvisioning ||
+                      canStartProvisioning) && (
+                      <Button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={isActionDisabled || savePending}
+                      >
+                        <Check />
+                        {savePending
+                          ? 'Saving...'
+                          : provisioningRunning
+                            ? 'Provisioning...'
+                            : canRetryProvisioning && !hasPendingValueChanges
+                              ? 'Retry provisioning'
+                              : 'Save'}
+                        {savePending || provisioningRunning ? (
+                          <Spinner />
+                        ) : null}
+                      </Button>
+                    )}
+                  </div>
+                )}
+            </div>
+          ))}
       </Section>
       <Dialog open={removeDialogOpen} onOpenChange={setRemoveDialogOpen}>
         <DialogContent size="sm">

@@ -1,5 +1,6 @@
 import type {
   Command,
+  DockerProject,
   EnvironmentConfig,
   EnvironmentRepositoryConfig,
   NamedPort,
@@ -12,6 +13,36 @@ function withDefinedEntries<T extends Record<string, unknown>>(
 ): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  );
+}
+
+function sanitizeDockerProjectForPrompt(
+  project: DockerProject,
+): Record<string, unknown> {
+  const common = {
+    type: project.type,
+    name: project.name,
+    repository: project.repository,
+    working_dir: project.working_dir,
+    ports: project.ports,
+    required: project.required,
+  };
+
+  return withDefinedEntries(
+    project.type === 'compose'
+      ? {
+          ...common,
+          files: project.files,
+          profiles: project.profiles,
+          services: project.services,
+        }
+      : {
+          ...common,
+          context: project.context,
+          dockerfile: project.dockerfile,
+          target: project.target,
+          command: project.command,
+        },
   );
 }
 
@@ -90,6 +121,9 @@ export function sanitizeEnvironmentConfigForPrompt(
       sanitizeRepositoryForPrompt,
     ),
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
+    docker_projects: environmentConfig.docker_projects?.map(
+      sanitizeDockerProjectForPrompt,
+    ),
   });
 }
 
@@ -162,6 +196,13 @@ export function buildSandboxInstruction(
     if (hasDetachedCommands(environmentConfig)) {
       lines.push(
         'Any command marked `detached: true` was started in the background under PM2 supervision. Check its `logfile` and `pm2 status` before starting another copy.',
+      );
+    }
+
+    if (environmentConfig.docker_projects?.length) {
+      lines.push(
+        '',
+        'Configured Docker projects were built and started with Docker Compose before your task began. Use `docker compose` with the configured project files when inspecting them, and do not start duplicate copies.',
       );
     }
 

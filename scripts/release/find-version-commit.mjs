@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Print the commit SHA that introduced a product version (the Version PR
- * merge commit). Used by the Release workflow to freeze the promote PR at
- * the versioned commit instead of the moving develop tip.
+ * Print the commit SHA that introduced a product version (the release PR merge
+ * commit). Used by the Release workflow to freeze the promote PR at the
+ * versioned commit instead of the moving develop tip.
  *
  * Usage: node scripts/release/find-version-commit.mjs <version> [ref]
  * Prints the full SHA to stdout, or exits 1 when the version is not the

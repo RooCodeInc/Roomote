@@ -24,7 +24,7 @@ import {
   type SetupSuggestionSummary,
 } from '../tasks/setup-suggestion-lifecycle.js';
 import { findTelegramPrimaryChatId } from './primary-chat.js';
-import { postTelegramMessageBestEffort } from './replies.js';
+import { postTelegramMessageInNewTopicBestEffort } from './replies.js';
 
 const SUGGESTION_CALLBACK_PREFIX = 'idea:';
 
@@ -99,9 +99,9 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
       },
     ],
   );
-
-  const posted = await postTelegramMessageBestEffort({
+  const posted = await postTelegramMessageInNewTopicBestEffort({
     chatId,
+    topicName: 'Suggested tasks',
     text: introLines.join('\n'),
     textFormat: 'markdown',
     buttons,
@@ -132,6 +132,7 @@ export async function postSetupTaskSuggestionsToTelegram(params: {
     enqueue: () =>
       enqueueTelegramSuggestedTasksOnboardingFollowup({
         chatId,
+        ...(posted.threadId ? { threadId: posted.threadId } : {}),
         introMessageId: posted.messageId,
         sourceTaskId,
       }),

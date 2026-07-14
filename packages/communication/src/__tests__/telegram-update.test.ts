@@ -257,13 +257,13 @@ describe('Telegram update helpers', () => {
     // neither stripped from the queued text nor treated specially.
     expect(
       telegramUpdateToQueuedCommunicationMessage(
-        buildUpdate('ping me when you are /done with the build', 'private', [
-          { type: 'bot_command', offset: 21, length: 5 },
+        buildUpdate('ping me when you are /status with the build', 'private', [
+          { type: 'bot_command', offset: 21, length: 7 },
         ]),
         { botUsername: 'roomote_bot' },
       ),
     ).toMatchObject({
-      text: 'ping me when you are /done with the build',
+      text: 'ping me when you are /status with the build',
     });
 
     expect(
@@ -330,6 +330,64 @@ describe('Telegram update helpers', () => {
     ).toBe(true);
   });
 
+  it('treats an attachment-only private message as task input', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 4001,
+      message: {
+        message_id: 70,
+        chat: { id: 5, type: 'private' },
+        photo: [
+          {
+            file_id: 'photo-large',
+            file_unique_id: 'photo-1',
+            width: 1280,
+            height: 720,
+          },
+        ],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({ text: 'Image attachment' });
+  });
+
+  it('strips bot mentions from group media captions', () => {
+    const buildCaptionUpdate = (caption: string) =>
+      parseTelegramUpdate({
+        update_id: 4002,
+        message: {
+          message_id: 71,
+          chat: { id: -1007, type: 'group', title: 'Engineering' },
+          caption,
+          caption_entities: [{ type: 'mention', offset: 0, length: 12 }],
+          photo: [
+            {
+              file_id: 'photo-large',
+              file_unique_id: 'photo-1',
+              width: 1280,
+              height: 720,
+            },
+          ],
+        },
+      }).data!;
+
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(
+        buildCaptionUpdate('@roomote_bot what is this?'),
+        { botUsername: 'roomote_bot' },
+      ),
+    ).toMatchObject({ text: 'what is this?' });
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(
+        buildCaptionUpdate('@roomote_bot'),
+        { botUsername: 'roomote_bot' },
+      ),
+    ).toMatchObject({ text: 'Image attachment' });
+  });
+
   describe('getTelegramNewTaskCommand', () => {
     const buildUpdate = (
       text: string,
@@ -363,7 +421,7 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: 'fix the flaky auth test' });
     });
 
-    it('detects /done as an alias for /new', () => {
+    it('does not recognize the removed /done alias', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(
@@ -372,7 +430,7 @@ describe('Telegram update helpers', () => {
             ]),
           ),
         ),
-      ).toEqual({ command: 'done', text: 'run the tests' });
+      ).toBeNull();
     });
 
     it('is case-insensitive on the command name', () => {
@@ -399,19 +457,7 @@ describe('Telegram update helpers', () => {
       ).toEqual({ command: 'new', text: '' });
     });
 
-    it('ignores /new and /done mentioned mid-sentence', () => {
-      expect(
-        getTelegramNewTaskCommand(
-          parse(
-            buildUpdate(
-              'ping me when you are /done with the build',
-              'private',
-              [{ type: 'bot_command', offset: 21, length: 5 }],
-            ),
-          ),
-        ),
-      ).toBeNull();
-
+    it('ignores /new mentioned mid-sentence', () => {
       expect(
         getTelegramNewTaskCommand(
           parse(

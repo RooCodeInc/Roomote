@@ -31,6 +31,7 @@ import { PreviewPaneLayout } from './PreviewPaneLayout';
 import { ConnectionStatusBanner } from './ErrorFallback';
 import { PendingUserInputRequestStateProvider } from './PendingUserInputRequestPanel';
 import { TaskInputStack } from './TaskInputStack';
+import { OnboardingCompletionMessage } from './OnboardingCompletionMessage';
 
 interface LiveContentProps {
   session: TaskSession;
@@ -249,6 +250,13 @@ function LiveContentInner({
                   session={session}
                   scrollRef={messagesRef}
                   initialScrollBehavior={messagesInitialScrollBehavior}
+                  footer={
+                    session.onboardingEnvironment ? (
+                      <OnboardingCompletionMessage
+                        environmentName={session.onboardingEnvironment.name}
+                      />
+                    ) : undefined
+                  }
                 />
                 <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
                   <div className="max-w-4xl mx-auto">

@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
-import { type EnvironmentConfig, PRODUCT_NAME } from '@roomote/types';
+import { type EnvironmentConfig } from '@roomote/types';
 
 import type { EnvironmentWithMeta } from '@/trpc/commands/environments';
 import {
@@ -16,7 +16,6 @@ import {
   useValidateEnvironmentConfig,
 } from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
-import { buildEnvironmentDefinitionFingerprint } from '@/lib/environment-definition';
 import { SETTINGS_PATHS } from '@/lib/settings';
 import { useTRPC } from '@/trpc/client';
 
@@ -30,22 +29,12 @@ import {
   Card,
   CardContent,
   Check,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   Loader2,
   Spinner,
   Textarea,
 } from '@/components/system';
 
-import {
-  EnvironmentDefinitionAgentTaskPanel,
-  type SelectedRepositorySummary,
-  useEnvironmentDefinitionAgentState,
-} from './EnvironmentDefinitionAgentTask';
+import { type SelectedRepositorySummary } from './EnvironmentDefinitionAgentTask';
 import { EnvironmentRepositorySelector } from './EnvironmentRepositorySelector';
 import { UpdateGitHubReposHint } from './UpdateGitHubReposHint';
 import {
@@ -56,12 +45,6 @@ import { configToYaml } from './yaml-utils';
 
 type MasterView = 'agent' | 'yaml';
 const CURRENT_VERSION_VALUE = 'current';
-
-type DefinitionTaskState = {
-  taskId: string;
-  startedAt: string;
-  baselineDefinitionFingerprint: string;
-};
 
 interface EditEnvironmentPageProps {
   environmentId: string;
@@ -74,8 +57,8 @@ export function EditEnvironmentPage({
   environmentId,
   onUpdated = () => {},
   onCancel = () => {},
-  onGoUseIt = () => {},
 }: EditEnvironmentPageProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const suggestedMcpId = searchParams.get('add-mcp')?.trim() ?? '';
   const trpc = useTRPC();
@@ -84,15 +67,6 @@ export function EditEnvironmentPage({
   const repositories = useRepositories();
   const environmentQuery = useEnvironment(environmentId);
   const environment = environmentQuery.data;
-  const activeDefinitionTaskQuery = useQuery(
-    trpc.environments.activeDefinitionTask.queryOptions(
-      { environmentId },
-      {
-        enabled: Boolean(environmentId),
-        refetchInterval: 2_000,
-      },
-    ),
-  );
   const configVersionsQuery = useQuery(
     trpc.environments.listConfigVersions.queryOptions(
       { environmentId },
@@ -117,21 +91,17 @@ export function EditEnvironmentPage({
     [],
   );
   const [agentChangeRequest, setAgentChangeRequest] = useState('');
-  const [taskState, setTaskState] = useState<DefinitionTaskState | null>(null);
-  const [isDefinitionTaskActive, setIsDefinitionTaskActive] = useState(false);
-  const [showChangeReposDialog, setShowChangeReposDialog] = useState(false);
   const [isLoadingVersion, setIsLoadingVersion] = useState(false);
 
   const startDefinitionTask = useMutation(
     trpc.environments.startDefinitionTask.mutationOptions({
+      onSuccess: (result) => {
+        router.push(`/task/${result.taskId}`);
+      },
       onError: (error) => {
         toast.error(error.message);
       },
     }),
-  );
-
-  const cancelDefinitionTask = useMutation(
-    trpc.environments.cancelDefinitionTask.mutationOptions(),
   );
 
   useEffect(() => {
@@ -143,9 +113,6 @@ export function EditEnvironmentPage({
     setSelectedVersionValue(CURRENT_VERSION_VALUE);
     setSelectedRepositoryIds([]);
     setAgentChangeRequest('');
-    setTaskState(null);
-    setIsDefinitionTaskActive(false);
-    setShowChangeReposDialog(false);
     setIsLoadingVersion(false);
   }, [environmentId]);
 
@@ -166,26 +133,6 @@ export function EditEnvironmentPage({
     setSelectedRepositoryIds(repositoryIds);
   }, [environment, repositories.data]);
 
-  const selectedRepositories = useMemo<SelectedRepositorySummary[]>(() => {
-    const repositoryMap = new Map(
-      (repositories.data ?? []).map((repository) => [
-        repository.id,
-        repository,
-      ]),
-    );
-
-    return selectedRepositoryIds
-      .map((repositoryId) => {
-        const repository = repositoryMap.get(repositoryId);
-        return repository
-          ? { id: repository.id, fullName: repository.fullName }
-          : null;
-      })
-      .filter((repository): repository is SelectedRepositorySummary =>
-        Boolean(repository),
-      );
-  }, [repositories.data, selectedRepositoryIds]);
-
   const resetState = () => {
     setWarnings([]);
     setPendingConfig(null);
@@ -193,9 +140,6 @@ export function EditEnvironmentPage({
     setSelectedVersionValue(CURRENT_VERSION_VALUE);
     setSelectedRepositoryIds([]);
     setAgentChangeRequest('');
-    setTaskState(null);
-    setIsDefinitionTaskActive(false);
-    setShowChangeReposDialog(false);
     setActiveView('yaml');
   };
 
@@ -343,106 +287,23 @@ export function EditEnvironmentPage({
       return;
     }
 
-    const baselineDefinitionFingerprint = buildEnvironmentDefinitionFingerprint(
-      {
-        name: environment.name,
-        description: environment.description,
-        config: environment.config,
-      },
-    );
-
-    const result = await startDefinitionTask.mutateAsync({
+    await startDefinitionTask.mutateAsync({
       repositoryIds: selectedRepositoryIds,
       environmentId: environment.id,
       changeRequest: agentChangeRequest.trim() || undefined,
     });
-
-    setTaskState({
-      taskId: result.taskId,
-      startedAt: result.startedAt,
-      baselineDefinitionFingerprint,
-    });
-    setIsDefinitionTaskActive(true);
-
-    await queryClient.invalidateQueries({
-      queryKey: trpc.environments.activeDefinitionTask.queryKey({
-        environmentId,
-      }),
-    });
   };
 
-  const stopActiveDefinitionTask = async () => {
-    const activeTaskId =
-      activeDefinitionTaskQuery.data?.taskId ??
-      (isDefinitionTaskActive ? taskState?.taskId : null);
-
-    if (!activeTaskId) {
-      setTaskState(null);
-      setIsDefinitionTaskActive(false);
-      return true;
-    }
-
-    try {
-      await cancelDefinitionTask.mutateAsync({ taskId: activeTaskId });
-      setTaskState(null);
-      setIsDefinitionTaskActive(false);
-      await queryClient.invalidateQueries({
-        queryKey: trpc.environments.activeDefinitionTask.queryKey({
-          environmentId,
-        }),
-      });
-      return true;
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Failed to stop the Onboarding Agent.',
-      );
-      return false;
-    }
-  };
-
-  const handleSwitchToYaml = async () => {
-    const stopped = await stopActiveDefinitionTask();
-
-    if (!stopped) {
-      return;
-    }
-
+  const handleSwitchToYaml = () => {
     setActiveView('yaml');
   };
 
-  const handleConfirmPickAnotherRepo = async () => {
-    const stopped = await stopActiveDefinitionTask();
-
-    if (!stopped) {
-      return;
-    }
-
-    setSelectedRepositoryIds([]);
-    setShowChangeReposDialog(false);
-  };
-
-  const handleGoUseIt = (updatedEnvironmentId: string) => {
-    resetState();
-    onGoUseIt(updatedEnvironmentId);
-  };
-
-  const handleCancel = async () => {
-    const stopped = await stopActiveDefinitionTask();
-
-    if (!stopped) {
-      return;
-    }
-
+  const handleCancel = () => {
     resetState();
     onCancel();
   };
 
-  const isBusy =
-    updateEnvironment.isPending ||
-    startDefinitionTask.isPending ||
-    cancelDefinitionTask.isPending;
+  const isBusy = updateEnvironment.isPending || startDefinitionTask.isPending;
   const versionOptions = useMemo(
     () =>
       (configVersionsQuery.data ?? []).map((version) => ({
@@ -538,8 +399,6 @@ export function EditEnvironmentPage({
             ) : (
               <AgentMasterView
                 environment={environment}
-                taskState={taskState}
-                selectedRepositories={selectedRepositories}
                 repositories={repositories.data ?? []}
                 repositoriesLoading={repositories.isPending}
                 selectedRepositoryIds={selectedRepositoryIds}
@@ -553,29 +412,16 @@ export function EditEnvironmentPage({
                   );
                 }}
                 onStartAgent={() => void handleStartAgent()}
-                onSwitchToYaml={() => void handleSwitchToYaml()}
-                onGoUseIt={(updatedEnvironmentId) =>
-                  void handleGoUseIt(updatedEnvironmentId)
-                }
+                onSwitchToYaml={handleSwitchToYaml}
                 changeRequest={agentChangeRequest}
                 onChangeRequest={setAgentChangeRequest}
-                onRequestPickAnotherRepo={() => setShowChangeReposDialog(true)}
                 isStartAgentPending={startDefinitionTask.isPending}
-                isPickAnotherRepoPending={cancelDefinitionTask.isPending}
                 isBusy={isBusy}
-                onTaskActivityChange={setIsDefinitionTaskActive}
               />
             )}
           </div>
         </div>
       </div>
-
-      <PickAnotherRepoDialog
-        open={showChangeReposDialog}
-        isPending={cancelDefinitionTask.isPending}
-        onOpenChange={setShowChangeReposDialog}
-        onConfirm={() => void handleConfirmPickAnotherRepo()}
-      />
     </>
   );
 }
@@ -700,80 +546,42 @@ function YamlMasterView({
 
 function AgentMasterView({
   environment,
-  taskState,
-  selectedRepositories,
   repositories,
   repositoriesLoading,
   selectedRepositoryIds,
   onToggleRepository,
   onStartAgent,
   onSwitchToYaml,
-  onGoUseIt,
   changeRequest,
   onChangeRequest,
-  onRequestPickAnotherRepo,
   isStartAgentPending,
-  isPickAnotherRepoPending,
   isBusy,
-  onTaskActivityChange,
 }: {
   environment: EnvironmentWithMeta | null | undefined;
-  taskState: DefinitionTaskState | null;
-  selectedRepositories: SelectedRepositorySummary[];
   repositories: SelectedRepositorySummary[];
   repositoriesLoading: boolean;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onStartAgent: () => void;
   onSwitchToYaml: () => void;
-  onGoUseIt: (environmentId: string) => void;
   changeRequest: string;
   onChangeRequest: (value: string) => void;
-  onRequestPickAnotherRepo: () => void;
   isStartAgentPending: boolean;
-  isPickAnotherRepoPending: boolean;
   isBusy: boolean;
-  onTaskActivityChange: (isActive: boolean) => void;
 }) {
-  if (!taskState) {
-    return (
-      <AgentRepositorySelectionSubview
-        environment={environment}
-        repositories={repositories}
-        repositoriesLoading={repositoriesLoading}
-        selectedRepositoryIds={selectedRepositoryIds}
-        onToggleRepository={onToggleRepository}
-        onStartAgent={onStartAgent}
-        onSwitchToYaml={onSwitchToYaml}
-        changeRequest={changeRequest}
-        onChangeRequest={onChangeRequest}
-        isStartAgentPending={isStartAgentPending}
-        isBusy={isBusy}
-      />
-    );
-  }
-
-  if (!environment) {
-    return (
-      <Alert>
-        <AlertDescription>
-          Select an environment before trying to edit it.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
   return (
-    <AgentRunSubview
-      taskId={taskState.taskId}
-      baselineDefinitionFingerprint={taskState.baselineDefinitionFingerprint}
-      selectedRepositories={selectedRepositories}
-      environmentId={environment.id}
-      environmentName={environment.name}
-      onTaskActivityChange={onTaskActivityChange}
-      onGoUseIt={onGoUseIt}
-      onRequestPickAnotherRepo={onRequestPickAnotherRepo}
-      isPickAnotherRepoPending={isPickAnotherRepoPending}
+    <AgentRepositorySelectionSubview
+      environment={environment}
+      repositories={repositories}
+      repositoriesLoading={repositoriesLoading}
+      selectedRepositoryIds={selectedRepositoryIds}
+      onToggleRepository={onToggleRepository}
+      onStartAgent={onStartAgent}
+      onSwitchToYaml={onSwitchToYaml}
+      changeRequest={changeRequest}
+      onChangeRequest={onChangeRequest}
+      isStartAgentPending={isStartAgentPending}
+      isBusy={isBusy}
     />
   );
 }
@@ -909,141 +717,5 @@ function AgentRepositorySelectionSubview({
         </Button>
       </div>
     </>
-  );
-}
-
-function AgentRunSubview({
-  taskId,
-  baselineDefinitionFingerprint,
-  selectedRepositories,
-  environmentId,
-  environmentName,
-  onTaskActivityChange,
-  onGoUseIt,
-  onRequestPickAnotherRepo,
-  isPickAnotherRepoPending,
-}: {
-  taskId: string;
-  baselineDefinitionFingerprint: string;
-  selectedRepositories: SelectedRepositorySummary[];
-  environmentId: string;
-  environmentName: string;
-  onTaskActivityChange: (isActive: boolean) => void;
-  onGoUseIt: (environmentId: string) => Promise<void> | void;
-  onRequestPickAnotherRepo: () => void;
-  isPickAnotherRepoPending: boolean;
-}) {
-  const { failed, session, succeeded, taskIsActive } =
-    useEnvironmentDefinitionAgentState({
-      taskId,
-      mode: 'edit',
-      environmentId,
-      initialEnvironmentDefinitionFingerprint: baselineDefinitionFingerprint,
-    });
-
-  useEffect(() => {
-    onTaskActivityChange(taskIsActive);
-
-    return () => {
-      onTaskActivityChange(false);
-    };
-  }, [onTaskActivityChange, taskIsActive]);
-
-  return (
-    <div className="space-y-4">
-      {!succeeded && (
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={onRequestPickAnotherRepo}
-          disabled={isPickAnotherRepoPending}
-        >
-          <ArrowLeft />
-          Start over
-        </Button>
-      )}
-
-      {taskIsActive && (
-        <p className="text-sm text-muted-foreground">
-          {PRODUCT_NAME} is inspecting your repo
-          {selectedRepositories.length > 1 && 's'} (
-          <span className="font-mono text-[0.8rem]">
-            {selectedRepositories
-              .map((repository) => repository.fullName)
-              .join(', ')}
-          </span>
-          ) and updating this environment definition. If it needs help or info,
-          it will ask you. It won&apos;t make any code changes.
-        </p>
-      )}
-
-      {succeeded && (
-        <div className="text-sm py-2 font-semibold flex gap-2 items-center text-green-600 dark:text-green-400 animate-[fade-in_0.5s_linear_0.5s_backwards_1]">
-          <Check className="size-4" />
-          <span>Environment {environmentName} updated.</span>
-          <Button
-            type="button"
-            size="sm"
-            onClick={() => void onGoUseIt(environmentId)}
-          >
-            Go use it
-            <ArrowRight />
-          </Button>
-        </div>
-      )}
-
-      <EnvironmentDefinitionAgentTaskPanel
-        session={session}
-        title="Onboarding Agent"
-        className="h-128 max-w-4xl wrapper"
-      />
-
-      {failed && (
-        <p className="text-sm text-destructive">
-          The Onboarding Agent exited without updating this environment. You can
-          choose another set of repos and try again.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function PickAnotherRepoDialog({
-  open,
-  isPending,
-  onOpenChange,
-  onConfirm,
-}: {
-  open: boolean;
-  isPending: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>Start over?</DialogTitle>
-          <DialogDescription>
-            This will stop the Onboarding Agent and lose any progress made so
-            far.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            No, stay here
-          </Button>
-          <Button type="button" onClick={onConfirm} disabled={isPending}>
-            {isPending && <Loader2 className="animate-spin" />}
-            Start over
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

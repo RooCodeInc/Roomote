@@ -5,6 +5,35 @@ import { getRedis } from '@roomote/redis';
 
 const TELEGRAM_UPDATE_DEDUP_PREFIX = 'telegram:update:';
 const TELEGRAM_UPDATE_DEDUP_TTL_SECONDS = 5 * 60;
+const TELEGRAM_IMPLICIT_TOPIC_PREFIX = 'telegram:implicit-topic:';
+const TELEGRAM_IMPLICIT_TOPIC_TTL_SECONDS = 60 * 60;
+
+function implicitTopicKey(chatId: string, threadId: string): string {
+  return `${TELEGRAM_IMPLICIT_TOPIC_PREFIX}${chatId}:${threadId}`;
+}
+
+export async function rememberTelegramImplicitTopic(input: {
+  chatId: string;
+  threadId: string;
+}): Promise<void> {
+  const redis = getRedis();
+  await redis.set(
+    implicitTopicKey(input.chatId, input.threadId),
+    '1',
+    'EX',
+    TELEGRAM_IMPLICIT_TOPIC_TTL_SECONDS,
+  );
+}
+
+export async function consumeTelegramImplicitTopic(input: {
+  chatId: string;
+  threadId: string;
+}): Promise<boolean> {
+  const redis = getRedis();
+  return Boolean(
+    await redis.getdel(implicitTopicKey(input.chatId, input.threadId)),
+  );
+}
 
 function safeCompareSecret(
   expected: string | undefined,

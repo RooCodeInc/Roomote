@@ -135,7 +135,13 @@ export async function resolveAuthProviderConfig(
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_CLIENT_SECRET') ??
     null;
   const adoTenantId =
-    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ?? null;
+    readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_TENANT_ID') ??
+    readConfiguredValue(
+      runtimeEnv,
+      deploymentEnvVars,
+      'R_MICROSOFT_TENANT_ID',
+    ) ??
+    null;
   const adoOrganization =
     readConfiguredValue(runtimeEnv, deploymentEnvVars, 'ADO_ORGANIZATION') ??
     null;

@@ -223,7 +223,7 @@ async function startLinearTask({
 
   await linearClient.emitThought(
     sessionId,
-    `Getting started on your task in \`${routedTask.workspaceDisplayName}\``,
+    `Getting started on your task in ${routedTask.workspaceDisplayName}`,
     true,
   );
 

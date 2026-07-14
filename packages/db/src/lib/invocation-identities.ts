@@ -11,6 +11,7 @@ import { desc, eq } from 'drizzle-orm';
 import { db } from '../db';
 import { slackInstallations, teamsInstallations } from '../schema';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
+import { resolveTelegramRuntimeCredentials } from './telegram-runtime-credentials';
 
 const TEAMS_PACKAGE_DEFAULT_BOT_NAME = 'Roomote';
 
@@ -25,31 +26,29 @@ export async function resolveInvocationIdentities(): Promise<
   InvocationIdentity[]
 > {
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
-  const [slackInstallation, teamsInstallation] = await Promise.all([
-    db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
-      orderBy: [desc(slackInstallations.updatedAt)],
-      columns: {
-        botUserId: true,
-        botName: true,
-        appName: true,
-      },
-    }),
-    db.query.teamsInstallations.findFirst({
-      where: eq(teamsInstallations.isActive, true),
-      orderBy: [desc(teamsInstallations.updatedAt)],
-      columns: {
-        botName: true,
-      },
-    }),
-  ]);
+  const [slackInstallation, teamsInstallation, telegramCredentials] =
+    await Promise.all([
+      db.query.slackInstallations.findFirst({
+        where: eq(slackInstallations.isActive, true),
+        orderBy: [desc(slackInstallations.updatedAt)],
+        columns: {
+          botUserId: true,
+          botName: true,
+          appName: true,
+        },
+      }),
+      db.query.teamsInstallations.findFirst({
+        where: eq(teamsInstallations.isActive, true),
+        orderBy: [desc(teamsInstallations.updatedAt)],
+        columns: {
+          botName: true,
+        },
+      }),
+      resolveTelegramRuntimeCredentials(),
+    ]);
 
   const githubSlug = readConfiguredValue(
     'R_GITHUB_APP_SLUG',
-    deploymentEnvVars,
-  );
-  const telegramUsername = readConfiguredValue(
-    'R_TELEGRAM_BOT_USERNAME',
     deploymentEnvVars,
   );
   const configuredTeamsBotName = readConfiguredValue(
@@ -71,7 +70,7 @@ export async function resolveInvocationIdentities(): Promise<
       displayName: teamsBotName,
       configured: Boolean(configuredTeamsBotName || teamsInstallation?.botName),
     }),
-    buildTelegramInvocationIdentity(telegramUsername),
+    buildTelegramInvocationIdentity(telegramCredentials.botUsername),
     buildGitHubInvocationIdentity(githubSlug),
     buildGenericInvocationIdentity('linear', 'Linear'),
     buildGenericInvocationIdentity('gitlab', 'GitLab'),

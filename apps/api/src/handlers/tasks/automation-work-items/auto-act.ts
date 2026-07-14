@@ -62,9 +62,11 @@ const AUTO_ACT_AUTOMATION_CONFIG: Record<
     executionTaskBootstrap: '$implement-changes',
     enforceUniqueTargetEnvironments: false,
   },
+  // CI failure triage launches one environment-backed standard task from the
+  // webhook / manual runner and must not open a second hop via work items.
   ci_failure_triage: {
     label: 'CI Failure Triage',
-    maxActItems: 3,
+    maxActItems: 0,
     executionTaskBootstrap: '$implement-changes',
     enforceUniqueTargetEnvironments: true,
   },

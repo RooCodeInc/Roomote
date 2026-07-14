@@ -62,6 +62,13 @@ Use environment variables when:
 - you want changes reviewed in infrastructure config
 - you need to prevent in-app overrides
 
+`/setup` also respects env-managed provider configuration. If an inference
+provider is fully configured from environment variables, setup skips the
+inference-provider step. If a hosted sandbox provider such as Modal, E2B, or
+Daytona is fully configured from environment variables, setup skips the sandbox
+provider step too. Local Docker is still treated as the default local fallback,
+so Docker-only configuration does not skip that step.
+
 ## Production recommendations
 
 For production and shared self-hosted deployments:
@@ -262,43 +269,49 @@ as per-task auth tokens or workspace paths.
 | `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                        |
 | `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                       |
 | `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                       |
+| `ADO_AUTH_MODE`                | Optional     | `pat`, `entra`, or `delegated`; omitted values retain legacy PAT/Entra inference.                |
+| `ADO_LINKED_ACCOUNT_ID`        | Optional     | Linked Azure DevOps account key used by delegated authentication.                                |
 | `ADO_BASE_URL`                 | Optional     | Azure DevOps base URL.                                                                           |
 | `ADO_USERNAME`                 | Optional     | Azure DevOps username.                                                                           |
-| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps OAuth.                                                |
-| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps OAuth.                                            |
-| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps OAuth. `R_MICROSOFT_TENANT_ID` is also accepted.      |
-| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret.                                                                     |
+| `ADO_CLIENT_ID`                | Optional     | Microsoft Entra client ID for Azure DevOps service-principal authentication.                     |
+| `ADO_CLIENT_SECRET`            | Optional     | Microsoft Entra client secret for Azure DevOps service-principal authentication.                 |
+| `ADO_TENANT_ID`                | Optional     | Microsoft Entra tenant ID for Azure DevOps service-principal authentication.                     |
+| `ADO_WEBHOOK_SECRET`           | Optional     | Azure DevOps webhook secret. Generated automatically when Roomote configures service hooks.      |
 
 ### Communications and sign-in
 
-| Env var                        | Required          | Used for                                                                        |
-| ------------------------------ | ----------------- | ------------------------------------------------------------------------------- |
-| `SLACK_APP_ID`                 | Slack app         | Slack app ID for communications setup.                                          |
-| `R_SLACK_CLIENT_ID`            | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                   |
-| `R_SLACK_CLIENT_SECRET`        | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.               |
-| `SLACK_REDIRECT_URI`           | Optional          | Slack redirect URI override.                                                    |
-| `SLACK_AUTH_URI`               | Optional          | Slack auth URI override.                                                        |
-| `R_SLACK_SIGNING_SECRET`       | Slack app/auth    | Slack signing secret for webhook verification.                                  |
-| `SLACK_API_BASE_URL`           | Optional          | Slack API base URL. Defaults to `https://slack.com/api/`.                       |
-| `SLACK_UNFURL_ALLOWED_DOMAINS` | Optional          | Domains Slack unfurl handling may allow.                                        |
-| `SLACK_API_TIMEOUT_MS`         | Optional          | Slack API timeout. Defaults to `API_EXTERNAL_REQUEST_TIMEOUT_MS` or 10 seconds. |
-| `SLACK_DEBUG_LOGS`             | Optional          | Set to `true` or `1` to enable extra Slack logs.                                |
-| `ROUTER_DEBUG_CHANNEL_ID`      | Optional          | Slack channel ID for router debug output.                                       |
-| `R_TEAMS_BOT_APP_ID`           | Teams             | Microsoft Teams bot app ID.                                                     |
-| `R_TEAMS_BOT_APP_PASSWORD`     | Teams             | Microsoft Teams bot password.                                                   |
-| `R_TEAMS_BOT_TENANT_ID`        | Optional          | Microsoft Teams bot tenant ID.                                                  |
-| `R_TEAMS_BOT_NAME`             | Optional          | Teams bot display name for generated app packages and invocation guidance.      |
-| `R_TEAMS_BOT_TOKEN_ENDPOINT`   | Optional          | Teams bot token endpoint override.                                              |
-| `R_TEAMS_BOT_OAUTH_SCOPE`      | Optional          | Teams bot OAuth scope override.                                                 |
-| `R_TELEGRAM_BOT_TOKEN`         | Telegram          | Telegram bot token.                                                             |
-| `R_TELEGRAM_WEBHOOK_SECRET`    | Telegram          | Telegram webhook secret.                                                        |
-| `R_TELEGRAM_BOT_USERNAME`      | Telegram          | Telegram bot username.                                                          |
-| `R_SLACK_CLIENT_ID`            | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                  |
-| `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.          |
-| `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                      |
-| `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                  |
-| `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.      |
-| `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email. |
+| Env var                        | Required          | Used for                                                                         |
+| ------------------------------ | ----------------- | -------------------------------------------------------------------------------- |
+| `SLACK_APP_ID`                 | Slack app         | Slack app ID for communications setup.                                           |
+| `R_SLACK_CLIENT_ID`            | Slack app/auth    | Slack OAuth client ID. Also accepted for Slack sign-in setup.                    |
+| `R_SLACK_CLIENT_SECRET`        | Slack app/auth    | Slack OAuth client secret. Also accepted for Slack sign-in setup.                |
+| `SLACK_REDIRECT_URI`           | Optional          | Slack redirect URI override.                                                     |
+| `SLACK_AUTH_URI`               | Optional          | Slack auth URI override.                                                         |
+| `R_SLACK_SIGNING_SECRET`       | Slack app/auth    | Slack signing secret for webhook verification.                                   |
+| `SLACK_API_BASE_URL`           | Optional          | Slack API base URL. Defaults to `https://slack.com/api/`.                        |
+| `SLACK_UNFURL_ALLOWED_DOMAINS` | Optional          | Domains Slack unfurl handling may allow.                                         |
+| `SLACK_API_TIMEOUT_MS`         | Optional          | Slack API timeout. Defaults to `API_EXTERNAL_REQUEST_TIMEOUT_MS` or 10 seconds.  |
+| `SLACK_DEBUG_LOGS`             | Optional          | Set to `true` or `1` to enable extra Slack logs.                                 |
+| `ROUTER_DEBUG_CHANNEL_ID`      | Optional          | Slack channel ID for router debug output.                                        |
+| `R_TEAMS_BOT_APP_ID`           | Teams             | Microsoft Teams bot app ID.                                                      |
+| `R_TEAMS_BOT_APP_PASSWORD`     | Teams             | Microsoft Teams bot password.                                                    |
+| `R_TEAMS_BOT_TENANT_ID`        | Optional          | Microsoft Teams bot tenant ID.                                                   |
+| `R_TEAMS_BOT_NAME`             | Optional          | Teams bot display name for generated app packages and invocation guidance.       |
+| `R_TEAMS_BOT_TOKEN_ENDPOINT`   | Optional          | Teams bot token endpoint override.                                               |
+| `R_TEAMS_BOT_OAUTH_SCOPE`      | Optional          | Teams bot OAuth scope override.                                                  |
+| `R_TELEGRAM_BOT_TOKEN`         | Telegram          | Telegram bot token.                                                              |
+| `R_TELEGRAM_WEBHOOK_SECRET`    | Telegram          | Optional. Telegram webhook secret; generated automatically when unset in the UI. |
+| `R_SLACK_CLIENT_ID`            | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                   |
+| `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.           |
+| `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                       |
+| `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
+| `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.       |
+| `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
+
+During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
+the Teams bot by default. Use **Show advanced config** after the Directory
+(Tenant) ID field only when your Azure Bot app ID is different from the Entra
+app ID, or when you need to set the optional bot name or token overrides.
 
 ### Integrations
 

@@ -43,6 +43,7 @@ const configSchema = z.object({
         id: z.number().int(),
         username: z.string().min(1),
         first_name: z.string().min(1),
+        has_topics_enabled: z.boolean().optional(),
       })
       .optional(),
     acceptedBotTokens: z.array(z.string().min(1)).optional(),

@@ -20,11 +20,9 @@ import { configToYaml } from './yaml-utils';
 
 const {
   mockStartDefinitionTask,
-  mockCancelDefinitionTask,
   mockConfigVersionsState,
   mockGetConfigVersion,
-  mockActiveDefinitionTaskState,
-  mockDefinitionAgentState,
+  mockRouterPush,
   mockUpdateEnvironment,
   mockValidateEnvironmentConfig,
   mockYamlEditorState,
@@ -82,9 +80,6 @@ const {
       taskId: 'task-1',
       startedAt: '2026-03-24T00:00:00.000Z',
     }),
-    mockCancelDefinitionTask: vi.fn().mockResolvedValue({
-      success: true,
-    }),
     mockConfigVersionsState: {
       current: baselineVersions,
       reset() {
@@ -95,12 +90,7 @@ const {
       ({ version }: { environmentId: string; version: number }) =>
         Promise.resolve(versionDetails[version as 1 | 2] ?? null),
     ),
-    mockActiveDefinitionTaskState: {
-      current: null as { taskId: string } | null,
-    },
-    mockDefinitionAgentState: {
-      taskIsActive: true,
-    },
+    mockRouterPush: vi.fn(),
     mockUpdateEnvironment: vi.fn().mockResolvedValue({ success: true }),
     mockValidateEnvironmentConfig: vi.fn(),
     mockEnvironment: {
@@ -128,6 +118,9 @@ const {
 });
 
 vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+  }),
   useSearchParams: () => new URLSearchParams(''),
 }));
 
@@ -206,25 +199,9 @@ vi.mock('@/trpc/client', () => ({
           queryFn: () => mockGetConfigVersion({ environmentId, version }),
         }),
       },
-      activeDefinitionTask: {
-        queryKey: ({ environmentId }: { environmentId: string }) => [
-          'environments.activeDefinitionTask',
-          environmentId,
-        ],
-        queryOptions: ({ environmentId }: { environmentId: string }) => ({
-          queryKey: ['environments.activeDefinitionTask', environmentId],
-          queryFn: () => Promise.resolve(mockActiveDefinitionTaskState.current),
-        }),
-      },
       startDefinitionTask: {
         mutationOptions: (options = {}) => ({
           mutationFn: mockStartDefinitionTask,
-          ...options,
-        }),
-      },
-      cancelDefinitionTask: {
-        mutationOptions: (options = {}) => ({
-          mutationFn: mockCancelDefinitionTask,
           ...options,
         }),
       },
@@ -234,21 +211,6 @@ vi.mock('@/trpc/client', () => ({
 
 vi.mock('./UpdateGitHubReposHint', () => ({
   UpdateGitHubReposHint: () => <div data-testid="update-github-repos-hint" />,
-}));
-
-vi.mock('./EnvironmentDefinitionAgentTask', () => ({
-  EnvironmentDefinitionAgentTaskPanel: () => <div>task panel</div>,
-  useEnvironmentDefinitionAgentState: () => ({
-    succeeded: false,
-    failed: false,
-    session: {
-      taskRun: {
-        taskPhase: 'running',
-      },
-    },
-    taskIsActive: mockDefinitionAgentState.taskIsActive,
-    matchingEnvironment: null,
-  }),
 }));
 
 vi.mock('./YamlEnvironmentEditor', () => ({
@@ -354,8 +316,6 @@ describe('EditEnvironmentPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockConfigVersionsState.reset();
-    mockActiveDefinitionTaskState.current = null;
-    mockDefinitionAgentState.taskIsActive = true;
     mockYamlEditorState.nextMountId = 0;
   });
 
@@ -608,7 +568,7 @@ describe('EditEnvironmentPage', () => {
     });
   });
 
-  it('prefers the server-backed active task id over stale local task state when starting over', async () => {
+  it('starts an environment edit task and opens it in the task view', async () => {
     const queryClient = new QueryClient();
 
     render(
@@ -625,29 +585,11 @@ describe('EditEnvironmentPage', () => {
     await waitFor(() => {
       expect(mockStartDefinitionTask).toHaveBeenCalled();
     });
-
-    mockDefinitionAgentState.taskIsActive = false;
-    mockActiveDefinitionTaskState.current = { taskId: 'task-2' };
-    await queryClient.invalidateQueries({
-      queryKey: ['environments.activeDefinitionTask', 'env-1'],
+    expect(mockStartDefinitionTask.mock.calls[0]?.[0]).toEqual({
+      repositoryIds: ['repo-1'],
+      environmentId: 'env-1',
+      changeRequest: undefined,
     });
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: /^Start over$/i }),
-      ).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /^Start over$/i }));
-    fireEvent.click(
-      screen.getAllByRole('button', { name: /^Start over$/i })[1]!,
-    );
-
-    await waitFor(() => {
-      expect(mockCancelDefinitionTask).toHaveBeenCalled();
-      expect(mockCancelDefinitionTask.mock.calls[0]?.[0]).toEqual({
-        taskId: 'task-2',
-      });
-    });
+    expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
 });

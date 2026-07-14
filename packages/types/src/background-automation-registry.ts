@@ -11,6 +11,9 @@ import type {
   SentryTriageFrequency,
   SuggesterFrequency,
 } from './background-agents';
+import type { CommunicationProvider } from './communication';
+import { sourceControlProviders } from './source-control';
+import type { SourceControlProvider } from './source-control';
 import type { TaskSuggestionSource } from './task-runs';
 
 export const AUTO_RESPOND_CHANNELS_SETTINGS_HASH = 'auto-respond-channels';
@@ -58,6 +61,20 @@ export type TriggerableBackgroundAutomationDescriptor<
   manualTriggerRequirements: readonly BackgroundAutomationManualTriggerRequirement[];
   /** Whether the automation posts to the shared manager channel by default. */
   usesManagerChannel: boolean;
+  /**
+   * Comms surfaces the automation's shipped runner can report to today.
+   * Empty for automations that report elsewhere (e.g. PR comments). Expanded
+   * per-automation as runners generalize; settings gating and the automations
+   * page read this as the source of truth.
+   */
+  supportedCommunicationProviders: readonly CommunicationProvider[];
+  /**
+   * Source-control providers the automation's shipped runner works with
+   * today. Inherently-GitHub automations (Dependabot, GitHub Actions CI
+   * triage) stay ['github'] by design; others expand as their gates and
+   * scans go provider-neutral.
+   */
+  supportedSourceControlProviders: readonly SourceControlProvider[];
   scheduledSuggestionSource?: TaskSuggestionSource;
 };
 
@@ -107,8 +124,12 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Resolve PR Conflicts',
     availability: 'stable',
     scheduleModes: CONFLICT_RESOLVER_SCHEDULE_MODES,
-    manualTriggerRequirements: ['github', 'repository'],
+    // Provider-neutral scan: any active repository qualifies, GitHub
+    // installation no longer required.
+    manualTriggerRequirements: ['repository'],
     usesManagerChannel: false,
+    supportedCommunicationProviders: [],
+    supportedSourceControlProviders: ['github', 'gitlab', 'ado'],
   },
   {
     automationKey: 'suggester',
@@ -118,6 +139,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack'],
+    supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'suggest_ideas',
   },
   {
@@ -125,8 +148,11 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Summarize Merged PRs',
     availability: 'stable',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
-    manualTriggerRequirements: ['slack', 'github'],
+    // Merged-PR summaries read the provider-neutral taskPullRequests table.
+    manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: sourceControlProviders,
   },
   {
     automationKey: 'manager_stats',
@@ -135,6 +161,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: ['github'],
   },
   {
     automationKey: 'sentry_triage',
@@ -143,6 +171,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'sentry'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'sentry_triage',
   },
   {
@@ -152,6 +182,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'dependabot_triage',
   },
   {
@@ -161,6 +193,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'security_auditor',
   },
   {
@@ -170,6 +204,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'code_quality_auditor',
   },
   {
@@ -179,6 +215,8 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack'],
+    supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
 ] as const satisfies readonly TriggerableBackgroundAutomationDescriptor[];

@@ -92,6 +92,81 @@ describe('TeamsCommunicationProvider', () => {
     );
   });
 
+  it('degrades link buttons to trailing markdown links and drops callback buttons', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          access_token: 'bot-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'activity-response' }));
+    const provider = new TeamsCommunicationProvider({
+      appId: 'bot-app-id',
+      appPassword: 'bot-secret',
+      tokenEndpoint: 'https://login.example.test/token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '19:conversation@thread.v2',
+      text: 'root summary',
+      textFormat: 'markdown',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      buttons: [
+        [
+          { text: 'Go to task', url: 'https://app.example.com/task/1' },
+          { text: 'Retry', callbackData: 'retry' },
+        ],
+      ],
+    });
+
+    const activityBody = JSON.parse(
+      fetchMock.mock.calls[1]?.[1]?.body as string,
+    );
+    expect(activityBody.text).toBe(
+      'root summary\n\n[Go to task](https://app.example.com/task/1)',
+    );
+    expect(activityBody.textFormat).toBe('markdown');
+  });
+
+  it('degrades link buttons to label: url lines for non-markdown messages', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          access_token: 'bot-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: 'activity-response' }));
+    const provider = new TeamsCommunicationProvider({
+      appId: 'bot-app-id',
+      appPassword: 'bot-secret',
+      tokenEndpoint: 'https://login.example.test/token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.postMessage({
+      channelId: '19:conversation@thread.v2',
+      text: 'root summary',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      buttons: [
+        [{ text: 'Go to task', url: 'https://app.example.com/task/1' }],
+      ],
+    });
+
+    const activityBody = JSON.parse(
+      fetchMock.mock.calls[1]?.[1]?.body as string,
+    );
+    expect(activityBody.text).toBe(
+      'root summary\n\nGo to task: https://app.example.com/task/1',
+    );
+  });
+
   it('requires a serviceUrl for outbound Teams messages', async () => {
     const provider = new TeamsCommunicationProvider({
       appId: 'bot-app-id',

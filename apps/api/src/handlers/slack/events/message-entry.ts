@@ -12,13 +12,11 @@ import { SLACK_AUTO_CONFIRM_TIMEOUT_MS } from '@roomote/cloud-agents/server';
 import {
   autoConfirmRouting,
   collectAndExtractThreadAttachmentTexts,
-  clearPendingSlackMcpSetupInterrupt,
   collectAndProcessThreadImages,
   fetchThreadMessagesSafe,
   findActiveSlackTaskRun,
   formatSlackRoutingWaitReplyText,
   hasPendingRoutingConfirmation,
-  hasPendingSlackMcpSetupInterrupt,
   getSlackThreadReplyFooterMessageTs,
   isTargetSlackBotMessage,
   markSlackThreadExplicitMentionRequired,
@@ -524,25 +522,20 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  const [pendingRoutingConfirmation, pendingMcpSetupInterrupt] =
-    await Promise.all([
-      hasPendingRoutingConfirmation(event.thread_ts),
-      hasPendingSlackMcpSetupInterrupt(event.thread_ts),
-    ]);
+  const pendingRoutingConfirmation = await hasPendingRoutingConfirmation(
+    event.thread_ts,
+  );
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
 
   let eligibilityReason:
     | 'pending-routing-confirmation'
-    | 'pending-mcp-setup-interrupt'
     | 'roomote-owned-thread'
     | null = null;
 
   if (pendingRoutingConfirmation) {
     eligibilityReason = 'pending-routing-confirmation';
-  } else if (pendingMcpSetupInterrupt) {
-    eligibilityReason = 'pending-mcp-setup-interrupt';
   } else {
     roomoteThreadMatch = await findRoomoteOwnedSlackThread({
       teamId,
@@ -1440,7 +1433,7 @@ async function processAutomatedAppMentionTask(params: {
         ...(attachmentTexts.length > 0
           ? { processedAttachmentTexts: attachmentTexts }
           : {}),
-        skipMcpSetupInterrupt: true,
+        skipMcpSetupSuggestion: true,
         ...(videoDescriptions.length > 0
           ? { processedVideoDescriptions: videoDescriptions }
           : {}),
@@ -1717,13 +1710,6 @@ export async function handleSlackEntryEvent(params: {
 
     if (followUpOutcome.kind !== 'fresh') {
       return;
-    }
-
-    const pendingMcpSetupInterrupt =
-      await hasPendingSlackMcpSetupInterrupt(threadId);
-
-    if (pendingMcpSetupInterrupt) {
-      await clearPendingSlackMcpSetupInterrupt(threadId);
     }
 
     const pendingConfirmation = await hasPendingRoutingConfirmation(threadId);

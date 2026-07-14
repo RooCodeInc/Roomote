@@ -72,6 +72,13 @@ const VERCEL_PROJECT_TAB_PATH_REGEX = new RegExp(
   `^/(?!(?:${VERCEL_PUBLIC_SITE_ROOT_SEGMENT_PATTERN})(?:/|$))[^/]+/[^/]+/(?:analytics|deployments|domains|functions|logs|observability|settings|storage|usage)(?:/|$)`,
 );
 
+// Zero product surfaces: capability pages (/c/<id>), the service directory
+// (/browse), and the wallet/profile page. The bare homepage also matches — a
+// pasted zero.xyz root link still reads as "about Zero" — but deep marketing
+// pages (/faq, /security, /getlisted, ...) do not.
+const ZERO_APP_PATH_REGEX = /^\/(?:c|browse|profile)(?:\/|$)/;
+const HOMEPAGE_PATH_REGEX = /^\/$/;
+
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'asana',
@@ -222,6 +229,19 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Zero',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['zero.xyz', 'withzero.ai'],
+    hostRules: [
+      {
+        hostSuffix: 'mcp.zero.xyz',
+      },
+      {
+        hostSuffix: 'zero.xyz',
+        pathRegexes: [HOMEPAGE_PATH_REGEX, ZERO_APP_PATH_REGEX],
+      },
+      {
+        hostSuffix: 'withzero.ai',
+        pathRegexes: [HOMEPAGE_PATH_REGEX],
+      },
+    ],
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',
   },

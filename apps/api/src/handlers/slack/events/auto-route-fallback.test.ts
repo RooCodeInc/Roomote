@@ -53,7 +53,7 @@ describe('auto-route-fallback', () => {
       userMapping: { userId: 'user_123' },
       slack: {},
       skipRouting: true,
-      skipMcpSetupInterrupt: true,
+      skipMcpSetupSuggestion: true,
       processingReactionName: 'eyes',
     });
   });

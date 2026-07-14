@@ -27,10 +27,16 @@ function InstructionText({
   );
 }
 
-function InstructionUrl({ heading, url }: { heading: string; url: string }) {
+export function InstructionUrl({
+  heading,
+  url,
+}: {
+  heading: string;
+  url: string;
+}) {
   return (
     <div className="space-y-1 flex gap-2 items-center">
-      <p className="font-semibold text-foreground text-sm w-45 shrink-0">
+      <p className="font-semibold text-foreground text-sm w-50 shrink-0">
         {heading}
       </p>
       <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
@@ -134,8 +140,11 @@ export function ProviderSetupInstructions({
         <InstructionText heading="Bot token">
           Copy the bot token BotFather replies with into the field below.
         </InstructionText>
-        <InstructionText heading="Webhook">
-          Roomote registers the webhook automatically when you save.
+        <InstructionText heading="Threaded Mode">
+          In BotFather, open Bot Settings → Threaded Mode and turn it on. This
+          lets Roomote create a separate private-chat topic for every task.
+          Telegram withholds a 15% fee from Stars purchases while this mode is
+          enabled.
         </InstructionText>
       </div>
     );

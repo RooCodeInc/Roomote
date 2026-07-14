@@ -663,8 +663,7 @@ describe('finishRun', () => {
       expect(mockPostMessage).not.toHaveBeenCalled();
     });
 
-    it('posts a setup thread reply with a /setup link when setup onboarding completes', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
+    it('does not post a setup completion message when setup onboarding completes', async () => {
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -694,17 +693,22 @@ describe('finishRun', () => {
         status: RunStatus.Completed,
       });
 
-      expect(mockPostMessage).toHaveBeenCalledWith({
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^slack:setup-completion:/),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
         channel: 'C123',
-        thread_ts: '111.222',
-        text: `Setup for the repo project is done. Continue on the web: <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.completed|Open setup>.`,
-        unfurl_links: false,
-        unfurl_media: false,
+        messageTs: '111.333',
+        threadTs: '111.222',
       });
     });
 
-    it('posts a setup thread reply when setup onboarding becomes idle with a linked environment', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
+    it('does not post a setup completion message when setup becomes idle with a linked environment', async () => {
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -736,16 +740,22 @@ describe('finishRun', () => {
         status: RunStatus.Idle,
       });
 
-      expect(mockPostMessage).toHaveBeenCalledWith({
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRedisSet).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^slack:setup-completion:/),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
         channel: 'C123',
-        thread_ts: '111.222',
-        text: `Setup for the repo project is done. Continue on the web: <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.completed|Open setup>.`,
-        unfurl_links: false,
-        unfurl_media: false,
+        messageTs: '111.333',
+        threadTs: '111.222',
       });
     });
 
-    it('does not post a setup thread reply when an idle setup task is still running', async () => {
+    it('does not clean up setup UI when an idle setup task is still running', async () => {
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -778,9 +788,10 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
-    it('does not post a setup thread reply when setup onboarding becomes idle without a linked environment', async () => {
+    it('does not clean up setup UI when setup becomes idle without a linked environment', async () => {
       const job = makeRun(
         {
           payloadKind: TaskPayloadKind.SlackAppMention,
@@ -812,50 +823,10 @@ describe('finishRun', () => {
       });
 
       expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRemoveCancelButton).not.toHaveBeenCalled();
     });
 
-    it('falls back to a generic setup completion message when no project name is available', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
-      const job = makeRun(
-        {
-          payloadKind: TaskPayloadKind.SlackAppMention,
-          payload: {
-            repo: '',
-            channel: 'C123',
-            user: 'U456',
-            text: 'test',
-            ts: '111.222',
-            thread_ts: '111.222',
-            webPath: '/setup',
-          },
-        },
-        { slackChannelId: 'C123', slackThreadTs: '111.222' },
-      );
-      mockFindFirstRun.mockResolvedValue(job);
-      mockFindFirstTask.mockResolvedValue(job.task);
-      mockFindFirstSlackInstallation.mockResolvedValue({
-        id: 'slack-inst-1',
-        botAccessToken: 'xoxb-test',
-        isActive: true,
-      });
-      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
-
-      await finishRun({
-        id: 1,
-        status: RunStatus.Completed,
-      });
-
-      expect(mockPostMessage).toHaveBeenCalledWith({
-        channel: 'C123',
-        thread_ts: '111.222',
-        text: `Setup is done. Continue on the web: <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.completed|Open setup>.`,
-        unfurl_links: false,
-        unfurl_media: false,
-      });
-    });
-
-    it('posts a setup thread reply for resumed setup snapshot runs by reading sibling runs of the task', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
+    it('cleans up setup UI for resumed setup snapshot runs by reading sibling runs of the task', async () => {
       const resumedRun = makeRun(
         {
           id: 2,
@@ -901,17 +872,15 @@ describe('finishRun', () => {
         status: RunStatus.Completed,
       });
 
-      expect(mockPostMessage).toHaveBeenCalledWith({
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
         channel: 'C123',
-        thread_ts: '111.222',
-        text: `Setup for the repo project is done. Continue on the web: <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.completed|Open setup>.`,
-        unfurl_links: false,
-        unfurl_media: false,
+        messageTs: '111.333',
+        threadTs: '111.222',
       });
     });
 
-    it('posts a setup thread reply for an idle resume when the linked environment lives on a sibling run', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
+    it('cleans up setup UI for an idle resume when the linked environment lives on a sibling run', async () => {
       const resumedRun = makeRun(
         {
           id: 2,
@@ -957,99 +926,12 @@ describe('finishRun', () => {
         status: RunStatus.Idle,
       });
 
-      expect(mockPostMessage).toHaveBeenCalledWith({
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockRemoveCancelButton).toHaveBeenCalledWith({
         channel: 'C123',
-        thread_ts: '111.222',
-        text: `Setup for the repo project is done. Continue on the web: <${origin}/setup?utm_source=slack&utm_medium=link&utm_campaign=setup.onboarding.completed|Open setup>.`,
-        unfurl_links: false,
-        unfurl_media: false,
+        messageTs: '111.333',
+        threadTs: '111.222',
       });
-    });
-
-    it('posts the setup thread reply only once across repeated idle resume cycles of the same task', async () => {
-      const freshRunPayload = {
-        repo: 'owner/repo',
-        channel: 'C123',
-        user: 'U456',
-        text: 'test',
-        ts: '111.222',
-        thread_ts: '111.222',
-        webPath: '/setup',
-        environmentDefinitionId: 'env-123',
-      };
-      const firstResumeRun = makeRun(
-        {
-          id: 2,
-          payloadKind: TaskPayloadKind.SnapshotResume,
-          kind: 'resume',
-          taskPhase: 'waiting_for_prompt',
-          sourceRunId: 1,
-          payload: {
-            repo: 'owner/repo',
-            sourceSnapshotId: 'snapshot-123',
-            sourceRunId: 1,
-            slackChannel: 'C123',
-          },
-        },
-        { slackChannelId: 'C123', slackThreadTs: '111.222' },
-      );
-      const secondResumeRun = makeRun(
-        {
-          id: 3,
-          payloadKind: TaskPayloadKind.SnapshotResume,
-          kind: 'resume',
-          taskPhase: 'waiting_for_prompt',
-          sourceRunId: 2,
-          payload: {
-            repo: 'owner/repo',
-            sourceSnapshotId: 'snapshot-456',
-            sourceRunId: 2,
-            slackChannel: 'C123',
-          },
-        },
-        { slackChannelId: 'C123', slackThreadTs: '111.222' },
-      );
-
-      mockFindFirstRun
-        .mockResolvedValueOnce(firstResumeRun)
-        .mockResolvedValueOnce(secondResumeRun);
-      mockFindFirstTask.mockResolvedValue(firstResumeRun.task);
-      mockFindManyRuns.mockResolvedValue([{ id: 1, payload: freshRunPayload }]);
-      mockFindFirstSlackInstallation.mockResolvedValue({
-        id: 'slack-inst-1',
-        botAccessToken: 'xoxb-test',
-        isActive: true,
-      });
-      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
-      mockRedisSet.mockResolvedValueOnce('OK').mockResolvedValueOnce(null);
-
-      await finishRun({
-        id: 2,
-        status: RunStatus.Idle,
-      });
-      await finishRun({
-        id: 3,
-        status: RunStatus.Idle,
-      });
-
-      // The claim is task-scoped, so repeated idle cycles share one key.
-      expect(mockRedisSet).toHaveBeenNthCalledWith(
-        1,
-        'slack:setup-completion:slack-inst-1:task-1',
-        '1',
-        'EX',
-        2592000,
-        'NX',
-      );
-      expect(mockRedisSet).toHaveBeenNthCalledWith(
-        2,
-        'slack:setup-completion:slack-inst-1:task-1',
-        '1',
-        'EX',
-        2592000,
-        'NX',
-      );
-      expect(mockPostMessage).toHaveBeenCalledTimes(1);
     });
 
     it('DMs the installing user after their second completed non-unknown task when no channels were joined yet', async () => {

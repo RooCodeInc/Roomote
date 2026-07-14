@@ -3,6 +3,7 @@ const replaceMock = vi.fn();
 const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
+const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
@@ -45,6 +46,7 @@ vi.mock('@tanstack/react-query', async () => {
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
       removeQueries: removeQueriesMock,
+      fetchQuery: fetchQueryMock,
     }),
   };
 });
@@ -57,6 +59,11 @@ vi.mock('@/trpc/client', () => ({
       },
       status: {
         queryKey: () => queryKeys.setupStatus,
+      },
+    },
+    setupNew: {
+      status: {
+        queryOptions: () => ({ queryKey: ['setupNew.status'] }),
       },
     },
     onboarding: {
@@ -92,6 +99,11 @@ vi.mock('./StepCompletedBadge', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  Alert: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  AlertCircle: () => <span>AlertCircle</span>,
+  AlertDescription: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
   Button: ({
     children,
     onClick,
@@ -125,6 +137,7 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Loader2: () => <span>Loader2</span>,
+  CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
   Zap: () => <span>Zap</span>,
@@ -151,7 +164,35 @@ describe('Setup StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
+    fetchQueryMock.mockResolvedValue({
+      setupNewState: { onboardingTaskId: null },
+    });
     environmentState.environments = [{ id: 'env-1' }];
+  });
+
+  it('shows an actionable retry when sandbox provisioning fails', () => {
+    const onRetryComputeProvisioning = vi.fn();
+
+    render(
+      <StepInvoke
+        computeProvisioning={{
+          status: 'failed',
+          runtimeSchemaVersion: 3,
+          imageRef: 'registry.example.com/worker:tag',
+          templateRef: null,
+          error: 'Access denied',
+          startedAt: new Date().toISOString(),
+          finishedAt: new Date().toISOString(),
+        }}
+        onRetryComputeProvisioning={onRetryComputeProvisioning}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Sandbox provider provisioning failed/),
+    ).toHaveTextContent('Access denied');
+    fireEvent.click(screen.getByRole('button', { name: 'Retry provisioning' }));
+    expect(onRetryComputeProvisioning).toHaveBeenCalledOnce();
   });
 
   it('optimistically completes setup and onboarding before routing away', async () => {
@@ -245,6 +286,48 @@ describe('Setup StepInvoke', () => {
 
     await waitFor(() => {
       expect(replaceMock).toHaveBeenCalledWith('/');
+    });
+  });
+
+  it('explains the background setup task and finishes onboarding at its canonical task page', async () => {
+    render(<StepInvoke onboardingTaskId="task-onboarding-1" />);
+
+    expect(
+      screen.getByText(
+        /once your environment is ready, you can work with roomote in these ways/i,
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: /finish environment setup/i }),
+    );
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-onboarding-1');
+    });
+    // Destination is already known from the invoke prop — do not wait on a
+    // setupNew.status refresh before leaving, or /setup can flash Home first.
+    expect(fetchQueryMock).not.toHaveBeenCalled();
+    expect(replaceMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('environmentId='),
+    );
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: queryKeys.setupStatus,
+      });
+    });
+  });
+
+  it('uses the refreshed onboarding task id when finishing setup', async () => {
+    fetchQueryMock.mockResolvedValueOnce({
+      setupNewState: { onboardingTaskId: 'task-refreshed' },
+    });
+
+    render(<StepInvoke />);
+
+    fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith('/task/task-refreshed');
     });
   });
 

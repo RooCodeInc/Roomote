@@ -137,17 +137,10 @@ export async function handleCreateEnvironment(
       config: finalParse.data,
     });
 
-    const missingCount = result.missingRepositories.length;
-    const message =
-      missingCount > 0
-        ? `Environment "${result.name}" created. ${missingCount} repository mapping(s) were skipped because they are not linked to this deployment.`
-        : `Environment "${result.name}" created successfully.`;
-
     return successResult({
       environmentId: result.environmentId,
       name: result.name,
-      missingRepositories: result.missingRepositories,
-      message,
+      message: `Environment "${result.name}" created successfully.`,
     });
   } catch (error) {
     return catchError(error);
@@ -203,17 +196,10 @@ export async function handleUpdateEnvironment(
       config: finalParse.data,
     });
 
-    const missingCount = result.missingRepositories.length;
-    const message =
-      missingCount > 0
-        ? `Environment "${result.name}" updated. ${missingCount} repository mapping(s) were skipped because they are not linked to this deployment.`
-        : `Environment "${result.name}" updated successfully.`;
-
     return successResult({
       environmentId: result.environmentId,
       name: result.name,
-      missingRepositories: result.missingRepositories,
-      message,
+      message: `Environment "${result.name}" updated successfully.`,
     });
   } catch (error) {
     return catchError(error);

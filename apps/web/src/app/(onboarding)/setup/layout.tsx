@@ -44,9 +44,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         frameClassName="h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden"
         surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center"
       >
+        <RoomoteWordmark className="absolute right-9 bottom-7 h-8 hidden md:block" />
+
         {isSignedIn ? (
           <>
-            <RoomoteWordmark className="absolute right-9 bottom-7 h-8 hidden md:block" />
             <div className="z-50 flex w-full justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0 ">
               <UserMenu portalContainer={userMenuPortalContainer} />
             </div>

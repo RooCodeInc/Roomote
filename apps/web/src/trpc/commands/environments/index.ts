@@ -32,6 +32,7 @@ import {
   type EnvironmentConfig,
   environmentConfigSchema,
   getEnvironmentRepositoryInstallationError,
+  getMissingEnvironmentRepositoryError,
   isExitedRunStatus,
   normalizeRepositorySelection,
 } from '@roomote/types';
@@ -39,7 +40,10 @@ import * as GitHub from '@roomote/github';
 
 import { checkRepoAccess } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
-import { buildUpdateEnvironmentDefinitionPrompt } from '@/lib/environment-definition';
+import {
+  buildSetupEnvironmentTaskTitle,
+  buildUpdateEnvironmentDefinitionPrompt,
+} from '@/lib/environment-definition';
 import { getRepositories } from '@/lib/server';
 
 export type SnapshotStatus = 'pending' | 'ready' | 'expired' | 'failed';
@@ -369,14 +373,22 @@ export async function createEnvironmentCommand(
   }
 
   const configRepos = parseResult.data.repositories ?? [];
-  const repositoryRows = await getEnvironmentRepositoryRows(
-    getConfiguredRepositoryNames(parseResult.data),
-  );
+  const repositoryNames = getConfiguredRepositoryNames(parseResult.data);
+  const repositoryRows = await getEnvironmentRepositoryRows(repositoryNames);
   const repositoryConfigError =
     getEnvironmentRepositoryConfigError(repositoryRows);
 
   if (repositoryConfigError) {
     return { success: false, error: repositoryConfigError };
+  }
+
+  const missingRepositoryError = getMissingEnvironmentRepositoryError(
+    repositoryNames,
+    repositoryRows,
+  );
+
+  if (missingRepositoryError) {
+    return { success: false, error: missingRepositoryError };
   }
 
   const repoMap = new Map(repositoryRows.map((r) => [r.fullName, r.id]));
@@ -501,16 +513,25 @@ export async function updateEnvironmentCommand(
   }
 
   const configRepos = nextConfig?.repositories ?? [];
+  const repositoryNames =
+    input.config && nextConfig ? getConfiguredRepositoryNames(nextConfig) : [];
   const repositoryRows = input.config
-    ? await getEnvironmentRepositoryRows(
-        nextConfig ? getConfiguredRepositoryNames(nextConfig) : [],
-      )
+    ? await getEnvironmentRepositoryRows(repositoryNames)
     : [];
   const repositoryConfigError =
     getEnvironmentRepositoryConfigError(repositoryRows);
 
   if (repositoryConfigError) {
     return { success: false, error: repositoryConfigError };
+  }
+
+  const missingRepositoryError = getMissingEnvironmentRepositoryError(
+    repositoryNames,
+    repositoryRows,
+  );
+
+  if (missingRepositoryError) {
+    return { success: false, error: missingRepositoryError };
   }
 
   const repoMap = new Map(repositoryRows.map((r) => [r.fullName, r.id]));
@@ -654,7 +675,7 @@ export async function getActiveEnvironmentDefinitionTaskCommand(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.workflow, 'standard'),
+        eq(tasks.workflow, 'setup_onboarding'),
         inArray(taskRuns.status, [...activeRunStatuses]),
         sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${input.environmentId}`,
       ),
@@ -688,6 +709,7 @@ export async function startEnvironmentDefinitionTaskCommand(
   const selectedRepositoryFullNames = selectedRepositories.map(
     (repository) => repository.fullName,
   );
+  const title = buildSetupEnvironmentTaskTitle(selectedRepositoryFullNames);
   const workspacePayload = buildEnvironmentDefinitionWorkspacePayload(
     selectedRepositoryFullNames,
   );
@@ -731,6 +753,7 @@ export async function startEnvironmentDefinitionTaskCommand(
 
   const startedAt = new Date().toISOString();
   const launchResult = await enqueueTask({
+    title,
     task: {
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -739,11 +762,10 @@ export async function startEnvironmentDefinitionTaskCommand(
           ? { environmentDefinitionId: input.environmentId }
           : {}),
         description: prompt,
-        visibleInTranscript: false,
       },
     },
     initiator: { kind: 'user', userId },
-    workflow: 'standard',
+    workflow: 'setup_onboarding',
     surface: 'web',
     trigger: 'manual',
   });
@@ -851,8 +873,8 @@ export async function duplicateEnvironmentCommand(
 
 /**
  * Validates an environment configuration asynchronously against server-side
- * resources. Checks repository accessibility via the GitHub API (hard error)
- * and branch existence (soft warning).
+ * resources. Checks repository accessibility (hard error) and branch existence
+ * for providers with a branch-listing implementation (soft warning).
  */
 export async function validateConfigCommand(
   auth: UserAuthSuccess,
@@ -862,6 +884,10 @@ export async function validateConfigCommand(
 
   const errors: string[] = [];
   const warnings: string[] = [];
+  const repositoryProviders = new Map<
+    string,
+    (typeof repositories.$inferSelect)['sourceControlProvider']
+  >();
   const repositoryNames = [
     ...new Set(input.config.repositories.map((repo) => repo.repository)),
   ];
@@ -872,6 +898,7 @@ export async function validateConfigCommand(
         id: repositories.id,
         fullName: repositories.fullName,
         installationId: repositories.installationId,
+        sourceControlProvider: repositories.sourceControlProvider,
       })
       .from(repositories)
       .where(
@@ -886,6 +913,13 @@ export async function validateConfigCommand(
     if (repositoryConfigError) {
       errors.push(repositoryConfigError);
     }
+
+    for (const repository of dbRepos) {
+      repositoryProviders.set(
+        repository.fullName,
+        repository.sourceControlProvider,
+      );
+    }
   }
 
   await Promise.all(
@@ -899,8 +933,13 @@ export async function validateConfigCommand(
         return; // skip branch check if repo itself is inaccessible
       }
 
-      // If a branch is specified, check it exists
-      if (repo.branch) {
+      // Branch listing is currently implemented only for GitHub. Do not send
+      // repositories from other providers through the GitHub API: its
+      // provider-scoped lookup correctly returns no branches for those rows.
+      if (
+        repo.branch &&
+        repositoryProviders.get(repo.repository) === 'github'
+      ) {
         try {
           const branches = await GitHub.getBranches({
             userId,

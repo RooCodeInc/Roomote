@@ -63,7 +63,7 @@ function buildTelegramTaskRunMatchConditions(input: TelegramConversationRef) {
   const conversationMatch = sql`${taskRuns.payload}->>'communicationChannelId' = ${input.chatId}`;
   const threadMatch = input.threadId
     ? sql`${taskRuns.payload}->>'communicationThreadId' = ${input.threadId}`
-    : undefined;
+    : sql`${taskRuns.payload}->>'communicationThreadId' IS NULL`;
 
   return { telegramProviderMatch, conversationMatch, threadMatch };
 }

@@ -31,6 +31,11 @@ vi.mock('../automation-work-items/teams.js', () => ({
   postLateBoundWorkItemFailureToTeams: vi.fn(async () => undefined),
 }));
 
+vi.mock('../automation-work-items/telegram.js', () => ({
+  resolveAutomationTelegramTarget: vi.fn(async () => null),
+  postLateBoundWorkItemFailureToTelegram: vi.fn(async () => undefined),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   asc: vi.fn(),
@@ -505,6 +510,70 @@ describe('submitAutomationWorkItems', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: 'Automation work items are not supported for this task source',
+    });
+  });
+
+  it('loads the latest task run when validating scan payload before act submit', async () => {
+    const environmentId = '11111111-1111-1111-1111-111111111111';
+    mockTaskRunFindFirst.mockResolvedValueOnce({
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
+      payload: {
+        repo: 'acme/app',
+        selectedRepositories: ['acme/app'],
+        suggestionSource: 'sentry_triage',
+      },
+    });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/automation_work_items', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workItems: [
+            {
+              title: 'Fix parser nil access',
+              brief: 'Fix the production issue.',
+              actionKind: 'code_change_pr',
+              disposition: 'act',
+              executionPrompt: '$implement-changes\nFix the production issue.',
+              targetRepositoryFullName: 'acme/app',
+              targetEnvironmentId: environmentId,
+            },
+            {
+              title: 'Fix setup insertBefore crash',
+              brief:
+                'Must still fail Sentry act limit after latest-run lookup.',
+              actionKind: 'code_change_pr',
+              disposition: 'act',
+              executionPrompt: '$implement-changes\nFix the second issue.',
+              targetRepositoryFullName: 'acme/app',
+              targetEnvironmentId: '22222222-2222-2222-2222-222222222222',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(mockTaskRunFindFirst).toHaveBeenCalledTimes(1);
+    const findFirstArgs = mockTaskRunFindFirst.mock.calls[0]?.[0] as {
+      orderBy?: (
+        table: { id: string },
+        operators: { desc: (column: string) => { desc: string } },
+      ) => { desc: string };
+    };
+    expect(findFirstArgs?.orderBy).toEqual(expect.any(Function));
+    expect(
+      findFirstArgs.orderBy?.(
+        { id: 'taskRuns.id' },
+        { desc: (column) => ({ desc: column }) },
+      ),
+    ).toEqual({ desc: 'taskRuns.id' });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Sentry triage may submit at most 1 act work item per run.',
     });
   });
 });

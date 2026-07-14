@@ -20,6 +20,7 @@ const telegramChatSchema = z
     username: z.string().optional(),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
+    is_forum: z.boolean().optional(),
   })
   .passthrough();
 
@@ -31,15 +32,49 @@ const telegramMessageEntitySchema = z
   })
   .passthrough();
 
+const telegramForumTopicCreatedSchema = z
+  .object({
+    name: z.string(),
+    icon_color: z.number().int().optional(),
+    icon_custom_emoji_id: z.string().optional(),
+    is_name_implicit: z.boolean().optional(),
+  })
+  .passthrough();
+
+const telegramPhotoSizeSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    width: z.number().int(),
+    height: z.number().int(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
+const telegramDocumentSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    file_name: z.string().optional(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
     message_thread_id: z.number().int().optional(),
     date: z.number().int().optional(),
     text: z.string().optional(),
+    caption: z.string().optional(),
+    photo: z.array(telegramPhotoSizeSchema).optional(),
+    document: telegramDocumentSchema.optional(),
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
+    caption_entities: z.array(telegramMessageEntitySchema).optional(),
+    forum_topic_created: telegramForumTopicCreatedSchema.optional(),
   })
   .passthrough();
 
@@ -132,6 +167,12 @@ export function getTelegramMessageThreadId(
   return message.message_thread_id === undefined
     ? undefined
     : String(message.message_thread_id);
+}
+
+export function isTelegramImplicitTopicCreatedMessage(
+  message: TelegramMessage,
+): boolean {
+  return message.forum_topic_created?.is_name_implicit === true;
 }
 
 export function formatTelegramUser(message: TelegramMessage): string {
@@ -309,13 +350,21 @@ export function isTelegramBotMentioned(
   message: TelegramMessage,
   options: TelegramBotMentionOptions = {},
 ): boolean {
-  const text = message.text ?? '';
+  const text = message.text ?? message.caption ?? '';
 
   if (!text) {
     return false;
   }
 
-  return Boolean(getTelegramInvocationEntity(text, message, options));
+  return Boolean(
+    getTelegramInvocationEntity(
+      text,
+      message.caption && !message.text
+        ? { ...message, entities: message.caption_entities }
+        : message,
+      options,
+    ),
+  );
 }
 
 /**
@@ -341,13 +390,16 @@ export function isTelegramTaskEntryUpdate(
 
   return Boolean(
     message &&
-    message.text &&
+    (message.text ||
+      message.caption ||
+      message.photo?.length ||
+      message.document) &&
     (isTelegramPrivateChat(message) ||
       isTelegramBotMentioned(message, options)),
   );
 }
 
-export const TELEGRAM_NEW_TASK_COMMANDS = ['new', 'done'] as const;
+export const TELEGRAM_NEW_TASK_COMMANDS = ['new'] as const;
 
 export type TelegramNewTaskCommand = {
   command: (typeof TELEGRAM_NEW_TASK_COMMANDS)[number];
@@ -361,17 +413,16 @@ function isNewTaskCommandName(
 }
 
 /**
- * Detects an explicit `/new` or `/done` command and returns the command name
- * plus the task description with the invocation stripped. Returns `null` when
- * the update is not one of those commands.
+ * Detects an explicit `/new` command and returns the command name plus the task
+ * description with the invocation stripped. Returns `null` for other updates.
  *
- * Telegram chats have no threads, so after a task completes the next message
- * in the same chat would otherwise resume the previous task's snapshot. These
- * commands force a fresh task launch instead.
+ * After a task completes, the next message in the same chat/topic would
+ * otherwise resume its snapshot. This command forces a fresh task launch
+ * instead (and the launch path can create a fresh Telegram topic).
  *
- * The command must lead the message — a `/new` or `/done` mentioned
- * mid-sentence is ordinary text, not a command. The only prefix allowed before
- * the command is a mention of this bot, so both group forms work:
+ * The command must lead the message — a `/new` mentioned mid-sentence is
+ * ordinary text, not a command. The only prefix allowed before the command is
+ * a mention of this bot, so both group forms work:
  * `/new@<botUsername> <text>` and `@<botUsername> /new <text>`. A bare `/new`
  * from another member, or one suffixed for another bot, does not hijack the
  * chat.
@@ -463,11 +514,25 @@ export function telegramUpdateToQueuedCommunicationMessage(
 ): QueuedCommunicationMessage | null {
   const message = getTelegramUpdateMessage(update);
 
-  if (!message?.text) {
+  if (!message) {
     return null;
   }
 
-  const text = stripTelegramBotInvocation(message.text, message, options);
+  const sourceText = message.text ?? message.caption ?? '';
+  const invocationMessage =
+    message.caption && !message.text
+      ? { ...message, entities: message.caption_entities }
+      : message;
+  const strippedText = sourceText
+    ? stripTelegramBotInvocation(sourceText, invocationMessage, options)
+    : '';
+  const text = strippedText
+    ? strippedText
+    : message.photo?.length
+      ? 'Image attachment'
+      : message.document
+        ? `Document attachment${message.document.file_name ? `: ${message.document.file_name}` : ''}`
+        : '';
 
   if (!text) {
     return null;

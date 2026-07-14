@@ -74,6 +74,8 @@ workspace:
   MariaDB, ClickHouse, or the AWS CLI before repository setup commands run.
 - **Repositories** choose the repositories to clone, optional branches,
   repository-specific tool fallbacks, and setup commands for each repository.
+- **Docker Compose & Dockerfile** build and start an existing Docker Compose
+  project or a single Dockerfile from one of the selected repositories.
 - **Environment Variables** provide values that tasks can read.
 - **Environment `.tool-versions`** writes a shared `.tool-versions` file at
   the workspace root.
@@ -131,6 +133,25 @@ task, and include the exact command, package, or path when it matters.
 Use **Don't block setup even if it fails** only for helpful-but-optional
 steps. If the app cannot run without the command, let setup fail so the issue
 is visible.
+
+## Use an existing Docker setup
+
+If the repository already defines its development dependencies in Docker, add
+a **Docker project** (`docker_projects` in YAML) instead of duplicating that
+setup as Roomote-managed services. A project can use one or more Compose files
+or build a single Dockerfile. Roomote starts it after the repository is cloned
+and waits for its services to become healthy before repository setup commands
+run.
+
+Map container ports to named environment ports when a service should have a
+live preview. Compose mappings also identify the service that owns the port.
+Startup is required by default; mark a project optional only when tasks can
+still work usefully without it.
+
+Docker projects are supported by all sandbox providers. They are isolated with
+the task and are removed when the task sandbox is destroyed. They are still
+customer-controlled code, so review Compose files and Dockerfiles with the same
+care as repository setup scripts.
 
 ## Set tool versions at the right level
 

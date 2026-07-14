@@ -242,6 +242,8 @@ export interface ModalConfig {
   memoryMiB?: number;
   /** Hard memory cap in MiB (e.g. 16384 for 16 GB). */
   memoryLimitMiB?: number;
+  /** Use Modal's VM sandbox runtime for nested Docker workloads. */
+  vmRuntime?: boolean;
 }
 
 export interface DockerConfig {

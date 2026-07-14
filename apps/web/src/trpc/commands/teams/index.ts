@@ -1,4 +1,7 @@
-import { resolveTeamsBotRuntimeCredentials } from '@roomote/db/server';
+import {
+  resolveTeamsBotRuntimeCredentials,
+  resolveTeamsInvocationBotName,
+} from '@roomote/db/server';
 import { findTeamsPrimaryConversation } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -12,6 +15,7 @@ type TeamsIntegrationStatus = {
   microsoftAuthConfigured: boolean;
   webhookUrl: string;
   openInTeamsUrl: string | null;
+  botName: string;
   /**
    * True when a verified inbound Teams activity has captured a conversation
    * Roomote can post back into. Without it, proactive Teams output (setup
@@ -42,11 +46,12 @@ export async function getTeamsIntegrationStatusCommand(
 ): Promise<TeamsIntegrationStatus> {
   void auth;
 
-  const [credentials, authProviderConfig, primaryConversation] =
+  const [credentials, authProviderConfig, primaryConversation, botName] =
     await Promise.all([
       resolveTeamsBotRuntimeCredentials(),
       resolveAuthProviderConfig(),
       findTeamsPrimaryConversation(),
+      resolveTeamsInvocationBotName(),
     ]);
 
   return {
@@ -60,6 +65,7 @@ export async function getTeamsIntegrationStatusCommand(
     ),
     webhookUrl: getTeamsWebhookUrl(),
     openInTeamsUrl: getOpenInTeamsUrl(credentials.botAppId),
+    botName,
     primaryConversationReady: primaryConversation !== null,
     primaryConversationType: primaryConversation?.conversationType ?? null,
   };

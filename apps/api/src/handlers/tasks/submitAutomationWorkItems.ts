@@ -46,6 +46,7 @@ export async function submitAutomationWorkItems(
     const [run, task] = await Promise.all([
       db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, taskId),
+        orderBy: (table, { desc }) => desc(table.id),
         columns: {
           payloadKind: true,
           actingUserId: true,
@@ -63,6 +64,17 @@ export async function submitAutomationWorkItems(
 
     if (!run) {
       return c.json({ error: 'Task not found' }, 404);
+    }
+
+    // Initiator stamp catches the new StandardTask CI path (no suggestionSource).
+    if (task?.initiatorAutomation === 'ci_failure_triage') {
+      return c.json(
+        {
+          error:
+            'CI failure triage no longer uses automation work items. Investigate and fix in the launched standard task.',
+        },
+        400,
+      );
     }
 
     if (run.payloadKind !== TaskPayloadKind.Scan) {

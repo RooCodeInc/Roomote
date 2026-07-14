@@ -20,9 +20,7 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -51,13 +49,14 @@ function getReviewTaskType(
 
 /**
  * Notifies Slack, Teams, Telegram, and Linear threads/sessions linked to the
- * MR after a merge. GitLab has no installation gate, so verify the repository
- * is an active synced GitLab row before notifying (fire-and-forget, mirroring
- * the GitHub merge handler).
+ * MR after it becomes terminal (merged or closed). GitLab has no installation
+ * gate, so verify the repository is an active synced GitLab row before
+ * notifying (fire-and-forget, mirroring the GitHub status handler).
  */
-async function notifyMergedMergeRequestThreads(
+async function notifyTerminalMergeRequestThreads(
   payload: GitLabMergeRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
   const repositoryRow = await db.query.repositories.findFirst({
     where: and(
@@ -72,42 +71,19 @@ async function notifyMergedMergeRequestThreads(
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'gitlab' as const,
-    repository: repoFullName,
-    prNumber: payload.object_attributes.iid,
-    prTitle: payload.object_attributes.title,
-    prUrl: payload.object_attributes.url,
-    mergedBy:
-      payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Slack for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Teams for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'gitlab',
-  }).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Telegram/Linear for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'gitlab',
+      repository: repoFullName,
+      prNumber: payload.object_attributes.iid,
+      prTitle: payload.object_attributes.title,
+      prUrl: payload.object_attributes.url,
+      status,
+      actorLogin:
+        payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
+    },
+    `MR !${payload.object_attributes.iid}`,
+  );
 }
 
 export async function handleGitLabMergeRequest(
@@ -147,8 +123,8 @@ export async function handleGitLabMergeRequest(
       );
     });
 
-    if (mergeRequest.action === 'merge') {
-      await notifyMergedMergeRequestThreads(payload, repoFullName);
+    if (mergeRequest.action === 'merge' || mergeRequest.action === 'close') {
+      await notifyTerminalMergeRequestThreads(payload, repoFullName, status);
     }
 
     return { status: 'ok' };

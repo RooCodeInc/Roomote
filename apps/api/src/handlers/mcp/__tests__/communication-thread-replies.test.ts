@@ -54,6 +54,13 @@ vi.mock('@roomote/communication/thread-reply-footer-state', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(),
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await resolveTelegramRuntimeCredentialsMock();
+
+    return botToken
+      ? { postMessage: postMessageMock, sendChatAction: sendChatActionMock }
+      : null;
+  }),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -290,6 +297,18 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
 
     expect(sendChatActionMock).toHaveBeenCalledWith(
       expect.objectContaining({ channelId: '222' }),
+    );
+  });
+
+  it('does not post the managed live-preview footer in Telegram', async () => {
+    await maybeSendCommunicationThreadReply({
+      taskRun: telegramTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(postMessageMock).toHaveBeenCalledTimes(1);
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'done' }),
     );
   });
 

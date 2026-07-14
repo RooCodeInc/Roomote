@@ -237,12 +237,14 @@ import {
   getCommsStatusCommand,
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
+  repairTelegramWebhookCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
   clearComputeConfigCommand,
   setDefaultComputeProviderCommand,
+  setLocalDockerEnabledCommand,
 } from '../commands/compute';
 import {
   getTaskSuggestionFilterOptionsCommand,
@@ -1310,6 +1312,10 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         clearCommsAuthConfigCommand(auth, input),
       ),
+
+    repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      repairTelegramWebhookCommand(auth),
+    ),
   }),
 
   compute: createRouter({
@@ -1338,6 +1344,12 @@ export const appRouter = createRouter({
       .input(z.object({ provider: z.enum(computeProviders) }))
       .mutation(({ ctx: { auth }, input }) =>
         setDefaultComputeProviderCommand(auth, input),
+      ),
+
+    setLocalDockerEnabled: protectedProcedure
+      .input(z.object({ enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setLocalDockerEnabledCommand(auth, input),
       ),
   }),
 

@@ -136,7 +136,7 @@ describe('resolveComputeProviderEnvValues', () => {
     });
 
     expect(values.MODAL_BASE_IMAGE_REF).toBe(
-      'ghcr.io/roocodeinc/roomote-worker:latest',
+      'ghcr.io/roocodeinc/roomote-worker:develop',
     );
   });
 
@@ -228,5 +228,23 @@ describe('listConfiguredComputeProviders', () => {
     });
 
     expect(providers).toEqual(['blaxel', 'docker']);
+  });
+
+  it('excludes persisted providers from task launch options', async () => {
+    const executor = makeExecutor([]);
+    executor.query = {
+      deploymentSettings: {
+        findFirst: vi.fn().mockResolvedValue({
+          runtimeComputeConfig: { excludedProviders: ['docker'] },
+        }),
+      },
+    } as never;
+
+    const providers = await listConfiguredComputeProviders({
+      runtimeEnv: {},
+      executor,
+    });
+
+    expect(providers).toEqual([]);
   });
 });

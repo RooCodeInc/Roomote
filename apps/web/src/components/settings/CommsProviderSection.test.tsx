@@ -19,12 +19,24 @@ type CommsProviderStatus = {
     secret?: boolean;
     runtimeSatisfied: boolean;
     savedSatisfied: boolean;
+    savedValue?: string | null;
     satisfiedByEnvVarName: string | null;
   }>;
   runtimeSatisfied: boolean;
   savedSatisfied: boolean;
   setupSatisfied: boolean;
-  telegramWebhook?: null;
+  telegramWebhook?: {
+    status:
+      | 'connected'
+      | 'mismatch'
+      | 'stale_updates'
+      | 'unregistered'
+      | 'error';
+    registeredUrl: string | null;
+    expectedUrl: string;
+    lastErrorMessage: string | null;
+  } | null;
+  telegramBotUsername?: string | null;
 };
 
 const state = vi.hoisted(() => ({
@@ -124,7 +136,10 @@ vi.mock('@tanstack/react-query', () => ({
       });
     },
   }),
-  useQueryClient: () => ({ setQueryData: vi.fn() }),
+  useQueryClient: () => ({
+    setQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
 }));
 
 vi.mock('@/hooks/slack', () => ({
@@ -161,10 +176,20 @@ vi.mock('@/hooks/teams', () => ({
   }),
 }));
 
+vi.mock('./TelegramLinkAccountStep', () => ({
+  TelegramLinkAccountStep: () => <div>Telegram link step</div>,
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       installation: { queryKey: () => ['slack', 'installation'] },
+    },
+    comms: {
+      status: { queryKey: () => ['comms', 'status'] },
+      repairTelegram: {
+        mutationOptions: (options: unknown) => options,
+      },
     },
     routerDebug: {
       getSettings: {
@@ -471,14 +496,6 @@ function buildTelegramProvider(
         acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
         label: 'Telegram Webhook Secret',
         secret: true,
-        runtimeSatisfied: false,
-        savedSatisfied: false,
-        satisfiedByEnvVarName: null,
-      },
-      {
-        envVarName: 'R_TELEGRAM_BOT_USERNAME',
-        acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'],
-        label: 'Telegram Bot Username',
         required: false,
         runtimeSatisfied: false,
         savedSatisfied: false,
@@ -489,6 +506,7 @@ function buildTelegramProvider(
     savedSatisfied: false,
     setupSatisfied: false,
     telegramWebhook: null,
+    telegramBotUsername: null,
     ...overrides,
   };
 }
@@ -585,7 +603,7 @@ describe('CommsProviderSection', () => {
         screen.getByText('Create a Microsoft Entra app.'),
       ).toBeInTheDocument();
       expect(
-        screen.getByText('Enter the Microsoft app generated values.'),
+        screen.getByText('Enter the Microsoft Entra app generated values.'),
       ).toBeInTheDocument();
       expect(
         screen.getByText('Upload Roomote to Microsoft Teams.'),
@@ -600,7 +618,7 @@ describe('CommsProviderSection', () => {
       ).toBeInTheDocument();
     });
 
-    it('shows numbered Telegram setup with the settings-only webhook note', () => {
+    it('shows numbered Telegram setup without exposing the managed webhook secret', () => {
       render(
         <CommsProviderSection
           provider={buildTelegramProvider()}
@@ -619,11 +637,108 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText(/Create a new Telegram bot/)).toBeInTheDocument();
       expect(screen.getByText('Create bot')).toBeInTheDocument();
       expect(screen.getByText('Bot token')).toBeInTheDocument();
-      expect(screen.getByText('Webhook')).toBeInTheDocument();
+      expect(screen.getByText('Threaded Mode')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook')).not.toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
       expect(
-        screen.getByText(/Roomote will generate the webhook secret/),
+        screen.getByText(/Roomote generates a webhook secret automatically/),
       ).toBeInTheDocument();
+      expect(
+        screen.queryByText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByPlaceholderText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Telegram Bot Token')).toBeInTheDocument();
+      expect(
+        screen.getByPlaceholderText('Telegram Bot Token'),
+      ).toBeInTheDocument();
+    });
+
+    it('lets users save Telegram with only a bot token when the secret is auto-managed', () => {
+      const onSave = vi.fn();
+
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider()}
+          onSave={onSave}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByPlaceholderText('Telegram Bot Token'), {
+        target: { value: 'bot-token' },
+      });
+
+      const saveButton = screen.getByRole('button', { name: 'Save' });
+      expect(saveButton).not.toBeDisabled();
+      fireEvent.click(saveButton);
+
+      expect(onSave).toHaveBeenCalledWith('telegram', {
+        R_TELEGRAM_BOT_TOKEN: 'bot-token',
+      });
+    });
+
+    it('shows the concrete Telegram webhook check error instead of a generic reachability line', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider({
+            telegramWebhook: {
+              status: 'error',
+              registeredUrl: null,
+              expectedUrl: 'https://app.example.com/api/webhooks/telegram',
+              lastErrorMessage:
+                'Telegram rejected the bot token. Check the token from BotFather and save again.',
+            },
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(
+        screen.getByText(
+          'Telegram rejected the bot token. Check the token from BotFather and save again.',
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          /Could not reach the Telegram Bot API to check the webhook/,
+        ),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Last delivery error/)).not.toBeInTheDocument();
+    });
+
+    it('shows the connected Telegram bot username', () => {
+      render(
+        <CommsProviderSection
+          provider={buildTelegramProvider({
+            telegramBotUsername: 'RoomoteBot',
+            telegramWebhook: {
+              status: 'connected',
+              registeredUrl: 'https://app.example.com/api/webhooks/telegram',
+              expectedUrl: 'https://app.example.com/api/webhooks/telegram',
+              lastErrorMessage: null,
+            },
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(screen.getByText('Connected to @RoomoteBot')).toBeInTheDocument();
+      expect(screen.queryByText('Webhook connected')).not.toBeInTheDocument();
     });
   });
 
@@ -741,6 +856,13 @@ describe('CommsProviderSection', () => {
       );
 
       expect(screen.getByText('Diagnostics channel')).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Refresh Slack channels' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Refresh Slack channels' })
+          .previousElementSibling,
+      ).not.toBeNull();
     });
 
     it('hides the diagnostics channel control when Slack is not installed', () => {
@@ -758,6 +880,56 @@ describe('CommsProviderSection', () => {
       );
 
       expect(screen.queryByText('Diagnostics channel')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Slack client id display', () => {
+    it('shows the existing non-secret client id when present', () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            savedSatisfied: true,
+            setupSatisfied: true,
+            fields: [
+              {
+                envVarName: 'R_SLACK_CLIENT_ID',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_ID'],
+                label: 'Slack Client ID',
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: 'A123.CLIENT',
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_ID',
+              },
+              {
+                envVarName: 'R_SLACK_CLIENT_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_CLIENT_SECRET'],
+                label: 'Slack Client Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_CLIENT_SECRET',
+              },
+              {
+                envVarName: 'R_SLACK_SIGNING_SECRET',
+                acceptedEnvVarNames: ['R_SLACK_SIGNING_SECRET'],
+                label: 'Slack Signing Secret',
+                secret: true,
+                runtimeSatisfied: false,
+                savedSatisfied: true,
+                savedValue: null,
+                satisfiedByEnvVarName: 'R_SLACK_SIGNING_SECRET',
+              },
+            ],
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByDisplayValue('A123.CLIENT')).toBeInTheDocument();
     });
   });
 

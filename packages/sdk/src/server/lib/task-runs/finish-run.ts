@@ -1,5 +1,4 @@
 import {
-  ALL_REPOSITORIES,
   TaskPayloadKind,
   RunStatus,
   getCommunicationChannelFromTaskPayload,
@@ -341,10 +340,10 @@ export const finishRun = async ({
       payloadKind === TaskPayloadKind.SnapshotResume)
   ) {
     try {
-      await sendSlackSetupCompletionNotification(run);
+      await cleanupSlackSetupCompletion(run);
     } catch (err) {
       console.error(
-        `[finishRun] Failed to send Slack setup completion notification for run ${id}: ${
+        `[finishRun] Failed to clean up Slack setup completion UI for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -798,13 +797,6 @@ function buildSlackQuestionChannelInviteClaimKey(params: {
   return `slack:question-channel-invite:${params.slackInstallationId}:${params.taskId}`;
 }
 
-function buildSlackSetupCompletionClaimKey(params: {
-  slackInstallationId: string;
-  taskId: string;
-}): string {
-  return `slack:setup-completion:${params.slackInstallationId}:${params.taskId}`;
-}
-
 const SLACK_ONBOARDING_STAGE = {
   AwaitingTaskMilestone: 'awaiting_task_milestone',
   Done: 'done',
@@ -990,17 +982,10 @@ async function maybeSendSlackQuestionChannelInvite(
     );
 }
 
-async function sendSlackSetupCompletionNotification(run: FinishedRun) {
+async function cleanupSlackSetupCompletion(run: FinishedRun) {
   const { channel, threadTs, route } = await resolveSlackTaskRunRouting(run);
 
-  if (route.kind !== 'setup-onboarding' || !threadTs) {
-    return;
-  }
-
-  if (!channel) {
-    console.warn(
-      `[finishRun] No channel found for setup completion run ${run.id}, skipping Slack notification`,
-    );
+  if (route.kind !== 'setup-onboarding' || !threadTs || !channel) {
     return;
   }
 
@@ -1009,93 +994,21 @@ async function sendSlackSetupCompletionNotification(run: FinishedRun) {
   });
 
   if (!slackInstallation) {
-    console.warn(
-      `[finishRun] No active Slack installation, skipping setup completion Slack notification`,
-    );
+    return;
+  }
+
+  const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
+
+  if (!slackStartedMessageTs) {
     return;
   }
 
   const slack = new SlackNotifier(slackInstallation.botAccessToken);
-  const setupUrl = buildSlackWebPathUrl(
-    route.webPath,
-    'setup.onboarding.completed',
-  );
-  const projectName = getSlackProjectNameFromPayload(run.payload);
-  const slackStartedMessageTs = await getSlackStartedMessageTs(run.id);
-
-  if (slackStartedMessageTs) {
-    await slack.removeCancelButton({
-      channel,
-      messageTs: slackStartedMessageTs,
-      threadTs,
-    });
-  }
-
-  const redis = getRedis();
-  // All resume runs share the task, so the task id is the natural claim
-  // scope (previously the root run of the sourceRunId chain).
-  const claimKey = buildSlackSetupCompletionClaimKey({
-    slackInstallationId: slackInstallation.id,
-    taskId: run.taskId,
+  await slack.removeCancelButton({
+    channel,
+    messageTs: slackStartedMessageTs,
+    threadTs,
   });
-  const claim = await redis.set(claimKey, '1', 'EX', 30 * 24 * 60 * 60, 'NX');
-
-  if (claim !== 'OK') {
-    return;
-  }
-
-  const completionMessage = projectName
-    ? `Setup for the ${projectName} project is done. Continue on the web: <${setupUrl}|Open setup>.`
-    : `Setup is done. Continue on the web: <${setupUrl}|Open setup>.`;
-
-  let messageTs: string | undefined;
-
-  try {
-    messageTs = await slack.postMessage({
-      channel,
-      thread_ts: threadTs,
-      text: completionMessage,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
-  } catch (error) {
-    await redis.del(claimKey);
-    throw error;
-  }
-
-  if (!messageTs) {
-    await redis.del(claimKey);
-    console.warn(
-      `[finishRun] Failed to send setup completion Slack notification for run ${run.id}`,
-    );
-    return;
-  }
-
-  const completionSubject = run.actingUserId
-    ? await findSlackConversationSubjectByUserId({
-        userId: run.actingUserId,
-        slackTeamId: slackInstallation.teamId,
-      })
-    : null;
-
-  if (completionSubject && messageTs) {
-    await recordSlackConversationMessageBestEffort({
-      logContext: 'finishRun.setupCompletion',
-      ...completionSubject,
-      slackChannelId: channel,
-      conversationKind: 'thread',
-      threadTs,
-      messageTs,
-      direction: 'outbound',
-      authorKind: 'roomote',
-      source: 'setup_completion',
-      text: projectName
-        ? `Setup for the ${projectName} project is done. Continue on the web: ${setupUrl}`
-        : `Setup is done. Continue on the web: ${setupUrl}`,
-      taskId: run.taskId,
-      runId: run.id,
-    });
-  }
 }
 
 /**
@@ -1138,29 +1051,6 @@ async function resolveSetupCompletionEnvironmentDefinitionId(
   }
 
   return null;
-}
-
-function getSlackProjectNameFromPayload(payload: unknown): string | null {
-  if (!payload || typeof payload !== 'object') {
-    return null;
-  }
-
-  const repo = (payload as { repo?: unknown }).repo;
-
-  if (typeof repo !== 'string') {
-    return null;
-  }
-
-  const trimmedRepo = repo.trim();
-
-  if (!trimmedRepo || trimmedRepo === ALL_REPOSITORIES) {
-    return null;
-  }
-
-  const repoSegments = trimmedRepo.split('/');
-  const projectName = repoSegments[repoSegments.length - 1]?.trim();
-
-  return projectName && projectName.length > 0 ? projectName : null;
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {

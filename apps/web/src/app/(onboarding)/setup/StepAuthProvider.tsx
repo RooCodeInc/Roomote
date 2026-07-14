@@ -9,19 +9,29 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
+export type CommunicationProviderChoice = SetupAuthProviderId | 'telegram';
 
 export function StepAuthProvider({
   onContinue,
   onBack,
   onSkip,
+  includeTelegram = false,
 }: {
-  onContinue: (provider: SetupAuthProviderId) => void;
+  onContinue: (provider: CommunicationProviderChoice) => void;
   onBack?: () => void;
   onSkip?: () => void;
+  includeTelegram?: boolean;
 }) {
+  const providers = includeTelegram
+    ? [
+        ...SETUP_AUTH_PROVIDER_CATALOG,
+        { id: 'telegram' as const, label: 'Telegram' },
+      ]
+    : SETUP_AUTH_PROVIDER_CATALOG;
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={AUTH_PROVIDER_STEP.title} />
@@ -33,12 +43,12 @@ export function StepAuthProvider({
         </p>
 
         <div className="space-y-0.5 max-w-sm">
-          {SETUP_AUTH_PROVIDER_CATALOG.map((provider) => {
+          {providers.map((provider) => {
             return (
               <Button
                 key={provider.id}
                 type="button"
-                onClick={() => onContinue(provider.id as SetupAuthProviderId)}
+                onClick={() => onContinue(provider.id)}
                 className={cn(
                   'group flex w-full py-5',
                   'hover:text-accent-foreground hover:bg-foreground',
@@ -58,25 +68,17 @@ export function StepAuthProvider({
           })}
         </div>
 
-        {onSkip ? (
-          <button
-            type="button"
-            className="cursor-pointer text-sm text-muted-foreground underline"
-            onClick={onSkip}
-          >
-            Do this later
-          </button>
-        ) : null}
-
-        {onBack ? (
-          <button
-            type="button"
-            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-            onClick={onBack}
-          >
-            Back
-          </button>
-        ) : null}
+        <SetupFooter onBack={onBack}>
+          {onSkip ? (
+            <button
+              type="button"
+              className="cursor-pointer text-sm text-muted-foreground underline"
+              onClick={onSkip}
+            >
+              Do this later
+            </button>
+          ) : null}
+        </SetupFooter>
       </div>
     </div>
   );

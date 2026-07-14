@@ -13,7 +13,156 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe('TelegramCommunicationProvider', () => {
-  it('sends Telegram messages through the Bot API', async () => {
+  it('registers the supported slash commands', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: true, result: true }));
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.registerCommands();
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body as string)).toEqual({
+      commands: [
+        { command: 'start', description: 'Show welcome and command help' },
+        { command: 'new', description: 'Start a fresh task' },
+      ],
+    });
+  });
+
+  it('retries transient idempotent Bot API failures', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { has_topics_enabled: false } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+      maxRetries: 1,
+    });
+
+    await expect(provider.getBotInfo()).resolves.toEqual({
+      hasTopicsEnabled: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry an ambiguous server error for message delivery', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ ok: false }, 500))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { message_id: 99 } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.postMessage({ channelId: '123', text: 'hello' }),
+    ).rejects.toThrow('Telegram sendMessage failed (500)');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+  it('reads the private-chat topics capability from getMe', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, result: { has_topics_enabled: true } }),
+      );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(provider.getBotInfo()).resolves.toEqual({
+      hasTopicsEnabled: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/getMe',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('creates Telegram forum topics for task conversations', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: {
+          message_thread_id: 77,
+          name: 'Fix the flaky login test',
+        },
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await expect(
+      provider.createForumTopic({
+        channelId: '123',
+        name: 'Fix the flaky login test',
+      }),
+    ).resolves.toEqual({
+      messageThreadId: '77',
+      name: 'Fix the flaky login test',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/createForumTopic',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          name: 'Fix the flaky login test',
+        }),
+      }),
+    );
+  });
+
+  it('renames Telegram forum topics', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        ok: true,
+        result: true,
+      }),
+    );
+    const provider = new TelegramCommunicationProvider({
+      botToken: 'bot-token',
+      apiBaseUrl: 'https://telegram.example.test',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    await provider.editForumTopic({
+      channelId: '123',
+      threadId: '77',
+      name: 'Fix flaky login tests',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://telegram.example.test/botbot-token/editForumTopic',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          chat_id: '123',
+          message_thread_id: 77,
+          name: 'Fix flaky login tests',
+        }),
+      }),
+    );
+  });
+
+  it('sends topic messages without duplicative reply quotes', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       jsonResponse({
         ok: true,
@@ -55,10 +204,6 @@ describe('TelegramCommunicationProvider', () => {
             is_disabled: true,
           },
           message_thread_id: 7,
-          reply_parameters: {
-            message_id: 42,
-            allow_sending_without_reply: true,
-          },
         }),
       }),
     );
@@ -171,7 +316,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[1]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: unknown };
 
-    expect(firstBody.reply_parameters).toBeDefined();
+    expect(firstBody.reply_parameters).toBeUndefined();
     expect(secondBody.reply_parameters).toBeUndefined();
   });
 
@@ -247,7 +392,7 @@ describe('TelegramCommunicationProvider', () => {
       (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
     ) as { reply_parameters?: { message_id: number } };
 
-    expect(photoBody.reply_parameters?.message_id).toBe(42);
+    expect(photoBody.reply_parameters).toBeUndefined();
   });
 
   it('falls back to a link message when sendPhoto fails', async () => {

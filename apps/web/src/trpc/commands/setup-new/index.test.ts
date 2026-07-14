@@ -11,6 +11,7 @@ const {
   mockGetSetupBootstrapState,
   mockSetupTokenState,
   mockRunComputeProvisioning,
+  mockAcquireComputeProvisioningLock,
   mockResolveSavedWorkerImage,
   mockResolveGiteaBaseUrl,
   mockValidateGiteaToken,
@@ -26,6 +27,7 @@ const {
     inviteCookieToken: null as string | null,
   },
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
+  mockAcquireComputeProvisioningLock: vi.fn().mockResolvedValue(undefined),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockResolveGiteaBaseUrl: vi
     .fn()
@@ -39,6 +41,7 @@ vi.mock('../compute/compute-provisioning', async (importOriginal) => {
 
   return {
     ...actual,
+    acquireComputeProvisioningLock: mockAcquireComputeProvisioningLock,
     runComputeProvisioning: mockRunComputeProvisioning,
   };
 });
@@ -135,6 +138,15 @@ vi.mock('@/lib/repositories', () => ({
 
 vi.mock('@/lib/setup-new', () => ({
   appendEnvironmentDefinitionGuidance: vi.fn(),
+  buildSetupEnvironmentTaskTitle: vi.fn((repositoryFullNames: string[]) => {
+    const repositoryNames = repositoryFullNames
+      .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
+      .filter(Boolean);
+
+    return repositoryNames.length === 0
+      ? 'Set up your first environment'
+      : `Set up the ${repositoryNames.join(' + ')} environment`;
+  }),
   buildSetupNewKickoffPrompt: vi.fn(),
   buildSetupNewWorkspacePayload: vi.fn(),
   findMatchingSetupNewEnvironment: vi.fn(),
@@ -179,7 +191,11 @@ import {
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupNewOnboardingTaskCommand,
 } from './index';
-import { TaskPayloadKind } from '@roomote/types';
+import {
+  TaskPayloadKind,
+  WORKER_RUNTIME_SCHEMA_VERSION,
+  type SetupNewState,
+} from '@roomote/types';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
@@ -192,6 +208,7 @@ import { SlackNotifier } from '@roomote/slack';
 import { getRepositories } from '@/lib/server';
 import {
   appendEnvironmentDefinitionGuidance,
+  buildSetupEnvironmentTaskTitle,
   buildSetupNewKickoffPrompt,
   buildSetupNewWorkspacePayload,
   normalizeRepositorySelection,
@@ -242,6 +259,7 @@ describe('setup-new auth config commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
     process.env.E2B_TEMPLATE_ID = '';
     process.env.DAYTONA_SNAPSHOT_NAME = '';
     process.env.BLAXEL_IMAGE = '';
@@ -646,6 +664,32 @@ describe('setup-new compute config commands', () => {
     expect(result.runtimeComputeConfig.defaultProvider).toBe('docker');
   });
 
+  it('rejects an excluded provider choice', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+
+    await expect(
+      saveSetupNewComputeProviderChoiceCommand(buildMockAuth(), {
+        provider: 'docker',
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+  });
+
+  it('rejects configuration for an excluded provider', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'modal');
+
+    await expect(
+      saveSetupNewComputeConfigCommand(buildMockAuth(), {
+        provider: 'modal',
+        values: {
+          MODAL_TOKEN_ID: 'token-id',
+          MODAL_TOKEN_SECRET: 'token-secret',
+        },
+      }),
+    ).rejects.toThrow('Selected sandbox provider is unavailable.');
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+
   it('persists a Modal base image derived from the worker image', async () => {
     vi.stubEnv(
       'DOCKER_WORKER_IMAGE',
@@ -821,12 +865,12 @@ describe('setup-new compute config commands', () => {
       provider: 'e2b',
       userId: 'setup-test-user',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
       imageRef: 'registry.example.com/worker:tag',
-      templateRef: 'roomote-worker:tag',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
   });
 
@@ -850,8 +894,9 @@ describe('setup-new compute config commands', () => {
               setupNewState: {
                 e2bTemplateBuild: {
                   status: 'building',
+                  runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
                   imageRef: 'registry.example.com/worker:tag',
-                  templateRef: 'roomote-worker:tag',
+                  templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
                   error: null,
                   startedAt: new Date().toISOString(),
                   finishedAt: null,
@@ -877,7 +922,7 @@ describe('setup-new compute config commands', () => {
     expect(mockRunComputeProvisioning).not.toHaveBeenCalled();
     expect(result.setupNewState.e2bTemplateBuild).toMatchObject({
       status: 'building',
-      templateRef: 'roomote-worker:tag',
+      templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
     });
   });
 
@@ -945,11 +990,7 @@ describe('setup-new onboarding task start command', () => {
   }: {
     slackInstallation: { botAccessToken: string; teamId: string } | null;
     slackUserMapping?: { slackUserId: string } | null;
-    setupNewState?: {
-      selectedModelId?: string | null;
-      selectedRepositoryIds?: string[];
-      version?: number;
-    };
+    setupNewState?: Partial<SetupNewState>;
   }) {
     mockDbTransaction.mockImplementation(async (callback) => {
       const tx = {
@@ -970,6 +1011,11 @@ describe('setup-new onboarding task start command', () => {
           },
         ]),
       );
+      if (setupNewState?.computeProvider) {
+        mockTxSelect.mockReturnValueOnce(
+          createSelectChain([{ runtimeComputeConfig: null }]),
+        );
+      }
       mockTxSelect.mockReturnValueOnce(
         createSelectChain(slackInstallation ? [slackInstallation] : []),
       );
@@ -987,6 +1033,7 @@ describe('setup-new onboarding task start command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
 
     vi.mocked(getRepositories).mockResolvedValue([
       { id: 'repo-1', fullName: 'acme/api' },
@@ -1015,6 +1062,10 @@ describe('setup-new onboarding task start command', () => {
     } as unknown as Awaited<ReturnType<typeof enqueueTask>>);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('launches a web onboarding task when no Slack workspace is connected', async () => {
     mockOnboardingTransaction({ slackInstallation: null });
 
@@ -1024,6 +1075,7 @@ describe('setup-new onboarding task start command', () => {
     expect(enqueueTask).toHaveBeenCalledTimes(1);
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1051,6 +1103,85 @@ describe('setup-new onboarding task start command', () => {
     );
   });
 
+  it('rejects a stale excluded compute provider before launch', async () => {
+    vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { computeProvider: 'docker' },
+    });
+
+    await expect(
+      startSetupNewOnboardingTaskCommand(buildMockAuth()),
+    ).rejects.toThrow(
+      'Selected sandbox provider is no longer available. Choose another provider before starting setup.',
+    );
+
+    expect(enqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('creates the onboarding task without dispatching while first-time E2B provisioning is running', async () => {
+    vi.stubEnv('E2B_TEMPLATE_ID', '');
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['E2B_API_KEY']);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        computeProvider: 'e2b',
+        e2bTemplateBuild: {
+          status: 'building',
+          runtimeSchemaVersion: WORKER_RUNTIME_SCHEMA_VERSION,
+          imageRef: 'registry.example.com/worker:tag',
+          templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
+          error: null,
+          startedAt: new Date().toISOString(),
+          finishedAt: null,
+        },
+      },
+    });
+
+    const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(result.taskId).toBe('task-onboarding-1');
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflow: 'setup_onboarding',
+      }),
+      {
+        enqueue: false,
+        initialTaskPhase: 'waiting_for_sandbox_provider',
+        initialError: null,
+      },
+    );
+  });
+
+  it('includes every selected repository name in the onboarding task title', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      { id: 'repo-1', fullName: 'acme/api' },
+      { id: 'repo-2', fullName: 'acme/web' },
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    vi.mocked(normalizeRepositorySelection).mockReturnValue([
+      'repo-1',
+      'repo-2',
+    ]);
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        selectedRepositoryIds: ['repo-1', 'repo-2'],
+      },
+    });
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(buildSetupEnvironmentTaskTitle).toHaveBeenCalledWith([
+      'acme/api',
+      'acme/web',
+    ]);
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Set up the api + web environment',
+      }),
+    );
+  });
+
   it('falls back to a Telegram kickoff when no Slack workspace is connected but a primary chat exists', async () => {
     mockOnboardingTransaction({ slackInstallation: null });
 
@@ -1058,6 +1189,10 @@ describe('setup-new onboarding task start command', () => {
       provider: 'telegram' as const,
       channelId: '8846357662',
       messageId: '900',
+    }));
+    const telegramCreateForumTopic = vi.fn(async () => ({
+      messageThreadId: '77',
+      name: 'Set up Roomote',
     }));
 
     vi.mocked(resolveTelegramRuntimeCredentials).mockResolvedValue({
@@ -1070,6 +1205,8 @@ describe('setup-new onboarding task start command', () => {
       this: unknown,
     ) {
       return {
+        getBotInfo: vi.fn(async () => ({ hasTopicsEnabled: true })),
+        createForumTopic: telegramCreateForumTopic,
         postMessage: telegramPostMessage,
       } as unknown as TelegramCommunicationProvider;
     });
@@ -1078,11 +1215,19 @@ describe('setup-new onboarding task start command', () => {
 
     expect(result.taskId).toBe('task-onboarding-1');
     expect(telegramPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ channelId: '8846357662' }),
+      expect.objectContaining({
+        channelId: '8846357662',
+        threadId: '77',
+      }),
     );
+    expect(telegramCreateForumTopic).toHaveBeenCalledWith({
+      channelId: '8846357662',
+      name: 'Set up Roomote',
+    });
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1091,6 +1236,8 @@ describe('setup-new onboarding task start command', () => {
             communicationProvider: 'telegram',
             communicationChannelId: '8846357662',
             communicationMessageId: '900',
+            communicationThreadId: '77',
+            telegramTaskTopic: true,
           }),
         }),
         initiator: { kind: 'user', userId: 'setup-test-user' },
@@ -1106,7 +1253,7 @@ describe('setup-new onboarding task start command', () => {
           slackChannel: null,
           chatHandoffProvider: 'telegram',
           chatHandoffChannelId: '8846357662',
-          chatHandoffThreadId: '900',
+          chatHandoffThreadId: '77',
           chatHandoffServiceUrl: null,
         }),
       }),
@@ -1147,6 +1294,7 @@ describe('setup-new onboarding task start command', () => {
     expect(SlackNotifier).not.toHaveBeenCalled();
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.StandardTask,
           payload: expect.objectContaining({
@@ -1341,6 +1489,7 @@ describe('setup-new onboarding task start command', () => {
 
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           harness: 'opencode-server',
           type: TaskPayloadKind.StandardTask,
@@ -1403,6 +1552,7 @@ describe('setup-new onboarding task start command', () => {
     expect(openConversationMock).toHaveBeenCalledWith('U1');
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
+        title: 'Set up the api environment',
         task: expect.objectContaining({
           type: TaskPayloadKind.SlackAppMention,
           payload: expect.objectContaining({

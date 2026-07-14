@@ -95,6 +95,49 @@ export function buildRoutingConfirmationText({
   return `I'll get started in ${workspace}${model}, OK?`;
 }
 
+/**
+ * Returns a model display name for chat acknowledgements only when the router
+ * treated the pick as an explicit user preference. Default / preserved models
+ * stay out of the "getting started" copy.
+ */
+export function getUserRequestedModelDisplayName(
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null,
+): string | undefined {
+  if (model?.source !== 'preference') {
+    return undefined;
+  }
+
+  const displayName = model.displayName?.trim();
+  return displayName || undefined;
+}
+
+/**
+ * Resolves the user-facing model display name for routing state that can carry
+ * either a freshly routed model selection or a previous correction prefill.
+ * When a new model selection is present, only preference-sourced names are kept
+ * so display names cannot outlive a later default/preserved `modelId`.
+ */
+export function resolveUserFacingModelDisplayName({
+  model,
+  previousDisplayName,
+}: {
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null;
+  previousDisplayName?: string | null;
+}): string | undefined {
+  if (model) {
+    return getUserRequestedModelDisplayName(model);
+  }
+
+  const previous = previousDisplayName?.trim();
+  return previous || undefined;
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
@@ -108,7 +151,7 @@ export function buildTaskStartingText({
 }): string {
   const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
-    ? ` using ${formatModelName(modelDisplayName)}`
+    ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
 
   return `Getting started on your task in ${workspace}${model}`;
@@ -285,6 +328,29 @@ export const TASK_STARTUP_FAILURE_TEXT =
 export const TASK_RUNTIME_FAILURE_TEXT =
   "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.";
 
+export function buildPullRequestStatusNotificationText({
+  prTitle,
+  prUrl,
+  status,
+  actorLogin,
+  formatLink = (label) => label,
+  formatStatus = identity,
+}: {
+  prTitle: string;
+  prUrl: string;
+  status: 'merged' | 'closed';
+  actorLogin: string;
+  formatLink?: LinkFormatter;
+  formatStatus?: TextFormatter;
+}): { text: string; bodyText: string } {
+  return {
+    text: `${prTitle} was ${status} by ${actorLogin}`,
+    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
+      status,
+    )} by ${actorLogin}`,
+  };
+}
+
 export function buildPullRequestMergedNotificationText({
   prTitle,
   prUrl,
@@ -298,10 +364,12 @@ export function buildPullRequestMergedNotificationText({
   formatLink?: LinkFormatter;
   formatStatus?: TextFormatter;
 }): { text: string; bodyText: string } {
-  return {
-    text: `${prTitle} was merged by ${mergedBy}`,
-    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
-      'merged',
-    )} by ${mergedBy}`,
-  };
+  return buildPullRequestStatusNotificationText({
+    prTitle,
+    prUrl,
+    status: 'merged',
+    actorLogin: mergedBy,
+    formatLink,
+    formatStatus,
+  });
 }

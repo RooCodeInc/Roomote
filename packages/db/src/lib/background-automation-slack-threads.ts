@@ -2,7 +2,10 @@ import { and, desc, eq, gte, inArray } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { slackConversationMessages, trackedMessages } from '../schema';
-import type { BackgroundAutomationKey } from '@roomote/types';
+import type {
+  BackgroundAutomationKey,
+  TrackedMessageSurface,
+} from '@roomote/types';
 
 export type BackgroundAutomationThreadFeedback = {
   threadTs: string;
@@ -12,7 +15,7 @@ export type BackgroundAutomationThreadFeedback = {
 };
 
 /**
- * Automation Slack root threads are tracked_messages rows of kind
+ * Automation root threads are tracked_messages rows of kind
  * 'automation_thread', deduped on `${channelId}:${threadTs}`.
  */
 function automationThreadDedupeKey(params: {
@@ -25,6 +28,7 @@ function automationThreadDedupeKey(params: {
 export async function upsertBackgroundAutomationSlackThread(
   tx: DatabaseOrTransaction,
   params: {
+    surface: TrackedMessageSurface;
     automationKey: BackgroundAutomationKey;
     slackChannelId: string;
     threadTs: string;
@@ -39,7 +43,7 @@ export async function upsertBackgroundAutomationSlackThread(
   await tx
     .insert(trackedMessages)
     .values({
-      surface: 'slack',
+      surface: params.surface,
       kind: 'automation_thread',
       dedupeKey,
       channelId: params.slackChannelId,
@@ -93,11 +97,13 @@ function toBackgroundAutomationSlackThreadRow(row: {
 }
 
 export async function findBackgroundAutomationSlackThread(params: {
+  surface: TrackedMessageSurface;
   slackChannelId: string;
   threadTs: string;
 }): Promise<BackgroundAutomationSlackThreadRow | undefined> {
   const row = await db.query.trackedMessages.findFirst({
     where: and(
+      eq(trackedMessages.surface, params.surface),
       eq(trackedMessages.kind, 'automation_thread'),
       eq(trackedMessages.dedupeKey, automationThreadDedupeKey(params)),
     ),
@@ -118,6 +124,7 @@ export async function findBackgroundAutomationSlackThread(params: {
 export async function updateBackgroundAutomationSlackThreadMetadata(
   tx: DatabaseOrTransaction,
   params: {
+    surface: TrackedMessageSurface;
     slackChannelId: string;
     threadTs: string;
     metadata: Record<string, unknown>;
@@ -132,6 +139,7 @@ export async function updateBackgroundAutomationSlackThreadMetadata(
     .from(trackedMessages)
     .where(
       and(
+        eq(trackedMessages.surface, params.surface),
         eq(trackedMessages.kind, 'automation_thread'),
         eq(trackedMessages.dedupeKey, dedupeKey),
       ),
@@ -153,6 +161,7 @@ export async function updateBackgroundAutomationSlackThreadMetadata(
     })
     .where(
       and(
+        eq(trackedMessages.surface, params.surface),
         eq(trackedMessages.kind, 'automation_thread'),
         eq(trackedMessages.dedupeKey, dedupeKey),
       ),
@@ -162,6 +171,7 @@ export async function updateBackgroundAutomationSlackThreadMetadata(
 }
 
 export async function listRecentBackgroundAutomationThreadFeedback(params: {
+  surface: TrackedMessageSurface;
   automationKey: BackgroundAutomationKey;
   slackChannelId: string;
   since?: Date;
@@ -176,6 +186,7 @@ export async function listRecentBackgroundAutomationThreadFeedback(params: {
     .from(trackedMessages)
     .where(
       and(
+        eq(trackedMessages.surface, params.surface),
         eq(trackedMessages.kind, 'automation_thread'),
         eq(trackedMessages.automationKey, params.automationKey),
         eq(trackedMessages.channelId, params.slackChannelId),
@@ -193,6 +204,9 @@ export async function listRecentBackgroundAutomationThreadFeedback(params: {
     return [];
   }
 
+  // Reply harvesting reads the persisted Slack conversation log, so threads
+  // tracked on other surfaces resolve with empty feedbackMessages until those
+  // surfaces get an equivalent reply source.
   const feedbackRows = await db
     .select({
       threadTs: slackConversationMessages.threadTs,

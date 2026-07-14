@@ -11,8 +11,8 @@ const {
   mockRecordDelivery,
   mockPostMessage,
   mockTeamsPostMessage,
-  mockCreateTeamsProvider,
   mockTelegramPostMessage,
+  mockStickyFooterPost,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -24,8 +24,8 @@ const {
   mockRecordDelivery: vi.fn(),
   mockPostMessage: vi.fn(),
   mockTeamsPostMessage: vi.fn(),
-  mockCreateTeamsProvider: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
+  mockStickyFooterPost: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -56,12 +56,11 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: { isActive: 'isActive' },
 }));
 
-vi.mock('@roomote/env', () => ({
-  Env: {
-    R_TEAMS_BOT_APP_ID: 'teams-app',
-    R_TEAMS_BOT_APP_PASSWORD: 'teams-secret',
-    R_TELEGRAM_BOT_TOKEN: 'telegram-token',
-  },
+vi.mock('@roomote/slack', () => ({
+  postSlackThreadMessageWithStickyFooter: mockStickyFooterPost,
+  SlackNotifier: vi.fn().mockImplementation(function () {
+    return {};
+  }),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -77,22 +76,16 @@ vi.mock('@roomote/sdk/server', () => ({
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
   schedulePrReviewNotificationJob: mockSchedule,
-  createTeamsCommunicationProviderFromRuntimeCredentials:
-    mockCreateTeamsProvider,
+  getCommunicationProviderAdapter: vi.fn(
+    async (provider: 'slack' | 'teams' | 'telegram') =>
+      ({
+        slack: { postMessage: mockPostMessage },
+        teams: { postMessage: mockTeamsPostMessage },
+        telegram: { postMessage: mockTelegramPostMessage },
+      })[provider],
+  ),
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
-}));
-
-vi.mock('@roomote/slack', () => ({
-  SlackNotifier: class MockSlackNotifier {
-    postMessage = mockPostMessage;
-  },
-}));
-
-vi.mock('@roomote/communication/telegram-provider', () => ({
-  TelegramCommunicationProvider: class MockTelegramProvider {
-    postMessage = mockTelegramPostMessage;
-  },
 }));
 
 import type { Job } from 'bullmq';
@@ -143,12 +136,23 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     mockRecordDelivery.mockResolvedValue(undefined);
-    mockPostMessage.mockResolvedValue('999.888');
-    mockCreateTeamsProvider.mockReturnValue({
-      postMessage: mockTeamsPostMessage,
+    mockStickyFooterPost.mockResolvedValue('999.888');
+    mockPostMessage.mockResolvedValue({
+      provider: 'slack',
+      channelId: 'C123',
+      messageId: '999.888',
+      threadId: '111.222',
     });
-    mockTeamsPostMessage.mockResolvedValue({ provider: 'teams' });
-    mockTelegramPostMessage.mockResolvedValue({ provider: 'telegram' });
+    mockTeamsPostMessage.mockResolvedValue({
+      provider: 'teams',
+      channelId: '19:abc',
+      messageId: 'activity-1',
+    });
+    mockTelegramPostMessage.mockResolvedValue({
+      provider: 'telegram',
+      channelId: '12345',
+      messageId: '901',
+    });
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {
@@ -165,13 +169,16 @@ describe('prReviewNotificationJob', () => {
       },
       events,
     });
-    expect(mockPostMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      thread_ts: '111.222',
-      text: 'formatted-message',
-      unfurl_links: false,
-      unfurl_media: false,
-    });
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        threadTs: '111.222',
+        taskId: 'task-1',
+        text: 'formatted-message',
+        utmCampaign: 'slack.pr_review',
+      }),
+    );
+    expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRecordDelivery).toHaveBeenCalledWith({
       runId: 1,
       taskId: 'task-1',
@@ -356,7 +363,7 @@ describe('prReviewNotificationJob', () => {
   });
 
   it('requeues drained events and rethrows when posting fails', async () => {
-    mockPostMessage.mockRejectedValue(new Error('slack down'));
+    mockStickyFooterPost.mockRejectedValue(new Error('slack down'));
 
     await expect(prReviewNotificationJob(makeJob() as never)).rejects.toThrow(
       'slack down',

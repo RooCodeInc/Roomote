@@ -25,10 +25,6 @@ interface BuildTaskFailedBlocksOptions {
 export const SLACK_STARTUP_FAILURE_TEXT = TASK_STARTUP_FAILURE_TEXT;
 export const SLACK_RUNTIME_FAILURE_TEXT = TASK_RUNTIME_FAILURE_TEXT;
 
-function formatSlackCode(value: string): string {
-  return `\`${value}\``;
-}
-
 /**
  * Block Kit blocks shown after a routing confirmation is accepted.
  * Used by both OK-button and auto-confirm paths.
@@ -79,8 +75,6 @@ export function buildStartedBlocks(
   const text = buildTaskStartingText({
     workspaceDisplayName,
     modelDisplayName,
-    formatWorkspaceName: formatSlackCode,
-    formatModelName: formatSlackCode,
   });
   const blocks: SlackBlock[] = [
     { type: 'section', text: { type: 'mrkdwn', text } },

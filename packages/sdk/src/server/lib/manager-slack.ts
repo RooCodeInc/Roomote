@@ -12,6 +12,7 @@ import {
 } from '@roomote/types';
 import { db, eq, users } from '@roomote/db/server';
 import { isShowDebugUIEnabledFromMetadata } from '@roomote/feature-flags';
+import { convertSlackLinksToMarkdown } from '@roomote/slack';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
@@ -107,6 +108,19 @@ export function buildAutomationSettingsMessage(
       buildAutomationSettingsContextBlock(hash),
     ],
   };
+}
+
+/**
+ * Degrades Slack mrkdwn automation text to standard markdown for non-Slack
+ * communication providers: `<url|label>` links become `[label](url)` and
+ * single-asterisk bold becomes double-asterisk bold. Other mrkdwn forms
+ * (italic `_text_`, bullets, plain URLs) already read correctly as markdown.
+ */
+export function degradeSlackMrkdwnToMarkdown(text: string): string {
+  return convertSlackLinksToMarkdown(text).replace(
+    /(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)/g,
+    '**$1**',
+  );
 }
 
 export function buildAutomationRootSummaryText(params: {

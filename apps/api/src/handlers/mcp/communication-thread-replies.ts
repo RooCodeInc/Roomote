@@ -1,10 +1,8 @@
 import {
-  TeamsCommunicationProvider,
-  TelegramCommunicationProvider,
   UnsupportedCommunicationOperationError,
   getLatestInboundMessageId,
+  type TelegramCommunicationProvider,
 } from '@roomote/communication';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -12,7 +10,10 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
-import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
+import {
+  createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
+  createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
+} from '@roomote/sdk/server';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -25,12 +26,10 @@ import {
 
 const LOG_CONTEXT = 'communicationThreadReplies';
 const TEAMS_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'teams:thread_reply_footer_lock:';
-const TELEGRAM_THREAD_REPLY_FOOTER_LOCK_PREFIX =
-  'telegram:thread_reply_footer_lock:';
 
 // Telegram clears a chat action after ~5s; re-send inside that window so the
 // "typing…" indicator spans the whole reply delivery (chunks, photo fetch,
-// footer) instead of lapsing partway through.
+// message delivery) instead of lapsing partway through.
 const TELEGRAM_TYPING_HEARTBEAT_MS = 4_000;
 
 /**
@@ -62,20 +61,6 @@ function startTelegramTypingHeartbeat(
   timer.unref?.();
 
   return () => clearInterval(timer);
-}
-
-async function createTeamsCommunicationProvider(): Promise<TeamsCommunicationProvider | null> {
-  return createTeamsCommunicationProviderFromRuntimeCredentials();
-}
-
-async function createTelegramCommunicationProvider(): Promise<TelegramCommunicationProvider | null> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
-
-  if (!botToken) {
-    return null;
-  }
-
-  return new TelegramCommunicationProvider({ botToken });
 }
 
 async function sendTeamsThreadReply(params: {
@@ -303,13 +288,6 @@ async function sendTelegramThreadReply(params: {
       textFormat: 'markdown',
       images,
     });
-
-    await postTelegramThreadReplyFooterBestEffort({
-      provider,
-      taskRun: params.taskRun,
-      channelId,
-      threadId,
-    });
   } finally {
     stopTyping();
   }
@@ -454,59 +432,6 @@ async function addTeamsReaction(params: {
         }`,
       }),
       { status: 502 },
-    );
-  }
-}
-
-async function postTelegramThreadReplyFooterBestEffort(params: {
-  provider: TelegramCommunicationProvider;
-  taskRun: CommunicationReplyTaskRun;
-  channelId: string;
-  threadId: string | null;
-}): Promise<void> {
-  const footerText = await buildCommunicationThreadReplyFooterTextBestEffort({
-    provider: 'telegram',
-    providerLabel: 'Telegram',
-    taskRun: params.taskRun,
-    logContext: LOG_CONTEXT,
-  });
-
-  if (!footerText) {
-    return;
-  }
-
-  const footerStateThreadId = params.threadId ?? 'root';
-
-  try {
-    await deliverManagedThreadReplyFooter({
-      provider: 'telegram',
-      providerLabel: 'Telegram',
-      channelId: params.channelId,
-      footerStateThreadId,
-      lockKey: `${TELEGRAM_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channelId}:${footerStateThreadId}`,
-      runId: params.taskRun.id,
-      logContext: LOG_CONTEXT,
-      postReplyWithFooter: async () => ({
-        ...(await params.provider.postMessage({
-          channelId: params.channelId,
-          ...(params.threadId ? { threadId: params.threadId } : {}),
-          text: footerText,
-          textFormat: 'markdown',
-        })),
-        textWithoutFooter: '',
-      }),
-      clearPreviousFooter: async (previousFooterRecord) => {
-        await params.provider.deleteMessage({
-          channelId: params.channelId,
-          messageId: previousFooterRecord.messageId,
-        });
-      },
-    });
-  } catch (error) {
-    console.error(
-      `[${LOG_CONTEXT}] Failed to post Telegram reply footer for task run ${params.taskRun.id}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
     );
   }
 }

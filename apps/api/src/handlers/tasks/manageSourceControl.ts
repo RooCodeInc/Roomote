@@ -73,6 +73,7 @@ export async function manageSourceControl(
         );
       case 'get_pull_request':
       case 'list_pull_request_comments':
+      case 'list_pull_requests':
         return c.json(
           await readSourceControlPullRequestForTaskRun({
             taskRun,
