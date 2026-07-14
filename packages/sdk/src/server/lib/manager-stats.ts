@@ -99,11 +99,16 @@ export type ManagerStatsDigest = {
    * Which Roomote PRs `additions`/`deletions` cover. Line counts come from
    * the GitHub PR-details API and no equivalent bulk surface exists on the
    * other providers (each would need its own diff-stat endpoint), so when
-   * non-GitHub Roomote PRs are in the digest the LOC line is explicitly
-   * scoped to GitHub instead of silently undercounting.
+   * non-GitHub Roomote PRs are in the digest the LOC numbers are partial and
+   * the digest omits its LOC line instead of silently undercounting.
    */
   locScope: 'all' | 'github_only';
   mostActiveRepo: {
+    /**
+     * Bare repository full name. PR counts behind it are provider-qualified,
+     * so equally named repositories on different providers never combine
+     * into one count.
+     */
     fullName: string;
     pullRequestCount: number;
   } | null;
@@ -276,8 +281,10 @@ type ClassifiedPullRequest = {
  * keeping only PRs created inside the stats window. Rows without a created
  * timestamp are dropped: window membership cannot be confirmed, and counting
  * a PR of unknown age would inflate the weekly totals. Summaries are deduped
- * by PR number (the open and merged lists cannot overlap, but a PR observed
- * twice must not count twice).
+ * by PR number, preferring the merged summary on a collision: the open and
+ * merged lists are fetched concurrently, so a PR that merges between the two
+ * requests can appear in both, and keeping the stale open row would
+ * underreport merged counts.
  */
 export function toAnalyticsPullRequests({
   provider,
@@ -297,7 +304,12 @@ export function toAnalyticsPullRequests({
       continue;
     }
 
-    if (byNumber.has(summary.number)) {
+    const existing = byNumber.get(summary.number);
+
+    if (
+      existing &&
+      (existing.state === 'merged' || summary.state !== 'merged')
+    ) {
       continue;
     }
 
@@ -352,6 +364,15 @@ async function listSourceControlAnalyticsPullRequests({
     }),
   ]);
 
+  // The list primitives report degradation (most importantly truncation at
+  // the list cap, which undercounts a busy repository's window totals) via
+  // warnings; log every one per repository instead of silently dropping them.
+  for (const warning of [...openResult.warnings, ...mergedResult.warnings]) {
+    console.warn(
+      `${LOG_PREFIX} ${provider} pull request list warning for ${repository.fullName}: ${warning}`,
+    );
+  }
+
   return toAnalyticsPullRequests({
     provider,
     repoFullName: repository.fullName,
@@ -360,7 +381,8 @@ async function listSourceControlAnalyticsPullRequests({
   });
 }
 
-async function getSourceControlAnalyticsPullRequests({
+/** Exported for tests. */
+export async function getSourceControlAnalyticsPullRequests({
   repositoryRows,
   since,
 }: {
@@ -494,6 +516,49 @@ export function summarizeRoomotePullRequests({
   return { roomotePullRequests, authored, reviewed, mergedAuthored };
 }
 
+/**
+ * The repository with the most counted Roomote PRs. Counting is
+ * provider-qualified so equally named repositories on different providers
+ * (e.g. a mirrored `org/repo` on GitHub and GitLab) are never combined into
+ * one wrong count; the reported label is the bare full name of the single
+ * winning repository.
+ */
+export function computeMostActiveRepo(
+  pullRequests: AnalyticsPullRequest[],
+): ManagerStatsDigest['mostActiveRepo'] {
+  const repoCounts = new Map<
+    string,
+    {
+      fullName: string;
+      pullRequestCount: number;
+    }
+  >();
+
+  for (const pullRequest of pullRequests) {
+    const key = `${pullRequest.sourceControlProvider}:${pullRequest.repoFullName.toLowerCase()}`;
+    const existing = repoCounts.get(key);
+
+    if (existing) {
+      existing.pullRequestCount += 1;
+    } else {
+      repoCounts.set(key, {
+        fullName: pullRequest.repoFullName,
+        pullRequestCount: 1,
+      });
+    }
+  }
+
+  return (
+    [...repoCounts.values()].sort((left, right) => {
+      if (right.pullRequestCount !== left.pullRequestCount) {
+        return right.pullRequestCount - left.pullRequestCount;
+      }
+
+      return left.fullName.localeCompare(right.fullName);
+    })[0] ?? null
+  );
+}
+
 export async function buildManagerStatsDigest(params: {
   /**
    * User the GitHub API calls run as. Only needed for the GitHub data path;
@@ -608,15 +673,9 @@ export async function buildManagerStatsDigest(params: {
     }
   }
 
-  const repoCounts = new Map<string, number>();
   const userCounts = new Map<string, number>();
 
   for (const pullRequest of roomotePullRequests) {
-    repoCounts.set(
-      pullRequest.repoFullName,
-      (repoCounts.get(pullRequest.repoFullName) ?? 0) + 1,
-    );
-
     const metadata = metadataByKey.get(
       getPullRequestKey(
         pullRequest.sourceControlProvider,
@@ -630,19 +689,7 @@ export async function buildManagerStatsDigest(params: {
     userCounts.set(label, (userCounts.get(label) ?? 0) + 1);
   }
 
-  const mostActiveRepo =
-    [...repoCounts.entries()]
-      .map(([fullName, pullRequestCount]) => ({
-        fullName,
-        pullRequestCount,
-      }))
-      .sort((left, right) => {
-        if (right.pullRequestCount !== left.pullRequestCount) {
-          return right.pullRequestCount - left.pullRequestCount;
-        }
-
-        return left.fullName.localeCompare(right.fullName);
-      })[0] ?? null;
+  const mostActiveRepo = computeMostActiveRepo(roomotePullRequests);
 
   const topUsers = [...userCounts.entries()]
     .map(([label, pullRequestCount]) => ({

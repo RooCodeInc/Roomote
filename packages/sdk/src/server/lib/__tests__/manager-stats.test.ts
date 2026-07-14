@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The lib module imports the db, github, and provider-read packages at load
 // time; stub them so the pure classification helpers can be exercised without
@@ -31,11 +31,18 @@ vi.mock('../pull-requests/source-control-pull-request-reads', () => ({
 
 import {
   buildRoomotePullRequestMetadata,
+  computeMostActiveRepo,
+  getSourceControlAnalyticsPullRequests,
   summarizeRoomotePullRequests,
   toAnalyticsPullRequests,
   type AnalyticsPullRequest,
 } from '../manager-stats';
-import type { SourceControlPullRequestSummary } from '../pull-requests/source-control-pull-request-reads';
+import {
+  listMergedSourceControlPullRequestsForRepository,
+  listOpenSourceControlPullRequestsForRepository,
+  type SourceControlPullRequestSummary,
+} from '../pull-requests/source-control-pull-request-reads';
+import type { RepositoryRow } from '../pull-requests/source-control-pull-request-shared';
 
 type MetadataRow = Parameters<
   typeof buildRoomotePullRequestMetadata
@@ -429,12 +436,245 @@ describe('toAnalyticsPullRequests', () => {
       repoFullName: 'group/app',
       summaries: [
         summary({ number: 8, state: 'open' }),
-        summary({ number: 8, state: 'merged' }),
+        summary({ number: 8, state: 'open' }),
       ],
       since: WINDOW_START,
     });
 
     expect(results).toHaveLength(1);
     expect(results[0]?.state).toBe('open');
+  });
+
+  it('prefers the merged summary when a PR merges between the open and merged list reads', () => {
+    // The open and merged lists are fetched concurrently, so a PR that merges
+    // between the two requests appears in both. The merged row must win
+    // regardless of which list is concatenated first, or merged counts are
+    // underreported.
+    const openFirst = toAnalyticsPullRequests({
+      provider: 'gitlab',
+      repoFullName: 'group/app',
+      summaries: [
+        summary({ number: 9, state: 'open' }),
+        summary({
+          number: 9,
+          state: 'merged',
+          mergedAt: '2026-07-10T10:00:00.000Z',
+        }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(openFirst).toHaveLength(1);
+    expect(openFirst[0]?.state).toBe('merged');
+
+    const mergedFirst = toAnalyticsPullRequests({
+      provider: 'gitlab',
+      repoFullName: 'group/app',
+      summaries: [
+        summary({
+          number: 9,
+          state: 'merged',
+          mergedAt: '2026-07-10T10:00:00.000Z',
+        }),
+        summary({ number: 9, state: 'open' }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(mergedFirst).toHaveLength(1);
+    expect(mergedFirst[0]?.state).toBe('merged');
+  });
+
+  it('does not let an open draft duplicate demote a merged row', () => {
+    const results = toAnalyticsPullRequests({
+      provider: 'gitea',
+      repoFullName: 'org/app',
+      summaries: [
+        summary({
+          number: 10,
+          state: 'merged',
+          mergedAt: '2026-07-10T10:00:00.000Z',
+        }),
+        summary({ number: 10, state: 'open', draft: true }),
+      ],
+      since: WINDOW_START,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.state).toBe('merged');
+  });
+});
+
+function repositoryRow(overrides: Partial<RepositoryRow>): RepositoryRow {
+  return {
+    id: 'repo-1',
+    sourceControlProvider: 'gitlab',
+    host: null,
+    installationId: null,
+    externalRepoId: '42',
+    fullName: 'group/app',
+    htmlUrl: 'https://gitlab.example.com/group/app',
+    ...overrides,
+  };
+}
+
+function listResult({
+  repository,
+  pullRequests,
+  warnings = [],
+}: {
+  repository: RepositoryRow;
+  pullRequests: SourceControlPullRequestSummary[];
+  warnings?: string[];
+}) {
+  return {
+    success: true as const,
+    provider: repository.sourceControlProvider,
+    repositoryFullName: repository.fullName,
+    pullRequests,
+    warnings,
+  };
+}
+
+const TRUNCATION_WARNING =
+  'Result truncated to the 200 most relevant merged pull requests; more exist.';
+
+describe('getSourceControlAnalyticsPullRequests', () => {
+  const listOpen = vi.mocked(listOpenSourceControlPullRequestsForRepository);
+  const listMerged = vi.mocked(
+    listMergedSourceControlPullRequestsForRepository,
+  );
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+    listOpen.mockReset();
+    listMerged.mockReset();
+  });
+
+  it('logs provider truncation warnings per repository instead of dropping them', async () => {
+    const repository = repositoryRow({});
+
+    listOpen.mockResolvedValue(
+      listResult({
+        repository,
+        pullRequests: [summary({ number: 1 })],
+      }),
+    );
+    listMerged.mockResolvedValue(
+      listResult({
+        repository,
+        pullRequests: [
+          summary({
+            number: 2,
+            state: 'merged',
+            mergedAt: '2026-07-10T10:00:00.000Z',
+          }),
+        ],
+        warnings: [TRUNCATION_WARNING],
+      }),
+    );
+
+    const pullRequests = await getSourceControlAnalyticsPullRequests({
+      repositoryRows: [repository],
+      since: WINDOW_START,
+    });
+
+    expect(
+      pullRequests.map((pullRequest) => pullRequest.number).sort(),
+    ).toEqual([1, 2]);
+    expect(warnSpy).toHaveBeenCalledWith(
+      `[managerStats] gitlab pull request list warning for group/app: ${TRUNCATION_WARNING}`,
+    );
+  });
+
+  it('logs warnings for each affected repository when several repositories report them', async () => {
+    const truncatedRepo = repositoryRow({
+      id: 'repo-1',
+      fullName: 'group/big',
+    });
+    const cleanRepo = repositoryRow({ id: 'repo-2', fullName: 'group/small' });
+    const openTruncationWarning =
+      'Result truncated to the 200 most relevant open pull requests; more exist.';
+
+    listOpen.mockImplementation(async ({ repository }) =>
+      listResult({
+        repository,
+        pullRequests: [],
+        warnings:
+          repository.fullName === 'group/big' ? [openTruncationWarning] : [],
+      }),
+    );
+    listMerged.mockImplementation(async ({ repository }) =>
+      listResult({ repository, pullRequests: [] }),
+    );
+
+    await getSourceControlAnalyticsPullRequests({
+      repositoryRows: [truncatedRepo, cleanRepo],
+      since: WINDOW_START,
+    });
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      `[managerStats] gitlab pull request list warning for group/big: ${openTruncationWarning}`,
+    );
+  });
+
+  it('logs nothing when no repository reports a warning', async () => {
+    const repository = repositoryRow({});
+
+    listOpen.mockResolvedValue(
+      listResult({ repository, pullRequests: [summary({ number: 4 })] }),
+    );
+    listMerged.mockResolvedValue(listResult({ repository, pullRequests: [] }));
+
+    const pullRequests = await getSourceControlAnalyticsPullRequests({
+      repositoryRows: [repository],
+      since: WINDOW_START,
+    });
+
+    expect(pullRequests).toHaveLength(1);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('computeMostActiveRepo', () => {
+  it('counts equally named repositories on different providers separately', () => {
+    const result = computeMostActiveRepo([
+      analyticsPr({ sourceControlProvider: 'github', number: 1 }),
+      analyticsPr({ sourceControlProvider: 'github', number: 2 }),
+      analyticsPr({ sourceControlProvider: 'gitlab', number: 1 }),
+      analyticsPr({ sourceControlProvider: 'gitlab', number: 2 }),
+      analyticsPr({ sourceControlProvider: 'gitlab', number: 3 }),
+    ]);
+
+    // Combined across providers, the two acme/app repos would wrongly report
+    // 5 PRs; counted per provider, the GitLab one leads with 3.
+    expect(result).toEqual({
+      fullName: 'acme/app',
+      pullRequestCount: 3,
+    });
+  });
+
+  it('picks the repo with the most PRs across providers', () => {
+    const result = computeMostActiveRepo([
+      analyticsPr({ sourceControlProvider: 'gitlab', number: 1 }),
+      analyticsPr({ sourceControlProvider: 'gitlab', number: 2 }),
+      analyticsPr({
+        sourceControlProvider: 'github',
+        repoFullName: 'acme/other',
+        number: 1,
+      }),
+    ]);
+
+    expect(result).toEqual({ fullName: 'acme/app', pullRequestCount: 2 });
+  });
+
+  it('returns null when no Roomote PRs were counted', () => {
+    expect(computeMostActiveRepo([])).toBeNull();
   });
 });

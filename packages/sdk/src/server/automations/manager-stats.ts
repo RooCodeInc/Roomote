@@ -72,10 +72,11 @@ function formatManagerStatsText({
     `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})* — ${stats.authoredPullRequests} authored, ${stats.reviewedPullRequests} reviewed`,
     `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.authoredPullRequests} authored)*`,
     // Line counts are only available from GitHub; when the digest includes
-    // PRs from other providers, say so instead of implying full coverage.
-    `· LOC added / removed: *+${stats.additions} / -${stats.deletions}*${
-      stats.locScope === 'github_only' ? ' (GitHub PRs only)' : ''
-    }`,
+    // PRs from other providers the number would be partial, so omit the line
+    // entirely rather than annotate it.
+    ...(stats.locScope === 'all'
+      ? [`· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`]
+      : []),
     `· Most active repo: ${
       stats.mostActiveRepo
         ? `*${stats.mostActiveRepo.fullName}* (${stats.mostActiveRepo.pullRequestCount} PRs)`

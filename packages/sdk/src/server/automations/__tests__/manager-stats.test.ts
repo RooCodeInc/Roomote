@@ -103,7 +103,7 @@ describe('formatManagerStatsMessage', () => {
     expect(message.text).not.toContain('Share of total PRs');
   });
 
-  it('reports LOC without a scope note when all Roomote PRs are on GitHub', () => {
+  it('includes the LOC line when all counted Roomote PRs are on GitHub', () => {
     const message = formatManagerStatsMessage({
       stats,
     });
@@ -112,14 +112,12 @@ describe('formatManagerStatsMessage', () => {
     expect(message.text).not.toContain('(GitHub PRs only)');
   });
 
-  it('scopes the LOC line to GitHub when non-GitHub Roomote PRs are counted', () => {
+  it('omits the LOC line entirely when non-GitHub Roomote PRs are counted', () => {
     const message = formatManagerStatsMessage({
       stats: { ...stats, locScope: 'github_only' as const },
     });
 
-    expect(message.text).toContain(
-      '· LOC added / removed: *+123 / -45* (GitHub PRs only)',
-    );
+    expect(message.text).not.toContain('LOC added / removed');
   });
 
   it('adds an automation-settings context footer', () => {
