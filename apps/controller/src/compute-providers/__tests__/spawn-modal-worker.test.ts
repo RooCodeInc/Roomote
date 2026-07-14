@@ -133,7 +133,7 @@ describe('spawnModalWorker', () => {
     );
   });
 
-  it('rejects environments with docker projects before starting Modal', async () => {
+  it('uses a right-sized Modal VM sandbox for environments with Docker projects', async () => {
     mockGetNamedPortsForTaskRun.mockResolvedValue({
       namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
       environmentSnapshotId: undefined,
@@ -149,27 +149,32 @@ describe('spawnModalWorker', () => {
       },
     });
 
-    await expect(
-      spawnModalWorker(
-        mockTaskRun({
-          payloadKind: TaskPayloadKind.StandardTask,
-          payload: { repo: 'test/repo', environmentId: 'env_123' },
-        }),
-        'auth_token',
-        {
-          deploymentSlug: 'roomote',
-          modalTokenId: 'token-id',
-          modalTokenSecret: 'token-secret',
-          modalBaseImageRef: 'image-ref',
-          modalTimeoutMs: 60_000,
-        },
-      ),
-    ).rejects.toThrow(
-      'Modal does not currently support Docker Compose or Dockerfile projects',
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalTimeoutMs: 60_000,
+      },
     );
 
-    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
-    expect(mockCreateModalMachine).not.toHaveBeenCalled();
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'modal',
+        config: expect.objectContaining({
+          vmRuntime: true,
+          cpu: 2,
+          memoryMiB: 4096,
+        }),
+      }),
+    );
+    expect(mockCreateModalMachine).toHaveBeenCalled();
   });
 
   it('primes environment OIDC before launching a fresh Modal worker when the environment defines OIDC targets', async () => {

@@ -463,6 +463,14 @@ describe('ModalClient', () => {
       { appId: 'app-123' },
       { imageId: 'img-123' },
       expect.objectContaining({
+        command: [
+          '/usr/bin/sudo',
+          '/usr/bin/env',
+          'DOCKER_INSECURE_NO_IPTABLES_RAW=1',
+          '/usr/bin/dockerd',
+          '--host=unix:///var/run/docker.sock',
+          '--log-level=error',
+        ],
         experimentalOptions: { vm_runtime: true },
       }),
     );
@@ -476,6 +484,14 @@ describe('ModalClient', () => {
       { appId: 'app-123' },
       { imageId: 'img-snap-123' },
       expect.objectContaining({
+        command: [
+          '/usr/bin/sudo',
+          '/usr/bin/env',
+          'DOCKER_INSECURE_NO_IPTABLES_RAW=1',
+          '/usr/bin/dockerd',
+          '--host=unix:///var/run/docker.sock',
+          '--log-level=error',
+        ],
         experimentalOptions: { vm_runtime: true },
       }),
     );
@@ -560,6 +576,56 @@ describe('ModalClient', () => {
 
     expect(Buffer.compare(Buffer.concat(chunks), content)).toBe(0);
     expect(closeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('streams VM file writes through exec instead of the filesystem API', async () => {
+    const writeBytesMock = vi.fn().mockResolvedValue(undefined);
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+    const mkdirWaitMock = vi.fn().mockResolvedValue(0);
+    const writeWaitMock = vi.fn().mockResolvedValue(0);
+    const execMock = vi
+      .fn()
+      .mockResolvedValueOnce({ wait: mkdirWaitMock })
+      .mockResolvedValueOnce({
+        stdin: { writeBytes: writeBytesMock, close: closeMock },
+        stderr: { readText: vi.fn().mockResolvedValue('') },
+        wait: writeWaitMock,
+      });
+    const openMock = vi.fn();
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-vm-123',
+      exec: execMock,
+      open: openMock,
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+      vmRuntime: true,
+    });
+    const content = Buffer.alloc(20 * 1024 * 1024 + 321, 7);
+
+    await client.writeFiles({
+      instanceId: 'modal-vm-123',
+      files: [{ path: '/sandbox/worker.tar.gz', content }],
+    });
+
+    expect(execMock).toHaveBeenNthCalledWith(1, ['mkdir', '-p', '/sandbox']);
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
+      ['/usr/bin/tee', '/sandbox/worker.tar.gz'],
+      {
+        mode: 'binary',
+        stdout: 'ignore',
+        stderr: 'pipe',
+      },
+    );
+    expect(writeBytesMock.mock.calls.length).toBeGreaterThan(1);
+    expect(closeMock).toHaveBeenCalledTimes(1);
+    expect(writeWaitMock).toHaveBeenCalledTimes(1);
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   it('surfaces immediate detached-process exits so callers can clean up', async () => {
