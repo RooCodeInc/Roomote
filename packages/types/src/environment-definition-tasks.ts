@@ -8,26 +8,6 @@ type RepositoryReference = {
 export const ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER =
   'Optional agent guidance, like what services in a monorepo to set up or context that may be missing from the repo itself';
 
-/**
- * Skill invocation prefix that marks a task prompt as an environment-setup
- * task. The worker keys runtime affordances (like the brief-targeted proof
- * runner) off this prefix, so prompt builders must keep it as the first line.
- */
-export const ENVIRONMENT_SETUP_SKILL_INVOCATION = '$environment-setup';
-
-export function isEnvironmentSetupTaskPrompt(
-  prompt: string | null | undefined,
-): boolean {
-  const trimmed = prompt?.trimStart();
-
-  if (!trimmed?.startsWith(ENVIRONMENT_SETUP_SKILL_INVOCATION)) {
-    return false;
-  }
-
-  const nextChar = trimmed[ENVIRONMENT_SETUP_SKILL_INVOCATION.length];
-  return nextChar === undefined || /\s/.test(nextChar);
-}
-
 export const ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH = 8_000;
 
 export function getEnvironmentDefinitionIdFromPayload(
@@ -79,7 +59,7 @@ export function buildCreateEnvironmentDefinitionPrompt(
     .map((repositoryFullName) => `- ${repositoryFullName}`)
     .join('\n');
 
-  return `${ENVIRONMENT_SETUP_SKILL_INVOCATION}
+  return `$environment-setup
 
 Set up a ${PRODUCT_NAME} environment for this repository set:
 ${repositoryLines}

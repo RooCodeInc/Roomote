@@ -24,7 +24,6 @@ describe('handleGetTaskSummary', () => {
       taskRunStatus: 'running',
       taskPhase: 'waiting_for_prompt',
       taskRunError: null,
-      environmentSetupState: null,
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });
@@ -58,7 +57,6 @@ describe('handleGetTaskSummary', () => {
       taskRunStatus: 'running',
       taskPhase: 'executing',
       taskRunError: null,
-      environmentSetupState: null,
       linkedEnvironmentId: 'env-123',
       linkedEnvironmentName: 'Onboarding Sandbox',
     });
@@ -83,7 +81,6 @@ describe('handleGetTaskSummary', () => {
       taskRunStatus: null,
       taskPhase: null,
       taskRunError: null,
-      environmentSetupState: null,
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });
@@ -105,7 +102,6 @@ describe('handleGetTaskSummary', () => {
       taskRunStatus: 'failed',
       taskPhase: null,
       taskRunError: 'Sandbox failed to boot worker process',
-      environmentSetupState: null,
       linkedEnvironmentId: null,
       linkedEnvironmentName: null,
     });
@@ -117,64 +113,6 @@ describe('handleGetTaskSummary', () => {
       'Error: Sandbox failed to boot worker process',
     );
   });
-
-  it('omits the environment setup line when no setup state is present', async () => {
-    vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
-      id: 'task-5',
-      title: 'No env setup',
-      mode: 'standard',
-      completed: false,
-      repositoryName: 'owner/repo',
-      harness: 'opencode-server',
-      createdAt: 1700000000,
-      taskRunStatus: 'running',
-      taskPhase: 'executing',
-      taskRunError: null,
-      environmentSetupState: null,
-      linkedEnvironmentId: null,
-      linkedEnvironmentName: null,
-    });
-
-    const result = await handleGetTaskSummary({ taskId: 'task-5' }, config);
-
-    expect(result.content[0]?.text).not.toContain('Environment Setup:');
-  });
-
-  it.each([
-    ['running', 'Environment Setup: still running in the background'],
-    ['completed', 'Environment Setup: completed'],
-    [
-      'completed_with_warnings',
-      'Environment Setup: completed with warnings (one or more setup commands failed',
-    ],
-    [
-      'failed',
-      'Environment Setup: failed (workspace may be missing dependencies or services',
-    ],
-  ])(
-    'surfaces the %s environment setup state in the summary',
-    async (state, expectedLine) => {
-      vi.mocked(tasksApiClient.getTaskSummary).mockResolvedValueOnce({
-        id: 'task-6',
-        title: 'Env-backed task',
-        mode: 'standard',
-        completed: false,
-        repositoryName: 'owner/repo',
-        harness: 'opencode-server',
-        createdAt: 1700000000,
-        taskRunStatus: 'running',
-        taskPhase: 'executing',
-        taskRunError: null,
-        environmentSetupState: state,
-        linkedEnvironmentId: null,
-        linkedEnvironmentName: null,
-      });
-
-      const result = await handleGetTaskSummary({ taskId: 'task-6' }, config);
-
-      expect(result.content[0]?.text).toContain(expectedLine);
-    },
-  );
 
   it('returns error on failure', async () => {
     vi.mocked(tasksApiClient.getTaskSummary).mockRejectedValueOnce(

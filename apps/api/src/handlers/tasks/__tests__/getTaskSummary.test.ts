@@ -114,7 +114,6 @@ describe('getTaskSummary', () => {
         status: 'failed',
         taskPhase: null,
         error: 'Sandbox startup timed out',
-        environmentSetupState: 'failed',
         payload: {
           environmentDefinitionId: 'env-123',
         },
@@ -136,7 +135,6 @@ describe('getTaskSummary', () => {
       id: 'task-1',
       taskRunStatus: 'failed',
       taskRunError: 'Sandbox startup timed out',
-      environmentSetupState: 'failed',
     });
   });
 
