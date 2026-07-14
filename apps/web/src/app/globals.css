@@ -107,7 +107,7 @@
     }
   }
 
-  --animate-enter-up: enter-up 0.75s ease-out 1;
+  --animate-enter-up: enter-up 0.25s ease-out 1;
 
   @keyframes enter-up {
     0% {
@@ -120,7 +120,7 @@
     }
   }
 
-  --animate-enter-down: enter-down 0.75s ease-out 1;
+  --animate-enter-down: enter-down 0.25s ease-out 1;
 
   @keyframes enter-down {
     0% {
@@ -133,7 +133,7 @@
     }
   }
 
-  --animate-exit-down: exit-down 0.75s ease-out 1;
+  --animate-exit-down: exit-down 0.25s ease-out 1;
 
   @keyframes exit-down {
     0% {
@@ -143,6 +143,19 @@
     100% {
       opacity: 0;
       transform: translateY(-20px);
+    }
+  }
+
+  --animate-exit-up: exit-up 0.25s ease-out 1;
+
+  @keyframes exit-up {
+    0% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(20px);
     }
   }
 

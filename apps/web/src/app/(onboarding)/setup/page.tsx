@@ -1,5 +1,6 @@
 'use client';
 
+import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
@@ -428,6 +429,30 @@ export default function SetupPage() {
 
   return (
     <div className="relative w-full">
+      <AnimatePresence mode="wait" initial={false} custom={transitionDirection}>
+        <motion.div
+          key={step}
+          custom={transitionDirection}
+          variants={{
+            enter: (direction) => ({
+              opacity: 0,
+              y: direction === 'forward' ? 20 : -20,
+            }),
+            center: {
+              opacity: 1,
+              y: 0,
+              transition: { duration: 0.75, ease: 'easeOut' },
+            },
+            exit: (direction) => ({
+              opacity: 0,
+              y: direction === 'forward' ? -20 : 20,
+              transition: { duration: 0.75, ease: 'easeOut' },
+            }),
+          }}
+          initial="enter"
+          animate="center"
+          exit="exit"
+        >
       {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
       {step === 'auth-provider' && (
         <StepAuthProvider
@@ -622,6 +647,8 @@ export default function SetupPage() {
           onTryItOut={() => undefined}
         />
       )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
