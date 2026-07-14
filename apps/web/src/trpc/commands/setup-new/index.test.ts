@@ -14,7 +14,7 @@ const {
   mockAcquireComputeProvisioningLock,
   mockResolveSavedWorkerImage,
   mockResolveGiteaBaseUrl,
-  mockValidateGiteaToken,
+  mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
   mockTxSelect: vi.fn(),
   mockDbTransaction: vi.fn(),
@@ -32,7 +32,7 @@ const {
   mockResolveGiteaBaseUrl: vi
     .fn()
     .mockResolvedValue('https://gitea.example.com'),
-  mockValidateGiteaToken: vi.fn().mockResolvedValue({ status: 'valid' }),
+  mockResolveDeploymentEnvVar: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../compute/compute-provisioning', async (importOriginal) => {
@@ -54,7 +54,6 @@ vi.mock('@roomote/gitea', () => ({
   normalizeGiteaBaseUrl: (value: string) =>
     value.startsWith('http') ? value : `https://${value}`,
   resolveGiteaBaseUrl: mockResolveGiteaBaseUrl,
-  validateGiteaToken: mockValidateGiteaToken,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -100,6 +99,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveSavedWorkerImage: mockResolveSavedWorkerImage,
+  resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage: vi.fn(async () => undefined),
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
@@ -491,7 +491,7 @@ describe('setup-new source-control config commands', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveGiteaBaseUrl.mockResolvedValue('https://gitea.example.com');
-    mockValidateGiteaToken.mockResolvedValue({ status: 'valid' });
+    mockResolveDeploymentEnvVar.mockResolvedValue(null);
 
     mockDbTransaction.mockImplementation(async (callback) => {
       const tx = {
@@ -535,16 +535,13 @@ describe('setup-new source-control config commands', () => {
         provider: 'gitea',
         values: {
           GITEA_BASE_URL: 'gitea.example.com',
-          GITEA_TOKEN: 'gitea-token',
+          GITEA_CLIENT_ID: 'gitea-client-id',
+          GITEA_CLIENT_SECRET: 'gitea-client-secret',
         },
       },
     );
 
     expect(result.setupNewState.sourceControlProvider).toBe('gitea');
-    expect(mockValidateGiteaToken).toHaveBeenCalledWith({
-      token: 'gitea-token',
-      baseUrl: 'https://gitea.example.com',
-    });
     expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -554,7 +551,8 @@ describe('setup-new source-control config commands', () => {
             name: 'GITEA_BASE_URL',
             value: 'https://gitea.example.com',
           }),
-          expect.objectContaining({ name: 'GITEA_TOKEN' }),
+          expect.objectContaining({ name: 'GITEA_CLIENT_ID' }),
+          expect.objectContaining({ name: 'GITEA_CLIENT_SECRET' }),
         ]),
       }),
     );
@@ -565,8 +563,16 @@ describe('setup-new source-control config commands', () => {
     mockTxSelect
       .mockReturnValueOnce(createSelectChain([{ setupNewState: {} }]))
       .mockReturnValueOnce(
-        createFromOnlySelectChain([{ name: 'GITEA_TOKEN' }]),
+        createFromOnlySelectChain([
+          { name: 'GITEA_CLIENT_ID' },
+          { name: 'GITEA_CLIENT_SECRET' },
+        ]),
       );
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'GITEA_CLIENT_ID' || name === 'GITEA_CLIENT_SECRET'
+        ? 'saved-value'
+        : null,
+    );
 
     await saveSetupNewSourceControlConfigCommand(buildMockAuth(), {
       provider: 'gitea',
@@ -592,27 +598,8 @@ describe('setup-new source-control config commands', () => {
         },
       }),
     ).rejects.toThrow(
-      'Enter the required Gitea configuration values to continue.',
+      'Configure the Gitea OAuth client ID and secret to continue.',
     );
-
-    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
-  });
-
-  it('rejects invalid Gitea tokens before saving config', async () => {
-    mockValidateGiteaToken.mockResolvedValue({
-      status: 'invalid',
-      error: 'Gitea rejected the token.',
-    });
-
-    await expect(
-      saveSetupNewSourceControlConfigCommand(buildMockAuth(), {
-        provider: 'gitea',
-        values: {
-          GITEA_BASE_URL: 'https://gitea.example.com',
-          GITEA_TOKEN: 'gitea-token',
-        },
-      }),
-    ).rejects.toThrow('Gitea rejected the token.');
 
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });

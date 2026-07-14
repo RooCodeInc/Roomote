@@ -150,7 +150,8 @@ describe('buildSetupSourceControlStatus', () => {
     const status = buildSetupSourceControlStatus({
       runtimeEnv: {
         GITEA_BASE_URL: 'https://gitea.example.com',
-        GITEA_TOKEN: 'gitea-token',
+        GITEA_CLIENT_ID: 'gitea-client-id',
+        GITEA_CLIENT_SECRET: 'gitea-client-secret',
       },
     });
 
@@ -274,16 +275,17 @@ describe('buildSetupSourceControlStatus', () => {
       },
     });
     const gitlab = gitlabStatus.providers.find((p) => p.provider === 'gitlab');
-    const optionalGitLabClientId = gitlab?.fields.find(
+    const requiredGitLabClientId = gitlab?.fields.find(
       (field) => field.envVarName === 'GITLAB_CLIENT_ID',
     );
-    const optionalGitLabClientSecret = gitlab?.fields.find(
+    const requiredGitLabClientSecret = gitlab?.fields.find(
       (field) => field.envVarName === 'GITLAB_CLIENT_SECRET',
     );
     const giteaStatus = buildSetupSourceControlStatus({
       runtimeEnv: {
         GITEA_BASE_URL: 'https://gitea.example.com',
-        GITEA_TOKEN: 'gitea-token',
+        GITEA_CLIENT_ID: 'gitea-client-id',
+        GITEA_CLIENT_SECRET: 'gitea-client-secret',
       },
     });
     const gitea = giteaStatus.providers.find((p) => p.provider === 'gitea');
@@ -291,16 +293,16 @@ describe('buildSetupSourceControlStatus', () => {
       (field) => field.envVarName === 'GITEA_WEBHOOK_SECRET',
     );
 
-    expect(optionalGitLabClientId).toMatchObject({
-      required: false,
-      runtimeSatisfied: false,
+    expect(requiredGitLabClientId).toMatchObject({
+      runtimeSatisfied: true,
       savedSatisfied: false,
     });
-    expect(optionalGitLabClientSecret).toMatchObject({
-      required: false,
-      runtimeSatisfied: false,
+    expect(requiredGitLabClientSecret).toMatchObject({
+      runtimeSatisfied: true,
       savedSatisfied: false,
     });
+    expect(requiredGitLabClientId?.required).not.toBe(false);
+    expect(requiredGitLabClientSecret?.required).not.toBe(false);
     expect(optionalGiteaWebhookSecret).toMatchObject({
       required: false,
       runtimeSatisfied: false,

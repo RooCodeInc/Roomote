@@ -410,20 +410,16 @@ describe('source-control commands', () => {
     expect(mockValidateAdoToken).not.toHaveBeenCalled();
   });
 
-  it('rejects invalid Gitea tokens during config validation', async () => {
-    mockValidateGiteaToken.mockResolvedValue({
-      status: 'invalid',
-      error: 'Gitea rejected the token.',
-    });
-
+  it('requires Gitea OAuth credentials during config validation', async () => {
     await expect(
       assertValidSourceControlConfigInput({
         provider: 'gitea',
         values: {
           GITEA_BASE_URL: 'https://gitea.example.com',
-          GITEA_TOKEN: 'gitea-token',
         },
       }),
-    ).rejects.toThrow('Gitea rejected the token.');
+    ).rejects.toThrow(
+      'Configure the Gitea OAuth client ID and secret to continue.',
+    );
   });
 });

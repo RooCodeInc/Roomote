@@ -148,11 +148,7 @@ export function buildInvokeMethods({
         icon: createBrandIcon(copy.icon, title),
         title,
         description,
-        ...(identity?.examplePrompt
-          ? { example: identity.examplePrompt }
-          : copy.example
-            ? { example: copy.example }
-            : {}),
+        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...(includeLinear

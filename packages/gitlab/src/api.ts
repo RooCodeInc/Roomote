@@ -122,12 +122,12 @@ export function normalizeGitLabBaseUrl(baseUrl: string): string {
   const url = new URL(
     /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
   );
-  const apiPathSuffix = /\/api\/v4$/;
+  const apiPathSuffix = '/api/v4';
 
   if (url.hostname === 'gitlab.com') {
     url.pathname = '/';
-  } else if (apiPathSuffix.test(url.pathname)) {
-    url.pathname = url.pathname.replace(apiPathSuffix, '') || '/';
+  } else if (url.pathname.endsWith(apiPathSuffix)) {
+    url.pathname = url.pathname.slice(0, -apiPathSuffix.length) || '/';
   }
 
   return url.toString().replace(/\/+$/, '');

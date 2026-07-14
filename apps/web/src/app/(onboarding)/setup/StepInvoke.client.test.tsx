@@ -337,10 +337,6 @@ describe('Setup StepInvoke', () => {
     expect(
       screen.getByText('Mention @roomote in a comment on any PR.'),
     ).toBeInTheDocument();
-
-    expect(
-      screen.getByText('@roomote address the PR feedback above'),
-    ).toBeInTheDocument();
   });
 
   it('clarifies that GitLab mentions work on any merge request', () => {
@@ -348,9 +344,6 @@ describe('Setup StepInvoke', () => {
 
     expect(
       screen.getByText('Mention @roomote in a comment on any merge request.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('@roomote address the merge request feedback above'),
     ).toBeInTheDocument();
   });
 

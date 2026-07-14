@@ -251,7 +251,7 @@ describe('StepSourceControlConfig', () => {
       screen.getAllByText(/GitLab OAuth application/).length,
     ).toBeGreaterThan(0);
     expect(
-      screen.getByText(/In GitLab, create an OAuth application/),
+      screen.getByText(/In GitLab, click on your avatar/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/GitLab Webhook Secret/)).not.toBeInTheDocument();
     expect(
