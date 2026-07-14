@@ -41,17 +41,26 @@ function getLogfileName(filePath: string) {
   return filePath.split('/').pop() ?? filePath;
 }
 
+function getLogfileDisplayLabel(logfile: {
+  label: string;
+  filePath: string;
+}): string {
+  return logfile.label || getLogfileName(logfile.filePath);
+}
+
 export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
   const logfiles = useLogFiles();
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [hasOpenedViewer, setHasOpenedViewer] = useState(active);
 
-  const logFilePaths = useMemo(
-    () => logfiles.map((logfile) => logfile.filePath),
-    [logfiles],
+  // Tail only the selected file so environments with many setup commands do not
+  // exhaust the multiplexed tail path limit while still showing full listings.
+  const selectedFilePaths = useMemo(
+    () => (selectedFilePath ? [selectedFilePath] : []),
+    [selectedFilePath],
   );
 
-  const tailLogs = useMultiplexedTailLogs(active ? logFilePaths : []);
+  const tailLogs = useMultiplexedTailLogs(active ? selectedFilePaths : []);
 
   useEffect(() => {
     if (active) {
@@ -114,12 +123,12 @@ export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
                   className="h-7 gap-1.5 px-2 text-sm font-medium hover:text-accent-foreground relative -left-2"
                 >
                   <span className="max-w-48 truncate">
-                    {getLogfileName(selectedLogfile.filePath)}
+                    {getLogfileDisplayLabel(selectedLogfile)}
                   </span>
                   <ChevronDown className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
+              <DropdownMenuContent align="start" className="max-h-80">
                 <DropdownMenuLabel>Logs in this environment</DropdownMenuLabel>
                 {logfiles.map((logfile) => (
                   <DropdownMenuItem
@@ -128,7 +137,7 @@ export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
                     onClick={() => setSelectedFilePath(logfile.filePath)}
                   >
                     <span className="flex flex-col">
-                      <span>{getLogfileName(logfile.filePath)}</span>
+                      <span>{getLogfileDisplayLabel(logfile)}</span>
                     </span>
                     {selectedLogfile.filePath === logfile.filePath ? (
                       <span className="ml-auto text-muted-foreground">
@@ -143,7 +152,7 @@ export function LogsSidePanel({ active, onClose }: LogsSidePanelProps) {
             <span className="flex h-6 items-center gap-1 px-2 text-xs font-medium text-muted-foreground">
               <Logs className="size-3" />
               <span className="max-w-24 truncate">
-                {getLogfileName(logfiles[0]!.filePath)}
+                {getLogfileDisplayLabel(logfiles[0]!)}
               </span>
             </span>
           ) : null

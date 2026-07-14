@@ -18,12 +18,39 @@ import { SandboxStoreContext } from '../SandboxProvider';
 import { useLogFiles } from '../use-log-files';
 
 const useEnvironmentMock = vi.fn((_id: string | undefined) => ({
-  data: undefined,
+  data: undefined as
+    | {
+        config?: {
+          repositories?: Array<{
+            repository: string;
+            commands?: Array<{ name: string; logfile?: string }>;
+          }>;
+          docker_projects?: Array<{ name: string }>;
+        };
+      }
+    | undefined,
 }));
+
+const getSetupStatusQueryMock = vi.fn();
 
 vi.mock('@/hooks/environments', () => ({
   useEnvironment: (id: string | undefined) => useEnvironmentMock(id),
 }));
+
+vi.mock('../SandboxProvider', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../SandboxProvider')>();
+
+  return {
+    ...actual,
+    useSandboxClient: () => ({
+      commands: {
+        getSetupStatus: {
+          query: getSetupStatusQueryMock,
+        },
+      },
+    }),
+  };
+});
 
 function createWrapper(store: ReturnType<typeof createSandboxStore>) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -38,6 +65,12 @@ function createWrapper(store: ReturnType<typeof createSandboxStore>) {
 describe('useLogFiles', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useEnvironmentMock.mockReturnValue({ data: undefined });
+    getSetupStatusQueryMock.mockResolvedValue({
+      path: '.roomote/setup-status.json',
+      exists: false,
+      status: null,
+    });
   });
 
   it('reads existing logfiles without syncing when called without inputs', async () => {
@@ -55,6 +88,7 @@ describe('useLogFiles', () => {
 
     expect(store.getState().logfiles).toEqual(existing);
     expect(useEnvironmentMock).toHaveBeenCalledWith(undefined);
+    expect(getSetupStatusQueryMock).not.toHaveBeenCalled();
   });
 
   it('clears stale logfiles when called with an explicit undefined environment id', async () => {
@@ -74,5 +108,74 @@ describe('useLogFiles', () => {
     });
 
     expect(useEnvironmentMock).toHaveBeenCalledWith(undefined);
+  });
+
+  it('merges setup command log files from the sandbox setup status', async () => {
+    useEnvironmentMock.mockReturnValue({
+      data: {
+        config: {
+          repositories: [
+            {
+              repository: 'RooCodeInc/Roomote',
+              commands: [
+                { name: 'Start Redis', logfile: '/tmp/roomote-redis.log' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    getSetupStatusQueryMock.mockResolvedValue({
+      path: '.roomote/setup-status.json',
+      exists: true,
+      status: {
+        version: 1,
+        state: 'completed',
+        startedAt: '2026-07-14T00:00:00.000Z',
+        commands: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            name: 'Install toolchain and dependencies',
+            state: 'succeeded',
+            logFile:
+              '.roomote/setup-logs/RooCodeInc/Roomote/install-toolchain-and-dependencies.log',
+          },
+          {
+            repository: 'RooCodeInc/Roomote',
+            name: 'Start Redis',
+            state: 'started_detached',
+            // Same path as env config; should dedupe.
+            logFile: '/tmp/roomote-redis.log',
+          },
+          {
+            repository: 'RooCodeInc/Roomote',
+            name: 'Install Mintlify CLI for docs',
+            state: 'running',
+          },
+        ],
+        warnings: [],
+      },
+    });
+
+    const store = createSandboxStore();
+
+    renderHook(() => useLogFiles('env-1'), {
+      wrapper: createWrapper(store),
+    });
+
+    await waitFor(() => {
+      expect(store.getState().logfiles).toEqual([
+        { label: 'harness.log', filePath: '/tmp/harness.log' },
+        { label: 'Start Redis', filePath: '/tmp/roomote-redis.log' },
+        {
+          label: 'Setup: Install toolchain and dependencies (Roomote)',
+          filePath:
+            '.roomote/setup-logs/RooCodeInc/Roomote/install-toolchain-and-dependencies.log',
+        },
+      ]);
+    });
+
+    expect(getSetupStatusQueryMock).toHaveBeenCalled();
   });
 });
