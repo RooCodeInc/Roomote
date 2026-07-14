@@ -507,6 +507,19 @@ export function useSetupFlow(
     [shouldSkip],
   );
 
+  const getPreviousNavigationStep = useCallback(
+    (currentStep: SetupStep): SetupStep | null => {
+      return (
+        navigationHistoryRef.current.at(-1) ??
+        findPreviousStep(SETUP_STEPS.indexOf(currentStep)) ??
+        (currentStep === 'source-control-connect'
+          ? 'source-control-provider'
+          : null)
+      );
+    },
+    [findPreviousStep],
+  );
+
   const findNextPostOnboardingStep = useCallback(
     ({
       fromIndex = SETUP_STEPS.indexOf('invoke'),
@@ -751,16 +764,13 @@ export function useSetupFlow(
   );
 
   const previousStep = useMemo(
-    () =>
-      navigationHistoryRef.current.at(-1) ??
-      findPreviousStep(SETUP_STEPS.indexOf(step)),
-    [findPreviousStep, step],
+    () => getPreviousNavigationStep(step),
+    [getPreviousNavigationStep, step],
   );
 
   const goToPreviousStep = useCallback(() => {
     const nextStep =
-      navigationHistoryRef.current.pop() ??
-      findPreviousStep(SETUP_STEPS.indexOf(step));
+      navigationHistoryRef.current.pop() ?? getPreviousNavigationStep(step);
 
     if (!nextStep) {
       return;
@@ -772,7 +782,7 @@ export function useSetupFlow(
     pinnedUrlStepRef.current = shouldSkip(nextStep) ? nextStep : null;
     setStep(nextStep);
     pushStepUrl(nextStep);
-  }, [findPreviousStep, pushStepUrl, shouldSkip, step]);
+  }, [getPreviousNavigationStep, pushStepUrl, shouldSkip, step]);
 
   const goToNextStep = useCallback(() => {
     const currentIndex = SETUP_STEPS.indexOf(step);

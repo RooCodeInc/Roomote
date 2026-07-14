@@ -1380,6 +1380,87 @@ describe('useSetupFlow', () => {
     );
   });
 
+  it('offers the source-control picker from a first-visible connect step', async () => {
+    mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: true,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: 'slack',
+        runtimeConfiguredProviders: ['slack'],
+        lockReason: 'runtime_env',
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
+      sourceControlSetup: {
+        setupSatisfied: false,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: 'github',
+        runtimeConfiguredProviders: ['github'],
+        lockReason: 'runtime_env',
+        connectedProvider: null,
+        providers: [
+          {
+            provider: 'github',
+            label: 'GitHub',
+            connectionMode: 'app',
+            fields: [],
+            runtimeConfigSatisfied: true,
+            savedConfigSatisfied: false,
+            configSatisfied: true,
+            configSatisfiedByRuntimeEnv: true,
+            connected: false,
+            repositoryCount: 0,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: 'openrouter',
+        computeProvider: null,
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=source-control-connect');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('source-control-connect');
+    });
+    expect(result.current.canGoBack).toBe(true);
+
+    act(() => {
+      result.current.goToPreviousStep();
+    });
+
+    expect(result.current.step).toBe('source-control-provider');
+    expect(routerMock.push).toHaveBeenLastCalledWith(
+      '/setup?step=source-control-provider',
+    );
+  });
+
   it('uses the visible setup flow when navigating backward', async () => {
     mockStatus({
       hasSlack: true,
