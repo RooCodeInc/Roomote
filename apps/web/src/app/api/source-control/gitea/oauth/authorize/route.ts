@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
@@ -6,13 +6,13 @@ import {
   createGiteaOAuthAuthorizationUrl,
   resolveGiteaBaseUrl,
 } from '@roomote/gitea';
-import { authorize } from '@/lib/server';
+import { authorize, getCallbackHost } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const authResult = await authorize();
   const webEnv = await bootstrapWebRuntimeEnv();
   if (!authResult.success || !authResult.isAdmin) {
@@ -28,7 +28,8 @@ export async function GET() {
       { status: 400 },
     );
   }
-  const redirectUri = buildGiteaOAuthRedirectUri(webEnv.R_APP_URL);
+  const callbackOrigin = new URL(getCallbackHost(request)).origin;
+  const redirectUri = buildGiteaOAuthRedirectUri(callbackOrigin);
   const { url, state } = createGiteaOAuthAuthorizationUrl({
     baseUrl,
     clientId,

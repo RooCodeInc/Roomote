@@ -6,7 +6,7 @@ import {
   exchangeGiteaOAuthCode,
   resolveGiteaBaseUrl,
 } from '@roomote/gitea';
-import { authorize } from '@/lib/server';
+import { authorize, getCallbackHost } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 
 export const runtime = 'nodejs';
@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const redirect = new URL('/setup', webEnv.R_APP_URL);
+  const callbackOrigin = new URL(getCallbackHost(request)).origin;
+  const redirect = new URL('/setup', callbackOrigin);
   redirect.searchParams.set('step', 'source-control-connect');
   const response = () => NextResponse.redirect(redirect);
   const authResult = await authorize();
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest) {
       clientId,
       clientSecret,
       code,
-      redirectUri: buildGiteaOAuthRedirectUri(webEnv.R_APP_URL),
+      redirectUri: buildGiteaOAuthRedirectUri(callbackOrigin),
     });
     redirect.searchParams.set('gitea', 'connected');
     redirect.searchParams.set('sync', '1');
