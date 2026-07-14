@@ -55,11 +55,29 @@ function getActiveSubtaskAgentTypeLabel(
   return formatAgentTypeLabel(payload.agentType) ?? 'Subagent';
 }
 
+function getSubtaskPrompt(
+  payload: AcpToolCallPayload | AcpToolResultPayload,
+): string | null {
+  const topLevelPrompt = asString(payload.prompt);
+
+  if (topLevelPrompt) {
+    return topLevelPrompt;
+  }
+
+  const rawInput = (payload as unknown as Record<string, unknown>).rawInput;
+
+  if (!rawInput || typeof rawInput !== 'object' || Array.isArray(rawInput)) {
+    return null;
+  }
+
+  return asString((rawInput as Record<string, unknown>).prompt);
+}
+
 function getSubtaskName(payload: AcpToolCallPayload | AcpToolResultPayload): {
   name: string;
   source: SubagentNameSource;
 } {
-  const prompt = asString(payload.prompt);
+  const prompt = getSubtaskPrompt(payload);
 
   if (prompt) {
     return {

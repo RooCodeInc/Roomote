@@ -211,6 +211,30 @@ describe('ActiveSubtasksList', () => {
     expect(screen.getByText(/Worker/)).toBeVisible();
   });
 
+  it('uses a rawInput prompt for OpenCode task launches', () => {
+    useSandboxMessagesMock.mockReturnValue({
+      messages: [
+        buildPendingToolCall({
+          prompt: null,
+          title: 'task',
+          agentType: 'explore',
+          rawInput: {
+            prompt: 'Inspect OpenCode task rows for rawInput prompts.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolCallUiMessage['data']>),
+      ],
+    });
+
+    render(<ActiveSubtasksList taskEntryKey="task-1" />);
+
+    fireEvent.click(screen.getByRole('button', { name: /1 active subagent/i }));
+
+    expect(
+      screen.getByText('Inspect OpenCode task rows for rawInput prompts.'),
+    ).toBeVisible();
+  });
+
   it('hides completed subagents after the latest child state resolves', () => {
     const completedSubtaskMessage = buildSubagentMessage({
       toolCallId: 'call-2',

@@ -125,7 +125,7 @@ describe('AcpToolMessage', () => {
     );
   });
 
-  it('renders subagent launches as compact title-only rows', () => {
+  it('renders subagent launches as compact expandable rows when a prompt is available', () => {
     render(
       <AcpToolMessage
         msg={buildMessage('subagent', {
@@ -140,14 +140,16 @@ describe('AcpToolMessage', () => {
       />,
     );
 
-    expect(
-      screen.queryByText(/Inspect the task transcript path and summarize/),
-    ).not.toBeInTheDocument();
     expect(screen.queryByText('Explorer')).not.toBeInTheDocument();
     expect(screen.queryByText('gpt-5.4-mini')).not.toBeInTheDocument();
     expect(screen.queryByText('Medium effort')).not.toBeInTheDocument();
     expect(screen.queryByText('1 child thread')).not.toBeInTheDocument();
-    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('keeps subagent rows non-expandable when the launch has no prompt summary', () => {
@@ -170,6 +172,30 @@ describe('AcpToolMessage', () => {
       }),
     );
     expect(toolDetailsSpy).not.toHaveBeenCalled();
+  });
+
+  it('expands OpenCode task rows when the launch prompt lives on rawInput', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('subagent', {
+          prompt: null,
+          agentType: 'explore',
+          isSubagentSpawn: true,
+          rawInput: {
+            prompt:
+              'Inspect the OpenCode task tool payload path for expandable prompts.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolCallUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('does not render returned child text for completed subagent rows', () => {
