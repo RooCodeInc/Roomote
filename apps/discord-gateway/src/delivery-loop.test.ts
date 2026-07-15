@@ -85,7 +85,10 @@ describe('Discord delivery worker', () => {
     expect(queue.acknowledge).toHaveBeenCalledWith('3-0');
   });
 
-  it('quarantines repeatedly failing transient events at the attempt cap', async () => {
+  it('keeps the attempt-cap backstop for retryable non-infrastructure failures', async () => {
+    // No forwarder-produced error currently lands in this branch (unknown 4xx
+    // are permanent, 5xx and listed 4xx are infrastructure), so the cap is
+    // defense-in-depth against future classification changes.
     const abort = new AbortController();
     const envelope = event('poison');
     const queue = {
@@ -110,9 +113,9 @@ describe('Discord delivery worker', () => {
         .fn()
         .mockRejectedValue(
           new DiscordApiForwardingError(
-            'Discord API event forwarding failed (500)',
+            'Discord API event forwarding failed (418)',
             true,
-            500,
+            418,
           ),
         ),
     } as unknown as DiscordApiForwarder;
@@ -163,6 +166,14 @@ describe('Discord delivery worker', () => {
         'Discord API event forwarding failed (503)',
         true,
         503,
+      ),
+    ],
+    [
+      'API internal error',
+      new DiscordApiForwardingError(
+        'Discord API event forwarding failed (500)',
+        true,
+        500,
       ),
     ],
   ])('preserves events during a %s', async (_label, error) => {

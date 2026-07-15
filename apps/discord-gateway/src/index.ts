@@ -18,6 +18,11 @@ async function shutdown(signal: string): Promise<void> {
   console.info(`[discord-gateway] ${signal} received; shutting down`);
   healthServer.close();
   await service.stop();
+  // run() releases the leader lease in its finally block; quitting Redis
+  // before that unwind finishes would strand the lease until its TTL and
+  // block failover for up to leaderLeaseTtlSeconds. The rejection (if any)
+  // was already logged by the run().catch handler below.
+  await runPromise.catch(() => undefined);
   await redis.quit();
 }
 
@@ -32,7 +37,8 @@ console.info(
   `[discord-gateway] health server listening on 0.0.0.0:${config.port}`,
 );
 
-service.run().catch(async (error) => {
+const runPromise = service.run();
+runPromise.catch(async (error) => {
   console.error(
     `[discord-gateway] fatal error: ${error instanceof Error ? error.message : String(error)}`,
   );

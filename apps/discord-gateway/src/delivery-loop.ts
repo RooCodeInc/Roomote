@@ -31,17 +31,22 @@ function isPermanentForwardingError(error: unknown): boolean {
 }
 
 const DELIVERY_INFRASTRUCTURE_STATUSES = new Set([
-  401, 403, 404, 405, 408, 425, 429, 502, 503, 504,
+  401, 403, 404, 405, 408, 425, 429,
 ]);
 
 /**
  * These failures describe the delivery path rather than one bad event. Keep
  * every stream entry and restart the worker so a secret rotation, deploy,
  * rate limit, timeout, or API outage cannot drain valid events into the DLQ.
+ * Every 5xx counts: an unhandled exception or dependency blip surfaces as a
+ * bare 500, and quarantining on it would silently discard valid traffic for
+ * the whole incident.
  */
 function isDeliveryInfrastructureError(error: unknown): boolean {
   if (!(error instanceof DiscordApiForwardingError)) return true;
-  return DELIVERY_INFRASTRUCTURE_STATUSES.has(error.status);
+  return (
+    error.status >= 500 || DELIVERY_INFRASTRUCTURE_STATUSES.has(error.status)
+  );
 }
 
 type DeliveryLoopParams = {
