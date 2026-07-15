@@ -260,6 +260,31 @@ export function StepSourceControlConnect({
     }
   }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
 
+  useEffect(() => {
+    if (
+      !oauthAutoSyncMarkerPresent ||
+      !alreadyConnected ||
+      needsAdoMicrosoftConnection
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.delete('sync');
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname,
+    );
+    onContinue();
+  }, [
+    alreadyConnected,
+    needsAdoMicrosoftConnection,
+    oauthAutoSyncMarkerPresent,
+    onContinue,
+  ]);
+
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">
       <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
