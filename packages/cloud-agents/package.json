@@ -21,11 +21,6 @@
       "import": "./src/server/non-task-provider-usage.ts",
       "require": "./src/server/non-task-provider-usage.ts"
     },
-    "./style-guidance-constants": {
-      "types": "./src/style-guidance-constants.ts",
-      "import": "./src/style-guidance-constants.ts",
-      "require": "./src/style-guidance-constants.ts"
-    },
     "./router-mcp-policy": {
       "types": "./src/router-mcp-policy.ts",
       "import": "./src/router-mcp-policy.ts",
@@ -39,9 +34,6 @@
       ],
       "server/non-task-provider-usage": [
         "./src/server/non-task-provider-usage.ts"
-      ],
-      "style-guidance-constants": [
-        "./src/style-guidance-constants.ts"
       ],
       "router-mcp-policy": [
         "./src/router-mcp-policy.ts"

@@ -350,7 +350,7 @@ describe('slackMentionCallbacks', () => {
     expect(mockAddReaction).not.toHaveBeenCalled();
   });
 
-  it('uses the captured acknowledgement emoji when cleaning up Slack reactions on start', async () => {
+  it('uses the fixed acknowledgement emoji when cleaning up Slack reactions on start', async () => {
     const taskRun = {
       ...createTaskRun(),
       payload: {
@@ -365,7 +365,7 @@ describe('slackMentionCallbacks', () => {
     expect(mockRemoveReaction).toHaveBeenCalledWith({
       channel: 'C123',
       timestamp: '1710000000.100',
-      name: 'hourglass',
+      name: 'eyes',
     });
   });
 

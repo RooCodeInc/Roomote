@@ -20,17 +20,6 @@ export function isThumbsUpReaction(reaction: string): boolean {
   return THUMBS_UP_REACTIONS.has(normalizedReaction);
 }
 
-export function isConfiguredSlackReaction(
-  reaction: string,
-  configuredEmoji: string | null | undefined,
-): boolean {
-  if (!configuredEmoji) {
-    return false;
-  }
-
-  return normalizeSlackReactionName(reaction) === configuredEmoji;
-}
-
 function coerceSlackWorkflowInputToString(value: unknown): string | undefined {
   if (typeof value === 'string') {
     const trimmed = value.trim();

@@ -26,7 +26,6 @@ const {
     mockResolveSlackReactionNames: vi.fn().mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
-      summonEmoji: null,
     }),
     mockStickyFooterPost: vi.fn().mockResolvedValue('msg-ts-123'),
     mockGetCommunicationProviderAdapter: vi.fn(),
@@ -147,7 +146,6 @@ describe('notifyPullRequestTerminalStatus', () => {
     mockResolveSlackReactionNames.mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
-      summonEmoji: null,
     });
     mockStickyFooterPost.mockResolvedValue('msg-ts-123');
     mockPostMessage.mockResolvedValue({

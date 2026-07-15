@@ -11,7 +11,7 @@ Public, user-facing documentation:
 - setup and self-hosting
 - product concepts and how Roomote works
 - admin and configuration workflows (dashboard, environments, skills,
-  automations, integrations, vibes, personal settings)
+  automations, integrations, personal settings)
 - integrations and common user-facing tasks
 
 ## What does NOT belong here
