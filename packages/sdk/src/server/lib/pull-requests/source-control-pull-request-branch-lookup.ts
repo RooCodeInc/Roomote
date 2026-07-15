@@ -83,7 +83,7 @@ const adoPullRequestListSchema = z.object({
   value: z.array(adoPullRequestSchema),
 });
 
-export type BranchLookupInput = {
+type BranchLookupInput = {
   sourceBranch: string;
   targetBranch?: string;
 };

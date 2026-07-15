@@ -4,7 +4,7 @@ import {
   type FetchImpl,
 } from './source-control-pull-request-shared';
 
-export type SourceControlRequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
+type SourceControlRequestMethod = 'GET' | 'POST' | 'PUT' | 'PATCH';
 
 /**
  * Shared JSON HTTP transport for the provider-neutral source-control PR

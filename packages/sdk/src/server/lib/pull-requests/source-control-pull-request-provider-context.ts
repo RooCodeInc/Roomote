@@ -30,7 +30,7 @@ import {
  * write, and create/update surfaces can share resolvers without changing the
  * messages callers and tests already rely on.
  */
-export type SourceControlApiPurpose = 'read' | 'write' | 'create';
+type SourceControlApiPurpose = 'read' | 'write' | 'create';
 
 function purposeVerb(purpose: SourceControlApiPurpose): string {
   return purpose;
