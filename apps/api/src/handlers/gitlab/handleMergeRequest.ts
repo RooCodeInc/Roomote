@@ -50,7 +50,7 @@ function getReviewTaskType(
 }
 
 /**
- * Notifies Slack, Teams, Telegram, and Linear threads/sessions linked to the
+ * Notifies Slack, Teams, Telegram, Discord, and Linear threads/sessions linked to the
  * MR after it becomes terminal (merged or closed). GitLab has no installation
  * gate, so verify the repository is an active synced GitLab row before
  * notifying (fire-and-forget, mirroring the GitHub status handler).

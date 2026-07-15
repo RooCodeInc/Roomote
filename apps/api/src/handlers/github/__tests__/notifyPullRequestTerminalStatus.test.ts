@@ -123,11 +123,21 @@ const telegramPayload = {
   communicationMessageId: 'msg-1',
 };
 
+const discordPayload = {
+  communicationProvider: 'discord',
+  communicationChannelId: 'channel-1',
+  communicationThreadId: 'discord-thread-1',
+};
+
 const teamsAdapter = {
   postMessage: mockPostMessage,
 };
 
 const telegramAdapter = {
+  postMessage: mockPostMessage,
+};
+
+const discordAdapter = {
   postMessage: mockPostMessage,
 };
 
@@ -166,6 +176,7 @@ describe('notifyPullRequestTerminalStatus', () => {
       async (provider: string) => {
         if (provider === 'teams') return teamsAdapter;
         if (provider === 'telegram') return telegramAdapter;
+        if (provider === 'discord') return discordAdapter;
         return null;
       },
     );
@@ -241,12 +252,13 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
   });
 
-  it('posts Teams and Telegram via the shared communication adapter', async () => {
+  it('posts Teams, Telegram, and Discord via the shared communication adapter', async () => {
     mockedGithubFind.mockResolvedValue({ id: 1 } as any);
     mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
     mockedTaskRunsFind.mockResolvedValue([
       { payload: teamsPayload },
       { payload: telegramPayload },
+      { payload: discordPayload },
     ] as any);
 
     await notifyPullRequestTerminalStatus(baseParams);
@@ -255,6 +267,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockGetCommunicationProviderAdapter).toHaveBeenCalledWith(
       'telegram',
     );
+    expect(mockGetCommunicationProviderAdapter).toHaveBeenCalledWith('discord');
     expect(mockPostMessage).toHaveBeenCalledWith({
       channelId: 'conversation-1',
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
@@ -267,6 +280,12 @@ describe('notifyPullRequestTerminalStatus', () => {
       channelId: 'chat-1',
       threadId: 'thread-1',
       replyToMessageId: 'msg-1',
+      text: '[Test PR](https://github.com/owner/repo/pull/42) was **merged** by merger',
+      textFormat: 'markdown',
+    });
+    expect(mockPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'discord-thread-1',
       text: '[Test PR](https://github.com/owner/repo/pull/42) was **merged** by merger',
       textFormat: 'markdown',
     });
