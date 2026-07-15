@@ -32,7 +32,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
     creationHref: 'https://developer.atlassian.com/console/myapps/',
     setupLabel: 'Bitbucket OAuth consumer',
     creationHint:
-      'Create an OAuth consumer in the Atlassian developer console, set the callback URL to this deployment, and grant account, repository, pull request, and webhook read/write scopes.',
+      'Create an OAuth consumer in the Atlassian developer console. In Permissions, click Add Marketplace or custom app, add the Bitbucket API, and grant account, repository:write, pullrequest:write, and webhook scopes.',
   },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',

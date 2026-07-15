@@ -30,6 +30,7 @@ import {
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
 import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
 import { GitLabSourceControlInstructions } from './GitLabSourceControlConfig';
+import { BitbucketSourceControlInstructions } from './BitbucketSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -409,7 +410,8 @@ export function StepSourceControlConfig({
 
       {isAdo ||
       selectedProvider?.provider === 'gitea' ||
-      selectedProvider?.provider === 'gitlab' ? (
+      selectedProvider?.provider === 'gitlab' ||
+      selectedProvider?.provider === 'bitbucket' ? (
         <NumberedStep number={2}>
           {isAdo ? (
             <AdoSourceControlInstructions
@@ -418,8 +420,10 @@ export function StepSourceControlConfig({
             />
           ) : selectedProvider?.provider === 'gitea' ? (
             <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
-          ) : (
+          ) : selectedProvider?.provider === 'gitlab' ? (
             <GitLabSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : (
+            <BitbucketSourceControlInstructions publicOrigin={publicOrigin} />
           )}
         </NumberedStep>
       ) : null}
@@ -428,7 +432,8 @@ export function StepSourceControlConfig({
         number={
           isAdo ||
           selectedProvider?.provider === 'gitea' ||
-          selectedProvider?.provider === 'gitlab'
+          selectedProvider?.provider === 'gitlab' ||
+          selectedProvider?.provider === 'bitbucket'
             ? 3
             : 2
         }

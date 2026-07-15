@@ -310,6 +310,17 @@ describe('StepSourceControlConfig', () => {
         /Create an OAuth consumer in the Atlassian developer console/,
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'In Permissions, click “Add Marketplace or custom app”, add the “Bitbucket API”, then enable these OAuth scopes:',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Deployment callback')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'http://localhost:3000/api/source-control/bitbucket/oauth/callback',
+      ),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();
     expect(
       screen.queryByText('Bitbucket Webhook Secret'),
