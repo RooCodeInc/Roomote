@@ -95,6 +95,58 @@ describe('Discord persistence (real database)', () => {
     ).resolves.toHaveLength(1);
   });
 
+  it('keeps the default destination deployment-wide: picking one clears the rest', async () => {
+    const userId = await createUser();
+    const suffix = randomUUID();
+    const firstGuildId = `guild-default-a-${suffix}`;
+    const secondGuildId = `guild-default-b-${suffix}`;
+    const firstChannelId = `channel-default-a-${suffix}`;
+    const secondChannelId = `channel-default-b-${suffix}`;
+
+    for (const [guildId, channelId] of [
+      [firstGuildId, firstChannelId],
+      [secondGuildId, secondChannelId],
+    ] as const) {
+      await upsertDiscordInstallation({
+        guildId,
+        guildName: guildId,
+        applicationId: 'application-default',
+        botUserId: 'bot-default',
+        installedByUserId: userId,
+      });
+      await syncDiscordInstallationChannels({
+        guildId,
+        channels: [{ channelId, channelName: 'roomote', channelType: 0 }],
+      });
+    }
+
+    await captureDiscordDefaultDestination({
+      guildId: firstGuildId,
+      channelId: firstChannelId,
+      channelName: 'roomote',
+      channelType: 0,
+    });
+    await captureDiscordDefaultDestination({
+      guildId: secondGuildId,
+      channelId: secondChannelId,
+      channelName: 'roomote',
+      channelType: 0,
+    });
+
+    // The later pick is THE deployment default; the earlier guild's stored
+    // default is cleared instead of lingering as a lastUsedAt-race fallback.
+    await expect(findDiscordDefaultDestination()).resolves.toMatchObject({
+      guildId: secondGuildId,
+      channelId: secondChannelId,
+    });
+    await expect(
+      findDiscordInstallationByGuildId(firstGuildId),
+    ).resolves.toMatchObject({ defaultChannelId: null });
+    await expect(findDiscordDefaultDestination(firstGuildId)).resolves.toBe(
+      null,
+    );
+  });
+
   it('reconciles live guilds and invalidates destinations after bot identity rotation', async () => {
     const userId = await createUser();
     const suffix = randomUUID();

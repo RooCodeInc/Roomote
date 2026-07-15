@@ -408,4 +408,36 @@ describe('submitTaskSuggestions', () => {
     expect(postScheduledSuggestionsToTelegram).not.toHaveBeenCalled();
     expect(postScheduledSuggestionsToTeams).not.toHaveBeenCalled();
   });
+
+  it('skips Slack when the automation targets a Discord channel', async () => {
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: null,
+      initiatorAutomation: 'suggest_ideas',
+    });
+    // Slack could deliver (its channel resolves), but the automation's own
+    // destination target is a Discord channel, so the summary belongs there.
+    vi.mocked(getAutomationRuntime).mockResolvedValue({
+      slackChannelId: 'C-AUTO',
+      destination: {
+        provider: 'discord',
+        channelId: 'discord-channel-1',
+        source: 'automation_target',
+      },
+    } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
+    vi.mocked(postScheduledSuggestionsToDiscord).mockResolvedValue(true);
+
+    const app = createApp({
+      runId: 1,
+      userId: null,
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+    const response = await requestSuggestions(app);
+
+    expect(response.status).toBe(200);
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(postScheduledSuggestionsToDiscord).toHaveBeenCalledTimes(1);
+    expect(postScheduledSuggestionsToTelegram).not.toHaveBeenCalled();
+  });
 });

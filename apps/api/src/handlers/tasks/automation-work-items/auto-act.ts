@@ -1,3 +1,4 @@
+import { getAutomationRuntime } from '@roomote/db/server';
 import { getSlackThreadTsFromTaskPayload } from '@roomote/types';
 
 import {
@@ -182,8 +183,17 @@ export async function submitAutoActWorkItems(params: {
       (duplicate) => !actItems.some((item) => item.id === duplicate.id),
     ),
   ].filter(isLaunchableActWorkItem);
-  const resolvedSlackTarget =
+  // An automation whose own destination target is a Discord channel reports
+  // there, not to the Slack manager channel — the same way a per-automation
+  // Slack channel would. Slack keeps precedence otherwise.
+  const automationRuntime =
     launchableActItems.length > 0
+      ? await getAutomationRuntime(params.automationKey)
+      : null;
+  const discordTargeted =
+    automationRuntime?.destination?.provider === 'discord';
+  const resolvedSlackTarget =
+    launchableActItems.length > 0 && !discordTargeted
       ? await resolveAutomationSlackTarget({
           slackConfig: resolveScheduledSuggestionSlackConfig(
             params.automationKey,
@@ -201,7 +211,7 @@ export async function submitAutoActWorkItems(params: {
         threadTs: sourceThreadTs ?? null,
       } satisfies AutomationChatTarget)
     : launchableActItems.length > 0
-      ? ((await resolveAutomationDiscordTarget()) ??
+      ? ((await resolveAutomationDiscordTarget(params.automationKey)) ??
         (await resolveAutomationTelegramTarget()) ??
         (await resolveAutomationTeamsTarget()))
       : null;

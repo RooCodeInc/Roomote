@@ -1,6 +1,9 @@
 import type { CommunicationMessageButton } from '@roomote/communication';
 import { and, db, eq, sql, trackedMessages } from '@roomote/db/server';
-import { findDiscordDefaultDestination } from '@roomote/sdk/server';
+import {
+  findDiscordAutomationDestination,
+  findDiscordDefaultDestination,
+} from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
 import { resolveScheduledSuggestionSlackConfig } from '../tasks/background-automation-slack.js';
@@ -43,14 +46,17 @@ export async function postScheduledSuggestionsToDiscord(params: {
     return false;
   }
 
-  const destination = await findDiscordDefaultDestination();
-  if (!destination) {
-    return false;
-  }
-
   const slackConfig = resolveScheduledSuggestionSlackConfig(
     params.suggestionSource,
   );
+  // The automation's own Discord channel target wins over the deployment
+  // default, mirroring Slack's per-automation channel.
+  const destination =
+    (await findDiscordAutomationDestination(slackConfig.automationKey)) ??
+    (await findDiscordDefaultDestination());
+  if (!destination) {
+    return false;
+  }
   const [existingSummaryMessage] = await db
     .select({ id: trackedMessages.id })
     .from(trackedMessages)

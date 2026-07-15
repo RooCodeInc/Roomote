@@ -7,9 +7,12 @@ import {
   discordInstallations,
   discordUserMappings,
   eq,
+  getAutomationRuntime,
   isNull,
+  ne,
   users,
 } from '@roomote/db/server';
+import type { BackgroundAutomationKey } from '@roomote/types';
 
 export type DiscordInstallationUpsert = {
   guildId: string;
@@ -402,6 +405,19 @@ export async function captureDiscordDefaultDestination(input: {
         updatedAt: selectedAt,
       })
       .where(eq(discordInstallations.id, installation.id));
+
+    // The default destination is deployment-wide, like Slack's manager
+    // channel: picking one clears the previous selection so proactive posts
+    // never fall back to a stale guild's channel.
+    await tx
+      .update(discordInstallations)
+      .set({
+        defaultChannelId: null,
+        defaultChannelName: null,
+        defaultChannelType: null,
+        updatedAt: selectedAt,
+      })
+      .where(ne(discordInstallations.id, installation.id));
   });
 
   return {
@@ -415,8 +431,10 @@ export async function captureDiscordDefaultDestination(input: {
 }
 
 /**
- * Find a guild's selected destination, or the most recently used active one
- * when proactive automation output is not scoped to a particular guild.
+ * Find a guild's selected destination, or — unscoped — THE deployment-wide
+ * default (capturing a new default clears every other installation's, so at
+ * most one active installation carries one; lastUsedAt only breaks ties in
+ * legacy data).
  */
 export async function findDiscordDefaultDestination(
   guildId?: string,
@@ -461,6 +479,53 @@ export async function findDiscordDefaultDestination(
   }
 
   return destination;
+}
+
+/** Resolves a known, available installation channel into a destination. */
+export async function findDiscordDestinationByChannelId(
+  channelId: string,
+): Promise<DiscordDefaultDestination | null> {
+  const [destination] = await db
+    .select({
+      installationId: discordInstallations.id,
+      guildId: discordInstallations.guildId,
+      guildName: discordInstallations.guildName,
+      channelId: discordInstallationChannels.channelId,
+      channelName: discordInstallationChannels.channelName,
+      channelType: discordInstallationChannels.channelType,
+    })
+    .from(discordInstallations)
+    .innerJoin(
+      discordInstallationChannels,
+      and(
+        eq(
+          discordInstallationChannels.discordInstallationId,
+          discordInstallations.id,
+        ),
+        eq(discordInstallationChannels.channelId, channelId),
+        eq(discordInstallationChannels.isAvailable, true),
+      ),
+    )
+    .where(eq(discordInstallations.isActive, true))
+    .limit(1);
+
+  return destination ?? null;
+}
+
+/**
+ * Resolves an automation's own Discord channel target — the per-automation
+ * destination configured in settings, mirroring Slack's per-automation
+ * channel. Null when the automation's destination waterfall did not select
+ * Discord, or when the targeted channel is no longer available.
+ */
+export async function findDiscordAutomationDestination(
+  automationKey: BackgroundAutomationKey,
+): Promise<DiscordDefaultDestination | null> {
+  const runtime = await getAutomationRuntime(automationKey);
+  if (runtime.destination?.provider !== 'discord') {
+    return null;
+  }
+  return findDiscordDestinationByChannelId(runtime.destination.channelId);
 }
 
 export async function upsertDiscordUserMapping(input: {

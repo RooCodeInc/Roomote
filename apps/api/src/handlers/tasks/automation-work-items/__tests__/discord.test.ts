@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   completeTaskThreadMock,
+  findAutomationDestinationMock,
   findDefaultDestinationMock,
   postMessageMock,
   redisGetMock,
@@ -11,6 +12,7 @@ const {
   selectLimitMock,
 } = vi.hoisted(() => ({
   completeTaskThreadMock: vi.fn(),
+  findAutomationDestinationMock: vi.fn(),
   findDefaultDestinationMock: vi.fn(),
   postMessageMock: vi.fn(),
   redisGetMock: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findDiscordAutomationDestination: findAutomationDestinationMock,
   findDiscordDefaultDestination: findDefaultDestinationMock,
 }));
 
@@ -104,6 +107,39 @@ describe('Discord automation work-item delivery', () => {
       guildId: 'guild-1',
       channelId: 'channel-1',
       channelType: 0,
+    });
+  });
+
+  it("prefers the automation's own Discord channel target over the default", async () => {
+    findAutomationDestinationMock.mockResolvedValue({
+      installationId: 'installation-1',
+      guildId: 'guild-1',
+      guildName: 'Roomote',
+      channelId: 'channel-sentry',
+      channelName: 'sentry-triage',
+      channelType: 0,
+    });
+
+    await expect(
+      resolveAutomationDiscordTarget('sentry_triage'),
+    ).resolves.toMatchObject({
+      provider: 'discord',
+      channelId: 'channel-sentry',
+    });
+    expect(findAutomationDestinationMock).toHaveBeenCalledWith(
+      'sentry_triage',
+    );
+    expect(findDefaultDestinationMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the default destination when the automation has no Discord target', async () => {
+    findAutomationDestinationMock.mockResolvedValue(null);
+
+    await expect(
+      resolveAutomationDiscordTarget('sentry_triage'),
+    ).resolves.toMatchObject({
+      provider: 'discord',
+      channelId: 'channel-1',
     });
   });
 

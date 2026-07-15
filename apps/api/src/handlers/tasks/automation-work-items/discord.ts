@@ -5,7 +5,11 @@ import {
   type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
 import { getRedis } from '@roomote/redis';
-import { findDiscordDefaultDestination } from '@roomote/sdk/server';
+import {
+  findDiscordAutomationDestination,
+  findDiscordDefaultDestination,
+} from '@roomote/sdk/server';
+import type { BackgroundAutomationKey } from '@roomote/types';
 
 import { resolveDiscordProvider } from '../../discord/provider.js';
 import { buildSuggestionBadgePrefix } from '../../slack/helpers/suggestion-workspace.js';
@@ -26,11 +30,18 @@ export type AutomationDiscordTarget = {
 };
 
 /**
- * Resolves the configured Discord destination. The caller applies provider
- * precedence, then every work item materializes a child thread/forum post.
+ * Resolves the configured Discord destination: the automation's own channel
+ * target first (mirroring Slack's per-automation channel), then the
+ * deployment default. The caller applies provider precedence, then every
+ * work item materializes a child thread/forum post.
  */
-export async function resolveAutomationDiscordTarget(): Promise<AutomationDiscordTarget | null> {
-  const destination = await findDiscordDefaultDestination();
+export async function resolveAutomationDiscordTarget(
+  automationKey?: BackgroundAutomationKey,
+): Promise<AutomationDiscordTarget | null> {
+  const destination =
+    (automationKey
+      ? await findDiscordAutomationDestination(automationKey)
+      : null) ?? (await findDiscordDefaultDestination());
   if (!destination) {
     return null;
   }

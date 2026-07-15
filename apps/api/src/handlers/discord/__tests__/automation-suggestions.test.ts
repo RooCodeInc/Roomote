@@ -37,6 +37,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  findDiscordAutomationDestination: vi.fn(async () => null),
   findDiscordDefaultDestination: findDestinationMock,
 }));
 

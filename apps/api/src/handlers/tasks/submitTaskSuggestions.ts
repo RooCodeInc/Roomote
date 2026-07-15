@@ -1301,14 +1301,23 @@ export async function submitTaskSuggestions(
       // precedence surface did not actually deliver. The fallbacks no longer
       // self-suppress on Slack-installation existence, so a Slack-installed
       // deployment that cannot resolve a channel still reaches another provider.
-      const slackDelivered = await postSuggestedTasksSummaryToSlack({
-        sourceTaskId: taskId,
-        createdByUserId,
-        suggestionSource: payload.suggestionSource,
-        historicalThreadFeedbackDebugSnippet:
-          payload.historicalThreadFeedbackDebugSnippet ?? null,
-        suggestions: persistedSuggestions,
-      });
+      // An automation whose own destination target is a Discord channel skips
+      // Slack entirely — its summary belongs in that channel.
+      const suggestionRuntime = await getAutomationRuntime(
+        resolveScheduledSuggestionSlackConfig(payload.suggestionSource)
+          .automationKey,
+      );
+      const slackDelivered =
+        suggestionRuntime.destination?.provider === 'discord'
+          ? false
+          : await postSuggestedTasksSummaryToSlack({
+              sourceTaskId: taskId,
+              createdByUserId,
+              suggestionSource: payload.suggestionSource,
+              historicalThreadFeedbackDebugSnippet:
+                payload.historicalThreadFeedbackDebugSnippet ?? null,
+              suggestions: persistedSuggestions,
+            });
 
       if (!slackDelivered) {
         const discordDelivered = await postScheduledSuggestionsToDiscord({
