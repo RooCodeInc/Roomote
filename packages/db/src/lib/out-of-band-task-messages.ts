@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   getTextFromContentBlocks,
   OUT_OF_BAND_RESURFACED_AT_METADATA_KEY,
-  OUT_OF_BAND_TASK_MESSAGE_SOURCES,
+  RESURFACE_OUT_OF_BAND_TASK_MESSAGE_SOURCES,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   type TaskMessageContentBlock,
 } from '@roomote/types';
@@ -48,7 +48,8 @@ function extractOutOfBandMessageText(row: {
  * Atomically claims the task's out-of-band transcript messages (rows a
  * background job persisted to task history without ever entering the harness
  * session, e.g. PR review-feedback notifications) that have not been
- * re-surfaced into a delivered prompt yet. Claimed rows are stamped with
+ * re-surfaced into a delivered prompt yet. Kickoff messages are intentionally
+ * excluded: they live in history only. Claimed rows are stamped with
  * `metadata.outOfBandResurfacedAt` so concurrent or later turns skip them;
  * use {@link releaseClaimedOutOfBandTaskMessages} if delivery then fails.
  */
@@ -65,7 +66,7 @@ export async function claimPendingOutOfBandTaskMessages(
         eq(taskMessages.taskId, taskId),
         eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
         inArray(sql`${taskMessages.metadata}->>'source'`, [
-          ...OUT_OF_BAND_TASK_MESSAGE_SOURCES,
+          ...RESURFACE_OUT_OF_BAND_TASK_MESSAGE_SOURCES,
         ]),
         sql`${taskMessages.metadata}->>${OUT_OF_BAND_RESURFACED_AT_METADATA_KEY} is null`,
       ),

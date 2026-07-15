@@ -118,6 +118,27 @@ describe('startSlackAppMentionTask', () => {
     );
   });
 
+  it('does not mark kickoffMessagePosted until a kickoff is posted after launch', async () => {
+    const { startSlackAppMentionTask } =
+      await import('../start-slack-app-mention');
+
+    await startSlackAppMentionTask({
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
+      channel: 'C123',
+      slackUserId: 'U123',
+      text: 'hello',
+      ts: '111.000',
+      threadTs: '111.000',
+      repo: 'owner/repo',
+    });
+
+    const taskArg = enqueueTaskMock.mock.calls[0]?.[0]?.task as {
+      payload?: { kickoffMessagePosted?: boolean };
+    };
+    expect(taskArg.payload?.kickoffMessagePosted).toBeUndefined();
+  });
+
   it('persists an exact Slack conversation permalink onto a reused active task run', async () => {
     findActiveSlackTaskRunMock.mockResolvedValueOnce({
       id: 99,

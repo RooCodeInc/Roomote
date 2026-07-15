@@ -62,6 +62,7 @@ export * from './lib/model-runtime-config';
 export * from './lib/chatgpt-subscription';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
+export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';

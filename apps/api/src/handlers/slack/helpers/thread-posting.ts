@@ -1,12 +1,14 @@
 import { Env } from '@roomote/env';
 import { AGENT_DISPLAY_NAME, formatErrorForLog } from '@roomote/types';
-import { findSlackConversationSubjectByUserId } from '@roomote/sdk/server';
+import {
+  findSlackConversationSubjectByUserId,
+  recordSlackConversationMessageBestEffort,
+} from '@roomote/sdk/server';
 import {
   buildStartedBlocks,
-  setSlackStartedMessageTs,
+  persistPostedSlackKickoff,
   type SlackNotifier,
 } from '@roomote/slack';
-import { recordSlackConversationMessageBestEffort } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../../logging.js';
 
@@ -130,7 +132,10 @@ export async function postTaskSuggestionStartedMessage(params: {
     });
 
     if (startedMessageTs && runId) {
-      await setSlackStartedMessageTs(runId, startedMessageTs, {
+      await persistPostedSlackKickoff({
+        runId,
+        taskId,
+        messageTs: startedMessageTs,
         agentName: AGENT_DISPLAY_NAME,
         initiatingSlackUserId,
         workspaceDisplayName: workspaceName,

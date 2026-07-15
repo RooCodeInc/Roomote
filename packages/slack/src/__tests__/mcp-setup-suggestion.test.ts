@@ -94,6 +94,7 @@ vi.mock('@roomote/db/server', () => ({
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
   not: vi.fn((...args: unknown[]) => ({ not: args })),
   repositories: { orgId: 'orgId', isActive: 'isActive' },
+  recordTaskKickoffMessageBestEffort: vi.fn().mockResolvedValue(undefined),
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackUserId: 'slackUserId', slackTeamId: 'slackTeamId' },
   taskRuns: { id: 'id' },

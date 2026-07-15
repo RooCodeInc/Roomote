@@ -241,10 +241,33 @@ function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
   );
 }
 
+function hasPostedKickoffMessage(taskRun: { payload: unknown }): boolean {
+  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
+    return false;
+  }
+
+  return (
+    (taskRun.payload as { kickoffMessagePosted?: unknown })
+      .kickoffMessagePosted === true
+  );
+}
+
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
   payload: unknown;
 }): boolean {
-  return !hasAutomationWorkItemId(taskRun);
+  // Automation work items deliberately skip opening acknowledgements.
+  if (hasAutomationWorkItemId(taskRun)) {
+    return false;
+  }
+
+  // A provider kickoff/started message already posts into the originating
+  // channel (including free-form router kickoffs). Forcing another opening
+  // reply only duplicates that message.
+  if (hasPostedKickoffMessage(taskRun)) {
+    return false;
+  }
+
+  return true;
 }
 
 function unwrapRequestTag(prompt: string): string | undefined {
