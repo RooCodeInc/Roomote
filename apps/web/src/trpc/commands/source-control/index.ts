@@ -680,6 +680,17 @@ export async function saveSourceControlConfigValues(params: {
     );
   }
 
+  if (params.provider === 'bitbucket') {
+    // Bitbucket deployments used to store API-token credentials under these
+    // names. OAuth is now the only supported deployment credential, so remove
+    // stale values even when the current OAuth client values come from runtime
+    // environment variables rather than this save request.
+    await deleteDeploymentEnvironmentVariables(params.executor, [
+      'BITBUCKET_TOKEN',
+      'BITBUCKET_USERNAME',
+    ]);
+  }
+
   if (valuesToSave.length > 0) {
     if (params.provider === 'ado') {
       const authMode =
