@@ -210,16 +210,33 @@ export function PendingEnvVarRequestPanel({
       }
 
       await client.commands.reloadDeploymentEnvVars.mutate();
-      await trpcClient.sandboxSession.sendPrompt.mutate({
-        taskId,
-        prompt: SAFE_FOLLOW_UP_PROMPT,
-        source: 'web',
-        clientMessageId,
-      });
+      let sentFollowUpPrompt = true;
+
+      try {
+        await trpcClient.sandboxSession.sendPrompt.mutate({
+          taskId,
+          prompt: SAFE_FOLLOW_UP_PROMPT,
+          source: 'web',
+          clientMessageId,
+        });
+      } catch (error) {
+        sentFollowUpPrompt = false;
+        console.warn(
+          'Saved environment variables, but failed to send the task follow-up prompt.',
+          error,
+        );
+      }
+
       recordFulfillmentLocally(clientMessageId);
       setValues({});
       setRevealedVariables({});
       setDismissedRequestKey(visibleRequest.key);
+
+      if (!sentFollowUpPrompt) {
+        toast.success(
+          'Environment variables saved. The task is reconnecting, so ask the agent to continue once it is connected.',
+        );
+      }
     } catch (error) {
       toast.error(
         error instanceof Error

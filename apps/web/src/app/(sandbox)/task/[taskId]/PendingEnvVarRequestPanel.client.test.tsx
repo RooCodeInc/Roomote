@@ -427,7 +427,10 @@ describe('PendingEnvVarRequestPanel', () => {
     expect(sendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('keeps the request visible when the safe follow-up prompt fails', async () => {
+  it('dismisses the request when the safe follow-up prompt fails after reload', async () => {
+    const consoleWarn = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     sendPromptMock.mockRejectedValue(new Error('send failed'));
 
     renderPanel();
@@ -438,18 +441,31 @@ describe('PendingEnvVarRequestPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(errorToastMock).toHaveBeenCalledWith('send failed');
+      expect(successToastMock).toHaveBeenCalledWith(
+        'Environment variables saved. The task is reconnecting, so ask the agent to continue once it is connected.',
+      );
     });
 
     expect(reloadDeploymentEnvVarsMock).toHaveBeenCalledWith();
     expect(
-      screen.getByRole('button', {
+      screen.queryByRole('button', {
         name: 'Dismiss environment variable request',
       }),
-    ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Value for OPENAI_API_KEY')).toHaveValue(
-      'new-openai-key',
+    ).not.toBeInTheDocument();
+    expect(errorToastMock).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Saved environment variables, but failed to send the task follow-up prompt.',
+      expect.any(Error),
     );
-    expect(appendAcpEventMock).not.toHaveBeenCalled();
+    expect(appendAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'roomote_runtime.user_prompt',
+        payload: expect.objectContaining({
+          clientMessageId: expect.stringMatching(/^env-var-request-fulfilled:/),
+        }),
+        visibleInTranscript: false,
+      }),
+    );
+    consoleWarn.mockRestore();
   });
 });
