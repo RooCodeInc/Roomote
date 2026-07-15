@@ -39,7 +39,6 @@ const ANALYTICS_DIMENSION_PLURAL_LABELS: Record<AnalyticsDimension, string> = {
   user: 'Users',
   project: 'Environments',
   source: 'Sources',
-  model: 'Models',
   status: 'Statuses',
   repo: 'Repos',
   author: 'Authors',
