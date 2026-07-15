@@ -1,6 +1,10 @@
 import * as fs from 'node:fs';
 
-import { isComputeProvider, resolveWorkerRuntimePaths } from '@roomote/types';
+import {
+  type ComputeProvider,
+  isComputeProvider,
+  resolveWorkerRuntimePaths,
+} from '@roomote/types';
 
 import { substituteEnvVars } from '../../../env';
 import type { StartupLogger } from '../../../logging';
@@ -8,12 +12,25 @@ import { WorkspaceManager, type WorkspaceConfig } from '../../../workspace';
 
 import { timedStep } from '../logging';
 
-export function resolveRuntimePathsForWorker() {
+/**
+ * The compute provider that launched this worker. Providers inject
+ * COMPUTE_PROVIDER into the worker's process env at sandbox creation; it is
+ * not part of the deployment or user-facing env vars.
+ */
+export function resolveComputeProviderFromEnv(): ComputeProvider | undefined {
   const providerFromEnv =
     process.env.COMPUTE_PROVIDER ?? process.env.WORKER_TARGET;
 
-  if (providerFromEnv && isComputeProvider(providerFromEnv)) {
-    return resolveWorkerRuntimePaths({ provider: providerFromEnv });
+  return providerFromEnv && isComputeProvider(providerFromEnv)
+    ? providerFromEnv
+    : undefined;
+}
+
+export function resolveRuntimePathsForWorker() {
+  const provider = resolveComputeProviderFromEnv();
+
+  if (provider) {
+    return resolveWorkerRuntimePaths({ provider });
   }
 
   return resolveWorkerRuntimePaths({ existsSync: fs.existsSync });
