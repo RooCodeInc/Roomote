@@ -165,7 +165,7 @@ describe('resolveVisualProofDisplayMedia', () => {
       {
         artifactId: 'art-1',
         artifactType: 'visual-proof',
-        viewUrl: 'https://example.com/view',
+        viewUrl: 'https://example.com/task/t1/artifacts/tmp/proof.png?v=4',
         rawUrl: 'https://example.com/raw',
       },
       [],
@@ -174,8 +174,10 @@ describe('resolveVisualProofDisplayMedia', () => {
     expect(media).toEqual({
       kind: 'image',
       src: 'https://example.com/raw',
-      viewUrl: 'https://example.com/view',
+      viewUrl: 'https://example.com/task/t1/artifacts/tmp/proof.png?v=4',
       artifactId: 'art-1',
+      path: 'tmp/proof.png',
+      version: 4,
     });
   });
 
@@ -184,15 +186,17 @@ describe('resolveVisualProofDisplayMedia', () => {
       {
         artifactId: 'art-1',
         artifactType: 'visual-proof',
-        viewUrl: 'https://example.com/view',
+        viewUrl: 'https://example.com/task/t1/artifacts/tmp/proof.mp4?v=1',
       },
       [],
     );
 
     expect(media).toEqual({
       kind: 'link',
-      viewUrl: 'https://example.com/view',
+      viewUrl: 'https://example.com/task/t1/artifacts/tmp/proof.mp4?v=1',
       artifactId: 'art-1',
+      path: 'tmp/proof.mp4',
+      version: 1,
     });
   });
 });

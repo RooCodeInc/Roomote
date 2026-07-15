@@ -450,7 +450,7 @@ describe('AcpToolMessage', () => {
     expect(windowOpenSpy).not.toHaveBeenCalled();
   });
 
-  it('falls back to viewUrl when the session artifact is unknown', () => {
+  it('opens the artifact detail from the upload viewUrl when session path is missing', () => {
     render(
       <AcpToolMessage
         msg={buildResultMessage('mcp', {
@@ -464,7 +464,8 @@ describe('AcpToolMessage', () => {
             success: true,
             artifactId: 'art-1',
             artifactType: 'visual-proof',
-            viewUrl: 'https://example.com/view',
+            viewUrl:
+              'https://example.com/task/task-1/artifacts/tmp/proof.png?v=2',
             rawUrl: 'https://example.com/raw.png',
           }),
         })}
@@ -473,11 +474,7 @@ describe('AcpToolMessage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
 
-    expect(openArtifactSpy).not.toHaveBeenCalled();
-    expect(windowOpenSpy).toHaveBeenCalledWith(
-      'https://example.com/view',
-      '_blank',
-      'noopener,noreferrer',
-    );
+    expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.png', 2);
+    expect(windowOpenSpy).not.toHaveBeenCalled();
   });
 });

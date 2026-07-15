@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import { useArtifactLink } from '../../hooks';
 
@@ -10,31 +10,59 @@ interface VisualProofToolPreviewProps {
   media: VisualProofDisplayMedia;
 }
 
+function parseArtifactLocationFromViewUrl(viewUrl: string): {
+  path?: string;
+  version?: number;
+} {
+  try {
+    const url = new URL(
+      viewUrl,
+      typeof window !== 'undefined'
+        ? window.location.origin
+        : 'http://localhost',
+    );
+    const match = url.pathname.match(/\/artifacts\/(.+)$/);
+    if (!match?.[1]) {
+      return {};
+    }
+
+    const path = decodeURIComponent(match[1]);
+    const versionParam = url.searchParams.get('v');
+    const version =
+      versionParam && Number.isFinite(Number(versionParam))
+        ? Number(versionParam)
+        : undefined;
+
+    return { path, version };
+  } catch {
+    return {};
+  }
+}
+
 export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
   const artifactLink = useArtifactLink();
 
+  const location = useMemo(() => {
+    if (media.path) {
+      return {
+        path: media.path,
+        version: media.version,
+      };
+    }
+
+    return parseArtifactLocationFromViewUrl(media.viewUrl);
+  }, [media.path, media.version, media.viewUrl]);
+
   const handleOpen = useCallback(() => {
-    if (media.path && artifactLink) {
-      artifactLink.openArtifact(media.path, media.version);
+    if (!location.path || !artifactLink) {
       return;
     }
 
-    if (typeof window !== 'undefined') {
-      window.open(media.viewUrl, '_blank', 'noopener,noreferrer');
-    }
-  }, [artifactLink, media.path, media.version, media.viewUrl]);
+    artifactLink.openArtifact(location.path, location.version);
+  }, [artifactLink, location.path, location.version]);
 
-  if (media.kind === 'link') {
-    return (
-      <button
-        type="button"
-        onClick={handleOpen}
-        className="rounded-lg border bg-card px-3 py-2 text-left text-sm text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-        aria-label="Open visual proof"
-      >
-        Open visual proof
-      </button>
-    );
+  if (media.kind === 'link' || !('src' in media)) {
+    return null;
   }
 
   if (media.kind === 'video') {
@@ -42,12 +70,13 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
       <button
         type="button"
         onClick={handleOpen}
-        className="group relative max-w-md overflow-hidden rounded-lg border bg-card text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-        aria-label="Open visual proof video"
+        disabled={!location.path}
+        className="group block max-h-[100px] overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
+        aria-label="Open visual proof"
       >
         <video
           src={media.src}
-          className="aspect-video w-full object-contain"
+          className="max-h-[100px] w-auto object-contain transition-opacity group-hover:opacity-90"
           muted
           playsInline
           preload="metadata"
@@ -60,14 +89,15 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
     <button
       type="button"
       onClick={handleOpen}
-      className="group relative max-w-md overflow-hidden rounded-lg border bg-card text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+      disabled={!location.path}
+      className="group block max-h-[100px] overflow-hidden rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default"
       aria-label="Open visual proof"
     >
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={media.src}
         alt="Visual proof"
-        className="aspect-video w-full object-contain transition-opacity group-hover:opacity-90"
+        className="max-h-[100px] w-auto object-contain transition-opacity group-hover:opacity-90"
         loading="lazy"
       />
     </button>

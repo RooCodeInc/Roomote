@@ -158,6 +158,30 @@ export function extractVisualProofUploadFromToolMessage(
   return null;
 }
 
+function parseArtifactLocationFromViewUrl(viewUrl: string): {
+  path?: string;
+  version?: number;
+} {
+  try {
+    const url = new URL(viewUrl, 'http://localhost');
+    const match = url.pathname.match(/\/artifacts\/(.+)$/);
+    if (!match?.[1]) {
+      return {};
+    }
+
+    const path = decodeURIComponent(match[1]);
+    const versionParam = url.searchParams.get('v');
+    const version =
+      versionParam && Number.isFinite(Number(versionParam))
+        ? Number(versionParam)
+        : undefined;
+
+    return { path, version };
+  } catch {
+    return {};
+  }
+}
+
 export function resolveVisualProofDisplayMedia(
   extraction: VisualProofUploadExtraction | null,
   artifacts: readonly TaskArtifact[] | null | undefined,
@@ -167,8 +191,9 @@ export function resolveVisualProofDisplayMedia(
   }
 
   const artifact = artifacts?.find((item) => item.id === extraction.artifactId);
-  const path = artifact?.path;
-  const version = artifact?.version;
+  const parsedLocation = parseArtifactLocationFromViewUrl(extraction.viewUrl);
+  const path = artifact?.path ?? parsedLocation.path;
+  const version = artifact?.version ?? parsedLocation.version;
   const contentType = artifact?.contentType ?? '';
 
   // Prefer session-supplied thumbnails whenever present.
