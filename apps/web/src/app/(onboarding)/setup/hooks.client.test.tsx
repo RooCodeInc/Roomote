@@ -845,7 +845,9 @@ describe('useSetupFlow', () => {
     );
   });
 
-  it('skips auth-env-vars and env-vars when runtime auth and model setup are already satisfied', async () => {
+  it('still shows the comms chooser when auth is only configured by runtime env and no choice is saved', async () => {
+    // Runtime env vars alone must not auto-select a provider: the user should
+    // still land on the comms chooser and make their own choice.
     mockStatus({
       hasSlack: true,
       authSetup: {
@@ -873,6 +875,52 @@ describe('useSetupFlow', () => {
       },
       setupNewState: {
         authProvider: null,
+        modelProvider: 'openrouter',
+        sourceControlProvider: null,
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+    setLocationSearch('?step=source-control-connect');
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('auth-provider');
+    });
+  });
+
+  it('skips auth-env-vars and env-vars once a runtime-configured auth provider is chosen', async () => {
+    mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: true,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: 'slack',
+        runtimeConfiguredProviders: ['slack'],
+        lockReason: 'runtime_env',
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
+      setupNewState: {
+        authProvider: 'slack',
         modelProvider: 'openrouter',
         sourceControlProvider: null,
         selectedRepositoryIds: [],
@@ -941,9 +989,9 @@ describe('useSetupFlow', () => {
         ],
       },
       setupNewState: {
-        authProvider: null,
+        authProvider: 'microsoft',
         modelProvider: 'openrouter',
-        sourceControlProvider: null,
+        sourceControlProvider: 'gitlab',
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
