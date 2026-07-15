@@ -378,27 +378,28 @@ export function Analytics({
         onItemSelect={handleObjectChange}
       >
         <div className="space-y-0.5 rounded-lg overflow-clip">
-          <div className="overflow-hidden bg-card flex items-center gap-2 px-4 py-2">
+          <div className="overflow-hidden bg-card flex flex-row flex-wrap items-center gap-2 px-4 py-2">
             <AnalyticsFilterBar
               object={object}
               filters={filters}
               filterOptions={filterOptions}
-              timePeriod={timePeriod}
-              onDownload={handleDownloadData}
-              isDownloadDisabled={isRegularDownloadDisabled}
               onFilterChange={handleFilterChange}
-              onTimePeriodChange={handleTimePeriodChange}
               onResetFilters={handleResetFilters}
             />
+
+            <div className="hidden grow md:block" />
 
             <AnalyticsControlRow
               object={object}
               viewBy={chart?.viewBy ?? viewBy}
               metric={chart?.metric ?? metric}
               timePeriod={timePeriod}
+              granularity={granularity}
+              availableGranularities={availableGranularities}
               onViewByChange={handleViewByChange}
               onMetricChange={handleMetricChange}
               onTimePeriodChange={handleTimePeriodChange}
+              onGranularityChange={handleGranularityChange}
             />
           </div>
           {object === 'pullRequests' ? (
@@ -421,10 +422,8 @@ export function Analytics({
               axisLabel={axisLabel}
               chart={chart}
               granularity={granularity}
-              availableGranularities={availableGranularities}
               isLoading={shouldShowChartLoading}
               isError={activeChartQuery.isError}
-              onGranularityChange={handleGranularityChange}
               onResetFilters={handleResetFilters}
               onSelectSegment={setSelectedSegment}
             />

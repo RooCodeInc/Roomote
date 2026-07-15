@@ -9,6 +9,7 @@ import {
   Download,
   GitPullRequest,
   Button,
+  Spinner,
 } from '@/components/system';
 import { PageNavigationShell } from '@/components/settings/PageNavigationShell';
 
@@ -71,6 +72,7 @@ export function AnalyticsShell({
       description={ANALYTICS_DESCRIPTIONS[activeItemId]}
       mobileLabel="Analytics view"
       headerAction={headerAction}
+      showHeaderActionOnMobile
       onItemSelect={(value) => onItemSelect(value as AnalyticsShellItemId)}
     >
       {children}
@@ -98,8 +100,17 @@ export function AnalyticsShellDownloadAction({
       onClick={onDownload}
       className="gap-2 disabled:cursor-default disabled:border-border/40 disabled:text-muted-foreground disabled:opacity-45 disabled:hover:border-border/40 disabled:hover:text-muted-foreground"
     >
-      <Download className="size-4" />
-      {isExporting ? 'Downloading...' : 'Download Data'}
+      {isExporting ? (
+        <>
+          <Spinner />
+          <span className="hidden md:inline">Preparing...</span>
+        </>
+      ) : (
+        <>
+          <Download />
+          <span className="hidden md:inline">Download data</span>
+        </>
+      )}
     </Button>
   );
 }
