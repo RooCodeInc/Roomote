@@ -5,9 +5,7 @@ import {
 } from '@roomote/ado';
 import {
   buildBitbucketApiBaseUrl,
-  resolveBitbucketBaseUrl,
-  resolveBitbucketToken,
-  resolveBitbucketUsername,
+  resolveBitbucketAuth,
 } from '@roomote/bitbucket';
 import {
   buildGiteaApiBaseUrl,
@@ -103,21 +101,11 @@ export async function resolveBitbucketProviderContext(
   workspace: string;
   repo: string;
 }> {
-  const token = await resolveBitbucketToken();
-  if (!token) {
-    throw new Error(
-      `BITBUCKET_TOKEN is required to ${purposeVerb(purpose)} Bitbucket pull requests.`,
-    );
-  }
-
-  const username = await resolveBitbucketUsername();
-  if (!username) {
-    throw new Error(
-      `BITBUCKET_USERNAME is required to ${purposeVerb(purpose)} Bitbucket pull requests.`,
-    );
-  }
-
-  const baseUrl = await resolveBitbucketBaseUrl();
+  // Keep the shared purpose parameter for the provider-context contract; the
+  // OAuth resolver owns the credential error text now.
+  void purpose;
+  const auth = await resolveBitbucketAuth();
+  const { baseUrl, token } = auth;
   const [workspace, repo] = splitRepositoryFullName(
     repository.fullName,
     'bitbucket',
@@ -125,7 +113,10 @@ export async function resolveBitbucketProviderContext(
 
   return {
     apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
-    authHeader: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
+    authHeader:
+      auth.authScheme === 'bearer'
+        ? `Bearer ${token}`
+        : `Basic ${Buffer.from(`${auth.username}:${token}`, 'utf8').toString('base64')}`,
     baseUrl,
     workspace,
     repo,

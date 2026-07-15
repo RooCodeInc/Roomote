@@ -51,7 +51,7 @@ vi.mock('@roomote/bitbucket', () => ({
     username: 'bb-bot',
     baseUrl: 'https://bitbucket.org',
     apiBaseUrl: 'https://api.bitbucket.org/2.0',
-    authScheme: 'basic',
+    authScheme: 'bearer',
   }),
   buildBitbucketApiBaseUrl: () => 'https://api.bitbucket.org/2.0',
 }));
@@ -1014,6 +1014,15 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     }
 
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer bitbucket-token',
+        }),
+      }),
+    );
     expect(
       result.pullRequests.map((pullRequest) => pullRequest.number),
     ).toEqual([3, 2]);
