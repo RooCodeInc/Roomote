@@ -10,6 +10,7 @@ import {
   recordEnvironmentVerification,
   beginEnvironmentVerification,
   updateEnvironmentDefinition,
+  withEnvironmentVerificationRetryLock,
 } from '../../server';
 
 function buildConfig(overrides?: {
@@ -244,5 +245,31 @@ describe('environment verification state', () => {
 
     expect(updated?.isVerified).toBe(true);
     expect(updated?.verificationTaskId).toBe('task-declarative');
+  });
+
+  it('acquires the retry advisory lock and runs the mutation against the real database', async () => {
+    const environment = await createUnverifiedEnvironment();
+
+    // Exercises the real pg_advisory_xact_lock SQL so a wrong function name
+    // (e.g. n_xact_lock) would fail here instead of only in production.
+    const result = await withEnvironmentVerificationRetryLock(
+      environment.id,
+      async (tx) => {
+        await beginEnvironmentVerification(tx, {
+          environmentId: environment.id,
+          verificationTaskId: 'task-locked',
+        });
+        return 'ok';
+      },
+    );
+
+    expect(result).toBe('ok');
+
+    const updated = await db.query.environments.findFirst({
+      where: eq(environments.id, environment.id),
+    });
+
+    expect(updated?.verificationTaskId).toBe('task-locked');
+    expect(updated?.isVerified).toBe(false);
   });
 });

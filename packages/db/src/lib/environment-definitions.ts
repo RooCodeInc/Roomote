@@ -357,7 +357,7 @@ export async function withEnvironmentVerificationRetryLock<T>(
 ): Promise<T> {
   return runInTransactionIfAvailable(db, async (tx) => {
     await tx.execute(
-      sql`SELECT n_xact_lock(hashtext(${`environment-verification-retry:${environmentId}`}))`,
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`environment-verification-retry:${environmentId}`}))`,
     );
     return mutation(tx);
   });
