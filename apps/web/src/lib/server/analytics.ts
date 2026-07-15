@@ -878,6 +878,9 @@ function buildChartData(
         qualifyingPrs.size === 0 ? null : prTaskCost / qualifyingPrs.size,
       averageCostPerActiveUser:
         userIds.size === 0 ? null : totalCost / userIds.size,
+      taskCount: taskIds.size,
+      prCount: qualifyingPrs.size,
+      activeUserCount: userIds.size,
     };
     response.costSummary = summary;
   }

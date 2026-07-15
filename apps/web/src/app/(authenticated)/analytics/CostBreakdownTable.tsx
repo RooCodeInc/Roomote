@@ -1,6 +1,12 @@
 'use client';
 
+import { getModelProviderLabel, getTaskModelDisplayName } from '@roomote/types';
+
 import type { AnalyticsCostBreakdownRow } from '@/types';
+
+function getTitle(rawValue: string, displayValue: string) {
+  return rawValue === displayValue ? undefined : rawValue;
+}
 
 export function CostBreakdownTable({
   rows,
@@ -25,22 +31,39 @@ export function CostBreakdownTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row.key} className="border-t border-border/40">
-              <td className="px-4 py-3">{row.provider}</td>
-              <td className="px-4 py-3">{row.model}</td>
-              <td className="px-4 py-3 text-right">
-                ${row.totalCost.toFixed(2)}
-              </td>
-              <td className="px-4 py-3 text-right">
-                {row.costShare.toFixed(1)}%
-              </td>
-              <td className="px-4 py-3 text-right">{row.taskCount}</td>
-              <td className="px-4 py-3 text-right">
-                ${row.averageCostPerTask.toFixed(2)}
-              </td>
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const providerLabel = getModelProviderLabel(row.provider);
+            const modelLabel = getTaskModelDisplayName(row.model);
+
+            return (
+              <tr key={row.key} className="border-t border-border/40">
+                <td
+                  className="px-4 py-3"
+                  title={getTitle(row.provider, providerLabel)}
+                >
+                  {providerLabel}
+                </td>
+                <td
+                  className="px-4 py-3"
+                  title={getTitle(row.model, modelLabel)}
+                >
+                  {modelLabel}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  ${row.totalCost.toFixed(2)}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {row.costShare.toFixed(1)}%
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  {row.taskCount}
+                </td>
+                <td className="px-4 py-3 text-right tabular-nums">
+                  ${row.averageCostPerTask.toFixed(2)}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

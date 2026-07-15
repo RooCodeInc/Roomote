@@ -32,6 +32,7 @@ vi.mock('@/components/settings/PageNavigationShell', () => ({
 
 vi.mock('@/components/system', () => ({
   ChartColumnIncreasing: Icon,
+  CircleDollarSign: Icon,
   Download: Icon,
   GitPullRequest: Icon,
   Button: ({

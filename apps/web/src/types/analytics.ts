@@ -122,6 +122,9 @@ export type AnalyticsCostSummary = {
   averageCostPerTask: number | null;
   averageCostPerPr: number | null;
   averageCostPerActiveUser: number | null;
+  taskCount: number;
+  prCount: number;
+  activeUserCount: number;
 };
 
 export type AnalyticsCostBreakdownRow = {

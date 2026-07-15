@@ -410,7 +410,10 @@ export function Analytics({
             />
           ) : null}
           {object === 'costs' ? (
-            <CostSummaryCards summary={chart?.costSummary} />
+            <CostSummaryCards
+              summary={chart?.costSummary}
+              timePeriod={timePeriod}
+            />
           ) : null}
 
           <div className="overflow-hidden bg-card p-4">

@@ -35,6 +35,7 @@ export {
   ChevronsUpDown,
   ChevronUp,
   CircleCheck,
+  CircleDollarSign,
   CircleOff,
   CircleSlash,
   CircleX,

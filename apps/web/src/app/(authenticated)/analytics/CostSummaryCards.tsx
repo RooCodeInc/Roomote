@@ -1,35 +1,79 @@
 'use client';
 
-import type { AnalyticsCostSummary } from '@/types';
+import {
+  ANALYTICS_TIME_RANGE_OPTIONS,
+  type AnalyticsCostSummary,
+  type TimePeriodFilter,
+} from '@/types';
+
+import {
+  AnalyticsSummaryCard,
+  AnalyticsSummaryCardsGrid,
+} from './AnalyticsSummaryCards';
 
 function format(value: number | null) {
   return value === null ? '—' : `$${value.toFixed(2)}`;
 }
 
+function formatCount(value: number) {
+  return new Intl.NumberFormat('en-US').format(value);
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
+}
+
+function formatTimePeriod(timePeriod: TimePeriodFilter) {
+  return (
+    ANALYTICS_TIME_RANGE_OPTIONS.find((option) => option.value === timePeriod)
+      ?.label ?? 'Selected period'
+  );
+}
+
 export function CostSummaryCards({
   summary,
+  timePeriod,
 }: {
   summary: AnalyticsCostSummary | undefined;
+  timePeriod: TimePeriodFilter;
 }) {
   if (!summary) {
     return null;
   }
 
-  const cards = [
-    ['Total inference cost', format(summary.totalInferenceCost)],
-    ['Average cost per PR', format(summary.averageCostPerPr)],
-    ['Average cost per task', format(summary.averageCostPerTask)],
-    ['Average cost per active user', format(summary.averageCostPerActiveUser)],
+  const cards: Array<{ label: string; value: string; secondary: string }> = [
+    {
+      label: 'Total inference cost',
+      value: format(summary.totalInferenceCost),
+      secondary: formatTimePeriod(timePeriod),
+    },
+    {
+      label: 'Average cost per PR',
+      value: format(summary.averageCostPerPr),
+      secondary: `Across ${formatCount(summary.prCount)} ${pluralize(summary.prCount, 'PR')}`,
+    },
+    {
+      label: 'Average cost per task',
+      value: format(summary.averageCostPerTask),
+      secondary: `Across ${formatCount(summary.taskCount)} ${pluralize(summary.taskCount, 'task')}`,
+    },
+    {
+      label: 'Average cost per active user',
+      value: format(summary.averageCostPerActiveUser),
+      secondary: `Amongst ${formatCount(summary.activeUserCount)} active ${pluralize(summary.activeUserCount, 'user')}`,
+    },
   ];
 
   return (
-    <div className="grid gap-2 bg-card p-4 sm:grid-cols-2 xl:grid-cols-4">
-      {cards.map(([label, value]) => (
-        <div key={label} className="rounded-lg border border-border/60 p-4">
-          <div className="text-sm text-muted-foreground">{label}</div>
-          <div className="mt-1 text-xl font-semibold">{value}</div>
-        </div>
+    <AnalyticsSummaryCardsGrid className="xl:grid-cols-4">
+      {cards.map(({ label, value, secondary }) => (
+        <AnalyticsSummaryCard
+          key={label}
+          label={label}
+          value={value}
+          secondary={secondary}
+        />
       ))}
-    </div>
+    </AnalyticsSummaryCardsGrid>
   );
 }

@@ -5,6 +5,7 @@ import { type ReactNode } from 'react';
 import { type AnalyticsObject } from '@/types';
 import {
   ChartColumnIncreasing,
+  CircleDollarSign,
   Download,
   GitPullRequest,
   Button,
@@ -27,7 +28,7 @@ export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
 const ANALYTICS_SHELL_ITEMS = [
   { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
   { id: 'pullRequests', label: 'PRs', icon: GitPullRequest },
-  { id: 'costs', label: 'Costs', icon: ChartColumnIncreasing },
+  { id: 'costs', label: 'Costs', icon: CircleDollarSign },
 ] as const satisfies Array<{
   id: AnalyticsObject;
   label: string;
@@ -38,8 +39,7 @@ const ANALYTICS_DESCRIPTIONS: Record<AnalyticsShellItemId, string> = {
   pullRequests:
     'Track pull request activity by user, status, repository, and author.',
   tasks: 'Track task activity by user, environment, source, and task type.',
-  costs:
-    'Compare inference cost across users, automations, environments, providers, and models.',
+  costs: 'Understand your inference spend',
 };
 
 type AnalyticsShellProps = {
