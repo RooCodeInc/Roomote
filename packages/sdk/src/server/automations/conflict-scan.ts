@@ -86,7 +86,7 @@ async function findEligibleInstallations(): Promise<ActiveInstallation[]> {
  */
 async function getActiveRepos(
   installationId: number,
-): Promise<Array<{ fullName: string }>> {
+): Promise<Array<{ id: string; fullName: string; host: string | null }>> {
   const installRow = await db.query.githubInstallations.findFirst({
     where: eq(githubInstallations.installationId, installationId),
   });
@@ -97,7 +97,9 @@ async function getActiveRepos(
 
   const repos = await db
     .select({
+      id: repositories.id,
       fullName: repositories.fullName,
+      host: repositories.host,
     })
     .from(repositories)
     .where(eq(repositories.installationId, installRow.id));
@@ -403,6 +405,8 @@ export async function conflictScanJob(
                 trigger: opts.manualTrigger ? 'manual' : 'schedule',
                 prLinkage: {
                   provider: 'github',
+                  host: repo.host ?? 'github.com',
+                  repositoryId: repo.id,
                   repository: repo.fullName,
                   prNumber: pr.number,
                   prUrl: pr.html_url,
@@ -684,6 +688,7 @@ async function scanProviderNeutralRepos({
               // Host-scope the task association so later dedup lookups for
               // a same-name PR on another host do not match this run.
               ...(repo.host ? { host: repo.host } : {}),
+              repositoryId: repo.id,
               repository: repo.fullName,
               prNumber: pr.number,
               prUrl: pr.url,

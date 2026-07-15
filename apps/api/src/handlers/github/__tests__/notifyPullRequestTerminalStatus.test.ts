@@ -86,10 +86,13 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {},
   githubInstallations: {},
   taskPullRequests: {},
-  eq: vi.fn(),
-  and: vi.fn(),
-  inArray: vi.fn(),
-  isNotNull: vi.fn(),
+  eq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  and: vi.fn((...args: unknown[]) => ({ and: args })),
+  inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
+  isNotNull: vi.fn((column: unknown) => ({ isNotNull: column })),
+  isNull: vi.fn((column: unknown) => ({ isNull: column })),
+  or: vi.fn((...args: unknown[]) => ({ or: args })),
+  like: vi.fn((...args: unknown[]) => ({ like: args })),
 }));
 
 import { db } from '@roomote/db/server';
@@ -428,6 +431,23 @@ describe('notifyPullRequestTerminalStatus', () => {
     });
 
     expect(mockedGithubFind).not.toHaveBeenCalled();
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('scopes task-PR lookup by repositoryId when provided', async () => {
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTaskRunsFind.mockResolvedValue([{ payload: telegramPayload }] as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      sourceControlProvider: 'gitea',
+      installationId: undefined,
+      repositoryId: 'repo-row-1',
+      host: 'gitea.host-a.example',
+    });
+
+    // findMany receives the and() of provider/pr/repositoryId scopes.
+    expect(mockedTaskPullRequestsFind).toHaveBeenCalled();
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
   });
 

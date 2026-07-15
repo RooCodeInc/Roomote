@@ -32,6 +32,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
   },
@@ -100,7 +104,10 @@ describe('handleGitLabMergeRequest', () => {
     mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
 
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
 
     mockGetGitLabAutomationTargets.mockResolvedValue({
       status: 'ok',
@@ -350,6 +357,8 @@ describe('handleGitLabMergeRequest', () => {
       {
         sourceControlProvider: 'gitlab',
         repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'gitlab.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
@@ -373,6 +382,8 @@ describe('handleGitLabMergeRequest', () => {
       {
         sourceControlProvider: 'gitlab',
         repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'gitlab.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
