@@ -1,4 +1,4 @@
-import { Env } from '@roomote/env';
+import { Env, isEnvFlagEnabled } from '@roomote/env';
 
 /**
  * Cached result of resolving the deployment's configured GitHub App slug
@@ -34,4 +34,13 @@ export function setConfiguredGitHubAppSlugCache(
  */
 export function getEffectiveGitHubAppSlug(): string {
   return configuredAppSlugCache?.value ?? Env.R_GITHUB_APP_SLUG;
+}
+/**
+ * Whether this deployment answers (and advertises) the canonical `@roomote`
+ * mention alias in addition to its own app slug. Disable with
+ * `R_GITHUB_DISABLE_CANONICAL_MENTION=true` when several deployments share
+ * the same repositories and a bare `@roomote` would make all of them respond.
+ */
+export function isCanonicalGitHubMentionEnabled(): boolean {
+  return !isEnvFlagEnabled(Env.R_GITHUB_DISABLE_CANONICAL_MENTION);
 }

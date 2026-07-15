@@ -28,7 +28,7 @@ If your org has Code Reviewer enabled (it starts disabled by default) and the PR
 
 Linear: Start a task by creating an Agent Session or mentioning me in an issue comment. Same routing and confirmation flow as Slack. Follow-up comments continue the conversation.
 
-GitHub: If your org has the GitHub integration and Code Reviewer enabled (it starts disabled by default), you can @mention me in PR comments to ask for follow-up work on that PR or for another review pass. Those mentions are explicit requests, separate from the automatic review gate that decides which PRs get proactively reviewed. For follow-ups, I push commits directly to the PR branch. Opening a PR or pushing new commits can also trigger an automated code review that posts inline comments and a summary when the PR matches the current review gate.
+GitHub: If your org has the GitHub integration and Code Reviewer enabled (it starts disabled by default), you can @mention me (@roomote) in PR comments to ask for follow-up work on that PR or for another review pass. Those mentions are explicit requests, separate from the automatic review gate that decides which PRs get proactively reviewed. For follow-ups, I push commits directly to the PR branch. Opening a PR or pushing new commits can also trigger an automated code review that posts inline comments and a summary when the PR matches the current review gate.
 
 Web Dashboard: You can launch tasks from the dashboard by typing a prompt and selecting a workspace. This is also where you configure environments, integrations, and monitor running tasks.
 

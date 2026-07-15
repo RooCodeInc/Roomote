@@ -4,6 +4,7 @@ import {
   buildSlackThreadPermalink,
   buildTeamsMessagePermalink,
   buildTelegramMessagePermalink,
+  ROOMOTE_CANONICAL_GITHUB_MENTION,
   getGitHubAppMention,
   resolveTaskWorkspace,
 } from '@roomote/types';
@@ -22,11 +23,13 @@ import {
   desc,
   asc,
 } from '@roomote/db/server';
-import { Schemas, getEffectiveGitHubAppSlug } from '@roomote/github';
+import {
+  Schemas,
+  getEffectiveGitHubAppSlug,
+  isCanonicalGitHubMentionEnabled,
+} from '@roomote/github';
 import { buildSlackThreadPromptBlocks } from '../../utils';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
-
-const DEFAULT_R_GITHUB_APP_SLUG = 'roomote';
 
 export function resolveConflictResolverLabel(
   conflictResolverLabel?: string,
@@ -51,7 +54,6 @@ export function getPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug = getEffectiveGitHubAppSlug(),
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -80,7 +82,6 @@ export function getPrBodyAttributionLine({
   teamsMessageId?: string;
   teamsTenantId?: string;
   teamsBotAppId?: string;
-  githubAppSlug?: string | null;
   escapeDoubleQuotes?: boolean;
 }) {
   if (
@@ -112,7 +113,6 @@ export function getPrBodyAttributionLine({
     teamsMessageId,
     teamsTenantId,
     teamsBotAppId,
-    githubAppSlug,
     escapeDoubleQuotes,
   });
 }
@@ -134,7 +134,6 @@ function buildPrBodyAttributionLine({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
-  githubAppSlug,
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -163,7 +162,6 @@ function buildPrBodyAttributionLine({
   teamsMessageId?: string;
   teamsTenantId?: string;
   teamsBotAppId?: string;
-  githubAppSlug?: string | null;
   escapeDoubleQuotes?: boolean;
 }) {
   const escapeValue = (value: string) =>
@@ -180,9 +178,9 @@ function buildPrBodyAttributionLine({
   const safeSlackConversationUrl = resolvedSlackConversationUrl
     ? escapeValue(resolvedSlackConversationUrl)
     : undefined;
-  const appMention = getGitHubAppMention(
-    githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
-  );
+  const appMention = isCanonicalGitHubMentionEnabled()
+    ? ROOMOTE_CANONICAL_GITHUB_MENTION
+    : getGitHubAppMention(getEffectiveGitHubAppSlug());
   const isChatSurface =
     taskSurface === 'slack' ||
     taskSurface === 'teams' ||

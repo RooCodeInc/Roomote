@@ -11,6 +11,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
   };
 });
 
+import { Env } from '@roomote/env';
 import { setConfiguredGitHubAppSlugCache } from '@roomote/github';
 
 import { isMention } from '../isMention';
@@ -136,10 +137,19 @@ describe('isMention', () => {
       ).toBe(true);
     });
 
-    it('ignores mentions of the default slug when another slug is configured', () => {
+    it('still detects the canonical @roomote alias', () => {
       expect(
         isMention({
           body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
+    });
+
+    it('applies word boundaries to the canonical alias too', () => {
+      expect(
+        isMention({
+          body: 'cc @roomote-fan on this one',
           user: { login: 'testuser' },
         }),
       ).toBe(false);
@@ -152,6 +162,41 @@ describe('isMention', () => {
           user: { login: 'acme[bot]' },
         }),
       ).toBe(false);
+    });
+  });
+
+  describe('with the canonical alias disabled', () => {
+    const mutableEnv = Env as unknown as Record<string, string | undefined>;
+
+    beforeEach(() => {
+      mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION = 'true';
+      setConfiguredGitHubAppSlugCache({
+        value: 'acme',
+        expiresAt: Date.now() + 60_000,
+      });
+    });
+
+    afterEach(() => {
+      delete mutableEnv.R_GITHUB_DISABLE_CANONICAL_MENTION;
+      setConfiguredGitHubAppSlugCache(null);
+    });
+
+    it('ignores the canonical alias', () => {
+      expect(
+        isMention({
+          body: 'Hey @roomote can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(false);
+    });
+
+    it('still detects the configured slug', () => {
+      expect(
+        isMention({
+          body: 'Hey @acme can you take a look?',
+          user: { login: 'testuser' },
+        }),
+      ).toBe(true);
     });
   });
 });

@@ -129,6 +129,13 @@ R_GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRI
 
 `R_GITHUB_APP_SLUG` is required when your GitHub App slug is not
 `roomote`; Roomote uses it for GitHub mentions and bot-authored PR detection.
+Comments trigger Roomote when they mention either your app's own slug or the
+canonical `@roomote` alias, and Roomote's PR footers always advertise
+`@roomote`, so the copy your users see works on every deployment. If several
+Roomote deployments are installed on the same repositories, set
+`R_GITHUB_DISABLE_CANONICAL_MENTION=true` on all but one so a bare `@roomote`
+does not make every deployment respond; opted-out deployments answer and
+advertise only their own app slug.
 
 Generate a private key from the app's **Private keys** section. GitHub
 downloads a `.pem` file. Convert it to an escaped single-line value before

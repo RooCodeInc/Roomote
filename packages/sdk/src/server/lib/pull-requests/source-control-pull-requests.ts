@@ -15,10 +15,7 @@ import {
   resolveGiteaBaseUrl,
   resolveGiteaToken,
 } from '@roomote/gitea';
-import {
-  getOctokit,
-  resolveConfiguredGitHubAppSlugIfConfigured,
-} from '@roomote/github';
+import { getOctokit } from '@roomote/github';
 import {
   buildGitLabApiBaseUrl,
   resolveGitLabBaseUrl,
@@ -35,7 +32,6 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  normalizePrBodyAttributionAppMention,
   prActions,
   resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
@@ -265,37 +261,18 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const prAction = await resolveEffectivePrAction(taskRun);
   const createDraft = prAction !== 'create';
 
-  // PR provenance mentions are injected into the agent prompt at task start
-  // via `getPrBodyAttributionLine`. When slug resolution at prompt-build time
-  // fell back to the schema default (`roomote`), the agent faithfully copies
-  // `@roomote` into the body. Repair that only when this process has a real
-  // configured slug — never rewrite with the default, or a correct custom
-  // handle (e.g. `@roomote-roomote`) could be downgraded.
-  const configuredGitHubAppSlug =
-    await resolveConfiguredGitHubAppSlugIfConfigured();
-  const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
-    configuredGitHubAppSlug
-      ? {
-          ...input,
-          body: normalizePrBodyAttributionAppMention(
-            input.body,
-            configuredGitHubAppSlug,
-          ),
-        }
-      : input;
-
   const result = await (() => {
     switch (provider) {
       case 'github':
         return createOrUpdateGitHubPullRequest({
-          input: inputWithNormalizedAttribution,
+          input: input,
           repository,
           provider,
           createDraft,
         });
       case 'gitlab':
         return createOrUpdateGitLabMergeRequest({
-          input: inputWithNormalizedAttribution,
+          input: input,
           repository,
           provider,
           createDraft,
@@ -303,7 +280,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         });
       case 'gitea':
         return createOrUpdateGiteaPullRequest({
-          input: inputWithNormalizedAttribution,
+          input: input,
           repository,
           provider,
           createDraft,
@@ -311,7 +288,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         });
       case 'bitbucket':
         return createOrUpdateBitbucketPullRequest({
-          input: inputWithNormalizedAttribution,
+          input: input,
           repository,
           provider,
           createDraft,
@@ -319,7 +296,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         });
       case 'ado':
         return createOrUpdateAdoPullRequest({
-          input: inputWithNormalizedAttribution,
+          input: input,
           repository,
           provider,
           createDraft,
