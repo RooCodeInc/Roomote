@@ -37,17 +37,10 @@ function isConvertibleSlackUrl(rawUrl: string): boolean {
 
 function hasDisallowedSlackUrlChars(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
+    const char = value[index] ?? '';
     const code = value.charCodeAt(index);
-    // < > | and whitespace separators
-    if (
-      code === 60 ||
-      code === 62 ||
-      code === 124 ||
-      code === 32 ||
-      code === 9 ||
-      code === 10 ||
-      code === 13
-    ) {
+    // < > | plus any whitespace (including non-breaking space and other \s)
+    if (code === 60 || code === 62 || code === 124 || char.trim() === '') {
       return true;
     }
   }

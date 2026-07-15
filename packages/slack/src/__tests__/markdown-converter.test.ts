@@ -130,6 +130,13 @@ describe('convertSlackLinksToMarkdown', () => {
     ).toBe('hello <@U123> and <#C123|general>');
   });
 
+  it('leaves entities with non-breaking space in the target unchanged', () => {
+    const labeled = '<https://example.com/\u00a0path|broken>';
+    const bare = '<https://example.com/\u00a0path>';
+    expect(convertSlackLinksToMarkdown(labeled)).toBe(labeled);
+    expect(convertSlackLinksToMarkdown(bare)).toBe(bare);
+  });
+
   it('does not double-unescape nested HTML entities', () => {
     expect(
       convertSlackLinksToMarkdown('<https://example.com?x=&lt;y|A &lt; B>'),
