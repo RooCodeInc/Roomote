@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 1.0.0 (2026-07-15)
+
+### Major changes
+
+- Roomote 1.0 is the first public product release: the monorepo is open and ready for people to try the product, self-host, and send feedback on web tasks, cloud agents, and chat integrations.
+
+### Minor changes
+
+- Docker Compose and Dockerfile environment projects are first-class: run them on Modal VM sandboxes, stream project logs into the task Logs panel, start them without blocking eligible tasks, and allocate higher sandbox memory when nested Docker is required (renamed from "container projects").
+- Multi-SCM automations and PR tooling: triage, audit, announcer, and manager-stats cover GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket with shared open-PR listing, merged-PR facts, conflict resolution, and digests; reports can land on Slack, Teams, or Telegram, and the automations page shows destinations plus exception-only coverage badges.
+- Environment setup is reworked into the normal task flow: setup completion is observable to the agent and platform, setup logs show in the Logs tab, first-time hosted compute provision no longer blocks creation, excluded sandbox providers stay hidden, and completion messaging no longer shoves users back to a separate /setup page.
+- Experimental settings add a deployment-level Code Mode toggle for coding-agent task behavior.
+- Local Docker can be enabled or disabled from the Local Docker settings surface without leaving that provider’s configuration page.
+- Source-control setup expands provider OAuth and connection flows, simplifies Azure DevOps to organization and PAT by default while preserving full repository identifiers, and prefills the GitHub App description in the manifest setup flow.
+- Slack agent narrative replies prefer modern markdown blocks, the Working on footer posts out of band with notifications when linked PRs close, MCP integration setup becomes a non-blocking suggestion instead of blocking task start (with Zero detection limited to product surfaces), and agents can post to Teams or Telegram channels through a surface-generic channel-post tool.
+- When only one environment exists the homepage starts there instead of Auto, subagent rows expand to show the launch prompt, the router supplies task-relevant kickoff strings, CI failure triage runs as one environment-backed fix task, the coding agent consults the advisor on hard failures and user challenges, and Microsoft Teams onboarding setup copy and flow are refreshed.
+- Daily anonymous product stats include a 7-day PR funnel so deployments can evaluate how effectively agent work turns into shipped pull requests.
+
+### Patch changes
+
+- Hosted Docker runtime provisioning is more reliable across E2B, Blaxel, and related setup paths, with retryable rebuilds that preserve the prior artifact.
+- Setup can back out of earlier choices without wiping later steps when a user revisits a picker, and finishing setup into an onboarding task no longer flashes the home page first.
+- Repository resolution and PR follow-up matching are host- and provider-scoped so same-named repositories on different source-control hosts no longer cross-route, and Slack markdown link conversion no longer uses a ReDoS-prone regex.
+- Local development artifact uploads from hosted workers succeed through the Caddy edge, and presigned upload responses without an S3 ETag are no longer treated as successful.
+
 ## 0.4.2 (2026-07-13)
 
 ### Patch changes
