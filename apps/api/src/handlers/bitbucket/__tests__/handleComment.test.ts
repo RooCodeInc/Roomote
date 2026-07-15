@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   mockCreateBitbucketPullRequestComment,
   mockGetBitbucketAutomationTargets,
+  mockEnqueueTask,
 } = vi.hoisted(() => ({
   mockCreateBitbucketPullRequestComment: vi.fn(),
   mockGetBitbucketAutomationTargets: vi.fn(),
+  mockEnqueueTask: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  enqueueTask: vi.fn(),
+  enqueueTask: mockEnqueueTask,
   getTaskUrl: vi.fn(),
 }));
 
@@ -71,6 +73,7 @@ describe('handleBitbucketComment', () => {
   beforeEach(() => {
     mockCreateBitbucketPullRequestComment.mockReset();
     mockGetBitbucketAutomationTargets.mockReset();
+    mockEnqueueTask.mockReset();
 
     mockGetBitbucketAutomationTargets.mockResolvedValue({
       status: 'error',
@@ -118,6 +121,28 @@ describe('handleBitbucketComment', () => {
     );
   });
 
+  it('posts an environment setup reply when no environment is mapped', async () => {
+    mockGetBitbucketAutomationTargets.mockResolvedValue({
+      status: 'error',
+      message:
+        'no environment mapping associated with [bitbucket:repo-1, acme/repo]',
+    });
+    mockCreateBitbucketPullRequestComment.mockResolvedValue({ id: 6 });
+
+    await expect(
+      handleBitbucketComment(
+        makeCommentPayload(),
+        'pullrequest:comment_created',
+      ),
+    ).resolves.toEqual({ status: 'ok', message: 'environment_required' });
+
+    expect(mockCreateBitbucketPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('no Roomote environment is mapped'),
+      }),
+    );
+  });
+
   it('does not suppress a human mention from the deployment OAuth identity', async () => {
     const payload = makeCommentPayload();
     payload.comment.user = {
@@ -132,5 +157,42 @@ describe('handleBitbucketComment', () => {
     ).resolves.toEqual({ status: 'ok', message: 'account_link_required' });
 
     expect(mockCreateBitbucketPullRequestComment).toHaveBeenCalledOnce();
+  });
+
+  it('logs enqueue failures and posts a queue-specific response', async () => {
+    mockGetBitbucketAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'bitbucket:pr_review:repo-1',
+          workflow: 'pr_review',
+          settings: null,
+          repo: {
+            id: 'repo-1',
+            host: 'bitbucket.org',
+          },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+    mockEnqueueTask.mockRejectedValue(new Error('queue unavailable'));
+    mockCreateBitbucketPullRequestComment.mockResolvedValue({ id: 5 });
+
+    await expect(
+      handleBitbucketComment(
+        makeCommentPayload(),
+        'pullrequest:comment_created',
+      ),
+    ).resolves.toEqual({
+      status: 'error',
+      message: 'review_start_failed:queue unavailable',
+    });
+
+    expect(mockCreateBitbucketPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('could not queue a review task'),
+      }),
+    );
   });
 });

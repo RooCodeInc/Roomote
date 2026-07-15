@@ -13,7 +13,10 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
-import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import {
+  buildSourceControlAccountLinkRequiredMessage,
+  buildSourceControlEnvironmentRequiredMessage,
+} from '../source-control-account-linking';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -135,7 +138,7 @@ function buildReviewerGateMissComment(): string {
 }
 
 function buildTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start a task for this pull request right now. Please try again in a moment.';
+  return 'I saw the mention, but Roomote could not queue a review task for this pull request. Please try again in a moment. If it keeps failing, an administrator should check the deployment logs.';
 }
 
 function formatQuotedText(text: string): string {
@@ -230,25 +233,41 @@ export async function handleBitbucketComment(
     requireLinkedSenderAccount: true,
   });
 
+  if (targetsResult.status === 'error') {
+    console.warn('[handleBitbucketComment] automation target rejected', {
+      repository: repoFullName,
+      pullRequestNumber: prNumber,
+      code: targetsResult.code ?? null,
+      reason: targetsResult.message,
+    });
+  }
+
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
+
+  const requiresEnvironment =
+    targetsResult.status === 'error' &&
+    targetsResult.message.includes('no environment mapping');
+  const requiresAccountLink =
+    targetsResult.status === 'error' &&
+    targetsResult.code === 'account_link_required';
 
   if (!target || !target.userId) {
     await postMentionResponseComment({
       ...mentionResponseTarget,
-      body:
-        targetsResult.status === 'error' &&
-        targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('bitbucket')
+      body: requiresAccountLink
+        ? buildSourceControlAccountLinkRequiredMessage('bitbucket')
+        : requiresEnvironment
+          ? buildSourceControlEnvironmentRequiredMessage('bitbucket')
           : buildReviewerGateMissComment(),
     });
 
     return {
       status: 'ok',
-      message:
-        targetsResult.status === 'error' &&
-        targetsResult.code === 'account_link_required'
-          ? 'account_link_required'
+      message: requiresAccountLink
+        ? 'account_link_required'
+        : requiresEnvironment
+          ? 'environment_required'
           : 'reviewer_gate_miss',
     };
   }
@@ -385,9 +404,22 @@ export async function handleBitbucketComment(
 
     return { status: 'ok', metadata: { ids: [launch.id] } };
   } catch (error) {
-    console.warn(
-      `[handleBitbucketComment] failed to start PR review task for ${repoFullName}#${prNumber}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const failure =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : { name: 'unknown_error', message: String(error) };
+    console.error('[handleBitbucketComment] failed to enqueue PR review task', {
+      repository: repoFullName,
+      pullRequestNumber: prNumber,
+      repositoryId: target.repo.id,
+      userId: target.userId,
+      sourceControlHost: target.repo.host ?? null,
+      error: failure,
+    });
 
     await postMentionResponseComment({
       ...mentionResponseTarget,
@@ -396,7 +428,7 @@ export async function handleBitbucketComment(
 
     return {
       status: 'error',
-      message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
+      message: `review_start_failed:${failure.message}`,
     };
   }
 }
