@@ -15,7 +15,7 @@ import type {
 // give it its own ceiling and override. Streaming events are unbounded.
 export const DEFAULT_OPENCODE_HTTP_TIMEOUT_MS = 60_000;
 export const DEFAULT_OPENCODE_SESSION_CREATE_TIMEOUT_MS = 90_000;
-export const DEFAULT_OPENCODE_HEALTH_TIMEOUT_MS = 15_000;
+const DEFAULT_OPENCODE_HEALTH_TIMEOUT_MS = 15_000;
 
 interface OpenCodeServerClientOptions {
   baseUrl: string;
@@ -36,9 +36,7 @@ interface RequestOptions {
   label?: string;
 }
 
-export function parsePositiveTimeoutMs(
-  value: string | undefined,
-): number | undefined {
+function parsePositiveTimeoutMs(value: string | undefined): number | undefined {
   const trimmed = value?.trim();
 
   if (!trimmed) {
@@ -76,7 +74,7 @@ export function resolveOpenCodeSessionCreateTimeoutMs(
   );
 }
 
-export function resolveOpenCodeHealthTimeoutMs(
+function resolveOpenCodeHealthTimeoutMs(
   override?: number,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
