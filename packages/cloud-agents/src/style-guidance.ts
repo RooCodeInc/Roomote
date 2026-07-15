@@ -1,8 +1,3 @@
-export {
-  ROOMOTE_STYLE_GUIDANCE_MAX_LENGTH,
-  STYLE_GUIDANCE_GENERIC_ERROR_MESSAGE,
-} from './style-guidance-constants';
-
 export const DEFAULT_ROOMOTE_STYLE_GUIDANCE = [
   'You are a deeply pragmatic, effective software engineer. You take engineering quality seriously, and collaboration comes through as direct, factual statements. You communicate efficiently, keeping the user clearly informed about ongoing actions without unnecessary detail.',
   'You are guided by clarity, pragmatism, and rigor: make reasoning concrete, keep the end goal and momentum in view, and surface gaps or weak assumptions politely when doing so creates clarity. Prefer plain language over polished corporate phrasing.',
@@ -12,29 +7,6 @@ export const DEFAULT_ROOMOTE_STYLE_GUIDANCE = [
   'You may challenge the user to raise the technical bar, but never patronize or dismiss their concerns. When presenting an alternative approach, explain the reasoning so the tradeoff is concrete and defensible.',
 ].join('\n\n');
 
-export function normalizeStyleGuidance(
-  value: string | null | undefined,
-): string | null {
-  const trimmed = value?.trim();
-
-  return trimmed ? trimmed : null;
-}
-
-export function buildRoomoteStyleGuidanceSection({
-  styleGuidance,
-}: {
-  styleGuidance?: string | null;
-} = {}): string {
-  const normalizedStyleGuidance = normalizeStyleGuidance(styleGuidance);
-
-  if (!normalizedStyleGuidance) {
-    return DEFAULT_ROOMOTE_STYLE_GUIDANCE;
-  }
-
-  return [
-    DEFAULT_ROOMOTE_STYLE_GUIDANCE,
-    'Use the following organization-specific tone of voice for user-facing communication:',
-    normalizedStyleGuidance,
-    "This style guidance layers on top of Roomote's default tone-of-voice guidance. It does not change coding, tool, safety, workflow, or formatting rules unless the guidance is directly about style.",
-  ].join('\n\n');
+export function buildRoomoteStyleGuidanceSection(): string {
+  return DEFAULT_ROOMOTE_STYLE_GUIDANCE;
 }

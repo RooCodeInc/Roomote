@@ -9,14 +9,12 @@ import {
   IdCard,
   MessagesSquare,
   PlugIcon,
-  Rainbow,
   ScrollText,
   ServerCog,
   Users,
   VectorSquare,
 } from '@/components/system';
 import { SETTINGS_PATHS } from '@/lib/settings';
-import { PRODUCT_NAME } from '@roomote/types';
 
 export type SettingsPageId =
   | 'personal'
@@ -31,7 +29,6 @@ export type SettingsPageId =
   | 'source-control'
   | 'models'
   | 'skills'
-  | 'vibes'
   | 'experimental'
   | 'misc';
 
@@ -167,16 +164,6 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     adminOnly: true,
     newGroup: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.users),
-  },
-  {
-    id: 'vibes',
-    label: 'Vibes',
-    title: 'Vibes',
-    description: `Help ${PRODUCT_NAME} fit in with your team.`,
-    href: SETTINGS_PATHS.vibes,
-    icon: Rainbow,
-    adminOnly: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.vibes),
   },
   {
     id: 'experimental',

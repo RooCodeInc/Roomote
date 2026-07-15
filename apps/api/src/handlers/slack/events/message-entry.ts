@@ -1587,7 +1587,7 @@ async function isSlackEvalLauncherEnabled(): Promise<boolean> {
   );
 }
 
-export async function handleSlackEntryEvent(params: {
+async function handleSlackEntryEvent(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
   slack: SlackNotifier;

@@ -12,7 +12,6 @@ export const SETTINGS_PATHS = {
   compute: '/settings/sandboxes',
   models: '/settings/models',
   skills: '/settings/skills',
-  vibes: '/settings/vibes',
   experimental: '/settings/experimental',
   misc: '/settings/misc',
   newEnvironment: '/settings/environments/new',

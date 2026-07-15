@@ -268,10 +268,6 @@ import {
   updateAgentBehaviorSettingsCommand,
 } from '../commands/agent-behavior';
 import {
-  getVibesSettingsCommand,
-  updateVibesSettingsCommand,
-} from '../commands/vibes';
-import {
   createPasswordResetLinkCommand,
   createInviteCommand,
   getAccessPolicySettingsCommand,
@@ -1989,27 +1985,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setLicenseKeyCommand(auth, input),
-      ),
-  }),
-
-  vibes: createRouter({
-    get: protectedProcedure.query(({ ctx: { auth } }) =>
-      getVibesSettingsCommand(auth),
-    ),
-
-    update: protectedProcedure
-      .input(
-        z
-          .object({
-            slackSummonEmoji: z.string().max(255).nullable(),
-            slackAckEmoji: z.string().max(255),
-            slackCompletionEmoji: z.string().max(255),
-            styleGuidance: z.string().max(400).nullable(),
-          })
-          .partial(),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateVibesSettingsCommand(auth, input),
       ),
   }),
 

@@ -131,6 +131,11 @@ export async function startSlackAppMentionTask(input: {
   persistedSlackUserId?: string | null;
   text: string;
   agentPromptText?: string;
+  /**
+   * Deprecated: acknowledgement/completion reactions are fixed defaults and
+   * cannot be customized. Kept on the input type only for call-site
+   * compatibility; values are ignored.
+   */
   ackEmoji?: string;
   completionEmoji?: string;
   ts: string;
@@ -243,13 +248,9 @@ export async function startSlackAppMentionTask(input: {
   const workspaceReadiness = input.environmentId
     ? 'environment_backed'
     : 'bare_repo';
-  const reactionNames =
-    input.ackEmoji?.trim() && input.completionEmoji?.trim()
-      ? null
-      : await resolveSlackReactionNames();
-  const ackEmoji = input.ackEmoji?.trim() || reactionNames?.ackEmoji;
-  const completionEmoji =
-    input.completionEmoji?.trim() || reactionNames?.completionEmoji;
+  const reactionNames = await resolveSlackReactionNames();
+  const ackEmoji = reactionNames.ackEmoji;
+  const completionEmoji = reactionNames.completionEmoji;
 
   // The Slack command parser validates this combination up front, so a failure
   // here means a non-eval caller passed an inconsistent harness/model; fall back

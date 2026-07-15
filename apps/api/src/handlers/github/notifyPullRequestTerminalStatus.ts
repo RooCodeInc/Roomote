@@ -37,7 +37,7 @@ import {
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
-export const SLACK_PR_CLOSED_REACTION_EMOJI = 'heavy_multiplication_x';
+export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 

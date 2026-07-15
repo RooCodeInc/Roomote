@@ -190,11 +190,6 @@ export type RunTaskOptions = {
    */
   orgAgentInstructions?: string;
   /**
-   * Optional deployment-specific tone guidance for user-facing
-   * communication in the Roomote system prompt.
-   */
-  styleGuidance?: string;
-  /**
    * Environment-specific instructions for LLM agents.
    * When provided, these are formatted into the environment-instructions
    * block that is delivered through harness developer instructions.

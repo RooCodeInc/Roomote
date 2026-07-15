@@ -29,11 +29,9 @@ function formatRepositoriesForPrompt(
 export function buildFastAgentSystemPrompt({
   availableEnvironments,
   hasGitHubTools,
-  styleGuidance,
 }: {
   availableEnvironments: RoutableEnvironment[];
   hasGitHubTools: boolean;
-  styleGuidance?: string | null;
 }): string {
   return `You are ${PRODUCT_NAME} Fast — a quick-response assistant that answers questions about code repositories.
 
@@ -51,9 +49,7 @@ ${formatRepositoriesForPrompt(availableEnvironments)}
 - Roomote task tools are available for listing environments, launching tasks, checking task activity, sending follow-up messages, and canceling tasks.
 
 ## Tone of Voice
-${buildRoomoteStyleGuidanceSection({
-  styleGuidance,
-})}
+${buildRoomoteStyleGuidanceSection()}
 
 ## How to Answer
 - Use the GitHub tools to search code, read files, and check commits before answering direct code questions when GitHub access is available.

@@ -54,7 +54,6 @@ vi.mock('@/components/system', async () => {
     Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
     PlugIcon: Icon,
     GraduationCap: Icon,
-    Rainbow: Icon,
     ScrollText: Icon,
     Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
     SelectContent: ({ children }: { children: ReactNode }) => (
@@ -101,7 +100,6 @@ describe('SettingsShell', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /skills/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /vibes/i })).toBeInTheDocument();
     expect(
       screen.getByText(
         'Enable deployment integrations. Individual users can optionally link their own accounts when an integration supports it.',

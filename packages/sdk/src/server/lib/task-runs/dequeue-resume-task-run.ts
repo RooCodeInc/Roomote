@@ -49,7 +49,6 @@ type DequeueResumeTaskRunResult =
       envVars: Record<string, string>;
       harnessInstructions?: string;
       orgAgentInstructions?: string;
-      styleGuidance?: string;
       setupOnboardingTask: boolean;
       gitAuthor: GitAuthor;
       /**
@@ -130,7 +129,6 @@ export const dequeueResumeTaskRun = async (
           task: Task;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
-          styleGuidance?: string;
           gitAuthor: GitAuthor;
           harnessSessionId?: string;
           sourceRepo?: string;
@@ -292,7 +290,6 @@ export const dequeueResumeTaskRun = async (
       const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
           globalAgentInstructions: true,
-          styleGuidance: true,
         },
       });
 
@@ -339,7 +336,6 @@ export const dequeueResumeTaskRun = async (
         task: taskRun.task,
         envVars,
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
-        styleGuidance: settings?.styleGuidance ?? undefined,
         gitAuthor,
         harnessSessionId: harnessSessionId ?? undefined,
         sourceRepo,
@@ -493,7 +489,6 @@ export const dequeueResumeTaskRun = async (
       gitHubToken,
       sourceControlToken,
       orgAgentInstructions: result.orgAgentInstructions,
-      styleGuidance: result.styleGuidance,
       setupOnboardingTask:
         slackTaskRunRouting.route.kind === 'setup-onboarding',
       harnessInstructions: task.harnessInstructions ?? undefined,
