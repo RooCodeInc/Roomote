@@ -26,6 +26,7 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 import { findLatestTaskRun, getTaskChannelBindings } from '../tasks/helpers';
 import {
   getTrackedUserDisplayName,
@@ -1328,6 +1329,8 @@ export async function handlePrComment(
           trigger: 'message',
           prLinkage: {
             provider: 'github',
+            host: reviewer.repo.host ?? toHostFromUrl(prUrl) ?? 'github.com',
+            repositoryId: reviewer.repo.id,
             repository: repository.full_name,
             prNumber: pr.number,
             prUrl,
@@ -1594,6 +1597,14 @@ export async function handlePrComment(
       trigger: 'message',
       prLinkage: {
         provider: 'github',
+        host:
+          reviewer.repo.host ??
+          toHostFromUrl(
+            routingDetails.prUrl ||
+              `https://github.com/${repository.full_name}/pull/${pr.number}`,
+          ) ??
+          'github.com',
+        repositoryId: reviewer.repo.id,
         repository: repository.full_name,
         prNumber: pr.number,
         prUrl:

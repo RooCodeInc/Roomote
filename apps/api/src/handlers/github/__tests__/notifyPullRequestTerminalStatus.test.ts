@@ -92,6 +92,7 @@ vi.mock('@roomote/db/server', () => ({
   isNotNull: vi.fn((column: unknown) => ({ isNotNull: column })),
   isNull: vi.fn((column: unknown) => ({ isNull: column })),
   or: vi.fn((...args: unknown[]) => ({ or: args })),
+  like: vi.fn((...args: unknown[]) => ({ like: args })),
 }));
 
 import { db } from '@roomote/db/server';

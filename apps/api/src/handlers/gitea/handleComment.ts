@@ -406,6 +406,8 @@ export async function handleGiteaComment(
       trigger: 'message',
       prLinkage: {
         provider: 'gitea',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber: pullRequest.number,
         prUrl,

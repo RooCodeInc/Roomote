@@ -20,6 +20,7 @@ import { hasActiveResolutionRun } from './has-active-resolution-run';
 import { getBackgroundGithubTaskProperties } from '../backgroundGithubTaskProperties';
 
 import { getGitHubAutomationTargets } from '../getGitHubAutomationTargets';
+import { toHostFromUrl } from '../../utils';
 import type {
   WebhookInstallation,
   WebhookRepository,
@@ -231,6 +232,11 @@ async function tryEnqueueResolution(
         trigger: 'webhook',
         prLinkage: {
           provider: 'github',
+          host:
+            target.repo.host ??
+            toHostFromUrl(candidate.htmlUrl) ??
+            'github.com',
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: candidate.prNumber,
           prUrl: candidate.htmlUrl,

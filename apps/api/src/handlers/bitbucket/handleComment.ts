@@ -408,6 +408,8 @@ export async function handleBitbucketComment(
       trigger: 'message',
       prLinkage: {
         provider: 'bitbucket',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber,
         prUrl,

@@ -255,6 +255,8 @@ export async function handleGiteaPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'gitea',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: payload.number,
           prUrl,

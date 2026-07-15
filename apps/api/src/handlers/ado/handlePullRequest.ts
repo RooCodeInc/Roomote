@@ -443,6 +443,8 @@ export async function handleAdoPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'ado',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: pullRequest.pullRequestId,
           prUrl,

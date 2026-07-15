@@ -263,6 +263,8 @@ export async function handleBitbucketPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'bitbucket',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber,
           prUrl,

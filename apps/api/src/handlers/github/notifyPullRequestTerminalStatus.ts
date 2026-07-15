@@ -10,6 +10,7 @@ import {
   inArray,
   isNull,
   or,
+  like,
 } from '@roomote/db/server';
 import {
   buildPullRequestStatusNotificationText,
@@ -54,16 +55,17 @@ interface NotifyPullRequestTerminalStatusParams {
   installationId?: number;
   repository: string;
   /**
-   * Optional FK to the provider-scoped `repositories` row. When set,
-   * `(repositoryId, prNumber)` uniquely identifies the PR even across
-   * same-name repositories on different self-managed hosts.
+   * Optional FK to the provider-scoped `repositories` row. When set, rows with
+   * that `repositoryId` match, and legacy webhook-created `pr_review` links
+   * that still have a NULL `repositoryId` can still match on repository name
+   * (and host below). Exclusive ID-only lookup would drop those links.
    */
   repositoryId?: string | null;
   /**
    * Optional source-control instance host (for example `gitlab.example.com`).
-   * When `repositoryId` is absent, scopes the repository-name lookup so
-   * same-name hosts cannot notify each other's task threads. Legacy rows
-   * with a NULL host still match.
+   * Scopes the lookup so same-name hosts cannot notify each other's threads.
+   * Rows with an explicit host must equal this value. NULL-host legacy rows
+   * only match when their `prUrl` is on this same host.
    */
   host?: string | null;
   prNumber: number;
@@ -542,23 +544,35 @@ export async function notifyPullRequestTerminalStatus({
       }
     }
 
+    const repositoryScope = repositoryId
+      ? or(
+          eq(taskPullRequests.repositoryId, repositoryId),
+          and(
+            isNull(taskPullRequests.repositoryId),
+            eq(taskPullRequests.repository, repository),
+          ),
+        )
+      : eq(taskPullRequests.repository, repository);
+
+    const hostScope = host
+      ? or(
+          eq(taskPullRequests.host, host),
+          and(
+            isNull(taskPullRequests.host),
+            or(
+              like(taskPullRequests.prUrl, `https://${host}/%`),
+              like(taskPullRequests.prUrl, `http://${host}/%`),
+            ),
+          ),
+        )
+      : undefined;
+
     const prTaskLinks = await db.query.taskPullRequests.findMany({
       where: and(
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.prNumber, prNumber),
-        repositoryId
-          ? eq(taskPullRequests.repositoryId, repositoryId)
-          : and(
-              eq(taskPullRequests.repository, repository),
-              ...(host
-                ? [
-                    or(
-                      eq(taskPullRequests.host, host),
-                      isNull(taskPullRequests.host),
-                    ),
-                  ]
-                : []),
-            ),
+        repositoryScope,
+        ...(hostScope ? [hostScope] : []),
       ),
       columns: {
         taskId: true,
