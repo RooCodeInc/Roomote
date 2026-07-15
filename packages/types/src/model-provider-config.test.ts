@@ -316,7 +316,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.5-flash',
+      defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
     });
   });
 
