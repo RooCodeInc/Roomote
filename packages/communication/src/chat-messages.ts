@@ -167,21 +167,25 @@ export function normalizeKickoffMessage(
   // mentions or special link markup when inserted into a section block.
   text = text.replace(SLACK_CONTROL_TOKEN_PATTERN, ' ').replace(/[<>]/g, ' ');
   text = text.replace(/\s+/g, ' ').trim();
-  text = text.replace(/\.+$/, '').trim();
+  // Normalize to one sentence-ending mark so LLM output is consistent.
+  text = text.replace(/[.!?…]+$/u, '').trim();
 
   if (!text) {
     return undefined;
   }
 
-  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
+  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH - 1) {
     const truncated = text
-      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
+      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 2)
       .replace(/\s+\S*$/, '')
       .trim();
-    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 159)}…`;
+    text =
+      truncated.length > 0
+        ? truncated
+        : text.slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1);
   }
 
-  return text;
+  return `${text}.`;
 }
 
 function stripMatchingEdgeQuotes(value: string): string {
@@ -235,7 +239,7 @@ export function buildTaskStartingText({
     ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
 
-  return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}`;
+  return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}.`;
 }
 
 export function buildOtherRunningTasksText(
