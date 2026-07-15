@@ -238,7 +238,8 @@ it runs.
 **What models does it support?**
 Two options. Connect your ChatGPT Plus or Pro subscription directly (no API key
 needed), or paste an API key from OpenRouter, Anthropic, OpenAI, xAI, Google
-Gemini, Amazon Bedrock, Google Vertex AI, and a dozen more providers.
+Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway, Requesty, Baseten,
+Together AI, Moonshot AI (Kimi), MiniMax, or OpenCode Zen / Go.
 
 **What sandboxes does it support?**
 Modal, E2B, Daytona, Blaxel, and Local Docker.
