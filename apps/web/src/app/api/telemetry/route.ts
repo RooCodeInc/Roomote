@@ -11,6 +11,7 @@ import {
 } from '@roomote/telemetry/server';
 
 import { authorize } from '@/lib/server/auth-context';
+import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
 
 export const runtime = 'nodejs';
 
@@ -54,7 +55,11 @@ export async function POST(request: NextRequest) {
 
   // captureEvent re-checks this per event; checking once up front just
   // avoids pointless id resolution work when analytics is disabled.
-  if (!(await isAnonymousAnalyticsEnabled())) {
+  if (
+    !(await isAnonymousAnalyticsEnabled(
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    ))
+  ) {
     return NextResponse.json({ accepted: 0 }, { status: 202 });
   }
 

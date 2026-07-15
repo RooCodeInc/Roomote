@@ -13,12 +13,16 @@ type PostHog = Array<[string, ...unknown[]]> & {
   _i?: Array<[string, PostHogOptions]>;
   init?: (projectKey: string, options: PostHogOptions) => void;
   identify?: (userId: string) => void;
+  reset?: () => void;
 };
 
 declare global {
   interface Window {
     posthog?: PostHog;
-    Intercom?: (command: 'boot', settings: { app_id: string }) => void;
+    Intercom?: (
+      command: 'boot' | 'shutdown',
+      settings?: { app_id: string },
+    ) => void;
   }
 }
 
@@ -35,6 +39,7 @@ export function CloudAnalyticsProvider({
   posthogHost?: string;
   userId?: string;
 }) {
+  const posthogLoaded = useRef(false);
   const intercomBooted = useRef(false);
   const resolvedPosthogHost = posthogHost ?? DEFAULT_POSTHOG_HOST;
 
@@ -47,44 +52,49 @@ export function CloudAnalyticsProvider({
   };
 
   useEffect(() => {
-    if (userId && window.posthog) {
-      if (window.posthog.identify) {
-        window.posthog.identify(userId);
-      } else {
-        window.posthog.push(['identify', userId]);
-      }
+    if (!cloudEnabled) return;
+    if (posthogProjectKey) {
+      const posthog = (window.posthog ??= []);
+      posthog._i ??= [];
+      posthog._i.push([
+        posthogProjectKey,
+        { api_host: resolvedPosthogHost, disable_session_recording: false },
+      ]);
+      posthog.identify ??= (id) => posthog.push(['identify', id]);
+      posthog.reset ??= () => posthog.push(['reset']);
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = `${resolvedPosthogHost.replace(/\/$/, '')}/static/array.js`;
+      script.onload = () => {
+        posthogLoaded.current = true;
+        if (userId) window.posthog?.identify?.(userId);
+      };
+      document.head.append(script);
     }
-  }, [userId]);
+    if (intercomAppId) {
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = `https://widget.intercom.io/widget/${intercomAppId}`;
+      script.onload = bootIntercom;
+      document.head.append(script);
+    }
+  }, [cloudEnabled, intercomAppId, posthogProjectKey, resolvedPosthogHost]);
+
+  useEffect(() => {
+    if (!cloudEnabled || !posthogLoaded.current) return;
+    if (userId) window.posthog?.identify?.(userId);
+    else window.posthog?.reset?.();
+  }, [cloudEnabled, userId]);
+
+  useEffect(() => {
+    if (!cloudEnabled || userId || !intercomBooted.current) return;
+    window.Intercom?.('shutdown');
+    intercomBooted.current = false;
+  }, [cloudEnabled, userId]);
 
   if (!cloudEnabled) {
     return null;
   }
 
-  return (
-    <>
-      {posthogProjectKey && (
-        <>
-          <script
-            dangerouslySetInnerHTML={{
-              __html: `window.posthog=window.posthog||[];window.posthog._i=window.posthog._i||[];window.posthog.init=window.posthog.init||function(k,o){window.posthog._i.push([k,o])};window.posthog.identify=window.posthog.identify||function(id){window.posthog.push(['identify',id])};window.posthog.init(${JSON.stringify(posthogProjectKey)},${JSON.stringify({ api_host: resolvedPosthogHost, disable_session_recording: false })});${userId ? `window.posthog.identify(${JSON.stringify(userId)});` : ''}`,
-            }}
-          />
-          <script
-            async
-            data-testid="posthog-script"
-            src={`${resolvedPosthogHost.replace(/\/$/, '')}/static/array.js`}
-          />
-        </>
-      )}
-      {intercomAppId && (
-        <script
-          async
-          data-testid="intercom-script"
-          onLoad={bootIntercom}
-          ref={(element) => element?.addEventListener('load', bootIntercom)}
-          src={`https://widget.intercom.io/widget/${intercomAppId}`}
-        />
-      )}
-    </>
-  );
+  return null;
 }

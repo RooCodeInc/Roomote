@@ -91,7 +91,9 @@ function getPingBaseUrl(): string {
  * telemetry AND the admin-controlled deployment setting is enabled
  * (opt-out: absent means enabled).
  */
-export async function isAnonymousAnalyticsEnabled(): Promise<boolean> {
+export async function isAnonymousAnalyticsEnabled(
+  cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+): Promise<boolean> {
   if (!isTelemetryEnvAllowed()) {
     return false;
   }
@@ -104,7 +106,7 @@ export async function isAnonymousAnalyticsEnabled(): Promise<boolean> {
 
     return isAnonymousAnalyticsEnabledFromMetadata(
       settings?.metadata,
-      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+      cloudEnabled,
     );
   } catch {
     return false;

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import { CloudAnalyticsProvider } from './CloudAnalyticsProvider';
 
@@ -34,7 +34,7 @@ describe('CloudAnalyticsProvider', () => {
     );
 
     const posthogScript = document.head.querySelector(
-      '[data-testid="posthog-script"]',
+      'script[src="https://eu.i.posthog.com/static/array.js"]',
     );
     expect(posthogScript).toBeInTheDocument();
     expect(posthogScript).toHaveAttribute(
@@ -52,6 +52,12 @@ describe('CloudAnalyticsProvider', () => {
         cloudEnabled
         posthogProjectKey="posthog-project"
       />,
+    );
+
+    fireEvent.load(
+      document.head.querySelector(
+        'script[src="https://us.i.posthog.com/static/array.js"]',
+      )!,
     );
 
     rerender(
