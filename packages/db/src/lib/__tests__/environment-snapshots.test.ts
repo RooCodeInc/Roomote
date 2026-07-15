@@ -478,6 +478,7 @@ describe('environment snapshot helpers', () => {
     expect(result).toEqual({
       updated: false,
       snapshotsInvalidated: false,
+      verificationCleared: false,
     });
     expect(snapshotRow).toEqual(
       expect.objectContaining({

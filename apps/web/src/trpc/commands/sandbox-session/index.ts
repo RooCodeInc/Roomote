@@ -1,6 +1,7 @@
 import {
   RunStatus,
   TaskPayloadKind,
+  activeRunStatuses,
   getEnvironmentDefinitionIdFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
@@ -13,6 +14,7 @@ import {
   db,
   environments,
   eq,
+  inArray,
   isNotNull,
   not,
   resolveEffectivePreviewRuntimeConfig,
@@ -47,6 +49,7 @@ import {
 
 import {
   getSessionState,
+  shouldExposeOnboardingEnvironment,
   shouldPollForFirstHarnessMessage,
 } from './session-state';
 
@@ -586,14 +589,13 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const task = taskById;
 
-  const onboardingEnvironmentId =
-    task.workflow === 'setup_onboarding' &&
-    (taskRun.status === RunStatus.Running ||
-      taskRun.status === RunStatus.Completed ||
-      (taskRun.status === RunStatus.Idle &&
-        taskRun.taskPhase === 'waiting_for_prompt'))
-      ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
-      : null;
+  const onboardingEnvironmentId = shouldExposeOnboardingEnvironment({
+    taskWorkflow: task.workflow,
+    taskRunStatus: taskRun.status,
+    taskRunPhase: taskRun.taskPhase,
+  })
+    ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
+    : null;
 
   const [artifacts, onboardingEnvironment] = await Promise.all([
     getArtifactsForTaskCommand(auth, {
@@ -602,10 +604,33 @@ export async function getSandboxSessionByTaskIdCommand(
     onboardingEnvironmentId
       ? db.query.environments.findFirst({
           where: eq(environments.id, onboardingEnvironmentId),
-          columns: { name: true },
+          columns: {
+            name: true,
+            isVerified: true,
+            verificationTaskId: true,
+            verifiedAt: true,
+            verificationError: true,
+          },
         })
       : Promise.resolve(null),
   ]);
+
+  const activeVerificationTaskRun = onboardingEnvironment?.verificationTaskId
+    ? await db.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.taskId, onboardingEnvironment.verificationTaskId),
+          inArray(taskRuns.status, [...activeRunStatuses]),
+        ),
+        columns: { status: true },
+      })
+    : null;
+
+  const onboardingEnvironmentWithVerification = onboardingEnvironment
+    ? {
+        ...onboardingEnvironment,
+        verificationTaskActive: Boolean(activeVerificationTaskRun),
+      }
+    : null;
 
   const shouldCheckBootFailureMessages =
     taskRun.status === RunStatus.Failed ||
@@ -690,7 +715,7 @@ export async function getSandboxSessionByTaskIdCommand(
     },
     prompt,
     artifacts,
-    onboardingEnvironment,
+    onboardingEnvironment: onboardingEnvironmentWithVerification,
     sessionState,
     refetchInterval,
   };

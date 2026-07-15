@@ -37,6 +37,7 @@ import {
 
 interface PendingEnvVarRequestPanelProps {
   taskId: string;
+  onVisibleRequestKeyChange?: (requestKey: string | null) => void;
 }
 
 const SAFE_FOLLOW_UP_PROMPT =
@@ -99,6 +100,7 @@ function createHiddenEnvVarFulfillmentMessage({
 
 export function PendingEnvVarRequestPanel({
   taskId,
+  onVisibleRequestKeyChange,
 }: PendingEnvVarRequestPanelProps) {
   const { isAdmin } = useAuthorizedUser();
   const client = useSandboxClient();
@@ -120,6 +122,10 @@ export function PendingEnvVarRequestPanel({
 
   const visibleRequest =
     request && request.key !== dismissedRequestKey ? request : null;
+
+  useEffect(() => {
+    onVisibleRequestKeyChange?.(visibleRequest?.key ?? null);
+  }, [onVisibleRequestKeyChange, visibleRequest?.key]);
 
   useEffect(() => {
     if (!visibleRequest) {
@@ -210,16 +216,50 @@ export function PendingEnvVarRequestPanel({
       }
 
       await client.commands.reloadDeploymentEnvVars.mutate();
-      await trpcClient.sandboxSession.sendPrompt.mutate({
-        taskId,
-        prompt: SAFE_FOLLOW_UP_PROMPT,
-        source: 'web',
-        clientMessageId,
-      });
+      let sentFollowUpPrompt = true;
+
+      try {
+        await trpcClient.sandboxSession.sendPrompt.mutate({
+          taskId,
+          prompt: SAFE_FOLLOW_UP_PROMPT,
+          source: 'web',
+          clientMessageId,
+        });
+      } catch (error) {
+        sentFollowUpPrompt = false;
+        console.warn(
+          'Saved environment variables, but failed to send the task follow-up prompt.',
+          error,
+        );
+
+        // The follow-up prompt (which would have persisted the durable
+        // fulfillment envelope) failed, so record that envelope directly.
+        // Without this, a reconnect or history refetch rebuilds the pending
+        // request from persisted envelopes and resurfaces it even though the
+        // values were already saved.
+        try {
+          await trpcClient.taskEnvVarRequests.markFulfilled.mutate({
+            taskId,
+            clientMessageId,
+          });
+        } catch (markError) {
+          console.warn(
+            'Failed to persist the env-var fulfillment marker after the follow-up prompt failed.',
+            markError,
+          );
+        }
+      }
+
       recordFulfillmentLocally(clientMessageId);
       setValues({});
       setRevealedVariables({});
       setDismissedRequestKey(visibleRequest.key);
+
+      if (!sentFollowUpPrompt) {
+        toast.success(
+          'Environment variables saved. The task is reconnecting, so ask the agent to continue once it is connected.',
+        );
+      }
     } catch (error) {
       toast.error(
         error instanceof Error
@@ -230,7 +270,7 @@ export function PendingEnvVarRequestPanel({
   };
 
   return (
-    <div className="min-h-80 md:min-h-auto">
+    <div className="min-h-80 md:min-h-auto border-b border-background">
       <div className="w-full p-4 text-foreground">
         <div className="md:space-y-2">
           <div className="flex items-start justify-between gap-3 mb-2 md:mb-0">

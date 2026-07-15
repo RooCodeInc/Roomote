@@ -9,19 +9,6 @@ vi.mock(
   () => ({
     useEnvironmentDefinitionAgentState: (...args: unknown[]) =>
       useEnvironmentDefinitionAgentStateMock(...args),
-    EnvironmentDefinitionAgentTaskPanel: ({
-      title,
-      showHeader = true,
-    }: {
-      title?: string;
-      session: unknown;
-      className?: string;
-      showHeader?: boolean;
-    }) => (
-      <div>
-        {showHeader ? (title ?? 'environment definition panel') : 'panel'}
-      </div>
-    ),
   }),
 );
 
@@ -31,25 +18,48 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
+vi.mock('@/hooks/environments', () => ({
+  useRetryEnvironmentVerification: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: vi.fn(),
+  }),
+}));
+
 vi.mock('@/components/sandbox', () => ({
   TaskStatusIndicator: () => <div>task status</div>,
 }));
 
 vi.mock('@/components/system', () => ({
+  Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   GripVertical: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Maximize2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({
     children,
     onClick,
+    asChild,
     ...props
   }: {
     children: ReactNode;
     onClick?: () => void;
-  } & HTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} type="button" {...props}>
-      {children}
-    </button>
-  ),
+    asChild?: boolean;
+  } & HTMLAttributes<HTMLButtonElement>) => {
+    if (asChild) {
+      return <>{children}</>;
+    }
+
+    return (
+      <button onClick={onClick} type="button" {...props}>
+        {children}
+      </button>
+    );
+  },
 }));
 
 import { SetupOnboardingAgentWidget } from './SetupOnboardingAgentWidget';
@@ -133,7 +143,7 @@ describe('SetupOnboardingAgentWidget', () => {
     expect(onOpenStep).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the transcript inline in the floating window when expanded without a duplicate inner header', () => {
+  it('links to the normal task page when expanded', () => {
     render(
       <SetupOnboardingAgentWidget
         taskId="task-1"
@@ -151,7 +161,11 @@ describe('SetupOnboardingAgentWidget', () => {
       screen.getByRole('button', { name: 'Collapse onboarding agent' }),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Onboarding agent')).toHaveLength(1);
-    expect(screen.queryByText('task status')).not.toBeInTheDocument();
+    expect(screen.getByText('task status')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View task' })).toHaveAttribute(
+      'href',
+      '/task/task-1',
+    );
   });
 
   it('shows Finish in expanded mode when onboarding succeeded and closes with toast', () => {

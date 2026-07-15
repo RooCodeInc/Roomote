@@ -6,7 +6,8 @@ type TaskNotificationSessionState =
   | 'resuming'
   | 'boot-failed'
   | 'historical'
-  | 'not-found';
+  | 'not-found'
+  | 'error';
 
 export function getTaskNotificationPhase({
   sessionState,

@@ -54,6 +54,11 @@ const state = vi.hoisted(() => ({
           snapshotExpiresAt: null,
         },
       },
+      isVerified: true,
+      verificationTaskId: 'task-verify-1' as string | null,
+      verificationTaskActive: true,
+      verifiedAt: new Date('2026-03-25T09:00:00.000Z'),
+      verificationError: null,
     },
   ],
 }));
@@ -107,6 +112,11 @@ vi.mock('@/hooks/environments', () => ({
     isPending: false,
     mutateAsync: vi.fn(),
   }),
+  useRetryEnvironmentVerification: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: vi.fn(),
+  }),
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
@@ -152,6 +162,7 @@ vi.mock('@/components/system', () => ({
     <span {...props}>{children}</span>
   ),
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ArrowUpRightIcon: Icon,
   BookMarked: Icon,
   Button: ({
     children,
@@ -175,6 +186,7 @@ vi.mock('@/components/system', () => ({
     );
   },
   Camera: Icon,
+  Check: Icon,
   CheckCircle2: Icon,
   ChevronDown: Icon,
   Collapsible: ({
@@ -294,6 +306,7 @@ vi.mock('@/components/system', () => ({
     <h2 {...props}>{children}</h2>
   ),
   Github: Icon,
+  HelpCircle: Icon,
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   Label: ({
     children,
@@ -304,6 +317,8 @@ vi.mock('@/components/system', () => ({
   Loader2: Icon,
   Pencil: Icon,
   Plus: Icon,
+  RefreshCw: Icon,
+  SearchCheck: Icon,
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PopoverContent: ({
     children,
@@ -381,6 +396,11 @@ describe('Environments', () => {
             snapshotExpiresAt: null,
           },
         },
+        isVerified: true,
+        verificationTaskId: 'task-verify-1',
+        verificationTaskActive: true,
+        verifiedAt: new Date('2026-03-25T09:00:00.000Z'),
+        verificationError: null,
       },
     ];
     state.createSnapshot.mockClear();
@@ -415,26 +435,47 @@ describe('Environments', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows descriptions and keeps environment details collapsed until expanded', () => {
+  it('shows verification and repositories while keeping snapshot details collapsed until expanded', () => {
     render(<Environments />);
 
-    expect(
-      screen.getByText('Main Environment description'),
-    ).toBeInTheDocument();
     expect(screen.queryByTitle('Edit details')).not.toBeInTheDocument();
     expect(screen.getByTitle('Edit environment')).toHaveAttribute(
       'href',
       '/settings/environments/env-1/edit',
     );
-    expect(screen.queryByText('acme/api')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Open verification task' }),
+    ).toHaveAttribute('href', '/task/task-verify-1');
+    expect(
+      screen.queryByRole('link', { name: 'View task' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTitle('Re-verify environment config'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('acme/api')).toBeInTheDocument();
     expect(
       screen.queryByTitle('Refresh modal snapshot'),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
-    expect(screen.getByText('acme/api')).toBeInTheDocument();
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
+  });
+
+  it('does not link verified badges when there is no verification task', () => {
+    state.environments = [
+      {
+        ...state.environments[0]!,
+        verificationTaskId: null,
+      },
+    ];
+
+    render(<Environments />);
+
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Open verification task' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows snapshot controls on the environments settings page', () => {

@@ -138,6 +138,7 @@ import {
   updateEnvironmentCommand,
   startEnvironmentDefinitionTaskCommand,
   cancelEnvironmentDefinitionTaskCommand,
+  retryEnvironmentVerificationCommand,
   deleteEnvironmentCommand,
   duplicateEnvironmentCommand,
   validateConfigCommand,
@@ -194,6 +195,8 @@ import {
 import {
   fulfillTaskEnvVarRequestCommand,
   fulfillTaskEnvVarRequestSchema,
+  markTaskEnvVarRequestFulfilledCommand,
+  markTaskEnvVarRequestFulfilledSchema,
 } from '../commands/task-env-var-requests';
 import {
   getUsersOnlyForFilterCommand,
@@ -1049,6 +1052,12 @@ export const appRouter = createRouter({
         cancelEnvironmentDefinitionTaskCommand(auth, input),
       ),
 
+    retryVerification: protectedProcedure
+      .input(z.object({ environmentId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        retryEnvironmentVerificationCommand(auth, input),
+      ),
+
     delete: protectedProcedure
       .input(z.object({ id: z.string() }))
       .mutation(({ ctx: { auth }, input }) =>
@@ -1354,6 +1363,12 @@ export const appRouter = createRouter({
       .input(fulfillTaskEnvVarRequestSchema)
       .mutation(({ ctx: { auth }, input }) =>
         fulfillTaskEnvVarRequestCommand(auth, input),
+      ),
+
+    markFulfilled: protectedProcedure
+      .input(markTaskEnvVarRequestFulfilledSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        markTaskEnvVarRequestFulfilledCommand(auth, input),
       ),
   }),
 

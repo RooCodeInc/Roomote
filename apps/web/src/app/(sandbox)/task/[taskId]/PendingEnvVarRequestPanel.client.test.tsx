@@ -7,6 +7,7 @@ const {
   appendAcpEventMock,
   reloadDeploymentEnvVarsMock,
   sendPromptMock,
+  markFulfilledMock,
   successToastMock,
   errorToastMock,
   authState,
@@ -17,6 +18,7 @@ const {
   appendAcpEventMock: vi.fn(),
   reloadDeploymentEnvVarsMock: vi.fn(),
   sendPromptMock: vi.fn(),
+  markFulfilledMock: vi.fn(),
   successToastMock: vi.fn(),
   errorToastMock: vi.fn(),
   authState: {
@@ -76,6 +78,11 @@ vi.mock('@/trpc/client', () => ({
     sandboxSession: {
       sendPrompt: {
         mutate: sendPromptMock,
+      },
+    },
+    taskEnvVarRequests: {
+      markFulfilled: {
+        mutate: markFulfilledMock,
       },
     },
   }),
@@ -427,7 +434,10 @@ describe('PendingEnvVarRequestPanel', () => {
     expect(sendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('keeps the request visible when the safe follow-up prompt fails', async () => {
+  it('dismisses the request when the safe follow-up prompt fails after reload', async () => {
+    const consoleWarn = vi
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
     sendPromptMock.mockRejectedValue(new Error('send failed'));
 
     renderPanel();
@@ -438,18 +448,39 @@ describe('PendingEnvVarRequestPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(errorToastMock).toHaveBeenCalledWith('send failed');
+      expect(successToastMock).toHaveBeenCalledWith(
+        'Environment variables saved. The task is reconnecting, so ask the agent to continue once it is connected.',
+      );
     });
 
     expect(reloadDeploymentEnvVarsMock).toHaveBeenCalledWith();
     expect(
-      screen.getByRole('button', {
+      screen.queryByRole('button', {
         name: 'Dismiss environment variable request',
       }),
-    ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Value for OPENAI_API_KEY')).toHaveValue(
-      'new-openai-key',
+    ).not.toBeInTheDocument();
+    expect(errorToastMock).not.toHaveBeenCalled();
+    expect(consoleWarn).toHaveBeenCalledWith(
+      'Saved environment variables, but failed to send the task follow-up prompt.',
+      expect.any(Error),
     );
-    expect(appendAcpEventMock).not.toHaveBeenCalled();
+    expect(appendAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'roomote_runtime.user_prompt',
+        payload: expect.objectContaining({
+          clientMessageId: expect.stringMatching(/^env-var-request-fulfilled:/),
+        }),
+        visibleInTranscript: false,
+      }),
+    );
+    // A durable fulfillment must be persisted server-side on the send-failure
+    // path so a reconnect does not resurface the already-handled request.
+    expect(markFulfilledMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        clientMessageId: expect.stringMatching(/^env-var-request-fulfilled:/),
+      }),
+    );
+    consoleWarn.mockRestore();
   });
 });

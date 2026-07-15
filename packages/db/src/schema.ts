@@ -2670,6 +2670,23 @@ export const environments = pgTable(
     // declarative set.
     declarativeSource: text('declarative_source'),
 
+    // Verification state. "Configured" means the environment definition exists
+    // but its current runtime configuration has not been confirmed to work by a
+    // follow-up verification task. "Verified" means a verification task
+    // explicitly reported success. The migration default keeps every existing
+    // environment verified; new environments start unverified. Any
+    // runtime-affecting edit clears verification through
+    // updateEnvironmentDefinition, so these fields cannot drift across the API,
+    // Settings, agent, and declarative write paths.
+    isVerified: boolean('is_verified').notNull().default(true),
+    // Roomote task id of the verification task that most recently ran (or is
+    // running) for the current configuration. Not a task-run id.
+    verificationTaskId: text('verification_task_id'),
+    verifiedAt: timestamp('verified_at'),
+    // Latest user-safe verification failure message. Never stores secrets or
+    // full environment YAML.
+    verificationError: text('verification_error'),
+
     snapshotId: text('snapshot_id'),
     snapshotCreatedAt: timestamp('snapshot_created_at'),
     snapshotExpiresAt: timestamp('snapshot_expires_at'),

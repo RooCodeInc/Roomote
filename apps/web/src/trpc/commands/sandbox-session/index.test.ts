@@ -8,6 +8,7 @@ import { restoreSnapshotResumeVisiblePromptFields } from '../snapshot-visible-pr
 import {
   getSessionState,
   isWaitingForFirstHarnessMessage,
+  shouldExposeOnboardingEnvironment,
   shouldPollForFirstHarnessMessage,
 } from './session-state';
 
@@ -198,6 +199,34 @@ describe('getSessionState', () => {
       }),
     ).toBe('interactive');
   });
+
+  it('keeps setup tasks interactive while waiting for environment variables', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+    });
+
+    expect(
+      getSessionState(taskRun, {
+        hasMessages: false,
+        hasHarnessMessages: true,
+      }),
+    ).toBe('interactive');
+  });
+
+  it('keeps ordinary idle tasks interactive while waiting for a prompt', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+    });
+
+    expect(
+      getSessionState(taskRun, {
+        hasMessages: false,
+        hasHarnessMessages: true,
+      }),
+    ).toBe('interactive');
+  });
 });
 
 describe('isWaitingForFirstHarnessMessage', () => {
@@ -287,6 +316,48 @@ describe('shouldPollForFirstHarnessMessage', () => {
         taskRunStatus: RunStatus.Completed,
         hasHarnessMessages: false,
         hasInitialPrompt: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('shouldExposeOnboardingEnvironment', () => {
+  it('does not expose the onboarding environment while setup is still running', () => {
+    expect(
+      shouldExposeOnboardingEnvironment({
+        taskWorkflow: 'setup_onboarding',
+        taskRunStatus: RunStatus.Running,
+        taskRunPhase: 'thinking',
+      }),
+    ).toBe(false);
+  });
+
+  it('exposes the onboarding environment after setup completes', () => {
+    expect(
+      shouldExposeOnboardingEnvironment({
+        taskWorkflow: 'setup_onboarding',
+        taskRunStatus: RunStatus.Completed,
+        taskRunPhase: null,
+      }),
+    ).toBe(true);
+  });
+
+  it('exposes the onboarding environment when setup is waiting for the final prompt', () => {
+    expect(
+      shouldExposeOnboardingEnvironment({
+        taskWorkflow: 'setup_onboarding',
+        taskRunStatus: RunStatus.Idle,
+        taskRunPhase: 'waiting_for_prompt',
+      }),
+    ).toBe(true);
+  });
+
+  it('ignores non-onboarding tasks', () => {
+    expect(
+      shouldExposeOnboardingEnvironment({
+        taskWorkflow: 'standard',
+        taskRunStatus: RunStatus.Completed,
+        taskRunPhase: null,
       }),
     ).toBe(false);
   });

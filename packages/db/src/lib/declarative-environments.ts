@@ -441,6 +441,7 @@ async function updateDeclarativeEnvironment(
         config,
       },
       repositoryIds,
+      preserveVerification: true,
       configVersion: {
         config,
         name: config.name,

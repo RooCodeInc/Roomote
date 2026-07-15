@@ -199,6 +199,51 @@ describe('SandboxPage', () => {
     expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
   });
 
+  it('does not open a live sandbox when the session has no task run', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      taskRun: undefined,
+      sessionState: 'interactive',
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [],
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByText(
+        'This task session is still preparing. Refresh the page or try again in a moment.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
+  });
+
+  it('renders paused setup onboarding tasks with the live task surface', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      sessionState: 'interactive',
+      task: {
+        ...baseSession.task,
+        workflow: 'setup_onboarding',
+      },
+      taskRun: {
+        ...baseSession.taskRun,
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      },
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [],
+    });
+
+    renderPage();
+
+    expect(screen.getByTestId('sandbox-provider')).toBeInTheDocument();
+    expect(screen.getByTestId('live-content')).toBeInTheDocument();
+    expect(screen.queryByTestId('historical-provider')).not.toBeInTheDocument();
+  });
+
   it('renders the transcript while booting when the initial prompt is visible even before messages exist', () => {
     useTaskSessionMock.mockReturnValue({
       ...baseSession,

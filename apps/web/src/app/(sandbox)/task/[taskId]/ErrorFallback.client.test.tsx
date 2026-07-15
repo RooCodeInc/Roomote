@@ -1,5 +1,5 @@
+import type { ButtonHTMLAttributes } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
 
 const {
   invalidateQueriesMock,
@@ -25,19 +25,11 @@ vi.mock('@/trpc/client', () => ({
 
 vi.mock('@/components/system', () => ({
   AlertCircle: () => <svg aria-hidden="true" />,
-  RefreshCw: () => <svg aria-hidden="true" />,
-  Button: ({
-    children,
-    ...props
-  }: {
-    children: ReactNode;
-    disabled?: boolean;
-    onClick?: () => void;
-  }) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
+  Button: ({ children, ...props }: ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button {...props}>{children}</button>
   ),
+  RefreshCw: () => <svg aria-hidden="true" />,
+  Spinner: () => <svg aria-hidden="true" />,
 }));
 
 vi.mock('./hooks', () => ({
@@ -142,7 +134,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.queryByText('Connecting to the live task...'),
+      screen.queryByText('Trying to connect to the sandbox...'),
     ).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
   });
@@ -169,7 +161,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Reconnecting to the live task...'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Lost connection to the live task'),
@@ -201,7 +193,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Connecting to the live task...'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Reconnecting to the live task...'),
@@ -211,14 +203,17 @@ describe('ConnectionStatusBanner', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a backend-unavailable message when the initial connection retry budget is exhausted', () => {
+  it('refreshes and reconnects when initial retries are exhausted', async () => {
+    const connectionTarget = { url: 'https://sandbox.test', token: 'token' };
+    const reconnect = vi.fn();
+    const refreshConnection = vi.fn().mockResolvedValue(connectionTarget);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
       hasConnectedOnce: false,
       connectionError: true,
       connectionFailureCategory: 'backend_unavailable',
       reconnecting: false,
-      reconnect: vi.fn(),
+      reconnect,
     });
 
     render(
@@ -227,7 +222,7 @@ describe('ConnectionStatusBanner', () => {
           {
             taskId: 'task-123',
             hasTransportError: false,
-            refreshConnection: vi.fn(),
+            refreshConnection,
           } as never
         }
       />,
@@ -236,12 +231,47 @@ describe('ConnectionStatusBanner', () => {
     expect(
       screen.getByText('Could not reach the live task'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Try again' }),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(refreshConnection).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(connectionTarget);
+    });
     expect(
       screen.queryByText('Lost connection to the live task'),
     ).not.toBeInTheDocument();
+  });
+
+  it('resyncs the session when manual retry refresh fails', async () => {
+    const reconnect = vi.fn();
+    const refreshConnection = vi
+      .fn()
+      .mockRejectedValue(new Error('token unavailable'));
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: false,
+      hasConnectedOnce: false,
+      connectionError: true,
+      connectionFailureCategory: 'backend_unavailable',
+      reconnecting: false,
+      reconnect,
+    });
+
+    render(
+      <ConnectionStatusBanner
+        session={
+          {
+            taskId: 'task-123',
+            hasTransportError: false,
+            refreshConnection,
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(null);
+    });
   });
 
   it('suppresses the lost-connection error while the sleep snapshot is in progress', () => {
@@ -403,45 +433,6 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('passes the refreshed sandbox connection target into reconnect', async () => {
-    const reconnectMock = vi.fn();
-    const refreshConnectionMock = vi.fn().mockResolvedValue({
-      url: 'http://sandbox-refreshed.test',
-      token: 'token-refreshed',
-    });
-
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: false,
-      hasConnectedOnce: true,
-      connectionError: true,
-      connectionFailureCategory: null,
-      reconnecting: false,
-      reconnect: reconnectMock,
-    });
-
-    render(
-      <ConnectionStatusBanner
-        session={
-          {
-            taskId: 'task-123',
-            hasTransportError: false,
-            refreshConnection: refreshConnectionMock,
-          } as never
-        }
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
-
-    await waitFor(() => {
-      expect(refreshConnectionMock).toHaveBeenCalledTimes(1);
-      expect(reconnectMock).toHaveBeenCalledWith({
-        url: 'http://sandbox-refreshed.test',
-        token: 'token-refreshed',
-      });
-    });
-  });
-
   it('shows an auth-specific message when reconnect auth refresh fails', () => {
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
@@ -498,7 +489,20 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows an auth-specific initial message for token/bootstrap failures', () => {
+  it('refreshes and reconnects for token/bootstrap failures', async () => {
+    const connectionTarget = { url: 'https://sandbox.test', token: 'token' };
+    const reconnect = vi.fn();
+    const refreshConnection = vi.fn().mockResolvedValue(connectionTarget);
+
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: false,
+      hasConnectedOnce: false,
+      connectionError: false,
+      connectionFailureCategory: null,
+      reconnecting: false,
+      reconnect,
+    });
+
     render(
       <ConnectionStatusBanner
         session={
@@ -506,7 +510,7 @@ describe('ConnectionStatusBanner', () => {
             taskId: 'task-123',
             hasTransportError: true,
             transportErrorCategory: 'auth_error',
-            refreshConnection: vi.fn(),
+            refreshConnection,
           } as never
         }
       />,
@@ -515,8 +519,10 @@ describe('ConnectionStatusBanner', () => {
     expect(
       screen.getByText('Could not verify access to the live task'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Try again' }),
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(refreshConnection).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(connectionTarget);
+    });
   });
 });
