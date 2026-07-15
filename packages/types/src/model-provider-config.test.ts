@@ -5,6 +5,8 @@ import {
   createEmptyDeploymentModelConfig,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
+  getDisplayModelProviderId,
+  groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
   getSetupModelProvider,
@@ -349,6 +351,63 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       defaultRoomoteModel: 'openai/gpt-5.6-terra',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
+  });
+
+  it('groups openai/ models under ChatGPT when a subscription is connected', () => {
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+      }),
+    ).toBe('chatgpt');
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: false,
+      }),
+    ).toBe('openai');
+    expect(
+      getDisplayModelProviderId('anthropic/claude-sonnet-5', {
+        chatgptConnected: true,
+      }),
+    ).toBe('anthropic');
+    // Subscription auth wins when both an OpenAI key and ChatGPT are present.
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+      }),
+    ).toBe('chatgpt');
+  });
+
+  it('groups model chooser options by display provider and catalog order', () => {
+    const groups = groupModelsByDisplayProvider(
+      [
+        { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
+        {
+          id: 'openrouter/x-ai/grok-4.5',
+          displayName: 'Grok 4.5',
+        },
+        {
+          id: 'openrouter/anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+        },
+      ],
+      { chatgptConnected: true },
+    );
+
+    expect(groups.map((group) => group.providerId)).toEqual([
+      'openrouter',
+      'chatgpt',
+    ]);
+    expect(groups[0]).toMatchObject({
+      label: 'OpenRouter',
+      items: [
+        { id: 'openrouter/x-ai/grok-4.5' },
+        { id: 'openrouter/anthropic/claude-sonnet-5' },
+      ],
+    });
+    expect(groups[1]).toMatchObject({
+      label: 'ChatGPT (subscription)',
+      items: [{ id: 'openai/gpt-5.6-terra' }],
+    });
   });
 
   it('maps Requesty to the REQUESTY_API_KEY env var and hides it from new connections', () => {

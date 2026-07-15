@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_TASK_MODEL_ID,
   DIRECT_TASK_MODEL_PROVIDER_IDS,
+  getTaskModelProviderId,
 } from './task-models';
 
 /**
@@ -723,6 +724,84 @@ export function getModelProviderLabel(
   }
 
   return providerId.charAt(0).toUpperCase() + providerId.slice(1);
+}
+
+/**
+ * Display/grouping provider for a model id. ChatGPT subscription models retain
+ * the runtime `openai/` prefix, but when a subscription is connected those
+ * requests authenticate through the ChatGPT path (which wins over an OpenAI
+ * API key). UI lists should therefore group `openai/` models under ChatGPT
+ * while ChatGPT is connected, without changing the stored model id.
+ */
+export function getDisplayModelProviderId(
+  modelId: string | null | undefined,
+  options?: {
+    chatgptConnected?: boolean;
+  },
+): string | null {
+  const normalizedModelId = normalizeOptionalString(modelId);
+
+  if (!normalizedModelId) {
+    return null;
+  }
+
+  const runtimeProviderId = getTaskModelProviderId(normalizedModelId);
+
+  if (runtimeProviderId === 'openai' && options?.chatgptConnected) {
+    return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  }
+
+  return runtimeProviderId;
+}
+
+export type DisplayModelProviderGroup<T extends { id: string }> = {
+  providerId: string;
+  label: string;
+  items: T[];
+};
+
+const KNOWN_MODEL_PROVIDER_ORDER = SETUP_MODEL_PROVIDER_CATALOG.map(
+  (provider) => provider.id as string,
+);
+
+/**
+ * Groups model options by display provider for chooser UIs. Preserves input
+ * order within each group and sorts groups by the setup provider catalog.
+ */
+export function groupModelsByDisplayProvider<T extends { id: string }>(
+  items: T[],
+  options?: {
+    chatgptConnected?: boolean;
+  },
+): DisplayModelProviderGroup<T>[] {
+  const groups = new Map<string, T[]>();
+
+  for (const item of items) {
+    const providerId =
+      getDisplayModelProviderId(item.id, {
+        chatgptConnected: options?.chatgptConnected,
+      }) ?? 'other';
+    const groupItems = groups.get(providerId) ?? [];
+    groupItems.push(item);
+    groups.set(providerId, groupItems);
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => {
+      const leftIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(left);
+      const rightIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(right);
+      const leftOrder =
+        leftIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : leftIndex;
+      const rightOrder =
+        rightIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : rightIndex;
+
+      return leftOrder - rightOrder || left.localeCompare(right);
+    })
+    .map(([providerId, groupItems]) => ({
+      providerId,
+      label: getModelProviderLabel(providerId),
+      items: groupItems,
+    }));
 }
 
 export function getSetupModelProviderForEnvVarName(

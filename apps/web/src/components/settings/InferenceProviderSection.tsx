@@ -439,7 +439,7 @@ function ChatGptSubscriptionRow({
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
-          ChatGPT (subscription)
+          {getModelProviderLabel(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
         </span>
       </div>
 
@@ -595,12 +595,17 @@ export function InferenceProviderSection({
     trpc.chatgptSubscription.disconnect.mutationOptions({
       onSuccess: async () => {
         toast.success('Disconnected ChatGPT subscription.');
-        await queryClient.invalidateQueries({
-          queryKey: trpc.taskModels.providerSetup.queryKey(),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: trpc.chatgptSubscription.status.queryKey(),
-        });
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.providerSetup.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.chatgptSubscription.status.queryKey(),
+          }),
+        ]);
       },
       onError: (error) => {
         toast.error(error.message);
