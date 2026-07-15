@@ -390,7 +390,7 @@ export async function spawnModalWorker(
       )}`,
     );
     await recordMutation({
-      provider: 'modal',
+      provider: vendor,
       operation: 'run_command',
       eventType: 'started',
       instanceId: machine.machineId,
@@ -426,7 +426,7 @@ export async function spawnModalWorker(
     }
 
     await recordMutation({
-      provider: 'modal',
+      provider: vendor,
       operation: 'run_command',
       eventType: 'completed',
       instanceId: machine.machineId,
@@ -460,7 +460,7 @@ export async function spawnModalWorker(
     };
   } catch (error) {
     await recordMutation({
-      provider: 'modal',
+      provider: vendor,
       operation: 'run_command',
       eventType: 'failed',
       instanceId: machine.machineId,

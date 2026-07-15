@@ -218,7 +218,7 @@ export async function createModalMachine(
         : 'create_instance';
 
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation,
         eventType: 'started',
         message:
@@ -253,7 +253,7 @@ export async function createModalMachine(
           });
 
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation,
         eventType: 'completed',
         instanceId: instance.instanceId,
@@ -284,7 +284,7 @@ export async function createModalMachine(
       break;
     } catch (error) {
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation: sourceSnapshotId
           ? 'resume_from_snapshot'
           : 'create_instance',
@@ -391,7 +391,7 @@ export async function createModalMachine(
       bootstrapPhase = 'write-files';
 
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation: 'write_files',
         eventType: 'started',
         instanceId: createdMachine.instanceId,
@@ -410,7 +410,7 @@ export async function createModalMachine(
       });
 
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation: 'write_files',
         eventType: 'completed',
         instanceId: createdMachine.instanceId,
@@ -430,7 +430,7 @@ export async function createModalMachine(
     );
 
     await onMutation?.({
-      provider: 'modal',
+      provider: computeClient.vendor,
       operation: 'run_command',
       eventType: 'started',
       instanceId: createdMachine.instanceId,
@@ -460,7 +460,7 @@ export async function createModalMachine(
     });
 
     await onMutation?.({
-      provider: 'modal',
+      provider: computeClient.vendor,
       operation: 'run_command',
       eventType: 'completed',
       instanceId: createdMachine.instanceId,
@@ -481,7 +481,7 @@ export async function createModalMachine(
   } catch (error) {
     if (bootstrapPhase === 'write-files') {
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation: 'write_files',
         eventType: 'failed',
         instanceId: createdMachine.instanceId,
@@ -493,7 +493,7 @@ export async function createModalMachine(
       });
     } else if (bootstrapPhase === 'install-worker') {
       await onMutation?.({
-        provider: 'modal',
+        provider: computeClient.vendor,
         operation: 'run_command',
         eventType: 'failed',
         instanceId: createdMachine.instanceId,
