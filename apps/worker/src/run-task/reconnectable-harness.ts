@@ -24,6 +24,7 @@ import type {
   HarnessPendingUserInputRequest,
   HarnessRestartRequest,
   HarnessQueuedMessage,
+  HarnessCommandError,
   QueuedPromptMessageSnapshot,
   TaskCommand,
 } from '../sandbox-server/lib/harness';
@@ -58,6 +59,8 @@ interface BoundHarnessListeners {
   runtimePersistedEnvelope: (envelope: AcpPersistedEnvelope) => void;
   runtimeTurnCompleted: (event: AcpTurnCompletedEvent) => void;
   runtimeInferenceUsage: (event: HarnessInferenceUsageEvent) => void;
+  commandError: (error: HarnessCommandError) => void;
+  commandErrorUnsubscribe?: () => void;
 }
 
 const DEFAULT_MAX_RECONNECT_ATTEMPTS = 7;
@@ -172,6 +175,13 @@ export class ReconnectableHarness
   ): () => void {
     this.on('runtimeInferenceUsage', listener);
     return () => this.off('runtimeInferenceUsage', listener);
+  }
+
+  subscribeCommandError(
+    listener: (error: HarnessCommandError) => void,
+  ): () => void {
+    this.on('commandError', listener);
+    return () => this.off('commandError', listener);
   }
 
   sendCommand(command: TaskCommand): boolean {
@@ -396,6 +406,9 @@ export class ReconnectableHarness
         this.updateSessionTracking(event.sessionId);
         this.emit('runtimeInferenceUsage', event);
       },
+      commandError: (error) => {
+        this.emit('commandError', error);
+      },
     };
 
     this.currentListeners = listeners;
@@ -408,6 +421,9 @@ export class ReconnectableHarness
     harness.on('runtimePersistedEnvelope', listeners.runtimePersistedEnvelope);
     harness.on('runtimeTurnCompleted', listeners.runtimeTurnCompleted);
     harness.on('runtimeInferenceUsage', listeners.runtimeInferenceUsage);
+    listeners.commandErrorUnsubscribe = harness.subscribeCommandError?.(
+      listeners.commandError,
+    );
 
     this.requestQueuedCommandFlush();
   }
@@ -428,6 +444,7 @@ export class ReconnectableHarness
       );
       harness.off('runtimeTurnCompleted', listeners.runtimeTurnCompleted);
       harness.off('runtimeInferenceUsage', listeners.runtimeInferenceUsage);
+      listeners.commandErrorUnsubscribe?.();
     }
 
     if (harness && options?.dispose !== false) {
