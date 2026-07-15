@@ -67,7 +67,6 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
 import { getLatestTaskRunsByTaskId } from './task-runs';
-import { getTaskModelDisplayNameMap } from './task-models';
 import { getRepositories } from './source-control';
 import {
   getPullRequestFactRepositoryIdsNeedingBackfill,
@@ -573,22 +572,13 @@ function applyDimensionFilters<TRow extends AnalyticsRow>(
   rows: TRow[],
   filters: AnalyticsFilters,
   omitDimension?: AnalyticsDimension,
-  object?: AnalyticsObject,
 ) {
-  const allowedDimensions = object
-    ? new Set(ANALYTICS_OBJECT_CONFIG[object].filterDimensions)
-    : null;
-
   return rows.filter((row) => {
     for (const [dimension, values] of Object.entries(filters) as [
       AnalyticsDimension,
       string[],
     ][]) {
       if (!values || values.length === 0 || dimension === omitDimension) {
-        continue;
-      }
-
-      if (allowedDimensions && !allowedDimensions.has(dimension)) {
         continue;
       }
 
@@ -621,12 +611,7 @@ function buildFilterOptions<TRow extends AnalyticsRow>(
 
   for (const dimension of config.filterDimensions) {
     const options = new Map<string, string>();
-    const dimensionRows = applyDimensionFilters(
-      rows,
-      filters,
-      dimension,
-      object,
-    );
+    const dimensionRows = applyDimensionFilters(rows, filters, dimension);
 
     for (const row of dimensionRows) {
       const value = row.dimensions[dimension];
@@ -1140,58 +1125,43 @@ async function getTaskAnalyticsRows(
           taskRows.map((task) => task.id),
         );
 
-  const rows = resolveDimensionLabelCollisions(
-    taskRows.map((task) => {
-      const sourceLabel = mapTaskSource(task.surface);
-      const usage = usageByTaskId[task.id];
-      const value = getTaskMetricValue(metric, usage);
-      const values: Record<string, string> = {
-        date: formatAnalyticsDateTime(task.timestamp),
-        user: task.userDimension.label,
-        project: task.projectLabel,
-        source: sourceLabel,
-        model: task.modelDimension.label,
-        taskTitle: task.title,
-        task: 'View task',
-      };
+  return taskRows.map((task) => {
+    const sourceLabel = mapTaskSource(task.surface);
+    const usage = usageByTaskId[task.id];
+    const value = getTaskMetricValue(metric, usage);
+    const values: Record<string, string> = {
+      date: formatAnalyticsDateTime(task.timestamp),
+      user: task.userDimension.label,
+      project: task.projectLabel,
+      source: sourceLabel,
+      taskTitle: task.title,
+      task: 'View task',
+    };
 
-      if (metric === 'tokens') {
-        values.tokens = formatTaskMetricDetailValue(metric, usage);
-      } else if (metric === 'cost') {
-        values.cost = formatTaskMetricDetailValue(metric, usage);
-      }
+    if (metric === 'tokens') {
+      values.tokens = formatTaskMetricDetailValue(metric, usage);
+    } else if (metric === 'cost') {
+      values.cost = formatTaskMetricDetailValue(metric, usage);
+    }
 
-      return {
+    return {
+      id: task.id,
+      timestamp: task.timestamp,
+      value,
+      dimensions: {
+        user: task.userDimension,
+        project: createLabelBackedDimensionValue(task.projectLabel),
+        source: createLabelBackedDimensionValue(sourceLabel),
+      },
+      details: {
         id: task.id,
-        timestamp: task.timestamp,
-        value,
-        dimensions: {
-          user: task.userDimension,
-          project: createLabelBackedDimensionValue(task.projectLabel),
-          source: createLabelBackedDimensionValue(sourceLabel),
-          model: task.modelDimension,
+        values,
+        links: {
+          task: `/task/${task.id}`,
         },
-        details: {
-          id: task.id,
-          values,
-          links: {
-            task: `/task/${task.id}`,
-          },
-        },
-      } satisfies AnalyticsRow;
-    }),
-  );
-
-  for (const row of rows) {
-    if (row.dimensions.user) {
-      row.details.values.user = row.dimensions.user.label;
-    }
-    if (row.dimensions.model) {
-      row.details.values.model = row.dimensions.model.label;
-    }
-  }
-
-  return rows;
+      },
+    } satisfies AnalyticsRow;
+  });
 }
 
 type TaskAnalyticsBaseRow = {
@@ -1201,7 +1171,6 @@ type TaskAnalyticsBaseRow = {
   surface: TaskSurface;
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
-  modelDimension: AnalyticsDimensionValue;
 };
 
 async function getTaskAnalyticsBaseRows(
@@ -1211,7 +1180,7 @@ async function getTaskAnalyticsBaseRows(
 ): Promise<TaskAnalyticsBaseRow[]> {
   const cutoff = getTimeCutoff(timePeriod, now);
 
-  // Single-table read: creator, source, model, and repo are all columns on tasks.
+  // Single-table read: creator, source, and repo are all columns on tasks.
   const taskResults = await db
     .select({
       id: tasks.id,
@@ -1219,7 +1188,6 @@ async function getTaskAnalyticsBaseRows(
       timestamp: tasks.createdAt,
       repositoryName: tasks.repositoryName,
       surface: tasks.surface,
-      model: tasks.model,
       initiatorKind: tasks.initiatorKind,
       initiatorUserId: tasks.initiatorUserId,
       initiatorAutomation: tasks.initiatorAutomation,
@@ -1237,10 +1205,9 @@ async function getTaskAnalyticsBaseRows(
     ? taskResults.filter((task) => task.timestamp >= cutoff)
     : taskResults;
 
-  const [latestRunsByTaskId, modelDisplayNames] = await Promise.all([
-    getLatestTaskRunsByTaskId(filteredTasks.map((task) => task.id)),
-    getTaskModelDisplayNameMap(filteredTasks.map((task) => task.model)),
-  ]);
+  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(
+    filteredTasks.map((task) => task.id),
+  );
 
   const environmentIds = [
     ...new Set(
@@ -1300,12 +1267,6 @@ async function getTaskAnalyticsBaseRows(
     return NO_PROJECT_LABEL;
   }
 
-  function getModelDimension(modelId: string) {
-    const label = modelDisplayNames.get(modelId) ?? modelId;
-
-    return createDimensionValue(modelId, label, modelId);
-  }
-
   return filteredTasks.map((task) => {
     const latestRun = latestRunsByTaskId[task.id];
     const payload = latestRun?.payload;
@@ -1326,7 +1287,6 @@ async function getTaskAnalyticsBaseRows(
       surface: task.surface,
       projectLabel: getProjectLabel(task.repositoryName, environmentId),
       userDimension,
-      modelDimension: getModelDimension(task.model),
     } satisfies TaskAnalyticsBaseRow;
   });
 }
@@ -1488,15 +1448,14 @@ function getAnalyticsDetailsColumns(
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
-        { key: 'model', label: 'Model' },
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
 
       if (metric === 'tokens') {
-        columns.splice(6, 0, { key: 'tokens', label: 'Tokens' });
+        columns.splice(5, 0, { key: 'tokens', label: 'Tokens' });
       } else if (metric === 'cost') {
-        columns.splice(6, 0, { key: 'cost', label: 'Cost (USD)' });
+        columns.splice(5, 0, { key: 'cost', label: 'Cost (USD)' });
       }
 
       return columns;
@@ -1535,12 +1494,7 @@ export async function getAnalyticsChartData(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const granularity = getResolvedGranularity(
     input.timePeriod,
     input.granularity,
@@ -1568,12 +1522,7 @@ export async function getPullRequestAnalyticsOverview(
   now: Date = new Date(),
 ): Promise<PullRequestAnalyticsOverviewResponse> {
   const rows = await getPullRequestAnalyticsRows(auth, input.timePeriod, now);
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    'pullRequests',
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const granularity = getResolvedGranularity(
     input.timePeriod,
     input.granularity,
@@ -1642,12 +1591,7 @@ export async function getAnalyticsExportData(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
     ? input.viewBy
     : getDefaultAnalyticsViewBy(input.object);
@@ -1686,12 +1630,7 @@ export async function getAnalyticsDetails(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
     ? input.viewBy
     : getDefaultAnalyticsViewBy(input.object);
