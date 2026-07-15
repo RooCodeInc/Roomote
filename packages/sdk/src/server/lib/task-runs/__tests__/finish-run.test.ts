@@ -1789,27 +1789,21 @@ describe('finishRun', () => {
       );
     });
 
-    it('posts setup completion once into the Discord setup thread', async () => {
-      const origin = process.env.R_APP_URL || 'http://localhost:13000';
+    it('does not post a setup completion message when setup onboarding completes', async () => {
       mockFindFirstRun.mockResolvedValue(
         makeRun({ payload: discordPayload }, { workflow: 'setup_onboarding' }),
       );
 
       await finishRun({ id: 1, status: RunStatus.Completed });
 
-      expect(mockRedisSet).toHaveBeenCalledWith(
-        'discord:setup-completion:task-1',
-        '1',
-        'EX',
-        30 * 24 * 60 * 60,
-        'NX',
+      expect(mockRedisSet).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^discord:setup-completion:/),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
       );
-      expect(mockDiscordPostMessage).toHaveBeenCalledWith({
-        channelId: 'channel-1',
-        threadId: 'thread-1',
-        text: `Setup for the repo project is done. Continue on the web: [Open setup](${origin}/setup?utm_source=discord&utm_medium=link&utm_campaign=setup.onboarding.completed).`,
-        textFormat: 'markdown',
-      });
+      expect(mockDiscordPostMessage).not.toHaveBeenCalled();
     });
 
     it('does not fail finalization when Discord delivery fails', async () => {
