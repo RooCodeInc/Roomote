@@ -5,9 +5,11 @@ import {
 } from '@roomote/types';
 import {
   type TaskRun,
+  and,
   db,
   eq,
   recordTaskRunLifecycleEvent,
+  sql,
   taskRuns,
 } from '@roomote/db/server';
 
@@ -90,23 +92,6 @@ export async function notifySourceRunOnSettle(
       return;
     }
 
-    // At-most-once guard: re-read the row so a concurrent finalization path
-    // (e.g. idle followed by a later completed) observes a prior delivery.
-    const currentRow = await db.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, run.id),
-      columns: { result: true },
-    });
-    const currentResult =
-      currentRow?.result &&
-      typeof currentRow.result === 'object' &&
-      !Array.isArray(currentRow.result)
-        ? (currentRow.result as Record<string, unknown>)
-        : {};
-
-    if (currentResult[NOTIFIED_RESULT_KEY]) {
-      return;
-    }
-
     const sourceRun = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, run.sourceRunId),
       columns: {
@@ -125,6 +110,28 @@ export async function notifySourceRunOnSettle(
       isExitedRunStatus(sourceRun.status) ||
       !sourceRun.sandboxServerUrl
     ) {
+      return;
+    }
+
+    // Atomically claim delivery before sending: a conditional JSONB update
+    // that only succeeds while the marker is absent, so concurrent
+    // finalizations (e.g. idle racing a later completed) cannot both send.
+    // A claim whose send then fails is not retried — at-most-once — and the
+    // failure is recorded as a run event below.
+    const claimed = await db
+      .update(taskRuns)
+      .set({
+        result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, to_jsonb(now()))`,
+      })
+      .where(
+        and(
+          eq(taskRuns.id, run.id),
+          sql`(${taskRuns.result} -> ${NOTIFIED_RESULT_KEY}) is null`,
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimed.length === 0) {
       return;
     }
 
@@ -148,13 +155,6 @@ export async function notifySourceRunOnSettle(
           source: 'task-settled',
         }),
     });
-
-    await db
-      .update(taskRuns)
-      .set({
-        result: { ...currentResult, [NOTIFIED_RESULT_KEY]: new Date() },
-      })
-      .where(eq(taskRuns.id, run.id));
 
     await recordTaskRunLifecycleEvent(db, {
       runId: run.id,

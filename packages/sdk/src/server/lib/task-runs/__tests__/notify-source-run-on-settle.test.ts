@@ -2,7 +2,7 @@ import { RunStatus } from '@roomote/types';
 import type { TaskRun } from '@roomote/db/server';
 
 const mockFindFirstRun = vi.fn();
-const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
+const mockClaimReturning = vi.fn();
 const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockWithSandboxServerRpcClient = vi.fn().mockResolvedValue({
   success: true,
@@ -17,12 +17,16 @@ vi.mock('@roomote/db/server', () => ({
     },
     update: vi.fn(() => ({
       set: vi.fn(() => ({
-        where: (...args: unknown[]) => mockUpdateWhere(...args),
+        where: vi.fn(() => ({
+          returning: (...args: unknown[]) => mockClaimReturning(...args),
+        })),
       })),
     })),
   },
+  and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
-  taskRuns: { id: 'task_runs.id' },
+  sql: vi.fn(),
+  taskRuns: { id: 'task_runs.id', result: 'task_runs.result' },
   recordTaskRunLifecycleEvent: (...args: unknown[]) =>
     mockRecordTaskRunLifecycleEvent(...args),
 }));
@@ -50,14 +54,6 @@ function makeSettledRun(overrides: Partial<SettledRun> = {}): SettledRun {
   } as SettledRun;
 }
 
-function mockParentRunLookup(parent: Record<string, unknown> | null) {
-  // First findFirst call re-reads the child row (at-most-once guard); the
-  // second resolves the parent run.
-  mockFindFirstRun
-    .mockResolvedValueOnce({ result: null })
-    .mockResolvedValueOnce(parent);
-}
-
 const activeParent = {
   id: 100,
   taskId: 'parent-task',
@@ -66,12 +62,17 @@ const activeParent = {
 };
 
 describe('notifySourceRunOnSettle', () => {
+  beforeEach(() => {
+    // Default: claim succeeds (marker was absent).
+    mockClaimReturning.mockResolvedValue([{ id: 200 }]);
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
   });
 
   it('delivers a settle prompt to the launching run and records delivery', async () => {
-    mockParentRunLookup(activeParent);
+    mockFindFirstRun.mockResolvedValueOnce(activeParent);
 
     const sendPromptMutate = vi.fn().mockResolvedValue({ success: true });
     mockWithSandboxServerRpcClient.mockImplementationOnce(
@@ -100,12 +101,12 @@ describe('notifySourceRunOnSettle', () => {
     expect(promptArg.prompt).toContain('child-task');
     expect(promptArg.prompt).toContain('completed');
     expect(promptArg.prompt).toContain('environment setup state is: completed');
-    expect(mockUpdateWhere).toHaveBeenCalledTimes(1);
+    expect(mockClaimReturning).toHaveBeenCalledTimes(1);
     expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledTimes(1);
   });
 
   it('includes the error and setup state for failed runs', async () => {
-    mockParentRunLookup(activeParent);
+    mockFindFirstRun.mockResolvedValueOnce(activeParent);
 
     const sendPromptMutate = vi.fn().mockResolvedValue({ success: true });
     mockWithSandboxServerRpcClient.mockImplementationOnce(
@@ -150,40 +151,52 @@ describe('notifySourceRunOnSettle', () => {
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
   });
 
-  it('skips delivery when it already notified once', async () => {
-    mockFindFirstRun.mockResolvedValueOnce({
-      result: { sourceRunSettleNotifiedAt: '2026-07-14T00:00:00Z' },
-    });
+  it('skips delivery when another finalization already claimed it', async () => {
+    mockFindFirstRun.mockResolvedValueOnce(activeParent);
+    mockClaimReturning.mockResolvedValueOnce([]);
 
     await notifySourceRunOnSettle(makeSettledRun(), RunStatus.Idle);
 
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
   });
 
-  it('skips same-task resume chains', async () => {
-    mockParentRunLookup({ ...activeParent, taskId: 'child-task' });
+  it('skips same-task resume chains without claiming', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({
+      ...activeParent,
+      taskId: 'child-task',
+    });
 
     await notifySourceRunOnSettle(makeSettledRun(), RunStatus.Completed);
 
+    expect(mockClaimReturning).not.toHaveBeenCalled();
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
   });
 
-  it('skips exited or sandbox-less launching runs', async () => {
-    mockParentRunLookup({ ...activeParent, status: RunStatus.Completed });
+  it('skips exited or sandbox-less launching runs without claiming', async () => {
+    mockFindFirstRun.mockResolvedValueOnce({
+      ...activeParent,
+      status: RunStatus.Completed,
+    });
 
     await notifySourceRunOnSettle(makeSettledRun(), RunStatus.Completed);
 
+    expect(mockClaimReturning).not.toHaveBeenCalled();
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
 
-    mockParentRunLookup({ ...activeParent, sandboxServerUrl: null });
+    mockFindFirstRun.mockResolvedValueOnce({
+      ...activeParent,
+      sandboxServerUrl: null,
+    });
 
     await notifySourceRunOnSettle(makeSettledRun(), RunStatus.Completed);
 
+    expect(mockClaimReturning).not.toHaveBeenCalled();
     expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
   });
 
   it('never throws when delivery fails, and records the failure', async () => {
-    mockParentRunLookup(activeParent);
+    mockFindFirstRun.mockResolvedValueOnce(activeParent);
     mockWithSandboxServerRpcClient.mockRejectedValueOnce(
       new Error('sandbox unreachable'),
     );
@@ -192,7 +205,7 @@ describe('notifySourceRunOnSettle', () => {
       notifySourceRunOnSettle(makeSettledRun(), RunStatus.Completed),
     ).resolves.toBeUndefined();
 
-    expect(mockUpdateWhere).not.toHaveBeenCalled();
+    expect(mockClaimReturning).toHaveBeenCalledTimes(1);
     expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

@@ -230,8 +230,12 @@ export const finishRun = async ({
   // Deterministic spawned-task feedback: when this run was launched by
   // another task's run with notify-on-settle requested, deliver the outcome
   // into that launching run's session (waking it if idle) so the parent
-  // never has to poll for it. Never throws.
-  await notifySourceRunOnSettle(run, status);
+  // never has to poll for it. Never throws. `run` was read before the
+  // transaction, so splice in the error that was just finalized.
+  await notifySourceRunOnSettle(
+    { ...run, error: sanitizedError ?? run.error },
+    status,
+  );
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
