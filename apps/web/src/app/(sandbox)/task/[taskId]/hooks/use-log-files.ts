@@ -150,7 +150,6 @@ export function useLogFiles(
 
   return logfiles;
 }
-
 function logfilesFromSetupStatus(
   commands: Array<{
     repository: string;
@@ -163,47 +162,21 @@ function logfilesFromSetupStatus(
       Boolean(command.logFile),
   );
 
-  const nameCounts = new Map<string, number>();
+  const baseLabelCounts = new Map<string, number>();
 
   for (const command of withLogs) {
-    nameCounts.set(command.name, (nameCounts.get(command.name) ?? 0) + 1);
-  }
-
-  const preferredLabels = withLogs.map((command) => {
     const baseLabel = setupLogBaseLabel(command.name);
-    const ambiguousName = (nameCounts.get(command.name) ?? 0) > 1;
-
-    // Use the full repository id so owner-a/web and owner-b/web do not collapse.
-    return ambiguousName ? `${baseLabel} (${command.repository})` : baseLabel;
-  });
-
-  const preferredLabelCounts = new Map<string, number>();
-
-  for (const label of preferredLabels) {
-    preferredLabelCounts.set(label, (preferredLabelCounts.get(label) ?? 0) + 1);
+    baseLabelCounts.set(baseLabel, (baseLabelCounts.get(baseLabel) ?? 0) + 1);
   }
 
-  const preferredLabelSeen = new Map<string, number>();
-
-  return withLogs.map((command, index) => {
-    const preferredLabel = preferredLabels[index]!;
-    const totalWithLabel = preferredLabelCounts.get(preferredLabel) ?? 1;
-
-    if (totalWithLabel === 1) {
-      return {
-        label: preferredLabel,
-        filePath: command.logFile,
-      };
-    }
-
-    // Same repository + command name (or any remaining label collision): number
-    // the second and later rows so each dropdown entry is distinct.
-    const occurrence = (preferredLabelSeen.get(preferredLabel) ?? 0) + 1;
-    preferredLabelSeen.set(preferredLabel, occurrence);
+  return withLogs.map((command) => {
+    const baseLabel = setupLogBaseLabel(command.name);
+    const needsRepoDisambiguation = (baseLabelCounts.get(baseLabel) ?? 0) > 1;
 
     return {
-      label:
-        occurrence === 1 ? preferredLabel : `${preferredLabel} ${occurrence}`,
+      label: needsRepoDisambiguation
+        ? `${baseLabel} (${shortRepositoryName(command.repository)})`
+        : baseLabel,
       filePath: command.logFile,
     };
   });
@@ -213,6 +186,11 @@ function setupLogBaseLabel(commandName: string): string {
   return `Setup: ${commandName}`;
 }
 
+function shortRepositoryName(repository: string): string {
+  return repository.includes('/')
+    ? (repository.split('/').pop() ?? repository)
+    : repository;
+}
 function mergeLogFiles(
   environmentLogfiles: LogfileInfo[],
   additionalLogfiles: LogfileInfo[],
