@@ -538,11 +538,16 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   }
 
   /**
-   * Cancel the current task and keep the sandbox in a resumable stopped state.
+   * Cancel the current task. Soft cancel keeps the sandbox in a resumable
+   * stopped state. Pass `terminate: true` for provider Cancel buttons so the
+   * sandbox shuts down and the run can finalize as canceled.
    * Pass `cancelledBy` only for explicit user stops — it makes the harness
    * leave a visible `task_cancelled` marker in the transcript.
    */
-  cancelTask(options?: { cancelledBy?: CancelTaskAttribution }): void {
+  cancelTask(options?: {
+    cancelledBy?: CancelTaskAttribution;
+    terminate?: boolean;
+  }): void {
     const canCancelRunningTask = this.phase === 'running';
     const canCancelUserInputTask = this.phase === 'waiting_for_user_input';
 
@@ -559,16 +564,26 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       !canCancelResumingTask
     ) {
       this.logger.warn('[HarnessManager#cancelTask] No active task');
+
+      // Terminal cancel still tears the sandbox down even if the turn already
+      // settled — provider Cancel should never leave a live machine behind.
+      if (options?.terminate && this.phase !== 'shutting_down') {
+        this.state.cancelTriggeredAt =
+          this.state.cancelTriggeredAt ?? Date.now();
+        this.state.taskAbortedAt = this.state.taskAbortedAt ?? Date.now();
+        this.triggerShutdown();
+      }
+
       return;
     }
 
     if (this.state.sessionId) {
       this.logger.info(
-        `[HarnessManager#cancelTask] Canceling task ${this.state.sessionId}`,
+        `[HarnessManager#cancelTask] Canceling task ${this.state.sessionId}${options?.terminate ? ' (terminal)' : ''}`,
       );
     } else {
       this.logger.info(
-        '[HarnessManager#cancelTask] Canceling active task (taskId not known yet)',
+        `[HarnessManager#cancelTask] Canceling active task (taskId not known yet)${options?.terminate ? ' (terminal)' : ''}`,
       );
     }
 
@@ -581,6 +596,13 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         ? { data: { cancelledBy: options.cancelledBy } }
         : {}),
     });
+
+    if (options?.terminate) {
+      // Stamp abort so finalization maps to Canceled even if the harness
+      // abort event races with process teardown.
+      this.state.taskAbortedAt = this.state.taskAbortedAt ?? Date.now();
+      this.triggerShutdown();
+    }
   }
 
   /**

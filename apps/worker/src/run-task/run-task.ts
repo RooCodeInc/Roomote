@@ -1129,7 +1129,10 @@ export const runTask = async ({
       },
     });
     taskCancellation.bindCancelTask(() => {
-      harnessManager?.cancelTask();
+      // Polling/MCP cancel stamps canceledAt on the run row — that is a
+      // terminal intent, so shut the sandbox down instead of leaving a soft
+      // resume hold that outlives the canceled task.
+      harnessManager?.cancelTask({ terminate: true });
     });
     // Close the loop on background environment setup: when it settles while
     // the agent is actively working, push a notification into the session so

@@ -118,10 +118,22 @@ describe('stopTaskRun', () => {
       sandboxServerUrl: 'https://sandbox.example',
       actingUserId: null,
     };
+    const cancelMutate = vi.fn().mockResolvedValue({ success: true });
+    mockWithSandboxServerRpcClient.mockImplementationOnce(
+      async (options: {
+        call: (client: {
+          commands: { cancelTask: { mutate: typeof cancelMutate } };
+        }) => Promise<unknown>;
+      }) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelMutate } },
+        }),
+    );
 
     const result = await stopTaskRun({
       run,
       cancelledBy: { name: 'alice', source: 'slack' },
+      terminate: true,
     });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
@@ -132,6 +144,40 @@ describe('stopTaskRun', () => {
         sandboxServerUrl: 'https://sandbox.example',
       }),
     );
+    expect(cancelMutate).toHaveBeenCalledWith({
+      cancelledBy: { name: 'alice', source: 'slack' },
+      terminate: true,
+    });
+  });
+
+  it('keeps soft stop resumable when terminate is not requested', async () => {
+    const run = {
+      id: 7,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example',
+      actingUserId: 'user-1',
+    };
+    const cancelMutate = vi.fn().mockResolvedValue({ success: true });
+    mockWithSandboxServerRpcClient.mockImplementationOnce(
+      async (options: {
+        call: (client: {
+          commands: { cancelTask: { mutate: typeof cancelMutate } };
+        }) => Promise<unknown>;
+      }) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelMutate } },
+        }),
+    );
+
+    await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      cancelledBy: { source: 'web' },
+    });
+
+    expect(cancelMutate).toHaveBeenCalledWith({
+      cancelledBy: { source: 'web' },
+    });
   });
 
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {

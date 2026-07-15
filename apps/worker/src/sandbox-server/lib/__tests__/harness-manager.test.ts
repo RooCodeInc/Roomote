@@ -667,7 +667,7 @@ describe('HarnessManager cancelTask', () => {
     }
   });
 
-  it('forwards user-stop attribution to the harness cancel command', () => {
+  it('forwards user-stop attribution to the harness cancel command', async () => {
     const { harness, manager } = createManager();
 
     try {
@@ -682,6 +682,53 @@ describe('HarnessManager cancelTask', () => {
         commandName: TaskCommandName.CancelTask,
         data: { cancelledBy: { name: 'Daniel', source: 'web' } },
       });
+      expect(manager.getStatus().phase).toBe('stopped');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('shuts the sandbox down when cancel is terminal', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({
+        cancelledBy: { name: 'Ada', source: 'slack' },
+        terminate: true,
+      });
+
+      await expect(shutdownPromise).resolves.toMatchObject({
+        cancelTriggeredAt: expect.any(Number),
+        taskAbortedAt: expect.any(Number),
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(harness.sentCommands.at(-1)).toMatchObject({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Ada', source: 'slack' } },
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('still terminates with no active turn when terminate is requested', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({ terminate: true });
+
+      await expect(shutdownPromise).resolves.toMatchObject({
+        cancelTriggeredAt: expect.any(Number),
+        taskAbortedAt: expect.any(Number),
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
     } finally {
       manager.dispose();
       harness.dispose();

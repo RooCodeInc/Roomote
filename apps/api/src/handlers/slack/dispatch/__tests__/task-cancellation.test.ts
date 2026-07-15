@@ -12,6 +12,8 @@ const {
   postSlackInteractiveResponseMock,
   stopTaskRunMock,
   lookupSlackUserMappingMock,
+  addReactionMock,
+  slackInstallationsFindFirstMock,
 } = vi.hoisted(() => ({
   dbUpdateMock: vi.fn(),
   dbUpdateWhereMock: vi.fn(),
@@ -20,14 +22,21 @@ const {
   postSlackInteractiveResponseMock: vi.fn(),
   stopTaskRunMock: vi.fn(),
   lookupSlackUserMappingMock: vi.fn(),
+  addReactionMock: vi.fn(),
+  slackInstallationsFindFirstMock: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => {
   const original = await importOriginal<typeof import('@roomote/slack')>();
 
+  class MockSlackNotifier {
+    addReaction = addReactionMock;
+  }
+
   return {
     ...original,
     postSlackInteractiveResponse: postSlackInteractiveResponseMock,
+    SlackNotifier: MockSlackNotifier,
   };
 });
 
@@ -41,12 +50,20 @@ vi.mock('@roomote/db/server', () => ({
     actingUserId: 'actingUserId',
     createdAt: 'createdAt',
     canceledAt: 'canceledAt',
+    payload: 'payload',
+  },
+  slackInstallations: {
+    teamId: 'teamId',
+    isActive: 'isActive',
   },
   db: {
     update: dbUpdateMock,
     query: {
       taskRuns: {
         findFirst: dbQueryFindFirstMock,
+      },
+      slackInstallations: {
+        findFirst: slackInstallationsFindFirstMock,
       },
     },
   },
@@ -123,6 +140,10 @@ describe('handleTaskCancellation', () => {
     lookupSlackUserMappingMock.mockResolvedValue({
       activeMapping: null,
       hasInactiveMapping: false,
+    });
+    addReactionMock.mockResolvedValue(true);
+    slackInstallationsFindFirstMock.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
     });
   });
 
@@ -218,6 +239,10 @@ describe('handleTaskCancellation', () => {
       status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.com',
       actingUserId: null,
+      payload: {
+        channel: 'C123',
+        ts: '1710000000.100',
+      },
     });
     lookupSlackUserMappingMock.mockResolvedValueOnce({
       activeMapping: {
@@ -251,13 +276,23 @@ describe('handleTaskCancellation', () => {
         status: RunStatus.Running,
         sandboxServerUrl: 'http://sandbox.example.com',
         actingUserId: null,
+        payload: {
+          channel: 'C123',
+          ts: '1710000000.100',
+        },
       },
       authUserId: 'roomote-user-1',
       allowDirectCancelWithoutSandbox: true,
+      terminate: true,
       cancelledBy: {
         name: 'alice',
         source: 'slack',
       },
+    });
+    expect(addReactionMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: '1710000000.100',
+      name: 'x',
     });
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://slack.test/response',
@@ -274,6 +309,10 @@ describe('handleTaskCancellation', () => {
       status: RunStatus.Running,
       sandboxServerUrl: 'http://sandbox.example.com',
       actingUserId: null,
+      payload: {
+        channel: 'C123',
+        ts: '1710000000.100',
+      },
     });
 
     await handleTaskCancellation(
@@ -289,8 +328,70 @@ describe('handleTaskCancellation', () => {
       expect.objectContaining({
         authUserId: null,
         allowDirectCancelWithoutSandbox: true,
+        terminate: true,
       }),
     );
+    expect(addReactionMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: '1710000000.100',
+      name: 'x',
+    });
+    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
+      'https://slack.test/response',
+      expect.objectContaining({
+        replace_original: true,
+      }),
+    );
+  });
+
+  it('skips the cancel reaction when the origin message ts is missing', async () => {
+    dbQueryFindFirstMock.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.com',
+      actingUserId: null,
+      payload: { channel: 'C123' },
+    });
+
+    await handleTaskCancellation(
+      buildCancellationPayload(
+        JSON.stringify({
+          taskId: 'task-1',
+          slackUserId: 'U123',
+        }),
+      ),
+    );
+
+    expect(addReactionMock).not.toHaveBeenCalled();
+    expect(stopTaskRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({ terminate: true }),
+    );
+  });
+
+  it('still replaces the cancel message when adding the x reaction fails', async () => {
+    dbQueryFindFirstMock.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.com',
+      actingUserId: null,
+      payload: {
+        channel: 'C123',
+        ts: '1710000000.100',
+      },
+    });
+    addReactionMock.mockRejectedValueOnce(new Error('slack unavailable'));
+
+    await handleTaskCancellation(
+      buildCancellationPayload(
+        JSON.stringify({
+          taskId: 'task-1',
+          slackUserId: 'U123',
+        }),
+      ),
+    );
+
     expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
       'https://slack.test/response',
       expect.objectContaining({
