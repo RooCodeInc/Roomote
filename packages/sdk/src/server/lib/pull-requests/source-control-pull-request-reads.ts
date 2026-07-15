@@ -2100,7 +2100,7 @@ async function listGitLabMergeRequests({
             : {}),
         },
       ),
-      tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+      tokenHeader: buildGitLabTokenHeader(token),
       schema: gitLabMergeRequestListPageSchema,
     });
 

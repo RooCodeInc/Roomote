@@ -3,6 +3,7 @@ const {
   mockGetTaskUrl,
   mockGetGiteaAutomationTargets,
   mockCreateGiteaPullRequestComment,
+  mockGetGiteaDeploymentUser,
   mockFindActiveGitHubPrReviewTask,
   mockFindReusableGitHubPrFollowUpOwner,
   mockSendMessageToTask,
@@ -12,6 +13,7 @@ const {
   mockGetTaskUrl: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
   mockCreateGiteaPullRequestComment: vi.fn(),
+  mockGetGiteaDeploymentUser: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockSendMessageToTask: vi.fn(),
@@ -25,6 +27,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/gitea', () => ({
   createGiteaPullRequestComment: mockCreateGiteaPullRequestComment,
+  getGiteaDeploymentUser: mockGetGiteaDeploymentUser,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -107,11 +110,13 @@ describe('handleGiteaComment', () => {
     mockGetTaskUrl.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
     mockCreateGiteaPullRequestComment.mockReset();
+    mockGetGiteaDeploymentUser.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
     mockSendMessageToTask.mockReset();
     mockSteerMessageToTask.mockReset();
 
+    mockGetGiteaDeploymentUser.mockResolvedValue(null);
     mockGetGiteaAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [
@@ -370,6 +375,26 @@ describe('handleGiteaComment', () => {
       makeCommentPayload({
         sender: { id: 11, login: 'roomote-bot' },
         comment: { user: { id: 11, login: 'roomote-bot' } },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'roomote_authored_comment',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('ignores comments from the deployment token identity even without a roomote username prefix', async () => {
+    mockGetGiteaDeploymentUser.mockResolvedValue({
+      id: 99,
+      login: 'deploy-bot',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 99, login: 'deploy-bot' },
+        comment: { user: { id: 99, login: 'deploy-bot' } },
       }),
     );
 
