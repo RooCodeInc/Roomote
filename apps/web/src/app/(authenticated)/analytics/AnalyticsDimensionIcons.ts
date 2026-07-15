@@ -2,7 +2,10 @@ import type { ComponentType } from 'react';
 
 import type { AnalyticsDimension } from '@/types';
 import {
+  Brain,
   CircleUserRound,
+  Bot,
+  Cpu,
   FolderIcon,
   GitPullRequest,
   RadioTower,
@@ -19,4 +22,7 @@ export const ANALYTICS_DIMENSION_ICONS: Record<
   status: GitPullRequest,
   repo: FolderIcon,
   author: CircleUserRound,
+  taskType: Bot,
+  provider: Cpu,
+  model: Brain,
 };

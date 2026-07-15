@@ -13,6 +13,10 @@ export {
 } from './trpc';
 
 export { finishRun } from './lib/task-runs/finish-run';
+export {
+  recordLlmUsage,
+  type RecordLlmUsageInput,
+} from './lib/task-runs/record-task-inference-usage';
 export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {

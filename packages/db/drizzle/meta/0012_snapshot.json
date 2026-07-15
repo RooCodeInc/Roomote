@@ -1,6 +1,6 @@
 {
-  "id": "e291b2c2-88ae-4e81-b6fc-4fbfec078554",
-  "prevId": "05a8029f-e2aa-4192-a6b5-32234bc1a149",
+  "id": "e70d8421-f02c-485f-b986-de3f82e5fe73",
+  "prevId": "e291b2c2-88ae-4e81-b6fc-4fbfec078554",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1752,6 +1752,31 @@
         },
         "declarative_source": {
           "name": "declarative_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "is_verified": {
+          "name": "is_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "verification_task_id": {
+          "name": "verification_task_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verified_at": {
+          "name": "verified_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verification_error": {
+          "name": "verification_error",
           "type": "text",
           "primaryKey": false,
           "notNull": false

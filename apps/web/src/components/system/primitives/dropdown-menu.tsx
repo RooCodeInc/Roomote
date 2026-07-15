@@ -7,7 +7,13 @@ import { useControllableState } from '@radix-ui/react-use-controllable-state';
 import { CheckIcon, ChevronRightIcon, CircleIcon } from 'lucide-react';
 import { cva, type VariantProps } from 'class-variance-authority';
 
-import { Drawer, DrawerContent, DrawerTitle, DrawerTrigger } from './drawer';
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerTitle,
+  DrawerTrigger,
+} from './drawer';
 import { Tooltip, TooltipContent, TooltipTrigger } from './tooltip';
 import {
   Collapsible,
@@ -149,11 +155,15 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         overlayClassName="z-popover"
         className={cn(
-          'z-popover bg-popover text-popover-foreground px-0 pb-2 pt-1 data-[vaul-drawer-direction=bottom]:w-full data-[vaul-drawer-direction=bottom]:max-h-[80vh]',
+          'z-popover bg-popover text-popover-foreground px-0 pb-2 pt-1',
           className,
+          'data-[vaul-drawer-direction=bottom]:w-full data-[vaul-drawer-direction=bottom]:max-w-none data-[vaul-drawer-direction=bottom]:max-h-[80vh]',
         )}
       >
         <DrawerTitle className="sr-only">Menu</DrawerTitle>
+        <DrawerDescription className="sr-only">
+          Choose an option from the menu.
+        </DrawerDescription>
         <div className="max-h-[80vh] overflow-y-auto p-2">{props.children}</div>
       </DrawerContent>
     );
