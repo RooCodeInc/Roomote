@@ -2,6 +2,7 @@ import { createEnv } from '@t3-oss/env-nextjs';
 import {
   DEFAULT_LOCAL_DOCKER_WORKER_IMAGE,
   resolveEffectiveDockerWorkerImage,
+  ROOMOTE_CLOUD_BACKENDS,
   TASK_SANDBOX_DOCKER_MEMORY_MIB,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -205,6 +206,7 @@ const serverSchema = {
   // the hosting operator's provisioning rather than the setup flow).
   ROOMOTE_CLOUD_TOKEN_ID: z.string().optional(),
   ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
+  ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -420,6 +422,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_TOKEN_SECRET',
   'ROOMOTE_CLOUD_TOKEN_ID',
   'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_BACKEND',
   'MODAL_ENDPOINT',
   'MODAL_ENVIRONMENT',
   'MODAL_APP_NAME',

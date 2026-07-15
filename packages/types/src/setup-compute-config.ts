@@ -245,10 +245,14 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
       {
         // Deployment-managed credentials: seeded into the process env by the
         // hosting operator, never collected from the setup/Settings UI. When
-        // they are absent the provider is not offered in the picker
-        // (infrastructureSatisfied is false).
+        // the secret is absent the provider is not offered in the picker
+        // (infrastructureSatisfied is false). The id slot is optional because
+        // backend engines differ in credential shape (Modal uses id+secret;
+        // API-key engines use only the secret) — spawn-time validation is
+        // backend-specific.
         envVarName: 'ROOMOTE_CLOUD_TOKEN_ID',
         label: 'Roomote Cloud Token ID',
+        required: false,
         category: 'infrastructure',
       },
       {
@@ -258,8 +262,16 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
       },
       {
-        // Shared with the Modal provider: Roomote Cloud runs on Modal, and
-        // the base image derives from the deployment's worker image.
+        // Selects the engine backing the managed provider (default modal).
+        // See ROOMOTE_CLOUD_BACKENDS in compute-providers/roomote-cloud.ts.
+        envVarName: 'ROOMOTE_CLOUD_BACKEND',
+        label: 'Roomote Cloud Backend',
+        required: false,
+        category: 'infrastructure',
+      },
+      {
+        // Shared with the Modal provider: the default backend runs on Modal,
+        // and the base image derives from the deployment's worker image.
         envVarName: 'MODAL_BASE_IMAGE_REF',
         label: 'Base Image Reference',
         category: 'infrastructure',
@@ -517,6 +529,7 @@ export function isAutoProvisionedComputeArtifactField(
 const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'ROOMOTE_CLOUD_TOKEN_ID',
   'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_BACKEND',
 ]);
 
 /**

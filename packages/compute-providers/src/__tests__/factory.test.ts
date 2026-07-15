@@ -131,6 +131,34 @@ describe('createComputeProviderClient', () => {
     ).toThrow('Missing ROOMOTE_CLOUD_TOKEN_ID');
   });
 
+  it('accepts the explicit modal backend and rejects unsupported backends', () => {
+    createComputeProviderClient({
+      provider: 'roomote',
+      envFallback: {
+        ROOMOTE_CLOUD_BACKEND: 'modal',
+        ROOMOTE_CLOUD_TOKEN_ID: 'rc-token-id',
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-token-secret',
+        MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+      },
+    });
+
+    expect(modalClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ vendor: 'roomote' }),
+    );
+
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'roomote',
+        envFallback: {
+          ROOMOTE_CLOUD_BACKEND: 'e2b',
+          ROOMOTE_CLOUD_TOKEN_ID: 'rc-token-id',
+          ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-token-secret',
+          MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+        },
+      }),
+    ).toThrow('Unsupported ROOMOTE_CLOUD_BACKEND "e2b"');
+  });
+
   it('resolves Modal private registry credentials from env', () => {
     process.env.MODAL_REGISTRY_USERNAME = 'ghcr-user';
     process.env.MODAL_REGISTRY_PASSWORD = 'ghcr-token';

@@ -1,6 +1,7 @@
 import {
   resolveConfiguredComputeProviderResources,
   resolveEffectiveModalBaseImageRef,
+  resolveRoomoteCloudBackend,
   SANDBOX_DEFAULT_MEMORY_MIB,
   SANDBOX_DEFAULT_VCPUS,
 } from '@roomote/types';
@@ -51,10 +52,21 @@ export function createComputeProviderClient(
     options.envFallback?.[name] ?? process.env[name];
 
   switch (options.provider) {
-    // Roomote Cloud is the deployment-managed flavor of the Modal provider:
-    // same machinery, credentials from ROOMOTE_CLOUD_TOKEN_ID/SECRET.
+    // Roomote is the deployment-managed provider: credentials come from
+    // ROOMOTE_CLOUD_TOKEN_ID/SECRET, and ROOMOTE_CLOUD_BACKEND selects the
+    // engine that runs its sandboxes. Only the Modal backend exists today,
+    // so both providers share the Modal client construction below; a new
+    // backend adds its branch here after the backend resolution.
     case 'modal':
     case 'roomote': {
+      if (options.provider === 'roomote') {
+        // Throws on an unsupported backend; the resolved value is 'modal'
+        // until more ROOMOTE_CLOUD_BACKENDS exist.
+        resolveRoomoteCloudBackend({
+          ROOMOTE_CLOUD_BACKEND: envValue('ROOMOTE_CLOUD_BACKEND'),
+        });
+      }
+
       const tokenIdEnvVar =
         options.provider === 'roomote'
           ? 'ROOMOTE_CLOUD_TOKEN_ID'

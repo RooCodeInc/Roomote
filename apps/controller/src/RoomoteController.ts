@@ -1,4 +1,7 @@
-import { type ComputeProvider } from '@roomote/types';
+import {
+  resolveRoomoteCloudBackend,
+  type ComputeProvider,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   type TaskRun,
@@ -74,10 +77,19 @@ export class RoomoteController extends BaseController {
     });
 
     switch (provider) {
-      // Roomote Cloud spawns through the Modal path with deployment-managed
-      // credentials, persisting its own vendor on the task run.
+      // Roomote spawns with deployment-managed credentials, persisting its
+      // own vendor on the task run. ROOMOTE_CLOUD_BACKEND selects the engine
+      // backing it; only the Modal backend exists today, so both providers
+      // share the Modal spawn path below — a new backend dispatches to its
+      // own spawn function here after the backend resolution.
       case 'modal':
       case 'roomote': {
+        if (provider === 'roomote') {
+          // Throws on an unsupported backend; the resolved value is 'modal'
+          // until more ROOMOTE_CLOUD_BACKENDS exist.
+          resolveRoomoteCloudBackend(resolvedEnv);
+        }
+
         const modalTokenId =
           provider === 'roomote'
             ? resolvedEnv.ROOMOTE_CLOUD_TOKEN_ID

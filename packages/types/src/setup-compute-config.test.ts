@@ -73,9 +73,11 @@ describe('buildSetupComputeStatus', () => {
   });
 
   it('satisfies Roomote Cloud from deployment-managed runtime env alone', () => {
+    // The token id is deliberately absent: it is optional because backend
+    // engines differ in credential shape (API-key engines use only the
+    // secret slot).
     const status = buildSetupComputeStatus({
       runtimeEnv: {
-        ROOMOTE_CLOUD_TOKEN_ID: 'rc-id',
         ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-secret',
         DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
       },
