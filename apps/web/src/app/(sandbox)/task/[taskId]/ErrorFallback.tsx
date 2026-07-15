@@ -47,6 +47,7 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
     hasConnectedOnce,
     connectionError,
     connectionFailureCategory,
+    reconnect,
     reconnecting,
   } = useSandboxConnectionStatus();
 
@@ -107,7 +108,18 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
             variant="outline"
             size="sm"
             onClick={() => {
-              void session.refreshConnection();
+              void session
+                .refreshConnection()
+                .then((connectionTarget) => {
+                  reconnect(connectionTarget);
+                })
+                .catch((error) => {
+                  console.warn(
+                    '[ConnectionStatusBanner] failed to refresh sandbox connection',
+                    error,
+                  );
+                  reconnect(null);
+                });
             }}
           >
             <RefreshCw />

@@ -203,15 +203,17 @@ describe('ConnectionStatusBanner', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a retry action when initial retries are exhausted', () => {
-    const refreshConnection = vi.fn();
+  it('refreshes and reconnects when initial retries are exhausted', async () => {
+    const connectionTarget = { url: 'https://sandbox.test', token: 'token' };
+    const reconnect = vi.fn();
+    const refreshConnection = vi.fn().mockResolvedValue(connectionTarget);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
       hasConnectedOnce: false,
       connectionError: true,
       connectionFailureCategory: 'backend_unavailable',
       reconnecting: false,
-      reconnect: vi.fn(),
+      reconnect,
     });
 
     render(
@@ -231,9 +233,45 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(refreshConnection).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(connectionTarget);
+    });
     expect(
       screen.queryByText('Lost connection to the live task'),
     ).not.toBeInTheDocument();
+  });
+
+  it('resyncs the session when manual retry refresh fails', async () => {
+    const reconnect = vi.fn();
+    const refreshConnection = vi
+      .fn()
+      .mockRejectedValue(new Error('token unavailable'));
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: false,
+      hasConnectedOnce: false,
+      connectionError: true,
+      connectionFailureCategory: 'backend_unavailable',
+      reconnecting: false,
+      reconnect,
+    });
+
+    render(
+      <ConnectionStatusBanner
+        session={
+          {
+            taskId: 'task-123',
+            hasTransportError: false,
+            refreshConnection,
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(null);
+    });
   });
 
   it('suppresses the lost-connection error while the sleep snapshot is in progress', () => {
@@ -451,8 +489,19 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows a retry action for token/bootstrap failures', () => {
-    const refreshConnection = vi.fn();
+  it('refreshes and reconnects for token/bootstrap failures', async () => {
+    const connectionTarget = { url: 'https://sandbox.test', token: 'token' };
+    const reconnect = vi.fn();
+    const refreshConnection = vi.fn().mockResolvedValue(connectionTarget);
+
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: false,
+      hasConnectedOnce: false,
+      connectionError: false,
+      connectionFailureCategory: null,
+      reconnecting: false,
+      reconnect,
+    });
 
     render(
       <ConnectionStatusBanner
@@ -472,5 +521,8 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(refreshConnection).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(reconnect).toHaveBeenCalledWith(connectionTarget);
+    });
   });
 });

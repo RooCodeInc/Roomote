@@ -628,7 +628,7 @@ export async function getSandboxSessionByTaskIdCommand(
   const onboardingEnvironmentWithVerification = onboardingEnvironment
     ? {
         ...onboardingEnvironment,
-        verificationTaskActive: activeVerificationTaskRun !== null,
+        verificationTaskActive: Boolean(activeVerificationTaskRun),
       }
     : null;
 
