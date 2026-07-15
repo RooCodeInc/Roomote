@@ -27,6 +27,10 @@ export function getWorkerComputeProviderLabel(
     case 'e2b':
     case 'blaxel':
       return provider;
+    // Roomote Cloud workers run inside Modal sandboxes, so worker-side
+    // runtime handling (cgroup layout, usage polling) must match Modal.
+    case 'roomote':
+      return 'modal';
     default: {
       const _exhaustive: never = provider;
       throw new Error(`Unsupported compute provider: ${_exhaustive}`);

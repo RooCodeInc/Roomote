@@ -143,6 +143,11 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'modal',
         envFallback: await resolveComputeProviderEnvValues('modal'),
       });
+    case 'roomote':
+      return createComputeProviderClient({
+        provider: 'roomote',
+        envFallback: await resolveComputeProviderEnvValues('roomote'),
+      });
     case 'daytona':
       return createComputeProviderClient({
         provider: 'daytona',

@@ -74,14 +74,25 @@ export class RoomoteController extends BaseController {
     });
 
     switch (provider) {
-      case 'modal': {
-        const modalTokenId = resolvedEnv.MODAL_TOKEN_ID;
-        const modalTokenSecret = resolvedEnv.MODAL_TOKEN_SECRET;
+      // Roomote Cloud spawns through the Modal path with deployment-managed
+      // credentials, persisting its own vendor on the task run.
+      case 'modal':
+      case 'roomote': {
+        const modalTokenId =
+          provider === 'roomote'
+            ? resolvedEnv.ROOMOTE_CLOUD_TOKEN_ID
+            : resolvedEnv.MODAL_TOKEN_ID;
+        const modalTokenSecret =
+          provider === 'roomote'
+            ? resolvedEnv.ROOMOTE_CLOUD_TOKEN_SECRET
+            : resolvedEnv.MODAL_TOKEN_SECRET;
         const modalBaseImageRef = resolvedEnv.MODAL_BASE_IMAGE_REF;
 
         if (!modalTokenId || !modalTokenSecret) {
           throw new Error(
-            'MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required to spawn Modal workers',
+            provider === 'roomote'
+              ? 'ROOMOTE_CLOUD_TOKEN_ID and ROOMOTE_CLOUD_TOKEN_SECRET are required to spawn Roomote Cloud workers'
+              : 'MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required to spawn Modal workers',
           );
         }
 
@@ -92,6 +103,7 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnModalWorker(taskRun, authToken, {
+          vendor: provider,
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
           modalTokenId,

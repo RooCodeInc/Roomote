@@ -197,7 +197,7 @@ export async function createModalMachine(
       },
     });
 
-  if (computeClient.vendor !== 'modal') {
+  if (computeClient.vendor !== 'modal' && computeClient.vendor !== 'roomote') {
     throw new Error('createModalMachine requires a Modal compute client');
   }
 

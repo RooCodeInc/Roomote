@@ -206,6 +206,12 @@ export interface ComputeProviderClient {
 }
 
 export interface ModalConfig {
+  /**
+   * Vendor identity the client reports (and task runs persist). The
+   * deployment-managed `roomote` provider runs on the same Modal
+   * machinery with its own credentials. Defaults to `modal`.
+   */
+  vendor?: Extract<ComputeProvider, 'modal' | 'roomote'>;
   /** Modal token ID (e.g. `ak-...`). */
   tokenId: string;
   /** Modal token secret (e.g. `as-...`). */
@@ -306,6 +312,15 @@ export interface BlaxelConfig {
 export type ComputeProviderFactoryOptions = (
   | {
       provider: 'modal';
+      config?: ModalConfig;
+    }
+  | {
+      /**
+       * Deployment-managed cloud sandboxes. Runs on the Modal machinery with
+       * credentials from `ROOMOTE_CLOUD_TOKEN_ID` / `ROOMOTE_CLOUD_TOKEN_SECRET`
+       * instead of the operator's own Modal account.
+       */
+      provider: 'roomote';
       config?: ModalConfig;
     }
   | {

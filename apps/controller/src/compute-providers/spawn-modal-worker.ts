@@ -118,6 +118,11 @@ export async function spawnModalWorker(
   taskRun: TaskRun,
   authToken: string,
   config: {
+    /**
+     * Vendor persisted on the task run. `roomote` reuses this Modal
+     * spawn path with deployment-managed credentials. Defaults to `modal`.
+     */
+    vendor?: 'modal' | 'roomote';
     modalTokenId: string;
     modalTokenSecret: string;
     modalEndpoint?: string;
@@ -142,6 +147,7 @@ export async function spawnModalWorker(
   sandboxCmdId?: string;
 }> {
   const {
+    vendor = 'modal',
     modalTokenId,
     modalTokenSecret,
     modalEndpoint,
@@ -265,6 +271,7 @@ export async function spawnModalWorker(
       : sandboxResources.memoryMiB,
   });
   const modalConfig = {
+    vendor,
     tokenId: modalTokenId,
     tokenSecret: modalTokenSecret,
     baseImageRef: modalBaseImageRef,
@@ -335,7 +342,7 @@ export async function spawnModalWorker(
   try {
     await updateTaskRunMachine({
       taskRun,
-      vendor: 'modal',
+      vendor,
       machineId: machine.machineId,
       namedPorts,
       domainFn: (port) => machine.domain(port),

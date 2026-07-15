@@ -221,7 +221,10 @@ export function getDefaultAvailableComputeProvider(
       availableProviders ??
         SETUP_COMPUTE_PROVIDER_CATALOG.map((provider) => ({
           provider: provider.provider,
-          configSatisfied: true,
+          // Without live status, deployment-managed providers (no
+          // operator-editable fields, e.g. Roomote Cloud) cannot be assumed
+          // satisfiable: only their runtime env can configure them.
+          configSatisfied: provider.fields.some(isComputeOperatorEditableField),
         })),
     ).find(
       (provider) =>
@@ -232,6 +235,37 @@ export function getDefaultAvailableComputeProvider(
 }
 
 export const SETUP_COMPUTE_PROVIDER_CATALOG = [
+  {
+    provider: 'roomote',
+    label: 'Roomote',
+    description:
+      'Managed sandboxes preconfigured by your deployment, with snapshot support. Nothing to set up.',
+    supportsSnapshots: true,
+    fields: [
+      {
+        // Deployment-managed credentials: seeded into the process env by the
+        // hosting operator, never collected from the setup/Settings UI. When
+        // they are absent the provider is not offered in the picker
+        // (infrastructureSatisfied is false).
+        envVarName: 'ROOMOTE_CLOUD_TOKEN_ID',
+        label: 'Roomote Cloud Token ID',
+        category: 'infrastructure',
+      },
+      {
+        envVarName: 'ROOMOTE_CLOUD_TOKEN_SECRET',
+        label: 'Roomote Cloud Token Secret',
+        secret: true,
+        category: 'infrastructure',
+      },
+      {
+        // Shared with the Modal provider: Roomote Cloud runs on Modal, and
+        // the base image derives from the deployment's worker image.
+        envVarName: 'MODAL_BASE_IMAGE_REF',
+        label: 'Base Image Reference',
+        category: 'infrastructure',
+      },
+    ],
+  },
   {
     provider: 'modal',
     label: 'Modal',
@@ -477,17 +511,28 @@ export function isAutoProvisionedComputeArtifactField(
 }
 
 /**
+ * Deployment-managed credential env vars (Roomote Cloud) that only the
+ * hosting operator's provisioning sets. Never operator form inputs.
+ */
+const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
+  'ROOMOTE_CLOUD_TOKEN_ID',
+  'ROOMOTE_CLOUD_TOKEN_SECRET',
+]);
+
+/**
  * True for managed Modal / E2B / Daytona / Blaxel worker-image artifact env vars that
  * Settings and setup never collect as form inputs. Process env, derivation
  * from DOCKER_WORKER_IMAGE / RELEASE_VERSION, or detached provisioning owns
- * them.
+ * them. Deployment-managed Roomote Cloud credentials are included: the
+ * hosting operator's provisioning owns them.
  */
 export function isManagedComputeArtifactField(
   field: Pick<SetupComputeFieldDescriptor, 'envVarName'>,
 ): boolean {
   return (
     isAutoProvisionedComputeArtifactField(field) ||
-    field.envVarName === 'MODAL_BASE_IMAGE_REF'
+    field.envVarName === 'MODAL_BASE_IMAGE_REF' ||
+    DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS.has(field.envVarName)
   );
 }
 

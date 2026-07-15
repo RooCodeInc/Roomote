@@ -51,11 +51,23 @@ export function createComputeProviderClient(
     options.envFallback?.[name] ?? process.env[name];
 
   switch (options.provider) {
-    case 'modal': {
-      const tokenId = options.config?.tokenId ?? envValue('MODAL_TOKEN_ID');
+    // Roomote Cloud is the deployment-managed flavor of the Modal provider:
+    // same machinery, credentials from ROOMOTE_CLOUD_TOKEN_ID/SECRET.
+    case 'modal':
+    case 'roomote': {
+      const tokenIdEnvVar =
+        options.provider === 'roomote'
+          ? 'ROOMOTE_CLOUD_TOKEN_ID'
+          : 'MODAL_TOKEN_ID';
+      const tokenSecretEnvVar =
+        options.provider === 'roomote'
+          ? 'ROOMOTE_CLOUD_TOKEN_SECRET'
+          : 'MODAL_TOKEN_SECRET';
+
+      const tokenId = options.config?.tokenId ?? envValue(tokenIdEnvVar);
 
       const tokenSecret =
-        options.config?.tokenSecret ?? envValue('MODAL_TOKEN_SECRET');
+        options.config?.tokenSecret ?? envValue(tokenSecretEnvVar);
 
       // The published worker image doubles as the Modal base image, so a
       // missing ref falls back to the deployment's effective worker image
@@ -88,18 +100,19 @@ export function createComputeProviderClient(
       const modalRegions = parseModalRegions(envValue('MODAL_REGIONS'));
       const configRegions = parseModalRegions(options.config?.regions);
 
-      assertDefined(tokenId, 'Missing MODAL_TOKEN_ID');
-      assertDefined(tokenSecret, 'Missing MODAL_TOKEN_SECRET');
+      assertDefined(tokenId, `Missing ${tokenIdEnvVar}`);
+      assertDefined(tokenSecret, `Missing ${tokenSecretEnvVar}`);
       assertDefined(baseImageRef, 'Missing MODAL_BASE_IMAGE_REF');
 
       const configuredResources = resolveConfiguredComputeProviderResources({
-        provider: 'modal',
+        provider: options.provider,
         configuredCpuCores: options.config?.cpu,
         configuredMemoryMiB: options.config?.memoryMiB,
       });
 
       const config: ModalConfig = {
         ...(options.config ?? {}),
+        vendor: options.config?.vendor ?? options.provider,
         tokenId,
         tokenSecret,
         baseImageRef,

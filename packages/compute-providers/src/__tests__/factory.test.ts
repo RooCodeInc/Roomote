@@ -98,6 +98,39 @@ describe('createComputeProviderClient', () => {
     );
   });
 
+  it('resolves Roomote Cloud credentials from ROOMOTE_CLOUD_* env and reports its vendor', () => {
+    createComputeProviderClient({
+      provider: 'roomote',
+      envFallback: {
+        ROOMOTE_CLOUD_TOKEN_ID: 'rc-token-id',
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-token-secret',
+        MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+      },
+    });
+
+    expect(modalClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        vendor: 'roomote',
+        tokenId: 'rc-token-id',
+        tokenSecret: 'rc-token-secret',
+        baseImageRef: 'ghcr.io/roomote/modal-worker:test',
+      }),
+    );
+  });
+
+  it('does not fall back to MODAL_TOKEN_* for the Roomote Cloud provider', () => {
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'roomote',
+        envFallback: {
+          MODAL_TOKEN_ID: 'modal-token-id',
+          MODAL_TOKEN_SECRET: 'modal-token-secret',
+          MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+        },
+      }),
+    ).toThrow('Missing ROOMOTE_CLOUD_TOKEN_ID');
+  });
+
   it('resolves Modal private registry credentials from env', () => {
     process.env.MODAL_REGISTRY_USERNAME = 'ghcr-user';
     process.env.MODAL_REGISTRY_PASSWORD = 'ghcr-token';

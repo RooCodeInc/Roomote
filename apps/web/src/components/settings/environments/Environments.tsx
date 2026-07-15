@@ -74,7 +74,7 @@ export function Environments() {
   const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b'];
+  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b', 'roomote'];
 
   if (environments.isPending || repositories.isPending) {
     return (

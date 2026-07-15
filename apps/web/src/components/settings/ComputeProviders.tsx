@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  isComputeOperatorEditableField,
   isSetupProvisionableComputeProvider,
   type ComputeProvider,
   type SetupComputeStatus,
@@ -113,7 +114,16 @@ export function ComputeProviders() {
     }),
   );
 
-  const providers: ComputeProviderStatus[] = status.data?.providers ?? [];
+  // Deployment-managed providers (no operator-editable fields, e.g. Roomote
+  // Cloud) have nothing to configure here, so they are only listed when the
+  // deployment already satisfies them.
+  const providers: ComputeProviderStatus[] = (
+    status.data?.providers ?? []
+  ).filter(
+    (provider) =>
+      provider.fields.some(isComputeOperatorEditableField) ||
+      provider.configSatisfied,
+  );
   const effectiveDefaultProvider: ComputeProvider =
     status.data?.persistedDefaultProvider ??
     status.data?.runtimeDefaultProvider ??
