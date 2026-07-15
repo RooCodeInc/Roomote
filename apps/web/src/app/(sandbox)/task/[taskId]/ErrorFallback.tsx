@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { AlertCircle, Spinner } from '@/components/system';
+import { AlertCircle, Button, RefreshCw, Spinner } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
 import { type TaskSession, useSandboxConnectionStatus } from './hooks';
@@ -88,6 +88,34 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
 
   if (!showReconnectState && !showError) {
     return null;
+  }
+
+  if (showInitialConnectionState && showError) {
+    return (
+      <div className="bg-destructive/10 border-card border-b">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3">
+          <AlertCircle className="text-destructive size-4 shrink-0" />
+          <span className="text-destructive min-w-0 flex-1 text-sm">
+            {getErrorMessage({
+              hasConnectedOnce,
+              connectionError,
+              connectionFailureCategory: effectiveFailureCategory,
+            })}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void session.refreshConnection();
+            }}
+          >
+            <RefreshCw />
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   if (showInitialConnectionState || showReconnectState) {

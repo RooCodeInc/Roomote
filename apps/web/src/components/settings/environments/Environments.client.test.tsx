@@ -55,7 +55,7 @@ const state = vi.hoisted(() => ({
         },
       },
       isVerified: true,
-      verificationTaskId: 'task-verify-1',
+      verificationTaskId: 'task-verify-1' as string | null,
       verificationTaskActive: true,
       verifiedAt: new Date('2026-03-25T09:00:00.000Z'),
       verificationError: null,
@@ -460,6 +460,22 @@ describe('Environments', () => {
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
+  });
+
+  it('does not link verified badges when there is no verification task', () => {
+    state.environments = [
+      {
+        ...state.environments[0]!,
+        verificationTaskId: null,
+      },
+    ];
+
+    render(<Environments />);
+
+    expect(screen.getByText('Verified')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: 'Open verification task' }),
+    ).not.toBeInTheDocument();
   });
 
   it('shows snapshot controls on the environments settings page', () => {

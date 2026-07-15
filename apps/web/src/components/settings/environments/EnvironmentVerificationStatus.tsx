@@ -83,11 +83,10 @@ export function EnvironmentVerificationBadge({
 }) {
   const state = getEnvironmentVerificationState(env);
   const { Icon, iconClassName, label } = environmentVerificationDisplay[state];
-  const badgeClassName = env.verificationTaskId
-    ? 'gap-1 cursor-pointer'
-    : 'gap-1';
+  const hasVerificationTask = Boolean(env.verificationTaskId);
+  const badgeClassName = hasVerificationTask ? 'gap-1 cursor-pointer' : 'gap-1';
   const wrapBadge = (badge: ReactNode) =>
-    env.verificationTaskId ? (
+    hasVerificationTask ? (
       <Link
         href={`/task/${env.verificationTaskId}`}
         className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -106,8 +105,10 @@ export function EnvironmentVerificationBadge({
           content={
             <div className="text-sm">
               <p>
-                {env.name} is verified and ready to use. Click to see the
-                verification task.
+                {env.name} is verified and ready to use.
+                {hasVerificationTask
+                  ? ' Click to see the verification task.'
+                  : ''}
               </p>
               {env.verifiedAt ? (
                 <p className="text-card/70">
@@ -124,7 +125,7 @@ export function EnvironmentVerificationBadge({
                 className={['size-3', iconClassName].filter(Boolean).join(' ')}
               />
               {label}
-              <ArrowUpRightIcon />
+              {hasVerificationTask ? <ArrowUpRightIcon /> : null}
             </Badge>,
           )}
         </BasicTooltip>
@@ -145,7 +146,7 @@ export function EnvironmentVerificationBadge({
                 className={['size-3', iconClassName].filter(Boolean).join(' ')}
               />
               {label}
-              <ArrowUpRightIcon />
+              {hasVerificationTask ? <ArrowUpRightIcon /> : null}
             </Badge>,
           )}
         </BasicTooltip>
@@ -169,7 +170,7 @@ export function EnvironmentVerificationBadge({
                 className={['size-3', iconClassName].filter(Boolean).join(' ')}
               />
               {label}
-              <ArrowUpRightIcon />
+              {hasVerificationTask ? <ArrowUpRightIcon /> : null}
             </Badge>,
           )}
         </BasicTooltip>
@@ -181,7 +182,10 @@ export function EnvironmentVerificationBadge({
           content={
             <div className="text-sm max-w-md">
               {env.name} is configured but has not been verified for its current
-              configuration. Click to see the verification task.
+              configuration.
+              {hasVerificationTask
+                ? ' Click to see the verification task.'
+                : ''}
             </div>
           }
         >
@@ -191,7 +195,7 @@ export function EnvironmentVerificationBadge({
                 className={['size-3', iconClassName].filter(Boolean).join(' ')}
               />
               {label}
-              <ArrowUpRightIcon />
+              {hasVerificationTask ? <ArrowUpRightIcon /> : null}
             </Badge>,
           )}
         </BasicTooltip>
