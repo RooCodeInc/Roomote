@@ -142,7 +142,6 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Loader2: () => <span>Loader2</span>,
-  CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
   Zap: () => <span>Zap</span>,
