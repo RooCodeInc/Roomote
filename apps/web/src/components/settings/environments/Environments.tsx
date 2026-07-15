@@ -74,7 +74,10 @@ export function Environments() {
   const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b', 'roomote'];
+  // Deliberately excludes the deployment-managed 'roomote' provider until
+  // this list is gated on configured providers: an unconditional entry would
+  // offer roomote snapshot controls on deployments without the provider.
+  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b'];
 
   if (environments.isPending || repositories.isPending) {
     return (
