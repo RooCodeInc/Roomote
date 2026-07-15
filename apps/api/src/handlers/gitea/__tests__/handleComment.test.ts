@@ -446,6 +446,48 @@ describe('handleGiteaComment', () => {
     expect(mockEnqueueTask).toHaveBeenCalled();
   });
 
+  it('falls back to sender when comment.user has no usable username', async () => {
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 10, login: 'alice' },
+        comment: {
+          // Partial comment.user with id only — username lives on sender.
+          user: { id: 10 },
+        },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initiator: { kind: 'user', userId: 'user-1' },
+      }),
+    );
+  });
+
+  it('ignores deployment-authored comments when only sender carries the login', async () => {
+    mockGetGiteaDeploymentUser.mockResolvedValue({
+      id: 99,
+      login: 'ci-agent',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 99, login: 'ci-agent' },
+        comment: {
+          body: '@roomote I started a pull request review task for this request',
+          user: { id: 99 },
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'roomote_authored_comment',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('requires linked commenter attribution for explicit mentions', async () => {
     await handleGiteaComment(makeCommentPayload());
 
