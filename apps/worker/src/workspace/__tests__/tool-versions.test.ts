@@ -117,9 +117,8 @@ function buildRepositorySyncCommands(
 /**
  * Access private methods for focused unit testing.
  */
-// oxlint-disable-next-line @typescript-eslint/no-explicit-any
-function getPrivateMethod(instance: WorkspaceManager, method: string): any {
-  return (instance as unknown as Record<string, unknown>)[method];
+function getPrivateMethod<T>(instance: WorkspaceManager, method: string): T {
+  return (instance as unknown as Record<string, unknown>)[method] as T;
 }
 
 describe('WorkspaceManager tool versions', () => {
