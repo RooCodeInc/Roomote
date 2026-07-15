@@ -58,8 +58,8 @@ export async function createRoomoteCloudGitHubToken(input: {
   fetchFn?: typeof fetch;
 }): Promise<GitHubTokenResponse> {
   const endpoint = new URL(
-    '/runtime/v1/integrations/github/token',
-    input.config.baseUrl,
+    'runtime/v1/integrations/github/token',
+    `${input.config.baseUrl}/`,
   );
   const response = await (input.fetchFn ?? fetch)(endpoint, {
     method: 'POST',

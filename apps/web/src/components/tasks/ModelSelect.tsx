@@ -1,12 +1,14 @@
 'use client';
 
 import { useMemo } from 'react';
-import { getModelProviderLabel, getTaskModelProviderId } from '@roomote/types';
+import { groupModelsByDisplayProvider } from '@roomote/types';
 
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/system';
@@ -21,6 +23,13 @@ type ModelSelectProps = {
   ariaLabel?: string;
 };
 
+function modelOptionLabel(model: {
+  displayName: string;
+  isDefault?: boolean;
+}): string {
+  return `${model.displayName}${model.isDefault ? ' (Default)' : ''}`;
+}
+
 export function ModelSelect({
   value,
   onValueChange,
@@ -29,23 +38,16 @@ export function ModelSelect({
   ariaLabel = 'Model',
 }: ModelSelectProps) {
   const { data, isPending } = useLaunchTaskModels();
-  const sortedModels = useMemo(
-    () =>
-      [...(data?.models ?? [])].sort((left, right) => {
-        const leftProvider = getModelProviderLabel(
-          getTaskModelProviderId(left.id) ?? 'other',
-        );
-        const rightProvider = getModelProviderLabel(
-          getTaskModelProviderId(right.id) ?? 'other',
-        );
+  const modelGroups = useMemo(() => {
+    const sortedModels = [...(data?.models ?? [])].sort((left, right) =>
+      left.displayName.localeCompare(right.displayName),
+    );
 
-        return (
-          leftProvider.localeCompare(rightProvider) ||
-          left.displayName.localeCompare(right.displayName)
-        );
-      }),
-    [data?.models],
-  );
+    return groupModelsByDisplayProvider(sortedModels, {
+      chatgptConnected: data?.chatgptConnected,
+    });
+  }, [data?.chatgptConnected, data?.models]);
+  const showProviderHeaders = modelGroups.length > 1;
 
   return (
     <Select
@@ -61,12 +63,24 @@ export function ModelSelect({
         <SelectValue placeholder="Model" />
       </SelectTrigger>
       <SelectContent>
-        {sortedModels.map((model) => (
-          <SelectItem key={model.id} value={model.id}>
-            {model.displayName}
-            {model.isDefault ? ' (Default)' : ''}
-          </SelectItem>
-        ))}
+        {showProviderHeaders
+          ? modelGroups.map((group) => (
+              <SelectGroup key={group.providerId}>
+                <SelectLabel>{group.label}</SelectLabel>
+                {group.items.map((model) => (
+                  <SelectItem key={model.id} value={model.id}>
+                    {modelOptionLabel(model)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))
+          : modelGroups.flatMap((group) =>
+              group.items.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                  {modelOptionLabel(model)}
+                </SelectItem>
+              )),
+            )}
       </SelectContent>
     </Select>
   );

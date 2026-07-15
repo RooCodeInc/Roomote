@@ -488,7 +488,7 @@ describe('getSetupSourceControlVisibleFields', () => {
   it.each([
     ['gitlab', ['GITLAB_BASE_URL', 'GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET']],
     ['gitea', ['GITEA_BASE_URL', 'GITEA_CLIENT_ID', 'GITEA_CLIENT_SECRET']],
-    ['bitbucket', ['BITBUCKET_TOKEN', 'BITBUCKET_USERNAME']],
+    ['bitbucket', ['BITBUCKET_CLIENT_ID', 'BITBUCKET_CLIENT_SECRET']],
   ] as const)(
     'keeps %s setup focused on required connection values',
     (provider, expected) => {

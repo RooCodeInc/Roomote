@@ -66,19 +66,21 @@ vi.mock('../../roomote-cloud-runtime', () => ({
     mockStopRoomoteCloudCompute(...args),
 }));
 
-vi.mock('../spawn-docker-worker', () => ({
-  toContainerReachableUrl: (url: string) => url,
-}));
-
 import { spawnRoomoteCloudWorker } from '../spawn-roomote-cloud-worker';
 
 describe('spawnRoomoteCloudWorker', () => {
   beforeEach(() => {
     mockLaunchRoomoteCloudCompute.mockReset();
     mockStopRoomoteCloudCompute.mockReset();
+    mockStopRoomoteCloudCompute.mockResolvedValue(undefined);
     mockUpdateTaskRunMachine.mockReset();
+    mockUpdateTaskRunMachine.mockResolvedValue(true);
     mockStampTaskRunMilestone.mockReset();
+    vi.stubEnv('TRPC_URL', 'http://127.0.0.1:13001');
+    vi.stubEnv('R_APP_URL', 'http://localhost:3000');
   });
+
+  afterEach(() => vi.unstubAllEnvs());
 
   it('persists the opaque Cloud lease and preserves customer model env', async () => {
     mockLaunchRoomoteCloudCompute.mockResolvedValue({
@@ -89,7 +91,7 @@ describe('spawnRoomoteCloudWorker', () => {
       portUrls: { '4200': 'https://sandbox.example' },
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
-    mockUpdateTaskRunMachine.mockResolvedValue(undefined);
+    mockUpdateTaskRunMachine.mockResolvedValue(true);
     mockStampTaskRunMilestone.mockResolvedValue(undefined);
 
     const taskRun = {
@@ -117,6 +119,9 @@ describe('spawnRoomoteCloudWorker', () => {
           ANTHROPIC_API_KEY: 'customer-key',
           COMPUTE_PROVIDER: 'roomote-cloud',
           ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote-cloud',
+          TRPC_URL: 'http://127.0.0.1:13001',
+          R_APP_URL: 'http://localhost:3000',
+          ROOMOTE_APP_URL: 'http://localhost:3000',
         }),
       }),
     );
@@ -127,6 +132,7 @@ describe('spawnRoomoteCloudWorker', () => {
         machineId: 'lease-1',
         sandboxServerUrl: 'https://sandbox.example',
       }),
+      { onlyIfNotCanceled: true },
     );
     expect(JSON.stringify(mockUpdateTaskRunMachine.mock.calls)).not.toContain(
       'underlying-sandbox-1',
@@ -165,5 +171,45 @@ describe('spawnRoomoteCloudWorker', () => {
       expect.anything(),
       'lease-2',
     );
+  });
+
+  it('stops a ready lease instead of attaching it after direct cancellation', async () => {
+    mockLaunchRoomoteCloudCompute.mockResolvedValue({
+      id: 'lease-canceled',
+      provider: 'roomote-cloud',
+      status: 'ready',
+      proxyPorts: { '4200': 4200 },
+      portUrls: { '4200': 'https://sandbox.example' },
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    mockUpdateTaskRunMachine.mockResolvedValue(false);
+    mockStopRoomoteCloudCompute.mockResolvedValue(undefined);
+
+    await expect(
+      spawnRoomoteCloudWorker({
+        taskRun: {
+          id: 44,
+          taskId: 'task-44',
+          payload: {},
+        } as TaskRun,
+        authToken: 'run-token',
+        deploymentSlug: 'hosted',
+        timeoutMs: 60_000,
+        cloudConfig: {
+          baseUrl: 'https://cloud.example',
+          deploymentToken: 'deployment-token',
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
+      expect.objectContaining({ machineId: 'lease-canceled' }),
+      { onlyIfNotCanceled: true },
+    );
+    expect(mockStopRoomoteCloudCompute).toHaveBeenCalledWith(
+      expect.anything(),
+      'lease-canceled',
+    );
+    expect(mockStampTaskRunMilestone).not.toHaveBeenCalled();
   });
 });

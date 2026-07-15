@@ -141,8 +141,13 @@ async function stopTaskSandboxRun(params: {
   run: StopTaskRun & { sandboxServerUrl: string };
   authUserId?: string | null;
   cancelledBy?: StopTaskAttribution;
+  /**
+   * When true, the worker cancels the turn and shuts the sandbox down. Soft
+   * stops omit this so the UI stop path can leave a resumable session.
+   */
+  terminate?: boolean;
 }): Promise<StopTaskRunResult> {
-  const { run, authUserId, cancelledBy } = params;
+  const { run, authUserId, cancelledBy, terminate } = params;
   // Prefer the caller's auth identity, then the live run actor. Both may be
   // null for chat-started / automation runs that still only have a deployment
   // service principal; createRunToken accepts that and mints a principal token
@@ -150,7 +155,11 @@ async function stopTaskSandboxRun(params: {
   // without a human user claim on the run row.
   const tokenUserId = authUserId ?? run.actingUserId ?? null;
 
-  await markCancelRequested(run.id);
+  // Only terminal provider cancels stamp cancelRequestedAt. Soft stops stay
+  // resumable and must not look like snapshot/destroy candidates later.
+  if (terminate) {
+    await markCancelRequested(run.id);
+  }
 
   try {
     await withSandboxServerRpcClient({
@@ -158,9 +167,10 @@ async function stopTaskSandboxRun(params: {
       userId: tokenUserId,
       sandboxServerUrl: run.sandboxServerUrl,
       call: (client) =>
-        client.commands.cancelTask.mutate(
-          cancelledBy ? { cancelledBy } : undefined,
-        ),
+        client.commands.cancelTask.mutate({
+          ...(cancelledBy ? { cancelledBy } : {}),
+          ...(terminate ? { terminate: true } : {}),
+        }),
     });
 
     return { success: true, mode: 'sandbox_stop' };
@@ -182,9 +192,19 @@ export async function stopTaskRun(params: {
   authUserId?: string | null;
   allowDirectCancelWithoutSandbox?: boolean;
   cancelledBy?: StopTaskAttribution;
+  /**
+   * Terminal cancel for provider affordances (Slack/Telegram Cancel). Soft
+   * web/API stop omits this so the sandbox stays resumable.
+   */
+  terminate?: boolean;
 }): Promise<StopTaskRunResult> {
-  const { run, authUserId, allowDirectCancelWithoutSandbox, cancelledBy } =
-    params;
+  const {
+    run,
+    authUserId,
+    allowDirectCancelWithoutSandbox,
+    cancelledBy,
+    terminate,
+  } = params;
 
   const initialResolution = resolveStopTaskRun(run);
 
@@ -197,6 +217,7 @@ export async function stopTaskRun(params: {
       run: initialResolution.run,
       authUserId,
       cancelledBy,
+      terminate,
     });
   }
 
@@ -211,6 +232,7 @@ export async function stopTaskRun(params: {
       run: refreshedResolution.run,
       authUserId,
       cancelledBy,
+      terminate,
     });
   }
 
@@ -229,6 +251,7 @@ export async function stopTaskRun(params: {
       run: racedResolution.run,
       authUserId,
       cancelledBy,
+      terminate,
     });
   }
 

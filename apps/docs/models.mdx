@@ -15,7 +15,7 @@ Configure models from **Settings > Models**.
 ## Inference providers
 
 An inference provider is the service that hosts or routes model calls. Roomote
-supports providers such as OpenRouter, Vercel AI Gateway, Requesty, Baseten,
+supports providers such as OpenRouter, Vercel AI Gateway, Baseten,
 Together AI, OpenAI, Anthropic, Moonshot AI, MiniMax, OpenCode, Amazon Bedrock,
 Google Vertex AI, Google Gemini, xAI, and ChatGPT subscriptions.
 
@@ -45,6 +45,22 @@ full recommended set for every connected provider: recommendations you have
 not enabled appear toggled off, and they cannot be deleted while their
 provider stays connected — turn a model off to stop using it. To go beyond the
 recommended set, add any model by its slug from the add-model field.
+
+### Recommended default models
+
+Providers also carry recommended defaults for the model roles below — for
+example a strong model for planning and code review and a fast, low-cost model
+for helper and explore work. Connecting a provider in the setup wizard applies
+its recommended defaults automatically, so a fresh deployment starts with a
+sensible split instead of one model for everything.
+
+From **Settings > Models**, the **Use recommended** button on the Default
+Models card re-applies a connected provider's recommended defaults at any
+time. It is an apply-once action, not a lock: it sets the role selections (and
+enables any recommended models that are missing), and you can adjust every
+role afterward. Roles a provider has no specific recommendation for are set to
+**Same as coding model**, and roles managed by environment variables are left
+untouched.
 
 ## Env-based setup
 

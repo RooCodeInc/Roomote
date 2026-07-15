@@ -16,8 +16,10 @@ import {
   db,
   taskRuns,
   environments,
+  and,
   eq,
   getEnvironmentSnapshot,
+  isNull,
   resolveEffectivePreviewRuntimeConfig,
 } from '@roomote/db/server';
 import {
@@ -187,6 +189,7 @@ type UpdateTaskRunMachineInfoParams = {
 
 type UpdateTaskRunMachineOptions = {
   db?: DatabaseOrTransaction;
+  onlyIfNotCanceled?: boolean;
 };
 
 /**
@@ -199,7 +202,7 @@ type UpdateTaskRunMachineOptions = {
 export async function updateTaskRunMachine(
   params: UpdateTaskRunMachineInfoParams,
   options: UpdateTaskRunMachineOptions = {},
-): Promise<void> {
+): Promise<boolean> {
   const {
     taskRun,
     vendor,
@@ -231,7 +234,7 @@ export async function updateTaskRunMachine(
 
   const database = options.db ?? db;
 
-  await database
+  const [updatedRun] = await database
     .update(taskRuns)
     .set({
       ...(vendor ? { vendor } : {}),
@@ -256,5 +259,12 @@ export async function updateTaskRunMachine(
       ...(configuredCpuCores !== undefined ? { configuredCpuCores } : {}),
       ...(configuredMemoryMiB !== undefined ? { configuredMemoryMiB } : {}),
     })
-    .where(eq(taskRuns.id, taskRun.id));
+    .where(
+      options.onlyIfNotCanceled
+        ? and(eq(taskRuns.id, taskRun.id), isNull(taskRuns.canceledAt))
+        : eq(taskRuns.id, taskRun.id),
+    )
+    .returning({ id: taskRuns.id });
+
+  return Boolean(updatedRun);
 }

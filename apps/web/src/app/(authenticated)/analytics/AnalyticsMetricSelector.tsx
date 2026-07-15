@@ -32,7 +32,7 @@ export function AnalyticsMetricSelector({
       value={value}
       onValueChange={(next) => onChange(next as AnalyticsMetric)}
     >
-      <SelectTrigger aria-label="Metric" className="min-w-[140px]">
+      <SelectTrigger aria-label="Metric">
         <SelectValue placeholder="Metric" />
       </SelectTrigger>
       <SelectContent>

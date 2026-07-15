@@ -18,9 +18,10 @@ const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 const originalPreviewDomains = process.env.PREVIEW_DOMAINS;
 const originalRoomotePreviewDomain = process.env.ROOMOTE_PREVIEW_DOMAIN;
 
+const mockReturning = vi.fn().mockResolvedValue([{ id: 1 }]);
 const mockUpdate = vi.fn().mockReturnValue({
   set: vi.fn().mockReturnValue({
-    where: vi.fn().mockResolvedValue(undefined),
+    where: vi.fn().mockReturnValue({ returning: mockReturning }),
   }),
 });
 const mockDeploymentSettingsFindFirst = vi.fn();
@@ -57,10 +58,12 @@ vi.mock('@roomote/db/server', () => ({
     },
     update: (...args: unknown[]) => mockUpdate(...args),
   },
-  taskRuns: { id: 'id' },
+  taskRuns: { id: 'id', canceledAt: 'canceled-at' },
   environments: {},
   deploymentSettings: {},
+  and: vi.fn(),
   eq: vi.fn(),
+  isNull: vi.fn(),
   getEnvironmentSnapshot: (
     params: Parameters<typeof mockGetEnvironmentSnapshot>[0],
   ) => mockGetEnvironmentSnapshot(params),
@@ -457,6 +460,7 @@ describe('shouldEnableAuthBypassForTaskRun', () => {
 describe('updateTaskRunMachine', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockReturning.mockResolvedValue([{ id: 1 }]);
   });
 
   it('stores routing info for the explicit primary port', async () => {
@@ -527,5 +531,26 @@ describe('updateTaskRunMachine', () => {
     const setArg = setCall.mock.calls[0][0];
 
     expect(setArg.sourceSnapshotId).toBeNull();
+  });
+
+  it('reports when a canceled run prevented the machine attachment', async () => {
+    mockReturning.mockResolvedValueOnce([]);
+    const taskRun = {
+      id: 1,
+      sourceSnapshotId: null,
+    } as Parameters<typeof updateTaskRunMachine>[0]['taskRun'];
+
+    await expect(
+      updateTaskRunMachine(
+        {
+          taskRun,
+          machineId: 'machine-canceled',
+          machineDomains: {
+            SANDBOX_SERVER: 'https://sandbox.localhost',
+          },
+        },
+        { onlyIfNotCanceled: true },
+      ),
+    ).resolves.toBe(false);
   });
 });

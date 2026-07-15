@@ -94,6 +94,31 @@ describe('Roomote Cloud GitHub token broker', () => {
     );
   });
 
+  it('preserves a reverse-proxy path when requesting a token', async () => {
+    const fetchFn = vi.fn(async () =>
+      Response.json({
+        token: 'ghs_managed',
+        expiresAt: '2026-07-14T18:00:00Z',
+      }),
+    );
+
+    await createRoomoteCloudGitHubToken({
+      config: {
+        baseUrl: 'https://example.com/roomote-cloud',
+        deploymentToken: 'deployment-secret',
+      },
+      installationId: 1234,
+      fetchFn,
+    });
+
+    expect(fetchFn).toHaveBeenCalledWith(
+      new URL(
+        'https://example.com/roomote-cloud/runtime/v1/integrations/github/token',
+      ),
+      expect.anything(),
+    );
+  });
+
   it('does not expose an upstream error body', async () => {
     await expect(
       createRoomoteCloudGitHubToken({

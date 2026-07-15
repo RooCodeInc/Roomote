@@ -44,6 +44,7 @@ import {
 
 const connectionToken = `rce_${'a'.repeat(43)}`;
 const connectionLink = `https://cloud.example.com/#enrollment=${connectionToken}`;
+const prefixedConnectionLink = `https://cloud.example.com/control-plane/#enrollment=${connectionToken}`;
 
 describe('Roomote Cloud customer-hosted enrollment', () => {
   beforeEach(() => {
@@ -56,19 +57,36 @@ describe('Roomote Cloud customer-hosted enrollment', () => {
 
   it('parses only one-time links on a Cloud HTTPS origin', () => {
     expect(parseRoomoteCloudEnrollmentLink(connectionLink)).toEqual({
-      cloudOrigin: 'https://cloud.example.com',
+      cloudBaseUrl: 'https://cloud.example.com',
       connectionToken,
     });
-    expect(() =>
-      parseRoomoteCloudEnrollmentLink(
-        `https://cloud.example.com/setup#enrollment=${connectionToken}`,
-      ),
-    ).toThrow('valid Roomote Cloud connection link');
+    expect(parseRoomoteCloudEnrollmentLink(prefixedConnectionLink)).toEqual({
+      cloudBaseUrl: 'https://cloud.example.com/control-plane',
+      connectionToken,
+    });
     expect(() =>
       parseRoomoteCloudEnrollmentLink(
         'https://cloud.example.com/#enrollment=not-a-token',
       ),
     ).toThrow('invalid or expired');
+  });
+
+  it('rejects loopback connection links in production even over HTTPS', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+
+    for (const baseUrl of [
+      'https://localhost',
+      'https://localhost.',
+      'https://tenant.localhost',
+      'https://127.0.0.1:4443',
+      'https://[::1]:4443',
+    ]) {
+      expect(() =>
+        parseRoomoteCloudEnrollmentLink(
+          `${baseUrl}/#enrollment=${connectionToken}`,
+        ),
+      ).toThrow('valid Roomote Cloud connection link');
+    }
   });
 
   it('claims the link and persists only Cloud-owned deployment settings', async () => {
@@ -82,12 +100,18 @@ describe('Roomote Cloud customer-hosted enrollment', () => {
           manifest: { hosting: { mode: 'customer_hosted' } },
           environment: {
             ROOMOTE_CLOUD_ENABLED: 'true',
-            ROOMOTE_CLOUD_URL: 'https://cloud.example.com',
+            ROOMOTE_CLOUD_URL: 'https://cloud.example.com/control-plane',
             ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: `rcd_${'b'.repeat(43)}`,
             ROOMOTE_CLOUD_DEPLOYMENT_ID: '00000000-0000-4000-8000-000000000001',
             ROOMOTE_CLOUD_INTEGRATION_SECRET: 'c'.repeat(43),
             ROOMOTE_CLOUD_SHARED_SLACK_ENABLED: 'true',
-            ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED: 'false',
+            ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED: 'true',
+            R_TEAMS_BOT_APP_ID: 'teams-app-id',
+            R_TEAMS_BOT_APP_PASSWORD: `rcd_${'b'.repeat(43)}`,
+            R_TEAMS_BOT_TOKEN_ENDPOINT:
+              'https://cloud.example.com/control-plane/runtime/v1/integrations/teams/token',
+            R_TEAMS_BOT_NAME: 'Roomote',
+            R_TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
             DEFAULT_COMPUTE_PROVIDER: 'roomote-cloud',
             EXCLUDED_COMPUTE_PROVIDERS: 'docker,modal',
             UNEXPECTED_SECRET: 'must-not-be-written',
@@ -98,13 +122,13 @@ describe('Roomote Cloud customer-hosted enrollment', () => {
     );
 
     await enrollCustomerHostedRoomoteCommand({
-      connectionLink,
+      connectionLink: prefixedConnectionLink,
       actorUserId: null,
       fetchFn,
     });
 
     expect(fetchFn).toHaveBeenCalledWith(
-      'https://cloud.example.com/enrollment/v1/claim',
+      'https://cloud.example.com/control-plane/enrollment/v1/claim',
       expect.objectContaining({
         method: 'POST',
         redirect: 'manual',

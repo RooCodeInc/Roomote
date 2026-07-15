@@ -1,14 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
   type AnalyticsDimension,
   type AnalyticsFilterOption,
   type AnalyticsFilters,
   type AnalyticsObject,
-  type TimePeriodFilter,
   ANALYTICS_DIMENSION_LABELS,
   ANALYTICS_OBJECT_CONFIG,
-  ANALYTICS_TIME_RANGE_OPTIONS,
 } from '@/types';
 import { cn } from '@/lib/utils';
 import {
@@ -18,7 +16,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  Download,
   Funnel,
   Button,
   DropdownMenu,
@@ -27,12 +24,9 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  ChevronsUpDown,
 } from '@/components/system';
 
-import {
-  AnalyticsSelectField,
-  toTimeRangeSelectValue,
-} from './AnalyticsSelectField';
 import { ANALYTICS_DIMENSION_ICONS } from './AnalyticsDimensionIcons';
 
 const ANALYTICS_DIMENSION_PLURAL_LABELS: Record<AnalyticsDimension, string> = {
@@ -42,17 +36,16 @@ const ANALYTICS_DIMENSION_PLURAL_LABELS: Record<AnalyticsDimension, string> = {
   status: 'Statuses',
   repo: 'Repos',
   author: 'Authors',
+  taskType: 'Task Types',
+  provider: 'Providers',
+  model: 'Models',
 };
 
 type AnalyticsFilterBarProps = {
   object: AnalyticsObject;
   filters: AnalyticsFilters;
   filterOptions: Partial<Record<AnalyticsDimension, AnalyticsFilterOption[]>>;
-  timePeriod: TimePeriodFilter;
-  onDownload: () => void;
-  isDownloadDisabled: boolean;
   onFilterChange: (dimension: AnalyticsDimension, value: string[]) => void;
-  onTimePeriodChange: (value: TimePeriodFilter) => void;
   onResetFilters: () => void;
 };
 
@@ -61,6 +54,7 @@ type AnalyticsFilterControlProps = {
   value: string[] | undefined;
   options: AnalyticsFilterOption[];
   onChange: (value: string[]) => void;
+  presentation?: 'toolbar' | 'drawer';
 };
 
 function formatAnalyticsFilterValue(
@@ -125,6 +119,7 @@ function AnalyticsFilterControl({
   value,
   options,
   onChange,
+  presentation = 'toolbar',
 }: AnalyticsFilterControlProps) {
   const Icon = ANALYTICS_DIMENSION_ICONS[dimension] ?? Funnel;
   const selectedValues = normalizeSelectedAnalyticsFilterValues(value, options);
@@ -150,17 +145,26 @@ function AnalyticsFilterControl({
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
+          variant={presentation === 'drawer' ? 'outline' : 'ghost'}
           size="sm"
           className={cn(
             selectedValues.length > 0 ? activeFilterStyle : defaultFilterStyle,
             selectedValues.length === 0 && 'font-normal',
-            'gap-0 px-1!',
+            presentation === 'drawer'
+              ? 'w-full justify-between gap-2 rounded-lg border-border/60 bg-card px-3'
+              : 'gap-0 px-1!',
           )}
         >
-          <Icon className="size-4 lg:mr-1.5" />
-          <span className="max-w-48 truncate align-middle">{activeLabel}</span>
-          <ChevronDown className="ml-1 hidden h-3 w-3 shrink-0 align-middle lg:inline-block" />
+          <span className="flex min-w-0 items-center gap-1.5">
+            <Icon className="size-4 shrink-0" />
+            <span className="truncate align-middle">{activeLabel}</span>
+          </span>
+          <ChevronDown
+            className={cn(
+              'h-3 w-3 shrink-0 align-middle',
+              presentation === 'toolbar' && 'ml-1 hidden lg:inline-block',
+            )}
+          />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="z-system max-w-64 md:z-popover">
@@ -252,99 +256,71 @@ export function AnalyticsFilterBar({
   object,
   filters,
   filterOptions,
-  timePeriod,
-  onDownload,
-  isDownloadDisabled,
   onFilterChange,
-  onTimePeriodChange,
   onResetFilters,
 }: AnalyticsFilterBarProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   const filterDimensions = ANALYTICS_OBJECT_CONFIG[object].filterDimensions;
-  const activeFilterCount =
-    filterDimensions.reduce(
-      (count, dimension) =>
-        count + ((filters[dimension]?.length ?? 0) > 0 ? 1 : 0),
-      0,
-    ) + (timePeriod !== 7 ? 1 : 0);
+  const activeFilterCount = filterDimensions.reduce(
+    (count, dimension) =>
+      count + ((filters[dimension]?.length ?? 0) > 0 ? 1 : 0),
+    0,
+  );
 
-  const controls = useMemo(
-    () =>
+  const renderControls = useCallback(
+    (presentation: AnalyticsFilterControlProps['presentation']) =>
       filterDimensions.map((dimension) => (
         <AnalyticsFilterControl
           key={dimension}
           dimension={dimension}
           value={filters[dimension]}
           options={filterOptions[dimension] ?? []}
+          presentation={presentation}
           onChange={(value) => onFilterChange(dimension, value)}
         />
       )),
     [filterDimensions, filterOptions, filters, onFilterChange],
   );
 
+  const toolbarControls = useMemo(
+    () => renderControls('toolbar'),
+    [renderControls],
+  );
+  const drawerControls = useMemo(
+    () => renderControls('drawer'),
+    [renderControls],
+  );
+
   return (
     <>
       <div className="hidden flex-wrap items-center gap-2 md:flex py-2 m-0">
         <span className="text-sm text-muted-foreground">Filter by</span>
-        {controls}
+        {toolbarControls}
       </div>
 
-      <div className="flex items-center justify-between gap-3 md:hidden">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="rounded-full border-border/60 bg-card/60"
-          onClick={() => setIsMobileOpen(true)}
-        >
-          <Funnel className="size-4" />
-          Filters ({activeFilterCount})
-          <ChevronDown className="size-3" />
-        </Button>
-
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={isDownloadDisabled}
-          className="size-8 rounded-xl border-border/60 bg-card/60 px-0 disabled:cursor-default disabled:border-border/40 disabled:text-muted-foreground disabled:opacity-45 disabled:hover:border-border/40 disabled:hover:text-muted-foreground"
-          onClick={onDownload}
-        >
-          <Download className="size-4" />
-          <span className="sr-only">Download Data</span>
-        </Button>
-      </div>
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-between gap-2 text-sm rounded-lg bg-card border-border md:hidden font-light"
+        onClick={() => setIsMobileOpen(true)}
+      >
+        <Funnel className="size-4" />
+        <span>Filters ({activeFilterCount})</span>
+        <ChevronsUpDown className="size-3 shrink-0" />
+      </Button>
 
       <Dialog open={isMobileOpen} onOpenChange={setIsMobileOpen}>
         <DialogContent size="lg">
           <DialogHeader>
             <DialogTitle>Filters</DialogTitle>
             <DialogDescription className="sr-only">
-              Adjust analytics filters and time range.
+              Adjust analytics filters.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-5">
-            <div className="space-y-3">
-              <div className="text-sm font-medium text-foreground">Filters</div>
-              <div className="flex flex-wrap gap-2">{controls}</div>
-            </div>
-
-            <AnalyticsSelectField
-              label="Time range"
-              value={toTimeRangeSelectValue(timePeriod)}
-              showLabel={false}
-              options={ANALYTICS_TIME_RANGE_OPTIONS.map((option) => ({
-                value: toTimeRangeSelectValue(option.value),
-                label: option.label,
-              }))}
-              onChange={(value) =>
-                onTimePeriodChange(
-                  value === 'all' ? 'all' : (Number(value) as TimePeriodFilter),
-                )
-              }
-            />
+            <div className="grid gap-2 sm:grid-cols-2">{drawerControls}</div>
 
             <Button
               type="button"

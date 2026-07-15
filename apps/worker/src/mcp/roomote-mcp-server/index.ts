@@ -471,6 +471,12 @@ const manageTasksInputSchema = {
         'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
     ),
   branch: z.string().optional().describe('Branch to use (for launch)'),
+  notifyOnSettle: z
+    .boolean()
+    .optional()
+    .describe(
+      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
+    ),
 } satisfies Record<string, z.ZodTypeAny>;
 
 roomoteMcpServer.registerTool(
@@ -556,6 +562,7 @@ roomoteMcpServer.registerTool(
             prompt: params.prompt,
             branch: params.branch,
             environmentId,
+            notifyOnSettle: params.notifyOnSettle,
           },
           config,
         );

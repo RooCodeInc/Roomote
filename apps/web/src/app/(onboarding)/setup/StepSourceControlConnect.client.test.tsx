@@ -453,6 +453,35 @@ describe('StepSourceControlConnect', () => {
     expect(syncRepositoriesMutateMock).toHaveBeenCalledOnce();
   });
 
+  it('continues after Bitbucket OAuth callback sync already connected repositories', () => {
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, pathname: '/setup', search: '?sync=1' },
+    });
+    const onContinue = vi.fn();
+
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('bitbucket', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          connectedProvider: 'bitbucket',
+          providers: [
+            {
+              ...buildSourceControlSetup('bitbucket').providers[0]!,
+              connected: true,
+              repositoryCount: 1,
+            },
+          ],
+        })}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(onContinue).toHaveBeenCalledOnce();
+  });
+
   it('reports Gitea webhook setup failures as repositories', async () => {
     const onContinue = vi.fn();
 

@@ -384,10 +384,17 @@ export function SourceControlConfigForm({
               provider,
               values: {
                 ...Object.fromEntries(
-                  visibleFields.map((field) => [
-                    field.envVarName,
-                    values[field.envVarName] ?? '',
-                  ]),
+                  visibleFields.flatMap((field) => {
+                    const value = values[field.envVarName] ?? '';
+                    if (
+                      isSecretSourceControlField(field) &&
+                      field.savedSatisfied &&
+                      value.length === 0
+                    ) {
+                      return [];
+                    }
+                    return [[field.envVarName, value]];
+                  }),
                 ),
                 ...(isAdo
                   ? {

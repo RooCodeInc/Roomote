@@ -154,6 +154,98 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.sourceControlProvider).toBeUndefined();
   });
 
+  it('stamps the launching run and settle opt-in for run-token launches with notifyOnSettle', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-child' });
+
+    const runAuth = {
+      runId: 555,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const app = createApp(runAuth);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Verify the environment',
+          environmentId: '6f1f3f0a-9f5e-4d2a-8f4e-1a2b3c4d5e6f',
+          notifyOnSettle: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: {
+        sourceRunId?: number;
+        payload: { notifySourceRunOnSettle?: boolean };
+      };
+    };
+    expect(enqueuedTask.task.sourceRunId).toBe(555);
+    expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBe(true);
+  });
+
+  it('ignores notifyOnSettle for user-token launches', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 103, taskId: 'task-user' });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Investigate this',
+          notifyOnSettle: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: {
+        sourceRunId?: number;
+        payload: { notifySourceRunOnSettle?: boolean };
+      };
+    };
+    expect(enqueuedTask.task.sourceRunId).toBeUndefined();
+    expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
+  });
+
+  it('does not stamp the launching run for run-token launches without notifyOnSettle', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 104, taskId: 'task-plain-child' });
+
+    const runAuth = {
+      runId: 556,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const app = createApp(runAuth);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Investigate this' }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: {
+        sourceRunId?: number;
+        payload: { notifySourceRunOnSettle?: boolean };
+      };
+    };
+    expect(enqueuedTask.task.sourceRunId).toBeUndefined();
+    expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
+  });
+
   it('rejects launches whose selected repositories span multiple providers', async () => {
     mockRepositoriesFindMany.mockResolvedValue([
       { fullName: 'octo/github-repo', installationId: 1 },

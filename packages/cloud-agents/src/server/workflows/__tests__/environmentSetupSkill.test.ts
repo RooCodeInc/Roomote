@@ -168,10 +168,28 @@ describe('environment-setup guidance', () => {
       'For that follow-up task launch, call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "list_environments"` first so you can confirm the created or updated environment appears as a current launch target and copy the exact returned `environmentId`.',
     );
     expect(skillContent).toContain(
-      'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID',
+      'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID, `notifyOnSettle` set to `true`',
     );
     expect(skillContent).toContain(
-      'Immediately begin monitoring that verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`.',
+      'First read .roomote/setup-status.json in the workspace root: while its state is "running", environment setup commands are still executing in the background',
+    );
+    expect(skillContent).toContain(
+      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from its log under .roomote/setup-logs/.",
+    );
+    expect(skillContent).toContain(
+      'the platform delivers a `Spawned task update` message into this session when the verification task settles',
+    );
+    expect(skillContent).toContain(
+      'Treat that message as the primary completion signal',
+    );
+    expect(skillContent).toContain(
+      'While waiting for that settle notification, periodically check the verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId` as a fallback signal.',
+    );
+    expect(skillContent).toContain(
+      'treat `failed` or `completed with warnings` as direct evidence that specific setup commands failed even when the verification task has not described the failure yet',
+    );
+    expect(skillContent).toContain(
+      'relaunch the verification task with `notifyOnSettle: true`, and wait for the new settle notification',
     );
     expect(skillContent).toContain(
       'Narrate concise, plain-language progress updates while the follow-up check runs',

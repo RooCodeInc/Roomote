@@ -57,7 +57,8 @@ jq -e '
     "EXEC": "1",
     "IMAGES": "1",
     "NETWORKS": "1",
-    "POST": "1"
+    "POST": "1",
+    "VOLUMES": "1"
   }) and
 
   ([[

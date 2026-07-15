@@ -43,6 +43,8 @@ import {
 } from './AnalyticsShell';
 import { AnalyticsStackedBarChart } from './AnalyticsStackedBarChart';
 import { PullRequestSummaryCards } from './PullRequestSummaryCards';
+import { CostBreakdownTable } from './CostBreakdownTable';
+import { CostSummaryCards } from './CostSummaryCards';
 import { downloadAnalyticsRowsCsv } from './downloadCsv';
 
 const analyticsFilterKeys = [
@@ -52,6 +54,9 @@ const analyticsFilterKeys = [
   'status',
   'repo',
   'author',
+  'taskType',
+  'provider',
+  'model',
 ] as const;
 
 type SelectedAnalyticsSegment = {
@@ -213,7 +218,7 @@ export function Analytics({
       return;
     }
 
-    if (fixedObject) {
+    if (fixedObject || nextObject === 'costs') {
       resetSelection();
       startParamsTransition(() => {
         router.push(getAnalyticsHref(nextObject));
@@ -373,27 +378,28 @@ export function Analytics({
         onItemSelect={handleObjectChange}
       >
         <div className="space-y-0.5 rounded-lg overflow-clip">
-          <div className="overflow-hidden bg-card flex items-center gap-2 px-4 py-2">
+          <div className="overflow-hidden bg-card flex flex-row flex-wrap items-center gap-2 px-4 py-2">
             <AnalyticsFilterBar
               object={object}
               filters={filters}
               filterOptions={filterOptions}
-              timePeriod={timePeriod}
-              onDownload={handleDownloadData}
-              isDownloadDisabled={isRegularDownloadDisabled}
               onFilterChange={handleFilterChange}
-              onTimePeriodChange={handleTimePeriodChange}
               onResetFilters={handleResetFilters}
             />
+
+            <div className="hidden grow md:block" />
 
             <AnalyticsControlRow
               object={object}
               viewBy={chart?.viewBy ?? viewBy}
               metric={chart?.metric ?? metric}
               timePeriod={timePeriod}
+              granularity={granularity}
+              availableGranularities={availableGranularities}
               onViewByChange={handleViewByChange}
               onMetricChange={handleMetricChange}
               onTimePeriodChange={handleTimePeriodChange}
+              onGranularityChange={handleGranularityChange}
             />
           </div>
           {object === 'pullRequests' ? (
@@ -404,19 +410,26 @@ export function Analytics({
               granularity={granularity}
             />
           ) : null}
+          {object === 'costs' ? (
+            <CostSummaryCards
+              summary={chart?.costSummary}
+              timePeriod={timePeriod}
+            />
+          ) : null}
 
           <div className="overflow-hidden bg-card p-4">
             <AnalyticsStackedBarChart
               axisLabel={axisLabel}
               chart={chart}
               granularity={granularity}
-              availableGranularities={availableGranularities}
               isLoading={shouldShowChartLoading}
               isError={activeChartQuery.isError}
-              onGranularityChange={handleGranularityChange}
               onResetFilters={handleResetFilters}
               onSelectSegment={setSelectedSegment}
             />
+            {object === 'costs' ? (
+              <CostBreakdownTable rows={chart?.costBreakdown} />
+            ) : null}
           </div>
         </div>
       </AnalyticsShell>

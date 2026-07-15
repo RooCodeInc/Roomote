@@ -96,7 +96,11 @@ describe('stopTaskRun', () => {
       actingUserId: null,
     };
 
-    const result = await stopTaskRun({ run, authUserId: 'user-1' });
+    const result = await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      terminate: true,
+    });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -109,6 +113,23 @@ describe('stopTaskRun', () => {
     );
   });
 
+  it('does not stamp cancelRequestedAt for soft resumable stops', async () => {
+    const run = {
+      id: 7,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example',
+      actingUserId: 'user-1',
+    };
+
+    await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      cancelledBy: { source: 'web' },
+    });
+
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
+  });
+
   it('stops a running sandbox with a deployment-principal token when no human actor is known', async () => {
     // Slack/Telegram cancel buttons often fire while actingUserId is still
     // null on chat-started runs; cancel must still mint a principal run token.
@@ -118,10 +139,22 @@ describe('stopTaskRun', () => {
       sandboxServerUrl: 'https://sandbox.example',
       actingUserId: null,
     };
+    const cancelMutate = vi.fn().mockResolvedValue({ success: true });
+    mockWithSandboxServerRpcClient.mockImplementationOnce(
+      async (options: {
+        call: (client: {
+          commands: { cancelTask: { mutate: typeof cancelMutate } };
+        }) => Promise<unknown>;
+      }) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelMutate } },
+        }),
+    );
 
     const result = await stopTaskRun({
       run,
       cancelledBy: { name: 'alice', source: 'slack' },
+      terminate: true,
     });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
@@ -132,6 +165,40 @@ describe('stopTaskRun', () => {
         sandboxServerUrl: 'https://sandbox.example',
       }),
     );
+    expect(cancelMutate).toHaveBeenCalledWith({
+      cancelledBy: { name: 'alice', source: 'slack' },
+      terminate: true,
+    });
+  });
+
+  it('keeps soft stop resumable when terminate is not requested', async () => {
+    const run = {
+      id: 7,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example',
+      actingUserId: 'user-1',
+    };
+    const cancelMutate = vi.fn().mockResolvedValue({ success: true });
+    mockWithSandboxServerRpcClient.mockImplementationOnce(
+      async (options: {
+        call: (client: {
+          commands: { cancelTask: { mutate: typeof cancelMutate } };
+        }) => Promise<unknown>;
+      }) =>
+        options.call({
+          commands: { cancelTask: { mutate: cancelMutate } },
+        }),
+    );
+
+    await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      cancelledBy: { source: 'web' },
+    });
+
+    expect(cancelMutate).toHaveBeenCalledWith({
+      cancelledBy: { source: 'web' },
+    });
   });
 
   it('persists cancel intent even when the sandbox stop RPC fails', async () => {
@@ -145,7 +212,11 @@ describe('stopTaskRun', () => {
       new TRPCClientError('sandbox unreachable'),
     );
 
-    const result = await stopTaskRun({ run, authUserId: 'user-1' });
+    const result = await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      terminate: true,
+    });
 
     expect(result).toEqual({
       success: false,

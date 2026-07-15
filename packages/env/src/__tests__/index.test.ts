@@ -80,6 +80,23 @@ describe('Env', () => {
     delete runtimeEnv.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY;
     delete runtimeEnv.PREVIEW_TOKEN_TTL_SECONDS;
     delete runtimeEnv.SKIP_ENV_VALIDATION;
+    for (const key of [
+      'R_MODEL',
+      'R_SMALL_MODEL',
+      'R_VISION_MODEL',
+      'R_CODE_REVIEW_MODEL',
+      'R_EXPLORE_MODEL',
+      'R_PLANNING_MODEL',
+      'R_MODEL_REASONING_EFFORT',
+      'R_SMALL_MODEL_REASONING_EFFORT',
+      'R_VISION_MODEL_REASONING_EFFORT',
+      'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+      'R_EXPLORE_MODEL_REASONING_EFFORT',
+      'R_PLANNING_MODEL_REASONING_EFFORT',
+      'R_MODEL_ENV_KEYS',
+    ]) {
+      delete runtimeEnv[key];
+    }
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
@@ -167,12 +184,22 @@ describe('Env', () => {
   });
 
   it('allows the Modal VM memory allocation to be overridden', () => {
-    const env = createRoomoteEnv({
-      ...process.env,
-      MODAL_VM_MEMORY_MIB: '12288',
-    });
+    const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
+    try {
+      delete process.env.SKIP_ENV_VALIDATION;
+      const env = createRoomoteEnv({
+        ...process.env,
+        MODAL_VM_MEMORY_MIB: '12288',
+      });
 
-    expect(env.MODAL_VM_MEMORY_MIB).toBe(12_288);
+      expect(env.MODAL_VM_MEMORY_MIB).toBe(12_288);
+    } finally {
+      if (previousSkipEnvValidation === undefined) {
+        delete process.env.SKIP_ENV_VALIDATION;
+      } else {
+        process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
+      }
+    }
   });
 
   it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {

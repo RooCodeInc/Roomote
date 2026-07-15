@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
-  BITBUCKET_API_TOKEN_GIT_USERNAME,
   buildBitbucketApiBaseUrl,
   buildBitbucketRepositoryValues,
-  getBitbucketGitUsername,
   listBitbucketRepositories,
   normalizeBitbucketLinkedAccountKey,
 } from '../api';
@@ -103,18 +101,6 @@ describe('buildBitbucketRepositoryValues', () => {
       linkedByUserId: 'user-1',
     });
     expect(values.cloneUrl).toBe('https://bitbucket.org/acme/roomote.git');
-  });
-});
-
-describe('getBitbucketGitUsername', () => {
-  it('substitutes the static API-token git user when the identity is an Atlassian account email', () => {
-    expect(getBitbucketGitUsername('bot@example.com')).toBe(
-      BITBUCKET_API_TOKEN_GIT_USERNAME,
-    );
-  });
-
-  it('keeps a non-email identity unchanged', () => {
-    expect(getBitbucketGitUsername('roomote-bot')).toBe('roomote-bot');
   });
 });
 

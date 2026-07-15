@@ -116,7 +116,7 @@ preview proxy.
 
 Docker sandboxes require the Roomote controller to create and manage worker
 containers. Production Compose routes those operations through an internal
-socket proxy that allows only the container, exec, image, and network API
+socket proxy that allows only the container, exec, image, network, and volume API
 sections Roomote needs; the controller does not mount the raw socket. Treat the
 proxy and Docker host as trusted infrastructure, and do not use Docker
 sandboxes as a multi-tenant isolation boundary for untrusted operators or

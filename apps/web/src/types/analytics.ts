@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { timePeriodFilterSchema, type TimePeriodFilter } from './time-period';
 
-export const analyticsObjects = ['tasks', 'pullRequests'] as const;
+export const analyticsObjects = ['tasks', 'pullRequests', 'costs'] as const;
 export const analyticsObjectSchema = z.enum(analyticsObjects);
 export type AnalyticsObject = z.infer<typeof analyticsObjectSchema>;
 
@@ -18,6 +18,9 @@ const analyticsDimensions = [
   'status',
   'repo',
   'author',
+  'taskType',
+  'provider',
+  'model',
 ] as const;
 export const analyticsDimensionSchema = z.enum(analyticsDimensions);
 export type AnalyticsDimension = z.infer<typeof analyticsDimensionSchema>;
@@ -36,6 +39,9 @@ export const analyticsFiltersSchema = z
     status: analyticsFilterValueSchema,
     repo: analyticsFilterValueSchema,
     author: analyticsFilterValueSchema,
+    taskType: analyticsFilterValueSchema,
+    provider: analyticsFilterValueSchema,
+    model: analyticsFilterValueSchema,
   })
   .partial();
 export type AnalyticsFilters = z.infer<typeof analyticsFiltersSchema>;
@@ -107,6 +113,29 @@ export type AnalyticsChartResponse = {
   series: AnalyticsSeries[];
   buckets: AnalyticsChartBucket[];
   total: number;
+  costBreakdown?: AnalyticsCostBreakdownRow[];
+  costSummary?: AnalyticsCostSummary;
+};
+
+export type AnalyticsCostSummary = {
+  totalInferenceCost: number;
+  averageCostPerTask: number | null;
+  averageCostPerPr: number | null;
+  averageCostPerActiveUser: number | null;
+  taskCount: number;
+  prCount: number;
+  activeUserCount: number;
+};
+
+export type AnalyticsCostBreakdownRow = {
+  key: string;
+  provider: string;
+  model: string;
+  totalCost: number;
+  costShare: number;
+  taskCount: number;
+  averageCostPerTask: number;
+  averageCostPerPr: number | null;
 };
 
 export type AnalyticsFilterOptionsResponse = {
@@ -167,10 +196,20 @@ export const ANALYTICS_OBJECT_CONFIG = {
   tasks: {
     label: 'Tasks',
     axisLabel: 'Tasks',
-    filterDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
-    viewByDimensions: ['user', 'project', 'source'] as AnalyticsDimension[],
+    filterDimensions: [
+      'user',
+      'project',
+      'source',
+      'taskType',
+    ] as AnalyticsDimension[],
+    viewByDimensions: [
+      'user',
+      'project',
+      'source',
+      'taskType',
+    ] as AnalyticsDimension[],
     defaultViewBy: 'user' as AnalyticsDimension,
-    supportedMetrics: ['tasks', 'tokens', 'cost'] as readonly AnalyticsMetric[],
+    supportedMetrics: ['tasks'] as readonly AnalyticsMetric[],
     defaultMetric: 'tasks' as AnalyticsMetric,
   },
   pullRequests: {
@@ -192,6 +231,27 @@ export const ANALYTICS_OBJECT_CONFIG = {
     supportedMetrics: ['tasks'] as readonly AnalyticsMetric[],
     defaultMetric: 'tasks' as AnalyticsMetric,
   },
+  costs: {
+    label: 'Costs',
+    axisLabel: 'Cost (USD)',
+    filterDimensions: [
+      'user',
+      'taskType',
+      'project',
+      'provider',
+      'model',
+    ] as AnalyticsDimension[],
+    viewByDimensions: [
+      'user',
+      'taskType',
+      'project',
+      'provider',
+      'model',
+    ] as AnalyticsDimension[],
+    defaultViewBy: 'taskType' as AnalyticsDimension,
+    supportedMetrics: ['cost'] as readonly AnalyticsMetric[],
+    defaultMetric: 'cost' as AnalyticsMetric,
+  },
 } as const satisfies Record<
   AnalyticsObject,
   {
@@ -212,6 +272,9 @@ export const ANALYTICS_DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   status: 'Status',
   repo: 'Repo',
   author: 'Author',
+  taskType: 'Task Type',
+  provider: 'Provider',
+  model: 'Model',
 };
 
 export const ANALYTICS_METRIC_LABELS: Record<AnalyticsMetric, string> = {

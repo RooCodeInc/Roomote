@@ -320,7 +320,7 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
   });
 
-  it('guides Bitbucket token creation without optional credentials', () => {
+  it('guides Bitbucket OAuth client creation', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
@@ -329,19 +329,38 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText('Bitbucket API Token')).toBeInTheDocument();
-    expect(screen.getByText('Atlassian Account Email')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
-      'href',
-      'https://id.atlassian.com/manage-profile/security/api-tokens',
-    );
+    expect(screen.getByText(/Client ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Client Secret/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Create API token with scopes → Bitbucket/),
+      screen.getByText('Create a new Bitbucket OAuth Client.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Workspace settings.*OAuth clients/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Create OAuth client/)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /Open/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'When creating the OAuth client, set the callback URL to:',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Once created,, copy these values:'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Enter the values below for your Bitbucket integration.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Callback URL')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'http://localhost:3000/api/auth/oauth2/callback/bitbucket',
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Bitbucket OAuth Client ID'),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Bitbucket Webhook Secret'),
     ).not.toBeInTheDocument();

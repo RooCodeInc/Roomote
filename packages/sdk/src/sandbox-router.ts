@@ -126,6 +126,8 @@ export interface SandboxSendPromptInput {
   userName?: string;
   userImageUrl?: string;
   autoSteerWhenQueued?: boolean;
+  /** Hide the prompt from the user-facing transcript (platform machinery). */
+  visibleInTranscript?: boolean;
 }
 
 export interface SandboxSteerTaskInput {
@@ -168,6 +170,12 @@ export interface SandboxCancelTaskInput {
     name?: string;
     source?: string;
   };
+  /**
+   * When true, cancel is terminal: after aborting the turn the sandbox shuts
+   * down so provider Cancel buttons tear down the machine. Soft stops (web
+   * stop control) omit this and remain resumable.
+   */
+  terminate?: boolean;
 }
 
 export interface SandboxSuccessResult {

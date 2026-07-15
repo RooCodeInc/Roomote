@@ -1,6 +1,15 @@
+import { createElement } from 'react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
-import { normalizeSelectedAnalyticsFilterValues } from './AnalyticsFilterBar';
+import {
+  AnalyticsFilterBar,
+  normalizeSelectedAnalyticsFilterValues,
+} from './AnalyticsFilterBar';
+
+const FILTER_OPTIONS = {
+  user: [{ value: 'user:user-123', label: 'Analytics Tester' }],
+};
 
 describe('normalizeSelectedAnalyticsFilterValues', () => {
   it('maps legacy label-based selections to canonical option values', () => {
@@ -65,5 +74,31 @@ describe('normalizeSelectedAnalyticsFilterValues', () => {
         ],
       ),
     ).toEqual(['user:user-123']);
+  });
+});
+
+describe('AnalyticsFilterBar', () => {
+  it('keeps chart granularity out of the mobile filters drawer', () => {
+    render(
+      createElement(AnalyticsFilterBar, {
+        object: 'tasks',
+        filters: {},
+        filterOptions: FILTER_OPTIONS,
+        onFilterChange: vi.fn(),
+        onResetFilters: vi.fn(),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Filters/ }));
+
+    expect(screen.getByRole('dialog', { name: 'Filters' })).toBeInTheDocument();
+    expect(screen.getAllByText('Filters')).toHaveLength(1);
+    expect(
+      screen.queryByRole('combobox', { name: 'Time range' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('combobox', { name: 'Chart granularity' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText('By Day')).not.toBeInTheDocument();
   });
 });

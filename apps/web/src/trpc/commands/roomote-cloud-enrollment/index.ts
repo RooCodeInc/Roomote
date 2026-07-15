@@ -44,7 +44,7 @@ const claimResponseSchema = z.object({
 });
 
 export function parseRoomoteCloudEnrollmentLink(connectionLink: string): {
-  cloudOrigin: string;
+  cloudBaseUrl: string;
   connectionToken: string;
 } {
   let url: URL;
@@ -53,26 +53,30 @@ export function parseRoomoteCloudEnrollmentLink(connectionLink: string): {
   } catch {
     throw new Error('Enter a valid Roomote Cloud connection link.');
   }
-  const isLocalhost =
-    url.hostname === 'localhost' ||
-    url.hostname === '127.0.0.1' ||
-    url.hostname === '[::1]';
+  const hostname = url.hostname
+    .replace(/^\[|\]$/gu, '')
+    .replace(/\.$/u, '')
+    .toLowerCase();
+  const isLoopback =
+    ['localhost', '127.0.0.1', '::1'].includes(hostname) ||
+    hostname.endsWith('.localhost');
+  const isDevelopmentLoopback =
+    process.env.NODE_ENV !== 'production' && isLoopback;
+  const isValidPublicUrl =
+    url.protocol === 'https:' &&
+    !isLoopback &&
+    isIP(hostname) === 0 &&
+    (url.port === '' || url.port === '443') &&
+    !hostname.endsWith('.local') &&
+    !hostname.endsWith('.internal');
+  const isValidDevelopmentUrl =
+    isDevelopmentLoopback &&
+    (url.protocol === 'http:' || url.protocol === 'https:');
   if (
     url.username ||
     url.password ||
     url.search ||
-    (url.pathname !== '' && url.pathname !== '/') ||
-    (!isLocalhost &&
-      (isIP(url.hostname.replace(/^\[|\]$/gu, '')) !== 0 ||
-        (url.port !== '' && url.port !== '443') ||
-        url.hostname.endsWith('.local') ||
-        url.hostname.endsWith('.internal'))) ||
-    (url.protocol !== 'https:' &&
-      !(
-        process.env.NODE_ENV !== 'production' &&
-        isLocalhost &&
-        url.protocol === 'http:'
-      ))
+    (!isValidPublicUrl && !isValidDevelopmentUrl)
   ) {
     throw new Error('Enter a valid Roomote Cloud connection link.');
   }
@@ -82,19 +86,26 @@ export function parseRoomoteCloudEnrollmentLink(connectionLink: string): {
   if (!connectionToken || !ENROLLMENT_TOKEN_PATTERN.test(connectionToken)) {
     throw new Error('The Roomote Cloud connection link is invalid or expired.');
   }
-  return { cloudOrigin: url.origin, connectionToken };
+  url.hash = '';
+  url.pathname = url.pathname.replace(/\/+$/u, '');
+  const cloudBaseUrl = url.toString().replace(/\/$/u, '');
+  return { cloudBaseUrl, connectionToken };
+}
+
+function resolveCloudEndpoint(cloudBaseUrl: string, path: string): URL {
+  return new URL(path, `${cloudBaseUrl}/`);
 }
 
 function assertClaimResponse(
   claim: z.infer<typeof claimResponseSchema>,
-  input: { cloudOrigin: string; endpointUrl: string },
+  input: { cloudBaseUrl: string; endpointUrl: string },
 ) {
   const environment = claim.environment;
   const deploymentToken = environment.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN;
   const teamsEnabled = environment.ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED;
   if (
     new URL(claim.endpointUrl).origin !== input.endpointUrl ||
-    environment.ROOMOTE_CLOUD_URL !== input.cloudOrigin ||
+    environment.ROOMOTE_CLOUD_URL !== input.cloudBaseUrl ||
     environment.ROOMOTE_CLOUD_DEPLOYMENT_ID !== claim.deploymentId ||
     !/^rcd_[A-Za-z0-9_-]{43}$/u.test(deploymentToken ?? '') ||
     !/^[A-Za-z0-9_-]{43}$/u.test(
@@ -123,10 +134,11 @@ function assertClaimResponse(
       environment.R_TEAMS_BOT_APP_PASSWORD !== deploymentToken ||
       !environment.R_TEAMS_BOT_NAME ||
       !environment.R_TEAMS_BOT_OAUTH_SCOPE ||
-      teamsTokenUrl.origin !== input.cloudOrigin ||
-      teamsTokenUrl.pathname !== '/runtime/v1/integrations/teams/token' ||
-      teamsTokenUrl.search ||
-      teamsTokenUrl.hash
+      teamsTokenUrl.toString() !==
+        resolveCloudEndpoint(
+          input.cloudBaseUrl,
+          'runtime/v1/integrations/teams/token',
+        ).toString()
     ) {
       throw new Error('Roomote Cloud returned an invalid enrollment response.');
     }
@@ -176,14 +188,14 @@ export async function enrollCustomerHostedRoomoteCommand(input: {
   if (!isRoomoteCloudEnabled(process.env)) {
     throw new Error('Roomote Cloud enrollment is not enabled.');
   }
-  const { cloudOrigin, connectionToken } = parseRoomoteCloudEnrollmentLink(
+  const { cloudBaseUrl, connectionToken } = parseRoomoteCloudEnrollmentLink(
     input.connectionLink,
   );
   const endpointUrl = new URL(Env.R_APP_URL).origin;
   let response: Response;
   try {
     response = await (input.fetchFn ?? fetch)(
-      `${cloudOrigin}/enrollment/v1/claim`,
+      resolveCloudEndpoint(cloudBaseUrl, 'enrollment/v1/claim').toString(),
       {
         method: 'POST',
         headers: {
@@ -202,7 +214,7 @@ export async function enrollCustomerHostedRoomoteCommand(input: {
   }
   if (!response.ok) throw new Error(await getCloudError(response));
   const claim = await parseClaimResponse(response);
-  assertClaimResponse(claim, { cloudOrigin, endpointUrl });
+  assertClaimResponse(claim, { cloudBaseUrl, endpointUrl });
 
   const values = Object.entries(claim.environment)
     .filter(
@@ -243,7 +255,7 @@ export async function enrollCustomerHostedRoomoteCommand(input: {
   return {
     deploymentId: claim.deploymentId,
     workspaceId: claim.workspaceId,
-    cloudUrl: cloudOrigin,
+    cloudUrl: cloudBaseUrl,
     endpointUrl,
   };
 }
