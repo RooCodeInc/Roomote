@@ -12,7 +12,7 @@ function resolveCleanupReason(error: unknown): 'abort' | 'error' {
 }
 
 export async function cleanupModalInstance(options: {
-  computeClient: Pick<ComputeProviderClient, 'destroyInstance'>;
+  computeClient: Pick<ComputeProviderClient, 'destroyInstance' | 'vendor'>;
   instanceId: string;
   phase: string;
   error: unknown;
@@ -49,7 +49,7 @@ export async function cleanupModalInstance(options: {
 
   try {
     await onMutation?.({
-      provider: 'modal',
+      provider: computeClient.vendor,
       operation: 'destroy_instance',
       eventType: 'started',
       instanceId,
@@ -60,7 +60,7 @@ export async function cleanupModalInstance(options: {
     await computeClient.destroyInstance({ instanceId });
 
     await onMutation?.({
-      provider: 'modal',
+      provider: computeClient.vendor,
       operation: 'destroy_instance',
       eventType: 'completed',
       instanceId,
@@ -75,7 +75,7 @@ export async function cleanupModalInstance(options: {
     });
   } catch (cleanupError) {
     await onMutation?.({
-      provider: 'modal',
+      provider: computeClient.vendor,
       operation: 'destroy_instance',
       eventType: 'failed',
       instanceId,
