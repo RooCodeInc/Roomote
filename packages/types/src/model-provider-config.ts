@@ -109,6 +109,14 @@ export type SetupModelProviderDescriptor = {
   authKind: SetupModelProviderAuthKind;
   suggestedTaskModels: readonly SuggestedTaskModel[];
   /**
+   * Hides the provider from the setup wizard and settings connect surfaces
+   * unless it is already connected (saved or runtime env). The catalog entry
+   * stays registered so existing connections keep working: model-id
+   * resolution, credential env-var forwarding, and provider labels are
+   * unaffected.
+   */
+  hidden?: boolean;
+  /**
    * Recommended per-role default models, applied when the provider is
    * connected during setup and by the models settings page's
    * "Use recommended" action (see
@@ -134,9 +142,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels(
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
+    // Vision is unset: the recommended coding model is multimodal, so image
+    // work follows the coding model ("same as coding").
     recommendedRoleModels: {
       helper: 'openrouter/google/gemini-3.5-flash',
-      vision: 'openrouter/google/gemini-3.1-pro-preview',
       codeReview: 'openrouter/anthropic/claude-opus-4.8',
       explore: 'openrouter/google/gemini-3.5-flash',
       planning: 'openrouter/anthropic/claude-opus-4.8',
@@ -167,9 +176,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
       'grok-4-5': 'vercel/xai/grok-4.5',
     }),
+    // Vision is unset: the recommended coding model is multimodal, so image
+    // work follows the coding model ("same as coding").
     recommendedRoleModels: {
       helper: 'vercel/google/gemini-3.5-flash',
-      vision: 'vercel/google/gemini-3.1-pro-preview',
       codeReview: 'vercel/anthropic/claude-opus-4.8',
       explore: 'vercel/google/gemini-3.5-flash',
       planning: 'vercel/anthropic/claude-opus-4.8',
@@ -186,6 +196,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-haiku-4-5': 'requesty/anthropic/claude-haiku-4-5',
     }),
+    // Hidden from new connections for now: the catalog above resolves too
+    // few recommended models to seed a useful default list. Existing
+    // connections keep working.
+    hidden: true,
   },
   {
     id: 'baseten',
@@ -367,7 +381,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         placeholder: 'us-central1',
       },
     ],
-    defaultRoomoteModel: 'google-vertex/gemini-3.5-flash',
+    defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-haiku-4-5': 'google-vertex/claude-haiku-4-5@20251001',
@@ -376,12 +390,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-1-pro': 'google-vertex/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google-vertex/gemini-3.5-flash',
     }),
-    // Gemini-only recommendations: Claude models on Vertex often require
-    // separate Model Garden enablement, so they are suggested but not
-    // recommended defaults.
+    // Mirrors the Anthropic/Bedrock split. Claude models on Vertex may
+    // require Model Garden enablement in the GCP project.
     recommendedRoleModels: {
-      codeReview: 'google-vertex/gemini-3.1-pro-preview',
-      planning: 'google-vertex/gemini-3.1-pro-preview',
+      helper: 'google-vertex/claude-haiku-4-5@20251001',
+      codeReview: 'google-vertex/claude-opus-4-8@default',
+      explore: 'google-vertex/claude-haiku-4-5@20251001',
+      planning: 'google-vertex/claude-opus-4-8@default',
     },
   },
   {
@@ -934,58 +949,67 @@ export function buildSetupModelStatus(input: {
     persistedProviderId ??
     DEFAULT_SETUP_MODEL_PROVIDER_ID;
 
-  const providers = SETUP_MODEL_PROVIDER_CATALOG.map((provider) => {
-    if (provider.authKind === 'oauth') {
-      // OAuth providers carry no env var. Satisfaction comes from the
-      // connection flag passed in by the caller (chatgptConnected).
+  const providers = SETUP_MODEL_PROVIDER_CATALOG.map(
+    (provider): SetupModelProviderStatus => {
+      if (provider.authKind === 'oauth') {
+        // OAuth providers carry no env var. Satisfaction comes from the
+        // connection flag passed in by the caller (chatgptConnected).
+        return {
+          ...provider,
+          additionalEnvValues: {},
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: chatgptConnected,
+        };
+      }
+
+      // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
+      // when every required env var is configured. Runtime satisfaction is
+      // runtime-env-only; saved satisfaction allows mixed sources (the
+      // effective model runtime env resolves each key runtime-first with a DB
+      // fallback) as long as at least one required value is actually saved.
+      const requiredEnvVarNames =
+        getSetupModelProviderRequiredEnvVarNames(provider);
+      const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+      const isRuntimeConfigured = (name: string) =>
+        isConfiguredEnvValue(runtimeEnv[name]);
+      const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
+      const additionalEnvValues = Object.fromEntries(
+        getSetupModelProviderAdditionalEnvFields(provider)
+          .filter((field) => !field.secret)
+          .map((field) => {
+            const runtimeValue = normalizeOptionalString(
+              runtimeEnv[field.envVarName],
+            );
+            const persistedValue = normalizeOptionalString(
+              input.persistedEnvVarValues?.[field.envVarName],
+            );
+
+            return [field.envVarName, runtimeValue ?? persistedValue];
+          })
+          .filter((entry): entry is [string, string] => entry[1] !== null),
+      );
+
       return {
         ...provider,
-        additionalEnvValues: {},
-        runtimeApiKeySatisfied: false,
-        savedApiKeySatisfied: chatgptConnected,
+        additionalEnvValues,
+        runtimeApiKeySatisfied:
+          hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
+        savedApiKeySatisfied:
+          hasRequiredEnvVars &&
+          requiredEnvVarNames.every(
+            (name) => isPersisted(name) || isRuntimeConfigured(name),
+          ) &&
+          requiredEnvVarNames.some(isPersisted),
       };
-    }
-
-    // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
-    // when every required env var is configured. Runtime satisfaction is
-    // runtime-env-only; saved satisfaction allows mixed sources (the
-    // effective model runtime env resolves each key runtime-first with a DB
-    // fallback) as long as at least one required value is actually saved.
-    const requiredEnvVarNames =
-      getSetupModelProviderRequiredEnvVarNames(provider);
-    const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-    const isRuntimeConfigured = (name: string) =>
-      isConfiguredEnvValue(runtimeEnv[name]);
-    const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
-    const additionalEnvValues = Object.fromEntries(
-      getSetupModelProviderAdditionalEnvFields(provider)
-        .filter((field) => !field.secret)
-        .map((field) => {
-          const runtimeValue = normalizeOptionalString(
-            runtimeEnv[field.envVarName],
-          );
-          const persistedValue = normalizeOptionalString(
-            input.persistedEnvVarValues?.[field.envVarName],
-          );
-
-          return [field.envVarName, runtimeValue ?? persistedValue];
-        })
-        .filter((entry): entry is [string, string] => entry[1] !== null),
-    );
-
-    return {
-      ...provider,
-      additionalEnvValues,
-      runtimeApiKeySatisfied:
-        hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
-      savedApiKeySatisfied:
-        hasRequiredEnvVars &&
-        requiredEnvVarNames.every(
-          (name) => isPersisted(name) || isRuntimeConfigured(name),
-        ) &&
-        requiredEnvVarNames.some(isPersisted),
-    };
-  });
+    },
+  ).filter(
+    // Hidden providers are not offered for new connections but stay listed
+    // (and manageable) while they are connected.
+    (provider) =>
+      !provider.hidden ||
+      provider.runtimeApiKeySatisfied ||
+      provider.savedApiKeySatisfied,
+  );
 
   const runtimeProviderStatus = providers.find(
     (provider) => provider.id === runtimeKnownProviderId,

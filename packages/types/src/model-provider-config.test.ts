@@ -295,7 +295,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       label: 'Google Vertex AI',
       envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
       envVarLabel: 'Service account JSON',
-      defaultRoomoteModel: 'google-vertex/gemini-3.5-flash',
+      defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
     });
     expect(
       vertexProvider?.additionalEnvFields?.map((field) => ({
@@ -346,7 +346,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
 
-  it('maps Requesty to the REQUESTY_API_KEY env var', () => {
+  it('maps Requesty to the REQUESTY_API_KEY env var and hides it from new connections', () => {
     const requestyProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'requesty',
     );
@@ -355,7 +355,25 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       label: 'Requesty',
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
+      hidden: true,
     });
+  });
+
+  it('excludes hidden providers from the setup status unless they are connected', () => {
+    const unconnected = buildSetupModelStatus({});
+
+    expect(
+      unconnected.providers.some((provider) => provider.id === 'requesty'),
+    ).toBe(false);
+
+    const connected = buildSetupModelStatus({
+      persistedEnvVarNames: ['REQUESTY_API_KEY'],
+    });
+    const requestyStatus = connected.providers.find(
+      (provider) => provider.id === 'requesty',
+    );
+
+    expect(requestyStatus?.savedApiKeySatisfied).toBe(true);
   });
 
   it('maps Baseten to the BASETEN_API_KEY env var', () => {

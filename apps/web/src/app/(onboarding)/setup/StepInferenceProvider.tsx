@@ -5,7 +5,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
-  SETUP_MODEL_PROVIDER_CATALOG,
   type SetupModelProviderId,
   type SetupModelStatus,
 } from '@roomote/types';
@@ -146,12 +145,14 @@ export function StepInferenceProvider({
   const primaryCredentialLabel =
     selectedProviderStatus?.envVarLabel ?? 'API key';
   const additionalEnvFields = selectedProviderStatus?.additionalEnvFields ?? [];
-  const sortedModelProviderCatalog = useMemo(
+  // The server status list already excludes hidden providers that are not
+  // connected, so the picker only offers providers that can be selected.
+  const sortedModelProviders = useMemo(
     () =>
-      [...SETUP_MODEL_PROVIDER_CATALOG].sort((left, right) =>
+      [...modelSetup.providers].sort((left, right) =>
         left.label.localeCompare(right.label),
       ),
-    [],
+    [modelSetup.providers],
   );
   const shouldShowSavedValueMask =
     !hasRuntimeProviderKey &&
@@ -202,7 +203,7 @@ export function StepInferenceProvider({
             <SelectValue placeholder="Choose a provider" />
           </SelectTrigger>
           <SelectContent>
-            {sortedModelProviderCatalog.map((provider) => (
+            {sortedModelProviders.map((provider) => (
               <SelectItem key={provider.id} value={provider.id}>
                 {provider.label}
               </SelectItem>
