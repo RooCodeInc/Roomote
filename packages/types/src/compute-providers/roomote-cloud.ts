@@ -24,6 +24,42 @@ export const DEFAULT_ROOMOTE_CLOUD_BACKEND: RoomoteCloudBackend = 'modal';
 
 export const ROOMOTE_CLOUD_BACKEND_ENV_VAR = 'ROOMOTE_CLOUD_BACKEND';
 
+/**
+ * Engine-neutral deployment identity for the managed provider. Backends map
+ * it to their native grouping mechanism — the Modal backend groups the
+ * deployment's sandboxes under the app `roomote-<slug>` — so hosting
+ * operators get per-deployment usage attribution without touching
+ * engine-specific env vars (which would also affect an operator's
+ * bring-your-own provider of the same engine).
+ */
+export const ROOMOTE_CLOUD_SLUG_ENV_VAR = 'ROOMOTE_CLOUD_SLUG';
+
+export function resolveRoomoteCloudSlug(
+  env: Partial<Record<string, string | undefined>>,
+): string | null {
+  return env[ROOMOTE_CLOUD_SLUG_ENV_VAR]?.trim() || null;
+}
+
+/**
+ * Modal app name for the managed provider's Modal backend. An explicit
+ * `MODAL_APP_NAME` wins as an escape hatch; otherwise the deployment slug
+ * maps to `roomote-<slug>`; with neither, the Modal client's default
+ * applies.
+ */
+export function resolveRoomoteCloudModalAppName(
+  env: Partial<Record<string, string | undefined>>,
+): string | undefined {
+  const explicit = env.MODAL_APP_NAME?.trim();
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const slug = resolveRoomoteCloudSlug(env);
+
+  return slug ? `roomote-${slug}` : undefined;
+}
+
 export function isRoomoteCloudBackend(
   value: string,
 ): value is RoomoteCloudBackend {

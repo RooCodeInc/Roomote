@@ -131,6 +131,37 @@ describe('createComputeProviderClient', () => {
     ).toThrow('Missing ROOMOTE_CLOUD_TOKEN_ID');
   });
 
+  it('derives the Modal app name from the deployment slug for the Roomote provider', () => {
+    createComputeProviderClient({
+      provider: 'roomote',
+      envFallback: {
+        ROOMOTE_CLOUD_TOKEN_ID: 'rc-token-id',
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-token-secret',
+        ROOMOTE_CLOUD_SLUG: 'acme',
+        MODAL_BASE_IMAGE_REF: 'ghcr.io/roomote/modal-worker:test',
+      },
+    });
+
+    expect(modalClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ appName: 'roomote-acme' }),
+    );
+
+    // The plain Modal provider ignores the deployment slug entirely.
+    createComputeProviderClient({
+      provider: 'modal',
+      config: {
+        tokenId: 'token-id',
+        tokenSecret: 'token-secret',
+        baseImageRef: 'ghcr.io/roomote/modal-worker:test',
+      },
+      envFallback: { ROOMOTE_CLOUD_SLUG: 'acme' },
+    });
+
+    expect(modalClientMock).toHaveBeenLastCalledWith(
+      expect.not.objectContaining({ appName: 'roomote-acme' }),
+    );
+  });
+
   it('accepts the explicit modal backend and rejects unsupported backends', () => {
     createComputeProviderClient({
       provider: 'roomote',

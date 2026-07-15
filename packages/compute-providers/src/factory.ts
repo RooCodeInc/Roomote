@@ -2,6 +2,7 @@ import {
   resolveConfiguredComputeProviderResources,
   resolveEffectiveModalBaseImageRef,
   resolveRoomoteCloudBackend,
+  resolveRoomoteCloudModalAppName,
   SANDBOX_DEFAULT_MEMORY_MIB,
   SANDBOX_DEFAULT_VCPUS,
 } from '@roomote/types';
@@ -106,7 +107,16 @@ export function createComputeProviderClient(
 
       const modalEndpoint = envValue('MODAL_ENDPOINT');
       const modalEnvironment = envValue('MODAL_ENVIRONMENT');
-      const modalAppName = envValue('MODAL_APP_NAME');
+      // The managed provider derives its app name from the engine-neutral
+      // deployment slug (explicit MODAL_APP_NAME still wins); plain Modal
+      // keeps reading only its own env var.
+      const modalAppName =
+        options.provider === 'roomote'
+          ? resolveRoomoteCloudModalAppName({
+              MODAL_APP_NAME: envValue('MODAL_APP_NAME'),
+              ROOMOTE_CLOUD_SLUG: envValue('ROOMOTE_CLOUD_SLUG'),
+            })
+          : envValue('MODAL_APP_NAME');
       const modalEcrOidcRoleArn = envValue('MODAL_ECR_OIDC_ROLE_ARN');
       const modalEcrRegion = envValue('MODAL_ECR_REGION');
       const modalRegions = parseModalRegions(envValue('MODAL_REGIONS'));

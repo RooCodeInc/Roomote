@@ -1,5 +1,6 @@
 import {
   resolveRoomoteCloudBackend,
+  resolveRoomoteCloudModalAppName,
   type ComputeProvider,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
@@ -122,7 +123,13 @@ export class RoomoteController extends BaseController {
           modalTokenSecret,
           modalEndpoint: Env.MODAL_ENDPOINT,
           modalEnvironment: Env.MODAL_ENVIRONMENT,
-          modalAppName: Env.MODAL_APP_NAME,
+          modalAppName:
+            provider === 'roomote'
+              ? resolveRoomoteCloudModalAppName({
+                  MODAL_APP_NAME: Env.MODAL_APP_NAME,
+                  ROOMOTE_CLOUD_SLUG: resolvedEnv.ROOMOTE_CLOUD_SLUG,
+                })
+              : Env.MODAL_APP_NAME,
           modalBaseImageRef,
           modalRegistryUsername: Env.MODAL_REGISTRY_USERNAME,
           modalRegistryPassword: Env.MODAL_REGISTRY_PASSWORD,

@@ -270,6 +270,14 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
       },
       {
+        // Engine-neutral deployment identity; backends map it to their
+        // native grouping (Modal app name) for per-deployment attribution.
+        envVarName: 'ROOMOTE_CLOUD_SLUG',
+        label: 'Roomote Cloud Slug',
+        required: false,
+        category: 'infrastructure',
+      },
+      {
         // Shared with the Modal provider: the default backend runs on Modal,
         // and the base image derives from the deployment's worker image.
         envVarName: 'MODAL_BASE_IMAGE_REF',
@@ -530,6 +538,7 @@ const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'ROOMOTE_CLOUD_TOKEN_ID',
   'ROOMOTE_CLOUD_TOKEN_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
+  'ROOMOTE_CLOUD_SLUG',
 ]);
 
 /**
