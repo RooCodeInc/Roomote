@@ -9,6 +9,7 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
@@ -78,25 +79,17 @@ export function StepAuthProvider({
           })}
         </div>
 
-        {onSkip ? (
-          <button
-            type="button"
-            className="cursor-pointer text-sm text-muted-foreground underline"
-            onClick={onSkip}
-          >
-            Do this later
-          </button>
-        ) : null}
-
-        {onBack ? (
-          <button
-            type="button"
-            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
-            onClick={onBack}
-          >
-            Back
-          </button>
-        ) : null}
+        <SetupFooter onBack={onBack}>
+          {onSkip ? (
+            <button
+              type="button"
+              className="cursor-pointer text-sm text-muted-foreground underline"
+              onClick={onSkip}
+            >
+              Do this later
+            </button>
+          ) : null}
+        </SetupFooter>
       </div>
     </div>
   );

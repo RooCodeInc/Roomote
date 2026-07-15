@@ -27,7 +27,6 @@ const communicationProviderCopy: Record<
     icon: string;
     title: string;
     description: string;
-    example?: string;
   }
 > = {
   slack: {
@@ -58,7 +57,6 @@ const sourceControlProviderCopy: Record<
   {
     icon: string;
     description: string;
-    example?: string;
   }
 > = {
   github: {
@@ -67,11 +65,11 @@ const sourceControlProviderCopy: Record<
   },
   gitlab: {
     icon: 'gitlab',
-    description: `Start work from connected GitLab merge requests and repositories.`,
+    description: `Mention @roomote in a comment on any merge request.`,
   },
   gitea: {
     icon: 'gitea',
-    description: `Start work from connected Gitea pull requests and repositories.`,
+    description: `Mention @roomote in a comment on any pull request.`,
   },
   bitbucket: {
     icon: 'bitbucket',
@@ -171,7 +169,7 @@ export function buildInvokeMethods({
     {
       icon: Zap,
       title: 'Automations',
-      description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed.`,
+      description: `Let ${PRODUCT_NAME} work proactively for you, handling alerts, taking on tasks and finding issues. No prompting needed look at the Automations tab.`,
     },
     {
       icon: AppWindow,

@@ -67,6 +67,13 @@ vi.mock('@roomote/communication/thread-reply-footer-state', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(),
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await resolveTelegramRuntimeCredentialsMock();
+
+    return botToken
+      ? { postMessage: postMessageMock, sendChatAction: sendChatActionMock }
+      : null;
+  }),
 }));
 
 vi.mock('@roomote/slack', () => ({

@@ -92,6 +92,7 @@ export interface WorkerRuntimePaths {
   runtime: WorkerRuntimeEnvironment;
   sandboxRootDir: string;
   workspaceReposDir: string;
+  /** Legacy provider/snapshot path identifier; no editor is installed. */
   vscodeUserDataDir: string;
 }
 

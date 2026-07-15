@@ -71,10 +71,12 @@ services:
   caddy-dev:
     container_name: roomote-caddy-dev
     image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    environment:
+      S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-roomote-artifacts}
     ports:
       - '127.0.0.1:18080:18080'
     volumes:
-      - ./.docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./.docker/caddy:/etc/caddy:ro
     extra_hosts:
       - 'host.docker.internal:host-gateway'
 

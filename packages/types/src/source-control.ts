@@ -29,6 +29,7 @@ export type SourceControlGitCredential = {
   repositoryFullName: string;
   username: string;
   token: string;
+  authScheme?: 'basic' | 'bearer';
   originBaseUrl?: string;
 };
 
@@ -139,6 +140,21 @@ export function resolveSourceControlProviderFromPayload(payload: {
   sourceControlProvider?: unknown;
 }): SourceControlProvider {
   return normalizeSourceControlProvider(payload.sourceControlProvider);
+}
+
+/**
+ * Reads the optional `sourceControlHost` field from a task payload. Returns
+ * the trimmed host, or undefined when the payload carries no usable host so
+ * repository resolution falls back to (provider, fullName) alone.
+ */
+export function resolveSourceControlHostFromPayload(payload: {
+  sourceControlHost?: unknown;
+}): string | undefined {
+  const host =
+    typeof payload.sourceControlHost === 'string'
+      ? payload.sourceControlHost.trim()
+      : '';
+  return host || undefined;
 }
 
 export function getSourceControlProviderLabel(

@@ -13,6 +13,11 @@ export type SetupSourceControlFieldDescriptor = {
   label: string;
   required?: boolean;
   secret?: boolean;
+  settingsHidden?: boolean;
+  /** Hidden in onboarding until “Show advanced config” is opened. */
+  advanced?: boolean;
+  /** Never shown in onboarding; remaining available in Settings/backend. */
+  setupHidden?: boolean;
 };
 
 export type SetupSourceControlProviderDescriptor = {
@@ -69,6 +74,29 @@ export function isRequiredField(field: SetupSourceControlFieldDescriptor) {
   return field.required !== false;
 }
 
+/**
+ * Fields shown during `/setup` source-control configuration.
+ * Settings continues to use the full field list for every provider.
+ */
+export function getSetupSourceControlVisibleFields<
+  TField extends SetupSourceControlFieldDescriptor,
+>(
+  fields: readonly TField[],
+  options: { showAdvancedConfig?: boolean } = {},
+): TField[] {
+  return fields.filter((field) => {
+    if (field.setupHidden) {
+      return false;
+    }
+
+    if (field.advanced && !options.showAdvancedConfig) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
 function isSecretSourceControlField(
   field: Pick<SetupSourceControlFieldDescriptor, 'secret'>,
 ): boolean {
@@ -79,6 +107,44 @@ function isConfiguredEnvValue(
   value: string | null | undefined,
 ): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function getAdoFieldValue(
+  fields: readonly SetupSourceControlFieldStatus[],
+  envVarName: string,
+): string | null {
+  return (
+    fields
+      .find((field) => field.envVarName === envVarName)
+      ?.savedValue?.trim() ?? null
+  );
+}
+
+function isAdoCredentialConfigured(
+  fields: readonly SetupSourceControlFieldStatus[],
+  kind: 'runtime' | 'saved' | 'effective',
+): boolean {
+  const isConfigured = (envVarName: string) =>
+    fields.some((field) => {
+      if (field.envVarName !== envVarName) return false;
+      return kind === 'runtime'
+        ? field.runtimeSatisfied
+        : kind === 'saved'
+          ? field.savedSatisfied
+          : field.runtimeSatisfied || field.savedSatisfied;
+    });
+  const authMode = getAdoFieldValue(fields, 'ADO_AUTH_MODE');
+  if (authMode === 'pat') return isConfigured('ADO_TOKEN');
+  if (!authMode && isConfigured('ADO_TOKEN')) return true;
+
+  const hasAppCredentials = [
+    'ADO_CLIENT_ID',
+    'ADO_CLIENT_SECRET',
+    'ADO_TENANT_ID',
+  ].every(isConfigured);
+  if (!hasAppCredentials) return false;
+
+  return authMode !== 'delegated' || isConfigured('ADO_LINKED_ACCOUNT_ID');
 }
 
 export const SETUP_SOURCE_CONTROL_PROVIDER_CATALOG = sourceControlProviders.map(
@@ -175,12 +241,6 @@ function buildProviderFields(
     case 'gitlab':
       return [
         {
-          envVarName: 'GITLAB_TOKEN',
-          acceptedEnvVarNames: ['GITLAB_TOKEN'],
-          label: 'GitLab Personal Access Token',
-          secret: true,
-        },
-        {
           envVarName: 'GITLAB_BASE_URL',
           acceptedEnvVarNames: ['GITLAB_BASE_URL'],
           label: 'GitLab Base URL',
@@ -189,15 +249,13 @@ function buildProviderFields(
         {
           envVarName: 'GITLAB_CLIENT_ID',
           acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
-          label: 'GitLab OAuth Client ID',
-          required: false,
+          label: 'OAuth Application ID',
         },
         {
           envVarName: 'GITLAB_CLIENT_SECRET',
           acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
-          label: 'GitLab OAuth Client Secret',
+          label: 'OAuth App Secret',
           secret: true,
-          required: false,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SIGNING_TOKEN',
@@ -205,6 +263,7 @@ function buildProviderFields(
           label: 'GitLab Webhook Signing Token',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'GITLAB_WEBHOOK_SECRET',
@@ -212,6 +271,7 @@ function buildProviderFields(
           label: 'GitLab Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'gitea':
@@ -222,29 +282,17 @@ function buildProviderFields(
           label: 'Gitea Base URL',
         },
         {
-          envVarName: 'GITEA_TOKEN',
-          acceptedEnvVarNames: ['GITEA_TOKEN'],
-          label: 'Gitea Access Token',
-          secret: true,
-        },
-        {
-          envVarName: 'GITEA_USERNAME',
-          acceptedEnvVarNames: ['GITEA_USERNAME'],
-          label: 'Gitea Username',
-          required: false,
-        },
-        {
           envVarName: 'GITEA_CLIENT_ID',
           acceptedEnvVarNames: ['GITEA_CLIENT_ID'],
           label: 'Gitea OAuth Client ID',
-          required: false,
+          required: true,
         },
         {
           envVarName: 'GITEA_CLIENT_SECRET',
           acceptedEnvVarNames: ['GITEA_CLIENT_SECRET'],
           label: 'Gitea OAuth Client Secret',
           secret: true,
-          required: false,
+          required: true,
         },
         {
           envVarName: 'GITEA_WEBHOOK_SECRET',
@@ -252,6 +300,7 @@ function buildProviderFields(
           label: 'Gitea Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'ado':
@@ -266,18 +315,37 @@ function buildProviderFields(
           acceptedEnvVarNames: ['ADO_TOKEN'],
           label: 'Azure DevOps Access Token',
           secret: true,
+          required: false,
+        },
+        {
+          envVarName: 'ADO_AUTH_MODE',
+          acceptedEnvVarNames: ['ADO_AUTH_MODE'],
+          label: 'Azure DevOps Authentication Mode',
+          required: false,
+          setupHidden: true,
+          settingsHidden: true,
+        },
+        {
+          envVarName: 'ADO_LINKED_ACCOUNT_ID',
+          acceptedEnvVarNames: ['ADO_LINKED_ACCOUNT_ID'],
+          label: 'Azure DevOps Linked Account ID',
+          required: false,
+          setupHidden: true,
+          settingsHidden: true,
         },
         {
           envVarName: 'ADO_BASE_URL',
           acceptedEnvVarNames: ['ADO_BASE_URL'],
           label: 'Azure DevOps Base URL',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_USERNAME',
           acceptedEnvVarNames: ['ADO_USERNAME'],
           label: 'Azure DevOps Username',
           required: false,
+          advanced: true,
         },
         {
           envVarName: 'ADO_CLIENT_ID',
@@ -304,6 +372,7 @@ function buildProviderFields(
           label: 'Azure DevOps Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
     case 'bitbucket':
@@ -324,12 +393,14 @@ function buildProviderFields(
           acceptedEnvVarNames: ['BITBUCKET_BASE_URL'],
           label: 'Bitbucket Base URL',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_ID',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
           label: 'Bitbucket OAuth Client ID',
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_SECRET',
@@ -337,6 +408,7 @@ function buildProviderFields(
           label: 'Bitbucket OAuth Client Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_WEBHOOK_SECRET',
@@ -344,6 +416,7 @@ function buildProviderFields(
           label: 'Bitbucket Webhook Secret',
           secret: true,
           required: false,
+          setupHidden: true,
         },
       ];
   }
@@ -394,23 +467,38 @@ export function buildSetupSourceControlStatus(input: {
     });
 
     const requiredFields = fields.filter(isRequiredField);
-    const runtimeConfigSatisfied = requiredFields.every(
+    const requiredFieldsSatisfied = requiredFields.every(
       (field) => field.runtimeSatisfied,
     );
-    const savedConfigSatisfied = requiredFields.every(
+    const requiredSavedFieldsSatisfied = requiredFields.every(
       (field) => field.savedSatisfied,
     );
-    const configSatisfied = requiredFields.every(
+    const standardRequiredFieldsSatisfied = requiredFields.every(
       (field) => field.runtimeSatisfied || field.savedSatisfied,
     );
+    const runtimeConfigSatisfied = requiredFieldsSatisfied;
+    const savedConfigSatisfied = requiredSavedFieldsSatisfied;
+    const standardConfigSatisfied = standardRequiredFieldsSatisfied;
+    const adoCredentialSatisfied =
+      descriptor.provider !== 'ado' ||
+      isAdoCredentialConfigured(fields, 'effective');
+    const adoRuntimeCredentialSatisfied =
+      descriptor.provider !== 'ado' ||
+      isAdoCredentialConfigured(fields, 'runtime');
+    const adoSavedCredentialSatisfied =
+      descriptor.provider !== 'ado' ||
+      isAdoCredentialConfigured(fields, 'saved');
+    const configSatisfied = standardConfigSatisfied && adoCredentialSatisfied;
 
     return {
       ...descriptor,
       fields,
-      runtimeConfigSatisfied,
-      savedConfigSatisfied,
+      runtimeConfigSatisfied:
+        runtimeConfigSatisfied && adoRuntimeCredentialSatisfied,
+      savedConfigSatisfied: savedConfigSatisfied && adoSavedCredentialSatisfied,
       configSatisfied,
-      configSatisfiedByRuntimeEnv: runtimeConfigSatisfied,
+      configSatisfiedByRuntimeEnv:
+        runtimeConfigSatisfied && adoRuntimeCredentialSatisfied,
       connected: connectedProviderSet.has(descriptor.provider),
       repositoryCount: repositoryCounts[descriptor.provider] ?? 0,
     };

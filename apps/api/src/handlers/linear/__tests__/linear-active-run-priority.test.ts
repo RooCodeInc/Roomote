@@ -54,6 +54,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildLinearRoutingContext: vi.fn(),
 }));
 
+vi.mock('@roomote/slack', () => ({
+  postRouterDebugMessage: vi.fn(),
+}));
+
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
 

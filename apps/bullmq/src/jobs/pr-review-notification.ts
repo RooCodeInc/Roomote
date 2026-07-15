@@ -1,7 +1,6 @@
 import { Job } from 'bullmq';
 
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
-import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import type { CommunicationPostMessageInput } from '@roomote/communication';
 import {
   and,
   db,
@@ -10,13 +9,11 @@ import {
   slackInstallations,
   taskPullRequests,
   taskRuns,
-  resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
-import { Env } from '@roomote/env';
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
-  createTeamsCommunicationProviderFromRuntimeCredentials,
+  getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
@@ -26,140 +23,94 @@ import {
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
 } from '@roomote/sdk/server';
-import { SlackNotifier } from '@roomote/slack';
+import {
+  postSlackThreadMessageWithStickyFooter,
+  SlackNotifier,
+} from '@roomote/slack';
 import { isTaskExecutingTurn } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
 
-async function postSlackNotification({
+function buildPrReviewNotificationPostInput(
+  route: PrReviewNotificationRoute,
+  text: string,
+): CommunicationPostMessageInput {
+  switch (route.provider) {
+    case 'slack':
+      return {
+        channelId: route.channelId,
+        threadId: route.threadId,
+        text,
+      };
+    case 'teams':
+      return {
+        channelId: route.channelId,
+        serviceUrl: route.serviceUrl,
+        ...(route.threadId
+          ? { threadId: route.threadId, replyToMessageId: route.threadId }
+          : {}),
+        text,
+        textFormat: 'markdown',
+      };
+    case 'telegram':
+      return {
+        channelId: route.channelId,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+        text,
+      };
+    case 'discord':
+      return {
+        channelId: route.channelId,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+        text,
+        textFormat: 'markdown',
+      };
+  }
+}
+
+async function postPrReviewNotification({
+  taskId,
   route,
   text,
 }: {
-  route: Extract<PrReviewNotificationRoute, { provider: 'slack' }>;
+  taskId: string;
+  route: PrReviewNotificationRoute;
   text: string;
 }): Promise<string | null> {
-  const slackInstallation = await db.query.slackInstallations.findFirst({
-    where: eq(slackInstallations.isActive, true),
-    columns: { botAccessToken: true },
-  });
+  if (route.provider === 'slack') {
+    const slackInstallation = await db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      columns: { botAccessToken: true },
+    });
 
-  if (!slackInstallation) {
+    if (!slackInstallation?.botAccessToken) {
+      console.warn('[PrReviewNotification] Slack is not connected, skipping');
+      return null;
+    }
+
+    const slack = new SlackNotifier(slackInstallation.botAccessToken);
+    return postSlackThreadMessageWithStickyFooter({
+      slack,
+      channel: route.channelId,
+      threadTs: route.threadId,
+      taskId,
+      text,
+      utmCampaign: 'slack.pr_review',
+    });
+  }
+
+  const adapter = await getCommunicationProviderAdapter(route.provider);
+
+  if (!adapter) {
     console.warn(
-      '[PrReviewNotification] No active Slack installation, skipping',
+      `[PrReviewNotification] ${route.provider} is not connected, skipping`,
     );
     return null;
   }
 
-  const notifier = new SlackNotifier(slackInstallation.botAccessToken);
-  const messageTs = await notifier.postMessage({
-    channel: route.channelId,
-    thread_ts: route.threadId,
-    text,
-    unfurl_links: false,
-    unfurl_media: false,
-  });
+  await adapter.postMessage(buildPrReviewNotificationPostInput(route, text));
 
-  return typeof messageTs === 'string' && messageTs ? messageTs : null;
-}
-
-async function postTeamsNotification({
-  route,
-  text,
-}: {
-  route: Extract<PrReviewNotificationRoute, { provider: 'teams' }>;
-  text: string;
-}): Promise<void> {
-  const provider =
-    await createTeamsCommunicationProviderFromRuntimeCredentials();
-
-  if (!provider) {
-    console.warn(
-      '[PrReviewNotification] Teams bot credentials are not configured, skipping',
-    );
-    return;
-  }
-
-  await provider.postMessage({
-    channelId: route.channelId,
-    serviceUrl: route.serviceUrl,
-    ...(route.threadId
-      ? { threadId: route.threadId, replyToMessageId: route.threadId }
-      : {}),
-    text,
-    textFormat: 'markdown',
-  });
-}
-
-async function postTelegramNotification({
-  route,
-  text,
-}: {
-  route: Extract<PrReviewNotificationRoute, { provider: 'telegram' }>;
-  text: string;
-}): Promise<void> {
-  if (!Env.R_TELEGRAM_BOT_TOKEN) {
-    console.warn(
-      '[PrReviewNotification] Telegram bot token is not configured, skipping',
-    );
-    return;
-  }
-
-  const provider = new TelegramCommunicationProvider({
-    botToken: Env.R_TELEGRAM_BOT_TOKEN,
-  });
-
-  await provider.postMessage({
-    channelId: route.channelId,
-    ...(route.threadId ? { threadId: route.threadId } : {}),
-    text,
-  });
-}
-
-async function postDiscordNotification({
-  route,
-  text,
-}: {
-  route: Extract<PrReviewNotificationRoute, { provider: 'discord' }>;
-  text: string;
-}): Promise<void> {
-  const { botToken, applicationId } = await resolveDiscordRuntimeCredentials();
-  if (!botToken) {
-    console.warn(
-      '[PrReviewNotification] Discord bot token is not configured, skipping',
-    );
-    return;
-  }
-  await new DiscordCommunicationProvider({
-    botToken,
-    ...(applicationId ? { applicationId } : {}),
-  }).postMessage({
-    channelId: route.channelId,
-    ...(route.threadId ? { threadId: route.threadId } : {}),
-    text,
-    textFormat: 'markdown',
-  });
-}
-
-async function postPrReviewNotification({
-  route,
-  text,
-}: {
-  route: PrReviewNotificationRoute;
-  text: string;
-}): Promise<string | null> {
-  switch (route.provider) {
-    case 'slack':
-      return postSlackNotification({ route, text });
-    case 'teams':
-      await postTeamsNotification({ route, text });
-      return null;
-    case 'telegram':
-      await postTelegramNotification({ route, text });
-      return null;
-    case 'discord':
-      await postDiscordNotification({ route, text });
-      return null;
-  }
+  return null;
 }
 
 /**
@@ -274,6 +225,7 @@ export const prReviewNotificationJob = async (
     }
 
     const messageTs = await postPrReviewNotification({
+      taskId: data.taskId,
       route: delivery.route,
       text: delivery.text,
     });

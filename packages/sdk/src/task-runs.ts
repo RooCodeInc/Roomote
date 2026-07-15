@@ -117,6 +117,10 @@ export const stampMilestone = (
   options: AppRouterInput['taskRuns']['stampMilestone'],
 ) => client.taskRuns.stampMilestone.mutate(options);
 
+export const updateEnvironmentSetup = (
+  options: AppRouterInput['taskRuns']['updateEnvironmentSetup'],
+) => client.taskRuns.updateEnvironmentSetup.mutate(options);
+
 /**
  * Reconcile the worker's local actor state against the server-authoritative
  * `task_runs.actingUserId` before delivering a turn.

@@ -75,6 +75,48 @@ export interface SandboxHarnessLogResult {
   lines: string[];
 }
 
+export type SandboxSetupCommandState =
+  | 'pending'
+  | 'running'
+  | 'started_detached'
+  | 'succeeded'
+  | 'failed';
+
+export type SandboxSetupOverallState =
+  | 'running'
+  | 'completed'
+  | 'completed_with_warnings'
+  | 'failed';
+
+export interface SandboxSetupCommandStatus {
+  repository: string;
+  name: string;
+  state: SandboxSetupCommandState;
+  detached?: boolean;
+  exitCode?: number;
+  durationMs?: number;
+  error?: string;
+  /** Workspace-relative path to the command's captured output. */
+  logFile?: string;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface SandboxSetupStatus {
+  version: 1;
+  state: SandboxSetupOverallState;
+  startedAt: string;
+  finishedAt?: string;
+  commands: SandboxSetupCommandStatus[];
+  warnings: string[];
+}
+
+export interface SandboxSetupStatusResult {
+  path: string;
+  exists: boolean;
+  status: SandboxSetupStatus | null;
+}
+
 export interface SandboxSendPromptInput {
   prompt?: string;
   taskTool?: TaskToolDispatchPayload;
@@ -177,6 +219,7 @@ export interface SandboxServerRpcClient {
       { lineLimit?: number } | undefined,
       SandboxHarnessLogResult
     >;
+    getSetupStatus: SandboxQuery<undefined, SandboxSetupStatusResult>;
     sendPrompt: SandboxMutation<SandboxSendPromptInput, SandboxSuccessResult>;
     steerTask: SandboxMutation<SandboxSteerTaskInput, SandboxSuccessResult>;
     steerQueuedMessage: SandboxMutation<

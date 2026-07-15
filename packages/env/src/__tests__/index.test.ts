@@ -96,12 +96,14 @@ describe('Env', () => {
       expect(env.DOCKER_WORKER_RELEASE_PATH).toBeUndefined();
       expect(env.DOCKER_WORKER_CPU_LIMIT).toBe(2);
       expect(env.DOCKER_WORKER_MEMORY_LIMIT).toBe('4g');
+      expect(env.DOCKER_TASK_DAEMON_MEMORY_LIMIT).toBe('8g');
       expect(env.DOCKER_WORKER_PIDS_LIMIT).toBe(512);
       expect(env.DOCKER_WORKER_DISK_LIMIT).toBe('20g');
       expect(env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK).toBe(false);
       expect(env.DOCKER_WORKER_LOG_MAX_SIZE).toBe('10m');
       expect(env.DOCKER_WORKER_LOG_MAX_FILES).toBe(3);
       expect(env.DOCKER_WORKER_EGRESS_POLICY).toBe('internet');
+      expect(env.MODAL_VM_MEMORY_MIB).toBe(8192);
       expect(env.DOCKER_STANDBY_MAX_COUNT).toBe(10);
       expect(env.DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
       expect(env.BLAXEL_STANDBY_MAX_COUNT).toBe(25);
@@ -145,6 +147,15 @@ describe('Env', () => {
     expect(
       createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
+  });
+
+  it('allows the Modal VM memory allocation to be overridden', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      MODAL_VM_MEMORY_MIB: '12288',
+    });
+
+    expect(env.MODAL_VM_MEMORY_MIB).toBe(12_288);
   });
 
   it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {

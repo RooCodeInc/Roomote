@@ -82,9 +82,93 @@ export function getGitHubAppMention(slug: string): string {
  * Leading Roomote PR provenance blockquote:
  * `> Created by Roomote. ...` or `> Opened on behalf of <name>. ...`
  * (including the historical "from an unlinked ..." attribution form).
+ *
+ * Parsed with linear string scans so untrusted PR bodies cannot trigger
+ * polynomial regular-expression matching.
  */
-const PR_BODY_ATTRIBUTION_LINE_RE =
-  /^(>\s*(?:Created by Roomote(?: from an unlinked [^.]+)?\.|Opened on behalf of .+?\.)\s*)(.*)$/;
+function matchPrBodyAttributionLine(
+  firstLine: string,
+): { prefix: string; instruction: string } | null {
+  if (!firstLine.startsWith('>')) {
+    return null;
+  }
+
+  let index = 1;
+  while (
+    index < firstLine.length &&
+    (firstLine.charCodeAt(index) === 32 /* space */ ||
+      firstLine.charCodeAt(index) === 9) /* tab */
+  ) {
+    index += 1;
+  }
+
+  const contentStart = index;
+  const content = firstLine.slice(contentStart);
+
+  const createdByPrefix = 'Created by Roomote';
+  if (content.startsWith(createdByPrefix)) {
+    let sentenceEnd = createdByPrefix.length;
+
+    if (content.startsWith(' from an unlinked ', sentenceEnd)) {
+      sentenceEnd += ' from an unlinked '.length;
+      while (
+        sentenceEnd < content.length &&
+        content.charCodeAt(sentenceEnd) !== 46 /* . */
+      ) {
+        sentenceEnd += 1;
+      }
+    }
+
+    if (content.charCodeAt(sentenceEnd) !== 46 /* . */) {
+      return null;
+    }
+
+    sentenceEnd += 1;
+    while (
+      sentenceEnd < content.length &&
+      (content.charCodeAt(sentenceEnd) === 32 ||
+        content.charCodeAt(sentenceEnd) === 9)
+    ) {
+      sentenceEnd += 1;
+    }
+
+    return {
+      prefix: firstLine.slice(0, contentStart + sentenceEnd),
+      instruction: content.slice(sentenceEnd),
+    };
+  }
+
+  const openedPrefix = 'Opened on behalf of ';
+  if (content.startsWith(openedPrefix)) {
+    let sentenceEnd = openedPrefix.length;
+    while (
+      sentenceEnd < content.length &&
+      content.charCodeAt(sentenceEnd) !== 46 /* . */
+    ) {
+      sentenceEnd += 1;
+    }
+
+    if (content.charCodeAt(sentenceEnd) !== 46 /* . */) {
+      return null;
+    }
+
+    sentenceEnd += 1;
+    while (
+      sentenceEnd < content.length &&
+      (content.charCodeAt(sentenceEnd) === 32 ||
+        content.charCodeAt(sentenceEnd) === 9)
+    ) {
+      sentenceEnd += 1;
+    }
+
+    return {
+      prefix: firstLine.slice(0, contentStart + sentenceEnd),
+      instruction: content.slice(sentenceEnd),
+    };
+  }
+
+  return null;
+}
 
 /**
  * Rewrite follow-up app mentions in the Roomote PR-body attribution line so
@@ -108,14 +192,13 @@ export function normalizePrBodyAttributionAppMention(
   const firstNewline = body.indexOf('\n');
   const firstLine = firstNewline === -1 ? body : body.slice(0, firstNewline);
   const remainder = firstNewline === -1 ? '' : body.slice(firstNewline);
-  const match = firstLine.match(PR_BODY_ATTRIBUTION_LINE_RE);
+  const match = matchPrBodyAttributionLine(firstLine);
 
   if (!match) {
     return body;
   }
 
-  const prefix = match[1] ?? '';
-  const instruction = match[2] ?? '';
+  const { prefix, instruction } = match;
   const rewrittenInstruction = instruction.replace(
     /(mention(?:ing)?\s+)@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/g,
     `$1${mention}`,

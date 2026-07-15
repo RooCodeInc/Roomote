@@ -13,6 +13,10 @@ import { cn } from '@/lib/utils';
 
 const phaseConfig: Record<TaskPhase, { label: string; color: string }> = {
   idle: { label: 'Idle', color: 'text-muted-foreground' },
+  waiting_for_sandbox_provider: {
+    label: 'Waiting for sandbox provider',
+    color: 'text-yellow-500',
+  },
   waiting_for_prompt: { label: 'Ready', color: 'text-emerald-500' },
   waiting_for_user_input: {
     label: 'Needs input',

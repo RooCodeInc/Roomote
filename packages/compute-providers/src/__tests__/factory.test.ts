@@ -183,7 +183,7 @@ describe('createComputeProviderClient', () => {
 
       expect(modalClientMock).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          baseImageRef: 'ghcr.io/roocodeinc/roomote-worker:latest',
+          baseImageRef: 'ghcr.io/roocodeinc/roomote-worker:develop',
         }),
       );
 

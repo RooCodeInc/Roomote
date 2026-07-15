@@ -12,7 +12,10 @@ import {
   uploadPreparedArtifact,
 } from '../local-file-upload.js';
 import { postToSlackChannel } from '../slack-api-client.js';
-import { handlePostToSlackChannel } from '../post-to-slack-channel.js';
+import {
+  handlePostToChannel,
+  handlePostToSlackChannel,
+} from '../post-to-slack-channel.js';
 import type { ArtifactConfig, RoomoteConfig } from '../types.js';
 
 const artifactConfig: ArtifactConfig = {
@@ -315,6 +318,87 @@ describe('handlePostToSlackChannel', () => {
       success: false,
       error: 'Slack API unavailable',
       uploadedArtifactIds: ['art-1'],
+    });
+  });
+});
+
+describe('handlePostToChannel', () => {
+  const originalProvider = process.env.ROOMOTE_COMMUNICATION_PROVIDER;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    if (originalProvider === undefined) {
+      delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
+    } else {
+      process.env.ROOMOTE_COMMUNICATION_PROVIDER = originalProvider;
+    }
+  });
+
+  it('passes opaque conversation ids through untouched on Teams', async () => {
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'teams';
+    vi.mocked(postToSlackChannel).mockResolvedValue({
+      messageTs: 'activity-1',
+      channelId: '19:conversation@thread.v2',
+    });
+
+    const result = await handlePostToChannel(
+      {
+        taskId: 'task-1',
+        channel: '19:conversation@thread.v2',
+        text: 'update',
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: '19:conversation@thread.v2',
+      text: 'update',
+    });
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      success: true,
+      messageTs: 'activity-1',
+    });
+  });
+
+  it('passes Telegram chat ids through untouched', async () => {
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER = 'telegram';
+    vi.mocked(postToSlackChannel).mockResolvedValue({
+      messageTs: '901',
+      channelId: '-1002233445566',
+    });
+
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: '-1002233445566', text: 'update' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: '-1002233445566',
+      text: 'update',
+    });
+  });
+
+  it('falls back to Slack channel normalization without a chat provider', async () => {
+    delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
+    vi.mocked(postToSlackChannel).mockResolvedValue({
+      messageTs: '111.222',
+      channelId: 'C123ABC456',
+    });
+
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: '#Eng', text: 'update' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToSlackChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: '#eng',
+      text: 'update',
     });
   });
 });

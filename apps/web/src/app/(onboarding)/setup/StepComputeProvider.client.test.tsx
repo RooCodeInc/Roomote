@@ -58,6 +58,8 @@ describe('StepComputeProvider', () => {
       runtimeDefaultProvider: null,
       persistedDefaultProvider: null,
       setupSatisfied: false,
+      setupSatisfiedByRuntimeEnv: false,
+      excludedProviders: [],
       workerImage: {
         envVarName: 'DOCKER_WORKER_IMAGE',
         label: 'Worker Image',
@@ -98,5 +100,46 @@ describe('StepComputeProvider', () => {
     expect(screen.getByRole('button', { name: /e2b/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /daytona/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /local docker/i })).toBeTruthy();
+  });
+
+  it('hides providers excluded by the deployment', () => {
+    const computeSetup: SetupComputeStatus = {
+      selectedProvider: null,
+      preselectedProvider: 'modal',
+      runtimeDefaultProvider: 'modal',
+      persistedDefaultProvider: null,
+      setupSatisfied: false,
+      setupSatisfiedByRuntimeEnv: false,
+      excludedProviders: ['docker'],
+      workerImage: {
+        envVarName: 'DOCKER_WORKER_IMAGE',
+        label: 'Worker Image',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        hostedImageRef: null,
+        hostedReady: false,
+      },
+      providers: [
+        buildProvider({
+          provider: 'modal',
+          label: 'Modal',
+          infrastructureSatisfied: false,
+        }),
+        buildProvider({
+          provider: 'docker',
+          label: 'Local Docker',
+          infrastructureSatisfied: true,
+        }),
+      ],
+    };
+
+    render(
+      <StepComputeProvider computeSetup={computeSetup} onContinue={vi.fn()} />,
+    );
+
+    expect(screen.getByRole('button', { name: /modal/i })).toBeTruthy();
+    expect(
+      screen.queryByRole('button', { name: /local docker/i }),
+    ).not.toBeInTheDocument();
   });
 });

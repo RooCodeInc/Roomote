@@ -5,6 +5,11 @@ import { tmpdir } from 'node:os';
 import { handleCreatePlan } from '../create-plan.js';
 import type { ArtifactConfig } from '../types.js';
 
+const successfulS3UploadResponse = () => ({
+  ok: true,
+  headers: new Headers({ etag: '"artifact-etag"' }),
+});
+
 describe('handleCreatePlan', () => {
   const originalEnv = process.env;
   let testDir: string;
@@ -39,7 +44,7 @@ describe('handleCreatePlan', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -85,7 +90,7 @@ describe('handleCreatePlan', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 
@@ -116,7 +121,7 @@ describe('handleCreatePlan', () => {
           rawUrl: 'https://test-api.example.com/api/artifacts/art-1/raw',
         }),
       })
-      .mockResolvedValueOnce({ ok: true })
+      .mockResolvedValueOnce(successfulS3UploadResponse())
       .mockResolvedValueOnce({ ok: true });
     global.fetch = fetchMock;
 

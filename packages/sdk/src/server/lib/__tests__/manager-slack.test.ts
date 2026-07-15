@@ -19,6 +19,7 @@ import {
   buildAutomationRootSummaryText,
   buildAutomationSettingsContextText,
   buildAutomationSettingsMessage,
+  degradeSlackMrkdwnToMarkdown,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
   shouldPostHistoricalThreadFeedbackDebugSnippet,
@@ -203,6 +204,24 @@ describe('manager slack helpers', () => {
     ).resolves.toBe(false);
     expect(warn).toHaveBeenCalledWith(
       '[manager-slack] Failed to load show-debug-ui preference for user user-1; skipping historical thread debug snippet: metadata unavailable',
+    );
+  });
+});
+
+describe('degradeSlackMrkdwnToMarkdown', () => {
+  it('converts mrkdwn links and bold to standard markdown', () => {
+    expect(
+      degradeSlackMrkdwnToMarkdown(
+        '*Shipped today*\n- Fix bug <https://github.com/acme/app/pull/1|#1>\nSee <https://app.example.com/automations|settings>.',
+      ),
+    ).toBe(
+      '**Shipped today**\n- Fix bug [#1](https://github.com/acme/app/pull/1)\nSee [settings](https://app.example.com/automations).',
+    );
+  });
+
+  it('leaves italic, double-asterisk bold, and plain text unchanged', () => {
+    expect(degradeSlackMrkdwnToMarkdown('_quiet_ **loud** plain')).toBe(
+      '_quiet_ **loud** plain',
     );
   });
 });

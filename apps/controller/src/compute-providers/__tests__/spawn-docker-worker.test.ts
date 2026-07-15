@@ -5,6 +5,7 @@ import {
   buildDockerSandboxServerUrl,
   getDockerWorkerCommand,
   resolveDockerWorkerOwnershipTargetFromLookup,
+  resumeDockerTaskDaemon,
   shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
   toContainerReachableUrl,
@@ -61,6 +62,19 @@ describe('getDockerWorkerCommand', () => {
       'resume',
     );
     expect(getDockerWorkerCommand(TaskPayloadKind.StandardTask)).toBe('run');
+  });
+});
+
+describe('resumeDockerTaskDaemon', () => {
+  it('tolerates a missing retained daemon container', async () => {
+    const runDocker = vi.fn().mockResolvedValue('');
+
+    await resumeDockerTaskDaemon('roomote-worker-42-docker', runDocker);
+
+    expect(runDocker).toHaveBeenCalledWith(
+      ['start', 'roomote-worker-42-docker'],
+      { allowFailure: true },
+    );
   });
 });
 

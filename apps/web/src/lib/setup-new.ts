@@ -6,6 +6,7 @@ export {
 } from '@roomote/types';
 
 export {
+  buildSetupEnvironmentTaskTitle,
   findMatchingDefinedEnvironment as findMatchingSetupNewEnvironment,
   isEnvironmentDefinitionFailureStatus as isSetupNewOnboardingFailureStatus,
   isEnvironmentDefinitionSuccessStatus as isSetupNewOnboardingSuccessStatus,

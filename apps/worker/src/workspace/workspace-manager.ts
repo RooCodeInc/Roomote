@@ -34,6 +34,11 @@ interface PrepareRepositoryOptions {
 
 interface ExecuteEnvironmentRepositoryCommandsOptions {
   continueOnError?: boolean;
+  onCommandStart?: (event: { repository: string; commandName: string }) => void;
+  onCommandResult?: (event: {
+    repository: string;
+    result: ExecutionResult;
+  }) => void;
   onCommandFailure?: (failure: {
     repository: string;
     result: ExecutionResult;
@@ -939,9 +944,20 @@ export class WorkspaceManager {
 
       const startTimes = new Map<string, number>();
       await userCommandExecutor.executeAll(repoConfig.commands, {
-        onStart: (command) => startTimes.set(command.name, Date.now()),
+        onStart: (command) => {
+          startTimes.set(command.name, Date.now());
+          options.onCommandStart?.({
+            repository: repoConfig.repository,
+            commandName: command.name,
+          });
+        },
         onResult: (result) => {
           const { success, command, error } = result;
+
+          options.onCommandResult?.({
+            repository: repoConfig.repository,
+            result,
+          });
 
           if (success) {
             if (startTimes && startTimes.has(command.name)) {

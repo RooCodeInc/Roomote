@@ -62,6 +62,7 @@ vi.mock('@roomote/db/encryption', () => ({
 
 import {
   buildGiteaApiBaseUrl,
+  normalizeGiteaBaseUrl,
   buildGiteaRepositoryValues,
   createTaskRunGiteaCredentials,
   createGiteaPullRequestComment,
@@ -69,7 +70,6 @@ import {
   removeGiteaWebhooksForRepositories,
   getGiteaAuthenticatedUser,
   listGiteaRepositories,
-  validateGiteaToken,
   type GiteaRepository,
 } from '../api';
 
@@ -88,15 +88,11 @@ function makeTaskRun(payload: TaskRun['payload']): TaskRun {
 }
 
 describe('Gitea API helpers', () => {
-  const originalGiteaToken = process.env.GITEA_TOKEN;
   const originalGiteaBaseUrl = process.env.GITEA_BASE_URL;
-  const originalGiteaUsername = process.env.GITEA_USERNAME;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.GITEA_TOKEN = 'gitea_deployment_token';
     process.env.GITEA_BASE_URL = 'https://git.example.com/';
-    delete process.env.GITEA_USERNAME;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
     mockRepositoriesFindMany.mockResolvedValue([
@@ -107,28 +103,32 @@ describe('Gitea API helpers', () => {
   });
 
   afterEach(() => {
-    if (originalGiteaToken === undefined) {
-      delete process.env.GITEA_TOKEN;
-    } else {
-      process.env.GITEA_TOKEN = originalGiteaToken;
-    }
-
     if (originalGiteaBaseUrl === undefined) {
       delete process.env.GITEA_BASE_URL;
     } else {
       process.env.GITEA_BASE_URL = originalGiteaBaseUrl;
-    }
-
-    if (originalGiteaUsername === undefined) {
-      delete process.env.GITEA_USERNAME;
-    } else {
-      process.env.GITEA_USERNAME = originalGiteaUsername;
     }
   });
 
   it('builds the API base URL from the configured Gitea instance URL', () => {
     expect(buildGiteaApiBaseUrl('https://git.example.com/')).toBe(
       'https://git.example.com/api/v1',
+    );
+    expect(buildGiteaApiBaseUrl('https://git.example.com/api/v1')).toBe(
+      'https://git.example.com/api/v1',
+    );
+    expect(buildGiteaApiBaseUrl('https://git.example.com/gitea/api/v1/')).toBe(
+      'https://git.example.com/gitea/api/v1',
+    );
+    expect(buildGiteaApiBaseUrl('https://gitea.com/roocode/')).toBe(
+      'https://gitea.com/api/v1',
+    );
+    expect(normalizeGiteaBaseUrl('gitea.com')).toBe('https://gitea.com');
+    expect(normalizeGiteaBaseUrl('git.example.com/')).toBe(
+      'https://git.example.com',
+    );
+    expect(normalizeGiteaBaseUrl('git.example.com////////')).toBe(
+      'https://git.example.com',
     );
   });
 
@@ -189,7 +189,7 @@ describe('Gitea API helpers', () => {
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
-          Authorization: 'token gitea_test',
+          Authorization: 'Bearer gitea_test',
         }),
       }),
     );
@@ -201,7 +201,9 @@ describe('Gitea API helpers', () => {
         token: '',
         baseUrl: 'https://git.example.com',
       }),
-    ).rejects.toThrow('GITEA_TOKEN is required to sync Gitea repositories.');
+    ).rejects.toThrow(
+      'Gitea OAuth connection is required to sync repositories.',
+    );
 
     await expect(
       listGiteaRepositories({
@@ -268,47 +270,10 @@ describe('Gitea API helpers', () => {
       'https://git.example.com/api/v1/user',
       expect.objectContaining({
         headers: expect.objectContaining({
-          Authorization: 'token gitea_test',
+          Authorization: 'Bearer gitea_test',
         }),
       }),
     );
-  });
-
-  it('validates a Gitea token with the authenticated user endpoint', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ login: 'roomote-bot' }), {
-        status: 200,
-      }),
-    );
-
-    await expect(
-      validateGiteaToken({
-        token: 'gitea_test',
-        baseUrl: 'https://git.example.com',
-        fetchImpl: fetchMock,
-      }),
-    ).resolves.toEqual({ status: 'valid', login: 'roomote-bot' });
-  });
-
-  it('rejects definitively invalid Gitea tokens during validation', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ message: 'forbidden' }), {
-        status: 403,
-        statusText: 'Forbidden',
-      }),
-    );
-
-    await expect(
-      validateGiteaToken({
-        token: 'bad_token',
-        baseUrl: 'https://git.example.com',
-        fetchImpl: fetchMock,
-      }),
-    ).resolves.toEqual({
-      status: 'invalid',
-      error:
-        'Gitea rejected the token. Confirm the token is active and has repository access.',
-    });
   });
 
   it('removes the Roomote webhook from repositories and reports not_found when absent', async () => {
@@ -436,7 +401,7 @@ describe('Gitea API helpers', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'token gitea_test',
+          Authorization: 'Bearer gitea_test',
           'Content-Type': 'application/json',
         }),
         body: expect.stringContaining('"pull_request_sync"'),
@@ -478,7 +443,7 @@ describe('Gitea API helpers', () => {
         description: 'Work on Gitea',
         sourceControlProvider: 'gitea',
       }),
-      { username: 'roomote-bot' },
+      { username: 'roomote-bot', token: 'gitea_oauth_token' },
     );
 
     expect(result).toEqual({
@@ -487,7 +452,7 @@ describe('Gitea API helpers', () => {
           host: 'git.example.com',
           repositoryFullName: 'acme/backend',
           username: 'roomote-bot',
-          token: 'gitea_deployment_token',
+          token: 'gitea_oauth_token',
           originBaseUrl: 'https://git.example.com',
         },
       ],

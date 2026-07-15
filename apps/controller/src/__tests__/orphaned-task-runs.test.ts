@@ -77,9 +77,10 @@ describe('getOrphanedTaskRun', () => {
     expect(mockReleaseTaskRun).toHaveBeenCalledWith(taskRun);
 
     const claimQuery = execute.mock.calls[0]?.[0];
-    expect(collectStrings(claimQuery).join(' ')).toContain(
-      'FOR UPDATE SKIP LOCKED',
-    );
+    const claimSql = collectStrings(claimQuery).join(' ');
+    expect(claimSql).toContain('FOR UPDATE SKIP LOCKED');
+    expect(claimSql).toContain('task_phase IS DISTINCT FROM');
+    expect(claimSql).toContain('waiting_for_sandbox_provider');
   });
 
   it('returns null without touching Redis when no stale row is claimable', async () => {

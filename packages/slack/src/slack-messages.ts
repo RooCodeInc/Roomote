@@ -120,6 +120,7 @@ export interface SlackStartedMessageData {
   agentName: string;
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  kickoffMessage?: string;
   otherRunningTasksCount?: number;
   workspaceOnly?: boolean;
   initiatingSlackUserId?: string;
@@ -136,6 +137,7 @@ export async function setSlackStartedMessageTs(
     agentName: string;
     workspaceDisplayName: string;
     modelDisplayName?: string;
+    kickoffMessage?: string;
     otherRunningTasksCount?: number;
     workspaceOnly?: boolean;
     initiatingSlackUserId?: string;

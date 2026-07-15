@@ -163,12 +163,18 @@ vi.mock('@roomote/communication/discord-provider', () => ({
     'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.',
 }));
 
-vi.mock('@roomote/communication/telegram-provider', () => ({
-  TelegramCommunicationProvider: class {
-    getWebhookInfo = mockTelegramGetWebhookInfo;
-    registerWebhook = mockTelegramRegisterWebhook;
-    registerCommands = mockTelegramRegisterCommands;
-  },
+vi.mock('@roomote/sdk/server', () => ({
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await mockResolveTelegramRuntimeCredentials();
+
+    return botToken
+      ? {
+          getWebhookInfo: mockTelegramGetWebhookInfo,
+          registerWebhook: mockTelegramRegisterWebhook,
+          registerCommands: mockTelegramRegisterCommands,
+        }
+      : null;
+  }),
 }));
 
 vi.mock('@/lib/server/env', () => ({

@@ -48,15 +48,17 @@ function normalizeSlackChannelTarget(
   return { value: `#${channelName.toLowerCase()}` };
 }
 
+type ChannelPostInput = {
+  taskId: string;
+  channel: string;
+  threadTs?: string;
+  text?: string;
+  imagePaths?: string[];
+  imageArtifactIds?: string[];
+};
+
 export async function handlePostToSlackChannel(
-  input: {
-    taskId: string;
-    channel: string;
-    threadTs?: string;
-    text?: string;
-    imagePaths?: string[];
-    imageArtifactIds?: string[];
-  },
+  input: ChannelPostInput,
   artifactConfig: ArtifactConfig,
   roomoteConfig: RoomoteConfig,
 ): Promise<ToolResult> {
@@ -72,6 +74,48 @@ export async function handlePostToSlackChannel(
     return errorResult(channelTarget.error);
   }
 
+  return postChannelMessage(
+    { ...input, channel: channelTarget.value },
+    artifactConfig,
+    roomoteConfig,
+  );
+}
+
+/**
+ * Surface-generic channel post. Slack targets get Slack channel-name
+ * normalization; Teams conversation ids and Telegram chat ids are opaque and
+ * pass through untouched (the API restricts them to the task's own
+ * conversation).
+ */
+export async function handlePostToChannel(
+  input: ChannelPostInput,
+  artifactConfig: ArtifactConfig,
+  roomoteConfig: RoomoteConfig,
+): Promise<ToolResult> {
+  const provider =
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim().toLowerCase();
+
+  if (provider !== 'teams' && provider !== 'telegram') {
+    return handlePostToSlackChannel(input, artifactConfig, roomoteConfig);
+  }
+
+  const channel = input.channel.trim();
+  if (!channel) {
+    return errorResult('channel is required');
+  }
+
+  return postChannelMessage(
+    { ...input, channel },
+    artifactConfig,
+    roomoteConfig,
+  );
+}
+
+async function postChannelMessage(
+  input: ChannelPostInput,
+  artifactConfig: ArtifactConfig,
+  roomoteConfig: RoomoteConfig,
+): Promise<ToolResult> {
   const threadTs = normalizeOptionalText(input.threadTs);
   const text = normalizeOptionalSlackText(input.text);
   const imagePaths = uniqueNonEmpty(input.imagePaths);
@@ -103,7 +147,7 @@ export async function handlePostToSlackChannel(
     allArtifactIds.push(...uploads.uploadedArtifactIds);
 
     const reply = await postToSlackChannel(roomoteConfig, {
-      channel: channelTarget.value,
+      channel: input.channel,
       ...(threadTs && { threadTs }),
       ...(text && { text }),
       ...(allArtifactIds.length > 0 && {

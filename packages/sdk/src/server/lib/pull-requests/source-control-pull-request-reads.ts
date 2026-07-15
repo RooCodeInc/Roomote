@@ -25,6 +25,7 @@ import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
@@ -34,6 +35,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
@@ -47,12 +49,39 @@ import {
 
 const ADO_API_VERSION = '7.1';
 
-export const sourceControlPullRequestReadInputSchema = z.object({
-  action: z.enum(['get_pull_request', 'list_pull_request_comments']),
-  repositoryFullName: z.string().trim().min(1),
-  prNumber: z.number().int().positive(),
-  sourceControlProvider: sourceControlProviderSchema.optional(),
-});
+const DEFAULT_LIST_PULL_REQUESTS_LIMIT = 100;
+const MAX_LIST_PULL_REQUESTS_LIMIT = 200;
+const LIST_PULL_REQUESTS_MAX_PAGES = 40;
+
+export const sourceControlPullRequestReadInputSchema = z
+  .object({
+    action: z.enum([
+      'get_pull_request',
+      'list_pull_request_comments',
+      'list_pull_requests',
+    ]),
+    repositoryFullName: z.string().trim().min(1),
+    // Required for the single-PR actions; unused by list_pull_requests.
+    prNumber: z.number().int().positive().optional(),
+    // list_pull_requests filters. Only open pull requests are supported.
+    state: z.literal('open').optional(),
+    limit: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_LIST_PULL_REQUESTS_LIMIT)
+      .optional(),
+    sourceControlProvider: sourceControlProviderSchema.optional(),
+  })
+  .superRefine((input, ctx) => {
+    if (input.action !== 'list_pull_requests' && input.prNumber === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['prNumber'],
+        message: `prNumber is required for ${input.action}.`,
+      });
+    }
+  });
 
 export type SourceControlPullRequestReadInput = z.infer<
   typeof sourceControlPullRequestReadInputSchema
@@ -110,9 +139,52 @@ export type SourceControlPullRequestCommentsResult = {
   warnings: string[];
 };
 
+export type SourceControlPullRequestSummary = {
+  number: number;
+  /**
+   * The provider's globally unique pull request id when the list payload
+   * exposes one distinct from the per-repository number (GitHub, GitLab,
+   * Gitea). Null when the provider only has the number (Bitbucket, ADO).
+   */
+  externalId: number | null;
+  url: string;
+  title: string;
+  state: 'open' | 'closed' | 'merged';
+  draft: boolean;
+  sourceBranch: string;
+  targetBranch: string;
+  author: { id: string | null; login: string | null } | null;
+  /** Null when the provider's list payload has no last-updated timestamp (Azure DevOps). */
+  updatedAt: string | null;
+  createdAt: string | null;
+  /** Null for open PRs and when the provider exposes no merge timestamp (Bitbucket). */
+  mergedAt: string | null;
+  /** Null for open PRs and when the provider exposes no close timestamp (Bitbucket). */
+  closedAt: string | null;
+  labels: string[];
+  headSha: string | null;
+  baseSha: string | null;
+  /** Null when the provider's list payload carries no mergeability signal. */
+  mergeable: boolean | null;
+  /** The provider's raw merge-state string when the list payload exposes one. */
+  mergeStateDescription: string | null;
+  /** True when the PR head lives in a different repository/fork than the base; null when the provider cannot say. */
+  isCrossRepository: boolean | null;
+  headRepositoryFullName: string | null;
+};
+
+export type SourceControlPullRequestListResult = {
+  success: true;
+  provider: SourceControlProvider;
+  repositoryFullName: string;
+  pullRequests: SourceControlPullRequestSummary[];
+  warnings: string[];
+};
+
 type SourceControlPullRequestReadResult =
   | SourceControlPullRequestDetailsResult
-  | SourceControlPullRequestCommentsResult;
+  | SourceControlPullRequestCommentsResult
+  | SourceControlPullRequestListResult;
 
 /**
  * Mirrors SourceControlMutationError in source-control-pull-requests.ts so
@@ -429,6 +501,92 @@ const gitHubReviewThreadsQueryResponseSchema = z.object({
     .nullable(),
 });
 
+const gitLabMergeRequestListItemSchema = z
+  .object({
+    id: z.number().int().optional(),
+    iid: z.number().int(),
+    title: z.string(),
+    state: z.string(),
+    merged_at: z.string().nullable().optional(),
+    closed_at: z.string().nullable().optional(),
+    web_url: z.string().url().optional(),
+    draft: z.boolean().optional(),
+    work_in_progress: z.boolean().optional(),
+    source_branch: z.string(),
+    target_branch: z.string(),
+    has_conflicts: z.boolean().optional(),
+    merge_status: z.string().nullable().optional(),
+    detailed_merge_status: z.string().nullable().optional(),
+    source_project_id: z.number().nullable().optional(),
+    target_project_id: z.number().nullable().optional(),
+    sha: z.string().nullable().optional(),
+    labels: z.array(z.string()).optional(),
+    created_at: z.string().optional(),
+    updated_at: z.string().optional(),
+    author: z
+      .object({ id: z.number().optional(), username: z.string().optional() })
+      .nullable()
+      .optional(),
+  })
+  .passthrough();
+const gitLabMergeRequestListPageSchema = z.array(
+  gitLabMergeRequestListItemSchema,
+);
+
+const giteaPullRequestListItemSchema = giteaPullRequestDetailsSchema.extend({
+  id: z.number().int().optional(),
+  labels: z
+    .array(z.object({ name: z.string().optional() }).passthrough())
+    .optional(),
+  created_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  merged_at: z.string().nullable().optional(),
+  closed_at: z.string().nullable().optional(),
+  user: z
+    .object({ id: z.number().optional(), login: z.string().optional() })
+    .nullable()
+    .optional(),
+});
+const giteaPullRequestListPageSchema = z.array(giteaPullRequestListItemSchema);
+
+const bitbucketPullRequestListItemSchema =
+  bitbucketPullRequestDetailsSchema.extend({
+    created_on: z.string().optional(),
+    updated_on: z.string().optional(),
+    author: z
+      .object({
+        uuid: z.string().optional(),
+        nickname: z.string().optional(),
+        display_name: z.string().optional(),
+        username: z.string().optional(),
+      })
+      .nullable()
+      .optional(),
+  });
+const bitbucketPullRequestListPageSchema = z.object({
+  values: z.array(bitbucketPullRequestListItemSchema),
+  next: z.string().url().optional().nullable(),
+});
+
+const adoPullRequestListItemSchema = adoPullRequestDetailsSchema.extend({
+  creationDate: z.string().optional(),
+  closedDate: z.string().optional(),
+  labels: z
+    .array(z.object({ name: z.string().optional() }).passthrough())
+    .optional(),
+  createdBy: z
+    .object({
+      id: z.string().optional(),
+      displayName: z.string().optional(),
+      uniqueName: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+});
+const adoPullRequestListPageSchema = z.object({
+  value: z.array(adoPullRequestListItemSchema),
+});
+
 export async function readSourceControlPullRequestForTaskRun({
   taskRun,
   input,
@@ -438,9 +596,10 @@ export async function readSourceControlPullRequestForTaskRun({
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestReadResult> {
-  const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(taskRun.payload),
-  );
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider =
+    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
@@ -456,68 +615,272 @@ export async function readSourceControlPullRequestForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
   });
+
+  if (input.action === 'list_pull_requests') {
+    return listOpenSourceControlPullRequestsForRepository({
+      repository,
+      provider,
+      limit: input.limit,
+      fetchImpl,
+    });
+  }
+
+  const { prNumber } = input;
+
+  if (prNumber === undefined) {
+    throw new SourceControlReadError(
+      400,
+      `prNumber is required for ${input.action}.`,
+    );
+  }
+
+  if (input.action === 'get_pull_request') {
+    return getSourceControlPullRequestDetailsForRepository({
+      repository,
+      provider,
+      prNumber,
+      fetchImpl,
+    });
+  }
 
   switch (provider) {
     case 'github':
-      return input.action === 'get_pull_request'
-        ? getGitHubPullRequestDetails({ input, repository, provider })
-        : listGitHubPullRequestComments({ input, repository, provider });
+      return listGitHubPullRequestComments({ prNumber, repository, provider });
     case 'gitlab':
-      return input.action === 'get_pull_request'
-        ? getGitLabMergeRequestDetails({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          })
-        : listGitLabMergeRequestComments({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          });
+      return listGitLabMergeRequestComments({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
     case 'gitea':
-      return input.action === 'get_pull_request'
-        ? getGiteaPullRequestDetails({ input, repository, provider, fetchImpl })
-        : listGiteaPullRequestComments({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          });
+      return listGiteaPullRequestComments({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
     case 'bitbucket':
-      return input.action === 'get_pull_request'
-        ? getBitbucketPullRequestDetails({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          })
-        : listBitbucketPullRequestComments({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          });
+      return listBitbucketPullRequestComments({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
     case 'ado':
-      return input.action === 'get_pull_request'
-        ? getAdoPullRequestDetails({ input, repository, provider, fetchImpl })
-        : listAdoPullRequestComments({
-            input,
-            repository,
-            provider,
-            fetchImpl,
-          });
+      return listAdoPullRequestComments({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
   }
 }
 
+/**
+ * Single-PR details for a resolved repository row, dispatched by provider.
+ * Exported for server-side automations (e.g. the conflict scan) that operate
+ * outside a task run; the task-run entry point above adds scope checks before
+ * delegating here.
+ */
+export async function getSourceControlPullRequestDetailsForRepository({
+  repository,
+  provider,
+  prNumber,
+  fetchImpl = fetch,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  prNumber: number;
+  fetchImpl?: FetchImpl;
+}): Promise<SourceControlPullRequestDetailsResult> {
+  switch (provider) {
+    case 'github':
+      return getGitHubPullRequestDetails({ prNumber, repository, provider });
+    case 'gitlab':
+      return getGitLabMergeRequestDetails({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
+    case 'gitea':
+      return getGiteaPullRequestDetails({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
+    case 'bitbucket':
+      return getBitbucketPullRequestDetails({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
+    case 'ado':
+      return getAdoPullRequestDetails({
+        prNumber,
+        repository,
+        provider,
+        fetchImpl,
+      });
+  }
+}
+
+/**
+ * The list states the per-provider implementations support. 'open' maps to
+ * each provider's open/active filter; 'merged' maps to the closest
+ * server-side filter (GitLab state=merged, ADO status=completed, Bitbucket
+ * state=MERGED) plus a client-side merged check where the provider's closed
+ * list mixes in unmerged PRs (GitHub, Gitea).
+ */
+type PullRequestListState = 'open' | 'merged';
+
+async function listSourceControlPullRequestsForRepository({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  limit?: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const effectiveLimit = Math.min(
+    limit ?? DEFAULT_LIST_PULL_REQUESTS_LIMIT,
+    MAX_LIST_PULL_REQUESTS_LIMIT,
+  );
+
+  switch (provider) {
+    case 'github':
+      return listGitHubPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+      });
+    case 'gitlab':
+      return listGitLabMergeRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'gitea':
+      return listGiteaPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'bitbucket':
+      return listBitbucketPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        updatedAfter,
+        fetchImpl,
+      });
+    case 'ado':
+      return listAdoPullRequests({
+        repository,
+        provider,
+        limit: effectiveLimit,
+        state,
+        fetchImpl,
+      });
+  }
+}
+
+/**
+ * Open pull requests for a resolved repository row, dispatched by provider.
+ * Exported for server-side automations (e.g. the conflict scan) that operate
+ * outside a task run; the task-run entry point above adds scope checks before
+ * delegating here.
+ */
+export async function listOpenSourceControlPullRequestsForRepository({
+  repository,
+  provider,
+  limit,
+  fetchImpl = fetch,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  limit?: number;
+  fetchImpl?: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  return listSourceControlPullRequestsForRepository({
+    repository,
+    provider,
+    limit,
+    state: 'open',
+    fetchImpl,
+  });
+}
+
+/**
+ * Merged pull requests for a resolved repository row, dispatched by provider.
+ * Used by the provider-neutral merged-PR facts sync. `updatedAfter` narrows
+ * the result to PRs updated after the given time: server-side on GitLab
+ * (updated_after) and via early pagination cut-off on the update-sorted
+ * GitHub/Gitea/Bitbucket lists; ADO lists carry no update ordering, so ADO is
+ * only filtered client-side here. Rows without any usable timestamp are kept.
+ */
+export async function listMergedSourceControlPullRequestsForRepository({
+  repository,
+  provider,
+  limit,
+  updatedAfter,
+  fetchImpl = fetch,
+}: {
+  repository: RepositoryRow;
+  provider: SourceControlProvider;
+  limit?: number;
+  updatedAfter?: Date | null;
+  fetchImpl?: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const result = await listSourceControlPullRequestsForRepository({
+    repository,
+    provider,
+    limit,
+    state: 'merged',
+    updatedAfter,
+    fetchImpl,
+  });
+
+  if (!updatedAfter) {
+    return result;
+  }
+
+  return {
+    ...result,
+    pullRequests: result.pullRequests.filter((pullRequest) => {
+      const timestamp = pullRequest.updatedAt ?? pullRequest.mergedAt;
+      return !timestamp || new Date(timestamp) > updatedAfter;
+    }),
+  };
+}
+
 async function getGitHubPullRequestDetails({
-  input,
+  prNumber,
   repository,
   provider,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
 }): Promise<SourceControlPullRequestDetailsResult> {
@@ -529,7 +892,7 @@ async function getGitHubPullRequestDetails({
   const { data } = await octokit.rest.pulls.get({
     owner,
     repo,
-    pull_number: input.prNumber,
+    pull_number: prNumber,
   });
 
   return {
@@ -563,11 +926,11 @@ async function getGitHubPullRequestDetails({
 }
 
 async function listGitHubPullRequestComments({
-  input,
+  prNumber,
   repository,
   provider,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
 }): Promise<SourceControlPullRequestCommentsResult> {
@@ -581,13 +944,13 @@ async function listGitHubPullRequestComments({
     octokit.paginate(octokit.rest.pulls.listReviewComments, {
       owner,
       repo,
-      pull_number: input.prNumber,
+      pull_number: prNumber,
       per_page: 100,
     }),
     octokit.paginate(octokit.rest.issues.listComments, {
       owner,
       repo,
-      issue_number: input.prNumber,
+      issue_number: prNumber,
       per_page: 100,
     }),
   ]);
@@ -608,7 +971,7 @@ async function listGitHubPullRequestComments({
       octokit,
       owner,
       repo,
-      prNumber: input.prNumber,
+      prNumber: prNumber,
     });
   } catch (error) {
     warnings.push(
@@ -623,7 +986,7 @@ async function listGitHubPullRequestComments({
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    number: input.prNumber,
+    number: prNumber,
     threads,
     issueComments,
     warnings,
@@ -759,12 +1122,12 @@ function groupGitHubReviewCommentsIntoThreads(
 }
 
 async function getGitLabMergeRequestDetails({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'gitlab';
   fetchImpl: FetchImpl;
@@ -776,10 +1139,10 @@ async function getGitLabMergeRequestDetails({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
-      `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`,
+      `/projects/${encodeURIComponent(projectId)}/merge_requests/${prNumber}`,
       {},
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabMergeRequestDetailsSchema,
   });
 
@@ -829,12 +1192,12 @@ async function getGitLabMergeRequestDetails({
 }
 
 async function listGitLabMergeRequestComments({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'gitlab';
   fetchImpl: FetchImpl;
@@ -846,10 +1209,10 @@ async function listGitLabMergeRequestComments({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
-      `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}/discussions`,
+      `/projects/${encodeURIComponent(projectId)}/merge_requests/${prNumber}/discussions`,
       { per_page: 100 },
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabDiscussionListSchema,
   });
 
@@ -897,7 +1260,7 @@ async function listGitLabMergeRequestComments({
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    number: input.prNumber,
+    number: prNumber,
     threads,
     issueComments,
     warnings: [],
@@ -924,12 +1287,12 @@ async function resolveGitLabReadContext(
 }
 
 async function getGiteaPullRequestDetails({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'gitea';
   fetchImpl: FetchImpl;
@@ -941,14 +1304,14 @@ async function getGiteaPullRequestDetails({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}`,
       {},
     ),
     tokenHeader: { name: 'Authorization', value: `token ${token}` },
     schema: giteaPullRequestDetailsSchema,
   });
 
-  const number = pullRequest.number ?? pullRequest.index ?? input.prNumber;
+  const number = pullRequest.number ?? pullRequest.index ?? prNumber;
   const title = pullRequest.title ?? '';
   const host = new URL(baseUrl).host;
 
@@ -990,12 +1353,12 @@ async function getGiteaPullRequestDetails({
 }
 
 async function listGiteaPullRequestComments({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'gitea';
   fetchImpl: FetchImpl;
@@ -1011,7 +1374,7 @@ async function listGiteaPullRequestComments({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${input.prNumber}/comments`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${prNumber}/comments`,
       {},
     ),
     tokenHeader,
@@ -1024,7 +1387,7 @@ async function listGiteaPullRequestComments({
     fetchImpl,
     url: buildApiUrl(
       apiBaseUrl,
-      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}/reviews`,
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews`,
       {},
     ),
     tokenHeader,
@@ -1038,7 +1401,7 @@ async function listGiteaPullRequestComments({
       fetchImpl,
       url: buildApiUrl(
         apiBaseUrl,
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${input.prNumber}/reviews/${review.id}/comments`,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${prNumber}/reviews/${review.id}/comments`,
         {},
       ),
       tokenHeader,
@@ -1068,7 +1431,7 @@ async function listGiteaPullRequestComments({
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    number: input.prNumber,
+    number: prNumber,
     threads,
     issueComments,
     warnings,
@@ -1119,12 +1482,12 @@ async function resolveGiteaReadContext(
 }
 
 async function getBitbucketPullRequestDetails({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'bitbucket';
   fetchImpl: FetchImpl;
@@ -1138,7 +1501,7 @@ async function getBitbucketPullRequestDetails({
       apiBaseUrl,
       `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
         repo,
-      )}/pullrequests/${input.prNumber}`,
+      )}/pullrequests/${prNumber}`,
       {},
     ),
     tokenHeader: { name: 'Authorization', value: authHeader },
@@ -1195,12 +1558,12 @@ async function getBitbucketPullRequestDetails({
 }
 
 async function listBitbucketPullRequestComments({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'bitbucket';
   fetchImpl: FetchImpl;
@@ -1213,7 +1576,7 @@ async function listBitbucketPullRequestComments({
     apiBaseUrl,
     `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
       repo,
-    )}/pullrequests/${input.prNumber}/comments`,
+    )}/pullrequests/${prNumber}/comments`,
     { pagelen: 50 },
   );
 
@@ -1265,7 +1628,7 @@ async function listBitbucketPullRequestComments({
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    number: input.prNumber,
+    number: prNumber,
     threads: Array.from(threadsById.values()),
     issueComments,
     warnings:
@@ -1333,12 +1696,12 @@ async function resolveBitbucketReadContext(
 }
 
 async function getAdoPullRequestDetails({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'ado';
   fetchImpl: FetchImpl;
@@ -1350,7 +1713,7 @@ async function getAdoPullRequestDetails({
     fetchImpl,
     url: buildApiUrl(
       organizationApiBaseUrl,
-      `${repositoryPullRequestsPath}/${input.prNumber}`,
+      `${repositoryPullRequestsPath}/${prNumber}`,
       { 'api-version': ADO_API_VERSION },
     ),
     tokenHeader: {
@@ -1405,12 +1768,12 @@ async function getAdoPullRequestDetails({
 }
 
 async function listAdoPullRequestComments({
-  input,
+  prNumber,
   repository,
   provider,
   fetchImpl,
 }: {
-  input: SourceControlPullRequestReadInput;
+  prNumber: number;
   repository: RepositoryRow;
   provider: 'ado';
   fetchImpl: FetchImpl;
@@ -1422,7 +1785,7 @@ async function listAdoPullRequestComments({
     fetchImpl,
     url: buildApiUrl(
       organizationApiBaseUrl,
-      `${repositoryPullRequestsPath}/${input.prNumber}/threads`,
+      `${repositoryPullRequestsPath}/${prNumber}/threads`,
       { 'api-version': ADO_API_VERSION },
     ),
     tokenHeader: {
@@ -1473,7 +1836,7 @@ async function listAdoPullRequestComments({
     success: true,
     provider,
     repositoryFullName: repository.fullName,
-    number: input.prNumber,
+    number: prNumber,
     threads,
     issueComments,
     warnings: [],
@@ -1564,4 +1927,616 @@ async function requestJson<T>({
 
 function stripAdoBranchRef(ref: string): string {
   return ref.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
+}
+
+function mapProviderPullRequestState(state: {
+  merged: boolean;
+  closed: boolean;
+}): SourceControlPullRequestSummary['state'] {
+  return state.merged ? 'merged' : state.closed ? 'closed' : 'open';
+}
+
+function truncationWarning(limit: number, state: PullRequestListState): string {
+  return `Result truncated to the ${limit} most relevant ${state} pull requests; more exist.`;
+}
+
+/**
+ * True when a page of update-sorted rows ended at or before `updatedAfter`,
+ * meaning later pages can only contain older rows.
+ */
+function reachedUpdatedAfterCutoff(
+  lastRowUpdatedAt: string | null | undefined,
+  updatedAfter: Date | null | undefined,
+): boolean {
+  return Boolean(
+    updatedAfter &&
+    lastRowUpdatedAt &&
+    new Date(lastRowUpdatedAt) <= updatedAfter,
+  );
+}
+
+async function listGitHubPullRequests({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+}: {
+  repository: RepositoryRow;
+  provider: 'github';
+  limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+}): Promise<SourceControlPullRequestListResult> {
+  const { octokit, owner, repo } = await createGitHubReadClient(
+    repository,
+    provider,
+  );
+  const warnings: string[] = [];
+  let fetched = 0;
+
+  const pulls = await octokit.paginate(
+    octokit.rest.pulls.list,
+    {
+      owner,
+      repo,
+      // GitHub has no merged filter; merged PRs are the closed list minus
+      // the closed-without-merging ones.
+      state: state === 'open' ? ('open' as const) : ('closed' as const),
+      sort: 'updated',
+      direction: 'desc',
+      per_page: 100,
+    },
+    (response, done) => {
+      fetched += response.data.length;
+
+      if (
+        fetched > limit ||
+        reachedUpdatedAfterCutoff(
+          response.data.at(-1)?.updated_at,
+          updatedAfter,
+        )
+      ) {
+        done();
+      }
+
+      return response.data;
+    },
+  );
+
+  const rows =
+    state === 'merged'
+      ? pulls.filter((pull) => Boolean(pull.merged_at))
+      : pulls;
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
+  }
+
+  if (state === 'open') {
+    warnings.push(
+      'GitHub does not include mergeability in pull request lists; use get_pull_request for a per-PR mergeable signal.',
+    );
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    pullRequests: rows.slice(0, limit).map((pull) => ({
+      number: pull.number,
+      externalId: pull.id ?? null,
+      url: pull.html_url,
+      title: pull.title,
+      state: mapProviderPullRequestState({
+        merged: Boolean(pull.merged_at),
+        closed: pull.state === 'closed',
+      }),
+      draft: Boolean(pull.draft),
+      sourceBranch: pull.head.ref,
+      targetBranch: pull.base.ref,
+      author: pull.user
+        ? { id: String(pull.user.id), login: pull.user.login ?? null }
+        : null,
+      updatedAt: pull.updated_at ?? null,
+      createdAt: pull.created_at ?? null,
+      mergedAt: pull.merged_at ?? null,
+      closedAt: pull.closed_at ?? null,
+      labels: pull.labels
+        .map((label) => label.name)
+        .filter((name): name is string => Boolean(name)),
+      headSha: pull.head.sha ?? null,
+      baseSha: pull.base.sha ?? null,
+      mergeable: null,
+      mergeStateDescription: null,
+      isCrossRepository:
+        pull.head?.repo && pull.base?.repo
+          ? pull.head.repo.full_name !== pull.base.repo.full_name
+          : null,
+      headRepositoryFullName: pull.head?.repo?.full_name ?? null,
+    })),
+    warnings,
+  };
+}
+
+const GITLAB_MR_LIST_PAGE_SIZE = 100;
+
+async function listGitLabMergeRequests({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: 'gitlab';
+  limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const { projectId, token, apiBaseUrl } =
+    await resolveGitLabReadContext(repository);
+  const host = new URL(apiBaseUrl).host;
+  const warnings: string[] = [];
+  const rows: z.infer<typeof gitLabMergeRequestListItemSchema>[] = [];
+
+  for (let page = 1; page <= LIST_PULL_REQUESTS_MAX_PAGES; page++) {
+    const pageRows = await requestJson({
+      fetchImpl,
+      url: buildApiUrl(
+        apiBaseUrl,
+        `/projects/${encodeURIComponent(projectId)}/merge_requests`,
+        {
+          state: state === 'open' ? 'opened' : 'merged',
+          order_by: 'updated_at',
+          sort: 'desc',
+          per_page: GITLAB_MR_LIST_PAGE_SIZE,
+          page,
+          // GitLab filters updated_after server-side.
+          ...(updatedAfter
+            ? { updated_after: updatedAfter.toISOString() }
+            : {}),
+        },
+      ),
+      tokenHeader: buildGitLabTokenHeader(token),
+      schema: gitLabMergeRequestListPageSchema,
+    });
+
+    rows.push(...pageRows);
+
+    if (rows.length > limit || pageRows.length < GITLAB_MR_LIST_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    pullRequests: rows.slice(0, limit).map((mergeRequest) => ({
+      number: mergeRequest.iid,
+      externalId: mergeRequest.id ?? null,
+      url:
+        mergeRequest.web_url ??
+        buildPullRequestUrl({
+          provider,
+          host,
+          repositoryFullName: repository.fullName,
+          number: mergeRequest.iid,
+        }),
+      title: mergeRequest.title,
+      state: mapProviderPullRequestState({
+        merged: mergeRequest.state === 'merged',
+        closed: mergeRequest.state === 'closed',
+      }),
+      draft: isGitLabDraft(mergeRequest),
+      sourceBranch: mergeRequest.source_branch,
+      targetBranch: mergeRequest.target_branch,
+      author: mergeRequest.author
+        ? {
+            id:
+              mergeRequest.author.id != null
+                ? String(mergeRequest.author.id)
+                : null,
+            login: mergeRequest.author.username ?? null,
+          }
+        : null,
+      updatedAt: mergeRequest.updated_at ?? null,
+      createdAt: mergeRequest.created_at ?? null,
+      mergedAt: mergeRequest.merged_at ?? null,
+      closedAt: mergeRequest.closed_at ?? null,
+      labels: mergeRequest.labels ?? [],
+      headSha: mergeRequest.sha ?? null,
+      // The GitLab MR list payload has no diff_refs, so the base sha is unknown.
+      baseSha: null,
+      mergeable:
+        typeof mergeRequest.has_conflicts === 'boolean'
+          ? !mergeRequest.has_conflicts
+          : null,
+      mergeStateDescription:
+        mergeRequest.detailed_merge_status ?? mergeRequest.merge_status ?? null,
+      isCrossRepository:
+        typeof mergeRequest.source_project_id === 'number' &&
+        typeof mergeRequest.target_project_id === 'number'
+          ? mergeRequest.source_project_id !== mergeRequest.target_project_id
+          : null,
+      headRepositoryFullName: null,
+    })),
+    warnings,
+  };
+}
+
+const GITEA_PULLS_LIST_PAGE_SIZE = 50;
+
+async function listGiteaPullRequests({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: 'gitea';
+  limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const { apiBaseUrl, baseUrl, owner, repo, token } =
+    await resolveGiteaReadContext(repository, provider);
+  const host = new URL(baseUrl).host;
+  const warnings: string[] = [];
+  const rows: z.infer<typeof giteaPullRequestListItemSchema>[] = [];
+
+  for (let page = 1; page <= LIST_PULL_REQUESTS_MAX_PAGES; page++) {
+    const pageRows = await requestJson({
+      fetchImpl,
+      url: buildApiUrl(
+        apiBaseUrl,
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
+        {
+          // Gitea has no merged filter; merged PRs are the closed list
+          // filtered by the merged flag below.
+          state: state === 'open' ? 'open' : 'closed',
+          limit: GITEA_PULLS_LIST_PAGE_SIZE,
+          page,
+          ...(state === 'merged' ? { sort: 'recentupdate' } : {}),
+        },
+      ),
+      tokenHeader: { name: 'Authorization', value: `token ${token}` },
+      schema: giteaPullRequestListPageSchema,
+    });
+
+    rows.push(
+      ...(state === 'merged'
+        ? pageRows.filter((row) => Boolean(row.merged))
+        : pageRows),
+    );
+
+    if (
+      rows.length > limit ||
+      pageRows.length < GITEA_PULLS_LIST_PAGE_SIZE ||
+      reachedUpdatedAfterCutoff(pageRows.at(-1)?.updated_at, updatedAfter)
+    ) {
+      break;
+    }
+  }
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    pullRequests: rows.slice(0, limit).map((pullRequest) => {
+      const number = pullRequest.number ?? pullRequest.index ?? 0;
+      const title = pullRequest.title ?? '';
+
+      return {
+        number,
+        externalId: pullRequest.id ?? null,
+        url:
+          pullRequest.html_url ??
+          buildPullRequestUrl({
+            provider,
+            host,
+            repositoryFullName: repository.fullName,
+            number,
+          }),
+        title,
+        state: mapProviderPullRequestState({
+          merged: Boolean(pullRequest.merged),
+          closed: pullRequest.state === 'closed',
+        }),
+        draft: Boolean(pullRequest.draft) || isDraftTitle(title),
+        sourceBranch: pullRequest.head?.ref ?? '',
+        targetBranch: pullRequest.base?.ref ?? '',
+        author: pullRequest.user
+          ? {
+              id:
+                pullRequest.user.id != null
+                  ? String(pullRequest.user.id)
+                  : null,
+              login: pullRequest.user.login ?? null,
+            }
+          : null,
+        updatedAt: pullRequest.updated_at ?? null,
+        createdAt: pullRequest.created_at ?? null,
+        mergedAt: pullRequest.merged_at ?? null,
+        closedAt: pullRequest.closed_at ?? null,
+        labels: (pullRequest.labels ?? [])
+          .map((label) => label.name)
+          .filter((name): name is string => Boolean(name)),
+        headSha: pullRequest.head?.sha ?? null,
+        baseSha: pullRequest.base?.sha ?? null,
+        mergeable: pullRequest.mergeable ?? null,
+        mergeStateDescription: null,
+        isCrossRepository:
+          pullRequest.head?.repo?.full_name && pullRequest.base?.repo?.full_name
+            ? pullRequest.head.repo.full_name !==
+              pullRequest.base.repo.full_name
+            : null,
+        headRepositoryFullName: pullRequest.head?.repo?.full_name ?? null,
+      };
+    }),
+    warnings,
+  };
+}
+
+async function listBitbucketPullRequests({
+  repository,
+  provider,
+  limit,
+  state,
+  updatedAfter,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: 'bitbucket';
+  limit: number;
+  state: PullRequestListState;
+  updatedAfter?: Date | null;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
+    await resolveBitbucketReadContext(repository, provider);
+  const host = new URL(baseUrl).host;
+  const warnings: string[] = [];
+  const rows: z.infer<typeof bitbucketPullRequestListItemSchema>[] = [];
+  let nextUrl: string | null = buildApiUrl(
+    apiBaseUrl,
+    `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
+      repo,
+    )}/pullrequests`,
+    {
+      state: state === 'open' ? 'OPEN' : 'MERGED',
+      pagelen: 50,
+      ...(state === 'merged' ? { sort: '-updated_on' } : {}),
+    },
+  );
+
+  for (let page = 1; nextUrl && page <= LIST_PULL_REQUESTS_MAX_PAGES; page++) {
+    const pageResult: z.infer<typeof bitbucketPullRequestListPageSchema> =
+      await requestJson({
+        fetchImpl,
+        url: nextUrl,
+        tokenHeader: { name: 'Authorization', value: authHeader },
+        schema: bitbucketPullRequestListPageSchema,
+      });
+
+    rows.push(...pageResult.values);
+    nextUrl = pageResult.next ?? null;
+
+    if (
+      rows.length > limit ||
+      (state === 'merged' &&
+        reachedUpdatedAfterCutoff(
+          pageResult.values.at(-1)?.updated_on,
+          updatedAfter,
+        ))
+    ) {
+      break;
+    }
+  }
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
+  }
+
+  warnings.push(
+    'Bitbucket does not expose a mergeable signal or labels; mergeable is null and labels are empty.',
+  );
+
+  if (state === 'merged') {
+    warnings.push(
+      'Bitbucket does not expose merge/close timestamps in pull request lists; mergedAt and closedAt are null and updatedAt approximates the merge time.',
+    );
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    pullRequests: rows.slice(0, limit).map((pullRequest) => {
+      const title = pullRequest.title ?? '';
+      const state = (pullRequest.state ?? '').toUpperCase();
+
+      return {
+        number: pullRequest.id,
+        // Bitbucket PR ids are already the per-repository number; there is
+        // no separate global id.
+        externalId: null,
+        url:
+          pullRequest.links?.html?.href ??
+          buildPullRequestUrl({
+            provider,
+            host,
+            repositoryFullName: repository.fullName,
+            number: pullRequest.id,
+          }),
+        title,
+        state: mapProviderPullRequestState({
+          merged: state === 'MERGED',
+          closed: state === 'DECLINED' || state === 'SUPERSEDED',
+        }),
+        draft: Boolean(pullRequest.draft) || isDraftTitle(title),
+        sourceBranch: pullRequest.source?.branch?.name ?? '',
+        targetBranch: pullRequest.destination?.branch?.name ?? '',
+        author: pullRequest.author
+          ? {
+              id: pullRequest.author.uuid ?? null,
+              login:
+                pullRequest.author.nickname ??
+                pullRequest.author.display_name ??
+                pullRequest.author.username ??
+                null,
+            }
+          : null,
+        updatedAt: pullRequest.updated_on ?? null,
+        createdAt: pullRequest.created_on ?? null,
+        mergedAt: null,
+        closedAt: null,
+        labels: [],
+        headSha: pullRequest.source?.commit?.hash ?? null,
+        baseSha: pullRequest.destination?.commit?.hash ?? null,
+        mergeable: null,
+        mergeStateDescription: null,
+        isCrossRepository:
+          pullRequest.source?.repository?.full_name &&
+          pullRequest.destination?.repository?.full_name
+            ? pullRequest.source.repository.full_name !==
+              pullRequest.destination.repository.full_name
+            : null,
+        headRepositoryFullName:
+          pullRequest.source?.repository?.full_name ?? null,
+      };
+    }),
+    warnings,
+  };
+}
+
+const ADO_PULLS_LIST_PAGE_SIZE = 100;
+
+async function listAdoPullRequests({
+  repository,
+  provider,
+  limit,
+  state,
+  fetchImpl,
+}: {
+  repository: RepositoryRow;
+  provider: 'ado';
+  limit: number;
+  state: PullRequestListState;
+  fetchImpl: FetchImpl;
+}): Promise<SourceControlPullRequestListResult> {
+  const { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token } =
+    await resolveAdoReadContext(repository);
+  const host = new URL(baseUrl).host;
+  const warnings: string[] = [];
+  const rows: z.infer<typeof adoPullRequestListItemSchema>[] = [];
+
+  for (let page = 0; page < LIST_PULL_REQUESTS_MAX_PAGES; page++) {
+    const pageResult = await requestJson({
+      fetchImpl,
+      url: buildApiUrl(organizationApiBaseUrl, repositoryPullRequestsPath, {
+        'api-version': ADO_API_VERSION,
+        // Azure DevOps calls merged PRs "completed".
+        'searchCriteria.status': state === 'open' ? 'active' : 'completed',
+        $top: ADO_PULLS_LIST_PAGE_SIZE,
+        $skip: page * ADO_PULLS_LIST_PAGE_SIZE,
+      }),
+      tokenHeader: {
+        name: 'Authorization',
+        value: buildAdoBasicAuthHeader(token),
+      },
+      schema: adoPullRequestListPageSchema,
+    });
+
+    rows.push(...pageResult.value);
+
+    if (
+      rows.length > limit ||
+      pageResult.value.length < ADO_PULLS_LIST_PAGE_SIZE
+    ) {
+      break;
+    }
+  }
+
+  if (rows.length > limit) {
+    warnings.push(truncationWarning(limit, state));
+  }
+
+  if (rows.some((pullRequest) => pullRequest.labels === undefined)) {
+    warnings.push(
+      'Azure DevOps did not include labels in the pull request list; labels may be reported as empty.',
+    );
+  }
+
+  return {
+    success: true,
+    provider,
+    repositoryFullName: repository.fullName,
+    pullRequests: rows.slice(0, limit).map((pullRequest) => ({
+      number: pullRequest.pullRequestId,
+      // Azure DevOps pullRequestId is the only PR identifier it exposes.
+      externalId: null,
+      url: buildPullRequestUrl({
+        provider,
+        host,
+        repositoryFullName: repository.fullName,
+        number: pullRequest.pullRequestId,
+      }),
+      title: pullRequest.title,
+      state: mapProviderPullRequestState({
+        merged: pullRequest.status === 'completed',
+        closed: pullRequest.status === 'abandoned',
+      }),
+      draft: Boolean(pullRequest.isDraft),
+      sourceBranch: stripAdoBranchRef(pullRequest.sourceRefName ?? ''),
+      targetBranch: stripAdoBranchRef(pullRequest.targetRefName ?? ''),
+      author: pullRequest.createdBy
+        ? {
+            id: pullRequest.createdBy.id ?? null,
+            login:
+              pullRequest.createdBy.uniqueName ??
+              pullRequest.createdBy.displayName ??
+              null,
+          }
+        : null,
+      // Azure DevOps pull request lists carry no last-updated timestamp.
+      updatedAt: null,
+      createdAt: pullRequest.creationDate ?? null,
+      mergedAt:
+        pullRequest.status === 'completed'
+          ? (pullRequest.closedDate ?? null)
+          : null,
+      closedAt: pullRequest.closedDate ?? null,
+      labels: (pullRequest.labels ?? [])
+        .map((label) => label.name)
+        .filter((name): name is string => Boolean(name)),
+      headSha: pullRequest.lastMergeSourceCommit?.commitId ?? null,
+      baseSha: pullRequest.lastMergeTargetCommit?.commitId ?? null,
+      mergeable:
+        pullRequest.mergeStatus === 'succeeded'
+          ? true
+          : pullRequest.mergeStatus === 'conflicts'
+            ? false
+            : null,
+      mergeStateDescription: pullRequest.mergeStatus ?? null,
+      // ADO exposes forkSource only on fork PRs, so its absence means same-repo.
+      isCrossRepository: pullRequest.forkSource ? true : false,
+      headRepositoryFullName: pullRequest.forkSource?.repository?.name ?? null,
+    })),
+    warnings,
+  };
 }

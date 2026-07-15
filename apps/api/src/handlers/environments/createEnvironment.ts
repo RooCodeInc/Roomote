@@ -14,6 +14,7 @@ import {
 import {
   type TaskPayload,
   environmentConfigSchema,
+  getMissingEnvironmentRepositoryError,
   getEnvironmentRepositoryInstallationError,
 } from '@roomote/types';
 
@@ -256,9 +257,14 @@ export async function createEnvironment(
     }
 
     const repoMap = new Map(orgRepos.map((repo) => [repo.fullName, repo.id]));
-    const missingRepositories = repositoryNames.filter(
-      (name) => !repoMap.has(name),
+    const missingRepositoryError = getMissingEnvironmentRepositoryError(
+      repositoryNames,
+      orgRepos,
     );
+
+    if (missingRepositoryError) {
+      return c.json({ error: missingRepositoryError }, 400);
+    }
 
     const created = await db.transaction(async (tx) => {
       const inserted = await tx
@@ -307,7 +313,6 @@ export async function createEnvironment(
       success: true,
       environmentId: created.id,
       name: config.name,
-      missingRepositories,
     });
   } catch (error) {
     if (isEnvironmentNameUniqueViolation(error)) {

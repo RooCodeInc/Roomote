@@ -11,13 +11,23 @@
 # Intentionally out of scope compared to production:
 # - TLS: ngrok terminates TLS in front of this listener.
 # - Preview subdomains: the local preview proxy keeps its own port (18081).
-# - MinIO artifact routing: dev presigned S3 URLs point directly at MinIO.
 {
 	auto_https off
 }
 
 :18080 {
 	encode zstd gzip
+
+	@artifact_storage {
+		path /{$S3_BUCKET_ARTIFACTS:roomote-artifacts} /{$S3_BUCKET_ARTIFACTS:roomote-artifacts}/*
+	}
+
+	handle @artifact_storage {
+		reverse_proxy minio:9000 {
+			# Presigned S3 URLs sign the bucket path and Host header.
+			header_up Host {http.request.host}
+		}
+	}
 
 	@api {
 		path /_roomote-api /_roomote-api/*

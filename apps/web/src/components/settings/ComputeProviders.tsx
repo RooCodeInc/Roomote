@@ -101,6 +101,18 @@ export function ComputeProviders() {
     }),
   );
 
+  const setLocalDockerEnabled = useMutation(
+    trpc.compute.setLocalDockerEnabled.mutationOptions({
+      onSuccess: async () => {
+        await invalidateComputeQueries();
+        toast.success('Local Docker setting updated.');
+      },
+      onError: (error) => {
+        toast.error(error.message || 'Failed to update Local Docker.');
+      },
+    }),
+  );
+
   const providers: ComputeProviderStatus[] = status.data?.providers ?? [];
   const effectiveDefaultProvider: ComputeProvider =
     status.data?.persistedDefaultProvider ??
@@ -109,6 +121,8 @@ export function ComputeProviders() {
   const defaultProviderStatus = providers.find(
     (provider) => provider.provider === effectiveDefaultProvider,
   );
+  const localDockerEnabled =
+    !status.data?.excludedProviders?.includes('docker');
 
   const handleSave = (
     provider: ComputeProvider,
@@ -166,16 +180,21 @@ export function ComputeProviders() {
               <SelectValue placeholder="Select a sandbox provider" />
             </SelectTrigger>
             <SelectContent>
-              {providers.map((provider) => (
-                <SelectItem
-                  key={provider.provider}
-                  value={provider.provider}
-                  disabled={!provider.configSatisfied}
-                >
-                  {provider.label}
-                  {getDefaultProviderDisabledLabel(provider)}
-                </SelectItem>
-              ))}
+              {providers
+                .filter(
+                  (provider) =>
+                    localDockerEnabled || provider.provider !== 'docker',
+                )
+                .map((provider) => (
+                  <SelectItem
+                    key={provider.provider}
+                    value={provider.provider}
+                    disabled={!provider.configSatisfied}
+                  >
+                    {provider.label}
+                    {getDefaultProviderDisabledLabel(provider)}
+                  </SelectItem>
+                ))}
             </SelectContent>
           </Select>
           {defaultProviderStatus && !defaultProviderStatus.configSatisfied && (
@@ -209,6 +228,17 @@ export function ComputeProviders() {
           clearPending={
             clearConfig.isPending &&
             clearConfig.variables?.provider === provider.provider
+          }
+          localDockerEnabled={
+            provider.provider === 'docker' ? localDockerEnabled : undefined
+          }
+          onLocalDockerToggle={
+            provider.provider === 'docker'
+              ? (enabled) => setLocalDockerEnabled.mutate({ enabled })
+              : undefined
+          }
+          localDockerTogglePending={
+            provider.provider === 'docker' && setLocalDockerEnabled.isPending
           }
         />
       ))}

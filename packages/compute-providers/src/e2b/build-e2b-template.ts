@@ -1,4 +1,5 @@
 import { Template, type LogEntry } from 'e2b';
+import { WORKER_RUNTIME_SCHEMA_TAG } from '@roomote/types';
 
 /**
  * Default template name for the Roomote worker base template. The tag is
@@ -25,7 +26,7 @@ export interface BuildE2bWorkerTemplateOptions {
    * Docker tags are rejected up front.
    */
   imageRef: string;
-  /** Overrides the derived `roomote-worker:<image-tag>` template reference. */
+  /** Overrides the derived `roomote-worker:<image-tag>-r<schema>` reference. */
   templateRef?: string;
   cpuCount?: number;
   memoryMB?: number;
@@ -48,7 +49,7 @@ export function deriveE2bWorkerTemplateRef(imageRef: string): string {
     ? imageRef.slice(imageRef.lastIndexOf(':') + 1)
     : 'latest';
 
-  return `${E2B_WORKER_TEMPLATE_NAME}:${imageTag}`;
+  return `${E2B_WORKER_TEMPLATE_NAME}:${imageTag}-${WORKER_RUNTIME_SCHEMA_TAG}`;
 }
 
 /**
@@ -85,12 +86,23 @@ export async function buildE2bWorkerTemplate(
     })}`,
   );
 
-  const template = Template().fromImage(
-    imageRef,
-    registryUsername && registryPassword
-      ? { username: registryUsername, password: registryPassword }
-      : undefined,
-  );
+  const template = Template()
+    .fromImage(
+      imageRef,
+      registryUsername && registryPassword
+        ? { username: registryUsername, password: registryPassword }
+        : undefined,
+    )
+    // E2B doesn't preserve a custom image's Dockerfile USER for template
+    // steps, and its build environment can reject sudo even for an image user
+    // that has passwordless sudo. Validate the baked-in Docker CLI directly as
+    // root, start the packaged Docker service so E2B snapshots the running
+    // daemon, then restore Roomote's intended runtime identity.
+    .setUser('root')
+    .runCmd('/usr/bin/docker compose version')
+    .runCmd('service docker start && /usr/bin/docker info')
+    .setUser('roomote')
+    .setWorkdir('/home/roomote');
 
   const buildInfo = await Template.build(template, templateRef, {
     apiKey,

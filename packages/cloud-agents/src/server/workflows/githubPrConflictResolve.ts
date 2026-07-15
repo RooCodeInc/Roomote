@@ -1,6 +1,7 @@
 import {
   type GithubPrConflictResolveTask,
   getSkillCommandDelimiter,
+  resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
@@ -23,12 +24,16 @@ export function githubPrConflictResolve({
   const {
     payload: { repo, prNumber, prTitle, prUrl, headRef, baseRef },
   } = taskSpec;
+  // The payload kind stays GithubPrConflictResolve for every provider; the
+  // stamped payload provider decides which surface the task reports under.
+  const provider = resolveSourceControlProviderFromPayload(taskSpec.payload);
   const delimiter = getSkillCommandDelimiter(taskSpec.harness);
   const description = buildStructuredTaskRequest({
     command: `${delimiter}resolve-github-pr-merge-conflicts`,
     activeAppendixPath: 'resolve-github-pr-merge-conflicts',
     taskContext: {
       repository: repo,
+      source_control_provider: provider,
       pull_request_number: prNumber,
       workflow: 'pr_conflict_resolve',
       task_link_follow: `[Follow](${taskRunUrl})`,
@@ -45,7 +50,7 @@ export function githubPrConflictResolve({
   return standardTask({
     description,
     repo,
-    taskSurface: 'github',
+    taskSurface: provider,
     taskRunUrl,
     attribution,
     requestFormat: 'structured',

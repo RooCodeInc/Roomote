@@ -36,6 +36,11 @@ vi.mock('../automation-work-items/discord.js', () => ({
   postLateBoundWorkItemFailureToDiscord: vi.fn(async () => undefined),
 }));
 
+vi.mock('../automation-work-items/telegram.js', () => ({
+  resolveAutomationTelegramTarget: vi.fn(async () => null),
+  postLateBoundWorkItemFailureToTelegram: vi.fn(async () => undefined),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...args) => ({ type: 'and', args })),
   asc: vi.fn(),

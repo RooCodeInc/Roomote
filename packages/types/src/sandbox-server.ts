@@ -9,6 +9,10 @@ export const SANDBOX_SERVER_NAMED_PORT: NamedPort = {
   port: SANDBOX_SERVER_PORT,
 };
 
+/**
+ * Legacy editor port identity retained so stale URLs remain classified as
+ * system-managed. Roomote does not provide an editor service.
+ */
 export const CODE_SERVER_NAMED_PORT: NamedPort = {
   name: 'EDITOR',
   port: 0, // Dynamic -- resolved at runtime, routed through multiplex proxy
@@ -21,8 +25,8 @@ export const CODE_SERVER_NAMED_PORT: NamedPort = {
 export const LEGACY_SANDBOX_GUI_NAMED_PORT_NAME = 'GUI';
 
 /**
- * Ports that require their own dedicated sandbox port slot.
- * EDITOR was removed: it now shares the multiplex proxy slot.
+ * Ports that require their own dedicated sandbox port slot. The legacy EDITOR
+ * identity does not allocate a slot.
  */
 export const INTERNAL_PORTS = new Set([SANDBOX_SERVER_NAMED_PORT.name]);
 

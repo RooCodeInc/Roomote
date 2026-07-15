@@ -4,10 +4,8 @@ const {
   mockUpdateTaskPrStatus,
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
-  mockNotifyDiscordPrMerge,
-  mockNotifySlackPrMerge,
-  mockNotifyTeamsPrMerge,
-  mockNotifyTelegramAndLinearPrMerge,
+  mockScheduleNotifyPullRequestTerminalStatus,
+  mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -15,10 +13,8 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
-  mockNotifyDiscordPrMerge: vi.fn(),
-  mockNotifySlackPrMerge: vi.fn(),
-  mockNotifyTeamsPrMerge: vi.fn(),
-  mockNotifyTelegramAndLinearPrMerge: vi.fn(),
+  mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
+  mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
 }));
 
@@ -36,6 +32,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
   },
@@ -50,20 +50,14 @@ vi.mock('@roomote/db/server', () => ({
     mockFindActiveGitHubPrReviewTask(...args),
 }));
 
-vi.mock('../../github/notifySlackPrMerge', () => ({
-  notifySlackPrMerge: mockNotifySlackPrMerge,
+vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
+  scheduleNotifyPullRequestTerminalStatus:
+    mockScheduleNotifyPullRequestTerminalStatus,
 }));
 
-vi.mock('../../github/notifyDiscordPrMerge', () => ({
-  notifyDiscordPrMerge: mockNotifyDiscordPrMerge,
-}));
-
-vi.mock('../../github/notifyTeamsPrMerge', () => ({
-  notifyTeamsPrMerge: mockNotifyTeamsPrMerge,
-}));
-
-vi.mock('../../github/notifyTelegramAndLinearPrMerge', () => ({
-  notifyTelegramAndLinearPrMerge: mockNotifyTelegramAndLinearPrMerge,
+vi.mock('../../pull-request-fact-sync', () => ({
+  scheduleSourceControlPullRequestFactSync:
+    mockScheduleSourceControlPullRequestFactSync,
 }));
 
 vi.mock('../getGitLabAutomationTargets', () => ({
@@ -107,17 +101,13 @@ describe('handleGitLabMergeRequest', () => {
     mockGetGitLabAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
-    mockNotifyDiscordPrMerge.mockReset();
-    mockNotifySlackPrMerge.mockReset();
-    mockNotifyTeamsPrMerge.mockReset();
-    mockNotifyTelegramAndLinearPrMerge.mockReset();
+    mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
 
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
-    mockNotifyDiscordPrMerge.mockResolvedValue(undefined);
-    mockNotifySlackPrMerge.mockResolvedValue(undefined);
-    mockNotifyTeamsPrMerge.mockResolvedValue(undefined);
-    mockNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
 
     mockGetGitLabAutomationTargets.mockResolvedValue({
       status: 'ok',
@@ -125,6 +115,7 @@ describe('handleGitLabMergeRequest', () => {
         {
           id: 'gitlab:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
@@ -179,6 +170,91 @@ describe('handleGitLabMergeRequest', () => {
       expect.objectContaining({
         launchClass: 'automation',
       }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
+    // Two active rows share the repository identity; only the host differs.
+    const rows = [
+      { id: 'repo-host-a', host: 'gitlab.host-a.example' },
+      { id: 'repo-host-b', host: 'gitlab.host-b.example' },
+    ];
+    mockGetGitLabAutomationTargets.mockImplementation(
+      async ({ webhookHost }: { webhookHost?: string | null }) => {
+        const repo = rows.find((row) => row.host === webhookHost);
+        return repo
+          ? {
+              status: 'ok',
+              targets: [
+                {
+                  id: `gitlab:pr_review:${repo.id}`,
+                  settings: null,
+                  repo,
+                  repositoryIds: [repo.id],
+                  userId: 'user-1',
+                },
+              ],
+            }
+          : { status: 'error', message: 'no matching repository row' };
+      },
+    );
+
+    await handleGitLabMergeRequest(
+      makePayload('open', {
+        url: 'https://gitlab.host-a.example/acme/backend/-/merge_requests/42',
+      }),
+    );
+
+    // The handler derives the instance host from the webhook URL...
+    expect(mockGetGitLabAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookHost: 'gitlab.host-a.example' }),
+    );
+    // ...and the launched payload pins the matching row's host.
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'gitlab.host-a.example',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('stamps the repository host into review payloads when the repository row has one', async () => {
+    mockGetGitLabAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitlab:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'gitlab.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGitLabMergeRequest(makePayload('open'));
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitlab',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
+      }),
+      expect.any(Object),
     );
   });
 
@@ -243,7 +319,12 @@ describe('handleGitLabMergeRequest', () => {
 
   it('updates tracked task PR status for merged merge requests', async () => {
     await expect(
-      handleGitLabMergeRequest(makePayload('merge')),
+      handleGitLabMergeRequest(
+        makePayload('merge', {
+          created_at: '2026-07-01 00:00:00 UTC',
+          updated_at: '2026-07-10 00:00:00 UTC',
+        }),
+      ),
     ).resolves.toEqual({ status: 'ok' });
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -252,31 +333,43 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'merged',
     );
+    expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 42,
+        externalId: 999,
+        title: 'Update backend',
+        url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        authorLogin: null,
+        state: 'merged',
+        createdAt: '2026-07-01 00:00:00 UTC',
+        updatedAt: '2026-07-10 00:00:00 UTC',
+      },
+    });
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
-  it('notifies Slack, Teams, and Telegram/Linear threads for merged merge requests on active synced repositories', async () => {
+  it('notifies linked terminal-status surfaces for merged merge requests on active synced repositories', async () => {
     await handleGitLabMergeRequest(makePayload('merge'));
 
-    const expectedParams = {
-      sourceControlProvider: 'gitlab',
-      repository: 'acme/backend',
-      prNumber: 42,
-      prTitle: 'Update backend',
-      prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
-      mergedBy: 'roomote-bot',
-    };
-
-    expect(mockNotifySlackPrMerge).toHaveBeenCalledWith(expectedParams);
-    expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith(expectedParams);
-    expect(mockNotifyDiscordPrMerge).toHaveBeenCalledWith(expectedParams);
-    expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
-      ...expectedParams,
-      sourceControlProvider: 'gitlab',
-    });
+    expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitlab',
+        repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'gitlab.com',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        status: 'merged',
+        actorLogin: 'roomote-bot',
+      },
+      'MR !42',
+    );
   });
 
-  it('does not notify merge threads for closed merge requests', async () => {
+  it('notifies linked terminal-status surfaces for closed merge requests', async () => {
     await handleGitLabMergeRequest(makePayload('close'));
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -285,10 +378,20 @@ describe('handleGitLabMergeRequest', () => {
       42,
       'closed',
     );
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitlab',
+        repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'gitlab.com',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        status: 'closed',
+        actorLogin: 'roomote-bot',
+      },
+      'MR !42',
+    );
   });
 
   it('does not notify merge threads when the repository is not an active synced GitLab row', async () => {
@@ -296,9 +399,6 @@ describe('handleGitLabMergeRequest', () => {
 
     await handleGitLabMergeRequest(makePayload('merge'));
 
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyDiscordPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    expect(mockScheduleNotifyPullRequestTerminalStatus).not.toHaveBeenCalled();
   });
 });

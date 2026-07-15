@@ -169,6 +169,12 @@ export async function uploadToPresignedUrl(
       `Failed to upload to S3: ${response.status} ${response.statusText}`,
     );
   }
+
+  if (!response.headers.get('etag')) {
+    throw new Error(
+      'Failed to upload to S3: successful response did not include an ETag',
+    );
+  }
 }
 
 /**

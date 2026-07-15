@@ -32,6 +32,14 @@ import type {
 const execFileAsync = promisify(execFile);
 const DOCKER_WORKER_CONTAINER_PREFIX = 'roomote-worker-';
 
+function getTaskDaemonContainerName(instanceId: string): string {
+  return `${instanceId}-docker`;
+}
+
+function getTaskWorkspaceVolumeName(instanceId: string): string {
+  return `${instanceId}-workspace`;
+}
+
 async function docker(
   args: string[],
   options: { signal?: AbortSignal; allowFailure?: boolean } = {},
@@ -92,6 +100,10 @@ export class DockerClient implements ComputeProviderClient {
       signal: input.signal,
       allowFailure: true,
     });
+    await docker(['rm', '-f', getTaskDaemonContainerName(input.instanceId)], {
+      signal: input.signal,
+      allowFailure: true,
+    });
     await docker(['rm', '-f', input.instanceId], {
       signal: input.signal,
       allowFailure: true,
@@ -102,12 +114,26 @@ export class DockerClient implements ComputeProviderClient {
         allowFailure: true,
       });
     }
+    await docker(
+      ['volume', 'rm', '-f', getTaskWorkspaceVolumeName(input.instanceId)],
+      {
+        signal: input.signal,
+        allowFailure: true,
+      },
+    );
     return {};
   }
 
   public async enterStandby(
     input: EnterStandbyInput,
   ): Promise<EnterStandbyResult> {
+    await docker(
+      ['stop', '--time', '10', getTaskDaemonContainerName(input.instanceId)],
+      {
+        signal: input.signal,
+        allowFailure: true,
+      },
+    );
     await docker(['stop', '--time', '10', input.instanceId], {
       signal: input.signal,
     });
@@ -118,6 +144,10 @@ export class DockerClient implements ComputeProviderClient {
     input: ResumeFromStandbyInput,
   ): Promise<CreatedInstance> {
     await docker(['start', input.resumeHandle], { signal: input.signal });
+    await docker(['start', getTaskDaemonContainerName(input.resumeHandle)], {
+      signal: input.signal,
+      allowFailure: true,
+    });
     return {
       instanceId: input.resumeHandle,
       sourceSnapshotId: input.resumeHandle,

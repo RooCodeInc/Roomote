@@ -242,6 +242,8 @@ export interface ModalConfig {
   memoryMiB?: number;
   /** Hard memory cap in MiB (e.g. 16384 for 16 GB). */
   memoryLimitMiB?: number;
+  /** Use Modal's VM sandbox runtime for nested Docker workloads. */
+  vmRuntime?: boolean;
 }
 
 export interface DockerConfig {
@@ -265,6 +267,8 @@ export interface DaytonaConfig {
   snapshotName: string;
   /** Maximum sandbox lifetime in milliseconds, enforced via auto-stop. */
   timeoutMs?: number;
+  /** Memory allocated to the sandbox in GiB. */
+  memoryGiB?: number;
 }
 
 export interface E2bConfig {

@@ -102,6 +102,111 @@ export const serviceConfigSchema = z.union([
 export type ServiceConfig = z.infer<typeof serviceConfigSchema>;
 
 /**
+ * Docker projects run customer-owned Docker Compose or Dockerfile services
+ * inside the task sandbox after their repository has been prepared.
+ */
+const dockerProjectNameSchema = z
+  .string()
+  .min(1, 'Docker project name is required')
+  .max(50)
+  .regex(
+    /^[a-zA-Z][a-zA-Z0-9_-]*$/,
+    'Docker project name must start with a letter and contain only letters, numbers, underscores, and hyphens',
+  );
+
+const dockerProjectRelativePathSchema = z
+  .string()
+  .min(1)
+  .refine(
+    (value) =>
+      !value.startsWith('/') &&
+      !value.startsWith('~') &&
+      !/^[a-zA-Z]:[\\/]/.test(value),
+    { message: 'Path must be relative to the selected repository' },
+  )
+  .refine(
+    (value) => !value.split(/[\\/]/).some((segment) => segment === '..'),
+    { message: 'Path must stay within the selected repository' },
+  );
+
+export const dockerProjectPortSchema = z.object({
+  /** Name of an entry in the environment's top-level `ports` list. */
+  named_port: z.string().min(1),
+  /** Compose service that owns the container port. Omitted for Dockerfiles. */
+  service: z.string().min(1).optional(),
+  container_port: z.number().int().min(1).max(65535),
+});
+
+const dockerProjectCommonShape = {
+  name: dockerProjectNameSchema,
+  repository: z
+    .string()
+    .regex(
+      /^[^/]+(?:\/[^/]+)+$/,
+      'Must reference a configured slash-separated repository name',
+    ),
+  working_dir: dockerProjectRelativePathSchema.optional(),
+  env: z.record(z.string()).optional(),
+  ports: z.array(dockerProjectPortSchema).optional(),
+  required: z.boolean().optional(),
+  startup_timeout_seconds: z.number().int().positive().max(3600).optional(),
+};
+
+export const composeDockerProjectSchema = z.object({
+  ...dockerProjectCommonShape,
+  type: z.literal('compose'),
+  files: z.array(dockerProjectRelativePathSchema).min(1),
+  profiles: z.array(z.string().min(1)).optional(),
+  services: z.array(z.string().min(1)).optional(),
+});
+
+export const dockerfileDockerProjectSchema = z.object({
+  ...dockerProjectCommonShape,
+  type: z.literal('dockerfile'),
+  context: dockerProjectRelativePathSchema.optional(),
+  dockerfile: dockerProjectRelativePathSchema.optional(),
+  target: z.string().min(1).optional(),
+  build_args: z.record(z.string()).optional(),
+  command: z.array(z.string()).min(1).optional(),
+});
+
+export const dockerProjectSchema = z.discriminatedUnion('type', [
+  composeDockerProjectSchema,
+  dockerfileDockerProjectSchema,
+]);
+
+export type DockerProjectPort = z.infer<typeof dockerProjectPortSchema>;
+export type ComposeDockerProject = z.infer<typeof composeDockerProjectSchema>;
+export type DockerfileDockerProject = z.infer<
+  typeof dockerfileDockerProjectSchema
+>;
+export type DockerProject = z.infer<typeof dockerProjectSchema>;
+
+/**
+ * Normalize a configured Docker project name into the Compose project name
+ * the worker uses (`--project-name`). Shared with the web app so both sides
+ * derive identical log file paths.
+ */
+export function toComposeProjectName(name: string): string {
+  return `roomote-${name}`
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^[^a-z0-9]+/, '')
+    .slice(0, 63);
+}
+
+export const DOCKER_PROJECT_LOGS_DIR = '/tmp/roomote-docker-projects';
+
+/**
+ * Well-known sandbox path of a Docker project's log file. The worker writes
+ * Compose startup output, failure diagnostics, and a live `docker compose
+ * logs --follow` stream here; the web Logs panel tails it by this path.
+ */
+export function getDockerProjectLogFilePath(name: string): string {
+  return `${DOCKER_PROJECT_LOGS_DIR}/${toComposeProjectName(name)}.log`;
+}
+
+/**
  * Default ports for each service.
  */
 export const serviceDefaultPorts: Record<ServiceName, number> = {
@@ -554,6 +659,11 @@ export const environmentConfigSchema = z
       .optional()
       .transform(filterLegacyServices),
     /**
+     * Customer-owned Docker Compose projects or Dockerfiles to start after
+     * their repositories have been prepared.
+     */
+    docker_projects: z.array(dockerProjectSchema).optional(),
+    /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and
      * refreshed externally while the sandbox stays active.
@@ -744,6 +854,83 @@ export const environmentConfigSchema = z
         }
       }
     }
+
+    if (data.docker_projects && data.docker_projects.length > 0) {
+      const configuredRepositories = new Set(
+        data.repositories.map((repository) => repository.repository),
+      );
+      const configuredPortNames = new Set(
+        (data.ports ?? []).map((port) => port.name.toUpperCase()),
+      );
+      const seenProjectNames = new Set<string>();
+      const seenNamedPorts = new Set<string>();
+
+      data.docker_projects.forEach((project, projectIndex) => {
+        const normalizedProjectName = project.name.toLowerCase();
+        if (seenProjectNames.has(normalizedProjectName)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Duplicate Docker project name: ${project.name}`,
+            path: ['docker_projects', projectIndex, 'name'],
+          });
+        }
+        seenProjectNames.add(normalizedProjectName);
+
+        if (!configuredRepositories.has(project.repository)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Docker project repository '${project.repository}' is not configured in this environment`,
+            path: ['docker_projects', projectIndex, 'repository'],
+          });
+        }
+
+        project.ports?.forEach((port, portIndex) => {
+          const normalizedPortName = port.named_port.toUpperCase();
+          if (!configuredPortNames.has(normalizedPortName)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Docker project port '${port.named_port}' is not configured in the environment ports list`,
+              path: [
+                'docker_projects',
+                projectIndex,
+                'ports',
+                portIndex,
+                'named_port',
+              ],
+            });
+          }
+
+          if (seenNamedPorts.has(normalizedPortName)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: `Environment port '${port.named_port}' can only be mapped by one Docker project`,
+              path: [
+                'docker_projects',
+                projectIndex,
+                'ports',
+                portIndex,
+                'named_port',
+              ],
+            });
+          }
+          seenNamedPorts.add(normalizedPortName);
+
+          if (project.type === 'compose' && !port.service) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: 'Compose port mappings require a service name',
+              path: [
+                'docker_projects',
+                projectIndex,
+                'ports',
+                portIndex,
+                'service',
+              ],
+            });
+          }
+        });
+      });
+    }
   });
 
 export type EnvironmentConfig = z.infer<typeof environmentConfigSchema>;
@@ -817,6 +1004,24 @@ export function getEnvironmentRepositoryInstallationError(
   }
 
   return MULTI_INSTALLATION_ENVIRONMENT_REPOSITORIES_ERROR;
+}
+
+export function getMissingEnvironmentRepositoryError(
+  repositoryNames: string[],
+  repositoryRows: Array<{ fullName: string }>,
+): string | null {
+  const linkedRepositoryNames = new Set(
+    repositoryRows.map((repository) => repository.fullName),
+  );
+  const missingRepositories = repositoryNames.filter(
+    (name) => !linkedRepositoryNames.has(name),
+  );
+
+  if (missingRepositories.length === 0) {
+    return null;
+  }
+
+  return `Repositories are not linked to this deployment: ${missingRepositories.join(', ')}`;
 }
 
 export function getPrimaryPortFromConfig(

@@ -64,6 +64,10 @@ export const PROVIDER_IDENTIFIER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'GITLAB_CLIENT_ID',
   'GITEA_CLIENT_ID',
   'SLACK_APP_ID',
+  'ADO_CLIENT_ID',
+  'ADO_TENANT_ID',
+  'ADO_AUTH_MODE',
+  'ADO_LINKED_ACCOUNT_ID',
 ]);
 
 /**

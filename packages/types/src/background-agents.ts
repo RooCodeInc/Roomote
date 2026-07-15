@@ -124,10 +124,15 @@ export function isBackgroundAutomationKey(
   return (BACKGROUND_AUTOMATION_KEYS as readonly string[]).includes(value);
 }
 
-export type BackgroundAutomationProvider = 'slack' | 'telegram' | 'sentry';
+export type BackgroundAutomationProvider =
+  | 'slack'
+  | 'teams'
+  | 'telegram'
+  | 'sentry';
 
 export type BackgroundAutomationTargetKind =
   | 'slack_channel'
+  | 'teams_channel'
   | 'telegram_chat'
   | 'sentry_project';
 
@@ -147,7 +152,19 @@ export type AutomationTarget = {
  */
 export type AutomationScanCursor = {
   mergedAt: string;
-  externalPullRequestId: number;
+  /**
+   * `pull_request_facts.id` of the last row in the previous batch: the
+   * globally-unique pagination tie-breaker. Absent on cursors written before
+   * this field existed; those resume from `mergedAt` alone.
+   */
+  factId?: string;
+  /**
+   * Legacy tie-breaker, still written for rolling-deploy compatibility but no
+   * longer used to resume: for Bitbucket/ADO it is the per-repository PR
+   * number, so same-timestamp rows from different repositories could be
+   * skipped forever at a page boundary.
+   */
+  externalPullRequestId?: number;
 };
 
 export type BackgroundAutomationAvailability = 'stable' | 'beta';

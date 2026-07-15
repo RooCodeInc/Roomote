@@ -2,6 +2,8 @@ import { Env } from '@roomote/env';
 import {
   db,
   getAutomationRuntime,
+  githubInstallations,
+  isNull,
   recordAutomationRunOutcome,
   slackInstallations,
   eq,
@@ -10,9 +12,19 @@ import { MANAGER_STATS_SETTINGS_HASH } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import type { SlackMessage } from '@roomote/slack';
 
-import { buildAutomationSettingsMessage } from '../lib/manager-slack';
+import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import {
+  buildAutomationSettingsMessage,
+  buildManagerSlackSettingsUrl,
+  degradeSlackMrkdwnToMarkdown,
+} from '../lib/manager-slack';
 import { buildManagerStatsDigest } from '../lib/manager-stats';
-import { hasActiveGitHubInstallation } from './github-deployment-scope';
+import {
+  listConnectedCommunicationProviders,
+  resolveAutomationRuntimeDestination,
+  type ResolvedAutomationDestination,
+} from './destination';
+import { hasAnyActiveRepository } from './github-deployment-scope';
 import {
   isWeeklyRunDueOnLocalDay,
   resolveSlackWorkspaceTimezone,
@@ -29,9 +41,14 @@ const SCHEDULE_HOUR_LOCAL = 16;
 const WINDOW_DAYS = 7;
 
 interface DeploymentContext {
-  slackBotToken: string;
-  slackTeamId: string;
-  actorUserId: string;
+  slackBotToken: string | null;
+  slackTeamId: string | null;
+  /**
+   * User the GitHub data path runs as; null when the deployment has no Slack
+   * installer and no GitHub installation (e.g. GitLab + Teams). The digest
+   * then covers the non-GitHub repositories only, which is the whole set.
+   */
+  actorUserId: string | null;
 }
 
 function buildAnalyticsUrl() {
@@ -54,7 +71,12 @@ function formatManagerStatsText({
     `· Active users: *${stats.activeUsers}*`,
     `· PRs opened with me: *${stats.roomotePullRequests} (${Math.round(stats.roomotePullRequestPercentage)}% of ${stats.totalPullRequests})* — ${stats.authoredPullRequests} authored, ${stats.reviewedPullRequests} reviewed`,
     `· PR merged with me: *${stats.mergedRoomotePullRequests} (${Math.round(stats.mergedRoomotePullRequestPercentage)}% of ${stats.authoredPullRequests} authored)*`,
-    `· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`,
+    // Line counts are only available from GitHub; when the digest includes
+    // PRs from other providers the number would be partial, so omit the line
+    // entirely rather than annotate it.
+    ...(stats.locScope === 'all'
+      ? [`· LOC added / removed: *+${stats.additions} / -${stats.deletions}*`]
+      : []),
     `· Most active repo: ${
       stats.mostActiveRepo
         ? `*${stats.mostActiveRepo.fullName}* (${stats.mostActiveRepo.pullRequestCount} PRs)`
@@ -82,11 +104,13 @@ export function formatManagerStatsMessage({
 }
 
 async function findEligibleDeployments(): Promise<DeploymentContext[]> {
-  if (!(await hasActiveGitHubInstallation())) {
+  // PR stats come from the provider-neutral digest, so any active repository
+  // qualifies regardless of source-control provider.
+  if (!(await hasAnyActiveRepository())) {
     return [];
   }
 
-  return db
+  const rows = await db
     .select({
       slackBotToken: slackInstallations.botAccessToken,
       slackTeamId: slackInstallations.teamId,
@@ -94,6 +118,71 @@ async function findEligibleDeployments(): Promise<DeploymentContext[]> {
     })
     .from(slackInstallations)
     .where(eq(slackInstallations.isActive, true));
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  // No Slack: the deployment is still eligible when another comms provider
+  // can carry the stats report. GitHub calls then run as the user who
+  // installed the GitHub App; without a GitHub installation there is no
+  // GitHub data path to authenticate, so no actor is needed.
+  const connectedProviders = await listConnectedCommunicationProviders();
+
+  if (connectedProviders.length === 0) {
+    return [];
+  }
+
+  const [installation] = await db
+    .select({ actorUserId: githubInstallations.installedByUserId })
+    .from(githubInstallations)
+    .where(isNull(githubInstallations.suspendedAt))
+    .limit(1);
+
+  return [
+    {
+      slackBotToken: null,
+      slackTeamId: null,
+      actorUserId: installation?.actorUserId ?? null,
+    },
+  ];
+}
+
+/**
+ * Posts the weekly stats to a non-Slack destination through its
+ * communication provider adapter: the Slack mrkdwn digest degraded to
+ * standard markdown, with the automation-settings context degraded to a
+ * link button.
+ */
+async function postManagerStatsViaCommunicationAdapter(params: {
+  destination: ResolvedAutomationDestination;
+  stats: Awaited<ReturnType<typeof buildManagerStatsDigest>>;
+}): Promise<void> {
+  const { destination } = params;
+  const adapter = await getCommunicationProviderAdapter(destination.provider);
+
+  if (!adapter) {
+    throw new Error(
+      `Failed to post weekly manager stats: ${destination.provider} is not connected`,
+    );
+  }
+
+  await adapter.postMessage({
+    channelId: destination.channelId,
+    ...(destination.serviceUrl ? { serviceUrl: destination.serviceUrl } : {}),
+    text: degradeSlackMrkdwnToMarkdown(
+      formatManagerStatsText({ stats: params.stats }),
+    ),
+    textFormat: 'markdown',
+    buttons: [
+      [
+        {
+          text: 'Automation settings',
+          url: buildManagerSlackSettingsUrl(MANAGER_STATS_SETTINGS_HASH),
+        },
+      ],
+    ],
+  });
 }
 
 export async function managerStatsJob(
@@ -106,7 +195,8 @@ export async function managerStatsJob(
   const eligibleDeployments = await findEligibleDeployments();
 
   if (eligibleDeployments.length === 0) {
-    result.skippedReason = 'GitHub and Slack must both be connected.';
+    result.skippedReason =
+      'A repository and a communication provider must both be connected.';
   }
 
   let processed = 0;
@@ -116,7 +206,6 @@ export async function managerStatsJob(
     try {
       const runtime = await getAutomationRuntime('manager_stats');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
-      const channelId = runtime.slackChannelId;
 
       if (!frequency || frequency === 'off') {
         result.skippedReason = 'Automation is disabled.';
@@ -124,16 +213,27 @@ export async function managerStatsJob(
         continue;
       }
 
-      if (!channelId) {
+      const destination = await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: deployment.slackBotToken !== null,
+      });
+
+      if (!destination) {
         result.skippedReason = 'Manager channel is not configured.';
         skipped++;
         continue;
       }
 
-      const timezone = await resolveSlackWorkspaceTimezone(
-        deployment,
-        LOG_PREFIX,
-      );
+      const channelId = destination.channelId;
+      const timezone = deployment.slackBotToken
+        ? await resolveSlackWorkspaceTimezone(
+            {
+              slackBotToken: deployment.slackBotToken,
+              slackTeamId: deployment.slackTeamId ?? '',
+            },
+            LOG_PREFIX,
+          )
+        : 'UTC';
 
       if (
         !opts.manualTrigger &&
@@ -167,14 +267,24 @@ export async function managerStatsJob(
         continue;
       }
 
-      const slack = new SlackNotifier(deployment.slackBotToken);
-      const messageTs = await slack.postMessage({
-        channel: channelId,
-        ...formatManagerStatsMessage({ stats }),
-      });
+      if (destination.provider === 'slack') {
+        if (!deployment.slackBotToken) {
+          throw new Error(
+            'Manager stats destination is Slack, but Slack is not connected',
+          );
+        }
 
-      if (!messageTs) {
-        throw new Error('Failed to post weekly manager stats');
+        const slack = new SlackNotifier(deployment.slackBotToken);
+        const messageTs = await slack.postMessage({
+          channel: channelId,
+          ...formatManagerStatsMessage({ stats }),
+        });
+
+        if (!messageTs) {
+          throw new Error('Failed to post weekly manager stats');
+        }
+      } else {
+        await postManagerStatsViaCommunicationAdapter({ destination, stats });
       }
 
       await recordAutomationRunOutcome(db, {

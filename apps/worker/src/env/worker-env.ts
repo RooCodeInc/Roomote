@@ -36,6 +36,9 @@ const SYSTEM_KEYS = [
   'PNPM_HOME',
   'NODE_ENV',
   'COREPACK_ENABLE_DOWNLOAD_PROMPT',
+  // Container-project tasks use a task-scoped Docker daemon. Keep its endpoint
+  // available to setup commands, agent shells, and follow-up processes.
+  'DOCKER_HOST',
 ];
 
 // Capture worker-only config from the launcher, then scrub it from process.env

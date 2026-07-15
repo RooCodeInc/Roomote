@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
 import {
   sendMessageToTask,
@@ -271,6 +272,8 @@ export async function handleBitbucketComment(
       actor: payload.actor,
       commentAuthor: payload.comment.user,
     },
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getBitbucketPullRequestUrl(payload)),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -379,6 +382,10 @@ export async function handleBitbucketComment(
   const reviewPayload = {
     repo: repoFullName,
     sourceControlProvider: 'bitbucket',
+    // Pin repository resolution to the webhook repository's host so
+    // same-name repositories on other hosts cannot be picked up. Legacy
+    // rows without a recorded host omit the field.
+    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
     prNumber,
     prTitle: pullRequest.title,
     prUrl,
@@ -401,6 +408,8 @@ export async function handleBitbucketComment(
       trigger: 'message',
       prLinkage: {
         provider: 'bitbucket',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber,
         prUrl,

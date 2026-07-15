@@ -1,9 +1,10 @@
 import { Job } from 'bullmq';
 
 import { buildSuggestedTasksFollowupReminderText } from '@roomote/communication/chat-messages';
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
-import { telegramSuggestedTasksOnboardingFollowupRequestSchema } from '@roomote/sdk/server';
+import {
+  createTelegramCommunicationProviderFromRuntimeCredentials,
+  telegramSuggestedTasksOnboardingFollowupRequestSchema,
+} from '@roomote/sdk/server';
 
 import {
   buildSuggestedTasksSettingsUrl,
@@ -24,16 +25,15 @@ export const telegramSuggestedTasksOnboardingFollowupJob = async (
     label: 'TelegramSuggestedTasksOnboardingFollowup',
     requestSchema: telegramSuggestedTasksOnboardingFollowupRequestSchema,
     send: async (data) => {
-      const { botToken } = await resolveTelegramRuntimeCredentials();
+      const provider =
+        await createTelegramCommunicationProviderFromRuntimeCredentials();
 
-      if (!botToken) {
+      if (!provider) {
         console.warn(
           '[TelegramSuggestedTasksOnboardingFollowup] Telegram bot token is not configured, skipping',
         );
         return;
       }
-
-      const provider = new TelegramCommunicationProvider({ botToken });
 
       await provider.postMessage({
         channelId: data.chatId,

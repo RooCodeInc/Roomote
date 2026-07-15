@@ -8,6 +8,15 @@ import {
 import type { SourceControlProvider } from './source-control';
 
 /**
+ * Pre-runtime task phase used while first-time hosted compute provisioning is
+ * still creating the selected provider's deployment-wide worker artifact.
+ * Runs in this phase are persisted but deliberately not placed on the
+ * controller queue until provisioning succeeds.
+ */
+export const WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE =
+  'waiting_for_sandbox_provider' as const;
+
+/**
  * Progress of a setup-time worker base-image provisioning run (an E2B
  * template build, Daytona snapshot registration, or Blaxel image build). The run
  * executes detached in the web process after the provider's config is
@@ -17,6 +26,8 @@ import type { SourceControlProvider } from './source-control';
  */
 export type SetupNewComputeProvisioningState = {
   status: 'building' | 'succeeded' | 'failed';
+  /** Worker runtime contract used to build this provider artifact. */
+  runtimeSchemaVersion: number;
   imageRef: string;
   /** Provider-side artifact reference (template, snapshot, or image ref). */
   templateRef: string | null;
@@ -25,7 +36,7 @@ export type SetupNewComputeProvisioningState = {
   finishedAt: string | null;
 };
 
-export const SETUP_COMPUTE_PROVISIONING_STALE_MS = 10 * 60_000;
+export const SETUP_COMPUTE_PROVISIONING_STALE_MS = 20 * 60_000;
 
 export function isSetupNewComputeProvisioningStale(
   state: SetupNewComputeProvisioningState | null | undefined,

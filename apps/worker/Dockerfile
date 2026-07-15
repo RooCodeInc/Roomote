@@ -23,10 +23,13 @@ RUN apt-get update \
     ca-certificates \
     bubblewrap \
     curl \
+    docker.io \
+    docker-compose-v2 \
     unzip \
     jq \
     git \
     inotify-tools \
+    iptables \
     gnupg \
     netcat-openbsd \
     tar \
@@ -63,24 +66,15 @@ RUN apt-get update \
     libxrandr2 \
     libxss1 \
   && ln -sf "$(command -v python3)" /usr/local/bin/python \
+  && update-alternatives --set iptables /usr/sbin/iptables-legacy \
+  && update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy \
+  && docker compose version \
   && rm -rf /var/lib/apt/lists/*
 
 ENV LANG=en_US.UTF-8
 ENV LC_ALL=en_US.UTF-8
 
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
-
-# Install VSCode
-# Run with: `$VSCODE_BIN --no-sandbox --user-data-dir $VSCODE_USER_DATA_DIR --version`
-RUN ARCH="$(dpkg --print-architecture)" \
-  && mkdir -p /etc/apt/keyrings \
-  && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
-  && echo "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
-    > /etc/apt/sources.list.d/vscode.list \
-  && apt-get update \
-  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends code \
-  && rm -rf /var/lib/apt/lists/*
 
 # Install gh cli
 RUN ARCH="$(dpkg --print-architecture)" \
@@ -100,10 +94,12 @@ RUN ARCH="$(dpkg --print-architecture)" \
 
 # Create user 'roomote' and grant passwordless sudo.
 RUN useradd -m -s /bin/bash roomote \
-  && usermod -aG sudo roomote \
+  && usermod -aG sudo,docker roomote \
   && echo 'roomote ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/roomote \
   && chmod 0440 /etc/sudoers.d/roomote
 
+# Keep /sandbox/.vscode as a legacy provider/snapshot path identifier; no
+# editor is installed.
 RUN mkdir -p \
     /sandbox \
     /sandbox/repos \
@@ -245,5 +241,10 @@ RUN sudo chmod +x /usr/local/bin/opencode \
 RUN sudo apt-get update \
   && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends iproute2 \
   && sudo rm -rf /var/lib/apt/lists/*
+
+# Shared with WORKER_RUNTIME_SCHEMA_VERSION in @roomote/types. Local builds
+# pass this explicitly; the default keeps direct/release Docker builds labeled.
+ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=4
+LABEL dev.roomote.worker-image.schema-version="${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"
 
 WORKDIR /sandbox

@@ -1,14 +1,13 @@
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 
 import {
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER,
   type EnvironmentConfig,
-  PRODUCT_NAME,
 } from '@roomote/types';
 
 import {
@@ -17,34 +16,20 @@ import {
 } from '@/hooks/environments';
 import { useRepositories } from '@/hooks/source-control';
 import { useTRPC } from '@/trpc/client';
-import { useTaskCompletionNotification } from '@/app/(sandbox)/task/[taskId]/hooks';
 
 import {
   Alert,
   AlertDescription,
-  ArrowLeft,
   ArrowRight,
   Bot,
   Button,
   Card,
   CardContent,
-  Check,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
   HandMetal,
   Loader2,
   Textarea,
 } from '@/components/system';
 
-import {
-  EnvironmentDefinitionAgentTaskPanel,
-  type SelectedRepositorySummary,
-  useEnvironmentDefinitionAgentState,
-} from './EnvironmentDefinitionAgentTask';
 import { EnvironmentRepositorySelector } from './EnvironmentRepositorySelector';
 import { UpdateGitHubReposHint } from './UpdateGitHubReposHint';
 import {
@@ -54,36 +39,10 @@ import {
 
 type MasterView = 'agent' | 'yaml';
 
-type DefinitionTaskState = {
-  taskId: string;
-  startedAt: string;
-};
-
-type NotifiableTaskPhase =
-  | 'idle'
-  | 'running'
-  | 'waiting_for_prompt'
-  | 'waiting_for_user_input';
-
 type CreatedEnvironmentDetails = {
   id: string;
   name: string;
 };
-
-function toNotifiableTaskPhase(
-  phase: string | null | undefined,
-): NotifiableTaskPhase | undefined {
-  if (
-    phase === 'idle' ||
-    phase === 'running' ||
-    phase === 'waiting_for_prompt' ||
-    phase === 'waiting_for_user_input'
-  ) {
-    return phase;
-  }
-
-  return undefined;
-}
 
 interface CreateEnvironmentPageProps {
   onCreated?: (createdEnvironment: CreatedEnvironmentDetails) => void;
@@ -94,6 +53,7 @@ export function CreateEnvironmentPage({
   onCreated = () => {},
   onCancel = () => {},
 }: CreateEnvironmentPageProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const suggestedMcpId = searchParams.get('add-mcp')?.trim() ?? '';
   const trpc = useTRPC();
@@ -114,16 +74,11 @@ export function CreateEnvironmentPage({
     [],
   );
   const [agentSetupGuidance, setAgentSetupGuidance] = useState('');
-  const [taskState, setTaskState] = useState<DefinitionTaskState | null>(null);
-  const [showChangeReposDialog, setShowChangeReposDialog] = useState(false);
 
   const startDefinitionTask = useMutation(
     trpc.environments.startDefinitionTask.mutationOptions({
       onSuccess: (result) => {
-        setTaskState({
-          taskId: result.taskId,
-          startedAt: result.startedAt,
-        });
+        router.push(`/task/${result.taskId}`);
       },
       onError: (error) => {
         toast.error(error.message);
@@ -131,37 +86,11 @@ export function CreateEnvironmentPage({
     }),
   );
 
-  const cancelDefinitionTask = useMutation(
-    trpc.environments.cancelDefinitionTask.mutationOptions(),
-  );
-
-  const selectedRepositories = useMemo<SelectedRepositorySummary[]>(() => {
-    const repositoryMap = new Map(
-      (repositories.data ?? []).map((repository) => [
-        repository.id,
-        repository,
-      ]),
-    );
-
-    return selectedRepositoryIds
-      .map((repositoryId) => {
-        const repository = repositoryMap.get(repositoryId);
-        return repository
-          ? { id: repository.id, fullName: repository.fullName }
-          : null;
-      })
-      .filter((repository): repository is SelectedRepositorySummary =>
-        Boolean(repository),
-      );
-  }, [repositories.data, selectedRepositoryIds]);
-
   const resetState = () => {
     setWarnings([]);
     setPendingConfig(null);
     setSelectedRepositoryIds([]);
     setAgentSetupGuidance('');
-    setTaskState(null);
-    setShowChangeReposDialog(false);
     setActiveView('agent');
   };
 
@@ -224,59 +153,12 @@ export function CreateEnvironmentPage({
     });
   };
 
-  const stopActiveDefinitionTask = async () => {
-    if (!taskState) {
-      return true;
-    }
-
-    try {
-      await cancelDefinitionTask.mutateAsync({ taskId: taskState.taskId });
-      setTaskState(null);
-      return true;
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Failed to stop the environment definition agent.',
-      );
-      return false;
-    }
-  };
-
-  const handleConfirmPickAnotherRepo = async () => {
-    const stopped = await stopActiveDefinitionTask();
-
-    if (!stopped) {
-      return;
-    }
-
-    setSelectedRepositoryIds([]);
-    setAgentSetupGuidance('');
-    setShowChangeReposDialog(false);
-  };
-
-  const handleAgentCreated = (
-    createdEnvironment: CreatedEnvironmentDetails,
-  ) => {
-    resetState();
-    onCreated(createdEnvironment);
-  };
-
-  const handleCancel = async () => {
-    const stopped = await stopActiveDefinitionTask();
-
-    if (!stopped) {
-      return;
-    }
-
+  const handleCancel = () => {
     resetState();
     onCancel();
   };
 
-  const isBusy =
-    createEnvironment.isPending ||
-    startDefinitionTask.isPending ||
-    cancelDefinitionTask.isPending;
+  const isBusy = createEnvironment.isPending || startDefinitionTask.isPending;
 
   return (
     <>
@@ -294,8 +176,6 @@ export function CreateEnvironmentPage({
             ) : null}
             {activeView === 'agent' ? (
               <AgentMasterView
-                taskState={taskState}
-                selectedRepositories={selectedRepositories}
                 repositories={repositories.data ?? []}
                 repositoriesLoading={repositories.isPending}
                 selectedRepositoryIds={selectedRepositoryIds}
@@ -312,12 +192,7 @@ export function CreateEnvironmentPage({
                 setupGuidance={agentSetupGuidance}
                 onSetupGuidanceChange={setAgentSetupGuidance}
                 onSwitchToYaml={() => setActiveView('yaml')}
-                onCreated={(createdEnvironment) =>
-                  void handleAgentCreated(createdEnvironment)
-                }
-                onRequestPickAnotherRepo={() => setShowChangeReposDialog(true)}
                 isStartAgentPending={startDefinitionTask.isPending}
-                isPickAnotherRepoPending={cancelDefinitionTask.isPending}
                 isBusy={isBusy}
               />
             ) : (
@@ -337,20 +212,11 @@ export function CreateEnvironmentPage({
           </div>
         </div>
       </div>
-
-      <PickAnotherRepoDialog
-        open={showChangeReposDialog}
-        isPending={cancelDefinitionTask.isPending}
-        onOpenChange={setShowChangeReposDialog}
-        onConfirm={() => void handleConfirmPickAnotherRepo()}
-      />
     </>
   );
 }
 
 function AgentMasterView({
-  taskState,
-  selectedRepositories,
   repositories,
   repositoriesLoading,
   selectedRepositoryIds,
@@ -359,15 +225,10 @@ function AgentMasterView({
   setupGuidance,
   onSetupGuidanceChange,
   onSwitchToYaml,
-  onCreated,
-  onRequestPickAnotherRepo,
   isStartAgentPending,
-  isPickAnotherRepoPending,
   isBusy,
 }: {
-  taskState: DefinitionTaskState | null;
-  selectedRepositories: SelectedRepositorySummary[];
-  repositories: SelectedRepositorySummary[];
+  repositories: Array<{ id: string; fullName: string }>;
   repositoriesLoading: boolean;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
@@ -375,38 +236,20 @@ function AgentMasterView({
   setupGuidance: string;
   onSetupGuidanceChange: (value: string) => void;
   onSwitchToYaml: () => void;
-  onCreated: (
-    createdEnvironment: CreatedEnvironmentDetails,
-  ) => Promise<void> | void;
-  onRequestPickAnotherRepo: () => void;
   isStartAgentPending: boolean;
-  isPickAnotherRepoPending: boolean;
   isBusy: boolean;
 }) {
-  if (!taskState) {
-    return (
-      <AgentRepositorySelectionSubview
-        repositories={repositories}
-        repositoriesLoading={repositoriesLoading}
-        selectedRepositoryIds={selectedRepositoryIds}
-        onToggleRepository={onToggleRepository}
-        onStartAgent={onStartAgent}
-        setupGuidance={setupGuidance}
-        onSetupGuidanceChange={onSetupGuidanceChange}
-        onSwitchToYaml={onSwitchToYaml}
-        isStartAgentPending={isStartAgentPending}
-        isBusy={isBusy}
-      />
-    );
-  }
-
   return (
-    <AgentRunSubview
-      taskId={taskState.taskId}
-      selectedRepositories={selectedRepositories}
-      onCreated={onCreated}
-      onRequestPickAnotherRepo={onRequestPickAnotherRepo}
-      isPickAnotherRepoPending={isPickAnotherRepoPending}
+    <AgentRepositorySelectionSubview
+      repositories={repositories}
+      repositoriesLoading={repositoriesLoading}
+      selectedRepositoryIds={selectedRepositoryIds}
+      onToggleRepository={onToggleRepository}
+      onStartAgent={onStartAgent}
+      setupGuidance={setupGuidance}
+      onSetupGuidanceChange={onSetupGuidanceChange}
+      onSwitchToYaml={onSwitchToYaml}
+      isStartAgentPending={isStartAgentPending}
       isBusy={isBusy}
     />
   );
@@ -424,7 +267,7 @@ function AgentRepositorySelectionSubview({
   isStartAgentPending,
   isBusy,
 }: {
-  repositories: SelectedRepositorySummary[];
+  repositories: Array<{ id: string; fullName: string }>;
   repositoriesLoading: boolean;
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
@@ -516,108 +359,6 @@ function AgentRepositorySelectionSubview({
   );
 }
 
-function AgentRunSubview({
-  taskId,
-  selectedRepositories,
-  onCreated,
-  onRequestPickAnotherRepo,
-  isPickAnotherRepoPending,
-  isBusy,
-}: {
-  taskId: string;
-  selectedRepositories: SelectedRepositorySummary[];
-  onCreated: (
-    createdEnvironment: CreatedEnvironmentDetails,
-  ) => Promise<void> | void;
-  onRequestPickAnotherRepo: () => void;
-  isPickAnotherRepoPending: boolean;
-  isBusy: boolean;
-}) {
-  const { succeeded, failed, session, taskIsActive, matchingEnvironment } =
-    useEnvironmentDefinitionAgentState({
-      taskId,
-      mode: 'create',
-    });
-  useTaskCompletionNotification(
-    toNotifiableTaskPhase(session.taskRun?.taskPhase),
-  );
-
-  const handleFinish = async () => {
-    if (!matchingEnvironment) {
-      toast.error(
-        'Environment details are still syncing. Please wait a moment and try again.',
-      );
-      return;
-    }
-
-    await onCreated({
-      id: matchingEnvironment.id,
-      name: matchingEnvironment.name,
-    });
-  };
-
-  return (
-    <>
-      <div className="space-y-4">
-        {!succeeded && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={onRequestPickAnotherRepo}
-            disabled={isPickAnotherRepoPending}
-          >
-            <ArrowLeft />
-            Pick a different repo
-          </Button>
-        )}
-
-        {taskIsActive && (
-          <div className="flex justify-between max-w-3xl gap-4 items-center">
-            <p className="text-sm text-muted-foreground">
-              {PRODUCT_NAME} is inspecting your repo
-              {selectedRepositories.length > 1 && 's'} (
-              <span className="font-mono text-[0.8rem]">
-                {selectedRepositories.map((r) => r.fullName).join(', ')}
-              </span>
-              ) and setting up the environment. If it needs help or info, it
-              will ask you. It won&apos;t make any code changes.
-            </p>
-          </div>
-        )}
-
-        {succeeded && (
-          <div className="text-sm py-2 font-semibold flex gap-2 items-center text-green-600 dark:text-green-400 animate-[fade-in_0.5s_linear_0.5s_backwards_1]">
-            <Check className="size-4" />
-            <span>The environment {matchingEnvironment?.name} is ready!</span>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void handleFinish()}
-              disabled={isBusy || !matchingEnvironment}
-            >
-              Give it a try
-              <ArrowRight />
-            </Button>
-          </div>
-        )}
-
-        {failed && (
-          <p className="text-sm text-destructive">
-            The environment definition agent exited without creating an
-            environment. You can choose another set of repos and try again.
-          </p>
-        )}
-
-        <EnvironmentDefinitionAgentTaskPanel
-          session={session}
-          className="h-[calc(var(--effective-viewport-height)-18rem)] max-w-4xl wrapper"
-        />
-      </div>
-    </>
-  );
-}
-
 function YamlMasterView({
   editorRef,
   warnings,
@@ -690,44 +431,5 @@ function YamlMasterView({
         )}
       </div>
     </div>
-  );
-}
-
-function PickAnotherRepoDialog({
-  open,
-  isPending,
-  onOpenChange,
-  onConfirm,
-}: {
-  open: boolean;
-  isPending: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="sm">
-        <DialogHeader>
-          <DialogTitle>Pick another repository?</DialogTitle>
-          <DialogDescription>
-            This will stop the environment definition agent and lose any
-            progress made so far.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-          >
-            No, stay here
-          </Button>
-          <Button type="button" onClick={onConfirm} disabled={isPending}>
-            {isPending && <Loader2 className="animate-spin" />}
-            Pick another repo
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

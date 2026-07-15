@@ -37,6 +37,7 @@ const localPorts = {
   previewProxy: Number(process.env.ROOMOTE_PREVIEW_PROXY_PORT || 18081),
 };
 const publicUrl = process.env.R_PUBLIC_URL;
+const s3PresignEndpoint = process.env.S3_PRESIGN_ENDPOINT || publicUrl;
 
 const configuredModelProviderEnvKeysValue = process.env.R_MODEL_ENV_KEYS || '';
 const configuredModelProviderEnvKeys = configuredModelProviderEnvKeysValue
@@ -65,6 +66,10 @@ const defaultEnv = {
     (process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64'),
   R_PUBLIC_URL: publicUrl,
   R_APP_URL: publicUrl,
+  // Hosted workers cannot reach the host-local MinIO port. The local Caddy
+  // edge proxies signed bucket paths, so use the public edge for presigned
+  // artifact URLs unless the operator configured a separate reachable store.
+  S3_PRESIGN_ENDPOINT: s3PresignEndpoint,
   // Set by `pnpm dev` to `<public-url>/_roomote-api` so workers on hosted
   // compute providers reach the API through the Caddy dev edge, matching
   // the deployed TRPC_URL contract.

@@ -224,6 +224,52 @@ export function resolveAutomationSlackChannelId(
   return getAutomationSlackChannelTarget(automation) ?? managerSlackChannelId;
 }
 
+/** Provider-neutral resolved destination an automation reports to. */
+export type AutomationDestination = {
+  provider: 'slack' | 'teams' | 'telegram';
+  channelId: string;
+  /** Which waterfall level produced this destination. */
+  source: 'automation_target' | 'manager_channel';
+};
+
+const DESTINATION_TARGET_KINDS = [
+  ['slack', 'slack_channel'],
+  ['teams', 'teams_channel'],
+  ['telegram', 'telegram_chat'],
+] as const;
+
+/**
+ * Provider-neutral destination waterfall: the automation's own channel
+ * target wins (Slack first when several providers are targeted), otherwise
+ * the deployment-wide Slack manager channel. The primary-conversation
+ * fallbacks for Teams/Telegram deployments without any Slack live in the
+ * sdk runner layer, which owns those surfaces' installation lookups.
+ */
+export function resolveAutomationDestination(
+  automation: Pick<Automation, 'targets'> | undefined,
+  managerSlackChannelId: string | null,
+): AutomationDestination | null {
+  for (const [provider, targetKind] of DESTINATION_TARGET_KINDS) {
+    const channelId = getAutomationTargetRefs(
+      automation,
+      provider,
+      targetKind,
+    )[0];
+
+    if (channelId) {
+      return { provider, channelId, source: 'automation_target' };
+    }
+  }
+
+  return managerSlackChannelId
+    ? {
+        provider: 'slack',
+        channelId: managerSlackChannelId,
+        source: 'manager_channel',
+      }
+    : null;
+}
+
 function getChannelAutoStartTargets(
   automation: Automation | undefined,
 ): BackgroundAgentSettings['channelAutoStartSlackChannels'] {
@@ -298,6 +344,18 @@ export function normalizeReviewCodeAutomationSettings(
   };
 }
 
+function stripBoundaryColons(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 58 /* : */) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 58 /* : */) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
 export function normalizeSlackReactionName(value: string | null | undefined) {
   const trimmed = value?.trim();
 
@@ -305,7 +363,7 @@ export function normalizeSlackReactionName(value: string | null | undefined) {
     return '';
   }
 
-  const withoutBoundaryColons = trimmed.replace(/^:+|:+$/g, '');
+  const withoutBoundaryColons = stripBoundaryColons(trimmed);
   return withoutBoundaryColons.trim().toLowerCase().split('::')[0] ?? '';
 }
 
@@ -375,6 +433,13 @@ export type UpsertAutomationInput = {
   instructions?: string | null;
   settings?: Record<string, unknown>;
   targets?: AutomationTarget[];
+  /**
+   * Target kinds this write fully owns. When set alongside `targets`,
+   * existing targets of OTHER kinds are preserved instead of being replaced
+   * wholesale — so a Slack-only settings save cannot clobber teams/telegram
+   * targets configured elsewhere. Omit to keep full-replacement semantics.
+   */
+  managedTargetKinds?: readonly BackgroundAutomationTargetKind[];
   updatedAt?: Date;
 };
 
@@ -384,6 +449,20 @@ export async function upsertAutomation(
 ): Promise<void> {
   const now = input.updatedAt ?? new Date();
   const schedule = input.enabled ? (input.schedule ?? {}) : {};
+
+  let targets = input.targets;
+  if (input.targets !== undefined && input.managedTargetKinds !== undefined) {
+    const managedKinds = new Set(input.managedTargetKinds);
+    const existing = await tx.query.automations.findFirst({
+      columns: { targets: true },
+      where: eq(automations.key, input.key),
+    });
+    const preserved = (existing?.targets ?? []).filter(
+      (target) => !managedKinds.has(target.targetKind),
+    );
+    targets = [...preserved, ...input.targets];
+  }
+
   const values: typeof automations.$inferInsert = {
     key: input.key,
     internal: isInternalAutomationKey(input.key),
@@ -407,9 +486,9 @@ export async function upsertAutomation(
     set.instructions = input.instructions;
   }
 
-  if (input.targets !== undefined) {
-    values.targets = input.targets;
-    set.targets = input.targets;
+  if (targets !== undefined) {
+    values.targets = targets;
+    set.targets = targets;
   }
 
   await tx.insert(automations).values(values).onConflictDoUpdate({
@@ -525,6 +604,12 @@ export type AutomationRuntime = {
   /** Automation slack_channel target, falling back to the manager channel. */
   slackChannelId: string | null;
   managerSlackChannelId: string | null;
+  /**
+   * Provider-neutral destination waterfall result (own target on any comms
+   * provider, else the Slack manager channel). Null when neither is set;
+   * runners may still fall back to a primary Teams/Telegram conversation.
+   */
+  destination: AutomationDestination | null;
 };
 
 export async function getAutomationRuntime(
@@ -555,6 +640,10 @@ export async function getAutomationRuntime(
       managerSlackChannelId,
     ),
     managerSlackChannelId,
+    destination: resolveAutomationDestination(
+      automation ?? undefined,
+      managerSlackChannelId,
+    ),
   };
 }
 

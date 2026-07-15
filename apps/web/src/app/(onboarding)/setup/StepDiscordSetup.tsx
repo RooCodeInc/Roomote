@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
 import { useTRPC } from '@/trpc/client';
-import { ArrowLeft, ArrowRight, Button, Spinner } from '@/components/system';
+import { ArrowRight, Button, Spinner } from '@/components/system';
 import { DiscordSetupStatus } from '@/components/settings/DiscordSetupStatus';
 import { useDiscordLinkedAccount } from '@/hooks/linked-accounts';
 
@@ -15,13 +15,14 @@ import {
   getSetupVisibleFields,
   ProviderSetupExperience,
 } from './ProviderSetupExperience';
+import { SetupFooter } from './SetupFooter';
 
 export function StepDiscordSetup({
   onContinue,
   onBack,
 }: {
   onContinue: () => void;
-  onBack: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -124,11 +125,7 @@ export function StepDiscordSetup({
         <Spinner />
       )}
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
-        <Button type="button" variant="outline" onClick={onBack}>
-          <ArrowLeft />
-          Back
-        </Button>
+      <SetupFooter onBack={onBack} className="mt-8">
         <Button
           type="button"
           disabled={
@@ -153,7 +150,7 @@ export function StepDiscordSetup({
               : 'Save and connect Discord'}
           {save.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }

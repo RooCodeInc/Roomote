@@ -57,6 +57,8 @@ const bitbucketPullRequestSchema = z
     description: z.string().nullable().optional(),
     state: z.string().optional(),
     draft: z.boolean().optional(),
+    created_on: z.string().optional(),
+    updated_on: z.string().optional(),
     source: bitbucketPullRequestEndpointSchema.optional(),
     destination: bitbucketPullRequestEndpointSchema.optional(),
     author: bitbucketUserSchema.optional(),

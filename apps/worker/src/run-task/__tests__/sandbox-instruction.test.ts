@@ -64,6 +64,15 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+          env: { COMPOSE_SECRET: 'do-not-print' },
+        },
+      ],
     };
 
     expect(sanitizeEnvironmentConfigForPrompt(environmentConfig)).toEqual({
@@ -111,11 +120,53 @@ describe('sanitizeEnvironmentConfigForPrompt', () => {
         },
       ],
       services: ['postgres17', { name: 'redis7', port: 6380 }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+        },
+      ],
     });
   });
 });
 
 describe('buildSandboxInstruction', () => {
+  it('tells the agent that Docker project startup may still be running', () => {
+    const instruction = buildSandboxInstruction(false, {
+      name: 'Sandbox',
+      repositories: [{ repository: 'owner/repo' }],
+      docker_projects: [
+        {
+          type: 'compose',
+          name: 'app',
+          repository: 'owner/repo',
+          files: ['compose.yaml'],
+        },
+      ],
+    });
+
+    expect(instruction).toContain(
+      'They may still be building or waiting for health checks when your task begins.',
+    );
+    expect(instruction).toContain(
+      'Run `docker compose ls` to find each Roomote-managed project name and its config files',
+    );
+    expect(instruction).toContain(
+      '`docker compose --project-name <name> --file <file> ... ps`',
+    );
+    expect(instruction).toContain(
+      'repeat `--file` for every listed config file',
+    );
+    expect(instruction).not.toContain(
+      'Inspect them with `docker compose ps` and `docker compose logs`',
+    );
+    expect(instruction).not.toContain(
+      'were built and started with Docker Compose before your task began',
+    );
+  });
+
   it('does not leak non-whitelisted or secret fields into the serialized JSON block', () => {
     const environmentConfig: EnvironmentConfig = {
       name: 'Sandbox',
@@ -255,6 +306,50 @@ describe('buildSandboxInstruction', () => {
     expect(renderedInstruction).not.toContain(
       'Any command marked `detached: true` was started in the background under PM2 supervision.',
     );
+  });
+
+  it('tells the agent setup may still be running when background environment setup is pending', () => {
+    const environmentConfig = {
+      name: 'Sandbox',
+      description: 'Test environment',
+      repositories: [
+        {
+          repository: 'owner/repo',
+          commands: [
+            {
+              name: 'Install deps',
+              run: 'pnpm install',
+              timeout: 600,
+              continue_on_error: false,
+            },
+          ],
+        },
+      ],
+    };
+
+    const pendingInstruction =
+      buildSandboxInstruction(false, environmentConfig, {
+        backgroundEnvironmentSetupPending: true,
+      }) ?? '';
+
+    expect(pendingInstruction).toContain(
+      'run in the background and may still be executing while you work',
+    );
+    expect(pendingInstruction).toContain('.roomote/setup-status.json');
+    expect(pendingInstruction).toContain('.roomote/setup-logs/');
+    expect(pendingInstruction).not.toContain(
+      'were already executed before your task started',
+    );
+
+    const settledInstruction =
+      buildSandboxInstruction(false, environmentConfig, {
+        backgroundEnvironmentSetupPending: false,
+      }) ?? '';
+
+    expect(settledInstruction).toContain(
+      'were already executed before your task started',
+    );
+    expect(settledInstruction).toContain('.roomote/setup-status.json');
   });
 
   it('omits external preview URLs when configured hosts are unavailable', () => {

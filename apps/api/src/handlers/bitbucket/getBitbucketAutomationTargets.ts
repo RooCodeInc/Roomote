@@ -18,6 +18,7 @@ import {
 } from '@roomote/db/server';
 import { normalizeBitbucketLinkedAccountKey } from '@roomote/bitbucket';
 
+import { pickHostScopedRepository } from '../utils';
 import type {
   BitbucketPullRequestCommentWebhook,
   BitbucketPullRequestWebhook,
@@ -68,11 +69,18 @@ export function getBitbucketUserAccountKey(
 export async function getBitbucketAutomationTargets({
   workflow,
   payload,
+  webhookHost = null,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
   workflow: SourceControlAutomationWorkflow;
   payload: BitbucketAutomationWebhookContext;
+  /**
+   * Instance host derived from the webhook's own URLs. Scopes the repository
+   * lookup host-first (legacy NULL-host rows as fallback) so same-name
+   * repositories on other self-managed hosts are never selected.
+   */
+  webhookHost?: string | null;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
 }): Promise<
@@ -94,7 +102,7 @@ export async function getBitbucketAutomationTargets({
   const senderUsername = getBitbucketUsername(sender) ?? authorUsername;
   let linkedSenderUserId: string | null = null;
 
-  const repo = await db.query.repositories.findFirst({
+  const repoRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'bitbucket'),
       eq(repositories.isActive, true),
@@ -106,6 +114,7 @@ export async function getBitbucketAutomationTargets({
         : eq(repositories.externalRepoId, repositoryId),
     ),
   });
+  const repo = pickHostScopedRepository(repoRows, webhookHost);
 
   if (!repo) {
     return {

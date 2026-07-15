@@ -15,6 +15,10 @@ import {
   inArray,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
+import {
+  isGitLabOAuthAccessToken,
+  resolveGitLabOAuthAccessToken,
+} from './oauth';
 
 const GITLAB_PROVIDER = 'gitlab' satisfies SourceControlProvider;
 const DEFAULT_GITLAB_BASE_URL = 'https://gitlab.com';
@@ -76,6 +80,7 @@ export type GitLabScopedProjectTokenDescriptor = z.infer<
 >;
 export type GitLabScopedProjectTokenCredential = {
   host: string;
+  originBaseUrl: string;
   repositoryFullName: string;
   username: string;
   token: string;
@@ -108,18 +113,39 @@ export type ListGitLabProjectsOptions = {
   stopAfter?: number;
 };
 
-function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+function removeTrailingSlashes(value: string): string {
+  let end = value.length;
+
+  while (end > 0 && value[end - 1] === '/') {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+}
+
+export function normalizeGitLabBaseUrl(baseUrl: string): string {
+  const trimmed = removeTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('GITLAB_BASE_URL cannot be empty.');
   }
 
-  return new URL(trimmed).toString().replace(/\/+$/, '');
+  const url = new URL(
+    /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+  );
+  const apiPathSuffix = '/api/v4';
+
+  if (url.hostname === 'gitlab.com') {
+    url.pathname = '/';
+  } else if (url.pathname.endsWith(apiPathSuffix)) {
+    url.pathname = url.pathname.slice(0, -apiPathSuffix.length) || '/';
+  }
+
+  return removeTrailingSlashes(url.toString());
 }
 
 export async function resolveGitLabToken(): Promise<string | null> {
-  return resolveDeploymentEnvVar('GITLAB_TOKEN');
+  return resolveGitLabOAuthAccessToken();
 }
 
 let cachedGitLabDeploymentUser: {
@@ -128,7 +154,8 @@ let cachedGitLabDeploymentUser: {
 } | null = null;
 
 /**
- * Resolves the GitLab identity behind the deployment token via `GET /user`.
+ * Resolves the GitLab identity behind the deployment OAuth connection via
+ * `GET /user`.
  * The result is cached per token value so webhook handlers can call this on
  * every delivery without re-hitting the GitLab API.
  */
@@ -183,7 +210,7 @@ export async function createGitLabMergeRequestNote({
 
   if (!gitLabToken?.trim()) {
     throw new Error(
-      'GITLAB_TOKEN is required to create GitLab merge request notes.',
+      'GitLab OAuth authorization is required to create merge request notes.',
     );
   }
 
@@ -203,19 +230,19 @@ export async function createGitLabMergeRequestNote({
 
 export async function resolveGitLabBaseUrl(): Promise<string> {
   const baseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
-  return normalizeBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
+  return normalizeGitLabBaseUrl(baseUrl ?? DEFAULT_GITLAB_BASE_URL);
 }
 
 export function buildGitLabApiBaseUrl(baseUrl: string): string {
-  return new URL('api/v4', `${normalizeBaseUrl(baseUrl)}/`).toString();
+  return new URL('api/v4', `${normalizeGitLabBaseUrl(baseUrl)}/`).toString();
 }
 
 function hostFromBaseUrl(baseUrl: string): string {
-  return new URL(normalizeBaseUrl(baseUrl)).host;
+  return new URL(normalizeGitLabBaseUrl(baseUrl)).host;
 }
 
 function buildGitLabWebUrl(baseUrl: string, path: string): string {
-  return new URL(path.replace(/^\//, ''), `${normalizeBaseUrl(baseUrl)}/`)
+  return new URL(path.replace(/^\//, ''), `${normalizeGitLabBaseUrl(baseUrl)}/`)
     .toString()
     .replace(/\/+$/, '');
 }
@@ -290,7 +317,9 @@ async function requestGitLab(
       method,
       headers: {
         Accept: 'application/json',
-        'PRIVATE-TOKEN': token,
+        ...(isGitLabOAuthAccessToken(token)
+          ? { Authorization: `Bearer ${token}` }
+          : { 'PRIVATE-TOKEN': token }),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -352,7 +381,9 @@ export async function listGitLabProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to sync GitLab repositories.');
+    throw new Error(
+      'GitLab OAuth authorization is required to sync repositories.',
+    );
   }
 
   const resolvedApiBaseUrl =
@@ -400,63 +431,6 @@ export async function listGitLabProjects({
   }
 
   return projects;
-}
-
-export type GitLabTokenValidationResult =
-  | { status: 'valid'; username: string }
-  | { status: 'invalid'; error: string }
-  | { status: 'unknown'; error: string };
-
-const GITLAB_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
-
-/**
- * Verifies that a GitLab token can authenticate against the GitLab API.
- * Returns `invalid` only for definitive auth failures so transient network
- * or GitLab availability issues do not block saving configuration. The
- * request is bounded by a timeout so callers are never held open by a slow
- * GitLab response.
- */
-export async function validateGitLabToken({
-  token,
-  apiBaseUrl,
-  fetchImpl = fetch,
-  timeoutMs = GITLAB_TOKEN_VALIDATION_TIMEOUT_MS,
-}: {
-  token: string;
-  apiBaseUrl?: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<GitLabTokenValidationResult> {
-  const timedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-
-  try {
-    const { data } = await requestGitLabJson({
-      apiBaseUrl,
-      fetchImpl: timedFetch,
-      path: '/user',
-      params: {},
-      token,
-      schema: gitLabUserSchema,
-    });
-
-    return { status: 'valid', username: data.username };
-  } catch (error) {
-    if (error instanceof GitLabApiError && [401, 403].includes(error.status)) {
-      return {
-        status: 'invalid',
-        error:
-          'GitLab rejected the token. Confirm the token is active and has the api scope.',
-      };
-    }
-
-    return {
-      status: 'unknown',
-      error: `Could not verify the GitLab token: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
 }
 
 const GITLAB_WEBHOOK_EVENT_FLAGS = {
@@ -595,7 +569,9 @@ export async function ensureGitLabWebhooksForProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to configure GitLab webhooks.');
+    throw new Error(
+      'GitLab OAuth authorization is required to configure webhooks.',
+    );
   }
 
   const results: GitLabWebhookEnsureResult[] = [];
@@ -668,7 +644,9 @@ export async function removeGitLabWebhooksForProjects({
   const gitLabToken = token ?? (await resolveGitLabToken());
 
   if (!gitLabToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required to configure GitLab webhooks.');
+    throw new Error(
+      'GitLab OAuth authorization is required to configure webhooks.',
+    );
   }
 
   const results: GitLabWebhookRemoveResult[] = [];
@@ -981,6 +959,7 @@ async function createScopedProjectToken(params: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   host: string;
+  originBaseUrl: string;
   projectId: string;
   repositoryFullName: string;
   runId: number;
@@ -1008,6 +987,7 @@ async function createScopedProjectToken(params: {
   return {
     credential: {
       host: params.host,
+      originBaseUrl: params.originBaseUrl,
       repositoryFullName: params.repositoryFullName,
       username: data.username?.trim() || 'oauth2',
       token: data.token,
@@ -1024,6 +1004,7 @@ async function rotateScopedProjectToken(params: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
   host: string;
+  originBaseUrl: string;
   descriptor: GitLabScopedProjectTokenDescriptor;
   token: string;
 }): Promise<{
@@ -1046,6 +1027,7 @@ async function rotateScopedProjectToken(params: {
   return {
     credential: {
       host: params.host,
+      originBaseUrl: params.originBaseUrl,
       repositoryFullName: params.descriptor.repositoryFullName,
       username: data.username?.trim() || 'oauth2',
       token: data.token,
@@ -1128,13 +1110,36 @@ export async function createTaskRunScopedGitLabTokens(
   const deploymentToken = await resolveGitLabToken();
 
   if (!deploymentToken?.trim()) {
-    throw new Error('GITLAB_TOKEN is required for GitLab source control jobs.');
+    throw new Error(
+      'GitLab OAuth authorization is required for source-control jobs.',
+    );
   }
 
   const baseUrl = options?.baseUrl ?? (await resolveGitLabBaseUrl());
   const apiBaseUrl = options?.apiBaseUrl ?? buildGitLabApiBaseUrl(baseUrl);
   const host = hostFromBaseUrl(baseUrl);
   const repositoriesList = await resolveGitLabRepositoryRowsForTaskRun(taskRun);
+
+  // OAuth grants are deployment-scoped and already carry the repository
+  // permissions needed by the worker. Do not attempt to mint GitLab project
+  // tokens with an OAuth access token; this also keeps the refresh token out
+  // of task artifacts and preserves the PAT-only isolation path below.
+  if (isGitLabOAuthAccessToken(deploymentToken)) {
+    return {
+      credentials: [],
+      proxyCredentials: repositoriesList.map((repository) => ({
+        host,
+        originBaseUrl: baseUrl,
+        repositoryFullName: repository.repositoryFullName,
+        username: 'oauth2',
+        token: deploymentToken,
+      })),
+      artifactsPatch: {
+        [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
+      },
+    };
+  }
+
   const persistedDescriptors = new Map(
     readScopedProjectTokenDescriptors(taskRun.artifacts).map((descriptor) => [
       descriptor.repositoryFullName,
@@ -1167,6 +1172,7 @@ export async function createTaskRunScopedGitLabTokens(
             apiBaseUrl,
             fetchImpl: options?.fetchImpl,
             host,
+            originBaseUrl: baseUrl,
             descriptor: existingDescriptor,
             token: deploymentToken,
           }).catch(
@@ -1175,6 +1181,7 @@ export async function createTaskRunScopedGitLabTokens(
                 apiBaseUrl,
                 fetchImpl: options?.fetchImpl,
                 host,
+                originBaseUrl: baseUrl,
                 projectId: repository.projectId,
                 repositoryFullName: repository.repositoryFullName,
                 runId: taskRun.id,
@@ -1185,6 +1192,7 @@ export async function createTaskRunScopedGitLabTokens(
             apiBaseUrl,
             fetchImpl: options?.fetchImpl,
             host,
+            originBaseUrl: baseUrl,
             projectId: repository.projectId,
             repositoryFullName: repository.repositoryFullName,
             runId: taskRun.id,
@@ -1213,6 +1221,7 @@ export async function createTaskRunScopedGitLabTokens(
         credentials: [],
         proxyCredentials: repositoriesList.map((repository) => ({
           host,
+          originBaseUrl: baseUrl,
           repositoryFullName: repository.repositoryFullName,
           username: 'oauth2',
           token: deploymentToken,

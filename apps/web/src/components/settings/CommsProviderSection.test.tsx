@@ -603,7 +603,7 @@ describe('CommsProviderSection', () => {
         screen.getByText('Create a Microsoft Entra app.'),
       ).toBeInTheDocument();
       expect(
-        screen.getByText('Enter the Microsoft app generated values.'),
+        screen.getByText('Enter the Microsoft Entra app generated values.'),
       ).toBeInTheDocument();
       expect(
         screen.getByText('Upload Roomote to Microsoft Teams.'),

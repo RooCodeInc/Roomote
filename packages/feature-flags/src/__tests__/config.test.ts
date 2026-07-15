@@ -35,4 +35,10 @@ describe('FEATURE_FLAG_CONFIG', () => {
       'opencode_background_subagents',
     ]);
   });
+
+  it('CodeMode defaults to false and maps to the OpenCode env opt-in', () => {
+    const config = FEATURE_FLAG_CONFIG[FeatureFlag.CodeMode];
+    expect(config.defaultValue).toBe(false);
+    expect(config.metadataKey).toBe('opencode_code_mode');
+  });
 });

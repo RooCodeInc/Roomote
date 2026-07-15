@@ -3,14 +3,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 const {
   fetchThreadMessagesMock,
   hasPendingRoutingConfirmationMock,
-  hasPendingSlackMcpSetupInterruptMock,
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
   getSlackThreadReplyFooterMessageTsMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
   hasPendingRoutingConfirmationMock: vi.fn(),
-  hasPendingSlackMcpSetupInterruptMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
   getSlackThreadReplyFooterMessageTsMock: vi.fn(),
@@ -32,7 +30,6 @@ vi.mock('@roomote/cloud-agents', () => ({
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
-  hasPendingSlackMcpSetupInterrupt: hasPendingSlackMcpSetupInterruptMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
   getSlackThreadReplyFooterMessageTs: getSlackThreadReplyFooterMessageTsMock,
@@ -113,7 +110,6 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     hasPendingRoutingConfirmationMock.mockResolvedValue(false);
-    hasPendingSlackMcpSetupInterruptMock.mockResolvedValue(false);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue({
       userId: 'user-1',
       slackUserId: 'U111',

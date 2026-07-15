@@ -39,6 +39,7 @@ DOCKER_WORKER_NETWORK=roomote_worker
 DOCKER_WORKER_RELEASE_PATH=/roomote/releases/worker-current.tar.gz
 DOCKER_WORKER_CPU_LIMIT=2
 DOCKER_WORKER_MEMORY_LIMIT=4g
+DOCKER_TASK_DAEMON_MEMORY_LIMIT=8g
 DOCKER_WORKER_PIDS_LIMIT=512
 DOCKER_WORKER_DISK_LIMIT=20g
 DOCKER_WORKER_ALLOW_UNBOUNDED_DISK=false
@@ -68,9 +69,19 @@ The controller reconciles replacement API and preview-proxy containers onto
 running task networks, removes empty task networks periodically, and reaps
 stale provisioning containers after a restart.
 
+Environments that use [Docker projects](/environments/definition#docker-projects)
+also receive a dedicated Docker daemon and workspace volume. Customer Compose
+services share the task's network namespace so configured preview ports keep
+the same task-scoped routing, while their Docker control plane is not exposed
+to other tasks. The daemon, inner containers, network, and workspace volume are
+stopped or removed with the task lifecycle.
+
 Workers default to 2 CPUs, 4 GiB of memory with no additional swap, 512 PIDs,
 a requested 20 GiB writable-layer quota, and three 10 MiB JSON log files. The
-variables above can tune those bounds. Writable-layer quotas require a Docker
+dedicated Docker daemon used by Docker-project tasks receives an 8 GiB memory
+limit by default while inheriting the other worker resource limits. The
+variables above can tune those bounds.
+Writable-layer quotas require a Docker
 storage driver that supports `--storage-opt size`. When the driver rejects that
 option, Roomote refuses to start the task rather than allowing untrusted code to
 consume the host disk. Configure a quota-capable Docker data root. Operators

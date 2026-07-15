@@ -53,6 +53,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildLinearRoutingContext: vi.fn(),
 }));
 
+vi.mock('@roomote/slack', () => ({
+  postRouterDebugMessage: vi.fn(),
+}));
+
 vi.mock('@roomote/sdk/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
 
@@ -296,7 +300,7 @@ describe('linear routed task startup', () => {
     );
     expect(emitThought).toHaveBeenCalledWith(
       'session-1',
-      'Getting started on your task in `all repos`',
+      'Getting started on your task in all repos',
       true,
     );
     expect(createLinearAgentRun).toHaveBeenCalledWith(

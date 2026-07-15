@@ -80,6 +80,9 @@ vi.mock('@roomote/sdk/client', () => ({
     slackInstallations: {
       findFirst: mockSlackInstallationsFindFirst,
     },
+    featureFlags: {
+      evaluate: vi.fn().mockResolvedValue(false),
+    },
   },
 }));
 

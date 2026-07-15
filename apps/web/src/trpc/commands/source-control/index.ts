@@ -32,6 +32,7 @@ import { Env } from '@/lib/server/env';
 
 import {
   assertAdmin,
+  deleteDeploymentEnvironmentVariables,
   getPersistedEnvironmentVariableValues,
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
@@ -78,12 +79,11 @@ export async function getSourceControlConfigStatusCommand(
 }
 
 /**
- * Webhooks are only auto-created for synced repositories that are mapped to
- * at least one environment. Hooking every project the deployment token can
- * administer leaks events from unrelated repositories (for example private
- * work projects visible to a personal PAT) to the Roomote URL, so sync
- * treats environment mappings as the operator's selection and removes the
- * Roomote webhook from synced-but-unmapped repositories.
+ * Most provider webhooks are only auto-created for synced repositories that
+ * are mapped to at least one environment. GitLab and Gitea are exceptions
+ * because their OAuth callbacks immediately trigger the first repository
+ * sync, before onboarding creates environment mappings; their provider
+ * wrappers opt into registering hooks for the OAuth-visible projects.
  */
 async function getEnvironmentMappedRepositoryIds(): Promise<Set<string>> {
   const mappingRows = await db
@@ -152,8 +152,12 @@ async function configureScopedProviderWebhooks<
   actorUserId: string;
   logPrefix: string;
   removalDescription: string;
+  scopeToEnvironmentMappings?: boolean;
 }): Promise<WebhookSetupSummary<TEnsureResult>> {
-  const mappedRepositoryIds = await getEnvironmentMappedRepositoryIds();
+  const scopeToEnvironmentMappings = params.scopeToEnvironmentMappings ?? true;
+  const mappedRepositoryIds = scopeToEnvironmentMappings
+    ? await getEnvironmentMappedRepositoryIds()
+    : new Set(params.repositories.map((repository) => repository.id));
   const mappedTargets = params.repositories
     .filter((repository) => mappedRepositoryIds.has(repository.id))
     .flatMap(params.toTarget);
@@ -290,6 +294,10 @@ async function configureGitLabWebhooks(
     actorUserId,
     logPrefix: '[configureGitLabWebhooks]',
     removalDescription: 'remove webhooks from unmapped projects',
+    // GitLab OAuth is followed immediately by the repository sync. At that
+    // point onboarding has not created environment mappings yet, so register
+    // hooks for the projects returned by OAuth instead of skipping them.
+    scopeToEnvironmentMappings: false,
   });
 }
 
@@ -345,6 +353,10 @@ async function configureGiteaWebhooks(
     actorUserId,
     logPrefix: '[configureGiteaWebhooks]',
     removalDescription: 'remove webhooks from unmapped repositories',
+    // Gitea OAuth is followed immediately by the repository sync, before
+    // onboarding creates environment mappings. Register hooks for the
+    // repositories returned by OAuth instead of skipping them.
+    scopeToEnvironmentMappings: false,
   });
 }
 
@@ -640,7 +652,12 @@ export async function saveSourceControlConfigValues(params: {
     return [
       {
         name: field.envVarName,
-        value: nextValue,
+        value:
+          field.envVarName === 'GITEA_BASE_URL'
+            ? Gitea.normalizeGiteaBaseUrl(nextValue)
+            : field.envVarName === 'GITLAB_BASE_URL'
+              ? GitLab.normalizeGitLabBaseUrl(nextValue)
+              : nextValue,
       },
     ];
   });
@@ -663,6 +680,32 @@ export async function saveSourceControlConfigValues(params: {
   }
 
   if (valuesToSave.length > 0) {
+    if (params.provider === 'ado') {
+      const authMode =
+        params.values?.['ADO_AUTH_MODE']?.trim() ||
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ||
+        (params.values?.['ADO_TOKEN']?.trim() ? 'pat' : 'entra');
+      const usesEntraCredentials = Boolean(
+        params.values?.['ADO_CLIENT_ID']?.trim() ||
+        params.values?.['ADO_CLIENT_SECRET']?.trim() ||
+        params.values?.['ADO_TENANT_ID']?.trim(),
+      );
+      await deleteDeploymentEnvironmentVariables(
+        params.executor,
+        authMode === 'pat'
+          ? [
+              'ADO_CLIENT_ID',
+              'ADO_CLIENT_SECRET',
+              'ADO_TENANT_ID',
+              'ADO_LINKED_ACCOUNT_ID',
+            ]
+          : usesEntraCredentials
+            ? ['ADO_TOKEN']
+            : params.values?.['ADO_TOKEN']?.trim()
+              ? ['ADO_CLIENT_ID', 'ADO_CLIENT_SECRET', 'ADO_TENANT_ID']
+              : [],
+      );
+    }
     await upsertDeploymentEnvironmentVariables(params.executor, {
       userId: params.actorUserId,
       values: valuesToSave,
@@ -681,14 +724,27 @@ export async function saveSourceControlConfigValues(params: {
 export async function assertValidSourceControlConfigInput(params: {
   provider: SourceControlProvider;
   values?: Partial<Record<string, string>>;
+  allowIncompleteDelegated?: boolean;
 }): Promise<void> {
-  const nextGitLabToken =
+  const nextGitLabClientId =
     params.provider === 'gitlab'
-      ? params.values?.['GITLAB_TOKEN']?.trim()
+      ? (params.values?.['GITLAB_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('GITLAB_CLIENT_ID')))
       : undefined;
-  const nextGiteaToken =
+  const nextGitLabClientSecret =
+    params.provider === 'gitlab'
+      ? (params.values?.['GITLAB_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('GITLAB_CLIENT_SECRET')))
+      : undefined;
+  const nextGiteaClientId =
     params.provider === 'gitea'
-      ? params.values?.['GITEA_TOKEN']?.trim()
+      ? (params.values?.['GITEA_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('GITEA_CLIENT_ID')))
+      : undefined;
+  const nextGiteaClientSecret =
+    params.provider === 'gitea'
+      ? (params.values?.['GITEA_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('GITEA_CLIENT_SECRET')))
       : undefined;
   const nextBitbucketToken =
     params.provider === 'bitbucket'
@@ -696,36 +752,67 @@ export async function assertValidSourceControlConfigInput(params: {
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
-      ? params.values?.['ADO_TOKEN']?.trim()
+      ? (params.values?.['ADO_TOKEN']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_TOKEN')))
+      : undefined;
+  const nextAdoClientId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_CLIENT_ID')))
+      : undefined;
+  const nextAdoClientSecret =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_CLIENT_SECRET')))
+      : undefined;
+  const nextAdoTenantId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_TENANT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
+        (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID')))
+      : undefined;
+  const nextAdoAuthMode =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_AUTH_MODE']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_AUTH_MODE')) ??
+        (nextAdoToken ? 'pat' : 'entra'))
+      : undefined;
+  const nextAdoLinkedAccountId =
+    params.provider === 'ado'
+      ? (params.values?.['ADO_LINKED_ACCOUNT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID')))
       : undefined;
 
-  if (nextGitLabToken) {
-    const validation = await GitLab.validateGitLabToken({
-      token: nextGitLabToken,
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
+  if (
+    params.provider === 'ado' &&
+    (nextAdoAuthMode === 'pat'
+      ? !nextAdoToken
+      : !(nextAdoClientId && nextAdoClientSecret && nextAdoTenantId) ||
+        (nextAdoAuthMode === 'delegated' &&
+          !nextAdoLinkedAccountId &&
+          !params.allowIncompleteDelegated))
+  ) {
+    throw new Error(
+      nextAdoAuthMode === 'delegated'
+        ? 'Connect an Azure DevOps account and provide the Microsoft Entra client ID, client secret, and tenant ID.'
+        : 'Configure either an Azure DevOps access token or a Microsoft Entra client ID, client secret, and tenant ID.',
+    );
   }
 
-  if (nextGiteaToken) {
-    const nextGiteaBaseUrl =
-      params.values?.['GITEA_BASE_URL']?.trim() ??
-      (await Gitea.resolveGiteaBaseUrl());
+  if (
+    params.provider === 'gitlab' &&
+    !(nextGitLabClientId && nextGitLabClientSecret)
+  ) {
+    throw new Error('Configure the GitLab OAuth client ID and secret.');
+  }
 
-    if (!nextGiteaBaseUrl) {
-      return;
-    }
-
-    const validation = await Gitea.validateGiteaToken({
-      token: nextGiteaToken,
-      baseUrl: nextGiteaBaseUrl,
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
+  if (
+    params.provider === 'gitea' &&
+    !(nextGiteaClientId && nextGiteaClientSecret)
+  ) {
+    throw new Error(
+      'Configure the Gitea OAuth client ID and secret to continue.',
+    );
   }
 
   if (nextBitbucketToken) {

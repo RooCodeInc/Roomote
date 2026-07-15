@@ -1,6 +1,7 @@
 import {
   RunStatus,
   TaskPayloadKind,
+  getEnvironmentDefinitionIdFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
   taskToolDispatchPayloadSchema,
@@ -10,6 +11,7 @@ import {
   and,
   compareAndSetTrustedRunActingUser,
   db,
+  environments,
   eq,
   isNotNull,
   not,
@@ -584,9 +586,26 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const task = taskById;
 
-  const artifacts = await getArtifactsForTaskCommand(auth, {
-    taskId: task.id,
-  }).catch(() => []);
+  const onboardingEnvironmentId =
+    task.workflow === 'setup_onboarding' &&
+    (taskRun.status === RunStatus.Running ||
+      taskRun.status === RunStatus.Completed ||
+      (taskRun.status === RunStatus.Idle &&
+        taskRun.taskPhase === 'waiting_for_prompt'))
+      ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
+      : null;
+
+  const [artifacts, onboardingEnvironment] = await Promise.all([
+    getArtifactsForTaskCommand(auth, {
+      taskId: task.id,
+    }).catch(() => []),
+    onboardingEnvironmentId
+      ? db.query.environments.findFirst({
+          where: eq(environments.id, onboardingEnvironmentId),
+          columns: { name: true },
+        })
+      : Promise.resolve(null),
+  ]);
 
   const shouldCheckBootFailureMessages =
     taskRun.status === RunStatus.Failed ||
@@ -671,6 +690,7 @@ export async function getSandboxSessionByTaskIdCommand(
     },
     prompt,
     artifacts,
+    onboardingEnvironment,
     sessionState,
     refetchInterval,
   };

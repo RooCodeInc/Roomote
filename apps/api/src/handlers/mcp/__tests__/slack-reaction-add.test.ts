@@ -88,6 +88,9 @@ vi.mock('@roomote/sdk/server', () => ({
   buildSignedArtifactRawUrl: vi.fn(),
   createTeamsCommunicationProviderFromRuntimeCredentials:
     createTeamsCommunicationProviderMock,
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(
+    async () => ({ addReaction: telegramAddReactionMock }),
+  ),
   currentEpochSeconds: vi.fn(),
   findSlackConversationSubjectByUserId: vi.fn(),
   recordSlackConversationMessageBestEffort: vi.fn(),

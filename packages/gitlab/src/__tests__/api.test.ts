@@ -7,10 +7,12 @@ const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
+  mockGitLabOAuthAccessToken,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
+  mockGitLabOAuthAccessToken: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -60,6 +62,11 @@ vi.mock('@roomote/db/encryption', () => ({
   decryptSecrets: vi.fn(async (value: unknown) => value),
 }));
 
+vi.mock('../oauth', () => ({
+  isGitLabOAuthAccessToken: () => false,
+  resolveGitLabOAuthAccessToken: () => mockGitLabOAuthAccessToken(),
+}));
+
 import {
   buildGitLabApiBaseUrl,
   buildGitLabRepositoryValues,
@@ -73,7 +80,7 @@ import {
   revokeGitLabScopedProjectToken,
   type GitLabProject,
   listGitLabProjects,
-  validateGitLabToken,
+  normalizeGitLabBaseUrl,
 } from '../api';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
@@ -111,6 +118,20 @@ describe('resolveGitLabBaseUrl', () => {
     process.env.GITLAB_BASE_URL = 'https://gitlab.example.com/';
 
     await expect(resolveGitLabBaseUrl()).resolves.toBe(
+      'https://gitlab.example.com',
+    );
+  });
+
+  it('accepts scheme-less URLs and removes API or hosted-account paths', async () => {
+    process.env.GITLAB_BASE_URL = 'gitlab.example.com/api/v4/';
+
+    await expect(resolveGitLabBaseUrl()).resolves.toBe(
+      'https://gitlab.example.com',
+    );
+    expect(normalizeGitLabBaseUrl('gitlab.com/roomote/')).toBe(
+      'https://gitlab.com',
+    );
+    expect(normalizeGitLabBaseUrl('gitlab.example.com////////')).toBe(
       'https://gitlab.example.com',
     );
   });
@@ -198,7 +219,7 @@ describe('listGitLabProjects', () => {
 
   it('requires a token', async () => {
     await expect(listGitLabProjects({ token: '' })).rejects.toThrow(
-      'GITLAB_TOKEN is required to sync GitLab repositories.',
+      'GitLab OAuth authorization is required to sync repositories.',
     );
   });
 
@@ -278,12 +299,11 @@ describe('buildGitLabRepositoryValues', () => {
 });
 
 describe('createTaskRunScopedGitLabTokens', () => {
-  const originalGitLabToken = process.env.GITLAB_TOKEN;
   const originalGitLabBaseUrl = process.env.GITLAB_BASE_URL;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.GITLAB_TOKEN = 'glpat_deployment_token';
+    mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
     delete process.env.GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -296,12 +316,6 @@ describe('createTaskRunScopedGitLabTokens', () => {
   });
 
   afterEach(() => {
-    if (originalGitLabToken === undefined) {
-      delete process.env.GITLAB_TOKEN;
-    } else {
-      process.env.GITLAB_TOKEN = originalGitLabToken;
-    }
-
     if (originalGitLabBaseUrl === undefined) {
       delete process.env.GITLAB_BASE_URL;
     } else {
@@ -334,6 +348,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       credentials: [
         {
           host: 'gitlab.com',
+          originBaseUrl: 'https://gitlab.com',
           repositoryFullName: 'group/project',
           username: 'oauth2',
           token: 'glptt_repo_scoped',
@@ -355,7 +370,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          'PRIVATE-TOKEN': 'glpat_deployment_token',
+          'PRIVATE-TOKEN': 'oauth_access_token',
           'Content-Type': 'application/json',
         }),
         body: expect.stringContaining('"write_repository"'),
@@ -634,9 +649,10 @@ describe('createTaskRunScopedGitLabTokens', () => {
       proxyCredentials: [
         {
           host: 'gitlab.com',
+          originBaseUrl: 'https://gitlab.com',
           repositoryFullName: 'group/project',
           username: 'oauth2',
-          token: 'glpat_deployment_token',
+          token: 'oauth_access_token',
         },
       ],
       artifactsPatch: {
@@ -738,21 +754,14 @@ describe('createTaskRunScopedGitLabTokens', () => {
 });
 
 describe('getGitLabDeploymentUser', () => {
-  const originalGitLabToken = process.env.GITLAB_TOKEN;
-
   beforeEach(() => {
     vi.clearAllMocks();
     clearGitLabDeploymentUserCache();
-    process.env.GITLAB_TOKEN = 'glpat_deployment_token';
+    mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
   });
 
   afterEach(() => {
     clearGitLabDeploymentUserCache();
-    if (originalGitLabToken === undefined) {
-      delete process.env.GITLAB_TOKEN;
-    } else {
-      process.env.GITLAB_TOKEN = originalGitLabToken;
-    }
   });
 
   it('resolves the deployment identity via GET /user and caches it', async () => {
@@ -773,14 +782,14 @@ describe('getGitLabDeploymentUser', () => {
       expect.objectContaining({
         method: 'GET',
         headers: expect.objectContaining({
-          'PRIVATE-TOKEN': 'glpat_deployment_token',
+          'PRIVATE-TOKEN': 'oauth_access_token',
         }),
       }),
     );
   });
 
-  it('returns null when no deployment token is configured', async () => {
-    delete process.env.GITLAB_TOKEN;
+  it('returns null when no GitLab OAuth connection is configured', async () => {
+    mockGitLabOAuthAccessToken.mockResolvedValue(null);
     const fetchMock = vi.fn<typeof fetch>();
 
     await expect(
@@ -830,58 +839,8 @@ describe('createGitLabMergeRequestNote', () => {
         fetchImpl: vi.fn<typeof fetch>(),
       }),
     ).rejects.toThrow(
-      'GITLAB_TOKEN is required to create GitLab merge request notes.',
+      'GitLab OAuth authorization is required to create merge request notes.',
     );
-  });
-});
-
-describe('validateGitLabToken', () => {
-  it('returns the authenticated username for a working token', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ id: 7, username: 'roomote-bot' }), {
-        status: 200,
-      }),
-    );
-
-    await expect(
-      validateGitLabToken({ token: 'glpat_test', fetchImpl: fetchMock }),
-    ).resolves.toEqual({ status: 'valid', username: 'roomote-bot' });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://gitlab.com/api/v4/user',
-      expect.objectContaining({
-        headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'glpat_test' }),
-      }),
-    );
-  });
-
-  it('reports definitive auth failures as invalid', async () => {
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(JSON.stringify({ message: '401 Unauthorized' }), {
-        status: 401,
-        statusText: 'Unauthorized',
-      }),
-    );
-
-    const result = await validateGitLabToken({
-      token: 'glpat_bad',
-      fetchImpl: fetchMock,
-    });
-
-    expect(result.status).toBe('invalid');
-  });
-
-  it('reports transient failures as unknown instead of invalid', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockRejectedValue(new Error('network unreachable'));
-
-    const result = await validateGitLabToken({
-      token: 'glpat_test',
-      fetchImpl: fetchMock,
-    });
-
-    expect(result.status).toBe('unknown');
   });
 });
 

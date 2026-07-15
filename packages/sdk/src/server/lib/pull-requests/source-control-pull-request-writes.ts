@@ -24,6 +24,7 @@ import {
 import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type SourceControlProvider,
@@ -33,6 +34,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   parseAdoRepositoryFullName,
@@ -238,9 +240,10 @@ export async function writeSourceControlPullRequestForTaskRun({
   const input = normalizeOptionalWriteIds(rawInput);
   assertWriteInputFields(input);
 
-  const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(taskRun.payload),
-  );
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider =
+    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
@@ -256,6 +259,7 @@ export async function writeSourceControlPullRequestForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
   });
 
   switch (provider) {
@@ -591,7 +595,7 @@ async function writeGitLabMergeRequest({
 }): Promise<SourceControlPullRequestWriteResult> {
   const { projectId, token, apiBaseUrl } =
     await resolveGitLabWriteContext(repository);
-  const tokenHeader = { name: 'PRIVATE-TOKEN', value: token };
+  const tokenHeader = buildGitLabTokenHeader(token);
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
   switch (input.action) {

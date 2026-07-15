@@ -20,10 +20,9 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifyDiscordPrMerge } from '../github/notifyDiscordPrMerge';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -52,71 +51,45 @@ function getReviewTaskType(
 
 /**
  * Notifies Slack, Teams, Telegram, and Linear threads/sessions linked to the
- * MR after a merge. GitLab has no installation gate, so verify the repository
- * is an active synced GitLab row before notifying (fire-and-forget, mirroring
- * the GitHub merge handler).
+ * MR after it becomes terminal (merged or closed). GitLab has no installation
+ * gate, so verify the repository is an active synced GitLab row before
+ * notifying (fire-and-forget, mirroring the GitHub status handler).
  */
-async function notifyMergedMergeRequestThreads(
+async function notifyTerminalMergeRequestThreads(
   payload: GitLabMergeRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const webhookHost = toHostFromUrl(payload.object_attributes.url);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitlab'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'gitlab' as const,
-    repository: repoFullName,
-    prNumber: payload.object_attributes.iid,
-    prTitle: payload.object_attributes.title,
-    prUrl: payload.object_attributes.url,
-    mergedBy:
-      payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Slack for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Teams for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyDiscordPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Discord for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'gitlab',
-  }).catch((error) => {
-    console.error(
-      `[handleGitLabMergeRequest] Failed to notify Telegram/Linear for MR !${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'gitlab',
+      repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
+      prNumber: payload.object_attributes.iid,
+      prTitle: payload.object_attributes.title,
+      prUrl: payload.object_attributes.url,
+      status,
+      actorLogin:
+        payload.user?.username ?? payload.user?.name ?? 'someone on GitLab',
+    },
+    `MR !${payload.object_attributes.iid}`,
+  );
 }
 
 export async function handleGitLabMergeRequest(
@@ -137,6 +110,23 @@ export async function handleGitLabMergeRequest(
 
     await updateTaskPrStatus('gitlab', repoFullName, mergeRequest.iid, status);
 
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitlab',
+      repositoryFullName: repoFullName,
+      pullRequest: {
+        number: mergeRequest.iid,
+        externalId: mergeRequest.id ?? null,
+        title: mergeRequest.title,
+        url: mergeRequest.url,
+        // The merge-request webhook carries the acting user, not the MR
+        // author; the scheduled sync backfills authorLogin.
+        authorLogin: null,
+        state: status,
+        createdAt: mergeRequest.created_at ?? null,
+        updatedAt: mergeRequest.updated_at ?? null,
+      },
+    });
+
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'gitlab',
@@ -156,8 +146,8 @@ export async function handleGitLabMergeRequest(
       );
     });
 
-    if (mergeRequest.action === 'merge') {
-      await notifyMergedMergeRequestThreads(payload, repoFullName);
+    if (mergeRequest.action === 'merge' || mergeRequest.action === 'close') {
+      await notifyTerminalMergeRequestThreads(payload, repoFullName, status);
     }
 
     return { status: 'ok' };
@@ -175,6 +165,8 @@ export async function handleGitLabMergeRequest(
   const result = await getGitLabAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The MR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(mergeRequest.url),
   });
 
   if (result.status === 'error') {
@@ -225,7 +217,7 @@ export async function handleGitLabMergeRequest(
     payload.user?.id != null ? String(payload.user.id) : payload.user?.username;
   const mrAuthorName = payload.user?.name ?? payload.user?.username;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -233,6 +225,12 @@ export async function handleGitLabMergeRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'gitlab',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: mergeRequest.iid,
             prTitle: mergeRequest.title,
             prUrl: mergeRequest.url,
@@ -262,6 +260,8 @@ export async function handleGitLabMergeRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'gitlab',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: mergeRequest.iid,
           prUrl: mergeRequest.url,

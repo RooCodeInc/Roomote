@@ -105,6 +105,7 @@ export class RoomoteController extends BaseController {
           modalEcrOidcRoleArn: Env.MODAL_ECR_OIDC_ROLE_ARN,
           modalEcrRegion: Env.MODAL_ECR_REGION,
           modalRegions: resolvedEnv.MODAL_REGIONS,
+          modalVmMemoryMiB: Env.MODAL_VM_MEMORY_MIB,
           modalTimeoutMs: timeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });
@@ -118,6 +119,7 @@ export class RoomoteController extends BaseController {
           dockerTimeoutMs: timeoutMs,
           cpuLimit: Env.DOCKER_WORKER_CPU_LIMIT,
           memoryLimit: Env.DOCKER_WORKER_MEMORY_LIMIT,
+          taskDaemonMemoryLimit: Env.DOCKER_TASK_DAEMON_MEMORY_LIMIT,
           pidsLimit: Env.DOCKER_WORKER_PIDS_LIMIT,
           diskLimit: Env.DOCKER_WORKER_DISK_LIMIT,
           allowUnboundedDisk: Env.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,

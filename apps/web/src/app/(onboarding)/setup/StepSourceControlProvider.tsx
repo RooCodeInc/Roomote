@@ -9,6 +9,7 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const SOURCE_CONTROL_PROVIDER_STEP = getSetupStepDefinition(
@@ -18,6 +19,7 @@ const SOURCE_CONTROL_PROVIDER_STEP = getSetupStepDefinition(
 export function StepSourceControlProvider({
   sourceControlSetup,
   onContinue,
+  onBack,
   disabled = false,
 }: {
   sourceControlSetup: {
@@ -31,6 +33,7 @@ export function StepSourceControlProvider({
     }>;
   };
   onContinue: (provider: SourceControlProvider) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -75,6 +78,8 @@ export function StepSourceControlProvider({
             );
           })}
         </div>
+
+        <SetupFooter onBack={onBack} />
       </div>
     </div>
   );

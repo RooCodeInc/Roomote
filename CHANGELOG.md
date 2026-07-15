@@ -2,6 +2,34 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.5.0 (2026-07-15)
+
+### Minor changes
+
+- Docker Compose and Dockerfile environment projects are first-class: run them on Modal VM sandboxes, stream project logs into the task Logs panel, start them without blocking eligible tasks, and allocate higher sandbox memory when nested Docker is required (renamed from "container projects").
+- Multi-SCM automations and PR tooling: triage, audit, announcer, and manager-stats cover GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket with shared open-PR listing, merged-PR facts, conflict resolution, and digests; reports can land on Slack, Teams, or Telegram, and the automations page shows destinations plus exception-only coverage badges.
+- Environment setup is reworked into the normal task flow: setup completion is observable to the agent and platform, setup logs show in the Logs tab, first-time hosted compute provision no longer blocks creation, excluded sandbox providers stay hidden, and completion messaging no longer shoves users back to a separate /setup page.
+- Experimental settings add a deployment-level Code Mode toggle for coding-agent task behavior.
+- Local Docker can be enabled or disabled from the Local Docker settings surface without leaving that provider’s configuration page.
+- Source-control setup expands provider OAuth and connection flows, simplifies Azure DevOps to organization and PAT by default while preserving full repository identifiers, and prefills the GitHub App description in the manifest setup flow.
+- Slack agent narrative replies prefer modern markdown blocks, the Working on footer posts out of band with notifications when linked PRs close, MCP integration setup becomes a non-blocking suggestion instead of blocking task start (with Zero detection limited to product surfaces), and agents can post to Teams or Telegram channels through a surface-generic channel-post tool.
+- When only one environment exists the homepage starts there instead of Auto, subagent rows expand to show the launch prompt, the router supplies task-relevant kickoff strings (with freer punctuation and no forced opening reply after free-form kickoffs), freeform kickoffs always show when tasks start, CI failure triage runs as one environment-backed fix task, the coding agent consults the advisor on hard failures and user challenges, and Microsoft Teams onboarding setup copy and flow are refreshed.
+- Daily anonymous product stats include a 7-day PR funnel so deployments can evaluate how effectively agent work turns into shipped pull requests, and analytics can group by Model.
+- Visual proof images now render inline in the task transcript instead of only as detached artifact links.
+
+### Patch changes
+
+- Hosted Docker runtime provisioning is more reliable across E2B, Blaxel, and related setup paths, with retryable rebuilds that preserve the prior artifact; failed local standby resumes clean up nested Docker-project daemons rather than leaving them running.
+- Setup can back out of earlier choices without wiping later steps when a user revisits a picker, finishing setup into an onboarding task no longer flashes the home page first, and source-control settings no longer discard in-progress configuration edits when provider-status refetches.
+- GitLab OAuth listing and install paths work for OAuth-backed tokens and public callback hosts: MR list/sync uses the bearer-aware token header, and OAuth authorize/callback redirect URIs use the request callback host (matching Gitea). Gitea comment intake ignores the configured deployment bot identity, not only roomote*-prefixed logins. Host-aware keys keep PR funnel and merge-duration counts correct across multi-host source-control instances, and Slack markdown link conversion no longer uses a ReDoS-prone regex.
+- Local development artifact uploads from hosted workers succeed through the Caddy edge, and presigned upload responses without an S3 ETag are no longer treated as successful.
+
+## 0.4.2 (2026-07-13)
+
+### Patch changes
+
+- Onboarding Slack setup no longer strands revisits with saved credentials on a form with no Continue action: the step button is shown again when the intro screen is skipped.
+
 ## 0.4.1 (2026-07-13)
 
 ### Patch changes

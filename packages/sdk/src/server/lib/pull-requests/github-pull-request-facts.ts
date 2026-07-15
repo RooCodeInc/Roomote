@@ -4,43 +4,21 @@ import {
   db,
   eq,
   githubInstallations,
-  pullRequestFacts,
   pullRequestSyncStates,
   inArray,
   isNull,
   repositories,
-  sql,
 } from '@roomote/db/server';
+
+import {
+  getLatestUpdatedAt,
+  upsertPullRequestFacts,
+  upsertPullRequestSyncState,
+  type PullRequestFactSnapshot,
+} from './pull-request-facts-store';
 
 const MAX_REPOSITORIES_PER_RUN = 8;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 15 * 60 * 1000;
-
-type PullRequestFactSnapshot = {
-  authorLogin: string | null;
-  closedAt: string | null;
-  createdAt: string;
-  externalPullRequestId: number;
-  mergedAt: string | null;
-  number: number;
-  state: 'open' | 'draft' | 'closed' | 'merged';
-  title: string;
-  updatedAt: string;
-  url: string;
-};
-
-function getLatestUpdatedAt(
-  pullRequests: PullRequestFactSnapshot[],
-  fallback: Date | null,
-): Date | null {
-  return pullRequests.reduce((latest, pullRequest) => {
-    const updatedAt = new Date(pullRequest.updatedAt);
-    if (!latest || updatedAt > latest) {
-      return updatedAt;
-    }
-
-    return latest;
-  }, fallback);
-}
 
 function getRateLimitCooldownUntil(error: unknown, now: Date): Date | null {
   if (!(error instanceof Error) || !('status' in error)) {
@@ -91,99 +69,6 @@ function getRateLimitCooldownUntil(error: unknown, now: Date): Date | null {
   return new Date(now.getTime() + DEFAULT_RATE_LIMIT_COOLDOWN_MS);
 }
 
-async function upsertPullRequestFacts(params: {
-  repositoryId: string;
-  repositoryFullName: string;
-  pullRequests: PullRequestFactSnapshot[];
-  syncedAt: Date;
-}) {
-  if (params.pullRequests.length === 0) {
-    return;
-  }
-
-  await db
-    .insert(pullRequestFacts)
-    .values(
-      params.pullRequests.map((pullRequest) => ({
-        repositoryId: params.repositoryId,
-        repositoryFullName: params.repositoryFullName,
-        sourceControlProvider: 'github' as const,
-        externalPullRequestId: pullRequest.externalPullRequestId,
-        prNumber: pullRequest.number,
-        title: pullRequest.title,
-        htmlUrl: pullRequest.url,
-        authorLogin: pullRequest.authorLogin,
-        state: pullRequest.state,
-        createdAtRemote: new Date(pullRequest.createdAt),
-        updatedAtRemote: new Date(pullRequest.updatedAt),
-        closedAtRemote: pullRequest.closedAt
-          ? new Date(pullRequest.closedAt)
-          : null,
-        mergedAtRemote: pullRequest.mergedAt
-          ? new Date(pullRequest.mergedAt)
-          : null,
-        syncedAt: params.syncedAt,
-        updatedAt: params.syncedAt,
-      })),
-    )
-    .onConflictDoUpdate({
-      target: [pullRequestFacts.repositoryId, pullRequestFacts.prNumber],
-      set: {
-        repositoryFullName: sql`excluded.repository_full_name`,
-        sourceControlProvider: sql`excluded.source_control_provider`,
-        externalPullRequestId: sql`excluded.external_pull_request_id`,
-        title: sql`excluded.title`,
-        htmlUrl: sql`excluded.html_url`,
-        authorLogin: sql`excluded.author_login`,
-        state: sql`excluded.state`,
-        createdAtRemote: sql`excluded.created_at_remote`,
-        updatedAtRemote: sql`excluded.updated_at_remote`,
-        closedAtRemote: sql`excluded.closed_at_remote`,
-        mergedAtRemote: sql`excluded.merged_at_remote`,
-        syncedAt: params.syncedAt,
-        updatedAt: params.syncedAt,
-      },
-    });
-}
-
-async function upsertPullRequestSyncState(params: {
-  repositoryId: string;
-  lastIncrementalUpdatedAt?: Date | null;
-  backfillCompletedAt?: Date | null;
-  cooldownUntil?: Date | null;
-  lastSuccessfulSyncAt?: Date | null;
-  lastAttemptedSyncAt: Date;
-  lastErrorAt?: Date | null;
-  lastErrorMessage?: string | null;
-}) {
-  await db
-    .insert(pullRequestSyncStates)
-    .values({
-      repositoryId: params.repositoryId,
-      lastIncrementalUpdatedAt: params.lastIncrementalUpdatedAt ?? null,
-      backfillCompletedAt: params.backfillCompletedAt ?? null,
-      cooldownUntil: params.cooldownUntil ?? null,
-      lastSuccessfulSyncAt: params.lastSuccessfulSyncAt ?? null,
-      lastAttemptedSyncAt: params.lastAttemptedSyncAt,
-      lastErrorAt: params.lastErrorAt ?? null,
-      lastErrorMessage: params.lastErrorMessage ?? null,
-      updatedAt: params.lastAttemptedSyncAt,
-    })
-    .onConflictDoUpdate({
-      target: [pullRequestSyncStates.repositoryId],
-      set: {
-        lastIncrementalUpdatedAt: params.lastIncrementalUpdatedAt ?? null,
-        backfillCompletedAt: params.backfillCompletedAt ?? null,
-        cooldownUntil: params.cooldownUntil ?? null,
-        lastSuccessfulSyncAt: params.lastSuccessfulSyncAt ?? null,
-        lastAttemptedSyncAt: params.lastAttemptedSyncAt,
-        lastErrorAt: params.lastErrorAt ?? null,
-        lastErrorMessage: params.lastErrorMessage ?? null,
-        updatedAt: params.lastAttemptedSyncAt,
-      },
-    });
-}
-
 async function syncRepositoryPullRequestFacts(params: {
   actorUserId: string;
   repositoryId: string;
@@ -210,6 +95,7 @@ async function syncRepositoryPullRequestFacts(params: {
       await upsertPullRequestFacts({
         repositoryId: params.repositoryId,
         repositoryFullName: params.repositoryFullName,
+        sourceControlProvider: 'github',
         pullRequests: backfillPullRequests,
         syncedAt: params.now,
       });
@@ -250,6 +136,7 @@ async function syncRepositoryPullRequestFacts(params: {
     await upsertPullRequestFacts({
       repositoryId: params.repositoryId,
       repositoryFullName: params.repositoryFullName,
+      sourceControlProvider: 'github',
       pullRequests: incrementalPullRequests,
       syncedAt: params.now,
     });
@@ -303,8 +190,14 @@ export async function syncGitHubPullRequestFactsForOrg(params: {
   const now = params.now ?? new Date();
 
   const [repositoryRows, syncStateRows] = await Promise.all([
+    // Scoped to GitHub rows: non-GitHub repositories are synced by the
+    // provider-neutral merged-PR facts sync, which owns their
+    // pull_request_sync_states rows.
     db.query.repositories.findMany({
-      where: eq(repositories.isActive, true),
+      where: and(
+        eq(repositories.isActive, true),
+        eq(repositories.sourceControlProvider, 'github'),
+      ),
     }),
     db.query.pullRequestSyncStates.findMany(),
   ]);
@@ -458,6 +351,7 @@ export async function upsertGitHubPullRequestFactFromWebhook(params: {
       await upsertPullRequestFacts({
         repositoryId: repository.repositoryId,
         repositoryFullName: repository.repositoryFullName,
+        sourceControlProvider: 'github',
         pullRequests: [params.pullRequest],
         syncedAt: now,
       });

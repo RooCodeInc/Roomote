@@ -12,6 +12,8 @@ const {
   mockFindInstallation,
   mockGetAutomationRuntime,
   mockRecordAutomationRunOutcome,
+  mockListOpenPullRequests,
+  mockGetPullRequestDetails,
 } = vi.hoisted(() => {
   type AnyMock = Mock<(...args: never[]) => unknown>;
 
@@ -27,8 +29,15 @@ const {
     mockFindInstallation: vi.fn() as AnyMock,
     mockGetAutomationRuntime: vi.fn() as AnyMock,
     mockRecordAutomationRunOutcome: vi.fn() as AnyMock,
+    mockListOpenPullRequests: vi.fn() as AnyMock,
+    mockGetPullRequestDetails: vi.fn() as AnyMock,
   };
 });
+
+vi.mock('../../lib/pull-requests/source-control-pull-request-reads', () => ({
+  listOpenSourceControlPullRequestsForRepository: mockListOpenPullRequests,
+  getSourceControlPullRequestDetailsForRepository: mockGetPullRequestDetails,
+}));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
@@ -115,6 +124,7 @@ vi.mock('@roomote/db/server', () => {
       sourceControlProvider: 'sourceControlProvider',
       repository: 'repository',
       prNumber: 'prNumber',
+      host: 'taskPullRequests.host',
     },
     taskRuns: {
       id: 'id',
@@ -130,11 +140,15 @@ vi.mock('@roomote/db/server', () => {
     isNull: vi.fn(),
     eq: vi.fn(),
     and: vi.fn(),
+    or: vi.fn(),
     inArray: vi.fn(),
   };
 });
 
 import { conflictScanJob } from '../conflict-scan';
+// The mocked condition builders let tests verify how the active-run dedup
+// guard scopes its query.
+import { eq as mockedEq, or as mockedOr } from '@roomote/db/server';
 
 describe('conflictScanJob', () => {
   beforeEach(() => {
@@ -156,12 +170,22 @@ describe('conflictScanJob', () => {
       managerSlackChannelId: null,
     });
     mockFindInstallation.mockResolvedValue({ id: 'install-row-1' });
+    // Select order: eligible installations, provider-neutral (GitLab/ADO)
+    // repos, then the installation's GitHub repos.
     mockSelectWhere
       .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
         { fullName: 'Roomote/example-app', orgId: 'org-1' },
       ])
       .mockResolvedValue([]);
+    mockListOpenPullRequests.mockResolvedValue({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [],
+      warnings: [],
+    });
     mockSelectLimit.mockResolvedValue([]);
     mockFindActiveGitHubBranchWork.mockResolvedValue(null);
     mockGetCommitCommittedAt.mockResolvedValue(
@@ -211,6 +235,7 @@ describe('conflictScanJob', () => {
 
     await conflictScanJob();
 
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
     expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -495,5 +520,387 @@ describe('conflictScanJob', () => {
     expect(octokit.rest.pulls.get).not.toHaveBeenCalled();
     expect(mockGetCommitCommittedAt).not.toHaveBeenCalled();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  function queueProviderNeutralRepo(repo: Record<string, unknown>) {
+    // Select order: eligible installations (none, so the GitHub section is
+    // skipped), then the provider-neutral repos.
+    mockSelectWhere.mockReset();
+    mockSelectWhere
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([repo])
+      .mockResolvedValue([]);
+    // Drop once-values earlier tests queued but never consumed so the
+    // active-resolution-run dedup guard sees no active run.
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+  }
+
+  function makePullRequestSummary(overrides: Record<string, unknown> = {}) {
+    return {
+      number: 42,
+      url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+      title: 'MR 42',
+      state: 'open',
+      draft: false,
+      sourceBranch: 'feature/work',
+      targetBranch: 'main',
+      author: { id: '77', login: 'gitlab-author' },
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      labels: ['auto-resolve-conflicts'],
+      headSha: 'abc1234',
+      baseSha: 'base5678',
+      mergeable: false,
+      mergeStateDescription: 'conflict',
+      isCrossRepository: false,
+      headRepositoryFullName: null,
+      ...overrides,
+    };
+  }
+
+  it('enqueues GitLab conflict resolutions from the list mergeable signal without the GitHub idle guard', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: null,
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 9, taskId: 'task-9' });
+
+    const result = await conflictScanJob();
+
+    expect(mockListOpenPullRequests).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'gitlab',
+        repository: expect.objectContaining({ fullName: 'acme/backend' }),
+      }),
+    );
+    // The list already carried a definitive mergeable signal.
+    expect(mockGetPullRequestDetails).not.toHaveBeenCalled();
+    // The recent-commit idle guard is GitHub-only and skipped gracefully.
+    expect(mockGetCommitCommittedAt).not.toHaveBeenCalled();
+    expect(mockHasRecentGitHubBranchCommit).not.toHaveBeenCalled();
+    expect(mockFindActiveGitHubBranchWork).toHaveBeenCalledWith({
+      repoFullName: 'acme/backend',
+      prNumber: 42,
+      branchName: 'feature/work',
+      sourceControlProvider: 'gitlab',
+      host: null,
+    });
+    // Without a recorded repo host, the active-run dedup guard does not
+    // constrain on the association host column.
+    expect(mockedEq).not.toHaveBeenCalledWith(
+      'taskPullRequests.host',
+      expect.anything(),
+    );
+    expect(mockedOr).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: 'github_pr_conflict_resolve',
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            prNumber: 42,
+            headRef: 'feature/work',
+            baseRef: 'main',
+            sourceControlProvider: 'gitlab',
+          }),
+        }),
+        initiator: {
+          kind: 'automation',
+          key: 'conflict_resolver',
+          actor: { externalId: '77', displayName: 'gitlab-author' },
+        },
+        workflow: 'pr_conflict_resolve',
+        surface: 'gitlab',
+        trigger: 'schedule',
+        prLinkage: expect.objectContaining({
+          provider: 'gitlab',
+          repository: 'acme/backend',
+          prNumber: 42,
+          prSha: 'abc1234',
+          prBaseRef: 'main',
+          prBaseSha: 'base5678',
+        }),
+      }),
+    );
+    // A legacy repository row without a recorded host omits the payload
+    // host field entirely so resolution falls back to (provider, fullName),
+    // and the task association carries no host either.
+    const [enqueueArg] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      {
+        task: { payload: Record<string, unknown> };
+        prLinkage: Record<string, unknown>;
+      },
+    ];
+    expect('sourceControlHost' in enqueueArg.task.payload).toBe(false);
+    expect('host' in enqueueArg.prLinkage).toBe(false);
+    expect(result.launchedTaskId).toBe('task-9');
+  });
+
+  it('stamps the repository host into the conflict-resolution payload when the repo row has one', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.example.com',
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.example.com/acme/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 9, taskId: 'task-9' });
+
+    await conflictScanJob();
+
+    // The active-run dedup guard constrains on the association host column
+    // (exact host OR legacy NULL host), so an active run recorded for a
+    // same-name PR on a different host cannot suppress this launch.
+    expect(mockedEq).toHaveBeenCalledWith(
+      'taskPullRequests.host',
+      'gitlab.example.com',
+    );
+    expect(mockedOr).toHaveBeenCalled();
+
+    // The branch-activity guard receives the host for the same reason.
+    expect(mockFindActiveGitHubBranchWork).toHaveBeenCalledWith({
+      repoFullName: 'acme/backend',
+      prNumber: 42,
+      branchName: 'feature/work',
+      sourceControlProvider: 'gitlab',
+      host: 'gitlab.example.com',
+    });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: 'github_pr_conflict_resolve',
+          payload: expect.objectContaining({
+            repo: 'acme/backend',
+            prNumber: 42,
+            sourceControlProvider: 'gitlab',
+            // The payload pins repository resolution to this repo's host so
+            // a same-name repository on another host cannot be picked up.
+            sourceControlHost: 'gitlab.example.com',
+          }),
+        }),
+        // The task association is host-scoped so later dedup lookups for a
+        // same-name PR on another host do not match this run.
+        prLinkage: expect.objectContaining({
+          provider: 'gitlab',
+          repository: 'acme/backend',
+          prNumber: 42,
+          host: 'gitlab.example.com',
+        }),
+      }),
+    );
+  });
+
+  it('falls back to a single-PR detail read when an ADO list row has no mergeable signal', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-2',
+      sourceControlProvider: 'ado',
+      host: null,
+      installationId: null,
+      externalRepoId: 'repo-uuid',
+      fullName: 'acme/Platform/backend',
+      htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'ado',
+      repositoryFullName: 'acme/Platform/backend',
+      pullRequests: [
+        makePullRequestSummary({
+          url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/42',
+          updatedAt: null,
+          mergeable: null,
+          mergeStateDescription: null,
+        }),
+      ],
+      warnings: [],
+    });
+    mockGetPullRequestDetails.mockResolvedValueOnce({
+      success: true,
+      provider: 'ado',
+      mergeable: false,
+      mergeStateDescription: 'conflicts',
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 10, taskId: 'task-10' });
+
+    await conflictScanJob();
+
+    expect(mockGetPullRequestDetails).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'ado',
+        prNumber: 42,
+        repository: expect.objectContaining({
+          fullName: 'acme/Platform/backend',
+        }),
+      }),
+    );
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'ado',
+        prLinkage: expect.objectContaining({
+          provider: 'ado',
+          repository: 'acme/Platform/backend',
+          prNumber: 42,
+        }),
+      }),
+    );
+  });
+
+  it('records a single failed outcome when the GitHub scan fails and the provider-neutral scan succeeds', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+
+    // Select order: eligible installations, then provider-neutral repos. The
+    // installation's GitHub repos are never fetched because the octokit
+    // lookup fails first.
+    mockSelectWhere.mockReset();
+    mockSelectWhere
+      .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
+      .mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          sourceControlProvider: 'gitlab',
+          host: null,
+          installationId: null,
+          externalRepoId: '101',
+          fullName: 'acme/backend',
+          htmlUrl: 'https://gitlab.com/acme/backend',
+        },
+      ])
+      .mockResolvedValue([]);
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+
+    mockGetInstallationOctokit.mockReset();
+    mockGetInstallationOctokit.mockRejectedValueOnce(
+      new Error('GitHub API exploded'),
+    );
+
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 11, taskId: 'task-11' });
+
+    const result = await conflictScanJob();
+
+    // The provider-neutral scan still ran and launched work.
+    expect(result.launchedTaskId).toBe('task-11');
+    expect(result.errors).toEqual(['GitHub API exploded']);
+
+    // One combined outcome: failed, preserving the GitHub error instead of
+    // letting the successful provider-neutral pass clear it.
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'conflict_resolver',
+        status: 'failed',
+        error: expect.stringContaining('GitHub API exploded'),
+      }),
+    );
+  });
+
+  it('records a single succeeded outcome when only the provider-neutral scan finds candidates', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+
+    // Select order: eligible installations, provider-neutral repos, then the
+    // installation's GitHub repos (which yield no PRs).
+    mockSelectWhere.mockReset();
+    mockSelectWhere
+      .mockResolvedValueOnce([{ orgId: 'org-1', installationId: 123 }])
+      .mockResolvedValueOnce([
+        {
+          id: 'repo-1',
+          sourceControlProvider: 'gitlab',
+          host: null,
+          installationId: null,
+          externalRepoId: '101',
+          fullName: 'acme/backend',
+          htmlUrl: 'https://gitlab.com/acme/backend',
+        },
+      ])
+      .mockResolvedValueOnce([
+        { fullName: 'Roomote/example-app', orgId: 'org-1' },
+      ])
+      .mockResolvedValue([]);
+    mockSelectLimit.mockReset();
+    mockSelectLimit.mockResolvedValue([]);
+
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary()],
+      warnings: [],
+    });
+    mockEnqueueTask.mockResolvedValueOnce({ id: 12, taskId: 'task-12' });
+
+    const result = await conflictScanJob();
+
+    expect(result.launchedTaskId).toBe('task-12');
+    expect(result.errors).toEqual([]);
+
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledTimes(1);
+    expect(mockRecordAutomationRunOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'conflict_resolver',
+        status: 'succeeded',
+      }),
+    );
+  });
+
+  it('skips provider-neutral PRs without the opt-in label', async () => {
+    mockIsRepoSkipped.mockReturnValue(false);
+    queueProviderNeutralRepo({
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: null,
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    mockListOpenPullRequests.mockResolvedValueOnce({
+      success: true,
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequests: [makePullRequestSummary({ labels: ['other-label'] })],
+      warnings: [],
+    });
+
+    const result = await conflictScanJob();
+
+    expect(mockGetPullRequestDetails).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(result.skippedReason).toBe('No labeled conflict candidates found.');
   });
 });

@@ -26,10 +26,9 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifyDiscordPrMerge } from '../github/notifyDiscordPrMerge';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -76,72 +75,47 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: AdoPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const prUrl = getAdoPullRequestUrl({
+    resourceContainers: payload.resourceContainers,
+    pullRequest: payload.resource,
+    repositoryFullName: repoFullName,
+  });
+  const webhookHost = toHostFromUrl(prUrl);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'ado'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'ado' as const,
-    repository: repoFullName,
-    prNumber: payload.resource.pullRequestId,
-    prTitle: payload.resource.title,
-    prUrl: getAdoPullRequestUrl({
-      resourceContainers: payload.resourceContainers,
-      pullRequest: payload.resource,
-      repositoryFullName: repoFullName,
-    }),
-    mergedBy:
-      getAdoIdentityName(payload.resource.closedBy) ??
-      'someone in Azure DevOps',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyDiscordPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Discord for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'ado',
-  }).catch((error) => {
-    console.error(
-      `[handleAdoPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'ado',
+      repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
+      prNumber: payload.resource.pullRequestId,
+      prTitle: payload.resource.title,
+      prUrl,
+      status,
+      actorLogin:
+        getAdoIdentityName(payload.resource.closedBy) ??
+        'someone in Azure DevOps',
+    },
+    `PR #${payload.resource.pullRequestId}`,
+  );
 }
 
 async function getAdoSyncReviewDecision({
@@ -220,6 +194,35 @@ async function getAdoSyncReviewDecision({
   return { shouldEnqueue: true };
 }
 
+function scheduleAdoPullRequestFactSync(
+  payload: AdoPullRequestWebhook,
+  repoFullName: string,
+  status: 'merged' | 'closed',
+): void {
+  const pullRequest = payload.resource;
+
+  scheduleSourceControlPullRequestFactSync({
+    provider: 'ado',
+    repositoryFullName: repoFullName,
+    pullRequest: {
+      number: pullRequest.pullRequestId,
+      title: pullRequest.title,
+      url: getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+      authorLogin: getAdoIdentityName(pullRequest.createdBy) ?? null,
+      state: status,
+      createdAt: pullRequest.creationDate ?? null,
+      // Azure DevOps webhooks carry no last-updated timestamp; closedDate is
+      // the terminal-event time.
+      updatedAt: pullRequest.closedDate ?? null,
+      mergedAt: status === 'merged' ? (pullRequest.closedDate ?? null) : null,
+    },
+  });
+}
+
 export async function handleAdoPullRequest(
   payload: AdoPullRequestWebhook,
   context: AdoPullRequestWebhookContext = {},
@@ -245,6 +248,8 @@ export async function handleAdoPullRequest(
       'closed',
     );
 
+    scheduleAdoPullRequestFactSync(payload, repoFullName, 'closed');
+
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({
         sourceControlProvider: 'ado',
@@ -269,6 +274,8 @@ export async function handleAdoPullRequest(
       );
     });
 
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'closed');
+
     return { status: 'ok' };
   }
 
@@ -286,6 +293,8 @@ export async function handleAdoPullRequest(
       pullRequest.pullRequestId,
       'merged',
     );
+
+    scheduleAdoPullRequestFactSync(payload, repoFullName, 'merged');
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({
@@ -311,7 +320,7 @@ export async function handleAdoPullRequest(
       );
     });
 
-    await notifyMergedPullRequestThreads(payload, repoFullName);
+    await notifyTerminalPullRequestThreads(payload, repoFullName, 'merged');
 
     return { status: 'ok' };
   }
@@ -330,6 +339,15 @@ export async function handleAdoPullRequest(
   const result = await getAdoAutomationTargets({
     workflow: 'pr_review',
     payload: { ...payload, repositoryFullName: repoFullName },
+    // The PR web URL (or the account/collection base URL it is built from)
+    // carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(
+      getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+    ),
   });
 
   if (result.status === 'error') {
@@ -384,7 +402,7 @@ export async function handleAdoPullRequest(
   const prAuthorName = getAdoIdentityName(pullRequest.createdBy);
   const prAuthorId = pullRequest.createdBy?.id?.trim() || prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -392,6 +410,12 @@ export async function handleAdoPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'ado',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: pullRequest.pullRequestId,
             prTitle: pullRequest.title,
             prUrl,
@@ -419,6 +443,8 @@ export async function handleAdoPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'ado',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: pullRequest.pullRequestId,
           prUrl,

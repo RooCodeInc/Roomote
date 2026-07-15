@@ -10,6 +10,7 @@ export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
   [FeatureFlag.VisualProofAutoScreencast]: false,
   [FeatureFlag.AuthorshipRules]: false,
   [FeatureFlag.BackgroundSubagents]: false,
+  [FeatureFlag.CodeMode]: false,
 };
 
 export const mockUserResource: UserResource = {

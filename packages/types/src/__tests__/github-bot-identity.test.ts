@@ -100,5 +100,16 @@ describe('Roomote GitHub bot identity helpers', () => {
 
       expect(normalizePrBodyAttributionAppMention(body, 'openmote')).toBe(body);
     });
+
+    it('rewrites historical unlinked-attribution mentions', () => {
+      const body =
+        '> Created by Roomote from an unlinked Slack user. Follow up by mentioning @roomote or in the web UI.';
+
+      expect(
+        normalizePrBodyAttributionAppMention(body, 'roomote-roomote'),
+      ).toBe(
+        '> Created by Roomote from an unlinked Slack user. Follow up by mentioning @roomote-roomote or in the web UI.',
+      );
+    });
   });
 });

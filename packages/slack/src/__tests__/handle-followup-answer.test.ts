@@ -77,6 +77,7 @@ vi.mock('@roomote/db/server', () => ({
     strings,
     values,
   })),
+  recordTaskKickoffMessageBestEffort: vi.fn().mockResolvedValue(undefined),
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackTeamId: 'slackTeamId', slackUserId: 'slackUserId' },
   setTrustedRunActingUser: setTrustedRunActingUserMock,

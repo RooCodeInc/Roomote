@@ -322,6 +322,7 @@ export async function launchActWorkItems(params: {
         linkedTaskId
       ) {
         await updateBackgroundAutomationSlackThreadMetadata(db, {
+          surface: 'slack',
           slackChannelId: workItemChatTarget.channelId,
           threadTs: workItemChatTarget.threadTs,
           metadata: {

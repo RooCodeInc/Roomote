@@ -166,7 +166,13 @@ describe('createEnvironment attribution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockEnvironmentsFindFirst.mockResolvedValue(null);
-    mockRepositoriesFindMany.mockResolvedValue([]);
+    mockRepositoriesFindMany.mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'acme/app',
+        installationId: null,
+      },
+    ]);
   });
 
   it('attributes the write to the live acting user over the mint-time claim', async () => {
@@ -205,5 +211,76 @@ describe('createEnvironment attribution', () => {
       expect.anything(),
       expect.objectContaining({ createdByUserId: 'user-live' }),
     );
+  });
+
+  it('rejects a truncated Azure DevOps repository identifier', async () => {
+    mockRepositoriesFindMany.mockResolvedValueOnce([]);
+
+    const app = createApp({
+      userId: 'user-1',
+      tokenType: 'auth',
+      version: 1,
+    });
+    const response = await app.request(
+      new Request('http://localhost/environments', {
+        method: 'POST',
+        body: JSON.stringify({
+          config: {
+            name: 'ADO Test',
+            repositories: [{ repository: 'roomote/Test ADO' }],
+          },
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Repositories are not linked to this deployment: roomote/Test ADO',
+    });
+    expect(mockEnvironmentInsertValues).not.toHaveBeenCalled();
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateEnvironment repository validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnvironmentsFindFirst.mockResolvedValue({
+      id: 'env-1',
+      name: 'ADO Test',
+      description: null,
+      config: {
+        name: 'ADO Test',
+        repositories: [{ repository: 'roomote/Test ADO/Test ADO' }],
+      },
+      isEval: false,
+    });
+    mockRepositoriesFindMany.mockResolvedValue([]);
+  });
+
+  it('rejects an update with a truncated Azure DevOps repository identifier', async () => {
+    const app = createApp({
+      userId: 'user-1',
+      tokenType: 'auth',
+      version: 1,
+    });
+    const response = await app.request(
+      new Request('http://localhost/environments/env-1', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          config: {
+            name: 'ADO Test',
+            repositories: [{ repository: 'roomote/Test ADO' }],
+          },
+        }),
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Repositories are not linked to this deployment: roomote/Test ADO',
+    });
   });
 });

@@ -1,10 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import Link from 'next/link';
 
 import {
   getEnvironmentDefinitionIdFromPayload,
   isExitedRunStatus,
+  WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
 } from '@roomote/types';
 
 import {
@@ -246,6 +248,7 @@ export function EnvironmentDefinitionAgentTaskPanel({
             <TaskStatusIndicator
               status={session.taskRun?.status}
               phase={session.taskRun?.taskPhase}
+              lastErrorMessage={session.taskRun?.error}
               className="text-xs"
               compact={true}
             />
@@ -293,6 +296,11 @@ function EnvironmentDefinitionConversationBody({
   const isBootFailed = session.sessionState === 'boot-failed';
   const showStartupSurface = isBooting || isBootFailed;
   const showLogs = showStartupSurface && !!runId;
+  const isWaitingForSandboxProvider =
+    session.taskRun?.taskPhase === WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE;
+  const providerProvisioningError = isWaitingForSandboxProvider
+    ? session.taskRun?.error
+    : null;
 
   const {
     logs: sandboxLogs,
@@ -307,6 +315,32 @@ function EnvironmentDefinitionConversationBody({
     return (
       <div className="px-6 py-4 text-sm text-muted-foreground">
         <Shimmer direction="rl">Loading...</Shimmer>
+      </div>
+    );
+  }
+
+  if (isWaitingForSandboxProvider) {
+    return (
+      <div className="space-y-3 p-6 text-sm">
+        <p className="font-semibold">Waiting for sandbox provider</p>
+        <p
+          className={
+            providerProvisioningError
+              ? 'text-destructive'
+              : 'text-muted-foreground'
+          }
+        >
+          {providerProvisioningError ??
+            'Roomote is preparing the selected sandbox provider. This task will start automatically when it is ready.'}
+        </p>
+        {providerProvisioningError ? (
+          <Link
+            href="/settings/sandboxes"
+            className="inline-flex font-medium underline underline-offset-4"
+          >
+            Retry provisioning in Sandbox settings
+          </Link>
+        ) : null}
       </div>
     );
   }

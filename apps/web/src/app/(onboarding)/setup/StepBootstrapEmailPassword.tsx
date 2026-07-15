@@ -1,8 +1,7 @@
 'use client';
 
 import { EmailPasswordAuth } from '@/app/(unauthenticated)/email-password-auth';
-import { ArrowLeft, Button } from '@/components/system';
-
+import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
 
 export function StepBootstrapEmailPassword({ onBack }: { onBack: () => void }) {
@@ -18,12 +17,7 @@ export function StepBootstrapEmailPassword({ onBack }: { onBack: () => void }) {
         hideModeSwitchMessage={true}
         showNameField={false}
         submitButtonClassName="w-auto"
-        submitLeadingAction={
-          <Button type="button" variant="outline" onClick={onBack}>
-            <ArrowLeft />
-            Back
-          </Button>
-        }
+        submitLeadingAction={<SetupFooter onBack={onBack} />}
       />
     </div>
   );

@@ -126,20 +126,40 @@ describe('ecosystem.config.js', () => {
     process.env = {
       ...originalEnv,
       R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
+      S3_PRESIGN_ENDPOINT: undefined,
     };
 
     const apps = loadEcosystemApps();
     const webApp = apps.find((app) => app.name === 'roomote-web');
+    const apiApp = apps.find((app) => app.name === 'roomote-api');
 
     expect(webApp?.env).toMatchObject({
       R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
       R_APP_URL: 'https://roomote-example.ngrok.app',
+      S3_PRESIGN_ENDPOINT: 'https://roomote-example.ngrok.app',
       SLACK_REDIRECT_URI:
         'https://roomote-example.ngrok.app/api/slack/callback',
       SLACK_AUTH_URI: 'https://roomote-example.ngrok.app/api/slack/auth',
       R_LINEAR_REDIRECT_URI:
         'https://roomote-example.ngrok.app/api/linear/callback',
     });
+    expect(apiApp?.env?.S3_PRESIGN_ENDPOINT).toBe(
+      'https://roomote-example.ngrok.app',
+    );
+  });
+
+  it('preserves an explicit artifact presign endpoint', () => {
+    process.env = {
+      ...originalEnv,
+      R_PUBLIC_URL: 'https://roomote-example.ngrok.app',
+      S3_PRESIGN_ENDPOINT: 'https://artifacts.example.com',
+    };
+
+    const apps = loadEcosystemApps();
+
+    expect(
+      apps.find((app) => app.name === 'roomote-api')?.env?.S3_PRESIGN_ENDPOINT,
+    ).toBe('https://artifacts.example.com');
   });
 
   it('does not include the deleted hosted listener in the PM2 app list', () => {

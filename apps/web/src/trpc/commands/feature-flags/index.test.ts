@@ -104,16 +104,20 @@ describe('feature-flags commands', () => {
 
   it('getExperimentalFlagsCommand reflects explicit metadata overrides', async () => {
     mockFindFirst.mockResolvedValue({
-      metadata: { suggestion_routing: true },
+      metadata: { suggestion_routing: true, opencode_code_mode: true },
     });
 
     const flags = await getExperimentalFlagsCommand(buildAuth(true));
     const suggestionRouting = flags.find(
       (f) => f.id === FeatureFlag.SuggestionRouting,
     );
+    const codeMode = flags.find((f) => f.id === FeatureFlag.CodeMode);
 
     expect(suggestionRouting?.value).toBe(true);
     expect(suggestionRouting?.explicitlySet).toBe(true);
+    expect(codeMode?.value).toBe(true);
+    expect(codeMode?.explicitlySet).toBe(true);
+    expect(codeMode?.metadataKey).toBe('opencode_code_mode');
   });
 
   it('updateExperimentalFlagCommand rejects non-admins', async () => {

@@ -13,6 +13,7 @@ import {
   isNull,
   eq,
   and,
+  or,
   inArray,
   recordAutomationRunOutcome,
 } from '@roomote/db/server';
@@ -27,6 +28,7 @@ import {
   RunStatus,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   isConflictResolverMaxPrAgeDays,
+  type SourceControlProvider,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 
@@ -36,12 +38,32 @@ import {
 } from '@roomote/types';
 
 import {
+  getSourceControlPullRequestDetailsForRepository,
+  listOpenSourceControlPullRequestsForRepository,
+} from '../lib/pull-requests/source-control-pull-request-reads';
+import type { RepositoryRow } from '../lib/pull-requests/source-control-pull-request-shared';
+
+import {
   emptyJobResult,
   type AutomationJobResult,
   type AutomationRunOpts,
 } from './types';
 
 const LOG_PREFIX = '[conflictScan]';
+
+/**
+ * Providers the scan covers through the provider-neutral list/read primitive.
+ * Gitea and Bitbucket stay unsupported: Bitbucket exposes no mergeable
+ * signal at all and Gitea computes mergeability asynchronously, so neither
+ * yields a trustworthy conflict signal for an unattended automation.
+ */
+const PROVIDER_NEUTRAL_SCAN_PROVIDERS = [
+  'gitlab',
+  'ado',
+] as const satisfies readonly SourceControlProvider[];
+
+/** Cap on open PRs fetched per non-GitHub repository in one scan pass. */
+const PROVIDER_NEUTRAL_SCAN_LIST_LIMIT = 200;
 
 interface ActiveInstallation {
   installationId: number;
@@ -64,7 +86,7 @@ async function findEligibleInstallations(): Promise<ActiveInstallation[]> {
  */
 async function getActiveRepos(
   installationId: number,
-): Promise<Array<{ fullName: string }>> {
+): Promise<Array<{ id: string; fullName: string; host: string | null }>> {
   const installRow = await db.query.githubInstallations.findFirst({
     where: eq(githubInstallations.installationId, installationId),
   });
@@ -75,7 +97,9 @@ async function getActiveRepos(
 
   const repos = await db
     .select({
+      id: repositories.id,
       fullName: repositories.fullName,
+      host: repositories.host,
     })
     .from(repositories)
     .where(eq(repositories.installationId, installRow.id));
@@ -84,12 +108,46 @@ async function getActiveRepos(
 }
 
 /**
+ * Get all active repositories on the providers the provider-neutral scan
+ * covers, shaped for the source-control read primitive.
+ */
+async function getActiveProviderNeutralRepos(): Promise<RepositoryRow[]> {
+  return db
+    .select({
+      id: repositories.id,
+      sourceControlProvider: repositories.sourceControlProvider,
+      host: repositories.host,
+      installationId: repositories.installationId,
+      externalRepoId: repositories.externalRepoId,
+      fullName: repositories.fullName,
+      htmlUrl: repositories.htmlUrl,
+    })
+    .from(repositories)
+    .where(
+      and(
+        eq(repositories.isActive, true),
+        inArray(repositories.sourceControlProvider, [
+          ...PROVIDER_NEUTRAL_SCAN_PROVIDERS,
+        ]),
+      ),
+    );
+}
+
+/**
  * Check if there's already an active (pending/running) conflict resolution
  * run for the given PR.
+ *
+ * When a non-null `host` is given, association rows recorded for a
+ * different host do not suppress the launch: a same-name repository and PR
+ * number on another self-managed instance is a different PR. Rows with a
+ * NULL host (written before the host backfill) still suppress, mirroring
+ * the legacy tolerance in resolveRepositoryRow.
  */
 async function hasActiveResolutionRun(
   repoFullName: string,
   prNumber: number,
+  sourceControlProvider: SourceControlProvider,
+  host?: string | null,
 ): Promise<boolean> {
   const activeStatuses = [RunStatus.Pending, RunStatus.Running];
 
@@ -101,9 +159,12 @@ async function hasActiveResolutionRun(
     .where(
       and(
         eq(tasks.workflow, 'pr_conflict_resolve'),
-        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
         eq(taskPullRequests.repository, repoFullName),
         eq(taskPullRequests.prNumber, prNumber),
+        ...(host
+          ? [or(eq(taskPullRequests.host, host), isNull(taskPullRequests.host))]
+          : []),
         inArray(taskRuns.status, activeStatuses),
       ),
     )
@@ -131,53 +192,55 @@ export async function conflictScanJob(
   console.log(`${LOG_PREFIX} Starting scheduled conflict scan`);
 
   const result = emptyJobResult();
-  const installations = await findEligibleInstallations();
 
-  if (installations.length === 0) {
-    result.skippedReason = 'No active GitHub installation.';
+  const runtime = await getAutomationRuntime('conflict_resolver');
+  const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
+
+  if (!frequency || frequency === 'off') {
+    result.skippedReason = 'Automation is disabled.';
+    return result;
+  }
+
+  // Frequency gating: skip if last run was too recent for the configured
+  // frequency.
+  const intervalMs = CONFLICT_RESOLVER_INTERVAL_MS[frequency];
+
+  if (
+    !opts.manualTrigger &&
+    intervalMs &&
+    runtime.lastRunAt &&
+    Date.now() - runtime.lastRunAt.getTime() < intervalMs
+  ) {
+    console.log(
+      `${LOG_PREFIX} Skipping deployment: last run ${Math.round((Date.now() - runtime.lastRunAt.getTime()) / 60_000)}m ago, interval ${Math.round(intervalMs / 60_000)}m`,
+    );
+    result.skippedReason = 'Not due yet.';
+    return result;
+  }
+
+  const rawMaxPrAgeDays = runtime.settings.maxPrAgeDays;
+  const conflictResolverMaxPrAgeDays =
+    typeof rawMaxPrAgeDays === 'number' &&
+    isConflictResolverMaxPrAgeDays(rawMaxPrAgeDays)
+      ? rawMaxPrAgeDays
+      : DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS;
+  const conflictResolverLabel =
+    typeof runtime.settings.label === 'string' && runtime.settings.label.trim()
+      ? runtime.settings.label
+      : DEFAULT_CONFLICT_RESOLVER_LABEL;
+
+  const installations = await findEligibleInstallations();
+  const providerNeutralRepos = await getActiveProviderNeutralRepos();
+
+  if (installations.length === 0 && providerNeutralRepos.length === 0) {
+    result.skippedReason =
+      'No active GitHub installation or GitLab/Azure DevOps repositories.';
   }
 
   let totalCandidates = 0;
   let totalConflicting = 0;
 
   for (const { installationId } of installations) {
-    const runtime = await getAutomationRuntime('conflict_resolver');
-    const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
-
-    if (!frequency || frequency === 'off') {
-      result.skippedReason = 'Automation is disabled.';
-      continue;
-    }
-
-    // Frequency gating: skip if last run was too recent for the configured
-    // frequency.
-    const intervalMs = CONFLICT_RESOLVER_INTERVAL_MS[frequency];
-
-    if (
-      !opts.manualTrigger &&
-      intervalMs &&
-      runtime.lastRunAt &&
-      Date.now() - runtime.lastRunAt.getTime() < intervalMs
-    ) {
-      console.log(
-        `${LOG_PREFIX} Skipping deployment: last run ${Math.round((Date.now() - runtime.lastRunAt.getTime()) / 60_000)}m ago, interval ${Math.round(intervalMs / 60_000)}m`,
-      );
-      result.skippedReason = 'Not due yet.';
-      continue;
-    }
-
-    const rawMaxPrAgeDays = runtime.settings.maxPrAgeDays;
-    const conflictResolverMaxPrAgeDays =
-      typeof rawMaxPrAgeDays === 'number' &&
-      isConflictResolverMaxPrAgeDays(rawMaxPrAgeDays)
-        ? rawMaxPrAgeDays
-        : DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS;
-    const conflictResolverLabel =
-      typeof runtime.settings.label === 'string' &&
-      runtime.settings.label.trim()
-        ? runtime.settings.label
-        : DEFAULT_CONFLICT_RESOLVER_LABEL;
-
     console.log(`${LOG_PREFIX} Scanning installation ${installationId}`);
 
     let candidateCount = 0;
@@ -264,7 +327,9 @@ export async function conflictScanJob(
             );
 
             // Check for existing active resolution run (dedup guard)
-            if (await hasActiveResolutionRun(repo.fullName, pr.number)) {
+            if (
+              await hasActiveResolutionRun(repo.fullName, pr.number, 'github')
+            ) {
               console.log(
                 `${LOG_PREFIX} Active resolution run exists for ${repo.fullName}#${pr.number} — skipping`,
               );
@@ -340,6 +405,8 @@ export async function conflictScanJob(
                 trigger: opts.manualTrigger ? 'manual' : 'schedule',
                 prLinkage: {
                   provider: 'github',
+                  host: repo.host ?? 'github.com',
+                  repositoryId: repo.id,
                   repository: repo.fullName,
                   prNumber: pr.number,
                   prUrl: pr.html_url,
@@ -398,25 +465,12 @@ export async function conflictScanJob(
         result.skippedReason ??= 'No labeled conflict candidates found.';
       }
 
-      await recordAutomationRunOutcome(db, {
-        key: 'conflict_resolver',
-        status: candidateCount > 0 ? 'succeeded' : 'skipped',
-        at: new Date(),
-      });
-
       console.log(
         `${LOG_PREFIX} Installation ${installationId}: ${candidateCount} candidates, ${conflictingCount} conflicting, ${launchedTaskCount} launched, ${notificationCount} notified`,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       result.errors.push(message);
-
-      await recordAutomationRunOutcome(db, {
-        key: 'conflict_resolver',
-        status: 'failed',
-        at: new Date(),
-        error: message,
-      });
 
       console.error(
         `${LOG_PREFIX} Error scanning installation ${installationId}:`,
@@ -425,11 +479,262 @@ export async function conflictScanJob(
     }
   }
 
+  if (providerNeutralRepos.length > 0) {
+    const providerCounts = await scanProviderNeutralRepos({
+      repos: providerNeutralRepos,
+      conflictResolverLabel,
+      conflictResolverMaxPrAgeDays,
+      manualTrigger: Boolean(opts.manualTrigger),
+      result,
+    });
+
+    totalCandidates += providerCounts.candidateCount;
+    totalConflicting += providerCounts.conflictingCount;
+  }
+
+  // Record one combined outcome covering both the GitHub and provider-neutral
+  // sections. Per-section recording let the later section overwrite the
+  // earlier one — including clearing a GitHub failure from lastError when the
+  // provider-neutral pass then succeeded or skipped.
+  if (installations.length > 0 || providerNeutralRepos.length > 0) {
+    const combinedStatus =
+      result.errors.length > 0
+        ? 'failed'
+        : totalCandidates > 0
+          ? 'succeeded'
+          : 'skipped';
+
+    await recordAutomationRunOutcome(db, {
+      key: 'conflict_resolver',
+      status: combinedStatus,
+      at: new Date(),
+      ...(combinedStatus === 'failed'
+        ? { error: result.errors.join('; ') }
+        : {}),
+    });
+  }
+
   console.log(
     `${LOG_PREFIX} Scan complete: ${totalCandidates} candidates, ${totalConflicting} conflicting`,
   );
 
   return result;
+}
+
+/**
+ * Scan GitLab/Azure DevOps repositories through the provider-neutral pull
+ * request primitives. Conflict detection uses the list summaries' mergeable
+ * signal (GitLab `has_conflicts`) and falls back to a single-PR detail read
+ * when the list payload carries none (e.g. an ADO row missing mergeStatus).
+ */
+async function scanProviderNeutralRepos({
+  repos,
+  conflictResolverLabel,
+  conflictResolverMaxPrAgeDays,
+  manualTrigger,
+  result,
+}: {
+  repos: RepositoryRow[];
+  conflictResolverLabel: string;
+  conflictResolverMaxPrAgeDays: number;
+  manualTrigger: boolean;
+  result: AutomationJobResult;
+}): Promise<{ candidateCount: number; conflictingCount: number }> {
+  let candidateCount = 0;
+  let conflictingCount = 0;
+  let launchedTaskCount = 0;
+
+  try {
+    for (const repo of repos) {
+      if (isRepoSkipped(repo.fullName)) {
+        console.log(
+          `${LOG_PREFIX} Skipping scheduled conflict scan for ${repo.fullName}`,
+        );
+        continue;
+      }
+
+      const provider = repo.sourceControlProvider;
+
+      const oldestAllowedUpdatedAt = new Date();
+      oldestAllowedUpdatedAt.setDate(
+        oldestAllowedUpdatedAt.getDate() - DEFAULT_CONFLICT_SCAN_LOOKBACK_DAYS,
+      );
+      const oldestAllowedCreatedAt = new Date();
+      oldestAllowedCreatedAt.setDate(
+        oldestAllowedCreatedAt.getDate() - conflictResolverMaxPrAgeDays,
+      );
+
+      const listResult = await listOpenSourceControlPullRequestsForRepository({
+        repository: repo,
+        provider,
+        limit: PROVIDER_NEUTRAL_SCAN_LIST_LIMIT,
+      });
+
+      for (const pr of listResult.pullRequests) {
+        // Must have the opt-in label
+        if (!pr.labels.includes(conflictResolverLabel)) {
+          continue;
+        }
+
+        // Must be within the lookback window. Unlike the GitHub path (sorted
+        // by updated desc, so it can break), ADO lists carry no updatedAt and
+        // no update ordering, so filter each PR instead of breaking.
+        if (pr.updatedAt && new Date(pr.updatedAt) < oldestAllowedUpdatedAt) {
+          continue;
+        }
+
+        if (pr.createdAt && new Date(pr.createdAt) < oldestAllowedCreatedAt) {
+          continue;
+        }
+
+        candidateCount++;
+
+        // Check mergeability: trust the list signal when present, otherwise
+        // fall back to a single-PR read (mirrors the GitHub per-candidate
+        // detail fetch and is bounded by the same candidate set).
+        let mergeable = pr.mergeable;
+
+        if (mergeable === null) {
+          const detail = await getSourceControlPullRequestDetailsForRepository({
+            repository: repo,
+            provider,
+            prNumber: pr.number,
+          });
+          mergeable = detail.mergeable;
+        }
+
+        if (mergeable !== false) {
+          continue;
+        }
+
+        conflictingCount++;
+        console.log(
+          `${LOG_PREFIX} PR ${repo.fullName}#${pr.number} has conflicts`,
+        );
+
+        // Check for existing active resolution run (dedup guard). The
+        // repo's host scopes both lookups so a same-name PR on another
+        // self-managed instance cannot suppress this one.
+        if (
+          await hasActiveResolutionRun(
+            repo.fullName,
+            pr.number,
+            provider,
+            repo.host,
+          )
+        ) {
+          console.log(
+            `${LOG_PREFIX} Active resolution run exists for ${repo.fullName}#${pr.number} — skipping`,
+          );
+          continue;
+        }
+
+        const activeBranchWork = await findActiveGitHubBranchWork({
+          repoFullName: repo.fullName,
+          prNumber: pr.number,
+          branchName: pr.sourceBranch,
+          sourceControlProvider: provider,
+          host: repo.host,
+        });
+
+        if (activeBranchWork) {
+          console.log(
+            `${LOG_PREFIX} Skipping ${repo.fullName}#${pr.number} — active Roomote run ${activeBranchWork.runId} (${activeBranchWork.type}, match=${activeBranchWork.match}) is still working on the branch`,
+          );
+          continue;
+        }
+
+        // The recent-commit idle guard needs the head commit timestamp and
+        // getCommitCommittedAt only provides that for GitHub. An unknown
+        // timestamp is treated as NOT recent (matching
+        // hasRecentGitHubBranchCommit's `!latestCommitAt → false`), so the
+        // guard is skipped and the PR proceeds.
+
+        try {
+          const launchResult = await enqueueTask({
+            task: {
+              type: TaskPayloadKind.GithubPrConflictResolve,
+              payload: {
+                repo: repo.fullName,
+                prNumber: pr.number,
+                prTitle: pr.title,
+                prUrl: pr.url,
+                headRef: pr.sourceBranch,
+                baseRef: pr.targetBranch,
+                sourceControlProvider: provider,
+                // Pin repository resolution to this repo's host so
+                // same-name repositories on other hosts cannot be picked
+                // up. Legacy rows without a recorded host omit the field.
+                ...(repo.host ? { sourceControlHost: repo.host } : {}),
+              },
+            },
+            initiator: {
+              kind: 'automation',
+              key: 'conflict_resolver',
+              ...(pr.author?.id
+                ? {
+                    actor: {
+                      externalId: pr.author.id,
+                      displayName: pr.author.login ?? undefined,
+                    },
+                  }
+                : {}),
+            },
+            workflow: 'pr_conflict_resolve',
+            surface: provider,
+            trigger: manualTrigger ? 'manual' : 'schedule',
+            prLinkage: {
+              provider,
+              // Host-scope the task association so later dedup lookups for
+              // a same-name PR on another host do not match this run.
+              ...(repo.host ? { host: repo.host } : {}),
+              repositoryId: repo.id,
+              repository: repo.fullName,
+              prNumber: pr.number,
+              prUrl: pr.url,
+              prTitle: pr.title,
+              prSha: pr.headSha ?? undefined,
+              prBaseRef: pr.targetBranch,
+              prBaseSha: pr.baseSha ?? undefined,
+            },
+          });
+
+          launchedTaskCount++;
+          result.launchedTaskId ??= launchResult.taskId;
+          console.log(
+            `${LOG_PREFIX} Launched conflict resolution task run ${launchResult.id} for ${repo.fullName}#${pr.number}`,
+          );
+          // "Working on it" PR comments are GitHub-only today; other
+          // providers rely on the launched task itself for visibility.
+        } catch (error) {
+          console.error(
+            `${LOG_PREFIX} Failed to enqueue resolution for ${repo.fullName}#${pr.number}:`,
+            error instanceof Error ? error.message : error,
+          );
+        }
+      }
+    }
+
+    result.completed = true;
+
+    if (candidateCount === 0) {
+      result.skippedReason ??= 'No labeled conflict candidates found.';
+    }
+
+    console.log(
+      `${LOG_PREFIX} Provider-neutral repos: ${candidateCount} candidates, ${conflictingCount} conflicting, ${launchedTaskCount} launched`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    result.errors.push(message);
+
+    console.error(
+      `${LOG_PREFIX} Error scanning provider-neutral repositories:`,
+      message,
+    );
+  }
+
+  return { candidateCount, conflictingCount };
 }
 
 /**

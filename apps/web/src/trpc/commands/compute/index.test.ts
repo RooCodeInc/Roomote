@@ -1,4 +1,5 @@
 import type { FeatureFlag } from '@roomote/feature-flags';
+import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -12,6 +13,7 @@ const {
   mockGetPersistedEnvironmentVariableValues,
   mockResolveSavedWorkerImage,
   mockRunComputeProvisioning,
+  mockAcquireComputeProvisioningLock,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockDbInsert: vi.fn(),
@@ -24,6 +26,7 @@ const {
   mockGetPersistedEnvironmentVariableValues: vi.fn().mockResolvedValue({}),
   mockResolveSavedWorkerImage: vi.fn().mockResolvedValue(null),
   mockRunComputeProvisioning: vi.fn().mockResolvedValue(undefined),
+  mockAcquireComputeProvisioningLock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('./compute-provisioning', async (importOriginal) => {
@@ -32,6 +35,7 @@ vi.mock('./compute-provisioning', async (importOriginal) => {
 
   return {
     ...actual,
+    acquireComputeProvisioningLock: mockAcquireComputeProvisioningLock,
     runComputeProvisioning: mockRunComputeProvisioning,
   };
 });
@@ -76,6 +80,7 @@ import {
   getComputeStatusCommand,
   saveComputeConfigCommand,
   setDefaultComputeProviderCommand,
+  setLocalDockerEnabledCommand,
 } from './index';
 
 function buildMockAuth(
@@ -423,7 +428,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 
@@ -443,7 +448,7 @@ describe('compute commands', () => {
         provider: 'daytona',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker-tag',
+        templateRef: `roomote-worker-tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 
@@ -460,7 +465,7 @@ describe('compute commands', () => {
         provider: 'e2b',
         userId: 'compute-test-user',
         imageRef: 'registry.example.com/worker:tag',
-        templateRef: 'roomote-worker:tag',
+        templateRef: `roomote-worker:tag-r${WORKER_RUNTIME_SCHEMA_VERSION}`,
       });
     });
 
@@ -635,7 +640,14 @@ describe('compute commands', () => {
 
       mockDbTransaction.mockImplementation(async (callback) => {
         return callback({
-          select: createSelectChain(),
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: null,
+                excludedProviders: ['docker'],
+              },
+            },
+          ]),
           insert: txInsert,
         } as never);
       });
@@ -648,8 +660,68 @@ describe('compute commands', () => {
         provider: 'e2b',
       });
 
-      expect(result.runtimeComputeConfig).toEqual({ defaultProvider: 'e2b' });
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: 'e2b',
+        excludedProviders: ['docker'],
+      });
       expect(txInsert).toHaveBeenCalledWith(expect.anything());
+    });
+  });
+
+  describe('setLocalDockerEnabledCommand', () => {
+    it('disables Docker and clears it as the persisted default', async () => {
+      const txInsert = createInsertChain();
+
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: 'docker',
+                excludedProviders: ['modal'],
+              },
+            },
+          ]),
+          insert: txInsert,
+        } as never),
+      );
+
+      const result = await setLocalDockerEnabledCommand(buildMockAuth(), {
+        enabled: false,
+      });
+
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: null,
+        excludedProviders: ['modal', 'docker'],
+      });
+      expect(txInsert).toHaveBeenCalledWith(expect.anything());
+    });
+
+    it('enables Docker without dropping other exclusions', async () => {
+      const txInsert = createInsertChain();
+
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({
+          select: createSelectChain([
+            {
+              runtimeComputeConfig: {
+                defaultProvider: 'e2b',
+                excludedProviders: ['docker', 'modal'],
+              },
+            },
+          ]),
+          insert: txInsert,
+        } as never),
+      );
+
+      const result = await setLocalDockerEnabledCommand(buildMockAuth(), {
+        enabled: true,
+      });
+
+      expect(result.runtimeComputeConfig).toEqual({
+        defaultProvider: 'e2b',
+        excludedProviders: ['modal'],
+      });
     });
   });
 });

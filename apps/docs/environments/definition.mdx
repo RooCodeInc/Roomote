@@ -1,7 +1,7 @@
 ---
 title: Environment definition
 icon: file-code
-description: "Understand the environment definition YAML: the schema, how it relates to Dev Containers, and how to write your own by hand or with a coding agent."
+description: 'Understand the environment definition YAML: the schema, how it relates to Dev Containers, and how to write your own by hand or with a coding agent.'
 ---
 
 An environment definition is the YAML document that describes a Roomote
@@ -21,8 +21,8 @@ clean sandbox. The environment definition is what turns that empty sandbox into
 a workspace grounded in your product. It is applied in a predictable order:
 
 1. shared workspace tool versions are installed
-2. requested services (databases, caches) are started
-3. each repository is cloned onto the workspace, at its chosen branch
+2. requested services (databases, caches) are started while repositories clone
+3. configured Docker projects are built and started from cloned repositories
 4. each repository's setup commands run, in order
 5. named ports become live previews, and agent instructions are attached to
    every task
@@ -38,14 +38,14 @@ definition will feel familiar. Both describe a development workspace as a
 version-controllable, declarative file so that anyone (or any agent) gets the
 same setup. The concepts map closely:
 
-| Concept | Dev Container (`devcontainer.json`) | Roomote environment definition |
-| --- | --- | --- |
-| Base machine | [`image` / `build`](https://containers.dev/implementors/json_reference/#image-specific) | Provided by the [sandbox provider](/compute) worker image, not set here |
-| Extra tooling | [`features`](https://containers.dev/features) | `services` and `tool_versions` |
-| Setup steps | [`onCreateCommand` / `postCreateCommand`](https://containers.dev/implementors/json_reference/#lifecycle-scripts) | Repository `commands` |
-| Forwarded ports | [`forwardPorts` / `portsAttributes`](https://containers.dev/implementors/json_reference/#port-attributes) | `ports` |
-| Workspace env vars | [`containerEnv` / `remoteEnv`](https://containers.dev/implementors/json_reference/#variables-in-devcontainer-json) | `env` (and per-command `env`) |
-| Tool customizations | [`customizations`](https://containers.dev/supporting-tools) | `agentInstructions`, `mcpServers`, `skills` |
+| Concept             | Dev Container (`devcontainer.json`)                                                                                | Roomote environment definition                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| Base machine        | [`image` / `build`](https://containers.dev/implementors/json_reference/#image-specific)                            | Provided by the [sandbox provider](/compute) worker image, not set here |
+| Extra tooling       | [`features`](https://containers.dev/features)                                                                      | `services` and `tool_versions`                                          |
+| Setup steps         | [`onCreateCommand` / `postCreateCommand`](https://containers.dev/implementors/json_reference/#lifecycle-scripts)   | Repository `commands`                                                   |
+| Forwarded ports     | [`forwardPorts` / `portsAttributes`](https://containers.dev/implementors/json_reference/#port-attributes)          | `ports`                                                                 |
+| Workspace env vars  | [`containerEnv` / `remoteEnv`](https://containers.dev/implementors/json_reference/#variables-in-devcontainer-json) | `env` (and per-command `env`)                                           |
+| Tool customizations | [`customizations`](https://containers.dev/supporting-tools)                                                        | `agentInstructions`, `mcpServers`, `skills`                             |
 
 The important difference: **Roomote uses its own schema and does not read
 `devcontainer.json`.** The comparison is conceptual. If a repository already has
@@ -108,6 +108,20 @@ repositories:
       - name: Install dependencies
         run: pnpm install
 
+# Start an existing Compose project after acme/web is cloned.
+docker_projects:
+  - type: compose
+    name: app
+    repository: acme/web
+    files:
+      - compose.yaml
+    services:
+      - web
+    ports:
+      - named_port: WEB
+        service: web
+        container_port: 3000
+
 # Named ports exposed as human-facing previews.
 ports:
   - name: WEB
@@ -126,24 +140,25 @@ agentInstructions: |
 
 ## Top-level fields
 
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `name` | string | yes | Environment name, 1–100 characters. |
-| `description` | string | no | Short summary, up to 500 characters. |
-| `repositories` | list | yes | At least one repository. See [Repositories](#repositories). |
-| `initialUrl` | string | no | Absolute URL or `about:blank` that the preview surface opens first. |
-| `agentInstructions` | string | no | Guidance attached to every task, up to 10,000 characters. |
-| `tool_versions` | map | no | Tools installed at the shared workspace root via mise. |
-| `env` | map | no | Workspace environment variables available to every task. |
-| `services` | list | no | Managed services to start. See [Services](#services). |
-| `ports` | list | no | Named preview ports. See [Ports](#ports). |
-| `previews_enabled` | boolean | no | Explicitly enable or disable live previews without deleting port definitions. |
-| `oidc` | map | no | Sandbox OIDC targets. See [OIDC](#oidc). |
-| `mcpServers` | map | no | Custom MCP servers for this environment. See [MCP servers](#mcp-servers). |
-| `skills` | map | no | Installable skills by `owner/repo`. See [Skills](#skills). |
-| `manualSkills` | list | no | Inline skills defined in the environment. See [Skills](#skills). |
-| `auth_bypass_header` | boolean or string | no | Header-based auth bypass control for exposed authenticated previews. A fixed string secret must be at least 8 characters. |
-| `auth_bypass_header_name` | string | no | Custom bypass header name. Defaults to `x-bypass-roomote-auth`. |
+| Field                     | Type              | Required | Notes                                                                                                                     |
+| ------------------------- | ----------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `name`                    | string            | yes      | Environment name, 1–100 characters.                                                                                       |
+| `description`             | string            | no       | Short summary, up to 500 characters.                                                                                      |
+| `repositories`            | list              | yes      | At least one repository. See [Repositories](#repositories).                                                               |
+| `initialUrl`              | string            | no       | Absolute URL or `about:blank` that the preview surface opens first.                                                       |
+| `agentInstructions`       | string            | no       | Guidance attached to every task, up to 10,000 characters.                                                                 |
+| `tool_versions`           | map               | no       | Tools installed at the shared workspace root via mise.                                                                    |
+| `env`                     | map               | no       | Workspace environment variables available to every task.                                                                  |
+| `services`                | list              | no       | Managed services to start. See [Services](#services).                                                                     |
+| `docker_projects`         | list              | no       | Existing Compose or Dockerfile projects to build and start. See [Docker projects](#docker-projects).                      |
+| `ports`                   | list              | no       | Named preview ports. See [Ports](#ports).                                                                                 |
+| `previews_enabled`        | boolean           | no       | Explicitly enable or disable live previews without deleting port definitions.                                             |
+| `oidc`                    | map               | no       | Sandbox OIDC targets. See [OIDC](#oidc).                                                                                  |
+| `mcpServers`              | map               | no       | Custom MCP servers for this environment. See [MCP servers](#mcp-servers).                                                 |
+| `skills`                  | map               | no       | Installable skills by `owner/repo`. See [Skills](#skills).                                                                |
+| `manualSkills`            | list              | no       | Inline skills defined in the environment. See [Skills](#skills).                                                          |
+| `auth_bypass_header`      | boolean or string | no       | Header-based auth bypass control for exposed authenticated previews. A fixed string secret must be at least 8 characters. |
+| `auth_bypass_header_name` | string            | no       | Custom bypass header name. Defaults to `x-bypass-roomote-auth`.                                                           |
 
 ### Basics
 
@@ -157,12 +172,12 @@ opens first, so point it at the app entry a reviewer would expect, for example
 `repositories` is a required list with at least one entry. Each repository is
 cloned onto the shared workspace.
 
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `repository` | string | yes | `owner/repo` format. |
-| `branch` | string | no | Branch to check out. Defaults to the repository's default branch. |
-| `tool_versions` | map | no | Repo-local tool fallbacks installed via mise. |
-| `commands` | list | no | Setup commands for this repository. See [Commands](#commands). |
+| Field           | Type   | Required | Notes                                                             |
+| --------------- | ------ | -------- | ----------------------------------------------------------------- |
+| `repository`    | string | yes      | `owner/repo` format.                                              |
+| `branch`        | string | no       | Branch to check out. Defaults to the repository's default branch. |
+| `tool_versions` | map    | no       | Repo-local tool fallbacks installed via mise.                     |
+| `commands`      | list   | no       | Setup commands for this repository. See [Commands](#commands).    |
 
 Keep the first environment focused. One repository, or a small set that must be
 cloned together, sets up faster and is easier to debug than a large multi-repo
@@ -178,18 +193,18 @@ is cloned. Commands are the durable setup steps a teammate would run after
 cloning: installing dependencies, generating code, running migrations, and
 starting long-running services.
 
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `name` | string | yes | Human-readable label for the step. |
-| `run` | string | yes | The shell command to run. |
-| `env` | map | no | Command-specific environment variables, merged over workspace `env`. |
-| `working_dir` | string | no | Directory to run the command in. |
-| `cwd` | string | no | Alias for `working_dir`. |
-| `timeout` | number | no | Seconds before the command is killed. Defaults to `600`. |
-| `retries` | integer | no | Extra attempts for a failing command, with a 1-second delay. Use only for idempotent commands. Defaults to `0`. |
-| `continue_on_error` | boolean | no | When `true`, setup continues even if this command fails. Defaults to `false`. |
-| `detached` | boolean | no | Run in the background under supervision. Use for long-running servers. Defaults to `false`. |
-| `logfile` | string | no | Path to capture stdout and stderr. Used with `detached: true`. |
+| Field               | Type    | Required | Notes                                                                                                           |
+| ------------------- | ------- | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `name`              | string  | yes      | Human-readable label for the step.                                                                              |
+| `run`               | string  | yes      | The shell command to run.                                                                                       |
+| `env`               | map     | no       | Command-specific environment variables, merged over workspace `env`.                                            |
+| `working_dir`       | string  | no       | Directory to run the command in.                                                                                |
+| `cwd`               | string  | no       | Alias for `working_dir`.                                                                                        |
+| `timeout`           | number  | no       | Seconds before the command is killed. Defaults to `600`.                                                        |
+| `retries`           | integer | no       | Extra attempts for a failing command, with a 1-second delay. Use only for idempotent commands. Defaults to `0`. |
+| `continue_on_error` | boolean | no       | When `true`, setup continues even if this command fails. Defaults to `false`.                                   |
+| `detached`          | boolean | no       | Run in the background under supervision. Use for long-running servers. Defaults to `false`.                     |
+| `logfile`           | string  | no       | Path to capture stdout and stderr. Used with `detached: true`.                                                  |
 
 Guidance:
 
@@ -207,22 +222,83 @@ is either a service name string or an object with a name and a custom `port`.
 
 Supported services:
 
-| Service | Default port |
-| --- | --- |
-| `redis6`, `redis7` | 6379 |
-| `postgres15`, `postgres16`, `postgres17` | 5432 |
-| `mysql8`, `mariadb10` | 3306 |
-| `clickhouse` | 9000 |
-| `aws` | CLI tool, no port |
+| Service                                  | Default port      |
+| ---------------------------------------- | ----------------- |
+| `redis6`, `redis7`                       | 6379              |
+| `postgres15`, `postgres16`, `postgres17` | 5432              |
+| `mysql8`, `mariadb10`                    | 3306              |
+| `clickhouse`                             | 9000              |
+| `aws`                                    | CLI tool, no port |
 
 ```yaml
 services:
-  - postgres16          # default port 5432
+  - postgres16 # default port 5432
   - name: redis7
-    port: 6380          # custom port
+    port: 6380 # custom port
 ```
 
 A service name cannot collide with a port name in the same environment.
+
+## Docker projects
+
+`docker_projects` runs Docker Compose or Dockerfile definitions already owned
+by a configured repository. Roomote validates the Compose model, builds images,
+starts services with `docker compose up --wait`, and treats startup as required
+unless `required: false` is set.
+
+Common fields:
+
+| Field                     | Type                      | Required | Notes                                                                      |
+| ------------------------- | ------------------------- | -------- | -------------------------------------------------------------------------- |
+| `type`                    | `compose` or `dockerfile` | yes      | Selects the source format.                                                 |
+| `name`                    | string                    | yes      | Unique project name.                                                       |
+| `repository`              | string                    | yes      | Must exactly match a repository in this environment.                       |
+| `working_dir`             | string                    | no       | Relative directory inside the repository. Defaults to `.`.                 |
+| `env`                     | map                       | no       | Variables passed to Compose. Deployment-variable references are supported. |
+| `ports`                   | list                      | no       | Maps container ports to names from the top-level `ports` list.             |
+| `required`                | boolean                   | no       | Fail task startup when the project fails. Defaults to `true`.              |
+| `startup_timeout_seconds` | integer                   | no       | Build and health-wait timeout. Defaults to 600, maximum 3600.              |
+
+For `type: compose`, `files` is a required list of relative Compose file paths.
+Optional `profiles` enables Compose profiles, and optional `services` limits
+startup to those services. Each port mapping requires `named_port`, `service`,
+and `container_port`.
+
+```yaml
+docker_projects:
+  - type: compose
+    name: development
+    repository: acme/web
+    working_dir: infra/local
+    files: [compose.yaml, compose.override.yaml]
+    profiles: [development]
+    ports:
+      - named_port: WEB
+        service: web
+        container_port: 3000
+```
+
+For `type: dockerfile`, Roomote generates a one-service Compose project.
+`context` defaults to `.`, `dockerfile` defaults to `Dockerfile`, and `target`,
+`build_args`, and `command` are optional. Dockerfile port mappings omit
+`service` because the generated service is implicit.
+
+```yaml
+docker_projects:
+  - type: dockerfile
+    name: web
+    repository: acme/web
+    context: .
+    dockerfile: Dockerfile
+    target: development
+    ports:
+      - named_port: WEB
+        container_port: 3000
+```
+
+All paths must be relative and stay inside the selected repository. Docker
+projects are supported by all sandbox providers. Modal runs them in its beta VM
+sandbox runtime.
 
 ## Ports
 
@@ -231,17 +307,17 @@ A service name cannot collide with a port name in the same environment.
 a preview URL and a corresponding `ROOMOTE_<NAME>_HOST` environment variable
 inside the sandbox.
 
-| Field | Type | Required | Notes |
-| --- | --- | --- | --- |
-| `name` | string | yes | Starts with a letter; letters, numbers, and underscores only. Case-insensitive and unique. `SANDBOX_SERVER` and `EDITOR` are reserved. |
-| `port` | number | yes | The listening port, 1024–65535. |
-| `primary` | boolean | no | Marks the main preview surface. At most one port may be primary. |
-| `initial_path` | string | no | Path the preview opens first. Must start with `/`. |
-| `proxied` | boolean | no | Whether the port is served through the preview proxy. Defaults to proxied. |
-| `unauthenticated` | boolean | no | Allow access without the normal preview auth. |
-| `auth_bypass_paths` | list | no | Up to 20 paths (each starting with `/`) that skip preview auth. |
-| `subdomain` | string | no | DNS-safe subdomain prefix for the preview host. |
-| `wildcard_prefix` | boolean | no | Serve wildcard subdomains under the port. |
+| Field               | Type    | Required | Notes                                                                                                                                  |
+| ------------------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string  | yes      | Starts with a letter; letters, numbers, and underscores only. Case-insensitive and unique. `SANDBOX_SERVER` and `EDITOR` are reserved. |
+| `port`              | number  | yes      | The listening port, 1024–65535.                                                                                                        |
+| `primary`           | boolean | no       | Marks the main preview surface. At most one port may be primary.                                                                       |
+| `initial_path`      | string  | no       | Path the preview opens first. Must start with `/`.                                                                                     |
+| `proxied`           | boolean | no       | Whether the port is served through the preview proxy. Defaults to proxied.                                                             |
+| `unauthenticated`   | boolean | no       | Allow access without the normal preview auth.                                                                                          |
+| `auth_bypass_paths` | list    | no       | Up to 20 paths (each starting with `/`) that skip preview auth.                                                                        |
+| `subdomain`         | string  | no       | DNS-safe subdomain prefix for the preview host.                                                                                        |
+| `wildcard_prefix`   | boolean | no       | Serve wildcard subdomains under the port.                                                                                              |
 
 Limits: at most 10 proxied ports and at most 2 non-proxied ports per
 environment.
