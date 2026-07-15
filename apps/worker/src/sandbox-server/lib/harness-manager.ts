@@ -1226,9 +1226,15 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   /**
    * Fail closed on async StartNewTask failures (e.g. OpenCode session create
-   * timeout). TaskAborted is intentionally not used: it is resumable and
-   * resolveStatus maps it to Canceled. Terminal Failed is lastErrorMessage
-   * without abort/finish stamps, then immediate shutdown.
+   * timeout). TaskAborted is intentionally not used for the plain failure
+   * path: it is resumable and resolveStatus maps it to Canceled. Terminal
+   * Failed is lastErrorMessage without abort/finish stamps, then immediate
+   * shutdown.
+   *
+   * If the user already canceled before a session existed, CancelTask is
+   * effectively a no-op and leaves phase `stopped` with getSleepAt() null —
+   * do not silent-ignore the later StartNewTask settle; still shut down so
+   * the sandbox cannot linger forever.
    */
   private handleCommandError(commandName: string, error: unknown): void {
     if (commandName !== HarnessCommand.StartNewTask) {
@@ -1238,11 +1244,26 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       return;
     }
 
-    if (this.phase === 'shutting_down' || this.state.cancelTriggeredAt) {
+    if (this.phase === 'shutting_down') {
       return;
     }
 
     const message = formatCallbackError(error);
+
+    if (this.state.cancelTriggeredAt) {
+      if (!this.state.taskAbortedAt) {
+        // Preserve cancel semantics for resolveStatus while closing the
+        // session-create race where CancelTask had nothing to abort yet.
+        this.state.taskAbortedAt = this.state.cancelTriggeredAt;
+      }
+      this.logger.info(
+        `[HarnessManager] StartNewTask failed after cancel; completing canceled shutdown error=${message}`,
+      );
+      this.emit('stateChange', this.phase, this.state);
+      this.triggerShutdown();
+      return;
+    }
+
     this.state.lastErrorMessage = message;
     this.logger.error(
       `[HarnessManager] StartNewTask failed; shutting down terminally error=${message}`,

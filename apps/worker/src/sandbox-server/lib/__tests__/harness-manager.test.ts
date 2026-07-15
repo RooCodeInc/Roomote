@@ -2800,4 +2800,42 @@ describe('HarnessManager error status', () => {
       harness.dispose();
     }
   });
+
+  it('still shuts down when StartNewTask fails after cancel before a session exists', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      expect(manager.getStatus().phase).toBe('running');
+      expect(manager.getStatus().sessionId).toBeUndefined();
+
+      // Cancel before OpenCode invents a session id — CancelTask is a no-op on
+      // the runtime side because there is nothing to abort yet.
+      manager.cancelTask();
+      expect(manager.getStatus().phase).toBe('stopped');
+      expect(manager.getSleepAt()).toBeNull();
+      expect(manager.getState().cancelTriggeredAt).toBeDefined();
+
+      harness.emitCommandError({
+        command: {
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'hello' },
+        },
+        error: new Error(
+          'OpenCode session creation did not respond within 90s',
+        ),
+      });
+
+      const finalState = await manager.waitForShutdown();
+      expect(finalState.taskAbortedAt).toBe(finalState.cancelTriggeredAt);
+      expect(finalState.taskFinishedAt).toBeUndefined();
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      // User cancel wins for report status; do not rewrite it as Failed.
+      expect(manager.getStatus().lastErrorMessage).toBeUndefined();
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
 });
