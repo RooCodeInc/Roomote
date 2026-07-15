@@ -926,6 +926,7 @@ describe('ModalClient', () => {
     expect(dockerfile).not.toContain('xfce4-session \\');
     expect(dockerfile).not.toContain('thunar \\');
     expect(dockerfile).not.toContain('sudo dpkg -i "/tmp/${KASM_DEB}"');
+    expect(dockerfile).not.toMatch(/^\s*xvfb\s*\\?$/m);
   });
 
   it('bakes shared runtime tooling and the OpenCode entrypoint into the worker image', () => {
