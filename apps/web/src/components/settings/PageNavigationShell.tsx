@@ -81,7 +81,7 @@ export function PageNavigationShell<T extends string = string>({
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1 space-y-6 lg:ml-68">
+      <div className="min-w-0 flex-1 space-y-6 lg:ml-68 max-w-6xl">
         <div className="space-y-4 lg:hidden">
           <Select
             value={activeItemId}
@@ -125,7 +125,7 @@ export function PageNavigationShell<T extends string = string>({
           ) : null}
         </header>
 
-        <div className="space-y-6 max-w-6xl">{children}</div>
+        <div className="space-y-6">{children}</div>
       </div>
     </div>
   );
