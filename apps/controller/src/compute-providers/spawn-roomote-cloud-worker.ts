@@ -5,7 +5,7 @@ import {
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
 import { getPrimaryPortFromConfig, SANDBOX_SERVER_PORT } from '@roomote/types';
-import type { TaskRun } from '@roomote/db/server';
+import { count, db, isNull, type TaskRun, users } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 
 import {
@@ -27,9 +27,10 @@ export async function spawnRoomoteCloudWorker(input: {
   timeoutMs: number;
   cloudConfig: RoomoteCloudRuntimeConfig;
 }) {
-  const { namedPorts, environmentConfig } = await getNamedPortsForTaskRun(
-    input.taskRun,
-  );
+  const [{ namedPorts, environmentConfig }, [activeUsers]] = await Promise.all([
+    getNamedPortsForTaskRun(input.taskRun),
+    db.select({ total: count() }).from(users).where(isNull(users.deletedAt)),
+  ]);
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
     namedPorts,
@@ -60,6 +61,7 @@ export async function spawnRoomoteCloudWorker(input: {
     taskId: String(input.taskRun.taskId),
     deploymentSlug: input.deploymentSlug,
     timeoutSeconds: Math.ceil(input.timeoutMs / 1000),
+    activeSeatCount: activeUsers?.total ?? 0,
     environment: workerEnv,
     ports: namedPorts.map(({ port }) => port),
   });

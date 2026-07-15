@@ -47,6 +47,7 @@ describe('Roomote Cloud runtime', () => {
         taskId: 'task-1',
         deploymentSlug: 'hosted',
         timeoutSeconds: 600,
+        activeSeatCount: 3,
         environment: {
           AUTH_TOKEN: 'run-token',
           R_MODEL: 'anthropic/claude-sonnet',
@@ -63,6 +64,7 @@ describe('Roomote Cloud runtime', () => {
     });
     const request = fetchFn.mock.calls[0];
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
+      activeSeatCount: 3,
       environment: {
         R_MODEL: 'anthropic/claude-sonnet',
         ANTHROPIC_API_KEY: 'customer-key',

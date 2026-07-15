@@ -55,6 +55,7 @@ export async function launchRoomoteCloudCompute(
     taskId: string;
     deploymentSlug: string;
     timeoutSeconds: number;
+    activeSeatCount: number;
     environment: Record<string, string>;
     ports: number[];
   },

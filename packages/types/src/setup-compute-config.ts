@@ -236,7 +236,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     provider: 'roomote-cloud',
     label: 'Roomote Cloud',
     description:
-      'Managed isolated sandboxes billed from prepaid Roomote Cloud credits. Inference remains configured with your own provider keys.',
+      'Managed isolated sandboxes with service terms arranged through Roomote. Inference remains configured with your own provider keys.',
     supportsSnapshots: false,
     fields: [
       {

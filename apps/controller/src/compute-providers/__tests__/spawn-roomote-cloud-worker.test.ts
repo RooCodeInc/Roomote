@@ -16,6 +16,17 @@ vi.mock('@roomote/env', () => ({
   Env: { TRPC_URL: 'http://api', R_APP_URL: 'http://app' },
 }));
 
+vi.mock('@roomote/db/server', () => ({
+  count: () => 'count',
+  db: {
+    select: () => ({
+      from: () => ({ where: () => Promise.resolve([{ total: 3 }]) }),
+    }),
+  },
+  isNull: () => 'is-null',
+  users: { deletedAt: 'deleted-at' },
+}));
+
 vi.mock('@roomote/compute-providers', () => ({
   buildDockerWorkerEnv: (input: { extraEnv: Record<string, string> }) => ({
     ...input.extraEnv,
@@ -100,6 +111,7 @@ describe('spawnRoomoteCloudWorker', () => {
     expect(mockLaunchRoomoteCloudCompute).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
+        activeSeatCount: 3,
         environment: expect.objectContaining({
           R_MODEL: 'anthropic/claude-sonnet',
           ANTHROPIC_API_KEY: 'customer-key',
