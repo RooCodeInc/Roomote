@@ -302,16 +302,20 @@ describe('StepSourceControlConfig', () => {
       screen.getByText(/Bitbucket OAuth Client Secret/),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: 'Atlassian Developer Console' }),
+      screen.getByRole('link', {
+        name: 'Bitbucket OAuth consumer instructions',
+      }),
     ).toHaveAttribute(
       'href',
-      'https://developer.atlassian.com/console/myapps/',
+      'https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/',
     );
     expect(
       screen.getByText('Create a new Bitbucket OAuth consumer.'),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Create App → OAuth 2.0 → Account-level/),
+      screen.getByText(
+        /Workspace settings.*Apps and features.*OAuth consumers.*Add consumer/,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /Open/ }),

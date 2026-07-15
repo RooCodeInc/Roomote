@@ -29,7 +29,6 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
       'In Gitea 1.23+, go to your org → Settings → Application → New OAuth2 app.',
   },
   bitbucket: {
-    creationHref: 'https://developer.atlassian.com/console/myapps/',
     setupLabel: 'Bitbucket OAuth consumer',
   },
   ado: {

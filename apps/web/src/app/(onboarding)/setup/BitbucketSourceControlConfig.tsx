@@ -5,18 +5,19 @@ export function BitbucketSourceControlCreation() {
     <>
       <p className="font-semibold">Create a new Bitbucket OAuth consumer.</p>
       <p className="text-sm text-muted-foreground">
-        As an admin, in the{' '}
+        As an admin, open the Bitbucket workspace you want Roomote to access,
+        then go to Workspace settings → Apps and features → OAuth consumers →
+        Add consumer. See the{' '}
         <a
-          href="https://developer.atlassian.com/console/myapps/"
+          href="https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/"
           target="_blank"
           rel="noopener noreferrer"
           className="text-foreground underline underline-offset-4 hover:text-foreground"
         >
-          Atlassian Developer Console
+          Bitbucket OAuth consumer instructions
         </a>
-        , Create App → OAuth 2.0 → Account-level. Then go to Permissions →
-        Marketplace or custom app → Bitbucket API. Then go to Permissions → and
-        grant account, repository:write, pullrequest:write, and webhook scopes.
+        . Grant account, repository:write, pullrequest:write, and webhook
+        scopes.
       </p>
     </>
   );
