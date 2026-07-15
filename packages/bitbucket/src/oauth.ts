@@ -3,9 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { db, deploymentSecrets, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
+import { BITBUCKET_OAUTH_CALLBACK_PATH } from './constants';
+
+export { BITBUCKET_OAUTH_CALLBACK_PATH };
+
 const SECRET_NAME = 'bitbucket_deployment_oauth_connection';
-export const BITBUCKET_OAUTH_CALLBACK_PATH =
-  '/api/auth/oauth2/callback/bitbucket';
 const DEFAULT_SCOPES = [
   'account',
   'repository',

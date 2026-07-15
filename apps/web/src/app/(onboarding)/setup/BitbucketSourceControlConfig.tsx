@@ -1,5 +1,5 @@
 import { Settings } from '@/components/system';
-import { BITBUCKET_OAUTH_CALLBACK_PATH } from '@roomote/bitbucket';
+import { BITBUCKET_OAUTH_CALLBACK_PATH } from '@roomote/bitbucket/constants';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 export function BitbucketSourceControlCreation() {
