@@ -48,7 +48,7 @@ function getTokenBackedConnectCopy({
   providerLabel: string;
 }): string {
   if (lockedByRuntime) {
-    return `Roomote needs access to your repositories to work on your codebase. Since ${providerLabel} is already configured, let's go with it.`;
+    return 'Connect to continue';
   }
 
   switch (provider) {
@@ -162,10 +162,13 @@ export function StepSourceControlConnect({
     provider === 'ado' &&
     adoAuthMode === 'delegated' &&
     !adoLinkedAccount.data?.account;
-  const lockedByRuntime = sourceControlSetup.lockReason === 'runtime_env';
+  // Scope the runtime-configured copy to the provider the user actually
+  // landed on. A different provider being configured by env vars must not make
+  // an unconfigured selected provider claim it is already configured.
+  const lockedByRuntime = providerStatus?.configSatisfiedByRuntimeEnv === true;
   const providerLabel = providerStatus?.label ?? provider;
   const githubCopy = lockedByRuntime
-    ? "Roomote needs access to your repositories to work on your codebase. Since GitHub is already configured, let's go with it."
+    ? 'Connect to continue'
     : 'Connect the GitHub App to grant Roomote access to your repositories.';
 
   const tokenBackedCopy = getTokenBackedConnectCopy({
