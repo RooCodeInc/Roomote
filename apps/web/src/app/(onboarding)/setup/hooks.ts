@@ -412,13 +412,18 @@ export function useSetupFlow(
         case 'qualification-blocked':
           return activeQualificationBlock === null;
         case 'compute-provider':
-          return (
-            !hasStaleComputeProvider &&
-            (status.computeSetup.setupSatisfied ||
-              selectedComputeProvider !== null)
-          );
+          // Runtime env vars alone must not count as a choice: a deployment
+          // that preconfigures a sandbox provider (e.g. Roomote Sandbox)
+          // still renders the picker so the user sees what they are getting
+          // and that alternatives exist. selectedComputeProvider only
+          // reflects genuine choices — the wizard pick or a persisted
+          // default — mirroring the communication/source-control steps.
+          return !hasStaleComputeProvider && selectedComputeProvider !== null;
         case 'compute-config': {
-          if (hasStaleComputeProvider || status.computeSetup.setupSatisfied) {
+          // Scoped to the chosen provider: a deployment-wide setupSatisfied
+          // (another provider fully configured by env vars) must not skip
+          // configuration for an unconfigured provider the user picked.
+          if (hasStaleComputeProvider) {
             return true;
           }
 
@@ -430,6 +435,13 @@ export function useSetupFlow(
             (provider) => provider.provider === selectedComputeProvider,
           );
 
+          // A chosen provider missing from the offered list has no config
+          // step to render; the stale-choice guard above already covers
+          // exclusions, so a lookup miss means nothing to configure.
+          if (!computeProviderStatus) {
+            return true;
+          }
+
           if (
             isSetupProvisionableComputeProvider(selectedComputeProvider) &&
             getSetupNewComputeProvisioningState(
@@ -440,7 +452,7 @@ export function useSetupFlow(
             return true;
           }
 
-          return computeProviderStatus?.configSatisfied ?? false;
+          return computeProviderStatus.configSatisfied;
         }
         case 'slack':
           if (communicationStepResolved) {
