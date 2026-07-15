@@ -30,7 +30,7 @@ export async function installNodePty(logger: StartupLogger): Promise<void> {
     // We use require() here (not import()) because we only need to check
     // whether the module is resolvable — not actually load it. A failed
     // require() throws synchronously, which is cheap to catch.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    // oxlint-disable-next-line @typescript-eslint/no-require-imports
     require('node-pty');
     return;
   } catch {
