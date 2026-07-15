@@ -13,6 +13,7 @@ import {
   type TaskCommand,
   TaskCommandName,
   type Harness,
+  type HarnessCommandError,
   type HarnessEvents,
 } from '../harness';
 import {
@@ -71,6 +72,13 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
     return () => this.off('runtimeTurnCompleted', listener);
   }
 
+  subscribeCommandError(
+    listener: (error: HarnessCommandError) => void,
+  ): () => void {
+    this.on('commandError', listener);
+    return () => this.off('commandError', listener);
+  }
+
   sendCommand(command: TaskCommand): boolean {
     this.sentCommands.push(command);
     return true;
@@ -102,6 +110,10 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
 
   emitRuntimeOutput(event: AcpMessage): void {
     this.emit('runtimeOutput', event);
+  }
+
+  emitCommandError(error: HarnessCommandError): void {
+    this.emit('commandError', error);
   }
 }
 
@@ -2726,28 +2738,63 @@ describe('HarnessManager error status', () => {
 
       harness.emitTaskEvent({
         eventName: TaskEventName.TaskStarted,
-        payload: ['task-error'],
+        payload: ['task-error-clear'],
       } as TaskEvent);
 
       harness.emitTaskEvent({
         eventName: TaskEventName.Message,
         payload: [
           {
-            taskId: 'task-error',
+            taskId: 'task-error-clear',
+            action: 'created',
             message: {
               ts: Date.now(),
               type: 'say',
               say: 'error',
-              text: 'unexpected status 401 Unauthorized: proxy token rejected',
-              partial: false,
+              text: 'temporary glitch',
             },
           },
         ],
       } as TaskEvent);
 
       expect(manager.getStatus().lastErrorMessage).toBeDefined();
-      expect(manager.sendFollowUpPrompt({ prompt: 'retry' })).toBe(true);
+      manager.sendFollowUpPrompt({ prompt: 'retry' });
       expect(manager.getStatus().lastErrorMessage).toBeUndefined();
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('shuts down terminally when StartNewTask fails asynchronously', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.emitCommandError({
+        command: {
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'hello' },
+        },
+        error: new Error(
+          'OpenCode session creation did not respond within 90s',
+        ),
+      });
+
+      await expect(manager.waitForShutdown()).resolves.toMatchObject({
+        lastErrorMessage:
+          'OpenCode session creation did not respond within 90s',
+        taskAbortedAt: undefined,
+        taskFinishedAt: undefined,
+      });
+      expect(manager.getStatus()).toMatchObject({
+        phase: 'shutting_down',
+        lastErrorMessage:
+          'OpenCode session creation did not respond within 90s',
+      });
     } finally {
       manager.dispose();
       harness.dispose();

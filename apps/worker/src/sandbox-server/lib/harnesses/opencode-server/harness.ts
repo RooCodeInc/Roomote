@@ -14,6 +14,7 @@ import {
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
+  TaskEventName,
 } from '@roomote/types';
 import type {
   AcpMessage,
@@ -3037,10 +3038,10 @@ export class OpenCodeServerHarness
   }
 
   /**
-   * Leave a terminal, retryable failure when the very first session never
-   * materializes. Without this the harness manager stays in `running` forever
-   * (commandError is currently unsubscribed) and `first_assistant_output_at`
-   * never stamps.
+   * Leave a transcript-visible failure for the initial prompt when the first
+   * OpenCode session never materializes. Do not emit TaskAborted — that path is
+   * resumable and resolveStatus maps it to Canceled. The surrounding
+   * `commandError` + HarnessManager handler force a terminal Failed shutdown.
    */
   private failSessionCreateForInitialTask(error: unknown): void {
     if (this.sessionId) {
@@ -3055,14 +3056,28 @@ export class OpenCodeServerHarness
       : `OpenCode session creation failed before the agent could start.\n\n${message}\n\n${formatOpenCodeSessionCreateTimeoutText(timeoutMs)}`;
 
     this.logger.error(
-      `OpenCode initial session create failed; aborting task so it does not hang in running forever error=${message}`,
+      `OpenCode initial session create failed; failing the task terminally error=${message}`,
     );
     this.runtimeEvents.taskStarted(sessionId);
     this.runtimeEvents.assistantMessage({
       sessionId,
       text: userText,
     });
-    this.runtimeEvents.taskAborted(sessionId);
+    this.emit('taskEvent', {
+      eventName: TaskEventName.Message,
+      payload: [
+        {
+          taskId: sessionId,
+          action: 'created',
+          message: {
+            ts: Date.now(),
+            type: 'say',
+            say: 'error',
+            text: userText,
+          },
+        },
+      ],
+    });
   }
 
   private async validateResumedSession(sessionId: string): Promise<boolean> {

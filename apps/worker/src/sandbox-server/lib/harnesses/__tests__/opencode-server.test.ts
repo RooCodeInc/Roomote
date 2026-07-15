@@ -3384,7 +3384,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('aborts the initial task and records a diagnostic when session create fails', async () => {
+  it('fails the initial task and records a diagnostic when session create fails', async () => {
     const client = new FakeOpenCodeServerClient();
     client.createSession.mockRejectedValueOnce(
       new Error(
@@ -3404,11 +3404,13 @@ describe('OpenCodeServerHarness', () => {
     });
     const taskEvents: TaskEvent[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const commandErrors: unknown[] = [];
 
     harness.subscribe((event) => taskEvents.push(event));
     harness.subscribeRuntimePersistedEnvelope((envelope) =>
       persistedEnvelopes.push(envelope),
     );
+    harness.subscribeCommandError?.((error) => commandErrors.push(error));
 
     try {
       await connectHarness(harness, client);
@@ -3419,11 +3421,7 @@ describe('OpenCodeServerHarness', () => {
       });
 
       await vi.waitFor(() => {
-        expect(
-          taskEvents.some(
-            (event) => event.eventName === TaskEventName.TaskAborted,
-          ),
-        ).toBe(true);
+        expect(commandErrors.length).toBeGreaterThan(0);
       });
 
       expect(
@@ -3431,6 +3429,19 @@ describe('OpenCodeServerHarness', () => {
           (event) =>
             event.eventName === TaskEventName.TaskStarted &&
             event.payload?.[0] === 'opencode-session-create-failed',
+        ),
+      ).toBe(true);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.Message &&
+            (event.payload?.[0] as { message?: { say?: string } })?.message
+              ?.say === 'error',
         ),
       ).toBe(true);
       expect(client.promptAsync).not.toHaveBeenCalled();
