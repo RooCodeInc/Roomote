@@ -67,7 +67,7 @@ const sourceControlProviderCopy: Record<
   },
   bitbucket: {
     icon: 'bitbucket',
-    description: `Start work from connected Bitbucket Cloud pull requests and repositories.`,
+    description: `Mention @roomote in a comment on any pull request.`,
   },
   ado: {
     icon: 'ado',
