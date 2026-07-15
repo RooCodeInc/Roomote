@@ -36,11 +36,12 @@ export type RepositoryRow = {
 };
 
 /**
- * Shared provider-resolution and HTTP plumbing for the provider-neutral
- * source-control pull-request surface. The mutation, read, and write modules
- * each used to carry byte-identical private copies of these helpers; they now
- * import from this module so provider resolution and request handling change
- * in exactly one place.
+ * Shared provider-resolution and name/url plumbing for the provider-neutral
+ * source-control pull-request surface. HTTP transport lives in
+ * `source-control-pull-request-http.ts`; credential resolve lives in
+ * `source-control-pull-request-provider-context.ts`; create-or-update branch
+ * lookup lives in `source-control-pull-request-branch-lookup.ts`; normalized
+ * open/merged listing stays owned by `source-control-pull-request-reads.ts`.
  */
 
 /**
