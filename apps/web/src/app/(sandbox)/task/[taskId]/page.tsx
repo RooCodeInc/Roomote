@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleSlash } from '@/components/system';
+import { CircleSlash, TriangleAlert } from '@/components/system';
 
 import {
   TaskPayloadKind,
@@ -41,6 +41,7 @@ import { Header } from './Header';
 import { HistoricalContent } from './HistoricalContent';
 import { getTaskNotificationPhase } from './hooks/task-notification-phase';
 import { MemoizedLiveContent } from './LiveContent';
+import { EnvironmentDefinitionAgentTaskPanel } from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
 
 export default function SandboxPage() {
   const { taskId: unresolvedTaskId } = useParams<{ taskId: string }>();
@@ -185,6 +186,19 @@ export default function SandboxPage() {
     );
   }
 
+  if (sessionState === 'error') {
+    return (
+      <FramedSurface surfaceClassName="flex items-center justify-center">
+        <EmptyState
+          icon={<TriangleAlert className="size-6" />}
+          iconClassName="text-amber-500 pt-0"
+          containerClassName="[&>div]:items-center"
+          description="This task could not be loaded. Refresh the page or try again in a moment."
+        />
+      </FramedSurface>
+    );
+  }
+
   if (sessionState === 'not-found') {
     return (
       <FramedSurface surfaceClassName="flex items-center justify-center">
@@ -194,6 +208,20 @@ export default function SandboxPage() {
           containerClassName="[&>div]:items-center"
           description="This task does not exist or you do not have permission to view it."
         />
+      </FramedSurface>
+    );
+  }
+
+  if (task?.workflow === 'setup_onboarding') {
+    return (
+      <FramedSurface>
+        <div className="h-full min-h-0 p-6">
+          <EnvironmentDefinitionAgentTaskPanel
+            session={session}
+            className="h-full"
+            showHeader={false}
+          />
+        </div>
       </FramedSurface>
     );
   }
