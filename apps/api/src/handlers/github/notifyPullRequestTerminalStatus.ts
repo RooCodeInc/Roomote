@@ -8,6 +8,8 @@ import {
   eq,
   and,
   inArray,
+  isNull,
+  or,
 } from '@roomote/db/server';
 import {
   buildPullRequestStatusNotificationText,
@@ -51,6 +53,19 @@ interface NotifyPullRequestTerminalStatusParams {
    */
   installationId?: number;
   repository: string;
+  /**
+   * Optional FK to the provider-scoped `repositories` row. When set,
+   * `(repositoryId, prNumber)` uniquely identifies the PR even across
+   * same-name repositories on different self-managed hosts.
+   */
+  repositoryId?: string | null;
+  /**
+   * Optional source-control instance host (for example `gitlab.example.com`).
+   * When `repositoryId` is absent, scopes the repository-name lookup so
+   * same-name hosts cannot notify each other's task threads. Legacy rows
+   * with a NULL host still match.
+   */
+  host?: string | null;
   prNumber: number;
   prTitle: string;
   prUrl: string;
@@ -499,6 +514,8 @@ export async function notifyPullRequestTerminalStatus({
   sourceControlProvider,
   installationId,
   repository,
+  repositoryId,
+  host,
   prNumber,
   prTitle,
   prUrl,
@@ -528,8 +545,20 @@ export async function notifyPullRequestTerminalStatus({
     const prTaskLinks = await db.query.taskPullRequests.findMany({
       where: and(
         eq(taskPullRequests.sourceControlProvider, sourceControlProvider),
-        eq(taskPullRequests.repository, repository),
         eq(taskPullRequests.prNumber, prNumber),
+        repositoryId
+          ? eq(taskPullRequests.repositoryId, repositoryId)
+          : and(
+              eq(taskPullRequests.repository, repository),
+              ...(host
+                ? [
+                    or(
+                      eq(taskPullRequests.host, host),
+                      isNull(taskPullRequests.host),
+                    ),
+                  ]
+                : []),
+            ),
       ),
       columns: {
         taskId: true,

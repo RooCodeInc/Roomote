@@ -398,7 +398,9 @@ async function startDockerProject({
     resolved.project.type === 'compose'
       ? (resolved.project.services ?? [])
       : [];
-  const waitForServices = resolved.env.COMPUTE_PROVIDER !== 'blaxel';
+  const waitForServices =
+    resolved.env.COMPUTE_PROVIDER !== 'blaxel' &&
+    resolved.env.WORKER_TARGET !== 'blaxel';
   if (!waitForServices) {
     logger.userLog.warn(
       'Blaxel does not support Docker healthchecks; continuing after Compose starts the services.',

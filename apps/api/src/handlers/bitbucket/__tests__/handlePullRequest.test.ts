@@ -32,6 +32,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
   },
@@ -95,7 +99,10 @@ function makePayload(
 describe('handleBitbucketPullRequest', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
     mockGetBitbucketAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [

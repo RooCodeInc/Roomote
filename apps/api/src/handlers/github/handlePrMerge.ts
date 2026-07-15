@@ -2,6 +2,7 @@ import type { WebhookResponse } from '../../types';
 
 import type { WebhookPullRequestClosed } from './types';
 import { scheduleNotifyPullRequestTerminalStatus } from './notifyPullRequestTerminalStatus';
+import { toHostFromUrl } from '../utils';
 
 export const handlePrMerge = async ({
   installation,
@@ -21,6 +22,7 @@ export const handlePrMerge = async ({
         sourceControlProvider: 'github',
         installationId: installation.id,
         repository: repository.full_name,
+        host: toHostFromUrl(pull_request.html_url),
         prNumber: pull_request.number,
         prTitle: pull_request.title,
         prUrl: pull_request.html_url,

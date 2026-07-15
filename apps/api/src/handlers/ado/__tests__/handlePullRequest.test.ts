@@ -34,6 +34,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
     select: () => {
@@ -169,7 +173,10 @@ describe('handleAdoPullRequest', () => {
     mockDedupSelect.mockReset();
     mockScheduleNotifyPullRequestTerminalStatus.mockReset();
 
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
     mockDedupSelect.mockReturnValue([]);
 
     mockGetAdoAutomationTargets.mockResolvedValue({
@@ -483,6 +490,8 @@ describe('handleAdoPullRequest', () => {
       {
         sourceControlProvider: 'ado',
         repository: 'acme/Platform/backend',
+        repositoryId: 'repo-row-1',
+        host: 'dev.azure.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl:
@@ -526,6 +535,8 @@ describe('handleAdoPullRequest', () => {
       {
         sourceControlProvider: 'ado',
         repository: 'acme/Platform/backend',
+        repositoryId: 'repo-row-1',
+        host: 'dev.azure.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl:

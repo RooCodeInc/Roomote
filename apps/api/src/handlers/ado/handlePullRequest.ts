@@ -28,7 +28,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
-import { toHostFromUrl } from '../utils';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getAdoAutomationTargets,
   getAdoIdentityName,
@@ -80,14 +80,21 @@ async function notifyTerminalPullRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const prUrl = getAdoPullRequestUrl({
+    resourceContainers: payload.resourceContainers,
+    pullRequest: payload.resource,
+    repositoryFullName: repoFullName,
+  });
+  const webhookHost = toHostFromUrl(prUrl);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'ado'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
@@ -97,13 +104,11 @@ async function notifyTerminalPullRequestThreads(
     {
       sourceControlProvider: 'ado',
       repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
       prNumber: payload.resource.pullRequestId,
       prTitle: payload.resource.title,
-      prUrl: getAdoPullRequestUrl({
-        resourceContainers: payload.resourceContainers,
-        pullRequest: payload.resource,
-        repositoryFullName: repoFullName,
-      }),
+      prUrl,
       status,
       actorLogin:
         getAdoIdentityName(payload.resource.closedBy) ??

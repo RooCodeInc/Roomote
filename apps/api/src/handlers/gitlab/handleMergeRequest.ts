@@ -22,7 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
-import { toHostFromUrl } from '../utils';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import { getGitLabAutomationTargets } from './getGitLabAutomationTargets';
 import type { GitLabMergeRequestWebhook } from './types';
 
@@ -60,14 +60,16 @@ async function notifyTerminalMergeRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const webhookHost = toHostFromUrl(payload.object_attributes.url);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitlab'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
@@ -77,6 +79,8 @@ async function notifyTerminalMergeRequestThreads(
     {
       sourceControlProvider: 'gitlab',
       repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
       prNumber: payload.object_attributes.iid,
       prTitle: payload.object_attributes.title,
       prUrl: payload.object_attributes.url,
