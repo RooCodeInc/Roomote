@@ -1,4 +1,5 @@
 import {
+  buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
@@ -6,11 +7,13 @@ import {
   DEFAULT_TASK_MODEL_ID,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
+  getSetupModelProvider,
   isInlineGoogleCredentialsValue,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
   type ReasoningEffort,
+  type SetupModelProviderDescriptor,
 } from './index';
 
 describe('normalizeDeploymentModelConfig', () => {
@@ -236,6 +239,26 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('only recommends role models from the provider suggested catalog', () => {
+    const providers: readonly SetupModelProviderDescriptor[] =
+      SETUP_MODEL_PROVIDER_CATALOG;
+
+    for (const provider of providers) {
+      const suggestedModelIds = new Set(
+        provider.suggestedTaskModels.map((suggestion) => suggestion.id),
+      );
+
+      for (const [role, modelId] of Object.entries(
+        provider.recommendedRoleModels ?? {},
+      )) {
+        expect(
+          modelId !== undefined && suggestedModelIds.has(modelId),
+          `${provider.id} recommends ${modelId} for ${role}, which is not in its suggestedTaskModels`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it('maps Amazon Bedrock to a Bedrock API key plus an optional AWS region', () => {
     const bedrockProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'amazon-bedrock',
@@ -358,6 +381,36 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'TOGETHER_API_KEY',
       defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       authKind: 'api-key',
+    });
+  });
+});
+
+describe('buildRecommendedDeploymentModelConfig', () => {
+  it('maps the provider default to coding and recommended models to their roles', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
+    ).toEqual({
+      roomoteModel: 'anthropic/claude-sonnet-5',
+      roomoteSmallModel: 'anthropic/claude-haiku-4-5',
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: 'anthropic/claude-opus-4-8',
+      roomoteExploreModel: 'anthropic/claude-haiku-4-5',
+      roomotePlanningModel: 'anthropic/claude-opus-4-8',
+      roomoteModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
+  it('recommends only the coding default for providers without a role mapping', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('xai')),
+    ).toEqual({
+      ...createEmptyDeploymentModelConfig(),
+      roomoteModel: 'xai/grok-4.5',
     });
   });
 });

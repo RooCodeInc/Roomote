@@ -88,16 +88,22 @@ vi.mock('@/components/settings', () => ({
   Section: ({
     children,
     title,
+    action,
   }: {
     children: React.ReactNode;
     title?: string;
+    action?: React.ReactNode;
   }) => (
-    <section data-testid={`section-${title ?? 'untitled'}`}>{children}</section>
+    <section data-testid={`section-${title ?? 'untitled'}`}>
+      {action}
+      {children}
+    </section>
   ),
 }));
 
 import type {
   ReasoningEffort,
+  RecommendedRoleModels,
   SetupModelProviderId,
   TaskModelMetadata,
 } from '@roomote/types';
@@ -248,6 +254,7 @@ function buildProviderSetupData(
       string,
       Array<{ id: string; displayName: string }>
     >;
+    recommendedRoleModelsByProvider?: Record<string, RecommendedRoleModels>;
   } = {},
 ) {
   const connectedProviderIds = overrides.connectedProviderIds ?? [
@@ -256,6 +263,8 @@ function buildProviderSetupData(
   ];
   const suggestedTaskModelsByProvider =
     overrides.suggestedTaskModelsByProvider ?? {};
+  const recommendedRoleModelsByProvider =
+    overrides.recommendedRoleModelsByProvider ?? {};
   const buildProvider = (
     id: SetupModelProviderId,
     label: string,
@@ -267,6 +276,7 @@ function buildProviderSetupData(
     defaultRoomoteModel: `${id}/default-model`,
     authKind: 'api-key' as const,
     suggestedTaskModels: suggestedTaskModelsByProvider[id] ?? [],
+    recommendedRoleModels: recommendedRoleModelsByProvider[id],
     runtimeApiKeySatisfied: false,
     savedApiKeySatisfied: connectedProviderIds.includes(id),
     additionalEnvValues: {},
@@ -324,6 +334,9 @@ describe('ModelSettingsSection', () => {
     refreshMutateAsyncMock.mockReset();
     settingsData.current = null;
     providerSetupData.current = buildProviderSetupData();
+    // cmdk scrolls the highlighted command item into view; jsdom does not
+    // implement scrollIntoView.
+    window.HTMLElement.prototype.scrollIntoView = vi.fn();
 
     lookupMutateAsyncMock.mockResolvedValue({
       modelId: 'anthropic/claude-sonnet-4',
@@ -697,6 +710,139 @@ describe('ModelSettingsSection', () => {
     expect(
       screen.getByRole('button', { name: 'Delete GLM 5.2' }),
     ).toBeInTheDocument();
+  });
+
+  it('applies the recommended defaults for a single connected provider from the header action', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      suggestedTaskModelsByProvider: {
+        anthropic: [
+          {
+            id: 'anthropic/claude-haiku-4-5',
+            displayName: 'Claude Haiku 4.5',
+          },
+          { id: 'anthropic/claude-opus-4-8', displayName: 'Claude Opus 4.8' },
+        ],
+      },
+      recommendedRoleModelsByProvider: {
+        anthropic: {
+          helper: 'anthropic/claude-haiku-4-5',
+          codeReview: 'anthropic/claude-opus-4-8',
+          explore: 'anthropic/claude-haiku-4-5',
+          planning: 'anthropic/claude-opus-4-8',
+        },
+      },
+    });
+
+    renderModelSettingsSection();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The macro resets every role to the provider's recommendation (coding =
+    // provider default; vision is unset, so "Same as coding model")...
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'anthropic/default-model',
+        helperModelId: 'anthropic/claude-haiku-4-5',
+        visionModelId: null,
+        codeReviewModelId: 'anthropic/claude-opus-4-8',
+        exploreModelId: 'anthropic/claude-haiku-4-5',
+        planningModelId: 'anthropic/claude-opus-4-8',
+      }),
+    );
+
+    // ...and adds + enables any recommended models missing from the list.
+    const payload = updateMutateAsyncMock.mock.calls[0]![0] as {
+      models: Array<{ id: string }>;
+      allowedModelIds: string[];
+    };
+    const recommendedModelIds = [
+      'anthropic/default-model',
+      'anthropic/claude-haiku-4-5',
+      'anthropic/claude-opus-4-8',
+    ];
+    expect(payload.models.map((model) => model.id)).toEqual(
+      expect.arrayContaining(recommendedModelIds),
+    );
+    expect(payload.allowedModelIds).toEqual(
+      expect.arrayContaining(recommendedModelIds),
+    );
+  });
+
+  it('offers a provider picker for recommended defaults when several providers are connected', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      recommendedRoleModelsByProvider: {
+        openrouter: {
+          helper: 'openrouter/z-ai/glm-5.2',
+        },
+      },
+    });
+
+    renderModelSettingsSection();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'OpenRouter' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'openrouter/default-model',
+        helperModelId: 'openrouter/z-ai/glm-5.2',
+        visionModelId: null,
+        codeReviewModelId: null,
+        exploreModelId: null,
+        planningModelId: null,
+      }),
+    );
+  });
+
+  it('leaves env-managed roles untouched when applying recommended defaults', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/openai/gpt-5.4-mini',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      suggestedTaskModelsByProvider: {
+        anthropic: [
+          {
+            id: 'anthropic/claude-haiku-4-5',
+            displayName: 'Claude Haiku 4.5',
+          },
+        ],
+      },
+      recommendedRoleModelsByProvider: {
+        anthropic: {
+          helper: 'anthropic/claude-haiku-4-5',
+        },
+      },
+    });
+
+    renderModelSettingsSection();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    // The helper model is env-managed, so the macro keeps the persisted
+    // helper selection (null) instead of the recommendation.
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'anthropic/default-model',
+        helperModelId: null,
+      }),
+    );
   });
 
   it('composes openai/ model ids when the ChatGPT provider is selected', async () => {

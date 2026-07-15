@@ -41,6 +41,32 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
 export type SetupModelProviderAuthKind = 'api-key' | 'oauth';
 
 /**
+ * The default-model roles a deployment configures: one model per kind of
+ * work. `coding` drives new task launches; every other role falls back to
+ * the coding model at runtime when unset.
+ */
+export type TaskModelRole =
+  | 'coding'
+  | 'helper'
+  | 'vision'
+  | 'codeReview'
+  | 'explore'
+  | 'planning';
+
+/**
+ * A provider's recommended default models for the non-coding roles. The
+ * coding role's recommendation is always the provider's
+ * `defaultRoomoteModel`, so it is intentionally not part of this map; roles
+ * left unset are recommended to follow the coding model ("same as coding"
+ * at runtime). Every id must be one of the provider's `suggestedTaskModels`
+ * so applying recommendations never points a role at a model outside the
+ * provider's curated catalog.
+ */
+export type RecommendedRoleModels = Partial<
+  Record<Exclude<TaskModelRole, 'coding'>, string>
+>;
+
+/**
  * An additional credential value a provider needs beyond its primary API-key
  * env var (`envVarName`), such as an AWS region or a GCP project id. The
  * connect UI renders one input per field; `required` fields also participate
@@ -82,6 +108,15 @@ export type SetupModelProviderDescriptor = {
   defaultRoomoteModel: string;
   authKind: SetupModelProviderAuthKind;
   suggestedTaskModels: readonly SuggestedTaskModel[];
+  /**
+   * Recommended per-role default models, applied when the provider is
+   * connected during setup and by the models settings page's
+   * "Use recommended" action (see
+   * `buildRecommendedDeploymentModelConfig`). Providers without a mapping
+   * recommend `defaultRoomoteModel` for coding and "same as coding" for
+   * every other role.
+   */
+  recommendedRoleModels?: RecommendedRoleModels;
 };
 
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
@@ -99,6 +134,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels(
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
+    recommendedRoleModels: {
+      helper: 'openrouter/google/gemini-3.5-flash',
+      vision: 'openrouter/google/gemini-3.1-pro-preview',
+      codeReview: 'openrouter/anthropic/claude-opus-4.8',
+      explore: 'openrouter/google/gemini-3.5-flash',
+      planning: 'openrouter/anthropic/claude-opus-4.8',
+    },
   },
   {
     id: 'vercel',
@@ -125,6 +167,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
       'grok-4-5': 'vercel/xai/grok-4.5',
     }),
+    recommendedRoleModels: {
+      helper: 'vercel/google/gemini-3.5-flash',
+      vision: 'vercel/google/gemini-3.1-pro-preview',
+      codeReview: 'vercel/anthropic/claude-opus-4.8',
+      explore: 'vercel/google/gemini-3.5-flash',
+      planning: 'vercel/anthropic/claude-opus-4.8',
+    },
   },
   {
     id: 'requesty',
@@ -178,6 +227,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
+    recommendedRoleModels: {
+      helper: 'openai/gpt-5.6-luna',
+      codeReview: 'openai/gpt-5.6-sol',
+      explore: 'openai/gpt-5.6-luna',
+      planning: 'openai/gpt-5.6-sol',
+    },
   },
   {
     id: 'anthropic',
@@ -191,6 +246,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-4-8': 'anthropic/claude-opus-4-8',
       'claude-sonnet-5': 'anthropic/claude-sonnet-5',
     }),
+    recommendedRoleModels: {
+      helper: 'anthropic/claude-haiku-4-5',
+      codeReview: 'anthropic/claude-opus-4-8',
+      explore: 'anthropic/claude-haiku-4-5',
+      planning: 'anthropic/claude-opus-4-8',
+    },
   },
   {
     id: 'moonshotai',
@@ -233,6 +294,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'opencode/minimax-m3',
       'grok-4-5': 'opencode/grok-4.5',
     }),
+    // The default coding model (big-pickle) is OpenCode's own routed model,
+    // so vision gets an explicit multimodal recommendation instead of the
+    // usual same-as-coding fallback.
+    recommendedRoleModels: {
+      helper: 'opencode/gemini-3.5-flash',
+      vision: 'opencode/claude-sonnet-5',
+      codeReview: 'opencode/claude-opus-4-8',
+      explore: 'opencode/gemini-3.5-flash',
+      planning: 'opencode/claude-opus-4-8',
+    },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
@@ -264,6 +335,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-4-8': 'bedrock-mantle/anthropic.claude-opus-4-8',
       'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
     }),
+    recommendedRoleModels: {
+      helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      codeReview: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      planning: 'bedrock-mantle/anthropic.claude-opus-4-8',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `google-vertex` provider.
@@ -299,6 +376,13 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-1-pro': 'google-vertex/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google-vertex/gemini-3.5-flash',
     }),
+    // Gemini-only recommendations: Claude models on Vertex often require
+    // separate Model Garden enablement, so they are suggested but not
+    // recommended defaults.
+    recommendedRoleModels: {
+      codeReview: 'google-vertex/gemini-3.1-pro-preview',
+      planning: 'google-vertex/gemini-3.1-pro-preview',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
@@ -312,6 +396,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-1-pro': 'google/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google/gemini-3.5-flash',
     }),
+    recommendedRoleModels: {
+      codeReview: 'google/gemini-3.1-pro-preview',
+      planning: 'google/gemini-3.1-pro-preview',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `xai` provider so
@@ -336,6 +424,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
+    recommendedRoleModels: {
+      helper: 'openai/gpt-5.6-luna',
+      codeReview: 'openai/gpt-5.6-sol',
+      explore: 'openai/gpt-5.6-luna',
+      planning: 'openai/gpt-5.6-sol',
+    },
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 
@@ -455,7 +549,7 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   codeReview: 'high',
   explore: 'low',
   planning: 'high',
-} as const satisfies Record<string, ReasoningEffort>;
+} as const satisfies Record<TaskModelRole, ReasoningEffort>;
 
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
@@ -537,6 +631,33 @@ export function normalizeDeploymentModelConfig(
       value?.roomotePlanningModelReasoningEffort,
     ),
   };
+}
+
+/**
+ * Resolves a provider's recommended default-model configuration: the
+ * provider's default model for the coding role plus its recommended
+ * non-coding role models, with unset roles left null so they follow the
+ * coding model at runtime. Reasoning efforts stay null so the shared
+ * per-role defaults (`DEFAULT_MODEL_ROLE_REASONING_EFFORTS`) apply. Used
+ * when a provider is connected during setup and by the models settings
+ * page's "Use recommended" action.
+ */
+export function buildRecommendedDeploymentModelConfig(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedRoleModels'
+  >,
+): DeploymentModelConfig {
+  const roleModels = provider.recommendedRoleModels ?? {};
+
+  return normalizeDeploymentModelConfig({
+    roomoteModel: provider.defaultRoomoteModel,
+    roomoteSmallModel: roleModels.helper,
+    roomoteVisionModel: roleModels.vision,
+    roomoteCodeReviewModel: roleModels.codeReview,
+    roomoteExploreModel: roleModels.explore,
+    roomotePlanningModel: roleModels.planning,
+  });
 }
 
 export function normalizeOptionalReasoningEffort(

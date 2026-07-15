@@ -56,6 +56,7 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
+  buildRecommendedDeploymentModelConfig,
   getModelProviderLabel,
   getSetupModelProvider,
   getTaskModelProviderId,
@@ -66,6 +67,7 @@ import type {
   SetupModelProviderId,
   SetupModelProviderStatus,
   TaskModelMetadata,
+  TaskModelRole,
 } from '@roomote/types';
 
 type EditableTaskModel = {
@@ -80,8 +82,6 @@ type EditableRuntimeModelOption = {
   displayName: string;
   family?: string;
 };
-
-type TaskModelRole = keyof typeof DEFAULT_MODEL_ROLE_REASONING_EFFORTS;
 
 type TaskModelRoleDraft = {
   modelId: string | null;
@@ -380,6 +380,73 @@ function TaskModelRoleEditor({
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The "Use recommended" header action for the Default Models section. With a
+ * single connected provider it applies that provider's recommended defaults
+ * directly; with several it opens a picker so the operator chooses whose
+ * recommendations to apply.
+ */
+function UseRecommendedDefaultsAction({
+  providers,
+  onApply,
+}: {
+  providers: SetupModelProviderStatus[];
+  onApply: (provider: SetupModelProviderStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [onlyProvider] = providers;
+
+  if (providers.length === 0) {
+    return null;
+  }
+
+  if (providers.length === 1 && onlyProvider) {
+    return (
+      <BasicTooltip
+        content={`Reset the default models to the recommended ${onlyProvider.label} defaults.`}
+      >
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onApply(onlyProvider)}
+        >
+          Use recommended
+        </Button>
+      </BasicTooltip>
+    );
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm">
+          Use recommended
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-0">
+        <Command>
+          <CommandList>
+            <CommandGroup heading="Apply recommended defaults from">
+              {providers.map((provider) => (
+                <CommandItem
+                  key={provider.id}
+                  value={provider.label}
+                  onSelect={() => {
+                    setOpen(false);
+                    onApply(provider);
+                  }}
+                >
+                  {provider.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1453,6 +1520,84 @@ export function ModelSettingsSection({
     toast.success('Task model removed.');
   };
 
+  // "Use recommended" is an apply-once macro: it resets the default-model
+  // roles to the provider's recommended defaults (adding and enabling any
+  // recommended models that are missing) through the normal draft/save flow.
+  const applyRecommendedDefaults = (provider: SetupModelProviderStatus) => {
+    const recommended = buildRecommendedDeploymentModelConfig(provider);
+    const recommendedRoleModelIds: Record<TaskModelRole, string | null> = {
+      coding: recommended.roomoteModel,
+      helper: recommended.roomoteSmallModel,
+      vision: recommended.roomoteVisionModel,
+      codeReview: recommended.roomoteCodeReviewModel,
+      explore: recommended.roomoteExploreModel,
+      planning: recommended.roomotePlanningModel,
+    };
+    const suggestionsById = new Map(
+      provider.suggestedTaskModels.map((suggestion) => [
+        suggestion.id,
+        suggestion,
+      ]),
+    );
+    const nextModels = [...models];
+    const nextEnabledModelIds = [...enabledModelIds];
+
+    for (const modelId of Object.values(recommendedRoleModelIds)) {
+      if (!modelId) {
+        continue;
+      }
+
+      if (!nextModels.some((model) => model.id === modelId)) {
+        const suggestion = suggestionsById.get(modelId);
+        nextModels.push({
+          id: modelId,
+          displayName:
+            suggestion?.displayName || (modelId.split('/').at(-1) ?? modelId),
+          family: suggestion?.family,
+          metadata: null,
+        });
+      }
+
+      if (!nextEnabledModelIds.includes(modelId)) {
+        nextEnabledModelIds.push(modelId);
+      }
+    }
+
+    const nextRoles = cloneTaskModelRoleDrafts(roleDrafts);
+
+    for (const role of TASK_MODEL_ROLE_ORDER) {
+      const status =
+        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+
+      // Env-managed selections are not editable from the UI, so the macro
+      // leaves them untouched.
+      if (status?.managedByEnv) {
+        continue;
+      }
+
+      nextRoles[role] = {
+        modelId:
+          role === 'coding'
+            ? (recommendedRoleModelIds.coding ?? roleDrafts.coding.modelId)
+            : recommendedRoleModelIds[role],
+        reasoningEffort: status?.reasoningManagedByEnv
+          ? roleDrafts[role].reasoningEffort
+          : null,
+      };
+    }
+
+    suppressNextSaveSuccessToast();
+    applyDraftUpdates(
+      {
+        models: nextModels,
+        enabledModelIds: nextEnabledModelIds,
+        roles: nextRoles,
+      },
+      0,
+    );
+    toast.success(`Applied the recommended ${provider.label} default models.`);
+  };
+
   const handleRefreshMetadata = async () => {
     const result = await refreshMetadataMutation.mutateAsync();
     if (!result.success) {
@@ -1492,7 +1637,16 @@ export function ModelSettingsSection({
 
   return (
     <div className="space-y-6">
-      <Section icon={Brain} title="Default Models">
+      <Section
+        icon={Brain}
+        title="Default Models"
+        action={
+          <UseRecommendedDefaultsAction
+            providers={sortedConnectedProviders}
+            onApply={applyRecommendedDefaults}
+          />
+        }
+      >
         <div className="divide-y divide-background">
           {TASK_MODEL_ROLE_CONFIGS.map((config) => {
             const status =
