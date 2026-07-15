@@ -32,6 +32,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
   },
@@ -106,7 +110,10 @@ describe('handleGiteaPullRequest', () => {
     mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
 
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
 
     mockGetGiteaAutomationTargets.mockResolvedValue({
       status: 'ok',
@@ -345,6 +352,8 @@ describe('handleGiteaPullRequest', () => {
       {
         sourceControlProvider: 'gitea',
         repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'git.example.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl: 'https://git.example.com/acme/backend/pulls/42',
@@ -369,6 +378,8 @@ describe('handleGiteaPullRequest', () => {
       {
         sourceControlProvider: 'gitea',
         repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'git.example.com',
         prNumber: 42,
         prTitle: 'Update backend',
         prUrl: 'https://git.example.com/acme/backend/pulls/42',

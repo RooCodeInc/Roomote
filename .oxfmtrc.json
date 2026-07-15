@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "trailingComma": "all",
+  "useTabs": false,
+  "singleQuote": true,
+  "printWidth": 80,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    ".next",
+    "out",
+    "dist",
+    "build",
+    "next-env.d.ts",
+    "apps/codex-acp/target",
+    "apps/marketing/.astro",
+    "apps/web/.source",
+    "node_modules",
+    ".venv",
+    ".turbo",
+    ".docker/data",
+    ".docker/logs",
+    "/logs/",
+    "*.log",
+    ".env",
+    ".env.*",
+    ".qdrant",
+    "packages/cloud-agents/src/server/workflows/skills/standard/agent-browser",
+    ".vscode",
+    ".git",
+    "**/*.{md,mdx,yml,yaml,html,htm,toml,svg,graphql,gql}"
+  ]
+}

@@ -1193,15 +1193,15 @@ describe('setup-new onboarding task start command', () => {
       botUsername: null,
     } as Awaited<ReturnType<typeof resolveTelegramRuntimeCredentials>>);
     vi.mocked(findTelegramPrimaryChatId).mockResolvedValue('8846357662');
-    vi.mocked(TelegramCommunicationProvider).mockImplementation(function (
-      this: unknown,
-    ) {
-      return {
-        getBotInfo: vi.fn(async () => ({ hasTopicsEnabled: true })),
-        createForumTopic: telegramCreateForumTopic,
-        postMessage: telegramPostMessage,
-      } as unknown as TelegramCommunicationProvider;
-    });
+    vi.mocked(TelegramCommunicationProvider).mockImplementation(
+      function (this: unknown) {
+        return {
+          getBotInfo: vi.fn(async () => ({ hasTopicsEnabled: true })),
+          createForumTopic: telegramCreateForumTopic,
+          postMessage: telegramPostMessage,
+        } as unknown as TelegramCommunicationProvider;
+      },
+    );
 
     const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
 

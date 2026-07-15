@@ -1,0 +1,44 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "react"],
+  "categories": {
+    "correctness": "error"
+  },
+  "env": {
+    "builtin": true
+  },
+  "ignorePatterns": [
+    "**/dist/**",
+    "**/.next/**",
+    "**/out/**",
+    "**/build/**",
+    "**/.turbo/**",
+    "**/node_modules/**",
+    "**/storybook-static/**",
+    "**/.source/**",
+    "apps/docs/**",
+    "apps/marketing/**",
+    "packages/cloud-agents/src/server/workflows/skills/standard/agent-browser/**",
+    "apps/codex-acp/target/**",
+    "**/next-env.d.ts"
+  ],
+  "rules": {
+    "no-unused-vars": "off",
+    "typescript/no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        "varsIgnorePattern": "^_",
+        "caughtErrorsIgnorePattern": "^_"
+      }
+    ],
+    "no-unsafe-optional-chaining": "off",
+    "no-control-regex": "off"
+  },
+  "overrides": [
+    {
+      "files": ["apps/web/**/*.{ts,tsx,js,jsx}"],
+      "plugins": ["typescript", "react", "nextjs"]
+    }
+  ]
+}

@@ -111,6 +111,32 @@ describe('resolveAutomationRuntimeDestination', () => {
     });
   });
 
+  it('ignores a saved slack destination after Slack disconnects and falls back', async () => {
+    mockFindTeamsPrimaryConversation.mockResolvedValue({
+      conversationId: '19:primary@thread.v2',
+      serviceUrl: 'https://smba.example/amer/',
+      conversationType: 'channel',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: {
+          destination: {
+            provider: 'slack',
+            channelId: 'C123',
+            source: 'manager_channel',
+          },
+        },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'teams',
+      channelId: '19:primary@thread.v2',
+      serviceUrl: 'https://smba.example/amer/',
+      source: 'primary_conversation',
+    });
+  });
+
   it('resolves the serviceUrl for a teams destination', async () => {
     mockTeamsServiceUrlRows.mockResolvedValue([
       { serviceUrl: 'https://smba.example/amer/' },

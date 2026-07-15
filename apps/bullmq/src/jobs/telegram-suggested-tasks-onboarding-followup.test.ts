@@ -25,9 +25,8 @@ vi.mock('@roomote/sdk/server', async () => {
   const { z } = await import('zod');
 
   return {
-    createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(
-      async () =>
-        envMock.R_TELEGRAM_BOT_TOKEN ? { postMessage: postMessageMock } : null,
+    createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () =>
+      envMock.R_TELEGRAM_BOT_TOKEN ? { postMessage: postMessageMock } : null,
     ),
     telegramSuggestedTasksOnboardingFollowupRequestSchema: z.object({
       chatId: z.string(),

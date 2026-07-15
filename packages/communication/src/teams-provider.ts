@@ -758,8 +758,20 @@ const TEAMS_REACTION_EMOJI_BY_NAME: Record<string, string> = {
   rocket: '🚀',
 };
 
+function stripBoundaryColons(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 58 /* : */) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 58 /* : */) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
 function resolveTeamsReactionEmoji(name: string): string | undefined {
-  const normalizedName = name.trim().replace(/^:+|:+$/g, '');
+  const normalizedName = stripBoundaryColons(name.trim());
   const mapped = TEAMS_REACTION_EMOJI_BY_NAME[normalizedName];
 
   if (mapped) {

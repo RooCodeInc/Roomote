@@ -22,7 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
-import { toHostFromUrl } from '../utils';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getBitbucketAutomationTargets,
   getBitbucketUsername,
@@ -62,14 +62,17 @@ async function notifyTerminalPullRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const prUrl = getBitbucketPullRequestUrl(payload);
+  const webhookHost = toHostFromUrl(prUrl);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'bitbucket'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
@@ -81,9 +84,11 @@ async function notifyTerminalPullRequestThreads(
     {
       sourceControlProvider: 'bitbucket',
       repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
       prNumber,
       prTitle: payload.pullrequest.title,
-      prUrl: getBitbucketPullRequestUrl(payload),
+      prUrl,
       status,
       actorLogin: getBitbucketUsername(payload.actor) ?? 'someone on Bitbucket',
     },
@@ -258,6 +263,8 @@ export async function handleBitbucketPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'bitbucket',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber,
           prUrl,

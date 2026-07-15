@@ -172,18 +172,38 @@ let cachedAdoDelegatedToken: {
   expiresAt: number;
 } | null = null;
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* / */) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
+function stripBoundarySlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 47 /* / */) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 47 /* / */) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const trimmed = stripTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('ADO_BASE_URL cannot be empty.');
   }
 
-  return new URL(trimmed).toString().replace(/\/+$/, '');
+  return stripTrailingSlashes(new URL(trimmed).toString());
 }
 
 function normalizeOrganization(organization: string): string {
-  const trimmed = organization.trim().replace(/^\/+|\/+$/g, '');
+  const trimmed = stripBoundarySlashes(organization.trim());
 
   if (!trimmed) {
     throw new Error(
@@ -425,12 +445,12 @@ export function buildAdoOrganizationApiBaseUrl({
   baseUrl: string;
   organization: string;
 }): string {
-  return new URL(
-    `${encodeURIComponent(normalizeOrganization(organization))}/`,
-    `${normalizeBaseUrl(baseUrl)}/`,
-  )
-    .toString()
-    .replace(/\/+$/, '');
+  return stripTrailingSlashes(
+    new URL(
+      `${encodeURIComponent(normalizeOrganization(organization))}/`,
+      `${normalizeBaseUrl(baseUrl)}/`,
+    ).toString(),
+  );
 }
 
 function buildAdoApiUrl(
@@ -525,7 +545,7 @@ async function resolveAdoOrganizationApiBaseUrl({
   organizationApiBaseUrl?: string;
 } = {}): Promise<string | null> {
   if (organizationApiBaseUrl?.trim()) {
-    return organizationApiBaseUrl.replace(/\/+$/, '');
+    return stripTrailingSlashes(organizationApiBaseUrl);
   }
 
   const resolvedOrganization = organization ?? (await resolveAdoOrganization());
@@ -1647,14 +1667,20 @@ async function resolveAdoRepositoryRowsForTaskRun(taskRun: TaskRun) {
 }
 
 function normalizeCredentialRepositoryPath(rawPath: string): string {
-  return rawPath
-    .replace(/^\/+/, '')
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
+  let start = 0;
+  while (start < rawPath.length && rawPath.charCodeAt(start) === 47 /* / */) {
+    start += 1;
+  }
+
+  let path = start === 0 ? rawPath : rawPath.slice(start);
+  if (path.endsWith('.git')) {
+    path = path.slice(0, -4);
+  }
+  return stripTrailingSlashes(path);
 }
 
 function stripBasePathPrefix(rawPath: string, originBaseUrl: string): string {
-  const basePath = new URL(originBaseUrl).pathname.replace(/\/+$/, '');
+  const basePath = stripTrailingSlashes(new URL(originBaseUrl).pathname);
 
   if (!basePath || basePath === '/') {
     return rawPath;

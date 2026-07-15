@@ -9,10 +9,11 @@
   },
   "scripts": {
     "prepare": "[ -d .git ] && husky || true",
-    "format": "prettier --write --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
-    "format:check": "prettier --check --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
-    "lint": "pnpm format:check && turbo lint --log-order grouped --output-logs new-only",
-    "lint:fast": "turbo lint --log-order grouped --output-logs new-only",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "lint": "pnpm format:check && pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
+    "lint:fast": "pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
+    "lint:pre-push": "node scripts/pre-push-checks.mjs",
     "check-types": "turbo check-types --log-order grouped --output-logs new-only",
     "check-types:fast": "turbo check-types:fast --log-order grouped --output-logs new-only",
     "test": "pnpm --silent --filter @roomote/db db:push:test && turbo test --concurrency=1 --log-order grouped --output-logs new-only",
@@ -55,7 +56,8 @@
     "husky": "^9.1.7",
     "knip": "^5.85.0",
     "lint-staged": "^16.2.7",
-    "prettier": "^3.8.1",
+    "oxfmt": "^0.58.0",
+    "oxlint": "^1.73.0",
     "rimraf": "^6.1.2",
     "smol-toml": "1.6.1",
     "tsx": "4.20.4",
@@ -65,7 +67,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css}": [
-      "prettier --write"
+      "oxfmt"
     ],
     "*.{yml,yaml}": []
   },

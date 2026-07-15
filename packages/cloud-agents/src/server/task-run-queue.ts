@@ -801,6 +801,8 @@ export type TaskChannelBindings = {
 export type TaskPrLinkage = {
   provider: SourceControlProvider;
   host?: string | null;
+  /** Optional FK to the provider-scoped `repositories` row when known. */
+  repositoryId?: string | null;
   repository: string;
   prNumber: number;
   prUrl: string;
@@ -1371,6 +1373,7 @@ async function enqueueFreshLaunch(
         taskId: createdTask.id,
         sourceControlProvider: input.prLinkage.provider,
         host: input.prLinkage.host ?? null,
+        repositoryId: input.prLinkage.repositoryId ?? null,
         repository: input.prLinkage.repository,
         prNumber: input.prLinkage.prNumber,
         prUrl: input.prLinkage.prUrl,
