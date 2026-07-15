@@ -1,5 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
 
 const {
   invalidateQueriesMock,
@@ -26,18 +25,6 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@/components/system', () => ({
   AlertCircle: () => <svg aria-hidden="true" />,
   RefreshCw: () => <svg aria-hidden="true" />,
-  Button: ({
-    children,
-    ...props
-  }: {
-    children: ReactNode;
-    disabled?: boolean;
-    onClick?: () => void;
-  }) => (
-    <button type="button" {...props}>
-      {children}
-    </button>
-  ),
 }));
 
 vi.mock('./hooks', () => ({
@@ -142,7 +129,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.queryByText('Connecting to the live task...'),
+      screen.queryByText('Trying to connect to the sandbox...'),
     ).not.toBeInTheDocument();
     expect(container).toBeEmptyDOMElement();
   });
@@ -169,7 +156,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Reconnecting to the live task...'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Lost connection to the live task'),
@@ -201,7 +188,7 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Connecting to the live task...'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('Reconnecting to the live task...'),
@@ -211,7 +198,7 @@ describe('ConnectionStatusBanner', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('shows a backend-unavailable message when the initial connection retry budget is exhausted', () => {
+  it('keeps showing the automatic connection banner when initial retries are exhausted', () => {
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
       hasConnectedOnce: false,
@@ -234,11 +221,11 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Could not reach the live task'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Try again' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Try again' }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Lost connection to the live task'),
     ).not.toBeInTheDocument();
@@ -403,45 +390,6 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('passes the refreshed sandbox connection target into reconnect', async () => {
-    const reconnectMock = vi.fn();
-    const refreshConnectionMock = vi.fn().mockResolvedValue({
-      url: 'http://sandbox-refreshed.test',
-      token: 'token-refreshed',
-    });
-
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: false,
-      hasConnectedOnce: true,
-      connectionError: true,
-      connectionFailureCategory: null,
-      reconnecting: false,
-      reconnect: reconnectMock,
-    });
-
-    render(
-      <ConnectionStatusBanner
-        session={
-          {
-            taskId: 'task-123',
-            hasTransportError: false,
-            refreshConnection: refreshConnectionMock,
-          } as never
-        }
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Reconnect' }));
-
-    await waitFor(() => {
-      expect(refreshConnectionMock).toHaveBeenCalledTimes(1);
-      expect(reconnectMock).toHaveBeenCalledWith({
-        url: 'http://sandbox-refreshed.test',
-        token: 'token-refreshed',
-      });
-    });
-  });
-
   it('shows an auth-specific message when reconnect auth refresh fails', () => {
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: false,
@@ -498,7 +446,7 @@ describe('ConnectionStatusBanner', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows an auth-specific initial message for token/bootstrap failures', () => {
+  it('shows the automatic connection banner for token/bootstrap failures', () => {
     render(
       <ConnectionStatusBanner
         session={
@@ -513,10 +461,10 @@ describe('ConnectionStatusBanner', () => {
     );
 
     expect(
-      screen.getByText('Could not verify access to the live task'),
+      screen.getByText('Trying to connect to the sandbox...'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Try again' }),
-    ).toBeInTheDocument();
+      screen.queryByRole('button', { name: 'Try again' }),
+    ).not.toBeInTheDocument();
   });
 });

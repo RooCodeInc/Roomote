@@ -1,36 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { AlertCircle, RefreshCw, Button } from '@/components/system';
+import { AlertCircle, RefreshCw, Spinner } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
 import { type TaskSession, useSandboxConnectionStatus } from './hooks';
 import { isTaskRunSnapshotting } from './sidebar-actions/utils';
-
-function getInitialConnectionMessage({
-  showReconnectState,
-  connectionFailureCategory,
-}: {
-  showReconnectState: boolean;
-  connectionFailureCategory: TaskSession['transportErrorCategory'];
-}) {
-  if (showReconnectState) {
-    return 'Connecting to the live task...';
-  }
-
-  switch (connectionFailureCategory) {
-    case 'auth_error':
-      return 'Could not verify access to the live task';
-    case 'backend_unavailable':
-      return 'Could not reach the live task';
-    case 'transport_error':
-      return 'Could not connect to the live task';
-    default:
-      return 'Live task is taking longer than usual to connect';
-  }
-}
 
 function getErrorMessage({
   hasConnectedOnce,
@@ -65,20 +42,17 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
-  const [retrying, setRetrying] = useState(false);
-
   const {
     connected,
     hasConnectedOnce,
     connectionError,
     connectionFailureCategory,
     reconnecting,
-    reconnect,
   } = useSandboxConnectionStatus();
 
   const effectiveFailureCategory =
     connectionFailureCategory ?? session.transportErrorCategory;
-  const showReconnectState = reconnecting || retrying;
+  const showReconnectState = reconnecting;
   const showError =
     !showReconnectState && (connectionError || session.hasTransportError);
   const showInitialConnectionState =
@@ -99,18 +73,6 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
     });
   }, [queryClient, session.taskId, shouldInvalidateSandboxSession, trpc]);
 
-  const handleRetry = useCallback(async () => {
-    setRetrying(true);
-
-    try {
-      const refreshedConnection = await session.refreshConnection();
-      reconnect(refreshedConnection);
-    } finally {
-      // Give the connection attempt a moment before allowing another retry.
-      setTimeout(() => setRetrying(false), 2_000);
-    }
-  }, [session, reconnect]);
-
   if (connected) {
     return null;
   }
@@ -128,41 +90,13 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
     return null;
   }
 
-  if (showInitialConnectionState) {
+  if (showInitialConnectionState || showReconnectState) {
     return (
-      <div className="bg-muted/40 border-border flex items-center gap-3 border-b px-4 py-2.5">
-        <RefreshCw className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        <span className="text-muted-foreground text-sm">
-          {getInitialConnectionMessage({
-            showReconnectState,
-            connectionFailureCategory: effectiveFailureCategory,
-          })}
-        </span>
-        {!showReconnectState ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto"
-            disabled={retrying}
-            onClick={handleRetry}
-          >
-            <RefreshCw
-              className={`mr-1.5 size-3.5 ${retrying ? 'animate-spin' : ''}`}
-            />
-            Try again
-          </Button>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (showReconnectState) {
-    return (
-      <div className="bg-muted/40 border-border flex items-center gap-3 border-b px-4 py-2.5">
-        <RefreshCw className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        <span className="text-muted-foreground text-sm">
-          Reconnecting to the live task...
-        </span>
+      <div className="border-card border-b">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3">
+          <Spinner />
+          <span className="text-sm">Trying to connect to the sandbox...</span>
+        </div>
       </div>
     );
   }
@@ -172,27 +106,17 @@ export function ConnectionStatusBanner({ session }: { session: TaskSession }) {
   }
 
   return (
-    <div className="bg-destructive/10 border-destructive/30 flex items-center gap-3 border-b px-4 py-2.5">
-      <AlertCircle className="text-destructive size-4 shrink-0" />
-      <span className="text-destructive text-sm">
-        {getErrorMessage({
-          hasConnectedOnce,
-          connectionError,
-          connectionFailureCategory: effectiveFailureCategory,
-        })}
-      </span>
-      <Button
-        variant="outline"
-        size="sm"
-        className="ml-auto"
-        disabled={retrying}
-        onClick={handleRetry}
-      >
-        <RefreshCw
-          className={`mr-1.5 size-3.5 ${retrying ? 'animate-spin' : ''}`}
-        />
-        {retrying ? 'Reconnecting...' : 'Reconnect'}
-      </Button>
+    <div className="bg-destructive/10 border-card border-b">
+      <div className="mx-auto flex w-full max-w-4xl items-center gap-3 px-4 py-3">
+        <AlertCircle className="text-destructive size-4 shrink-0" />
+        <span className="text-destructive text-sm">
+          {getErrorMessage({
+            hasConnectedOnce,
+            connectionError,
+            connectionFailureCategory: effectiveFailureCategory,
+          })}
+        </span>
+      </div>
     </div>
   );
 }

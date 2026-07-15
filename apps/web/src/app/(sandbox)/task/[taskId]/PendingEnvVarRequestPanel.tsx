@@ -264,7 +264,7 @@ export function PendingEnvVarRequestPanel({
   };
 
   return (
-    <div className="min-h-80 md:min-h-auto">
+    <div className="min-h-80 md:min-h-auto border-b border-background">
       <div className="w-full p-4 text-foreground">
         <div className="md:space-y-2">
           <div className="flex items-start justify-between gap-3 mb-2 md:mb-0">
