@@ -301,21 +301,37 @@ describe('StepSourceControlConfig', () => {
     expect(
       screen.getByText(/Bitbucket OAuth Client Secret/),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
+    expect(
+      screen.getByRole('link', { name: 'Atlassian Developer Console' }),
+    ).toHaveAttribute(
       'href',
       'https://developer.atlassian.com/console/myapps/',
     );
     expect(
+      screen.getByText('Create a new Bitbucket OAuth consumer.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Create App → OAuth 2.0 → Account-level/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /Open/ }),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByText(
-        /Create an OAuth consumer in the Atlassian developer console/,
+        'In Authorization, add the OAuth 2.0 type, with this URL:',
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        'In Permissions, click “Add Marketplace or custom app”, add the “Bitbucket API”, then enable these OAuth scopes:',
+        'From the app Settings → Authentication details, copy these values:',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText('Deployment callback')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Enter the values below for your Bitbucket integration.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Callback URL')).toBeInTheDocument();
     expect(
       screen.getByText(
         'http://localhost:3000/api/source-control/bitbucket/oauth/callback',
