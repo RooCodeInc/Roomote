@@ -16,7 +16,6 @@ import {
   Loader2,
   ArrowRight,
   Checkbox,
-  CornerDownRight,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';

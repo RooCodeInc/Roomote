@@ -370,23 +370,6 @@ export const finishRun = async ({
     }
   }
 
-  if (
-    (status === RunStatus.Completed ||
-      linkedEnvironmentDefinitionId !== null) &&
-    task.workflow === 'setup_onboarding' &&
-    getCommunicationProviderFromTaskPayload(run.payload) === 'discord'
-  ) {
-    try {
-      await sendDiscordSetupCompletionNotification(run);
-    } catch (err) {
-      console.error(
-        `[finishRun] Failed to send Discord setup completion notification for run ${id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
   if (status === RunStatus.Completed) {
     try {
       await maybeSendSlackQuestionChannelInvite(run);
@@ -707,51 +690,6 @@ async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
   console.log(
     `[finishRun] Sent Discord failure notification for run ${run.id}`,
   );
-}
-
-async function sendDiscordSetupCompletionNotification(
-  run: FinishedRun,
-): Promise<void> {
-  const provider =
-    await createDiscordCommunicationProviderFromRuntimeCredentials();
-  if (!provider) {
-    return;
-  }
-
-  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
-  const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
-  if (!channelId || !threadId) {
-    return;
-  }
-
-  const redis = getRedis();
-  const claimKey = `discord:setup-completion:${run.taskId}`;
-  const claim = await redis.set(claimKey, '1', 'EX', 30 * 24 * 60 * 60, 'NX');
-  if (claim !== 'OK') {
-    return;
-  }
-
-  const setupUrl = buildCommunicationWebPathUrl(
-    '/setup',
-    'discord',
-    'setup.onboarding.completed',
-  );
-  const projectName = getSlackProjectNameFromPayload(run.payload);
-  const text = projectName
-    ? `Setup for the ${projectName} project is done. Continue on the web: ${formatMarkdownLink('Open setup', setupUrl)}.`
-    : `Setup is done. Continue on the web: ${formatMarkdownLink('Open setup', setupUrl)}.`;
-
-  try {
-    await provider.postMessage({
-      channelId,
-      threadId,
-      text,
-      textFormat: 'markdown',
-    });
-  } catch (error) {
-    await redis.del(claimKey);
-    throw error;
-  }
 }
 
 /**

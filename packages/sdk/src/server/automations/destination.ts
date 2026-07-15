@@ -3,6 +3,7 @@ import {
   db,
   eq,
   isNotNull,
+  resolveDiscordRuntimeCredentials,
   resolveTeamsBotRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
   slackInstallations,
@@ -11,6 +12,7 @@ import {
 } from '@roomote/db/server';
 import type { CommunicationProvider } from '@roomote/types';
 
+import { findDiscordDefaultDestination } from '../lib/discord-persistence';
 import { findTeamsPrimaryConversation } from '../lib/teams-primary-conversation';
 import { findTelegramPrimaryChatId } from '../lib/telegram-primary-chat';
 
@@ -27,20 +29,25 @@ export type ResolvedAutomationDestination = {
 /**
  * Connected comms providers in waterfall precedence order. Slack counts when
  * an installation is active; Teams when bot credentials resolve; Telegram
- * when a bot token resolves.
+ * and Discord when a bot token resolves.
  */
 export async function listConnectedCommunicationProviders(): Promise<
   CommunicationProvider[]
 > {
-  const [slackInstallation, teamsCredentials, telegramCredentials] =
-    await Promise.all([
-      db.query.slackInstallations.findFirst({
-        columns: { id: true },
-        where: eq(slackInstallations.isActive, true),
-      }),
-      resolveTeamsBotRuntimeCredentials(),
-      resolveTelegramRuntimeCredentials(),
-    ]);
+  const [
+    slackInstallation,
+    teamsCredentials,
+    telegramCredentials,
+    discordCredentials,
+  ] = await Promise.all([
+    db.query.slackInstallations.findFirst({
+      columns: { id: true },
+      where: eq(slackInstallations.isActive, true),
+    }),
+    resolveTeamsBotRuntimeCredentials(),
+    resolveTelegramRuntimeCredentials(),
+    resolveDiscordRuntimeCredentials(),
+  ]);
 
   return [
     ...(slackInstallation ? (['slack'] as const) : []),
@@ -48,6 +55,7 @@ export async function listConnectedCommunicationProviders(): Promise<
       ? (['teams'] as const)
       : []),
     ...(telegramCredentials.botToken ? (['telegram'] as const) : []),
+    ...(discordCredentials.botToken ? (['discord'] as const) : []),
   ];
 }
 
@@ -148,6 +156,15 @@ export async function resolveAutomationRuntimeDestination(params: {
     };
   }
 
+  const discordDestination = await findDiscordDefaultDestination();
+  if (discordDestination) {
+    return {
+      provider: 'discord',
+      channelId: discordDestination.channelId,
+      source: 'primary_conversation',
+    };
+  }
+
   return null;
 }
 
@@ -193,6 +210,11 @@ export function buildDestinationPromptContext(
   return {
     channelTag: 'channel_id',
     postToolName: 'post_to_channel',
-    surfaceLabel: destination.provider === 'teams' ? 'Teams' : 'Telegram',
+    surfaceLabel:
+      destination.provider === 'teams'
+        ? 'Teams'
+        : destination.provider === 'discord'
+          ? 'Discord'
+          : 'Telegram',
   };
 }

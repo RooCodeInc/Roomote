@@ -226,7 +226,7 @@ export function resolveAutomationSlackChannelId(
 
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
-  provider: 'slack' | 'teams' | 'telegram';
+  provider: 'slack' | 'teams' | 'telegram' | 'discord';
   channelId: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
@@ -236,6 +236,7 @@ const DESTINATION_TARGET_KINDS = [
   ['slack', 'slack_channel'],
   ['teams', 'teams_channel'],
   ['telegram', 'telegram_chat'],
+  ['discord', 'discord_channel'],
 ] as const;
 
 /**

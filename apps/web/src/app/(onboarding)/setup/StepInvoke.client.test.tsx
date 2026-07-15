@@ -145,7 +145,6 @@ vi.mock('@/components/system', () => ({
   CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
-  CornerDownRight: () => <span>CornerDownRight</span>,
   Zap: () => <span>Zap</span>,
   Switch: ({
     checked,

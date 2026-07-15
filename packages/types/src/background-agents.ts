@@ -128,12 +128,14 @@ export type BackgroundAutomationProvider =
   | 'slack'
   | 'teams'
   | 'telegram'
+  | 'discord'
   | 'sentry';
 
 export type BackgroundAutomationTargetKind =
   | 'slack_channel'
   | 'teams_channel'
   | 'telegram_chat'
+  | 'discord_channel'
   | 'sentry_project';
 
 /**
