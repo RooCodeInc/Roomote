@@ -35,6 +35,7 @@ describe('initializeDockerProjects', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await fs.rm(workspacePath, { recursive: true, force: true });
   });
 
@@ -268,6 +269,9 @@ describe('initializeDockerProjects', () => {
   });
 
   it('starts Blaxel projects without the unsupported healthcheck wait', async () => {
+    // The provider is injected into the worker's process env at sandbox
+    // creation; it never arrives through the job's envVars.
+    vi.stubEnv('COMPUTE_PROVIDER', 'blaxel');
     await fs.writeFile(
       path.join(repositoryPath, 'compose.yaml'),
       'services:\n  web:\n    image: nginx:alpine\n',
@@ -293,7 +297,7 @@ describe('initializeDockerProjects', () => {
             ],
           },
         },
-        envVars: { COMPUTE_PROVIDER: 'blaxel', PATH: '/usr/bin' },
+        envVars: { PATH: '/usr/bin' },
         taskRunType: TaskPayloadKind.StandardTask,
       },
       {
