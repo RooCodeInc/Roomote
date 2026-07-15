@@ -1052,7 +1052,7 @@ describe('runTask', () => {
       stateFilePath,
       JSON.stringify({
         startedAtMs: 123_456,
-        currentTurnRequiresInitialAck: true,
+        currentTurnRequiresInitialAck: false,
         currentTurnMessageTs: '111.222',
         currentTurnStartedAtMs: 123_456,
         currentTurnReactionsAllowed: false,
@@ -1070,65 +1070,6 @@ describe('runTask', () => {
           ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
         }),
       }),
-    );
-  });
-
-  it('skips the initial Slack ack requirement when a kickoff message was already posted', async () => {
-    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(123_789);
-
-    try {
-      await runTask({
-        taskRun: {
-          id: 1055,
-          taskId: 'task-1055',
-          payloadKind: TaskPayloadKind.SlackAppMention,
-          harness: 'opencode-server',
-          payload: {
-            channel: 'C123',
-            thread_ts: '111.222',
-            kickoffMessagePosted: true,
-          },
-          result: null,
-        } as never,
-        envVars: {},
-        workspacePath: '/tmp/workspace',
-        prompt: '',
-        harnessInstructions: undefined,
-        agentInstructions: undefined,
-        environmentConfig: undefined,
-        callbacks: {},
-        context: {},
-        logger: {
-          info: vi.fn(),
-          warn: vi.fn(),
-          error: vi.fn(),
-          log: vi.fn(),
-        } as never,
-        harnessSessionId: undefined,
-        workerEnv: {
-          authToken: 'cloud-token',
-          roomoteAppUrl: 'https://api.example.test',
-          trpcUrl: 'https://web.example.test',
-          buildUserFacingEnv: vi.fn(() => ({
-            HOME: '/tmp/home',
-            PATH: '/usr/bin',
-          })),
-        } as never,
-      });
-    } finally {
-      nowSpy.mockRestore();
-    }
-
-    expect(writeFileSyncMock).toHaveBeenCalledWith(
-      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
-      JSON.stringify({
-        startedAtMs: 123_789,
-        currentTurnRequiresInitialAck: false,
-        currentTurnMessageTs: '111.222',
-        currentTurnStartedAtMs: 123_789,
-        currentTurnReactionsAllowed: false,
-      }),
-      'utf8',
     );
   });
 

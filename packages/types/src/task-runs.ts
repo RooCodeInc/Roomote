@@ -1013,14 +1013,6 @@ const sharedTaskPayloadSchema = z.object({
    * survive schema parsing rather than being stripped as an unknown key.
    */
   automationWorkItemId: z.string().optional(),
-
-  /**
-   * True when a provider kickoff/started message was already posted for this
-   * launch (for example a free-form Slack kickoff). Workers use this to skip
-   * forcing an immediate chat-channel acknowledgement that would only
-   * duplicate that kickoff.
-   */
-  kickoffMessagePosted: z.boolean().optional(),
 });
 
 const queuedSnapshotResumeSlackMessageSchema = z.object({

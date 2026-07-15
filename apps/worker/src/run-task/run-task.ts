@@ -241,18 +241,8 @@ function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
   );
 }
 
-function hasPostedKickoffMessage(taskRun: { payload: unknown }): boolean {
-  if (!taskRun.payload || typeof taskRun.payload !== 'object') {
-    return false;
-  }
-
-  return (
-    (taskRun.payload as { kickoffMessagePosted?: unknown })
-      .kickoffMessagePosted === true
-  );
-}
-
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
+  payloadKind: string;
   payload: unknown;
 }): boolean {
   // Automation work items deliberately skip opening acknowledgements.
@@ -260,10 +250,10 @@ function shouldRequireInitialAckOnInitialTurn(taskRun: {
     return false;
   }
 
-  // A provider kickoff/started message already posts into the originating
-  // channel (including free-form router kickoffs). Forcing another opening
-  // reply only duplicates that message.
-  if (hasPostedKickoffMessage(taskRun)) {
+  // Slack launches already post a free-form/template kickoff into the
+  // originating thread before the worker runs. Forcing another opening reply
+  // only duplicates that message.
+  if (taskRun.payloadKind === TaskPayloadKind.SlackAppMention) {
     return false;
   }
 

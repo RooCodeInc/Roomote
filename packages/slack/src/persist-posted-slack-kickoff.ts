@@ -1,11 +1,5 @@
 import { buildTaskStartingText } from '@roomote/communication/chat-messages';
-import {
-  db,
-  eq,
-  recordTaskKickoffMessageBestEffort,
-  sql,
-  taskRuns,
-} from '@roomote/db/server';
+import { recordTaskKickoffMessageBestEffort } from '@roomote/db/server';
 
 import {
   setSlackStartedMessageTs,
@@ -13,32 +7,9 @@ import {
 } from './slack-messages';
 
 /**
- * Mark the task-run payload so the worker skips forcing an opening
- * channel acknowledgement after a provider kickoff was successfully posted.
- */
-export async function markKickoffMessagePosted(runId: number): Promise<void> {
-  try {
-    await db
-      .update(taskRuns)
-      .set({
-        payload: sql`${taskRuns.payload} || ${JSON.stringify({
-          kickoffMessagePosted: true,
-        })}::jsonb`,
-      })
-      .where(eq(taskRuns.id, runId));
-  } catch (error) {
-    console.warn(
-      `[markKickoffMessagePosted] Failed for run ${runId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-}
-
-/**
- * After a Slack started/kickoff message is successfully posted, persist Redis
- * rebuild metadata, record the transcript out-of-band row, and unlock the
- * worker from requiring a duplicate opening acknowledgement.
+ * After a Slack started/kickoff message is posted, persist Redis rebuild
+ * metadata and record the transcript out-of-band row so task chat history
+ * keeps a durable copy without requiring a duplicate opening acknowledgement.
  */
 export async function persistPostedSlackKickoff(input: {
   runId: number;
@@ -84,6 +55,4 @@ export async function persistPostedSlackKickoff(input: {
       }),
     });
   }
-
-  await markKickoffMessagePosted(input.runId);
 }
