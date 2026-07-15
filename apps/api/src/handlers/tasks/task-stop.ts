@@ -155,7 +155,11 @@ async function stopTaskSandboxRun(params: {
   // without a human user claim on the run row.
   const tokenUserId = authUserId ?? run.actingUserId ?? null;
 
-  await markCancelRequested(run.id);
+  // Only terminal provider cancels stamp cancelRequestedAt. Soft stops stay
+  // resumable and must not look like snapshot/destroy candidates later.
+  if (terminate) {
+    await markCancelRequested(run.id);
+  }
 
   try {
     await withSandboxServerRpcClient({

@@ -707,6 +707,12 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       return null;
     }
 
+    // Terminal cancel must not publish a due sleep deadline. That would turn a
+    // deliberate stop into a resumable snapshot/standby handoff.
+    if (this.state.cancelTriggeredAt) {
+      return null;
+    }
+
     if (this.phase === 'shutting_down' || this.state.clientDisconnectedAt) {
       return Date.now();
     }

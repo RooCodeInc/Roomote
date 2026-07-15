@@ -2576,6 +2576,35 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('getSleepAt returns null after terminal cancel even while shutting down', async () => {
+    vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
+
+    const { harness, manager } = createManager({
+      keepaliveMs: 60_000,
+      sandboxTimeoutMs: 20 * 60 * 1_000,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTask({ prompt: 'hello' });
+
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-cancel-term-1'],
+      } as TaskEvent);
+
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({ terminate: true });
+      await shutdownPromise;
+
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(manager.getSleepAt()).toBeNull();
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('getSleepAt returns approximately Date.now() for shutting_down phase', () => {
     vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
 

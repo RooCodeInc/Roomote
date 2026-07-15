@@ -96,7 +96,11 @@ describe('stopTaskRun', () => {
       actingUserId: null,
     };
 
-    const result = await stopTaskRun({ run, authUserId: 'user-1' });
+    const result = await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      terminate: true,
+    });
 
     expect(result).toEqual({ success: true, mode: 'sandbox_stop' });
     expect(mockDbUpdateSet).toHaveBeenCalledWith({
@@ -107,6 +111,23 @@ describe('stopTaskRun', () => {
     expect(mockDbUpdateSet.mock.invocationCallOrder[0]!).toBeLessThan(
       mockWithSandboxServerRpcClient.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('does not stamp cancelRequestedAt for soft resumable stops', async () => {
+    const run = {
+      id: 7,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example',
+      actingUserId: 'user-1',
+    };
+
+    await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      cancelledBy: { source: 'web' },
+    });
+
+    expect(mockDbUpdateSet).not.toHaveBeenCalled();
   });
 
   it('stops a running sandbox with a deployment-principal token when no human actor is known', async () => {
@@ -191,7 +212,11 @@ describe('stopTaskRun', () => {
       new TRPCClientError('sandbox unreachable'),
     );
 
-    const result = await stopTaskRun({ run, authUserId: 'user-1' });
+    const result = await stopTaskRun({
+      run,
+      authUserId: 'user-1',
+      terminate: true,
+    });
 
     expect(result).toEqual({
       success: false,
