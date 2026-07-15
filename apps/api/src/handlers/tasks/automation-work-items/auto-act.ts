@@ -4,7 +4,10 @@ import {
   AutomationWorkItemValidationError,
   resolvePreparedAutomationWorkItems,
 } from './prepare.js';
-import { persistAutomationWorkItems } from './persistence.js';
+import {
+  loadRelaunchableDuplicateWorkItems,
+  persistAutomationWorkItems,
+} from './persistence.js';
 import { resolveRepositoryIdsForSuggestedTask } from './repositories.js';
 import type { AutomationWorkItemInput } from './schema.js';
 import { launchActWorkItems, type AutomationChatTarget } from './launch.js';
@@ -166,7 +169,19 @@ export async function submitAutoActWorkItems(params: {
   const actItems = persisted.workItems.filter(
     (workItem) => workItem.disposition === 'act',
   );
-  const launchableActItems = actItems.filter(isLaunchableActWorkItem);
+  // A fingerprint duplicate that is still open with no linked task is a
+  // previous submission whose launch failed transiently and was reopened.
+  // The duplicate row blocks re-inserting the finding, so this scan must
+  // relaunch it or the work item strands indefinitely.
+  const relaunchableDuplicates = await loadRelaunchableDuplicateWorkItems(
+    persisted.duplicateWorkItemRefs.map((ref) => ref.id),
+  );
+  const launchableActItems = [
+    ...actItems,
+    ...relaunchableDuplicates.filter(
+      (duplicate) => !actItems.some((item) => item.id === duplicate.id),
+    ),
+  ].filter(isLaunchableActWorkItem);
   const resolvedSlackTarget =
     launchableActItems.length > 0
       ? await resolveAutomationSlackTarget({
