@@ -96,6 +96,8 @@ async function handleCancelTaskCallback(params: {
   const stopResult = await stopTaskRun({
     run: cancelableRun,
     allowDirectCancelWithoutSandbox: true,
+    // Provider Cancel is terminal: stop the turn and kill the sandbox.
+    terminate: true,
     cancelledBy: {
       ...(cancelledByName ? { name: cancelledByName } : {}),
       source: 'telegram',

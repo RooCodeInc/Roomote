@@ -1,26 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import {
-  buildAdoOrganizationApiBaseUrl,
-  resolveAdoBaseUrl,
-  resolveAdoToken,
-} from '@roomote/ado';
-import {
-  buildBitbucketApiBaseUrl,
-  resolveBitbucketBaseUrl,
-  resolveBitbucketToken,
-  resolveBitbucketUsername,
-} from '@roomote/bitbucket';
-import {
-  buildGiteaApiBaseUrl,
-  resolveGiteaBaseUrl,
-  resolveGiteaToken,
-} from '@roomote/gitea';
 import { getOctokit } from '@roomote/github';
-import {
-  buildGitLabApiBaseUrl,
-  resolveGitLabBaseUrl,
-  resolveGitLabToken,
-} from '@roomote/gitlab';
 import { type TaskRun } from '@roomote/db/server';
 import {
   getSourceControlProviderLabel,
@@ -31,13 +10,23 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
+  buildSourceControlRequestFailureMessage,
+  performSourceControlRequest as performRequest,
+  requestSourceControlJson as requestJson,
+} from './source-control-pull-request-http';
+import {
+  resolveAdoProviderContext,
+  resolveBitbucketProviderContext,
+  resolveGiteaProviderContext,
+  resolveGitLabProviderContext,
+} from './source-control-pull-request-provider-context';
+import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
-  parseAdoRepositoryFullName,
   resolveRepositoryRow,
   splitRepositoryFullName,
   type FetchImpl,
@@ -593,8 +582,10 @@ async function writeGitLabMergeRequest({
   provider: 'gitlab';
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
-  const { projectId, token, apiBaseUrl } =
-    await resolveGitLabWriteContext(repository);
+  const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
+    repository,
+    'write',
+  );
   const tokenHeader = buildGitLabTokenHeader(token);
   const mergeRequestPath = `/projects/${encodeURIComponent(projectId)}/merge_requests/${input.prNumber}`;
 
@@ -699,7 +690,7 @@ async function writeGitLabMergeRequest({
         });
       }
 
-      throw new Error(await buildRequestFailureMessage(response));
+      throw new Error(await buildSourceControlRequestFailureMessage(response));
     }
     case 'submit_pull_request_review':
       return submitGitLabReview({
@@ -798,7 +789,7 @@ async function submitGitLabReview({
   const approveRejected = [401, 403, 405].includes(response.status);
 
   if (!approveRejected && ![200, 201].includes(response.status)) {
-    throw new Error(await buildRequestFailureMessage(response));
+    throw new Error(await buildSourceControlRequestFailureMessage(response));
   }
 
   const warnings: string[] = approveRejected
@@ -856,26 +847,6 @@ async function createGitLabNote({
   });
 }
 
-// Mirrors resolveGitLabReadContext in source-control-pull-request-reads.ts.
-async function resolveGitLabWriteContext(
-  repository: RepositoryRow,
-): Promise<{ projectId: string; token: string; apiBaseUrl: string }> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `GitLab repository ${repository.fullName} is missing an external project id.`,
-    );
-  }
-
-  const token = await resolveGitLabToken();
-  if (!token) {
-    throw new Error('GITLAB_TOKEN is required to write GitLab merge requests.');
-  }
-
-  const apiBaseUrl = buildGitLabApiBaseUrl(await resolveGitLabBaseUrl());
-
-  return { projectId: repository.externalRepoId, token, apiBaseUrl };
-}
-
 async function writeGiteaPullRequest({
   input,
   repository,
@@ -887,9 +858,9 @@ async function writeGiteaPullRequest({
   provider: 'gitea';
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
-  const { apiBaseUrl, owner, repo, token } = await resolveGiteaWriteContext(
+  const { apiBaseUrl, owner, repo, token } = await resolveGiteaProviderContext(
     repository,
-    provider,
+    'write',
   );
   const tokenHeader = { name: 'Authorization', value: `token ${token}` };
   const issueCommentsUrl = buildApiUrl(
@@ -1007,36 +978,6 @@ async function writeGiteaPullRequest({
   }
 }
 
-// Mirrors resolveGiteaReadContext in source-control-pull-request-reads.ts.
-async function resolveGiteaWriteContext(
-  repository: RepositoryRow,
-  provider: 'gitea',
-): Promise<{
-  apiBaseUrl: string;
-  owner: string;
-  repo: string;
-  token: string;
-}> {
-  const token = await resolveGiteaToken();
-  if (!token) {
-    throw new Error('GITEA_TOKEN is required to write Gitea pull requests.');
-  }
-
-  const baseUrl = await resolveGiteaBaseUrl();
-  if (!baseUrl) {
-    throw new Error('GITEA_BASE_URL is required to write Gitea pull requests.');
-  }
-
-  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-
-  return {
-    apiBaseUrl: buildGiteaApiBaseUrl(baseUrl),
-    owner,
-    repo,
-    token,
-  };
-}
-
 async function writeBitbucketPullRequest({
   input,
   repository,
@@ -1049,7 +990,7 @@ async function writeBitbucketPullRequest({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { apiBaseUrl, authHeader, workspace, repo } =
-    await resolveBitbucketWriteContext(repository, provider);
+    await resolveBitbucketProviderContext(repository, 'write');
   const tokenHeader = { name: 'Authorization', value: authHeader };
   const commentsUrl = buildApiUrl(
     apiBaseUrl,
@@ -1219,7 +1160,9 @@ async function writeBitbucketPullRequest({
       });
 
       if (![200, 201].includes(approveResponse.status)) {
-        throw new Error(await buildRequestFailureMessage(approveResponse));
+        throw new Error(
+          await buildSourceControlRequestFailureMessage(approveResponse),
+        );
       }
 
       if (input.body?.trim()) {
@@ -1255,43 +1198,6 @@ async function writeBitbucketPullRequest({
   }
 }
 
-async function resolveBitbucketWriteContext(
-  repository: RepositoryRow,
-  provider: 'bitbucket',
-): Promise<{
-  apiBaseUrl: string;
-  authHeader: string;
-  workspace: string;
-  repo: string;
-}> {
-  const token = await resolveBitbucketToken();
-  if (!token) {
-    throw new Error(
-      'BITBUCKET_TOKEN is required to write Bitbucket pull requests.',
-    );
-  }
-
-  const username = await resolveBitbucketUsername();
-  if (!username) {
-    throw new Error(
-      'BITBUCKET_USERNAME is required to write Bitbucket pull requests.',
-    );
-  }
-
-  const baseUrl = await resolveBitbucketBaseUrl();
-  const [workspace, repo] = splitRepositoryFullName(
-    repository.fullName,
-    provider,
-  );
-
-  return {
-    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
-    authHeader: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
-    workspace,
-    repo,
-  };
-}
-
 async function writeAdoPullRequest({
   input,
   repository,
@@ -1304,7 +1210,7 @@ async function writeAdoPullRequest({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestWriteResult> {
   const { organizationApiBaseUrl, repositoryPullRequestsPath, token } =
-    await resolveAdoWriteContext(repository);
+    await resolveAdoProviderContext(repository, 'write');
   const tokenHeader = {
     name: 'Authorization',
     value: buildAdoBasicAuthHeader(token),
@@ -1525,103 +1431,4 @@ function getFirstAdoCommentId(
 ): string | null {
   const id = thread.comments?.[0]?.id;
   return id != null ? String(id) : null;
-}
-
-// Mirrors resolveAdoReadContext in source-control-pull-request-reads.ts.
-async function resolveAdoWriteContext(repository: RepositoryRow): Promise<{
-  organizationApiBaseUrl: string;
-  repositoryPullRequestsPath: string;
-  token: string;
-}> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `Azure DevOps repository ${repository.fullName} is missing an external repository id.`,
-    );
-  }
-
-  const token = await resolveAdoToken();
-  if (!token) {
-    throw new Error(
-      'ADO_TOKEN is required to write Azure DevOps pull requests.',
-    );
-  }
-
-  const { organization, project } = parseAdoRepositoryFullName(
-    repository.fullName,
-  );
-  const baseUrl = await resolveAdoBaseUrl();
-  const organizationApiBaseUrl = buildAdoOrganizationApiBaseUrl({
-    baseUrl,
-    organization,
-  });
-  const repositoryPullRequestsPath = `/${encodeURIComponent(
-    project,
-  )}/_apis/git/repositories/${encodeURIComponent(
-    repository.externalRepoId,
-  )}/pullrequests`;
-
-  return { organizationApiBaseUrl, repositoryPullRequestsPath, token };
-}
-
-// Mirrors requestJson in source-control-pull-requests.ts, split so callers
-// that must map specific statuses to capability warnings can inspect the raw
-// response through performRequest.
-async function requestJson<T>({
-  fetchImpl,
-  method = 'GET',
-  url,
-  tokenHeader,
-  body,
-  schema,
-}: {
-  fetchImpl: FetchImpl;
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
-  url: string;
-  tokenHeader: { name: string; value: string };
-  body?: Record<string, unknown>;
-  schema: z.ZodType<T>;
-}): Promise<T> {
-  const response = await performRequest({
-    fetchImpl,
-    method,
-    url,
-    tokenHeader,
-    body,
-  });
-
-  if (![200, 201].includes(response.status)) {
-    throw new Error(await buildRequestFailureMessage(response));
-  }
-
-  return schema.parse(await response.json());
-}
-
-async function performRequest({
-  fetchImpl,
-  method = 'GET',
-  url,
-  tokenHeader,
-  body,
-}: {
-  fetchImpl: FetchImpl;
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
-  url: string;
-  tokenHeader: { name: string; value: string };
-  body?: Record<string, unknown>;
-}): Promise<Response> {
-  return fetchImpl(url, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      [tokenHeader.name]: tokenHeader.value,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-}
-
-async function buildRequestFailureMessage(response: Response): Promise<string> {
-  return `Source control API request failed: ${response.status} ${
-    response.statusText
-  }${await formatResponseBody(response)}`;
 }
