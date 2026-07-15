@@ -312,11 +312,19 @@ export async function launchTask(
       userId: auth.userId,
     });
 
+    // A settle notification needs a durable pointer back to the launching
+    // run, so the opt-in only takes effect on run-token launches.
+    const notifySourceRunOnSettle =
+      requestedType === 'standard' &&
+      body.notifyOnSettle === true &&
+      'runId' in auth.authContext;
+
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
       computeProvider: body.computeProvider,
       requestedWorkKindDecision,
-      ...(requestedType === 'environment-definition' &&
+      ...((requestedType === 'environment-definition' ||
+        notifySourceRunOnSettle) &&
       'runId' in auth.authContext
         ? { sourceRunId: auth.authContext.runId }
         : {}),
@@ -340,6 +348,9 @@ export async function launchTask(
               ...basePayload,
               bootstrap:
                 requestedType === 'standard' ? body.bootstrap : undefined,
+              ...(notifySourceRunOnSettle
+                ? { notifySourceRunOnSettle: true }
+                : {}),
             },
           };
 

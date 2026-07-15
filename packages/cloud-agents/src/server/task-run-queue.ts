@@ -1406,6 +1406,10 @@ async function enqueueFreshLaunch(
         initialPaths,
         payload: taskWithHarnessOverrides.payload,
         keepaliveMs,
+        // Launching-run lineage for platform-spawned tasks. Without this on
+        // the run row, notify-source-run-on-settle has no pointer back to
+        // the parent run.
+        sourceRunId: taskWithHarnessOverrides.sourceRunId ?? null,
       })
       .returning();
 

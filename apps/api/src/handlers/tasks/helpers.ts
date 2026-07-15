@@ -30,6 +30,7 @@ interface LatestTaskRunSummary {
   status: string;
   taskPhase: string | null;
   error: string | null;
+  environmentSetupState: string | null;
   firstAssistantOutputAt: Date | null;
   payload: unknown;
 }
@@ -54,6 +55,7 @@ export async function getLatestTaskRunsByTaskIds(
       status: taskRuns.status,
       taskPhase: taskRuns.taskPhase,
       error: taskRuns.error,
+      environmentSetupState: taskRuns.environmentSetupState,
       firstAssistantOutputAt: taskRuns.firstAssistantOutputAt,
       payload: taskRuns.payload,
     })
