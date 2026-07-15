@@ -848,16 +848,18 @@ function buildChartData(
     const taskIds = new Set<string>();
     const qualifyingPrs = new Set<string>();
     let taskCost = 0;
+    let prTaskCost = 0;
     for (const row of rows) {
       if (!row.meta?.canonicalTaskId) {
         continue;
       }
+      taskIds.add(row.meta.canonicalTaskId);
+      taskCost += row.value;
       const prKeys = row.meta.prKeys ?? [];
       if (prKeys.length === 0) {
         continue;
       }
-      taskIds.add(row.meta.canonicalTaskId);
-      taskCost += row.value;
+      prTaskCost += row.value;
       for (const prKey of prKeys) {
         qualifyingPrs.add(prKey);
       }
@@ -873,7 +875,7 @@ function buildChartData(
       totalInferenceCost: totalCost,
       averageCostPerTask: taskIds.size === 0 ? null : taskCost / taskIds.size,
       averageCostPerPr:
-        qualifyingPrs.size === 0 ? null : taskCost / qualifyingPrs.size,
+        qualifyingPrs.size === 0 ? null : prTaskCost / qualifyingPrs.size,
       averageCostPerActiveUser:
         userIds.size === 0 ? null : totalCost / userIds.size,
     };
