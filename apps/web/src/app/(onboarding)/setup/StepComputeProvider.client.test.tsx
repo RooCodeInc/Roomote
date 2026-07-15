@@ -181,7 +181,7 @@ describe('StepComputeProvider', () => {
       providers: [
         buildProvider({
           provider: 'roomote',
-          label: 'Roomote',
+          label: 'Roomote Sandbox',
           infrastructureSatisfied: configSatisfied,
           configSatisfied,
           // Deployment-managed: no operator-editable fields.
