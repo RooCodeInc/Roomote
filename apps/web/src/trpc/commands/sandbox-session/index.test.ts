@@ -199,6 +199,36 @@ describe('getSessionState', () => {
       }),
     ).toBe('interactive');
   });
+
+  it('uses history for setup tasks paused while waiting for environment variables', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+    });
+
+    expect(
+      getSessionState(taskRun, {
+        hasMessages: false,
+        hasHarnessMessages: true,
+        taskWorkflow: 'setup_onboarding',
+      }),
+    ).toBe('historical');
+  });
+
+  it('keeps ordinary idle tasks interactive while waiting for a prompt', () => {
+    const taskRun = createTaskRunDetail({
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+    });
+
+    expect(
+      getSessionState(taskRun, {
+        hasMessages: false,
+        hasHarnessMessages: true,
+        taskWorkflow: 'standard',
+      }),
+    ).toBe('interactive');
+  });
 });
 
 describe('isWaitingForFirstHarnessMessage', () => {

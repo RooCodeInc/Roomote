@@ -212,6 +212,19 @@ export default function SandboxPage() {
     );
   }
 
+  if (!taskRun) {
+    return (
+      <FramedSurface surfaceClassName="flex items-center justify-center">
+        <EmptyState
+          icon={<TriangleAlert className="size-6" />}
+          iconClassName="text-amber-500 pt-0"
+          containerClassName="[&>div]:items-center"
+          description="This task session is still preparing. Refresh the page or try again in a moment."
+        />
+      </FramedSurface>
+    );
+  }
+
   if (task?.workflow === 'setup_onboarding') {
     return (
       <FramedSurface>
@@ -276,8 +289,8 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          runId={taskRun!.id}
-          initialTaskRun={taskRun!}
+          runId={taskRun.id}
+          initialTaskRun={taskRun}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -292,8 +305,8 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          runId={taskRun!.id}
-          initialTaskRun={taskRun!}
+          runId={taskRun.id}
+          initialTaskRun={taskRun}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -306,7 +319,7 @@ export default function SandboxPage() {
   return (
     <SandboxProvider
       taskId={taskId}
-      url={taskRun!.sandboxServerUrl}
+      url={taskRun.sandboxServerUrl}
       token={token}
       refreshConnection={session.refreshConnection}
       history={historyEnvelopesQuery}

@@ -114,6 +114,15 @@ vi.mock('./LiveContent', () => ({
   MemoizedLiveContent: () => <div data-testid="live-content" />,
 }));
 
+vi.mock(
+  '@/components/settings/environments/EnvironmentDefinitionAgentTask',
+  () => ({
+    EnvironmentDefinitionAgentTaskPanel: () => (
+      <div data-testid="environment-definition-agent-task-panel" />
+    ),
+  }),
+);
+
 import SandboxPage from './page';
 
 function renderPage() {
@@ -196,6 +205,52 @@ describe('SandboxPage', () => {
     renderPage();
 
     expect(screen.getByTestId('startup')).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
+  });
+
+  it('does not open a live sandbox when the session has no task run', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      taskRun: undefined,
+      sessionState: 'interactive',
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [],
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByText(
+        'This task session is still preparing. Refresh the page or try again in a moment.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
+  });
+
+  it('renders setup onboarding tasks with the environment definition panel', () => {
+    useTaskSessionMock.mockReturnValue({
+      ...baseSession,
+      sessionState: 'historical',
+      task: {
+        ...baseSession.task,
+        workflow: 'setup_onboarding',
+      },
+      taskRun: {
+        ...baseSession.taskRun,
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      },
+    });
+    useTaskMessageEnvelopesMock.mockReturnValue({
+      data: [],
+    });
+
+    renderPage();
+
+    expect(
+      screen.getByTestId('environment-definition-agent-task-panel'),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
   });
 
