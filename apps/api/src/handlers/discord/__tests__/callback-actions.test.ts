@@ -280,4 +280,65 @@ describe('Discord component callbacks', () => {
       expect.objectContaining({ text: 'That task is no longer running.' }),
     );
   });
+
+  it('launches a DM-delivered setup suggestion in the DM conversation', async () => {
+    const postMessage = vi.fn().mockResolvedValue({ messageId: 'reply-1' });
+    const provider = { postMessage } as never;
+    mocks.claimSuggestion.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix the flaky login test',
+      brief: null,
+      targetRepositoryFullName: null,
+      investigationContext: null,
+      launchClaimedAt: new Date(),
+    });
+    mocks.startNewTask.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 42, taskId: 'task-9' },
+      taskUrl: 'https://app.example.com/task/task-9',
+    });
+    mocks.finalizeWorkItem.mockResolvedValue({ id: 'suggestion-1' });
+
+    const dmChannel = {
+      channelId: 'dm-1',
+      channelName: 'DM',
+      channelType: 1,
+      isDirectMessage: true,
+      isThread: false,
+    };
+
+    const result = await handleDiscordComponentInteraction({
+      provider,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-2',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-2',
+        channel_id: 'dm-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'idea:suggestion-1', component_type: 2 },
+      },
+      interactionDeferred: true,
+      channel: dmChannel,
+    });
+
+    expect(result).toBe('handled');
+    // DM cards have no parent channel: the task launches in the DM itself
+    // instead of throwing and releasing the claim.
+    expect(mocks.resolveChannel).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: dmChannel }),
+    );
+    expect(mocks.releaseWorkItem).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-1',
+        text: 'Started “Fix the flaky login test”.',
+      }),
+    );
+    expect(postMessage).toHaveBeenCalledWith(
+      expect.not.objectContaining({ threadId: expect.anything() }),
+    );
+  });
 });

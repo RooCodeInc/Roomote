@@ -224,13 +224,32 @@ async function sendDiscordChannelPost(params: {
     );
   }
 
-  // Without an explicit thread target, keep the post in the task's own
-  // thread so it lands next to the conversation instead of the parent
-  // channel.
-  const threadId =
-    params.parsedBody.threadTs ??
+  // Discord posts land in the thread id directly (not the channel), so an
+  // arbitrary caller-provided thread would redirect the post to any
+  // bot-accessible conversation. Only the task's own stored thread (or its
+  // launch channel) is a valid target.
+  const storedThreadId =
     getCommunicationThreadIdFromTaskPayload(params.taskRun.payload) ??
     undefined;
+  const requestedThreadTs = params.parsedBody.threadTs?.replace(/^#/, '');
+
+  if (
+    requestedThreadTs &&
+    requestedThreadTs !== storedThreadId &&
+    requestedThreadTs !== jobChannelId
+  ) {
+    return jsonResponse(
+      {
+        error:
+          'Discord channel posts are only available for the conversation this task was launched from',
+      },
+      403,
+    );
+  }
+
+  // Keep the post in the task's own thread so it lands next to the
+  // conversation instead of the parent channel.
+  const threadId = storedThreadId;
 
   const reply = await provider.postMessage({
     channelId: jobChannelId!,

@@ -1,6 +1,8 @@
-import type {
-  DiscordCommunicationProvider,
-  DiscordTaskThread,
+import {
+  DiscordApiError,
+  DiscordApiTransportError,
+  type DiscordCommunicationProvider,
+  type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
 import { getRedis } from '@roomote/redis';
 import { findDiscordDefaultDestination } from '@roomote/sdk/server';
@@ -110,6 +112,34 @@ async function rememberAutomationTaskThread(
   );
 }
 
+/**
+ * Transient Discord failure while preparing the work item's task thread. The
+ * thread coordinate (when reserved) is already persisted, so the work item
+ * can be reopened and a later launch attempt resumes in the same thread
+ * instead of terminally failing.
+ */
+export class DiscordAutomationTargetPreparationError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `Transient Discord failure while preparing the automation task thread: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    this.name = 'DiscordAutomationTargetPreparationError';
+    this.cause = cause;
+  }
+}
+
+function isTransientDiscordError(error: unknown): boolean {
+  if (error instanceof DiscordApiTransportError) {
+    return true;
+  }
+  return (
+    error instanceof DiscordApiError &&
+    (error.status === 429 || error.status >= 500)
+  );
+}
+
 /** Creates the Discord task conversation before the execution run starts. */
 export async function createAutomationDiscordTaskThread(params: {
   target: AutomationDiscordTarget;
@@ -125,24 +155,36 @@ export async function createAutomationDiscordTaskThread(params: {
     params.target.channelId,
   );
 
-  if (!thread) {
-    thread = await params.target.discord.reserveTaskThread({
-      channelId: params.target.channelId,
-      name: buildCommunicationTaskThreadName(params.workItem.title),
+  try {
+    if (!thread) {
+      thread = await params.target.discord.reserveTaskThread({
+        channelId: params.target.channelId,
+        name: buildCommunicationTaskThreadName(params.workItem.title),
+        initialText,
+      });
+      // A queue publish failure reopens this same work item. Save the Discord
+      // coordinate before posting the starter so that every retry resumes
+      // here.
+      await rememberAutomationTaskThread(params.workItem.id, thread);
+    }
+
+    const completedThread = await params.target.discord.completeTaskThread({
+      thread,
       initialText,
     });
-    // A queue publish failure reopens this same work item. Save the Discord
-    // coordinate before posting the starter so that every retry resumes here.
-    await rememberAutomationTaskThread(params.workItem.id, thread);
-  }
-
-  const completedThread = await params.target.discord.completeTaskThread({
-    thread,
-    initialText,
-  });
-  if (completedThread !== thread) {
-    thread = completedThread;
-    await rememberAutomationTaskThread(params.workItem.id, thread);
+    if (completedThread !== thread) {
+      thread = completedThread;
+      await rememberAutomationTaskThread(params.workItem.id, thread);
+    }
+  } catch (error) {
+    // Rate limits, Discord outages, and network failures are retryable: the
+    // persisted coordinate lets the reopened work item resume in the same
+    // thread. Permanent failures (permissions, deleted channel) stay
+    // terminal.
+    if (isTransientDiscordError(error)) {
+      throw new DiscordAutomationTargetPreparationError(error);
+    }
+    throw error;
   }
 
   return {

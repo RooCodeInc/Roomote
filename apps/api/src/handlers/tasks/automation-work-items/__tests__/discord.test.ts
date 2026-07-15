@@ -55,8 +55,11 @@ vi.mock('../../communication-task-thread.js', () => ({
   buildCommunicationTaskThreadName: vi.fn((title: string) => title),
 }));
 
+import { DiscordApiError } from '@roomote/communication/discord-provider';
+
 import {
   createAutomationDiscordTaskThread,
+  DiscordAutomationTargetPreparationError,
   postLateBoundWorkItemFailureToDiscord,
   resolveAutomationDiscordTarget,
 } from '../discord';
@@ -225,5 +228,50 @@ describe('Discord automation work-item delivery', () => {
       'EX',
       2_592_000,
     );
+  });
+
+  it('classifies transient Discord failures as retryable target preparation', async () => {
+    const target = (await resolveAutomationDiscordTarget())!;
+    const workItem = {
+      id: 'work-transient',
+      title: 'Fix the flaky test',
+      brief: null,
+      category: null,
+      priority: null,
+    } as never;
+    reserveTaskThreadMock.mockRejectedValueOnce(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/channels/channel-1/threads',
+        status: 503,
+        message: 'Service unavailable',
+      }),
+    );
+
+    await expect(
+      createAutomationDiscordTaskThread({ target, workItem }),
+    ).rejects.toBeInstanceOf(DiscordAutomationTargetPreparationError);
+  });
+
+  it('keeps permanent Discord failures terminal', async () => {
+    const target = (await resolveAutomationDiscordTarget())!;
+    const workItem = {
+      id: 'work-permanent',
+      title: 'Fix the flaky test',
+      brief: null,
+      category: null,
+      priority: null,
+    } as never;
+    const forbidden = new DiscordApiError({
+      method: 'POST',
+      path: '/channels/channel-1/threads',
+      status: 403,
+      message: 'Missing permissions',
+    });
+    reserveTaskThreadMock.mockRejectedValueOnce(forbidden);
+
+    await expect(
+      createAutomationDiscordTaskThread({ target, workItem }),
+    ).rejects.toBe(forbidden);
   });
 });

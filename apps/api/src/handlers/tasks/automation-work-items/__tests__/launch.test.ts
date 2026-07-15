@@ -5,6 +5,7 @@ import { postLateBoundWorkItemFailureMessage } from '../slack.js';
 import { postLateBoundWorkItemFailureToTelegram } from '../telegram.js';
 import {
   createAutomationDiscordTaskThread,
+  DiscordAutomationTargetPreparationError,
   postLateBoundWorkItemFailureToDiscord,
 } from '../discord.js';
 import type { PersistedAutomationWorkItem } from '../types.js';
@@ -156,6 +157,7 @@ vi.mock('../discord.js', () => ({
       messageId: 'discord-message-1',
     }),
   ),
+  DiscordAutomationTargetPreparationError: class DiscordAutomationTargetPreparationError extends Error {},
   postLateBoundWorkItemFailureToDiscord: vi.fn(async () => undefined),
 }));
 
@@ -775,6 +777,30 @@ describe('launchActWorkItems', () => {
       workItem,
       reason: 'enqueue failed',
     });
+  });
+
+  it('reopens the work item when Discord thread creation fails transiently', async () => {
+    const updateSets = setupDbUpdateMock();
+    vi.mocked(createAutomationDiscordTaskThread).mockRejectedValueOnce(
+      new DiscordAutomationTargetPreparationError('discord unavailable'),
+    );
+
+    const result = await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: discordTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    // Transient chat-target failures reopen the claim instead of terminally
+    // failing: the persisted thread coordinate lets the retry resume there.
+    expect(updateSets.map((values) => values.status)).toEqual([
+      'launching',
+      'open',
+    ]);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(postLateBoundWorkItemFailureToDiscord).not.toHaveBeenCalled();
   });
 
   it('stays silent on terminal launch failures when no Slack target resolves', async () => {

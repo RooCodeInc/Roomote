@@ -21,6 +21,7 @@ import { postLateBoundWorkItemFailureToTelegram } from './telegram.js';
 import { postLateBoundWorkItemFailureToTeams } from './teams.js';
 import {
   createAutomationDiscordTaskThread,
+  DiscordAutomationTargetPreparationError,
   postLateBoundWorkItemFailureToDiscord,
   type AutomationDiscordTarget,
 } from './discord.js';
@@ -339,13 +340,21 @@ export async function launchActWorkItems(params: {
       const retryLaunchedTaskId =
         error instanceof TaskRunQueueEnqueueError ? linkedTaskId : null;
       const shouldRetry = retryLaunchedTaskId !== null;
+      // A transient chat-target failure happens before finalize, so the row
+      // is still `launching` under our claim; reopen it instead of terminally
+      // failing — the persisted thread coordinate lets the retry resume in
+      // the same conversation.
+      const shouldReopenUnderClaim =
+        error instanceof DiscordAutomationTargetPreparationError;
 
-      // Both failure writes are fenced so a stale launcher whose claim was
+      // All failure writes are fenced so a stale launcher whose claim was
       // reclaimed can never fail or clear the fresh claimant's row:
       // - retry (finalize succeeded, queue publish failed): the row is OUR
       //   `launched` row, so guard on status='launched' + our task link.
-      // - terminal failure: the row must still be `launching` under OUR claim
-      //   token (`launch_claimed_at`); after a reclaim this is a no-op.
+      // - reopen (transient failure before finalize): the row must still be
+      //   `launching` under OUR claim token.
+      // - terminal failure: same `launching`-under-our-claim guard; after a
+      //   reclaim this is a no-op.
       const [failureWriteApplied] = shouldRetry
         ? await db
             .update(workItems)
@@ -366,23 +375,47 @@ export async function launchActWorkItems(params: {
               ),
             )
             .returning({ id: workItems.id })
-        : await db
-            .update(workItems)
-            .set({
-              status: 'failed',
-              failedAt: new Date(),
-              launchClaimedAt: null,
-              launchError: message,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(workItems.id, workItem.id),
-                eq(workItems.status, 'launching'),
-                eq(workItems.launchClaimedAt, claimedWorkItem.launchClaimedAt),
-              ),
-            )
-            .returning({ id: workItems.id });
+        : shouldReopenUnderClaim
+          ? await db
+              .update(workItems)
+              .set({
+                status: 'open',
+                failedAt: null,
+                launchClaimedAt: null,
+                launchError: message,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workItems.id, workItem.id),
+                  eq(workItems.status, 'launching'),
+                  eq(
+                    workItems.launchClaimedAt,
+                    claimedWorkItem.launchClaimedAt,
+                  ),
+                ),
+              )
+              .returning({ id: workItems.id })
+          : await db
+              .update(workItems)
+              .set({
+                status: 'failed',
+                failedAt: new Date(),
+                launchClaimedAt: null,
+                launchError: message,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workItems.id, workItem.id),
+                  eq(workItems.status, 'launching'),
+                  eq(
+                    workItems.launchClaimedAt,
+                    claimedWorkItem.launchClaimedAt,
+                  ),
+                ),
+              )
+              .returning({ id: workItems.id });
 
       if (!failureWriteApplied) {
         apiLogger.warn(
@@ -390,7 +423,7 @@ export async function launchActWorkItems(params: {
         );
       }
 
-      if (workItemChatTarget && !shouldRetry) {
+      if (workItemChatTarget && !shouldRetry && !shouldReopenUnderClaim) {
         // Late-bound launches have no execution task to report through, so a
         // terminal launch failure must surface here or it disappears entirely.
         await postLateBoundWorkItemFailureToChatTarget({

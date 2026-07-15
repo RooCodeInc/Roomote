@@ -190,15 +190,20 @@ async function handleSuggestionCallback(input: {
   }
   const claimedAt = suggestion.launchClaimedAt;
   try {
-    if (!input.channel.parentChannelId) {
+    if (!input.channel.parentChannelId && !input.channel.isDirectMessage) {
       throw new Error(
-        'Discord suggestion card is not inside a task-capable thread.',
+        'Discord suggestion card is not inside a task-capable thread or DM.',
       );
     }
-    const launchChannel = await resolveDiscordChannelContext(
-      input.provider,
-      input.channel.parentChannelId,
-    );
+    // Guild cards live in a bot-created "Suggested tasks" thread: launch in
+    // the parent channel so the task gets its own thread. DM cards launch in
+    // the DM conversation itself, matching direct-message task entry.
+    const launchChannel = input.channel.parentChannelId
+      ? await resolveDiscordChannelContext(
+          input.provider,
+          input.channel.parentChannelId,
+        )
+      : input.channel;
     const promptText = [
       `Start this suggested task: ${suggestion.title}`,
       ...(suggestion.brief ? ['', suggestion.brief] : []),
@@ -251,16 +256,22 @@ async function handleSuggestionCallback(input: {
         `[discord] Lost suggestion launch fence for ${suggestion.id}; duplicate run ${started.launchResult.id} was orphaned — ${cancelNote}`,
       );
       await input.provider.postMessage({
-        channelId: input.channel.parentChannelId,
-        threadId: input.channel.channelId,
+        channelId: input.channel.parentChannelId ?? input.channel.channelId,
+        ...(input.channel.parentChannelId
+          ? { threadId: input.channel.channelId }
+          : {}),
         text: `“${suggestion.title}” was already started elsewhere — this duplicate task was canceled.`,
       });
       return;
     }
     await input.provider.postMessage({
-      channelId: input.channel.parentChannelId,
-      threadId: input.channel.channelId,
-      text: `Started “${suggestion.title}” in a new task thread.`,
+      channelId: input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { threadId: input.channel.channelId }
+        : {}),
+      text: input.channel.parentChannelId
+        ? `Started “${suggestion.title}” in a new task thread.`
+        : `Started “${suggestion.title}”.`,
       ...(started.taskUrl
         ? { buttons: [[{ text: 'Follow Task', url: started.taskUrl }]] }
         : {}),
