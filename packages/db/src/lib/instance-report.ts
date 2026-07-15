@@ -30,7 +30,7 @@ import {
   pullRequestFacts,
   repositories,
   slackInstallations,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   taskPullRequests,
   tasks,
   teamsInstallations,
@@ -657,13 +657,13 @@ export async function collectInstanceReportStats(
       .groupBy(tasks.modelProvider, tasks.model),
     db
       .select({
-        input: sum(taskInferenceUsageEvents.inputTokens),
-        output: sum(taskInferenceUsageEvents.outputTokens),
-        total: sum(taskInferenceUsageEvents.totalTokens),
-        costMicroUsd: sum(taskInferenceUsageEvents.costMicroUsd),
+        input: sum(llmUsageEvents.inputTokens),
+        output: sum(llmUsageEvents.outputTokens),
+        total: sum(llmUsageEvents.totalTokens),
+        costMicroUsd: sum(llmUsageEvents.costMicroUsd),
       })
-      .from(taskInferenceUsageEvents)
-      .where(gte(taskInferenceUsageEvents.createdAt, since)),
+      .from(llmUsageEvents)
+      .where(gte(llmUsageEvents.createdAt, since)),
     db
       .select({ total: count() })
       .from(slackInstallations)

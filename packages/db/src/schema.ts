@@ -1349,11 +1349,6 @@ export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
   }),
 }));
 
-/** @deprecated Use llmUsageEvents. */
-export const taskInferenceUsageEvents = llmUsageEvents;
-/** @deprecated Use llmUsageEventsRelations. */
-export const taskInferenceUsageEventsRelations = llmUsageEventsRelations;
-
 export const taskSlackReplyDetails = pgTable(
   'task_slack_reply_details',
   {

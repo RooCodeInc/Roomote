@@ -5,7 +5,6 @@ import {
   eq,
   llmUsageEvents,
   taskFactory,
-  taskInferenceUsageEvents,
   userFactory,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
@@ -52,8 +51,8 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id));
 
     expect(eventRows).toHaveLength(1);
     expect(eventRows[0]).toMatchObject({
@@ -120,8 +119,8 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id));
 
     expect(eventRows).toHaveLength(1);
     expect(eventRows[0]).toMatchObject({
@@ -169,9 +168,9 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id))
-      .orderBy(asc(taskInferenceUsageEvents.messageId));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id))
+      .orderBy(asc(llmUsageEvents.messageId));
 
     expect(eventRows).toHaveLength(2);
     expect(eventRows.map((event) => event.messageId)).toEqual([
