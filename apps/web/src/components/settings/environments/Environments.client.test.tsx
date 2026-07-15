@@ -315,6 +315,7 @@ vi.mock('@/components/system', () => ({
   Pencil: Icon,
   Plus: Icon,
   RefreshCw: Icon,
+  SearchCheck: Icon,
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PopoverContent: ({
     children,
@@ -431,25 +432,30 @@ describe('Environments', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows descriptions and keeps environment details collapsed until expanded', () => {
+  it('shows verification and repositories while keeping snapshot details collapsed until expanded', () => {
     render(<Environments />);
 
-    expect(
-      screen.getByText('Main Environment description'),
-    ).toBeInTheDocument();
     expect(screen.queryByTitle('Edit details')).not.toBeInTheDocument();
     expect(screen.getByTitle('Edit environment')).toHaveAttribute(
       'href',
       '/settings/environments/env-1/edit',
     );
-    expect(screen.queryByText('acme/api')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Open verification task' }),
+    ).toHaveAttribute('href', '/task/task-verify-1');
+    expect(
+      screen.queryByRole('link', { name: 'View task' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTitle('Re-verify environment config'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('acme/api')).toBeInTheDocument();
     expect(
       screen.queryByTitle('Refresh modal snapshot'),
     ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
-    expect(screen.getByText('acme/api')).toBeInTheDocument();
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
   });
 

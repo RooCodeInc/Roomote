@@ -1,19 +1,22 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { formatDistanceToNow } from 'date-fns';
 
 import type { EnvironmentWithMeta } from '@/trpc/commands/environments';
-import { useRetryEnvironmentVerification } from '@/hooks/environments';
 import {
   AlertCircle,
   Badge,
   BasicTooltip,
-  Button,
+  Check,
   CheckCircle2,
   Loader2,
-  RefreshCw,
+  X,
 } from '@/components/system';
+import { ArrowUpRight, CircleQuestionMark, ExternalLink } from 'lucide-react';
+import { Arrow } from '@radix-ui/react-tooltip';
+import { ArrowTopRightIcon } from '@radix-ui/react-icons';
 
 type EnvironmentVerificationState =
   | 'verified'
@@ -21,7 +24,7 @@ type EnvironmentVerificationState =
   | 'failed'
   | 'configured';
 
-function getEnvironmentVerificationState(
+export function getEnvironmentVerificationState(
   environment: Pick<
     EnvironmentWithMeta,
     | 'isVerified'
@@ -48,8 +51,27 @@ function getEnvironmentVerificationState(
   return 'configured';
 }
 
-function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
+export function EnvironmentVerificationBadge({
+  env,
+}: {
+  env: EnvironmentWithMeta;
+}) {
   const state = getEnvironmentVerificationState(env);
+  const badgeClassName = env.verificationTaskId
+    ? 'gap-1 cursor-pointer'
+    : 'gap-1';
+  const wrapBadge = (badge: ReactNode) =>
+    env.verificationTaskId ? (
+      <Link
+        href={`/task/${env.verificationTaskId}`}
+        className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label="Open verification task"
+      >
+        {badge}
+      </Link>
+    ) : (
+      badge
+    );
 
   switch (state) {
     case 'verified':
@@ -57,7 +79,10 @@ function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
         <BasicTooltip
           content={
             <div className="text-sm">
-              <p>Your environment is verified and ready to use.</p>
+              <p>
+                {env.name} is verified and ready to use. Click to see the
+                verification task.
+              </p>
               {env.verifiedAt ? (
                 <p className="text-card/70">
                   Verified{' '}
@@ -67,10 +92,13 @@ function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
             </div>
           }
         >
-          <Badge variant="success" className="gap-1">
-            <CheckCircle2 className="size-3" />
-            Verified
-          </Badge>
+          {wrapBadge(
+            <Badge variant="success" className={badgeClassName}>
+              <Check className="size-3" />
+              Verified
+              <ArrowUpRight />
+            </Badge>,
+          )}
         </BasicTooltip>
       );
     case 'in_progress':
@@ -83,10 +111,13 @@ function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
             </div>
           }
         >
-          <Badge variant="secondary" className="gap-1">
-            <Loader2 className="size-3 animate-spin" />
-            Verification in progress
-          </Badge>
+          {wrapBadge(
+            <Badge variant="secondary" className={badgeClassName}>
+              <Loader2 className="size-3 animate-spin" />
+              Verification in progress
+              <ArrowUpRight />
+            </Badge>,
+          )}
         </BasicTooltip>
       );
     case 'failed':
@@ -96,13 +127,19 @@ function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
             <div className="text-sm">
               Roomote could not verify that this environment works. It is still
               usable; retry verification after checking the configuration.
+              {env.verificationError ? (
+                <p className="mt-1 text-card/70">{env.verificationError}</p>
+              ) : null}
             </div>
           }
         >
-          <Badge variant="destructive" className="gap-1">
-            <AlertCircle className="size-3" />
-            Verification failed
-          </Badge>
+          {wrapBadge(
+            <Badge variant="destructive" className={badgeClassName}>
+              <X className="size-3" />
+              Verification failed
+              <ArrowUpRight />
+            </Badge>,
+          )}
         </BasicTooltip>
       );
     case 'configured':
@@ -110,72 +147,20 @@ function VerificationBadge({ env }: { env: EnvironmentWithMeta }) {
       return (
         <BasicTooltip
           content={
-            <div className="text-sm">
-              This environment is configured but has not been verified for its
-              current configuration.
+            <div className="text-sm max-w-md">
+              {env.name} is configured but has not been verified for its current
+              configuration. Click to see the verification task.
             </div>
           }
         >
-          <Badge variant="secondary" className="gap-1">
-            Configured
-          </Badge>
+          {wrapBadge(
+            <Badge variant="warning" className={badgeClassName}>
+              <CircleQuestionMark className="size-3" />
+              Configured
+              <ArrowUpRight />
+            </Badge>,
+          )}
         </BasicTooltip>
       );
   }
-}
-
-/**
- * Renders the verification status for an environment, its latest failure
- * message when present, a link to the related verification task, and a Retry
- * verification action.
- */
-export function EnvironmentVerificationStatus({
-  env,
-}: {
-  env: EnvironmentWithMeta;
-}) {
-  const retryVerification = useRetryEnvironmentVerification();
-  const state = getEnvironmentVerificationState(env);
-  const isRetrying =
-    retryVerification.isPending &&
-    retryVerification.variables?.environmentId === env.id;
-  const inProgress = state === 'in_progress';
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">Verification ·</span>
-        <VerificationBadge env={env} />
-        {env.verificationTaskId ? (
-          <Link
-            href={`/task/${env.verificationTaskId}`}
-            className="text-xs font-medium underline underline-offset-4 text-muted-foreground hover:text-foreground"
-          >
-            View task
-          </Link>
-        ) : null}
-        {!inProgress ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1 px-2 text-xs"
-            disabled={isRetrying}
-            onClick={() => retryVerification.mutate({ environmentId: env.id })}
-          >
-            {isRetrying ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <RefreshCw className="size-3" />
-            )}
-            Retry verification
-          </Button>
-        ) : null}
-      </div>
-      {state === 'failed' && env.verificationError ? (
-        <p className="text-xs text-destructive break-words">
-          {env.verificationError}
-        </p>
-      ) : null}
-    </div>
-  );
 }
