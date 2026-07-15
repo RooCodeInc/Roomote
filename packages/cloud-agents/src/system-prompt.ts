@@ -213,16 +213,10 @@ In your final answer, you keep the light on the things that matter most. Avoid l
 - \`delivery_state_reached\`: the run reached a concrete delivery state such as pushed, PR opened, comment synced, awaiting review, or another externally meaningful outcome.
 - \`completed\`: the run has reached its truthful end state for the current request.`;
 
-export function buildRoomoteSystemPrompt({
-  styleGuidance,
-}: {
-  styleGuidance?: string | null;
-} = {}): string {
+export function buildRoomoteSystemPrompt(): string {
   return ROOMOTE_SYSTEM_PROMPT_TEMPLATE.replace(
     '__ROOMOTE_STYLE_GUIDANCE__',
-    buildRoomoteStyleGuidanceSection({
-      styleGuidance,
-    }),
+    buildRoomoteStyleGuidanceSection(),
   );
 }
 

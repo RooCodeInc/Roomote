@@ -169,9 +169,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   >(),
   // Deployment-wide Roomote agent settings (folded in from the former
   // background_agent_settings table): manager channel, global/authorship
-  // instructions, compiled authorship rules, style guidance, and Slack emoji
-  // preferences. The flat settings view consumed across the product layers a
-  // per-automation projection (built from the automations table) on top.
+  // instructions, and compiled authorship rules. The flat settings view
+  // consumed across the product layers a per-automation projection (built
+  // from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   globalAgentInstructions: text('global_agent_instructions'),
   authorshipInstructions: text('authorship_instructions'),
@@ -184,12 +184,6 @@ export const deploymentSettings = pgTable('deployment_settings', {
     .notNull()
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipAt: timestamp('compiled_authorship_at'),
-  styleGuidance: text('style_guidance'),
-  slackSummonEmoji: text('slack_summon_emoji'),
-  slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
-  slackCompletionEmoji: text('slack_completion_emoji')
-    .notNull()
-    .default('white_check_mark'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

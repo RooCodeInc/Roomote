@@ -646,19 +646,6 @@ function getSlackOriginMessageTs(taskRun: TaskRun): string | null {
   return null;
 }
 
-function getStoredSlackAckEmoji(taskRun: TaskRun): string {
-  return getSlackPayloadEmoji(taskRun, 'ackEmoji') ?? DEFAULT_SLACK_ACK_EMOJI;
-}
-
-function getSlackPayloadEmoji(
-  taskRun: TaskRun,
-  key: 'ackEmoji',
-): string | null {
-  const payload =
-    taskRun.payload && typeof taskRun.payload === 'object'
-      ? (taskRun.payload as Record<string, unknown>)
-      : null;
-  const emoji = payload?.[key];
-
-  return typeof emoji === 'string' && emoji.trim() ? emoji.trim() : null;
+function getStoredSlackAckEmoji(_taskRun: TaskRun): string {
+  return DEFAULT_SLACK_ACK_EMOJI;
 }

@@ -136,8 +136,6 @@ export async function startAutoRoutedSlackTask({
   processedVideoDescriptions,
   agentPromptPrefix,
   agentPromptTextOverride,
-  ackEmoji,
-  completionEmoji,
   routingRepositoryConstraint,
   webPath,
   branch,
@@ -179,6 +177,10 @@ export async function startAutoRoutedSlackTask({
   processedVideoDescriptions?: string[];
   agentPromptPrefix?: string;
   agentPromptTextOverride?: string;
+  /**
+   * Deprecated: acknowledgement/completion reactions are fixed defaults and
+   * cannot be customized. Values are ignored when present.
+   */
   ackEmoji?: string;
   completionEmoji?: string;
   routingRepositoryConstraint?: string;
@@ -459,8 +461,6 @@ export async function startAutoRoutedSlackTask({
       persistedSlackUserId,
       text: taskText,
       agentPromptText,
-      ackEmoji,
-      completionEmoji,
       ts: sourceMessageTs,
       threadTs: threadId,
       repo: workspace.repoForPayload,

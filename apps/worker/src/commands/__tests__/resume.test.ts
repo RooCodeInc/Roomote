@@ -51,7 +51,6 @@ describe('resume', () => {
           envVars: {},
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
           harnessSessionId: 'session-42',
         },
         workspace: {
@@ -91,7 +90,6 @@ describe('resume', () => {
           envVars: {},
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
           harnessSessionId: 'session-43',
         },
         workspace: {

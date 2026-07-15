@@ -145,32 +145,9 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     );
   });
 
-  it('uses the default Roomote tone guidance when no custom style is enabled', () => {
+  it('uses the default Roomote tone guidance', () => {
     expect(buildRoomoteSystemPrompt()).toContain(
       DEFAULT_ROOMOTE_STYLE_GUIDANCE,
-    );
-  });
-
-  it('layers organization-specific style guidance on the default Roomote tone when style guidance is provided', () => {
-    const prompt = buildRoomoteSystemPrompt({
-      styleGuidance: 'Be concise, calm, and low-drama.',
-    });
-
-    expect(prompt).toContain(
-      'Use the following organization-specific tone of voice for user-facing communication:',
-    );
-    expect(prompt).toContain('Be concise, calm, and low-drama.');
-    expect(prompt).toContain(DEFAULT_ROOMOTE_STYLE_GUIDANCE);
-  });
-
-  it('falls back to the default Roomote tone when style guidance is empty or whitespace', () => {
-    const prompt = buildRoomoteSystemPrompt({
-      styleGuidance: '   ',
-    });
-
-    expect(prompt).toContain(DEFAULT_ROOMOTE_STYLE_GUIDANCE);
-    expect(prompt).not.toContain(
-      'Use the following organization-specific tone of voice for user-facing communication:',
     );
   });
 });
