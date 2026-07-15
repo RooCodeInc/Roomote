@@ -21,7 +21,7 @@ export default defineConfig({
   platform: 'node',
   banner: {
     // Add CJS require support for bundled CJS packages.
-    js: `import { createRequire } from 'module';const require = createRequire(import.meta.url);`,
+    js: `import { createRequire as __createRequire } from 'module';const require = __createRequire(import.meta.url);`,
   },
   esbuildOptions(options) {
     // Exclude native modules that cannot be bundled into a single JS file.
