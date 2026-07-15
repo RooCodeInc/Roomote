@@ -41,7 +41,9 @@ export function CloudAnalyticsProvider({
 }) {
   const posthogLoaded = useRef(false);
   const intercomBooted = useRef(false);
+  const userIdRef = useRef(userId);
   const resolvedPosthogHost = posthogHost ?? DEFAULT_POSTHOG_HOST;
+  userIdRef.current = userId;
 
   useEffect(() => {
     if (!cloudEnabled) return;
@@ -59,7 +61,7 @@ export function CloudAnalyticsProvider({
       script.src = `${resolvedPosthogHost.replace(/\/$/, '')}/static/array.js`;
       script.onload = () => {
         posthogLoaded.current = true;
-        if (userId) window.posthog?.identify?.(userId);
+        if (userIdRef.current) window.posthog?.identify?.(userIdRef.current);
       };
       document.head.append(script);
     }
