@@ -344,6 +344,18 @@ export function normalizeReviewCodeAutomationSettings(
   };
 }
 
+function stripBoundaryColons(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 58 /* : */) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 58 /* : */) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
+
 export function normalizeSlackReactionName(value: string | null | undefined) {
   const trimmed = value?.trim();
 
@@ -351,7 +363,7 @@ export function normalizeSlackReactionName(value: string | null | undefined) {
     return '';
   }
 
-  const withoutBoundaryColons = trimmed.replace(/^:+|:+$/g, '');
+  const withoutBoundaryColons = stripBoundaryColons(trimmed);
   return withoutBoundaryColons.trim().toLowerCase().split('::')[0] ?? '';
 }
 

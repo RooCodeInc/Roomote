@@ -129,4 +129,10 @@ describe('convertSlackLinksToMarkdown', () => {
       convertSlackLinksToMarkdown('hello <@U123> and <#C123|general>'),
     ).toBe('hello <@U123> and <#C123|general>');
   });
+
+  it('does not double-unescape nested HTML entities', () => {
+    expect(
+      convertSlackLinksToMarkdown('<https://example.com?x=&lt;y|A &lt; B>'),
+    ).toBe('[A < B](https://example.com?x=<y)');
+  });
 });
