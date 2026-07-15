@@ -37,12 +37,7 @@ export {
   MAX_THREAD_MESSAGES,
 } from './types';
 
-export {
-  routeTask,
-  routeGitHubTask,
-  classifyFollowUp,
-  isDynamicKickoffMessageEnabled,
-} from './router-service';
+export { routeTask, routeGitHubTask, classifyFollowUp } from './router-service';
 export { evaluateChannelLaunchCriteria } from './channel-launch-gate';
 export type {
   ChannelLaunchGateActivityEntry,

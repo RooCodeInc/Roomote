@@ -10,7 +10,6 @@ export enum FeatureFlag {
   VisualProofAutoScreencast = 'VisualProofAutoScreencast',
   AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
-  DynamicKickoffMessage = 'DynamicKickoffMessage',
   CodeMode = 'CodeMode',
 }
 
@@ -97,7 +96,6 @@ export interface MetadataRecord {
   visual_proof_auto_screencast?: boolean;
   authorship_rules?: boolean;
   background_subagents?: boolean;
-  dynamic_kickoff_message?: boolean;
   opencode_code_mode?: boolean;
   previews_enabled?: boolean;
   deployment_disabled?: boolean;

@@ -203,30 +203,22 @@ export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
   kickoffMessage,
-  freeformKickoffEnabled = false,
   formatWorkspaceName = identity,
   formatModelName = identity,
 }: {
   workspaceDisplayName: string;
   modelDisplayName?: string;
   /**
-   * Optional full router-generated kickoff string. Only used when
-   * `freeformKickoffEnabled` is true; otherwise the static template is used.
+   * Optional full router-generated kickoff string. When present and normalizable,
+   * it is posted as-is instead of the static template.
    */
   kickoffMessage?: string | null;
-  /**
-   * When false (default), ignore free-form kickoff text and use the static
-   * template. Gated by the DynamicKickoffMessage feature flag at call sites.
-   */
-  freeformKickoffEnabled?: boolean;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
-  if (freeformKickoffEnabled) {
-    const kickoff = normalizeKickoffMessage(kickoffMessage);
-    if (kickoff) {
-      return kickoff;
-    }
+  const kickoff = normalizeKickoffMessage(kickoffMessage);
+  if (kickoff) {
+    return kickoff;
   }
 
   const workspace = formatWorkspaceName(workspaceDisplayName);
