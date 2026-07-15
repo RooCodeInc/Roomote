@@ -217,8 +217,7 @@ export function getAutomationDiscordChannelTarget(
   automation: Pick<Automation, 'targets'> | undefined,
 ): string | null {
   return (
-    getAutomationTargetRefs(automation, 'discord', 'discord_channel')[0] ??
-    null
+    getAutomationTargetRefs(automation, 'discord', 'discord_channel')[0] ?? null
   );
 }
 

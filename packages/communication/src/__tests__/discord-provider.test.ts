@@ -318,7 +318,7 @@ describe('DiscordCommunicationProvider', () => {
   });
 
   it('anchors threads to an existing message and recovers the thread on retry', async () => {
-    const { server, provider } = createHarness();
+    const { provider } = createHarness();
     const channelId = '400000000000000001';
     const posted = await provider.postMessage({
       channelId,

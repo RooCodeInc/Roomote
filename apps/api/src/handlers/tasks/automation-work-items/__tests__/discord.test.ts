@@ -126,9 +126,7 @@ describe('Discord automation work-item delivery', () => {
       provider: 'discord',
       channelId: 'channel-sentry',
     });
-    expect(findAutomationDestinationMock).toHaveBeenCalledWith(
-      'sentry_triage',
-    );
+    expect(findAutomationDestinationMock).toHaveBeenCalledWith('sentry_triage');
     expect(findDefaultDestinationMock).not.toHaveBeenCalled();
   });
 

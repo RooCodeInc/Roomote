@@ -12,9 +12,11 @@ import {
 } from './formState';
 import { applyReviewerAuthorSelection } from './reviewerSelection';
 import {
+  buildAutomationDiscordDestinationOptions,
   buildCustomManagerSlackChannelOption,
   buildSlackWorkflowLaunchUrl,
   buildManagerSlackChannelOptions,
+  DISCORD_DESTINATION_OPTION_PREFIX,
   canSaveSentryTriageSettings,
   canSelectSentryTriageFrequency,
   formatSlackChannelValue,
@@ -50,17 +52,23 @@ const baseFormState: FormState = {
   managerSlackChannel: '',
   managerStatsFrequency: 'off' as const,
   managerStatsSlackChannel: '',
+  managerStatsDiscordChannel: '',
   sentryTriageFrequency: 'off' as const,
   sentryTriageSlackChannel: '',
+  sentryTriageDiscordChannel: '',
   sentryTriageProjectSlugs: '',
   dependabotTriageFrequency: 'off' as const,
   dependabotTriageSlackChannel: '',
+  dependabotTriageDiscordChannel: '',
   securityAuditorFrequency: 'off' as const,
   securityAuditorSlackChannel: '',
+  securityAuditorDiscordChannel: '',
   codeQualityAuditorFrequency: 'off' as const,
   codeQualityAuditorSlackChannel: '',
+  codeQualityAuditorDiscordChannel: '',
   ciFailureTriageFrequency: 'off' as const,
   ciFailureTriageSlackChannel: '',
+  ciFailureTriageDiscordChannel: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
   suggesterInstructions: '',
@@ -330,6 +338,22 @@ describe('Automations selection helpers', () => {
         reviewerReviewAllPullRequestAuthors: false,
       }),
     );
+  });
+
+  it('includes the automation Discord destination in the API save input', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        managerStatsFrequency: 'weekly',
+        managerStatsSlackChannel: '',
+        managerStatsDiscordChannel: ' 123456789 ',
+      },
+      baseFormState,
+      'managerStats',
+    );
+
+    expect(saveInput.managerStatsDiscordChannel).toBe('123456789');
+    expect(saveInput.managerStatsSlackChannel).toBeNull();
   });
 
   it('includes the reviewer all-author setting when saving Review Code', () => {
@@ -613,6 +637,56 @@ describe('Automations selection helpers', () => {
         id: 'C123MANAGER',
         name: 'roomote-managers',
         label: '#roomote-managers',
+      },
+    ]);
+  });
+
+  it('prefixes Discord destination options so they never collide with Slack channel ids', () => {
+    expect(
+      buildAutomationDiscordDestinationOptions({
+        channels: [{ id: '111', name: 'general', label: '#general' }],
+        selectedChannelId: null,
+      }),
+    ).toEqual([
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}111`,
+        name: 'general',
+        label: '#general (Discord)',
+      },
+    ]);
+  });
+
+  it('keeps a saved Discord channel selectable when the catalog no longer lists it', () => {
+    expect(
+      buildAutomationDiscordDestinationOptions({
+        channels: [{ id: '111', name: 'general', label: '#general' }],
+        selectedChannelId: '222',
+      }),
+    ).toEqual([
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}222`,
+        name: '222',
+        label: '#222 (Discord)',
+      },
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}111`,
+        name: 'general',
+        label: '#general (Discord)',
+      },
+    ]);
+  });
+
+  it('does not duplicate a Discord option for a selection the catalog already lists', () => {
+    expect(
+      buildAutomationDiscordDestinationOptions({
+        channels: [{ id: '111', name: 'general', label: '#general' }],
+        selectedChannelId: '111',
+      }),
+    ).toEqual([
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}111`,
+        name: 'general',
+        label: '#general (Discord)',
       },
     ]);
   });

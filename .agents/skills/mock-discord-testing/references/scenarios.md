@@ -25,8 +25,8 @@ A linked user DMs a work request.
 A linked user @mentions the bot in a guild root channel.
 
 - Inject: `message` in the seeded guild text channel with `<@100000000000000001>` in content and the bot in `mentions`.
-- Expect: Roomote creates a task thread (or forum post in forum channels) named after the request, posts the starter/ack there, and the run payload carries `communicationThreadId` + `discordTaskThread: true`.
-- Assert: state `.channels` gains a thread child of the root channel; started message lives in the thread.
+- Expect: Roomote starts a task thread **on the triggering message** (thread id equals the message id — the Slack threaded-reply model; forum channels get a detached forum post instead), named after the request, posts the ack there, and the run payload carries `communicationThreadId` + `discordTaskThread: true`.
+- Assert: state `.channels` gains a thread child of the root channel whose id equals the inbound message id; started message lives in the thread.
 
 ## 4. followup-in-task-thread (the continuity core case)
 

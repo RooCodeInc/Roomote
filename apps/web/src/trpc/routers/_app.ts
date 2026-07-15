@@ -265,6 +265,7 @@ import {
 } from '../commands/task-suggestions';
 import {
   getBackgroundAgentSettingsCommand,
+  listAutomationDiscordChannelsCommand,
   listSlackChannelsCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
@@ -385,6 +386,10 @@ const automationsRouter = createRouter({
     listSlackChannelsCommand(auth),
   ),
 
+  listDiscordChannels: protectedProcedure.query(({ ctx: { auth } }) =>
+    listAutomationDiscordChannelsCommand(auth),
+  ),
+
   updateSettings: protectedProcedure
     .input(
       z.object({
@@ -426,11 +431,29 @@ const automationsRouter = createRouter({
         managerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        managerStatsDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        sentryTriageDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         sentryTriageProjectSlugs: z.string().max(4_000).nullable(),
         dependabotTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         dependabotTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        dependabotTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
@@ -452,13 +475,31 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         ciFailureTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        ciFailureTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)

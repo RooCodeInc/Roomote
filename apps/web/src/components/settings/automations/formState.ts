@@ -63,11 +63,14 @@ export type FormState = {
   managerSlackChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannel: string;
+  managerStatsDiscordChannel: string;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannel: string;
+  sentryTriageDiscordChannel: string;
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannel: string;
+  dependabotTriageDiscordChannel: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
   suggesterInstructions: string;
@@ -78,8 +81,11 @@ export type FormState = {
   announcerInstructions: string;
   platformIssueSlackChannel: string;
   securityAuditorSlackChannel: string;
+  securityAuditorDiscordChannel: string;
   codeQualityAuditorSlackChannel: string;
+  codeQualityAuditorDiscordChannel: string;
   ciFailureTriageSlackChannel: string;
+  ciFailureTriageDiscordChannel: string;
 } & ScheduleOnlyAutomationFormFields;
 
 export type AutomationId =
@@ -125,17 +131,20 @@ const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = ['managerSlackChannel'];
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
   'managerStatsFrequency',
   'managerStatsSlackChannel',
+  'managerStatsDiscordChannel',
 ];
 
 const SENTRY_TRIAGE_FIELDS: Array<keyof FormState> = [
   'sentryTriageFrequency',
   'sentryTriageSlackChannel',
+  'sentryTriageDiscordChannel',
   'sentryTriageProjectSlugs',
 ];
 
 const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageFrequency',
   'dependabotTriageSlackChannel',
+  'dependabotTriageDiscordChannel',
 ];
 
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
@@ -161,11 +170,14 @@ const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
     automation.id,
     [
       automation.frequencyField,
-      automation.id === 'securityAuditor'
-        ? 'securityAuditorSlackChannel'
+      ...(automation.id === 'securityAuditor'
+        ? ['securityAuditorSlackChannel', 'securityAuditorDiscordChannel']
         : automation.id === 'codeQualityAuditor'
-          ? 'codeQualityAuditorSlackChannel'
-          : 'ciFailureTriageSlackChannel',
+          ? [
+              'codeQualityAuditorSlackChannel',
+              'codeQualityAuditorDiscordChannel',
+            ]
+          : ['ciFailureTriageSlackChannel', 'ciFailureTriageDiscordChannel']),
     ],
   ]),
 ) as Record<ScheduleOnlyBackgroundAutomationId, Array<keyof FormState>>;
@@ -282,14 +294,20 @@ export function buildAutomationSettingsSaveInput(
     managerStatsFrequency: stateToSave.managerStatsFrequency,
     managerStatsSlackChannel:
       stateToSave.managerStatsSlackChannel.trim() || null,
+    managerStatsDiscordChannel:
+      stateToSave.managerStatsDiscordChannel.trim() || null,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
     sentryTriageSlackChannel:
       stateToSave.sentryTriageSlackChannel.trim() || null,
+    sentryTriageDiscordChannel:
+      stateToSave.sentryTriageDiscordChannel.trim() || null,
     sentryTriageProjectSlugs:
       stateToSave.sentryTriageProjectSlugs.trim() || null,
     dependabotTriageFrequency: stateToSave.dependabotTriageFrequency,
     dependabotTriageSlackChannel:
       stateToSave.dependabotTriageSlackChannel.trim() || null,
+    dependabotTriageDiscordChannel:
+      stateToSave.dependabotTriageDiscordChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
@@ -304,10 +322,16 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.platformIssueSlackChannel.trim() || null,
     securityAuditorSlackChannel:
       stateToSave.securityAuditorSlackChannel.trim() || null,
+    securityAuditorDiscordChannel:
+      stateToSave.securityAuditorDiscordChannel.trim() || null,
     codeQualityAuditorSlackChannel:
       stateToSave.codeQualityAuditorSlackChannel.trim() || null,
+    codeQualityAuditorDiscordChannel:
+      stateToSave.codeQualityAuditorDiscordChannel.trim() || null,
     ciFailureTriageSlackChannel:
       stateToSave.ciFailureTriageSlackChannel.trim() || null,
+    ciFailureTriageDiscordChannel:
+      stateToSave.ciFailureTriageDiscordChannel.trim() || null,
   };
 }
 
