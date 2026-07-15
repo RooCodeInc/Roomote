@@ -58,6 +58,11 @@ export async function recordWebhook<T>(
   try {
     response = await handler();
   } catch (error) {
+    console.error(
+      `[recordWebhook] Handler failed for ${provider} webhook ${deliveryId} (${event}):`,
+      error instanceof Error ? error.message : error,
+    );
+
     // Handler threw an exception - record the failure
     response = {
       status: 'error',

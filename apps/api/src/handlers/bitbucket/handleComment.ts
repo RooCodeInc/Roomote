@@ -3,11 +3,7 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import {
-  createBitbucketPullRequestComment,
-  getBitbucketDeploymentUser,
-  normalizeBitbucketLinkedAccountKey,
-} from '@roomote/bitbucket';
+import { createBitbucketPullRequestComment } from '@roomote/bitbucket';
 import {
   type TaskPayload,
   TaskPayloadKind,
@@ -37,7 +33,6 @@ import {
   getBitbucketPullRequestNumber,
   getBitbucketPullRequestUrl,
   type BitbucketPullRequestCommentWebhook,
-  type BitbucketWebhookUser,
 } from './types';
 
 const BITBUCKET_MENTION_HANDLE = '@roomote';
@@ -49,50 +44,6 @@ type BitbucketPrMentionReplyKind =
 
 function isBitbucketMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(BITBUCKET_MENTION_HANDLE);
-}
-
-async function isDeploymentTokenAuthor(
-  author: BitbucketWebhookUser | undefined,
-): Promise<boolean> {
-  try {
-    const deploymentUser = await getBitbucketDeploymentUser();
-
-    if (!deploymentUser) {
-      return false;
-    }
-
-    const authorKey = getBitbucketUserAccountKey(author);
-
-    if (authorKey) {
-      if (
-        deploymentUser.accountId &&
-        normalizeBitbucketLinkedAccountKey(deploymentUser.accountId) ===
-          authorKey
-      ) {
-        return true;
-      }
-
-      if (
-        deploymentUser.uuid &&
-        normalizeBitbucketLinkedAccountKey(deploymentUser.uuid) === authorKey
-      ) {
-        return true;
-      }
-    }
-
-    const username = getBitbucketUsername(author);
-
-    return (
-      !!username &&
-      deploymentUser.login.toLowerCase() === username.toLowerCase()
-    );
-  } catch (error) {
-    console.warn(
-      `[handleBitbucketComment] failed to resolve Bitbucket deployment token identity: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return false;
-  }
 }
 
 async function postMentionResponseComment({
@@ -110,10 +61,15 @@ async function postMentionResponseComment({
       pullRequestNumber,
       body,
     });
+    console.info(
+      `[handleBitbucketComment] posted mention response comment on ${repositoryFullName}#${pullRequestNumber}`,
+    );
   } catch (error) {
     console.warn(
       `[handleBitbucketComment] failed to post mention response comment on ${repositoryFullName}#${pullRequestNumber}: ${error instanceof Error ? error.message : String(error)}`,
     );
+
+    throw error;
   }
 }
 
@@ -245,10 +201,7 @@ export async function handleBitbucketComment(
     return { status: 'ok', message: 'no_comment_author' };
   }
 
-  if (
-    isRoomoteBitbucketUsername(commenter) ||
-    (await isDeploymentTokenAuthor(payload.comment.user ?? payload.actor))
-  ) {
+  if (isRoomoteBitbucketUsername(commenter)) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }
 
