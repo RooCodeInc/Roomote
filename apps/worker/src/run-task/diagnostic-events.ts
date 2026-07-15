@@ -38,7 +38,7 @@ export function redactSecrets(text: string): string {
   let redacted = text;
 
   for (const pattern of SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, (match, ...groups) => {
+    redacted = redacted.replace(pattern, (_match, ...groups) => {
       // Assignment pattern keeps the key name for readability.
       if (typeof groups[0] === 'string' && typeof groups[1] === 'string') {
         return `${groups[0]}${groups[1]}[redacted]`;

@@ -171,6 +171,8 @@ export async function hasRepoAccess(
   fullName: string,
   authResult?: UserAuthSuccess,
 ): Promise<boolean> {
-  authResult ??= await authorizeOrThrow();
+  if (authResult === undefined) {
+    await authorizeOrThrow();
+  }
   return checkRepoAccess(fullName);
 }
