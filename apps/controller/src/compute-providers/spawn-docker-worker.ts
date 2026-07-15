@@ -434,11 +434,12 @@ export async function spawnDockerWorker(
       await docker(['stop', '--time', '10', containerName], {
         allowFailure: true,
       });
-      // Nested Docker project daemons are started on standby resume. On a
-      // failed resume, the retained worker is only stopped for reuse; the
-      // privileged `<worker>-docker` daemon must still be removed.
+      // Nested Docker project daemons are started on standby resume. Stop the
+      // privileged `<worker>-docker` daemon so it does not keep running after a
+      // failed resume, but keep the container retained for later `docker start`
+      // (resume never recreates the daemon).
       if (usesDockerProjects) {
-        await docker(['rm', '-f', taskDaemonContainerName], {
+        await docker(['stop', '--time', '10', taskDaemonContainerName], {
           allowFailure: true,
         });
       }
