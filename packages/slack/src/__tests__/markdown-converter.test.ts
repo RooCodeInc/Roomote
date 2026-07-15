@@ -135,4 +135,13 @@ describe('convertSlackLinksToMarkdown', () => {
       convertSlackLinksToMarkdown('<https://example.com?x=&lt;y|A &lt; B>'),
     ).toBe('[A < B](https://example.com?x=<y)');
   });
+
+  it('handles pathological angle-bracket sequences without quadratic scanning', () => {
+    const pathological = '<!|='.repeat(50_000);
+    const start = performance.now();
+    const result = convertSlackLinksToMarkdown(pathological);
+    const elapsedMs = performance.now() - start;
+    expect(result).toBe(pathological);
+    expect(elapsedMs).toBeLessThan(2_000);
+  });
 });

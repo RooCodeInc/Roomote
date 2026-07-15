@@ -35,6 +35,25 @@ function isConvertibleSlackUrl(rawUrl: string): boolean {
   );
 }
 
+function hasDisallowedSlackUrlChars(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    // < > | and whitespace separators
+    if (
+      code === 60 ||
+      code === 62 ||
+      code === 124 ||
+      code === 32 ||
+      code === 9 ||
+      code === 10 ||
+      code === 13
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Converts markdown link syntax to Slack link syntax.
  *
@@ -74,33 +93,57 @@ function decodeSlackEntity(text: string): string {
  * - `<https://example.com>` -> `https://example.com`
  *
  * Other Slack entity forms (mentions/channels) are intentionally untouched.
+ * Parsing is a linear left-to-right scan so untrusted payloads cannot drive
+ * polynomial regular-expression matching.
  */
 export function convertSlackLinksToMarkdown(text: string): string {
-  let converted = text;
+  let result = '';
+  let index = 0;
 
-  // Convert labeled links first. Scheme checks stay out of the match pattern
-  // so untrusted input cannot drive polynomial backoff on scheme alternation.
-  converted = converted.replace(
-    /<([^<>|\s]+)\|([^>]+)>/g,
-    (match, rawUrl: string, rawLabel: string) => {
-      if (!isConvertibleSlackUrl(rawUrl)) {
-        return match;
-      }
-
-      const url = decodeSlackEntity(rawUrl);
-      const label = decodeSlackEntity(rawLabel);
-      return `[${label}](${url})`;
-    },
-  );
-
-  // Convert bare links.
-  converted = converted.replace(/<([^<>|\s]+)>/g, (match, rawUrl: string) => {
-    if (!isConvertibleSlackUrl(rawUrl)) {
-      return match;
+  while (index < text.length) {
+    if (text.charCodeAt(index) !== 60 /* < */) {
+      result += text[index];
+      index += 1;
+      continue;
     }
 
-    return decodeSlackEntity(rawUrl);
-  });
+    const closeIndex = text.indexOf('>', index + 1);
+    if (closeIndex === -1) {
+      result += text.slice(index);
+      break;
+    }
 
-  return converted;
+    const inner = text.slice(index + 1, closeIndex);
+    const pipeIndex = inner.indexOf('|');
+
+    if (pipeIndex === -1) {
+      if (
+        inner.length > 0 &&
+        !hasDisallowedSlackUrlChars(inner) &&
+        isConvertibleSlackUrl(inner)
+      ) {
+        result += decodeSlackEntity(inner);
+        index = closeIndex + 1;
+        continue;
+      }
+    } else {
+      const rawUrl = inner.slice(0, pipeIndex);
+      const rawLabel = inner.slice(pipeIndex + 1);
+
+      if (
+        rawUrl.length > 0 &&
+        !hasDisallowedSlackUrlChars(rawUrl) &&
+        isConvertibleSlackUrl(rawUrl)
+      ) {
+        result += `[${decodeSlackEntity(rawLabel)}](${decodeSlackEntity(rawUrl)})`;
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    result += text.slice(index, closeIndex + 1);
+    index = closeIndex + 1;
+  }
+
+  return result;
 }
