@@ -9,7 +9,13 @@ import { findRoutePolicyRule, ROUTE_POLICY_RULES } from '../route-policies';
  * policy classification. Keep this list tight: adding an entry here must
  * never be the fix for an unclassified endpoint.
  */
-const INFRASTRUCTURE_MIDDLEWARE_PATHS = new Set(['/*', '/api/*']);
+const INFRASTRUCTURE_MIDDLEWARE_PATHS = new Set([
+  '/*',
+  '/api/*',
+  // Request-size middleware only; the three mounted Cloud webhook routers
+  // each have their own explicit route-policy rule.
+  '/api/webhooks/cloud/*',
+]);
 
 type RegisteredRoute = {
   method: string;
