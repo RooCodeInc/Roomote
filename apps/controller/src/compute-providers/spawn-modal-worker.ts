@@ -374,7 +374,10 @@ export async function spawnModalWorker(
         taskId: taskRun.taskId,
         environmentId,
         environmentConfig,
-        computeProvider: 'modal',
+        // The persisted vendor, not the literal 'modal': OIDC priming builds
+        // its compute client from this provider, and a roomote launch must
+        // resolve ROOMOTE_CLOUD_* credentials rather than MODAL_TOKEN_*.
+        computeProvider: vendor,
         computeProviderId: machine.machineId,
         runId: taskRun.id,
         context: 'Fresh Modal launch',

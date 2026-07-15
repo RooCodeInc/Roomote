@@ -32,6 +32,12 @@ function getDefaultProviderDisabledLabel(provider: ComputeProviderStatus) {
     return '';
   }
 
+  // Deployment-managed providers have no operator-editable fields; when
+  // unsatisfied there is nothing to configure from here.
+  if (!provider.fields.some(isComputeOperatorEditableField)) {
+    return ' (unavailable)';
+  }
+
   if (!provider.infrastructureSatisfied) {
     return ' (missing worker image)';
   }
@@ -117,9 +123,8 @@ export function ComputeProviders() {
   // Deployment-managed providers (no operator-editable fields, e.g. Roomote
   // Cloud) have nothing to configure here, so they are only listed when the
   // deployment already satisfies them.
-  const providers: ComputeProviderStatus[] = (
-    status.data?.providers ?? []
-  ).filter(
+  const allProviders: ComputeProviderStatus[] = status.data?.providers ?? [];
+  const providers: ComputeProviderStatus[] = allProviders.filter(
     (provider) =>
       provider.fields.some(isComputeOperatorEditableField) ||
       provider.configSatisfied,
@@ -128,9 +133,21 @@ export function ComputeProviders() {
     status.data?.persistedDefaultProvider ??
     status.data?.runtimeDefaultProvider ??
     'docker';
-  const defaultProviderStatus = providers.find(
+  // Resolved against the unfiltered list: the effective default may be a
+  // deployment-managed provider whose credentials were removed, and hiding
+  // it here would silently drop the missing-configuration alert while task
+  // dispatch keeps targeting it.
+  const defaultProviderStatus = allProviders.find(
     (provider) => provider.provider === effectiveDefaultProvider,
   );
+  // Keep the effective default selectable-but-disabled in the dropdown even
+  // when its section is hidden, so the select reflects the real state
+  // instead of rendering an empty value.
+  const defaultSelectProviders =
+    !defaultProviderStatus ||
+    providers.some((provider) => provider.provider === effectiveDefaultProvider)
+      ? providers
+      : [...providers, defaultProviderStatus];
   const localDockerEnabled =
     !status.data?.excludedProviders?.includes('docker');
 
@@ -190,7 +207,7 @@ export function ComputeProviders() {
               <SelectValue placeholder="Select a sandbox provider" />
             </SelectTrigger>
             <SelectContent>
-              {providers
+              {defaultSelectProviders
                 .filter(
                   (provider) =>
                     localDockerEnabled || provider.provider !== 'docker',
