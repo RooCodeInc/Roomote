@@ -288,7 +288,7 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
   });
 
-  it('guides Bitbucket token creation without optional credentials', () => {
+  it('guides Bitbucket OAuth consumer creation', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
@@ -297,19 +297,20 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText('Bitbucket API Token')).toBeInTheDocument();
-    expect(screen.getByText('Atlassian Account Email')).toBeInTheDocument();
+    expect(screen.getByText('Bitbucket OAuth Client ID')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Bitbucket OAuth Client Secret/),
+    ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open/ })).toHaveAttribute(
       'href',
-      'https://id.atlassian.com/manage-profile/security/api-tokens',
+      'https://developer.atlassian.com/console/myapps/',
     );
     expect(
-      screen.getByText(/Create API token with scopes → Bitbucket/),
+      screen.getByText(
+        /Create an OAuth consumer in the Atlassian developer console/,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('Bitbucket OAuth Client ID'),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByText('Bitbucket Webhook Secret'),
     ).not.toBeInTheDocument();

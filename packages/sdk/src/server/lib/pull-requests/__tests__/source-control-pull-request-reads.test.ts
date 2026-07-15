@@ -46,6 +46,13 @@ vi.mock('@roomote/gitlab', () => ({
 }));
 
 vi.mock('@roomote/bitbucket', () => ({
+  resolveBitbucketAuth: async () => ({
+    token: 'bitbucket-token',
+    username: 'bb-bot',
+    baseUrl: 'https://bitbucket.org',
+    apiBaseUrl: 'https://api.bitbucket.org/2.0',
+    authScheme: 'basic',
+  }),
   resolveBitbucketToken: async () => 'bitbucket-token',
   resolveBitbucketUsername: async () => 'bb-bot',
   resolveBitbucketBaseUrl: async () => 'https://bitbucket.org',

@@ -382,11 +382,15 @@ function buildProviderFields(
           acceptedEnvVarNames: ['BITBUCKET_TOKEN'],
           label: 'Bitbucket API Token',
           secret: true,
+          required: false,
+          advanced: true,
         },
         {
           envVarName: 'BITBUCKET_USERNAME',
           acceptedEnvVarNames: ['BITBUCKET_USERNAME'],
           label: 'Atlassian Account Email',
+          required: false,
+          advanced: true,
         },
         {
           envVarName: 'BITBUCKET_BASE_URL',
@@ -400,15 +404,13 @@ function buildProviderFields(
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
           label: 'Bitbucket OAuth Client ID',
           required: false,
-          setupHidden: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_SECRET',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_SECRET'],
           label: 'Bitbucket OAuth Client Secret',
           secret: true,
-          required: false,
-          setupHidden: true,
+          required: true,
         },
         {
           envVarName: 'BITBUCKET_WEBHOOK_SECRET',

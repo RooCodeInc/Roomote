@@ -750,6 +750,16 @@ export async function assertValidSourceControlConfigInput(params: {
     params.provider === 'bitbucket'
       ? params.values?.['BITBUCKET_TOKEN']?.trim()
       : undefined;
+  const nextBitbucketClientId =
+    params.provider === 'bitbucket'
+      ? (params.values?.['BITBUCKET_CLIENT_ID']?.trim() ??
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_ID')))
+      : undefined;
+  const nextBitbucketClientSecret =
+    params.provider === 'bitbucket'
+      ? (params.values?.['BITBUCKET_CLIENT_SECRET']?.trim() ??
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_SECRET')))
+      : undefined;
   const nextAdoToken =
     params.provider === 'ado'
       ? (params.values?.['ADO_TOKEN']?.trim() ??
@@ -835,6 +845,16 @@ export async function assertValidSourceControlConfigInput(params: {
     if (validation.status === 'invalid') {
       throw new Error(validation.error);
     }
+  }
+
+  if (
+    params.provider === 'bitbucket' &&
+    !(nextBitbucketClientId && nextBitbucketClientSecret) &&
+    !nextBitbucketToken
+  ) {
+    throw new Error(
+      'Configure the Bitbucket OAuth consumer ID and secret, or provide the legacy API token and username.',
+    );
   }
 
   if (nextAdoToken) {

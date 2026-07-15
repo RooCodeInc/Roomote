@@ -15,6 +15,10 @@ import {
   inArray,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
+import {
+  getBitbucketOAuthConnection,
+  resolveBitbucketOAuthAccessToken,
+} from './oauth';
 
 const BITBUCKET_PROVIDER = 'bitbucket' satisfies SourceControlProvider;
 const DEFAULT_BITBUCKET_BASE_URL = 'https://bitbucket.org';
@@ -127,6 +131,7 @@ export type BitbucketRepositoryCredential = {
   username: string;
   token: string;
   originBaseUrl: string;
+  authScheme: 'basic';
 };
 
 export type BitbucketRepositoryValues = {
@@ -260,7 +265,16 @@ export function normalizeBitbucketLinkedAccountKey(value: string): string {
 }
 
 export async function resolveBitbucketToken(): Promise<string | null> {
-  return resolveDeploymentEnvVar('BITBUCKET_TOKEN');
+  const connection = await getBitbucketOAuthConnection();
+  if (connection?.status === 'reauthorization_required') {
+    throw new Error(
+      'Bitbucket OAuth authorization requires reconnection. Reconnect the Bitbucket OAuth consumer in source-control settings.',
+    );
+  }
+  return (
+    (await resolveBitbucketOAuthAccessToken()) ??
+    resolveDeploymentEnvVar('BITBUCKET_TOKEN')
+  );
 }
 
 export async function resolveBitbucketBaseUrl(): Promise<string> {
@@ -271,7 +285,53 @@ export async function resolveBitbucketBaseUrl(): Promise<string> {
 }
 
 export async function resolveBitbucketUsername(): Promise<string | null> {
-  return resolveDeploymentEnvVar('BITBUCKET_USERNAME');
+  return (await getBitbucketOAuthConnection())?.status === 'active'
+    ? (await getBitbucketOAuthConnection())?.username || 'x-token-auth'
+    : resolveDeploymentEnvVar('BITBUCKET_USERNAME');
+}
+
+export type BitbucketAuthDescriptor = {
+  token: string;
+  username: string;
+  baseUrl: string;
+  apiBaseUrl: string;
+  authScheme: 'basic' | 'bearer';
+};
+
+export async function resolveBitbucketAuth(): Promise<BitbucketAuthDescriptor> {
+  const connection = await getBitbucketOAuthConnection();
+  if (connection?.status === 'reauthorization_required') {
+    throw new Error(
+      'Bitbucket OAuth authorization requires reconnection. Reconnect the Bitbucket OAuth consumer in source-control settings.',
+    );
+  }
+  const token = await resolveBitbucketOAuthAccessToken();
+  if (token && connection) {
+    const baseUrl = await resolveBitbucketBaseUrl();
+    return {
+      token,
+      username: connection.username || 'x-token-auth',
+      baseUrl,
+      apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
+      authScheme: 'bearer',
+    };
+  }
+  const legacyToken = await resolveDeploymentEnvVar('BITBUCKET_TOKEN');
+  const username = await resolveDeploymentEnvVar('BITBUCKET_USERNAME');
+  if (!legacyToken?.trim())
+    throw new Error(
+      'Bitbucket source-control credentials are not configured. Connect a Bitbucket OAuth consumer or configure BITBUCKET_TOKEN and BITBUCKET_USERNAME.',
+    );
+  if (!username?.trim())
+    throw new Error('BITBUCKET_USERNAME is required with BITBUCKET_TOKEN.');
+  const baseUrl = await resolveBitbucketBaseUrl();
+  return {
+    token: legacyToken,
+    username: username.trim(),
+    baseUrl,
+    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
+    authScheme: 'basic',
+  };
 }
 
 let cachedBitbucketDeploymentUser: {
@@ -305,6 +365,7 @@ async function requestBitbucketJson<T>({
   params = {},
   username,
   token,
+  authScheme,
   body,
   schema,
   absoluteUrl,
@@ -314,8 +375,9 @@ async function requestBitbucketJson<T>({
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   path?: string;
   params?: Record<string, string | number | boolean>;
-  username: string;
+  username?: string;
   token: string;
+  authScheme?: 'basic' | 'bearer';
   body?: Record<string, unknown>;
   schema: z.ZodType<T>;
   absoluteUrl?: string;
@@ -326,7 +388,10 @@ async function requestBitbucketJson<T>({
       method,
       headers: {
         Accept: 'application/json',
-        Authorization: buildAuthorizationHeader(username, token),
+        Authorization:
+          (authScheme ?? 'basic') === 'bearer'
+            ? `Bearer ${token}`
+            : buildAuthorizationHeader(username ?? '', token),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -369,12 +434,9 @@ async function resolveAuthIdentity({
   baseUrl?: string;
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
-}): Promise<{
-  token: string;
-  username: string;
-  baseUrl: string;
-  apiBaseUrl: string;
-}> {
+}): Promise<BitbucketAuthDescriptor> {
+  if (!token && !username && !baseUrl && !apiBaseUrl)
+    return resolveBitbucketAuth();
   const resolvedToken = token ?? (await resolveBitbucketToken());
 
   if (!resolvedToken?.trim()) {
@@ -389,12 +451,20 @@ async function resolveAuthIdentity({
   const configuredUsername =
     username ?? (await resolveBitbucketUsername()) ?? undefined;
 
-  if (configuredUsername?.trim()) {
+  const oauthConnection = await getBitbucketOAuthConnection();
+  const authScheme =
+    oauthConnection?.accessToken === resolvedToken ? 'bearer' : 'basic';
+
+  if (authScheme === 'bearer' || configuredUsername?.trim()) {
     return {
       token: resolvedToken,
-      username: configuredUsername.trim(),
+      username:
+        configuredUsername?.trim() ??
+        oauthConnection?.username ??
+        'x-token-auth',
       baseUrl: resolvedBaseUrl,
       apiBaseUrl: resolvedApiBaseUrl,
+      authScheme,
     };
   }
 
@@ -433,6 +503,7 @@ export async function getBitbucketAuthenticatedUser({
     path: '/user',
     username: auth.username,
     token: auth.token,
+    authScheme: auth.authScheme,
     schema: bitbucketUserSchema,
   });
 
@@ -530,6 +601,7 @@ export async function listBitbucketRepositories({
       fetchImpl,
       username: auth.username,
       token: auth.token,
+      authScheme: auth.authScheme,
       schema: bitbucketPaginatedWorkspaceMembershipsSchema,
       absoluteUrl: workspacesUrl,
     });
@@ -563,6 +635,7 @@ export async function listBitbucketRepositories({
           fetchImpl,
           username: auth.username,
           token: auth.token,
+          authScheme: auth.authScheme,
           schema: bitbucketPaginatedRepositoriesSchema,
           absoluteUrl: nextUrl,
         });
@@ -941,6 +1014,7 @@ async function findBitbucketRepositoryWebhookByUrl({
   webhookUrl,
   username,
   token,
+  authScheme,
   apiBaseUrl,
   fetchImpl,
 }: {
@@ -950,6 +1024,7 @@ async function findBitbucketRepositoryWebhookByUrl({
   username: string;
   token: string;
   apiBaseUrl: string;
+  authScheme?: 'basic' | 'bearer';
   fetchImpl?: typeof fetch;
 }): Promise<z.infer<typeof bitbucketHookSchema> | undefined> {
   let nextUrl: string | null = buildBitbucketApiUrl(
@@ -967,6 +1042,7 @@ async function findBitbucketRepositoryWebhookByUrl({
         fetchImpl,
         username,
         token,
+        authScheme,
         schema: bitbucketPaginatedHooksSchema,
         absoluteUrl: nextUrl,
       });
@@ -992,6 +1068,7 @@ async function ensureBitbucketRepositoryWebhook({
   username,
   token,
   apiBaseUrl,
+  authScheme,
   fetchImpl,
 }: {
   repositoryFullName: string;
@@ -1000,6 +1077,7 @@ async function ensureBitbucketRepositoryWebhook({
   username: string;
   token: string;
   apiBaseUrl: string;
+  authScheme?: 'basic' | 'bearer';
   fetchImpl?: typeof fetch;
 }): Promise<'created' | 'updated'> {
   const { workspace, repo } =
@@ -1010,6 +1088,7 @@ async function ensureBitbucketRepositoryWebhook({
     webhookUrl,
     username,
     token,
+    authScheme,
     apiBaseUrl,
     fetchImpl,
   });
@@ -1031,6 +1110,7 @@ async function ensureBitbucketRepositoryWebhook({
       )}/hooks`,
       username,
       token,
+      authScheme,
       body,
       schema: bitbucketHookSchema,
     });
@@ -1047,6 +1127,7 @@ async function ensureBitbucketRepositoryWebhook({
     )}/hooks/${encodeURIComponent(existingHook.uuid)}`,
     username,
     token,
+    authScheme,
     body,
     schema: bitbucketHookSchema,
   });
@@ -1102,6 +1183,7 @@ export async function ensureBitbucketWebhooksForRepositories({
               secretToken,
               username: auth.username,
               token: auth.token,
+              authScheme: auth.authScheme,
               apiBaseUrl: auth.apiBaseUrl,
               fetchImpl,
             })
@@ -1128,6 +1210,7 @@ async function removeBitbucketRepositoryWebhook({
   username,
   token,
   apiBaseUrl,
+  authScheme,
   fetchImpl = fetch,
 }: {
   repositoryFullName: string;
@@ -1135,6 +1218,7 @@ async function removeBitbucketRepositoryWebhook({
   username: string;
   token: string;
   apiBaseUrl: string;
+  authScheme?: 'basic' | 'bearer';
   fetchImpl?: typeof fetch;
 }): Promise<'removed' | 'not_found'> {
   const { workspace, repo } =
@@ -1145,6 +1229,7 @@ async function removeBitbucketRepositoryWebhook({
     webhookUrl,
     username,
     token,
+    authScheme,
     apiBaseUrl,
     fetchImpl,
   });
@@ -1162,6 +1247,7 @@ async function removeBitbucketRepositoryWebhook({
     )}/hooks/${encodeURIComponent(existingHook.uuid)}`,
     username,
     token,
+    authScheme,
     schema: z.undefined(),
   });
 
@@ -1258,9 +1344,13 @@ export async function createTaskRunBitbucketCredentials(
     credentials: repositoriesList.map((repository) => ({
       host,
       repositoryFullName: repository.fullName,
-      username: getBitbucketGitUsername(auth.username),
+      username:
+        auth.authScheme === 'bearer'
+          ? 'x-token-auth'
+          : getBitbucketGitUsername(auth.username),
       token: auth.token,
       originBaseUrl: auth.baseUrl,
+      authScheme: 'basic',
     })),
   };
 }

@@ -321,7 +321,8 @@ export function StepSourceControlConfig({
 
     if (
       selectedProvider.provider === 'gitea' ||
-      selectedProvider.provider === 'gitlab'
+      selectedProvider.provider === 'gitlab' ||
+      selectedProvider.provider === 'bitbucket'
     ) {
       window.location.assign(
         `/api/source-control/${selectedProvider.provider}/oauth/authorize`,

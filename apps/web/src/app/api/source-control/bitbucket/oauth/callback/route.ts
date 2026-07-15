@@ -1,0 +1,67 @@
+import { type NextRequest, NextResponse } from 'next/server';
+import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import {
+  buildBitbucketOAuthRedirectUri,
+  exchangeBitbucketOAuthCode,
+  syncBitbucketRepositories,
+} from '@roomote/bitbucket';
+import { authorize } from '@/lib/server';
+import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  const webEnv = await bootstrapWebRuntimeEnv();
+  const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
+  const redirect = new URL('/setup', publicAppUrl);
+  redirect.searchParams.set('step', 'source-control-connect');
+  const response = () => NextResponse.redirect(redirect);
+  const authResult = await authorize();
+  const state = request.nextUrl.searchParams.get('state');
+  const expectedState = request.cookies.get(
+    'roomote-bitbucket-oauth-state',
+  )?.value;
+  const code = request.nextUrl.searchParams.get('code');
+  if (
+    !authResult.success ||
+    !authResult.isAdmin ||
+    !state ||
+    state !== expectedState ||
+    !code
+  ) {
+    redirect.searchParams.set('bitbucket', 'error');
+    return response();
+  }
+  try {
+    const [clientId, clientSecret] = await Promise.all([
+      resolveDeploymentEnvVar('BITBUCKET_CLIENT_ID'),
+      resolveDeploymentEnvVar('BITBUCKET_CLIENT_SECRET'),
+    ]);
+    if (!clientId || !clientSecret)
+      throw new Error(
+        'Bitbucket OAuth consumer credentials are not configured.',
+      );
+    await exchangeBitbucketOAuthCode({
+      clientId,
+      clientSecret,
+      code,
+      redirectUri: buildBitbucketOAuthRedirectUri(publicAppUrl),
+    });
+    await syncBitbucketRepositories({ userId: authResult.userId });
+    redirect.searchParams.set('bitbucket', 'connected');
+    redirect.searchParams.set('sync', '1');
+  } catch (error) {
+    console.error('[Bitbucket OAuth] callback failed', error);
+    redirect.searchParams.set('bitbucket', 'error');
+  }
+  const result = response();
+  result.cookies.set('roomote-bitbucket-oauth-state', '', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: publicAppUrl.startsWith('https://'),
+    path: '/api/source-control/bitbucket/oauth',
+    maxAge: 0,
+  });
+  return result;
+}
