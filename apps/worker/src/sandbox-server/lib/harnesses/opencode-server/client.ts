@@ -90,7 +90,7 @@ export function formatOpenCodeSessionCreateTimeoutText(
 ): string {
   const seconds = Math.max(1, Math.round(timeoutMs / 1_000));
 
-  return `OpenCode session creation did not respond within ${seconds}s. The OpenCode server is up, but the first session request never finished — usually a hang while OpenCode bootstraps the workspace instance (config, plugins, storage, or MCP). Cancel and retry, or inspect the worker OpenCode logs for a stuck \`creating instance\` / \`bootstrapping\` sequence.`;
+  return `OpenCode session creation did not respond within ${seconds}s. The OpenCode server is up, but the first session request never finished — usually a hang while OpenCode bootstraps the workspace instance (config, plugins, storage, or MCP). Open the Logs sidebar and inspect harness.log for OpenCode lines (prefixed [opencode-server], including stuck \`creating instance\` / \`bootstrapping\` output), then cancel and retry.`;
 }
 
 function composeAbortSignals(

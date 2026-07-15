@@ -42,6 +42,13 @@ describe('OpenCodeServerClient timeouts', () => {
     );
   });
 
+  it('points session-create timeout copy at the Logs sidebar harness.log', () => {
+    const text = formatOpenCodeSessionCreateTimeoutText(90_000);
+    expect(text).toContain('Logs sidebar');
+    expect(text).toContain('harness.log');
+    expect(text).toContain('[opencode-server]');
+  });
+
   it('times out createSession when OpenCode never responds', async () => {
     vi.useFakeTimers();
     const logger = createLogger();
