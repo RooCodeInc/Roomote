@@ -52,7 +52,6 @@
     "@types/node": "^24.10.13",
     "@typescript/native-preview": "7.0.0-dev.20260614.1",
     "eslint": "^9.39.2",
-    "eslint-plugin-oxlint": "^1.73.0",
     "husky": "^9.1.7",
     "knip": "^5.85.0",
     "lint-staged": "^16.2.7",
