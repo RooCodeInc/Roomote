@@ -57,6 +57,19 @@ describe('StepAuthProvider', () => {
     expect(onContinue).toHaveBeenCalledWith('slack');
   });
 
+  it('disables the provider choices while a selection is being saved', () => {
+    const onContinue = vi.fn();
+
+    render(<StepAuthProvider onContinue={onContinue} disabled={true} />);
+
+    const slackButton = screen.getByRole('button', { name: /slack/i });
+    expect(slackButton).toBeDisabled();
+
+    fireEvent.click(slackButton);
+
+    expect(onContinue).not.toHaveBeenCalled();
+  });
+
   it('shows a subtle skip link when onSkip is provided', () => {
     const onContinue = vi.fn();
     const onSkip = vi.fn();

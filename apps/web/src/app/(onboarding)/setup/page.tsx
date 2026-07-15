@@ -204,6 +204,19 @@ export default function SetupPage() {
       },
     }),
   );
+  const saveAuthProviderChoice = useMutation(
+    trpc.setupNew.saveAuthProviderChoice.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        goToStep('auth-env-vars');
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
   const saveComputeProviderChoice = useMutation(
     trpc.setupNew.saveComputeProviderChoice.mutationOptions({
       onSuccess: async (_data, variables) => {
@@ -530,13 +543,26 @@ export default function SetupPage() {
               includeTelegram
               onContinue={(provider) => {
                 setPendingAuthProvider(provider);
-                goToStep('auth-env-vars');
+
+                // Telegram is a UI-only choice with no persisted auth provider
+                // and its own setup step, so keep it on the pending-only path.
+                if (provider === 'telegram') {
+                  goToStep('auth-env-vars');
+                  return;
+                }
+
+                // Persist the chosen provider before navigating so the choice
+                // survives a reload even when the config step is auto-skipped
+                // for a runtime-configured provider. saveAuthProviderChoice
+                // advances to auth-env-vars on success.
+                saveAuthProviderChoice.mutate({ provider });
               }}
               onSkip={() => {
                 setupSession.setCommunicationStepState('skipped');
                 goToNextStep();
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
+              disabled={saveAuthProviderChoice.isPending}
             />
           )}
           {step === 'auth-env-vars' &&

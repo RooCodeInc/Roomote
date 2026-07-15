@@ -20,11 +20,13 @@ export function StepAuthProvider({
   onBack,
   onSkip,
   includeTelegram = false,
+  disabled = false,
 }: {
   onContinue: (provider: CommunicationProviderChoice) => void;
   onBack?: () => void;
   onSkip?: () => void;
   includeTelegram?: boolean;
+  disabled?: boolean;
 }) {
   const providers = includeTelegram
     ? [
@@ -49,6 +51,7 @@ export function StepAuthProvider({
                 key={provider.id}
                 type="button"
                 onClick={() => onContinue(provider.id)}
+                disabled={disabled}
                 className={cn(
                   'group flex w-full py-5',
                   'hover:text-accent-foreground hover:bg-foreground',
