@@ -56,7 +56,7 @@ export function AnalyticsSelectField({
         <SelectTrigger
           aria-label={label}
           className={cn(
-            isInline ? 'w-[160px]' : 'w-full bg-background',
+            isInline ? 'min-w-[100px]' : 'w-full bg-background',
             triggerClassName,
           )}
         >

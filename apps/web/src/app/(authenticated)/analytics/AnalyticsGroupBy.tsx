@@ -34,7 +34,7 @@ export function AnalyticsGroupBy({
       value={value}
       onValueChange={(next) => onChange(next as AnalyticsDimension)}
     >
-      <SelectTrigger aria-label="View by" className="min-w-[160px]">
+      <SelectTrigger aria-label="View by" className="min-w-[100px]">
         <SelectValue placeholder="By" />
       </SelectTrigger>
       <SelectContent>

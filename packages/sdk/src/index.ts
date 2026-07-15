@@ -9,6 +9,7 @@ import * as environments from './environments';
 import * as featureFlags from './feature-flags';
 import * as mcpConnections from './mcp-connections';
 import * as userApiKeys from './user-api-keys';
+import * as llmUsage from './llm-usage';
 
 const sdk = {
   auth,
@@ -22,6 +23,7 @@ const sdk = {
   featureFlags,
   mcpConnections,
   userApiKeys,
+  llmUsage,
 };
 
 export { sdk };
@@ -50,3 +52,4 @@ export type {
   DequeuedResumeTaskRun,
 } from './task-runs';
 export type { Environment, EnvironmentListItem } from './environments';
+export type { RecordLlmUsageInput } from './llm-usage';
