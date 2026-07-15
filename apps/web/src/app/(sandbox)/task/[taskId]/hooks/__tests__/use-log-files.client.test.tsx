@@ -178,4 +178,69 @@ describe('useLogFiles', () => {
 
     expect(getSetupStatusQueryMock).toHaveBeenCalled();
   });
+
+  it('disambiguates setup log labels with the repo only when names collide', async () => {
+    useEnvironmentMock.mockReturnValue({ data: undefined });
+
+    getSetupStatusQueryMock.mockResolvedValue({
+      path: '.roomote/setup-status.json',
+      exists: true,
+      status: {
+        version: 1,
+        state: 'completed',
+        startedAt: '2026-07-14T00:00:00.000Z',
+        commands: [
+          {
+            repository: 'RooCodeInc/Roomote',
+            name: 'Install dependencies',
+            state: 'succeeded',
+            logFile:
+              '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies.log',
+          },
+          {
+            repository: 'RooCodeInc/web',
+            name: 'Install dependencies',
+            state: 'succeeded',
+            logFile:
+              '.roomote/setup-logs/RooCodeInc/web/install-dependencies.log',
+          },
+          {
+            repository: 'RooCodeInc/Roomote',
+            name: 'Migrate database',
+            state: 'succeeded',
+            logFile:
+              '.roomote/setup-logs/RooCodeInc/Roomote/migrate-database.log',
+          },
+        ],
+        warnings: [],
+      },
+    });
+
+    const store = createSandboxStore();
+
+    renderHook(() => useLogFiles('env-1'), {
+      wrapper: createWrapper(store),
+    });
+
+    await waitFor(() => {
+      expect(store.getState().logfiles).toEqual([
+        { label: 'harness.log', filePath: '/tmp/harness.log' },
+        {
+          label: 'Setup: Install dependencies (Roomote)',
+          filePath:
+            '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies.log',
+        },
+        {
+          label: 'Setup: Install dependencies (web)',
+          filePath:
+            '.roomote/setup-logs/RooCodeInc/web/install-dependencies.log',
+        },
+        {
+          label: 'Setup: Migrate database',
+          filePath:
+            '.roomote/setup-logs/RooCodeInc/Roomote/migrate-database.log',
+        },
+      ]);
+    });
+  });
 });

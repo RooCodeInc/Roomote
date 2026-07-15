@@ -153,28 +153,44 @@ export function useLogFiles(
 
 function logfilesFromSetupStatus(
   commands: Array<{
+    repository: string;
     name: string;
     logFile?: string;
   }>,
 ): LogfileInfo[] {
-  const result: LogfileInfo[] = [];
+  const withLogs = commands.filter(
+    (command): command is typeof command & { logFile: string } =>
+      Boolean(command.logFile),
+  );
 
-  for (const command of commands) {
-    if (!command.logFile) {
-      continue;
-    }
+  const baseLabelCounts = new Map<string, number>();
 
-    result.push({
-      label: setupLogLabel(command.name),
-      filePath: command.logFile,
-    });
+  for (const command of withLogs) {
+    const baseLabel = setupLogBaseLabel(command.name);
+    baseLabelCounts.set(baseLabel, (baseLabelCounts.get(baseLabel) ?? 0) + 1);
   }
 
-  return result;
+  return withLogs.map((command) => {
+    const baseLabel = setupLogBaseLabel(command.name);
+    const needsRepoDisambiguation = (baseLabelCounts.get(baseLabel) ?? 0) > 1;
+
+    return {
+      label: needsRepoDisambiguation
+        ? `${baseLabel} (${shortRepositoryName(command.repository)})`
+        : baseLabel,
+      filePath: command.logFile,
+    };
+  });
 }
 
-function setupLogLabel(commandName: string): string {
+function setupLogBaseLabel(commandName: string): string {
   return `Setup: ${commandName}`;
+}
+
+function shortRepositoryName(repository: string): string {
+  return repository.includes('/')
+    ? (repository.split('/').pop() ?? repository)
+    : repository;
 }
 
 function mergeLogFiles(
