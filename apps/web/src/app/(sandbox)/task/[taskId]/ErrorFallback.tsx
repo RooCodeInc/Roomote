@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
-import { AlertCircle, RefreshCw, Spinner } from '@/components/system';
+import { AlertCircle, Spinner } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
 import { type TaskSession, useSandboxConnectionStatus } from './hooks';
