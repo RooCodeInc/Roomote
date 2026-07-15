@@ -167,7 +167,6 @@ export function normalizeKickoffMessage(
   // mentions or special link markup when inserted into a section block.
   text = text.replace(SLACK_CONTROL_TOKEN_PATTERN, ' ').replace(/[<>]/g, ' ');
   text = text.replace(/\s+/g, ' ').trim();
-  text = text.replace(/\.+$/, '').trim();
 
   if (!text) {
     return undefined;

@@ -112,10 +112,10 @@ describe('chat message copy builders', () => {
         workspaceDisplayName: 'App',
         freeformKickoffEnabled: true,
         kickoffMessage:
-          'Checking login redirects in App with Anthropic Claude Fable 5',
+          'Checking login redirects in App with Anthropic Claude Fable 5.',
         modelDisplayName: 'Anthropic Claude Fable 5',
       }),
-    ).toBe('Checking login redirects in App with Anthropic Claude Fable 5');
+    ).toBe('Checking login redirects in App with Anthropic Claude Fable 5.');
 
     // Flag off (default): free-form is ignored in favor of the template.
     expect(

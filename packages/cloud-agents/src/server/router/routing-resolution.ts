@@ -47,7 +47,7 @@ export const workspaceResponseSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'Full short user-facing kickoff sentence posted in chat (about 8-18 words). Naturally include the exact chosen environment name, and when requestedModelId is a real model also naturally include that model display name from the Available Models list. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, mentions, or trailing period. Always provide a non-empty value for real routed tasks.',
+      'Full short user-facing kickoff sentence posted in chat (about 8-18 words). Naturally include the exact chosen environment name, and when requestedModelId is a real model also naturally include that model display name from the Available Models list. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.',
     )
     .optional()
     .default(null),

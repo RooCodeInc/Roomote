@@ -149,7 +149,7 @@ Respond with a single JSON object containing exactly these fields:
 - "workspaceValue" (string): Name of the chosen environment.
 - "reasoning" (string): Brief explanation of your workspace decision.
 - "confidence" (number): Confidence in the workspace choice from 0 to 1.
-- "kickoffMessage" (string or null): Full short user-facing kickoff sentence (about 8-18 words). Naturally include the chosen environment name, and naturally include the model display name when requestedModelId is a real model. Vary wording; no "Getting started on your task in…" boilerplate every time. No emojis, markdown, quotes, mentions, or trailing period.
+- "kickoffMessage" (string or null): Full short user-facing kickoff sentence (about 8-18 words). Naturally include the chosen environment name, and naturally include the model display name when requestedModelId is a real model. Vary wording; no "Getting started on your task in…" boilerplate every time. No emojis, markdown, quotes, or mentions.
 - "needsExternalLookup" (boolean): Whether an external reference must be fetched before routing, per the external lookup rules.
 - "externalReference" (string or null): The exact external reference to fetch when needsExternalLookup is true, otherwise null.
 - "requestedModelId" (string or null): The model id the user explicitly requested from the Available Models list, or the literal "${NO_MODEL_MENTIONED_VALUE}" when the user does not name a model.

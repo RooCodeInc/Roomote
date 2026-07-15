@@ -54,7 +54,7 @@ Also always set \`kickoffMessage\` to the full short user-facing kickoff for cha
   - "Checking mobile login redirects in Payments with Opus 4.8"
   - "Digging into the flaky checkout email race in Full Stack"
 - The environment and model names in the sentence must match the Available lists exactly (same spelling/casing as shown).
-- Do not include emojis, markdown, quotes, @-mentions, Slack markup, or a trailing period.
+- Do not include emojis, markdown, quotes, @-mentions, or Slack markup.
 - Do not invent environment or model names that are not in the provided lists.
 - Always produce a non-empty kickoffMessage for real routed tasks. Keep routing justification in \`reasoning\`; keep the spoken kickoff in \`kickoffMessage\`.`;
 
