@@ -6,23 +6,48 @@ import { formatDistanceToNow } from 'date-fns';
 
 import type { EnvironmentWithMeta } from '@/trpc/commands/environments';
 import {
-  AlertCircle,
+  ArrowUpRightIcon,
   Badge,
   BasicTooltip,
   Check,
-  CheckCircle2,
+  HelpCircle,
   Loader2,
+  type LucideIcon,
   X,
 } from '@/components/system';
-import { ArrowUpRight, CircleQuestionMark, ExternalLink } from 'lucide-react';
-import { Arrow } from '@radix-ui/react-tooltip';
-import { ArrowTopRightIcon } from '@radix-ui/react-icons';
 
-type EnvironmentVerificationState =
+export type EnvironmentVerificationState =
   | 'verified'
   | 'in_progress'
   | 'failed'
   | 'configured';
+
+export const environmentVerificationDisplay: Record<
+  EnvironmentVerificationState,
+  {
+    Icon: LucideIcon;
+    label: string;
+    iconClassName?: string;
+  }
+> = {
+  verified: {
+    Icon: Check,
+    label: 'Verified',
+  },
+  in_progress: {
+    Icon: Loader2,
+    label: 'Verification in progress',
+    iconClassName: 'animate-spin',
+  },
+  failed: {
+    Icon: X,
+    label: 'Verification failed',
+  },
+  configured: {
+    Icon: HelpCircle,
+    label: 'Configured',
+  },
+};
 
 export function getEnvironmentVerificationState(
   environment: Pick<
@@ -57,6 +82,7 @@ export function EnvironmentVerificationBadge({
   env: EnvironmentWithMeta;
 }) {
   const state = getEnvironmentVerificationState(env);
+  const { Icon, iconClassName, label } = environmentVerificationDisplay[state];
   const badgeClassName = env.verificationTaskId
     ? 'gap-1 cursor-pointer'
     : 'gap-1';
@@ -94,9 +120,11 @@ export function EnvironmentVerificationBadge({
         >
           {wrapBadge(
             <Badge variant="success" className={badgeClassName}>
-              <Check className="size-3" />
-              Verified
-              <ArrowUpRight />
+              <Icon
+                className={['size-3', iconClassName].filter(Boolean).join(' ')}
+              />
+              {label}
+              <ArrowUpRightIcon />
             </Badge>,
           )}
         </BasicTooltip>
@@ -113,9 +141,11 @@ export function EnvironmentVerificationBadge({
         >
           {wrapBadge(
             <Badge variant="secondary" className={badgeClassName}>
-              <Loader2 className="size-3 animate-spin" />
-              Verification in progress
-              <ArrowUpRight />
+              <Icon
+                className={['size-3', iconClassName].filter(Boolean).join(' ')}
+              />
+              {label}
+              <ArrowUpRightIcon />
             </Badge>,
           )}
         </BasicTooltip>
@@ -124,7 +154,7 @@ export function EnvironmentVerificationBadge({
       return (
         <BasicTooltip
           content={
-            <div className="text-sm">
+            <div className="text-sm max-w-lg">
               Roomote could not verify that this environment works. It is still
               usable; retry verification after checking the configuration.
               {env.verificationError ? (
@@ -135,9 +165,11 @@ export function EnvironmentVerificationBadge({
         >
           {wrapBadge(
             <Badge variant="destructive" className={badgeClassName}>
-              <X className="size-3" />
-              Verification failed
-              <ArrowUpRight />
+              <Icon
+                className={['size-3', iconClassName].filter(Boolean).join(' ')}
+              />
+              {label}
+              <ArrowUpRightIcon />
             </Badge>,
           )}
         </BasicTooltip>
@@ -155,9 +187,11 @@ export function EnvironmentVerificationBadge({
         >
           {wrapBadge(
             <Badge variant="warning" className={badgeClassName}>
-              <CircleQuestionMark className="size-3" />
-              Configured
-              <ArrowUpRight />
+              <Icon
+                className={['size-3', iconClassName].filter(Boolean).join(' ')}
+              />
+              {label}
+              <ArrowUpRightIcon />
             </Badge>,
           )}
         </BasicTooltip>

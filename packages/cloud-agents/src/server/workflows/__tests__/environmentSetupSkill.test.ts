@@ -174,7 +174,10 @@ describe('environment-setup guidance', () => {
       'First read .roomote/setup-status.json in the workspace root: while its state is "running", environment setup commands are still executing in the background',
     );
     expect(skillContent).toContain(
-      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from its log under .roomote/setup-logs/.",
+      'Re-read .roomote/setup-status.json every 10-15 seconds while it is still running, rather than sleeping for several minutes at a time.',
+    );
+    expect(skillContent).toContain(
+      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from .roomote/setup-logs/.",
     );
     expect(skillContent).toContain(
       'the platform delivers a `Spawned task update` message into this session when the verification task settles',
@@ -183,10 +186,13 @@ describe('environment-setup guidance', () => {
       'Treat that message as the primary completion signal',
     );
     expect(skillContent).toContain(
-      'While waiting for that settle notification, periodically check the verification task with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId` as a fallback signal.',
+      'While waiting for that settle notification, check the verification task every 10-15 seconds with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId` as a fallback signal.',
     );
     expect(skillContent).toContain(
       'treat `failed` or `completed with warnings` as direct evidence that specific setup commands failed even when the verification task has not described the failure yet',
+    );
+    expect(skillContent).toContain(
+      'when `Environment Setup` is `completed` immediately inspect the latest task messages instead of sleeping for another long interval',
     );
     expect(skillContent).toContain(
       'relaunch the verification task with `notifyOnSettle: true`, and wait for the new settle notification',
@@ -195,7 +201,7 @@ describe('environment-setup guidance', () => {
       'Narrate concise, plain-language progress updates while the follow-up check runs',
     );
     expect(skillContent).toContain(
-      'Preparing the environment can take 5 minutes or more, so do not stop monitoring just because startup is taking a long time.',
+      'Preparing the environment can take several minutes, so do not stop monitoring just because startup is taking a long time; keep checks frequent enough that a completed setup or completed verification is noticed promptly.',
     );
     expect(skillContent).toContain(
       'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',

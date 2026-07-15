@@ -37,6 +37,7 @@ import {
 
 interface PendingEnvVarRequestPanelProps {
   taskId: string;
+  onVisibleRequestKeyChange?: (requestKey: string | null) => void;
 }
 
 const SAFE_FOLLOW_UP_PROMPT =
@@ -99,6 +100,7 @@ function createHiddenEnvVarFulfillmentMessage({
 
 export function PendingEnvVarRequestPanel({
   taskId,
+  onVisibleRequestKeyChange,
 }: PendingEnvVarRequestPanelProps) {
   const { isAdmin } = useAuthorizedUser();
   const client = useSandboxClient();
@@ -120,6 +122,10 @@ export function PendingEnvVarRequestPanel({
 
   const visibleRequest =
     request && request.key !== dismissedRequestKey ? request : null;
+
+  useEffect(() => {
+    onVisibleRequestKeyChange?.(visibleRequest?.key ?? null);
+  }, [onVisibleRequestKeyChange, visibleRequest?.key]);
 
   useEffect(() => {
     if (!visibleRequest) {

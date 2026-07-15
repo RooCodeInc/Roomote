@@ -77,7 +77,14 @@ export interface TaskSession {
   artifacts: TaskArtifact[];
 
   /** Environment created by a completed setup-onboarding task, when available. */
-  onboardingEnvironment?: { name: string } | null;
+  onboardingEnvironment?: {
+    name: string;
+    isVerified: boolean;
+    verificationTaskId: string | null;
+    verificationTaskActive: boolean;
+    verifiedAt: Date | null;
+    verificationError: string | null;
+  } | null;
 
   /** The initial prompt for the session, null if not yet loaded or not found. */
   prompt: AcpUiMessage | null;

@@ -35,20 +35,26 @@ const TODO_INACTIVE_TASK_PHASES: ReadonlySet<string> = new Set([
  * before the provider is available.
  */
 interface TodoListProps {
+  autoCollapseKey?: string | null;
   taskEntryKey?: string;
 }
 
-export const TodoList = ({ taskEntryKey }: TodoListProps) => {
+export const TodoList = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
   const isInsideProvider = useIsInsideSandboxProvider();
 
   if (!isInsideProvider) {
     return null;
   }
 
-  return <TodoListContent taskEntryKey={taskEntryKey} />;
+  return (
+    <TodoListContent
+      autoCollapseKey={autoCollapseKey}
+      taskEntryKey={taskEntryKey}
+    />
+  );
 };
 
-const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
+const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
   const todos = useSandboxTodos();
   const taskPhase = useSandboxTaskPhase();
   const shouldSuppressActiveStatus =
@@ -63,12 +69,15 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
   const allDone = todos.length > 0 && completedCount === todos.length;
   const [isHiddenAfterCompletion, setIsHiddenAfterCompletion] = useState(false);
   const [isOpen, setIsOpen] = useState(() => !allDone);
+  const autoCollapsedKeysRef = useRef(new Set<string>());
   const wasAllDoneRef = useRef(allDone);
 
   useLayoutEffect(() => {
     if (!taskEntryKey) {
       return;
     }
+
+    autoCollapsedKeysRef.current.clear();
 
     const mobileQuery = window.matchMedia?.('(max-width: 767px)');
 
@@ -79,6 +88,19 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
     wasAllDoneRef.current = false;
     setIsOpen(false);
   }, [taskEntryKey]);
+
+  useEffect(() => {
+    if (!autoCollapseKey) {
+      return;
+    }
+
+    if (autoCollapsedKeysRef.current.has(autoCollapseKey)) {
+      return;
+    }
+
+    autoCollapsedKeysRef.current.add(autoCollapseKey);
+    setIsOpen(false);
+  }, [autoCollapseKey]);
 
   useEffect(() => {
     if (!allDone) {

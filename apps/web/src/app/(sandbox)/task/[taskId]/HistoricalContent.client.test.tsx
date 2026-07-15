@@ -6,12 +6,18 @@ const { isTaskRunAsleepMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  ArrowUpRightIcon: () => <svg aria-hidden="true" />,
   ArrowRight: () => <svg aria-hidden="true" />,
+  Badge: ({ children }: { children: ReactNode }) => <span>{children}</span>,
+  BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
   Button: ({ children }: { children: ReactNode }) => (
     <button>{children}</button>
   ),
   Check: () => <svg aria-hidden="true" />,
+  HelpCircle: () => <svg aria-hidden="true" />,
+  Loader2: () => <svg aria-hidden="true" />,
   Sun: () => <svg aria-hidden="true" />,
+  X: () => <svg aria-hidden="true" />,
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -217,14 +223,21 @@ describe('HistoricalContent', () => {
             },
             taskId: 'task-123',
             artifacts: [],
-            onboardingEnvironment: { name: 'Satanama' },
+            onboardingEnvironment: {
+              name: 'Satanama',
+              isVerified: true,
+              verificationTaskId: 'verify-123',
+              verificationTaskActive: false,
+              verifiedAt: new Date('2026-05-22T21:00:00.000Z'),
+              verificationError: null,
+            },
           } as never
         }
       />,
     );
 
     expect(
-      screen.getByText('The Satanama environment is set up.'),
+      screen.getByText('The Satanama environment is set up and verified.'),
     ).toBeInTheDocument();
     expect(
       screen.getByText('You can start your first task now.'),
@@ -233,5 +246,46 @@ describe('HistoricalContent', () => {
       'href',
       '/',
     );
+  });
+
+  it('shows an unverified onboarding environment as set up but not verified', () => {
+    render(
+      <HistoricalContent
+        session={
+          {
+            sessionState: 'historical',
+            draftPrompt: null,
+            taskRun: {
+              id: 123,
+              status: 'completed',
+              snapshotId: null,
+              createdAt: new Date('2026-05-22T20:57:00.000Z'),
+              startedAt: new Date('2026-05-22T20:58:30.000Z'),
+            },
+            taskId: 'task-123',
+            artifacts: [],
+            onboardingEnvironment: {
+              name: 'Satanama',
+              isVerified: false,
+              verificationTaskId: null,
+              verificationTaskActive: false,
+              verifiedAt: null,
+              verificationError: null,
+            },
+          } as never
+        }
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        'The Satanama environment is set up, but not verified yet.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "You can start a task, but it's worth checking verification before relying on it.",
+      ),
+    ).toBeInTheDocument();
   });
 });

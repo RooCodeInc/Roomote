@@ -1,6 +1,7 @@
 import {
   RunStatus,
   TaskPayloadKind,
+  activeRunStatuses,
   getEnvironmentDefinitionIdFromPayload,
   isBootingRunStatus,
   isExitedRunStatus,
@@ -54,6 +55,7 @@ import {
 const SANDBOX_PROMPT_TOKEN_TIMEOUT_MS = 15 * 60 * 1000;
 const SANDBOX_PROMPT_TIMEOUT_MS = 30_000;
 const SANDBOX_RPC_HEALTHCHECK_TIMEOUT_MS = 5_000;
+const activeVerificationTaskStatuses: readonly RunStatus[] = activeRunStatuses;
 const requestUserInputAnswersSchema = z.record(
   z.object({
     answers: z.array(z.string()),
@@ -602,10 +604,35 @@ export async function getSandboxSessionByTaskIdCommand(
     onboardingEnvironmentId
       ? db.query.environments.findFirst({
           where: eq(environments.id, onboardingEnvironmentId),
-          columns: { name: true },
+          columns: {
+            name: true,
+            isVerified: true,
+            verificationTaskId: true,
+            verifiedAt: true,
+            verificationError: true,
+          },
         })
       : Promise.resolve(null),
   ]);
+
+  const activeVerificationTaskRun = onboardingEnvironment?.verificationTaskId
+    ? await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.taskId, onboardingEnvironment.verificationTaskId),
+        columns: { status: true },
+      })
+    : null;
+
+  const onboardingEnvironmentWithVerification = onboardingEnvironment
+    ? {
+        ...onboardingEnvironment,
+        verificationTaskActive:
+          activeVerificationTaskRun !== null &&
+          activeVerificationTaskRun !== undefined &&
+          activeVerificationTaskStatuses.includes(
+            activeVerificationTaskRun.status,
+          ),
+      }
+    : null;
 
   const shouldCheckBootFailureMessages =
     taskRun.status === RunStatus.Failed ||
@@ -690,7 +717,7 @@ export async function getSandboxSessionByTaskIdCommand(
     },
     prompt,
     artifacts,
-    onboardingEnvironment,
+    onboardingEnvironment: onboardingEnvironmentWithVerification,
     sessionState,
     refetchInterval,
   };
