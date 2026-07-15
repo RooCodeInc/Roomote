@@ -296,6 +296,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
       envVarLabel: 'Service account JSON',
       defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
+      credentialHelp: {
+        text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
+        href: 'https://console.cloud.google.com/vertex-ai/model-garden',
+        linkLabel: 'Open Vertex AI Model Garden',
+      },
     });
     expect(
       vertexProvider?.additionalEnvFields?.map((field) => ({

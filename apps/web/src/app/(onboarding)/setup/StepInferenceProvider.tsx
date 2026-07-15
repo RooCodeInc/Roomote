@@ -239,6 +239,21 @@ export function StepInferenceProvider({
         {(hasRuntimeProviderKey || hasSavedProviderKey) && <Check />}
       </div>
 
+      {selectedProviderStatus?.credentialHelp && !hasRuntimeProviderKey ? (
+        <p className="max-w-lg text-xs text-muted-foreground">
+          {selectedProviderStatus.credentialHelp.text}{' '}
+          <a
+            className="font-medium underline underline-offset-2 hover:text-foreground"
+            href={selectedProviderStatus.credentialHelp.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {selectedProviderStatus.credentialHelp.linkLabel}
+          </a>
+          .
+        </p>
+      ) : null}
+
       {isChatGptProvider && !hasRuntimeProviderKey ? (
         <div className="flex max-w-lg items-center gap-3">
           {chatgptConnected ? (
