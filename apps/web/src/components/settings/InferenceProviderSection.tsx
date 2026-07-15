@@ -439,7 +439,7 @@ function ChatGptSubscriptionRow({
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
       <div className="flex min-w-0 items-center gap-2">
         <span className="min-w-0 truncate text-sm font-medium">
-          ChatGPT (subscription)
+          {getModelProviderLabel(CHATGPT_SUBSCRIPTION_PROVIDER_ID)}
         </span>
       </div>
 

@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_TASK_MODEL_ID,
   DIRECT_TASK_MODEL_PROVIDER_IDS,
+  getTaskModelProviderId,
 } from './task-models';
 
 /**
@@ -580,6 +581,34 @@ export function getModelProviderLabel(
   }
 
   return providerId.charAt(0).toUpperCase() + providerId.slice(1);
+}
+
+/**
+ * Display/grouping provider for a model id. ChatGPT subscription models retain
+ * the runtime `openai/` prefix, but when a subscription is connected those
+ * requests authenticate through the ChatGPT path (which wins over an OpenAI
+ * API key). UI lists should therefore group `openai/` models under ChatGPT
+ * while ChatGPT is connected, without changing the stored model id.
+ */
+export function getDisplayModelProviderId(
+  modelId: string | null | undefined,
+  options?: {
+    chatgptConnected?: boolean;
+  },
+): string | null {
+  const normalizedModelId = normalizeOptionalString(modelId);
+
+  if (!normalizedModelId) {
+    return null;
+  }
+
+  const runtimeProviderId = getTaskModelProviderId(normalizedModelId);
+
+  if (runtimeProviderId === 'openai' && options?.chatgptConnected) {
+    return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  }
+
+  return runtimeProviderId;
 }
 
 export function getSetupModelProviderForEnvVarName(
