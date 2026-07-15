@@ -22,7 +22,10 @@ describe('post-PR follow-up opt-in in delivery skills', () => {
         'ask once in plain language whether they want the agent to automatically address CI failures or review feedback on the opened pull request(s)',
       );
       expect(skillContent).toContain(
-        'Keep it short—one brief question, not a form or multi-part questionnaire.',
+        'Keep it short—one brief natural question nestled in the delivery summary, not a form or multi-part questionnaire.',
+      );
+      expect(skillContent).toContain(
+        'Do not coach the answer format (do not say "reply yes or no" or similar).',
       );
       expect(skillContent).toContain(
         'Do not start that follow-up work until they opt in.',
@@ -32,7 +35,7 @@ describe('post-PR follow-up opt-in in delivery skills', () => {
         'Skip it for no-op or fully blocked deliveries.',
       );
       expect(skillContent).toContain(
-        'Do not use `request_user_input` for this ask. A single casual Yes/No is enough; structured input is too heavy for this follow-up offer.',
+        'Do not use `request_user_input` for this ask. A single casual conversational offer is enough; structured input is too heavy for this follow-up offer.',
       );
       expect(skillContent).toContain(
         'Prefer a lightweight conversational ask in the normal closeout channel',
