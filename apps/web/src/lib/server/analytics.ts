@@ -852,9 +852,13 @@ function buildChartData(
       if (!row.meta?.canonicalTaskId) {
         continue;
       }
+      const prKeys = row.meta.prKeys ?? [];
+      if (prKeys.length === 0) {
+        continue;
+      }
       taskIds.add(row.meta.canonicalTaskId);
       taskCost += row.value;
-      for (const prKey of row.meta.prKeys ?? []) {
+      for (const prKey of prKeys) {
         qualifyingPrs.add(prKey);
       }
     }
@@ -894,8 +898,13 @@ function formatPullRequestStatus(status: PullRequestStatus) {
   }
 }
 
-function getPullRequestKey(repository: string, prNumber: number) {
-  return `${repository.toLowerCase()}#${prNumber}`;
+function getPullRequestKey(
+  repository: string,
+  prNumber: number,
+  provider = 'github',
+  host = 'github.com',
+) {
+  return `${provider.toLowerCase()}:${host.toLowerCase()}:${repository.toLowerCase()}#${prNumber}`;
 }
 
 function formatPullRequestLabel(title: string, prNumber: number) {
@@ -982,6 +991,8 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       taskActorDisplayName: tasks.actorDisplayName,
       taskUserName: taskInitiatorUsers.name,
       taskUserEmail: taskInitiatorUsers.email,
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      host: taskPullRequests.host,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
@@ -1005,7 +1016,12 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       continue;
     }
 
-    const dedupeKey = getPullRequestKey(result.repository, result.prNumber);
+    const dedupeKey = getPullRequestKey(
+      result.repository,
+      result.prNumber,
+      result.sourceControlProvider,
+      result.host ?? undefined,
+    );
     const existing = deduped.get(dedupeKey);
 
     if (
@@ -1503,6 +1519,8 @@ async function getCostAnalyticsRows(
             taskId: taskPullRequests.taskId,
             repository: taskPullRequests.repository,
             prNumber: taskPullRequests.prNumber,
+            sourceControlProvider: taskPullRequests.sourceControlProvider,
+            host: taskPullRequests.host,
           })
           .from(taskPullRequests)
           .where(inArray(taskPullRequests.taskId, taskIds));
@@ -1513,7 +1531,14 @@ async function getCostAnalyticsRows(
     }
 
     const keys = prKeysByTaskId.get(pullRequest.taskId) ?? new Set<string>();
-    keys.add(getPullRequestKey(pullRequest.repository, pullRequest.prNumber));
+    keys.add(
+      getPullRequestKey(
+        pullRequest.repository,
+        pullRequest.prNumber,
+        pullRequest.sourceControlProvider,
+        pullRequest.host ?? undefined,
+      ),
+    );
     prKeysByTaskId.set(pullRequest.taskId, keys);
   }
 

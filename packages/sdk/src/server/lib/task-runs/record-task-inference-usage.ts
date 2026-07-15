@@ -131,6 +131,16 @@ export async function recordLlmUsage(
     throw new Error('Non-task LLM usage requires an eventKey');
   }
 
+  if (
+    input.taskId &&
+    !input.eventKey &&
+    !(input.harnessSessionId?.trim() && input.messageId?.trim())
+  ) {
+    throw new Error(
+      'Task LLM usage requires an eventKey or non-empty harness session and message IDs',
+    );
+  }
+
   const now = new Date();
   const inputTokens = clampOptionalInteger(input.inputTokens);
   const outputTokens = clampOptionalInteger(input.outputTokens);

@@ -3,10 +3,7 @@ import { z } from 'zod';
 import { and, db, eq, or, taskRuns, tasks } from '@roomote/db/server';
 
 import { router, userOnlyProcedure } from '../trpc';
-import {
-  recordLlmUsage,
-  recordTaskInferenceUsage,
-} from '../lib/task-runs/record-task-inference-usage';
+import { recordLlmUsage } from '../lib/task-runs/record-task-inference-usage';
 
 const nonNegativeNumber = z.number().int().nonnegative().nullable().optional();
 
@@ -50,9 +47,20 @@ export const llmUsageRouter = router({
         throw new Error('Task usage requires a runId.');
       }
 
+      const hasEventKey = Boolean(input.eventKey?.trim());
+      const hasMessageKey = Boolean(
+        input.harnessSessionId?.trim() && input.messageId?.trim(),
+      );
+
+      if (input.runId && !hasEventKey && !hasMessageKey) {
+        throw new Error(
+          'Task usage requires an eventKey or non-empty harness session and message IDs.',
+        );
+      }
+
       if (input.runId) {
         const authorizedRun = await db
-          .select({ id: taskRuns.id })
+          .select({ id: taskRuns.id, taskId: taskRuns.taskId })
           .from(taskRuns)
           .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
           .where(
@@ -70,11 +78,13 @@ export const llmUsageRouter = router({
           throw new Error('You are not authorized to record this task run.');
         }
 
-        return recordTaskInferenceUsage({
+        return recordLlmUsage({
           ...input,
+          source: input.source ?? 'opencode',
+          usageType: 'inference',
+          taskId: authorizedRun[0]!.taskId,
+          userId: ctx.auth.userId,
           runId: input.runId,
-          harnessSessionId: input.harnessSessionId ?? '',
-          messageId: input.messageId ?? input.eventKey ?? '',
         });
       }
 
