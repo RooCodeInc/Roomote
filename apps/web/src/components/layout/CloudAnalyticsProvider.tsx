@@ -43,14 +43,6 @@ export function CloudAnalyticsProvider({
   const intercomBooted = useRef(false);
   const resolvedPosthogHost = posthogHost ?? DEFAULT_POSTHOG_HOST;
 
-  const bootIntercom = () => {
-    if (intercomBooted.current || !window.Intercom || !intercomAppId) {
-      return;
-    }
-    intercomBooted.current = true;
-    window.Intercom('boot', { app_id: intercomAppId });
-  };
-
   useEffect(() => {
     if (!cloudEnabled) return;
     if (posthogProjectKey) {
@@ -75,7 +67,11 @@ export function CloudAnalyticsProvider({
       const script = document.createElement('script');
       script.async = true;
       script.src = `https://widget.intercom.io/widget/${intercomAppId}`;
-      script.onload = bootIntercom;
+      script.onload = () => {
+        if (intercomBooted.current || !window.Intercom) return;
+        intercomBooted.current = true;
+        window.Intercom('boot', { app_id: intercomAppId });
+      };
       document.head.append(script);
     }
   }, [cloudEnabled, intercomAppId, posthogProjectKey, resolvedPosthogHost]);
