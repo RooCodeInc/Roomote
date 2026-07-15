@@ -9,6 +9,7 @@ import {
 
 import {
   buildEnvironmentDefinitionFingerprint,
+  buildSetupEnvironmentTaskTitle,
   buildUpdateEnvironmentDefinitionPrompt,
   findMatchingDefinedEnvironment,
   hasEnvironmentDefinitionChanged,
@@ -23,6 +24,18 @@ const config: EnvironmentConfig = {
 };
 
 describe('environment definition helpers', () => {
+  it('builds setup environment task titles from selected repository names', () => {
+    expect(buildSetupEnvironmentTaskTitle(['acme/api'])).toBe(
+      'Set up the api environment',
+    );
+    expect(buildSetupEnvironmentTaskTitle(['acme/api', 'acme/web'])).toBe(
+      'Set up the api + web environment',
+    );
+    expect(buildSetupEnvironmentTaskTitle([])).toBe(
+      'Set up your first environment',
+    );
+  });
+
   it('builds the create prompt with the environment-setup skill and sorted repositories', () => {
     const prompt = buildCreateEnvironmentDefinitionPrompt([
       'acme/web',

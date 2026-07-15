@@ -63,6 +63,16 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     description:
       'Enable background subagents so the Task tool can launch subagents asynchronously via its background flag, and standard-task delivery ships the PR before visual proof instead of blocking on it. Off by default: proof runs foreground, before delivery.',
   },
+
+  [FeatureFlag.CodeMode]: {
+    // Off by default: keeps every MCP tool schema in the agent tool list. When
+    // enabled, the worker injects OPENCODE_EXPERIMENTAL_CODE_MODE so OpenCode
+    // defers MCP tools behind the CodeMode execute runtime ($codemode.search).
+    defaultValue: false,
+    metadataKey: 'opencode_code_mode',
+    description:
+      'Enable OpenCode CodeMode so rarely used MCP tools stay deferred: tools are discovered via CodeMode search instead of loading every MCP schema into the main tool list each turn.',
+  },
 };
 
 /**

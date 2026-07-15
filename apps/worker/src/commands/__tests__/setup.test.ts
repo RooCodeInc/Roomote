@@ -14,12 +14,14 @@ const {
   mockInstallNodePty,
   mockInstallEmojiFont,
   mockInitializeWorkspaceRepositories,
+  mockInitializeDockerProjects,
   mockInitializeWorkspaceServices,
   mockInitializeSystemWorkspaceServices,
   mockInitializeEnvironmentWorkspaceServices,
   mockInstallOrganizationEnvironmentSkills,
   mockExecuteOrganizationEnvironmentRepositoryCommands,
   mockSetupOrganizationEnvironment,
+  mockEnvironmentSetupStatusWriter,
   mockTimedStep,
   mockGetRuntimeEnv,
   mockSetUserEnv,
@@ -39,12 +41,22 @@ const {
     mockInstallNodePty: vi.fn(),
     mockInstallEmojiFont: vi.fn(),
     mockInitializeWorkspaceRepositories: vi.fn(),
+    mockInitializeDockerProjects: vi.fn(),
     mockInitializeWorkspaceServices: vi.fn(),
     mockInitializeSystemWorkspaceServices: vi.fn(),
     mockInitializeEnvironmentWorkspaceServices: vi.fn(),
     mockInstallOrganizationEnvironmentSkills: vi.fn(),
     mockExecuteOrganizationEnvironmentRepositoryCommands: vi.fn(),
     mockSetupOrganizationEnvironment: vi.fn(),
+    mockEnvironmentSetupStatusWriter: vi.fn(function () {
+      return {
+        initialize: vi.fn(),
+        addWarnings: vi.fn(),
+        markCommandRunning: vi.fn(),
+        markCommandResult: vi.fn(),
+        finalize: vi.fn(),
+      };
+    }),
     mockTimedStep: vi.fn(
       async <T>(
         _logger: unknown,
@@ -92,6 +104,7 @@ vi.mock('../setup/logging', () => ({
 
 vi.mock('../setup/workspace', () => ({
   initializeRepositories: mockInitializeWorkspaceRepositories,
+  initializeDockerProjects: mockInitializeDockerProjects,
   initializeAllServices: mockInitializeWorkspaceServices,
   initializeSystemServices: mockInitializeSystemWorkspaceServices,
   initializeEnvironmentServices: mockInitializeEnvironmentWorkspaceServices,
@@ -100,6 +113,7 @@ vi.mock('../setup/workspace', () => ({
   executeOrganizationEnvironmentRepositoryCommands:
     mockExecuteOrganizationEnvironmentRepositoryCommands,
   setupOrganizationEnvironment: mockSetupOrganizationEnvironment,
+  EnvironmentSetupStatusWriter: mockEnvironmentSetupStatusWriter,
 }));
 
 import { setup } from '../setup';
@@ -146,6 +160,7 @@ describe('setup mode behavior', () => {
     mockInitializeWorkspaceRepositories.mockResolvedValue({
       workspacePath: '/tmp/workspace',
     });
+    mockInitializeDockerProjects.mockResolvedValue(undefined);
     mockInitializeWorkspaceServices.mockResolvedValue({
       services: [],
       env: {},
@@ -212,6 +227,15 @@ describe('setup mode behavior', () => {
       installPythonOrder ?? 0,
     );
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledTimes(1);
+    expect(mockInitializeDockerProjects).toHaveBeenCalledTimes(1);
+    expect(mockInitializeDockerProjects).toHaveBeenCalledWith(
+      logger,
+      expect.objectContaining({
+        cleanupLegacyPaths: false,
+        envVars: { BASE: 'base', FOO: 'bar' },
+      }),
+      { workspacePath: '/tmp/workspace' },
+    );
     expect(mockInitializeWorkspaceRepositories).toHaveBeenCalledWith(logger, {
       ...workspaceOptions,
       cleanupLegacyPaths: false,
@@ -252,6 +276,7 @@ describe('setup mode behavior', () => {
     expect(mockInstallNodePty).not.toHaveBeenCalled();
     expect(mockInstallEmojiFont).not.toHaveBeenCalled();
     expect(mockInitializeWorkspaceServices).not.toHaveBeenCalled();
+    expect(mockInitializeDockerProjects).not.toHaveBeenCalled();
     expect(mockInitializeSystemWorkspaceServices).not.toHaveBeenCalled();
     expect(mockSetupOrganizationEnvironment).not.toHaveBeenCalled();
     expect(mockSetUserEnv).toHaveBeenCalledWith({
@@ -271,13 +296,19 @@ describe('setup mode behavior', () => {
     const initializeRepositoriesOrder =
       mockInitializeWorkspaceRepositories.mock.invocationCallOrder[0];
     const installPythonOrder = mockInstallPython.mock.invocationCallOrder[0];
+    const initializeDockerProjectsOrder =
+      mockInitializeDockerProjects.mock.invocationCallOrder[0];
     const setupOrganizationEnvironmentOrder =
       mockSetupOrganizationEnvironment.mock.invocationCallOrder[0];
 
     expect(initializeRepositoriesOrder).toBeDefined();
     expect(installPythonOrder).toBeDefined();
+    expect(initializeDockerProjectsOrder).toBeDefined();
     expect(setupOrganizationEnvironmentOrder).toBeDefined();
     expect(initializeRepositoriesOrder ?? 0).toBeLessThan(
+      initializeDockerProjectsOrder ?? 0,
+    );
+    expect(initializeDockerProjectsOrder ?? 0).toBeLessThan(
       installPythonOrder ?? 0,
     );
     expect(installPythonOrder ?? 0).toBeLessThan(
@@ -301,6 +332,8 @@ describe('setup mode behavior', () => {
         workspacePath: '/tmp/workspace',
       },
       continueRepositoryCommandFailures: true,
+      setupStatusWriter: expect.anything(),
+      recordPhase: undefined,
     });
   });
 
@@ -329,10 +362,12 @@ describe('setup mode behavior', () => {
         workspacePath: '/tmp/workspace',
       },
       continueRepositoryCommandFailures: false,
+      setupStatusWriter: expect.anything(),
+      recordPhase: undefined,
     });
   });
 
-  it('can continue after minimal environment setup while repository commands run in the background', async () => {
+  it('can continue after minimal environment setup while Docker projects and repository commands run in the background', async () => {
     const deferredBackgroundWarnings = [
       {
         message:
@@ -340,6 +375,14 @@ describe('setup mode behavior', () => {
       },
     ];
     let releaseBackgroundSetup: (() => void) | undefined;
+    let releaseDockerProjects: (() => void) | undefined;
+
+    mockInitializeDockerProjects.mockImplementationOnce(
+      async () =>
+        await new Promise<void>((resolve) => {
+          releaseDockerProjects = resolve;
+        }),
+    );
 
     mockExecuteOrganizationEnvironmentRepositoryCommands.mockImplementationOnce(
       async () => {
@@ -355,10 +398,11 @@ describe('setup mode behavior', () => {
       workspace: environmentWorkspaceOptions,
       logger,
       workerEnv: mockWorkerEnv,
-      backgroundOrganizationEnvironmentSetup: true,
+      backgroundEnvironmentSetup: true,
     });
 
     expect(mockSetupOrganizationEnvironment).not.toHaveBeenCalled();
+    expect(mockInitializeDockerProjects).toHaveBeenCalledTimes(1);
     expect(mockInstallOrganizationEnvironmentSkills).toHaveBeenCalledWith(
       logger,
       expect.objectContaining({
@@ -367,35 +411,81 @@ describe('setup mode behavior', () => {
     );
     expect(
       mockExecuteOrganizationEnvironmentRepositoryCommands,
-    ).toHaveBeenCalledWith(
-      logger,
-      expect.objectContaining({
-        environment: environmentWorkspaceOptions.workspace,
-        continueRepositoryCommandFailures: true,
-      }),
+    ).not.toHaveBeenCalled();
+    expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
+      {
+        message:
+          'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
+      },
+    ]);
+    expect(result.backgroundEnvironmentSetup).toBeDefined();
+
+    releaseDockerProjects?.();
+    await vi.waitFor(() => {
+      expect(
+        mockExecuteOrganizationEnvironmentRepositoryCommands,
+      ).toHaveBeenCalledWith(
+        logger,
+        expect.objectContaining({
+          environment: environmentWorkspaceOptions.workspace,
+          continueRepositoryCommandFailures: true,
+        }),
+      );
+    });
+    releaseBackgroundSetup?.();
+    await expect(result.backgroundEnvironmentSetup).resolves.toEqual(
+      deferredBackgroundWarnings,
     );
     expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
       {
         message:
-          'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.',
-      },
-    ]);
-    expect(result.backgroundOrganizationEnvironmentSetup).toBeDefined();
-
-    releaseBackgroundSetup?.();
-    await expect(
-      result.backgroundOrganizationEnvironmentSetup,
-    ).resolves.toEqual(deferredBackgroundWarnings);
-    expect(result.preparedWorkspace?.environmentSetupWarnings).toEqual([
-      {
-        message:
-          'Environment setup is still running in the background. Repository setup commands may still be installing dependencies or preparing services.',
+          'Environment setup is still running in the background. Docker projects may still be building or waiting for health checks, and repository setup commands may still be installing dependencies or preparing services.',
       },
       {
         message:
           'Optional environment command "pnpm install" failed for owner/repo: Command failed with exit code 1',
       },
     ]);
+  });
+
+  it('reports a background Docker project failure without failing task startup', async () => {
+    mockInitializeDockerProjects.mockRejectedValueOnce(
+      new Error('backend failed its health check'),
+    );
+
+    const result = await setup({
+      mode: 'full',
+      workspace: environmentWorkspaceOptions,
+      logger,
+      workerEnv: mockWorkerEnv,
+      backgroundEnvironmentSetup: true,
+    });
+
+    await expect(result.backgroundEnvironmentSetup).resolves.toEqual([
+      {
+        message:
+          'Background Docker project setup failed: backend failed its health check',
+      },
+    ]);
+    expect(result.preparedWorkspace?.environmentSetupWarnings).toContainEqual({
+      message:
+        'Background Docker project setup failed: backend failed its health check',
+    });
+  });
+
+  it('keeps Docker project failures blocking when background setup is disabled', async () => {
+    mockInitializeDockerProjects.mockRejectedValueOnce(
+      new Error('backend failed its health check'),
+    );
+
+    await expect(
+      setup({
+        mode: 'full',
+        workspace: environmentWorkspaceOptions,
+        logger,
+        workerEnv: mockWorkerEnv,
+      }),
+    ).rejects.toThrow('backend failed its health check');
   });
 
   it('continues after environment service startup failures for standard tasks', async () => {

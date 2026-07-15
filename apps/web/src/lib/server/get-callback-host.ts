@@ -20,9 +20,11 @@ export function getCallbackHost(request: NextRequest) {
   // Rewrite any internal origin (any scheme/port) to the configured public
   // URL so OAuth redirects land back on the host the user's browser can
   // actually reach (e.g. the ngrok or self-host public domain) instead of
-  // https://localhost:13000 or http://0.0.0.0:3000.
+  // https://localhost:13000 or http://0.0.0.0:3000. Prefer R_PUBLIC_URL when
+  // R_APP_URL is intentionally left at its local development default.
   if (INTERNAL_HOSTNAMES.has(url.hostname)) {
-    return `${Env.R_APP_URL}${url.pathname}${url.search}`;
+    const publicUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
+    return `${publicUrl}${url.pathname}${url.search}`;
   }
 
   return request.url;

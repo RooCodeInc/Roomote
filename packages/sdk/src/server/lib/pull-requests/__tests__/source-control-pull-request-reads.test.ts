@@ -39,9 +39,17 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/gitlab', () => ({
   resolveGitLabToken: (...args: unknown[]) => mockResolveGitLabToken(...args),
+  isGitLabOAuthAccessToken: (token: string) => token === 'oauth-token',
   resolveGitLabBaseUrl: async () => 'https://gitlab.com',
   buildGitLabApiBaseUrl: (baseUrl: string) =>
     `${baseUrl.replace(/\/+$/, '')}/api/v4`,
+}));
+
+vi.mock('@roomote/bitbucket', () => ({
+  resolveBitbucketToken: async () => 'bitbucket-token',
+  resolveBitbucketUsername: async () => 'bb-bot',
+  resolveBitbucketBaseUrl: async () => 'https://bitbucket.org',
+  buildBitbucketApiBaseUrl: () => 'https://api.bitbucket.org/2.0',
 }));
 
 vi.mock('@roomote/gitea', () => ({
@@ -62,7 +70,12 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       repositories: {
-        findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        // resolveRepositoryRow queries with findMany; tests queue a single
+        // row (or null), adapted here to the list shape it expects.
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row == null ? [] : [row];
+        },
       },
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
@@ -81,7 +94,12 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
-import { readSourceControlPullRequestForTaskRun } from '../source-control-pull-request-reads';
+import {
+  listMergedSourceControlPullRequestsForRepository,
+  readSourceControlPullRequestForTaskRun,
+  sourceControlPullRequestReadInputSchema,
+} from '../source-control-pull-request-reads';
+import type { RepositoryRow } from '../source-control-pull-request-shared';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
@@ -589,6 +607,549 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ]);
   });
 
+  it('lists open GitHub pull requests as provider-neutral summaries', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const paginate = vi.fn().mockResolvedValue([
+      {
+        number: 55,
+        id: 5501,
+        html_url: 'https://github.com/acme/backend/pull/55',
+        title: '[Fix] Read surface',
+        state: 'open',
+        merged_at: null,
+        closed_at: null,
+        draft: false,
+        created_at: '2026-06-30T00:00:00Z',
+        updated_at: '2026-07-01T00:00:00Z',
+        labels: [{ name: 'auto-resolve-conflicts' }, { name: undefined }],
+        head: {
+          ref: 'codex/read-surface',
+          sha: 'head-sha',
+          repo: { full_name: 'acme/backend' },
+        },
+        base: {
+          ref: 'develop',
+          sha: 'base-sha',
+          repo: { full_name: 'acme/backend' },
+        },
+        user: { id: 9, login: 'octocat' },
+      },
+      {
+        number: 54,
+        html_url: 'https://github.com/acme/backend/pull/54',
+        title: 'Second PR',
+        state: 'open',
+        merged_at: null,
+        draft: true,
+        created_at: '2026-06-29T00:00:00Z',
+        updated_at: '2026-06-30T00:00:00Z',
+        labels: [],
+        head: { ref: 'feature/two', sha: 'sha-2', repo: null },
+        base: { ref: 'develop', sha: 'base-sha', repo: null },
+        user: null,
+      },
+    ]);
+    const pullsList = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      paginate,
+      rest: { pulls: { list: pullsList } },
+    });
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/backend',
+        limit: 1,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(paginate).toHaveBeenCalledWith(
+      pullsList,
+      {
+        owner: 'acme',
+        repo: 'backend',
+        state: 'open',
+        sort: 'updated',
+        direction: 'desc',
+        per_page: 100,
+      },
+      expect.any(Function),
+    );
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(result.pullRequests).toEqual([
+      {
+        number: 55,
+        externalId: 5501,
+        url: 'https://github.com/acme/backend/pull/55',
+        title: '[Fix] Read surface',
+        state: 'open',
+        draft: false,
+        sourceBranch: 'codex/read-surface',
+        targetBranch: 'develop',
+        author: { id: '9', login: 'octocat' },
+        updatedAt: '2026-07-01T00:00:00Z',
+        createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
+        labels: ['auto-resolve-conflicts'],
+        headSha: 'head-sha',
+        baseSha: 'base-sha',
+        mergeable: null,
+        mergeStateDescription: null,
+        isCrossRepository: false,
+        headRepositoryFullName: 'acme/backend',
+      },
+    ]);
+    expect(result.warnings).toEqual([
+      'Result truncated to the 1 most relevant open pull requests; more exist.',
+      'GitHub does not include mergeability in pull request lists; use get_pull_request for a per-PR mergeable signal.',
+    ]);
+  });
+
+  it('lists open GitLab merge requests with labels and conflict signal', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          iid: 42,
+          title: 'Conflicting MR',
+          state: 'opened',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+          draft: false,
+          source_branch: 'feature/work',
+          target_branch: 'main',
+          has_conflicts: true,
+          merge_status: 'cannot_be_merged',
+          detailed_merge_status: 'conflict',
+          source_project_id: 101,
+          target_project_id: 101,
+          sha: 'head-sha',
+          labels: ['auto-resolve-conflicts'],
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-01T00:00:00Z',
+          author: { id: 7, username: 'gitlab-user' },
+        },
+      ]),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://gitlab.com/api/v4/projects/101/merge_requests?state=opened&order_by=updated_at&sort=desc&per_page=100&page=1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'gitlab-token' }),
+      }),
+    );
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(result.pullRequests).toEqual([
+      {
+        number: 42,
+        externalId: null,
+        url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+        title: 'Conflicting MR',
+        state: 'open',
+        draft: false,
+        sourceBranch: 'feature/work',
+        targetBranch: 'main',
+        author: { id: '7', login: 'gitlab-user' },
+        updatedAt: '2026-07-01T00:00:00Z',
+        createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
+        labels: ['auto-resolve-conflicts'],
+        headSha: 'head-sha',
+        baseSha: null,
+        mergeable: false,
+        mergeStateDescription: 'conflict',
+        isCrossRepository: false,
+        headRepositoryFullName: null,
+      },
+    ]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('truncates GitLab merge request lists to the requested limit', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+    const makeItem = (iid: number) => ({
+      iid,
+      title: `MR ${iid}`,
+      state: 'opened',
+      source_branch: `feature/${iid}`,
+      target_branch: 'main',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([makeItem(3), makeItem(2), makeItem(1)]),
+      );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/backend',
+        limit: 2,
+        sourceControlProvider: 'gitlab',
+      },
+      fetchImpl,
+    });
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(
+      result.pullRequests.map((pullRequest) => pullRequest.number),
+    ).toEqual([3, 2]);
+    expect(result.warnings).toEqual([
+      'Result truncated to the 2 most relevant open pull requests; more exist.',
+    ]);
+  });
+
+  it('lists open Gitea pull requests with label names and mergeable passthrough', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://git.example.com/acme/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          number: 8,
+          title: 'WIP: Gitea PR',
+          state: 'open',
+          merged: false,
+          mergeable: false,
+          html_url: 'https://git.example.com/acme/backend/pulls/8',
+          labels: [{ name: 'auto-resolve-conflicts' }],
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-01T00:00:00Z',
+          user: { id: 4, login: 'gitea-user' },
+          head: {
+            ref: 'feature/work',
+            sha: 'head-sha',
+            repo: { full_name: 'acme/backend' },
+          },
+          base: {
+            ref: 'main',
+            sha: 'base-sha',
+            repo: { full_name: 'acme/backend' },
+          },
+        },
+      ]),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitea',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/backend',
+        sourceControlProvider: 'gitea',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/repos/acme/backend/pulls?state=open&limit=50&page=1',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          Authorization: 'token gitea-token',
+        }),
+      }),
+    );
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(result.pullRequests).toEqual([
+      {
+        number: 8,
+        externalId: null,
+        url: 'https://git.example.com/acme/backend/pulls/8',
+        title: 'WIP: Gitea PR',
+        state: 'open',
+        draft: true,
+        sourceBranch: 'feature/work',
+        targetBranch: 'main',
+        author: { id: '4', login: 'gitea-user' },
+        updatedAt: '2026-07-01T00:00:00Z',
+        createdAt: '2026-06-30T00:00:00Z',
+        mergedAt: null,
+        closedAt: null,
+        labels: ['auto-resolve-conflicts'],
+        headSha: 'head-sha',
+        baseSha: 'base-sha',
+        mergeable: false,
+        mergeStateDescription: null,
+        isCrossRepository: false,
+        headRepositoryFullName: 'acme/backend',
+      },
+    ]);
+  });
+
+  it('lists open Bitbucket pull requests across cursor pages without a mergeable signal', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://bitbucket.org/acme/backend',
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          values: [
+            {
+              id: 3,
+              title: 'First page PR',
+              state: 'OPEN',
+              draft: false,
+              links: {
+                html: {
+                  href: 'https://bitbucket.org/acme/backend/pull-requests/3',
+                },
+              },
+              author: { uuid: '{u-1}', nickname: 'bb-user' },
+              created_on: '2026-06-30T00:00:00Z',
+              updated_on: '2026-07-01T00:00:00Z',
+              source: {
+                branch: { name: 'feature/work' },
+                commit: { hash: 'head-sha' },
+                repository: { full_name: 'acme/backend' },
+              },
+              destination: {
+                branch: { name: 'main' },
+                commit: { hash: 'base-sha' },
+                repository: { full_name: 'acme/backend' },
+              },
+            },
+          ],
+          next: 'https://api.bitbucket.org/2.0/repositories/acme/backend/pullrequests?page=2',
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          values: [
+            {
+              id: 2,
+              title: 'Second page PR',
+              state: 'OPEN',
+              source: { branch: { name: 'feature/two' } },
+              destination: { branch: { name: 'main' } },
+            },
+          ],
+          next: null,
+        }),
+      );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'bitbucket',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/backend',
+        sourceControlProvider: 'bitbucket',
+      },
+      fetchImpl,
+    });
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(
+      result.pullRequests.map((pullRequest) => pullRequest.number),
+    ).toEqual([3, 2]);
+    expect(result.pullRequests[0]).toMatchObject({
+      author: { id: '{u-1}', login: 'bb-user' },
+      labels: [],
+      mergeable: null,
+      mergeStateDescription: null,
+      headSha: 'head-sha',
+      baseSha: 'base-sha',
+    });
+    expect(result.warnings).toEqual([
+      'Bitbucket does not expose a mergeable signal or labels; mergeable is null and labels are empty.',
+    ]);
+  });
+
+  it('lists open Azure DevOps pull requests with merge status mapping and a labels caveat', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: 'repo-uuid',
+      fullName: 'acme/Platform/backend',
+      htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+    });
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        value: [
+          {
+            pullRequestId: 7,
+            title: 'Conflicting PR',
+            status: 'active',
+            isDraft: false,
+            mergeStatus: 'conflicts',
+            creationDate: '2026-06-30T00:00:00Z',
+            sourceRefName: 'refs/heads/feature/work',
+            targetRefName: 'refs/heads/main',
+            lastMergeSourceCommit: { commitId: 'head-sha' },
+            lastMergeTargetCommit: { commitId: 'base-sha' },
+            createdBy: {
+              id: 'user-guid',
+              displayName: 'Author',
+              uniqueName: 'author@acme.com',
+            },
+          },
+          {
+            pullRequestId: 6,
+            title: 'Clean PR',
+            status: 'active',
+            mergeStatus: 'succeeded',
+            sourceRefName: 'refs/heads/feature/two',
+            targetRefName: 'refs/heads/main',
+            labels: [{ name: 'auto-resolve-conflicts' }],
+          },
+        ],
+      }),
+    );
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+      }),
+      input: {
+        action: 'list_pull_requests',
+        repositoryFullName: 'acme/Platform/backend',
+        sourceControlProvider: 'ado',
+      },
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://dev.azure.com/acme/Platform/_apis/git/repositories/repo-uuid/pullrequests?api-version=7.1&searchCriteria.status=active&%24top=100&%24skip=0',
+      expect.objectContaining({ method: 'GET' }),
+    );
+
+    if (!('pullRequests' in result)) {
+      throw new Error('Expected a list result.');
+    }
+
+    expect(result.pullRequests[0]).toMatchObject({
+      number: 7,
+      url: 'https://dev.azure.com/acme/Platform/_git/backend/pullrequest/7',
+      state: 'open',
+      sourceBranch: 'feature/work',
+      targetBranch: 'main',
+      author: { id: 'user-guid', login: 'author@acme.com' },
+      updatedAt: null,
+      createdAt: '2026-06-30T00:00:00Z',
+      labels: [],
+      headSha: 'head-sha',
+      baseSha: 'base-sha',
+      mergeable: false,
+      mergeStateDescription: 'conflicts',
+    });
+    expect(result.pullRequests[1]).toMatchObject({
+      number: 6,
+      mergeable: true,
+      mergeStateDescription: 'succeeded',
+      labels: ['auto-resolve-conflicts'],
+    });
+    expect(result.warnings).toEqual([
+      'Azure DevOps did not include labels in the pull request list; labels may be reported as empty.',
+    ]);
+  });
+
+  it('requires prNumber for single-PR read actions', async () => {
+    const schemaResult = sourceControlPullRequestReadInputSchema.safeParse({
+      action: 'get_pull_request',
+      repositoryFullName: 'acme/backend',
+    });
+    expect(schemaResult.success).toBe(false);
+
+    const listSchemaResult = sourceControlPullRequestReadInputSchema.safeParse({
+      action: 'list_pull_requests',
+      repositoryFullName: 'acme/backend',
+    });
+    expect(listSchemaResult.success).toBe(true);
+
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: null,
+      externalRepoId: '101',
+      fullName: 'acme/backend',
+      htmlUrl: 'https://gitlab.com/acme/backend',
+    });
+
+    await expect(
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        }),
+        input: {
+          action: 'get_pull_request',
+          repositoryFullName: 'acme/backend',
+          sourceControlProvider: 'gitlab',
+        },
+        fetchImpl: vi.fn(),
+      }),
+    ).rejects.toThrow('prNumber is required for get_pull_request.');
+  });
+
   it('rejects reads whose provider does not match the task payload', async () => {
     const fetchImpl = vi.fn();
 
@@ -611,5 +1172,350 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     );
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(mockRepositoriesFindFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe('listMergedSourceControlPullRequestsForRepository', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveGitLabToken.mockResolvedValue('gitlab-token');
+    mockResolveGiteaToken.mockResolvedValue('gitea-token');
+    mockResolveGiteaBaseUrl.mockResolvedValue('https://git.example.com');
+    mockBuildGiteaApiBaseUrl.mockReturnValue('https://git.example.com/api/v1');
+    mockResolveAdoToken.mockResolvedValue('ado-token');
+    mockResolveAdoBaseUrl.mockResolvedValue('https://dev.azure.com');
+    mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
+      'https://dev.azure.com/acme',
+    );
+  });
+
+  function makeRepositoryRow(overrides: Partial<RepositoryRow>): RepositoryRow {
+    return {
+      id: 'repo-1',
+      sourceControlProvider: 'gitlab',
+      host: null,
+      installationId: null,
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://example.com/acme/backend',
+      ...overrides,
+    };
+  }
+
+  it('lists merged GitLab MRs server-side with an updated_after cursor', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 991,
+          iid: 42,
+          title: 'Merged MR',
+          state: 'merged',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
+          source_branch: 'feature/work',
+          target_branch: 'main',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          closed_at: null,
+          author: { id: 7, username: 'gitlab-user' },
+        },
+      ]),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '101',
+      }),
+      provider: 'gitlab',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://gitlab.com/api/v4/projects/101/merge_requests?state=merged&order_by=updated_at&sort=desc&per_page=100&page=1&updated_after=2026-07-01T00%3A00%3A00.000Z',
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'PRIVATE-TOKEN': 'gitlab-token' }),
+      }),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 42,
+        externalId: 991,
+        state: 'merged',
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: null,
+        updatedAt: '2026-07-10T00:00:00Z',
+        author: { id: '7', login: 'gitlab-user' },
+      }),
+    ]);
+  });
+
+  it('lists GitLab MRs with Authorization Bearer when the deployment token is OAuth-backed', async () => {
+    mockResolveGitLabToken.mockResolvedValue('oauth-token');
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 992,
+          iid: 43,
+          title: 'OAuth listed MR',
+          state: 'merged',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/43',
+          source_branch: 'feature/oauth',
+          target_branch: 'main',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          closed_at: null,
+          author: { id: 8, username: 'oauth-user' },
+        },
+      ]),
+    );
+
+    await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '101',
+      }),
+      provider: 'gitlab',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining('/merge_requests?'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oauth-token',
+        }),
+      }),
+    );
+  });
+
+  it('lists Gitea merged PRs from the closed list, dropping unmerged rows', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 800,
+          number: 8,
+          title: 'Merged PR',
+          state: 'closed',
+          merged: true,
+          html_url: 'https://git.example.com/acme/backend/pulls/8',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-09T00:00:00Z',
+          merged_at: '2026-07-09T00:00:00Z',
+          closed_at: '2026-07-09T00:00:00Z',
+          user: { id: 4, login: 'gitea-user' },
+        },
+        {
+          id: 801,
+          number: 9,
+          title: 'Closed without merging',
+          state: 'closed',
+          merged: false,
+          updated_at: '2026-07-08T00:00:00Z',
+        },
+      ]),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({ sourceControlProvider: 'gitea' }),
+      provider: 'gitea',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://git.example.com/api/v1/repos/acme/backend/pulls?state=closed&limit=50&page=1&sort=recentupdate',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'token gitea-token',
+        }),
+      }),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 8,
+        externalId: 800,
+        state: 'merged',
+        mergedAt: '2026-07-09T00:00:00Z',
+        closedAt: '2026-07-09T00:00:00Z',
+      }),
+    ]);
+  });
+
+  it('lists merged Bitbucket PRs with null merge timestamps and filters by updatedAfter', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        values: [
+          {
+            id: 3,
+            title: 'Recently merged',
+            state: 'MERGED',
+            created_on: '2026-06-30T00:00:00Z',
+            updated_on: '2026-07-10T00:00:00Z',
+            author: { uuid: '{u-1}', nickname: 'bb-user' },
+            source: { branch: { name: 'feature/one' } },
+            destination: { branch: { name: 'main' } },
+          },
+          {
+            id: 2,
+            title: 'Old merge',
+            state: 'MERGED',
+            created_on: '2026-05-01T00:00:00Z',
+            updated_on: '2026-06-01T00:00:00Z',
+            source: { branch: { name: 'feature/two' } },
+            destination: { branch: { name: 'main' } },
+          },
+        ],
+        next: null,
+      }),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({ sourceControlProvider: 'bitbucket' }),
+      provider: 'bitbucket',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    const [requestedUrl] = fetchImpl.mock.calls[0]!;
+    expect(String(requestedUrl)).toContain('state=MERGED');
+    expect(String(requestedUrl)).toContain('sort=-updated_on');
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 3,
+        externalId: null,
+        state: 'merged',
+        mergedAt: null,
+        closedAt: null,
+        updatedAt: '2026-07-10T00:00:00Z',
+      }),
+    ]);
+    expect(result.warnings).toContain(
+      'Bitbucket does not expose merge/close timestamps in pull request lists; mergedAt and closedAt are null and updatedAt approximates the merge time.',
+    );
+  });
+
+  it('lists completed Azure DevOps PRs using closedDate for merge timestamps', async () => {
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        value: [
+          {
+            pullRequestId: 7,
+            title: 'Completed PR',
+            status: 'completed',
+            creationDate: '2026-06-30T00:00:00Z',
+            closedDate: '2026-07-10T00:00:00Z',
+            sourceRefName: 'refs/heads/feature/work',
+            targetRefName: 'refs/heads/main',
+            createdBy: { id: 'user-guid', uniqueName: 'author@acme.com' },
+          },
+          {
+            pullRequestId: 6,
+            title: 'Old completed PR',
+            status: 'completed',
+            creationDate: '2026-05-01T00:00:00Z',
+            closedDate: '2026-06-01T00:00:00Z',
+            sourceRefName: 'refs/heads/feature/two',
+            targetRefName: 'refs/heads/main',
+          },
+        ],
+      }),
+    );
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'ado',
+        externalRepoId: 'repo-uuid',
+        fullName: 'acme/Platform/backend',
+        htmlUrl: 'https://dev.azure.com/acme/Platform/_git/backend',
+      }),
+      provider: 'ado',
+      updatedAfter: new Date('2026-07-01T00:00:00Z'),
+      fetchImpl,
+    });
+
+    const [requestedUrl] = fetchImpl.mock.calls[0]!;
+    expect(String(requestedUrl)).toContain('searchCriteria.status=completed');
+    // ADO rows have no updatedAt, so the updatedAfter filter falls back to
+    // the closedDate-derived mergedAt and drops the June merge.
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 7,
+        externalId: null,
+        state: 'merged',
+        updatedAt: null,
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: '2026-07-10T00:00:00Z',
+        author: { id: 'user-guid', login: 'author@acme.com' },
+      }),
+    ]);
+  });
+
+  it('lists merged GitHub PRs from the closed list, dropping unmerged rows', async () => {
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const paginate = vi.fn().mockResolvedValue([
+      {
+        number: 55,
+        id: 5501,
+        html_url: 'https://github.com/acme/backend/pull/55',
+        title: 'Merged PR',
+        state: 'closed',
+        merged_at: '2026-07-10T00:00:00Z',
+        closed_at: '2026-07-10T00:00:00Z',
+        draft: false,
+        created_at: '2026-06-30T00:00:00Z',
+        updated_at: '2026-07-10T00:00:00Z',
+        labels: [],
+        head: { ref: 'feature/one', sha: 'head-sha', repo: null },
+        base: { ref: 'develop', sha: 'base-sha', repo: null },
+        user: { id: 9, login: 'octocat' },
+      },
+      {
+        number: 54,
+        id: 5401,
+        html_url: 'https://github.com/acme/backend/pull/54',
+        title: 'Closed without merging',
+        state: 'closed',
+        merged_at: null,
+        closed_at: '2026-07-09T00:00:00Z',
+        draft: false,
+        created_at: '2026-06-29T00:00:00Z',
+        updated_at: '2026-07-09T00:00:00Z',
+        labels: [],
+        head: { ref: 'feature/two', sha: 'sha-2', repo: null },
+        base: { ref: 'develop', sha: 'base-sha', repo: null },
+        user: null,
+      },
+    ]);
+    const pullsList = vi.fn();
+    mockGetOctokit.mockReturnValue({
+      paginate,
+      rest: { pulls: { list: pullsList } },
+    });
+
+    const result = await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'github',
+        installationId: 'installation-1',
+        fullName: 'acme/backend',
+      }),
+      provider: 'github',
+    });
+
+    expect(paginate).toHaveBeenCalledWith(
+      pullsList,
+      expect.objectContaining({ state: 'closed' }),
+      expect.any(Function),
+    );
+    expect(result.pullRequests).toEqual([
+      expect.objectContaining({
+        number: 55,
+        externalId: 5501,
+        state: 'merged',
+        mergedAt: '2026-07-10T00:00:00Z',
+        closedAt: '2026-07-10T00:00:00Z',
+      }),
+    ]);
   });
 });

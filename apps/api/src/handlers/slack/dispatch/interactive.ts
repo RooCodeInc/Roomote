@@ -11,8 +11,6 @@ import {
   handleNevermind,
   handleRoutingConfirmOk,
   handleRoutingRejectNo,
-  handleSlackMcpSetupConfigure,
-  handleSlackMcpSetupIgnore,
   handleRetryFailedTask,
   handleTaskConfiguration,
   MANAGER_MCP_SETUP_CONFIGURE_ACTION_ID,
@@ -197,12 +195,6 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === 'routing_confirm_no':
       await handleRoutingRejectNo(interactivePayload);
-      break;
-    case actionId === 'mcp_setup_configure':
-      await handleSlackMcpSetupConfigure(interactivePayload);
-      break;
-    case actionId === 'mcp_setup_ignore':
-      await handleSlackMcpSetupIgnore(interactivePayload);
       break;
     case actionId === MANAGER_MCP_SETUP_CONFIGURE_ACTION_ID:
       await handleManagerMcpSetupConfigure(interactivePayload);

@@ -14,6 +14,12 @@ export const SANDBOX_MEMORY_MIB_PER_VCPU = 2_048;
 export const SANDBOX_DEFAULT_MEMORY_MIB =
   SANDBOX_DEFAULT_VCPUS * SANDBOX_MEMORY_MIB_PER_VCPU;
 
+/** Default memory for task sandboxes that do not run nested Docker. */
+export const TASK_SANDBOX_DEFAULT_MEMORY_MIB = 4_096;
+
+/** Default memory for task sandboxes that run nested Docker workloads. */
+export const TASK_SANDBOX_DOCKER_MEMORY_MIB = 8_192;
+
 export const SANDBOX_FILES_DIR = '/sandbox';
 
 export const SANDBOX_SNAPSHOT_EXPIRY_MS = 7 * 24 * 60 * 60 * 1000;

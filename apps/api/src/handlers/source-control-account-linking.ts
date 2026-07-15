@@ -56,6 +56,26 @@ function getLinkedAccountsSettingsUrl(
   }
 }
 
+function getEnvironmentsSettingsUrl(): string | null {
+  try {
+    return new URL('/settings/environments', Env.R_APP_URL).toString();
+  } catch {
+    return null;
+  }
+}
+
+export function buildSourceControlEnvironmentRequiredMessage(
+  provider: SourceControlCommentProvider,
+): string {
+  const copy = sourceControlCommentProviderCopy[provider];
+  const settingsUrl = getEnvironmentsSettingsUrl();
+  const settingsText = settingsUrl
+    ? `[Settings -> Environments](${settingsUrl})`
+    : 'Settings -> Environments';
+
+  return `I saw the mention, but no Roomote environment is mapped to this ${copy.accountLabel} repository. Set up an environment and map this repository from ${settingsText}, then mention me again.`;
+}
+
 export function buildSourceControlAccountLinkRequiredMessage(
   provider: SourceControlCommentProvider,
 ): string {

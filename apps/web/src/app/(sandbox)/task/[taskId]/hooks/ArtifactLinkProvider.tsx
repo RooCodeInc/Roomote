@@ -1,6 +1,14 @@
 'use client';
 
-import { type ReactNode, createContext, useCallback, useContext } from 'react';
+import {
+  type ReactNode,
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+} from 'react';
+
+import type { TaskArtifact } from '@/types';
 
 import type { TaskSession } from './use-task-session';
 
@@ -8,6 +16,8 @@ import { useTaskSidePanel } from './use-task-side-panel';
 
 interface ArtifactLinkContextType {
   openArtifact: (path: string, version?: number) => void;
+  getArtifactById: (artifactId: string) => TaskArtifact | undefined;
+  artifacts: readonly TaskArtifact[];
 }
 
 const ArtifactLinkContext = createContext<ArtifactLinkContextType | null>(null);
@@ -22,7 +32,7 @@ interface ArtifactLinkProviderProps {
 }
 
 export function ArtifactLinkProvider({
-  session: _session,
+  session,
   children,
 }: ArtifactLinkProviderProps) {
   const { openArtifactDetail } = useTaskSidePanel();
@@ -34,8 +44,25 @@ export function ArtifactLinkProvider({
     [openArtifactDetail],
   );
 
+  const artifacts = useMemo(() => session.artifacts ?? [], [session.artifacts]);
+
+  const getArtifactById = useCallback(
+    (artifactId: string) =>
+      artifacts.find((artifact) => artifact.id === artifactId),
+    [artifacts],
+  );
+
+  const value = useMemo(
+    () => ({
+      openArtifact,
+      getArtifactById,
+      artifacts,
+    }),
+    [openArtifact, getArtifactById, artifacts],
+  );
+
   return (
-    <ArtifactLinkContext.Provider value={{ openArtifact }}>
+    <ArtifactLinkContext.Provider value={value}>
       {children}
     </ArtifactLinkContext.Provider>
   );

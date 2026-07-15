@@ -20,9 +20,9 @@ import {
 } from '@roomote/sdk/server';
 
 import type { WebhookResponse } from '../../types';
-import { notifySlackPrMerge } from '../github/notifySlackPrMerge';
-import { notifyTeamsPrMerge } from '../github/notifyTeamsPrMerge';
-import { notifyTelegramAndLinearPrMerge } from '../github/notifyTelegramAndLinearPrMerge';
+import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
+import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getGiteaAutomationTargets,
   getGiteaUsername,
@@ -60,58 +60,41 @@ function getReviewTaskType(
   return null;
 }
 
-async function notifyMergedPullRequestThreads(
+async function notifyTerminalPullRequestThreads(
   payload: GiteaPullRequestWebhook,
   repoFullName: string,
+  status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const prUrl = getPullRequestUrl(payload);
+  const webhookHost = toHostFromUrl(prUrl);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitea'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
   }
 
-  const notificationParams = {
-    sourceControlProvider: 'gitea' as const,
-    repository: repoFullName,
-    prNumber: payload.number,
-    prTitle: payload.pull_request.title,
-    prUrl: getPullRequestUrl(payload),
-    mergedBy: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
-  };
-
-  notifySlackPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Slack for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTeamsPrMerge(notificationParams).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Teams for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
-
-  notifyTelegramAndLinearPrMerge({
-    ...notificationParams,
-    sourceControlProvider: 'gitea',
-  }).catch((error) => {
-    console.error(
-      `[handleGiteaPullRequest] Failed to notify Telegram/Linear for PR #${notificationParams.prNumber}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  });
+  scheduleNotifyPullRequestTerminalStatus(
+    {
+      sourceControlProvider: 'gitea',
+      repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
+      prNumber: payload.number,
+      prTitle: payload.pull_request.title,
+      prUrl,
+      status,
+      actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
+    },
+    `PR #${payload.number}`,
+  );
 }
 
 export async function handleGiteaPullRequest(
@@ -126,6 +109,22 @@ export async function handleGiteaPullRequest(
       : ('closed' as const);
 
     await updateTaskPrStatus('gitea', repoFullName, payload.number, status);
+
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitea',
+      repositoryFullName: repoFullName,
+      pullRequest: {
+        number: payload.number,
+        externalId: pullRequest.id ?? null,
+        title: pullRequest.title,
+        url: getPullRequestUrl(payload),
+        authorLogin: getGiteaUsername(pullRequest.user) ?? null,
+        state: status,
+        createdAt: pullRequest.created_at ?? null,
+        updatedAt: pullRequest.updated_at ?? null,
+        mergedAt: pullRequest.merged_at ?? null,
+      },
+    });
 
     await Promise.resolve(
       recordPrStatusChangeInTaskHistory({
@@ -145,9 +144,7 @@ export async function handleGiteaPullRequest(
       );
     });
 
-    if (pullRequest.merged) {
-      await notifyMergedPullRequestThreads(payload, repoFullName);
-    }
+    await notifyTerminalPullRequestThreads(payload, repoFullName, status);
 
     return { status: 'ok' };
   }
@@ -164,6 +161,8 @@ export async function handleGiteaPullRequest(
   const result = await getGiteaAutomationTargets({
     workflow: 'pr_review',
     payload,
+    // The PR web URL carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(getPullRequestUrl(payload)),
   });
 
   if (result.status === 'error') {
@@ -215,7 +214,7 @@ export async function handleGiteaPullRequest(
   const prAuthorId =
     pullRequest.user?.id != null ? String(pullRequest.user.id) : prAuthorName;
 
-  const enqueued = await pMap(targets, async (_target) =>
+  const enqueued = await pMap(targets, async (target) =>
     enqueueTask(
       {
         task: {
@@ -223,6 +222,12 @@ export async function handleGiteaPullRequest(
           payload: {
             repo: repoFullName,
             sourceControlProvider: 'gitea',
+            // Pin repository resolution to the webhook repository's host so
+            // same-name repositories on other hosts cannot be picked up.
+            // Legacy rows without a recorded host omit the field.
+            ...(target.repo.host
+              ? { sourceControlHost: target.repo.host }
+              : {}),
             prNumber: payload.number,
             prTitle: pullRequest.title,
             prUrl,
@@ -250,6 +255,8 @@ export async function handleGiteaPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'gitea',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: payload.number,
           prUrl,

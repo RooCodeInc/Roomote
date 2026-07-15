@@ -45,6 +45,7 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/gitlab', () => ({
   resolveGitLabToken: (...args: unknown[]) => mockResolveGitLabToken(...args),
+  isGitLabOAuthAccessToken: () => false,
   resolveGitLabBaseUrl: async () => 'https://gitlab.com',
   buildGitLabApiBaseUrl: (baseUrl: string) =>
     `${baseUrl.replace(/\/+$/, '')}/api/v4`,
@@ -77,7 +78,12 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       repositories: {
-        findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        // resolveRepositoryRow queries with findMany; tests queue a single
+        // row (or null), adapted here to the list shape it expects.
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row == null ? [] : [row];
+        },
       },
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),

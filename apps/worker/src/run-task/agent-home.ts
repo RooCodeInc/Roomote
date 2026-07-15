@@ -123,11 +123,11 @@ const ROOMOTE_OPENCODE_JUDGE_AGENT_PROMPT = [
 const ROOMOTE_OPENCODE_ADVISOR_AGENT_PROMPT = [
   'You are Roomote coding advisor support.',
   '',
-  'The parent coding agent consults you when it is stuck or needs help: repeated failed attempts, a confusing bug, an uncertain approach or design decision, or conflicting constraints.',
+  'The parent coding agent consults you when it is stuck or needs help: repeated or insurmountable failures to accomplish the task, a confusing bug, an uncertain approach or design decision, conflicting constraints, or when the user contradicts or challenges its approach, conclusion, or reasoning.',
   '',
-  'Start from the context the parent provides: the goal, what was tried, exact errors or failing output, and the relevant files. Read additional repository files when needed to ground your advice, but keep exploration targeted to the question.',
+  "Start from the context the parent provides: the goal, what was tried, exact errors or failing output, and the relevant files. When the consultation is about a user contradiction or challenge, start from the user's exact challenge and the parent's current reasoning. Read additional repository files when needed to ground your advice, but keep exploration targeted to the question.",
   '',
-  'Return concrete, actionable guidance: 1) your diagnosis or best hypotheses, 2) the recommended approach and why, 3) specific next steps the parent can execute, 4) any risks or alternatives worth considering. Prefer a single clear recommendation over a menu of options.',
+  'Return concrete, actionable guidance: 1) your diagnosis or best hypotheses, 2) the recommended approach and why, 3) specific next steps the parent can execute, 4) any risks or alternatives worth considering. Prefer a single clear recommendation over a menu of options. For user challenges, say whether the challenge is correct, partially correct, or mistaken, and what the parent should do next.',
   '',
   'If the provided context is insufficient to advise confidently, say exactly what evidence would disambiguate the situation.',
   '',
@@ -721,7 +721,7 @@ function createAdvisorAgentConfig(
 ): Record<string, unknown> {
   return {
     description:
-      'Consulting advisor the coding agent can ask for help when it is stuck, has repeated failed attempts, or needs a second opinion on approach or debugging.',
+      'Consulting advisor the coding agent can ask for help when it is stuck, hits repeated or insurmountable task failures, needs a second opinion on approach or debugging, or the user contradicts or challenges it.',
     mode: 'subagent',
     model,
     ...(reasoningOptions ? { options: reasoningOptions } : {}),
@@ -865,7 +865,11 @@ function createAdvisorModelInstructions(): string {
     '',
     `When you are stuck or need help — repeated failed fix attempts, a confusing bug, an uncertain approach or design decision, or conflicting constraints — delegate one focused consultation to the \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent with the Task tool before grinding through more blind attempts.`,
     '',
-    'Give the advisor a complete brief: the goal, what you already tried, the exact errors or failing output, and the relevant file paths. The advisor can read the repository but cannot run commands, so include runtime evidence it cannot gather itself.',
+    `If you hit repeated or insurmountable failures to accomplish the task — including blockers you cannot clear after serious attempts, dead ends that keep recurring, or approach failures that make progress look unlikely — delegate one focused consultation to the \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent with the Task tool before more of the same failing approach. Include what failed, what you tried, and why it continues to fail.`,
+    '',
+    `If the user contradicts or challenges your approach, conclusion, or reasoning, delegate one focused consultation to the \`${ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME}\` subagent with the Task tool before doubling down, arguing back, or overriding the challenge. Include the user's exact challenge and your current reasoning in the brief, then take the advisor's assessment seriously while still verifying against the repository.`,
+    '',
+    'Give the advisor a complete brief: the goal, what you already tried, the exact errors or failing output, and the relevant file paths. When the user has contradicted or challenged you, include their exact challenge and your current reasoning. The advisor can read the repository but cannot run commands, so include runtime evidence it cannot gather itself.',
     '',
     'Treat the advisor response as internal guidance for the parent workflow. Verify its recommendations against the repository before acting on them, and keep orchestration, code changes, and final user-facing decisions in the parent agent.',
     '',

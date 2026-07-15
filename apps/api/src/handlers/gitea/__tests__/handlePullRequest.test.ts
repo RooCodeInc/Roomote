@@ -4,9 +4,8 @@ const {
   mockUpdateTaskPrStatus,
   mockRecordPrStatusChangeInTaskHistory,
   mockRepositoriesFindFirst,
-  mockNotifySlackPrMerge,
-  mockNotifyTeamsPrMerge,
-  mockNotifyTelegramAndLinearPrMerge,
+  mockScheduleNotifyPullRequestTerminalStatus,
+  mockScheduleSourceControlPullRequestFactSync,
   mockFindActiveGitHubPrReviewTask,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -14,9 +13,8 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
   mockRepositoriesFindFirst: vi.fn(),
-  mockNotifySlackPrMerge: vi.fn(),
-  mockNotifyTeamsPrMerge: vi.fn(),
-  mockNotifyTelegramAndLinearPrMerge: vi.fn(),
+  mockScheduleNotifyPullRequestTerminalStatus: vi.fn(),
+  mockScheduleSourceControlPullRequestFactSync: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
 }));
 
@@ -34,6 +32,10 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       repositories: {
         findFirst: (...args: unknown[]) => mockRepositoriesFindFirst(...args),
+        findMany: async (...args: unknown[]) => {
+          const row = await mockRepositoriesFindFirst(...args);
+          return row ? [row] : [];
+        },
       },
     },
   },
@@ -48,16 +50,14 @@ vi.mock('@roomote/db/server', () => ({
     mockFindActiveGitHubPrReviewTask(...args),
 }));
 
-vi.mock('../../github/notifySlackPrMerge', () => ({
-  notifySlackPrMerge: mockNotifySlackPrMerge,
+vi.mock('../../github/notifyPullRequestTerminalStatus', () => ({
+  scheduleNotifyPullRequestTerminalStatus:
+    mockScheduleNotifyPullRequestTerminalStatus,
 }));
 
-vi.mock('../../github/notifyTeamsPrMerge', () => ({
-  notifyTeamsPrMerge: mockNotifyTeamsPrMerge,
-}));
-
-vi.mock('../../github/notifyTelegramAndLinearPrMerge', () => ({
-  notifyTelegramAndLinearPrMerge: mockNotifyTelegramAndLinearPrMerge,
+vi.mock('../../pull-request-fact-sync', () => ({
+  scheduleSourceControlPullRequestFactSync:
+    mockScheduleSourceControlPullRequestFactSync,
 }));
 
 vi.mock('../getGiteaAutomationTargets', async () => {
@@ -107,15 +107,13 @@ describe('handleGiteaPullRequest', () => {
     mockGetGiteaAutomationTargets.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockRepositoriesFindFirst.mockReset();
-    mockNotifySlackPrMerge.mockReset();
-    mockNotifyTeamsPrMerge.mockReset();
-    mockNotifyTelegramAndLinearPrMerge.mockReset();
+    mockScheduleNotifyPullRequestTerminalStatus.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
 
-    mockRepositoriesFindFirst.mockResolvedValue({ id: 'repo-row-1' });
-    mockNotifySlackPrMerge.mockResolvedValue(undefined);
-    mockNotifyTeamsPrMerge.mockResolvedValue(undefined);
-    mockNotifyTelegramAndLinearPrMerge.mockResolvedValue(undefined);
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 'repo-row-1',
+      host: null,
+    });
 
     mockGetGiteaAutomationTargets.mockResolvedValue({
       status: 'ok',
@@ -123,6 +121,7 @@ describe('handleGiteaPullRequest', () => {
         {
           id: 'gitea:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
@@ -178,6 +177,91 @@ describe('handleGiteaPullRequest', () => {
         launchClass: 'automation',
       }),
     );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
+    // Two active rows share the repository identity; only the host differs.
+    const rows = [
+      { id: 'repo-host-a', host: 'gitea.host-a.example' },
+      { id: 'repo-host-b', host: 'gitea.host-b.example' },
+    ];
+    mockGetGiteaAutomationTargets.mockImplementation(
+      async ({ webhookHost }: { webhookHost?: string | null }) => {
+        const repo = rows.find((row) => row.host === webhookHost);
+        return repo
+          ? {
+              status: 'ok',
+              targets: [
+                {
+                  id: `gitea:pr_review:${repo.id}`,
+                  settings: null,
+                  repo,
+                  repositoryIds: [repo.id],
+                  userId: 'user-1',
+                },
+              ],
+            }
+          : { status: 'error', message: 'no matching repository row' };
+      },
+    );
+
+    await handleGiteaPullRequest(
+      makePayload('opened', {
+        html_url: 'https://gitea.host-a.example/acme/backend/pulls/42',
+      }),
+    );
+
+    // The handler derives the instance host from the webhook URL...
+    expect(mockGetGiteaAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookHost: 'gitea.host-a.example' }),
+    );
+    // ...and the launched payload pins the matching row's host.
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'gitea.host-a.example',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('stamps the repository host into review payloads when the repository row has one', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'git.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGiteaPullRequest(makePayload('opened'));
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitea',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'git.example.com',
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
   });
 
   it('enqueues sync reviews for synchronized pull requests', async () => {
@@ -231,7 +315,16 @@ describe('handleGiteaPullRequest', () => {
 
   it('updates tracked task PR status and notifications for merged pull requests', async () => {
     await expect(
-      handleGiteaPullRequest(makePayload('closed', { merged: true })),
+      handleGiteaPullRequest(
+        makePayload('closed', {
+          merged: true,
+          id: 900,
+          created_at: '2026-07-01T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          user: { id: 4, login: 'gitea-user' },
+        }),
+      ),
     ).resolves.toEqual({ status: 'ok' });
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -240,34 +333,39 @@ describe('handleGiteaPullRequest', () => {
       42,
       'merged',
     );
-    expect(mockNotifySlackPrMerge).toHaveBeenCalledWith({
-      sourceControlProvider: 'gitea',
-      repository: 'acme/backend',
-      prNumber: 42,
-      prTitle: 'Update backend',
-      prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
+    expect(mockScheduleSourceControlPullRequestFactSync).toHaveBeenCalledWith({
+      provider: 'gitea',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 42,
+        externalId: 900,
+        title: 'Update backend',
+        url: 'https://git.example.com/acme/backend/pulls/42',
+        authorLogin: 'gitea-user',
+        state: 'merged',
+        createdAt: '2026-07-01T00:00:00Z',
+        updatedAt: '2026-07-10T00:00:00Z',
+        mergedAt: '2026-07-10T00:00:00Z',
+      },
     });
-    expect(mockNotifyTeamsPrMerge).toHaveBeenCalledWith({
-      sourceControlProvider: 'gitea',
-      repository: 'acme/backend',
-      prNumber: 42,
-      prTitle: 'Update backend',
-      prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
-    });
-    expect(mockNotifyTelegramAndLinearPrMerge).toHaveBeenCalledWith({
-      repository: 'acme/backend',
-      prNumber: 42,
-      prTitle: 'Update backend',
-      prUrl: 'https://git.example.com/acme/backend/pulls/42',
-      mergedBy: 'roomote-bot',
-      sourceControlProvider: 'gitea',
-    });
+    expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitea',
+        repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'git.example.com',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://git.example.com/acme/backend/pulls/42',
+        status: 'merged',
+        actorLogin: 'roomote-bot',
+      },
+      'PR #42',
+    );
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
-  it('updates tracked task PR status without notifications for closed pull requests', async () => {
+  it('updates tracked task PR status and notifications for closed pull requests', async () => {
     await handleGiteaPullRequest(makePayload('closed'));
 
     expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
@@ -276,8 +374,19 @@ describe('handleGiteaPullRequest', () => {
       42,
       'closed',
     );
-    expect(mockNotifySlackPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTeamsPrMerge).not.toHaveBeenCalled();
-    expect(mockNotifyTelegramAndLinearPrMerge).not.toHaveBeenCalled();
+    expect(mockScheduleNotifyPullRequestTerminalStatus).toHaveBeenCalledWith(
+      {
+        sourceControlProvider: 'gitea',
+        repository: 'acme/backend',
+        repositoryId: 'repo-row-1',
+        host: 'git.example.com',
+        prNumber: 42,
+        prTitle: 'Update backend',
+        prUrl: 'https://git.example.com/acme/backend/pulls/42',
+        status: 'closed',
+        actorLogin: 'roomote-bot',
+      },
+      'PR #42',
+    );
   });
 });

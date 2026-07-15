@@ -1,8 +1,13 @@
 import { getSlackThreadDisplayName } from '@roomote/cloud-agents';
+import { TASK_STARTING_MESSAGE_PREFIX } from '@roomote/communication/chat-messages';
 
 import type { SlackThreadMessage } from './types';
 
-const SLACK_STARTED_MESSAGE_PREFIX = 'Getting started on your task';
+// Text-only fallback for older template kickoffs only. Dynamic kickoffs are
+// not matched by prefix; they rely on the stored started-message ts and/or
+// Follow/Cancel action blocks so unrelated "Getting started…" bot replies are
+// not suppressed from task context.
+const SLACK_STARTED_MESSAGE_PREFIX = TASK_STARTING_MESSAGE_PREFIX;
 const PROMPT_CONTROL_ACTION_IDS = new Set(['follow_task', 'cancel_task']);
 
 function compareSlackTimestamps(left: string, right: string): number {
@@ -62,13 +67,19 @@ export function isSlackStartedTaskMessage(
   return (
     (startedMessageTs != null && message.ts === startedMessageTs) ||
     (Boolean(message.bot_id) &&
-      message.text.trim().startsWith(SLACK_STARTED_MESSAGE_PREFIX)) ||
+      message.text
+        .trim()
+        .toLowerCase()
+        .startsWith(SLACK_STARTED_MESSAGE_PREFIX.toLowerCase())) ||
     hasPromptControlActionBlocks(message.blocks)
   );
 }
 
 export function isSlackStartedTaskReplyText(text: string): boolean {
-  return text.trim().startsWith(SLACK_STARTED_MESSAGE_PREFIX);
+  return text
+    .trim()
+    .toLowerCase()
+    .startsWith(SLACK_STARTED_MESSAGE_PREFIX.toLowerCase());
 }
 
 export function splitThreadMessages(

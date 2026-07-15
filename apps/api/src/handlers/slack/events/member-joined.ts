@@ -54,6 +54,7 @@ async function syncManagerStarterAutomations(params: {
       schedule: { mode: settings.suggesterFrequency },
       instructions: settings.suggesterInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.suggesterSlackChannelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt,
     }),
     upsertAutomation(db, {
@@ -62,6 +63,7 @@ async function syncManagerStarterAutomations(params: {
       schedule: { mode: settings.announcerFrequency },
       instructions: settings.announcerInstructions ?? null,
       targets: buildStarterAutomationTargets(settings.announcerSlackChannelId),
+      managedTargetKinds: ['slack_channel'],
       updatedAt,
     }),
     upsertAutomation(db, {

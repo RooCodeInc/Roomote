@@ -1,5 +1,13 @@
 import { Env } from '@roomote/env';
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* / */) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
 export function normalizeApiBaseUrl(raw: string | undefined): string | null {
   if (!raw) {
     return null;
@@ -10,7 +18,7 @@ export function normalizeApiBaseUrl(raw: string | undefined): string | null {
     return null;
   }
 
-  return trimmed.replace(/\/+$/, '');
+  return stripTrailingSlashes(trimmed);
 }
 
 export function resolveApiBaseUrl(explicit?: string): string | null {

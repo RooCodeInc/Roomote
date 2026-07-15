@@ -167,10 +167,14 @@ export type SetupComputeStatus = {
   providers: SetupComputeProviderStatus[];
   workerImage: SetupComputeWorkerImageStatus;
   setupSatisfied: boolean;
+  excludedProviders?: ComputeProvider[];
+  /** True when any hosted provider is fully configured in the process env. */
+  setupSatisfiedByRuntimeEnv: boolean;
 };
 
 export type DeploymentComputeConfig = {
   defaultProvider: ComputeProvider | null;
+  excludedProviders: ComputeProvider[];
 };
 
 export const SETUP_COMPUTE_PROVIDER_IDS = computeProviders;
@@ -528,6 +532,7 @@ export function isRequiredComputeField(field: SetupComputeFieldDescriptor) {
 export function createEmptyDeploymentComputeConfig(): DeploymentComputeConfig {
   return {
     defaultProvider: null,
+    excludedProviders: [],
   };
 }
 
@@ -541,6 +546,9 @@ export function normalizeDeploymentComputeConfig(
       defaultProvider && isComputeProvider(defaultProvider)
         ? defaultProvider
         : null,
+    excludedProviders: Array.from(
+      new Set((value?.excludedProviders ?? []).filter(isComputeProvider)),
+    ),
   };
 }
 
@@ -557,8 +565,14 @@ function isConfiguredEnvValue(
  */
 const DEFAULT_WORKER_IMAGE_REPOSITORY = 'ghcr.io/roocodeinc/roomote-worker';
 
+// Source checkouts do not have a baked RELEASE_VERSION. Follow the published
+// development channel automatically for hosted providers; operators can pin
+// any registry-qualified image with DOCKER_WORKER_IMAGE.
 export const DEVELOPMENT_MODAL_BASE_IMAGE_REF =
-  'ghcr.io/roocodeinc/roomote-worker:latest';
+  'ghcr.io/roocodeinc/roomote-worker:develop';
+
+const ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF =
+  'ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF';
 
 /**
  * Derives the published worker image ref for the running app release:
@@ -627,9 +641,14 @@ export function resolveDerivedModalBaseImageRef(
     return derivedFromWorkerImage;
   }
 
-  return isDevelopmentRuntime(runtimeEnv)
-    ? DEVELOPMENT_MODAL_BASE_IMAGE_REF
-    : null;
+  if (!isDevelopmentRuntime(runtimeEnv)) {
+    return null;
+  }
+
+  return (
+    runtimeEnv[ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF]?.trim() ||
+    DEVELOPMENT_MODAL_BASE_IMAGE_REF
+  );
 }
 
 /**
@@ -694,6 +713,9 @@ export function buildSetupComputeStatus(input: {
   const excludedProviders = parseExcludedComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
+  for (const provider of persistedComputeConfig.excludedProviders) {
+    excludedProviders.add(provider);
+  }
   const runtimeDefaultProvider =
     runtimeDefaultValue &&
     isComputeProvider(runtimeDefaultValue) &&
@@ -707,14 +729,7 @@ export function buildSetupComputeStatus(input: {
   // are ignored so they cannot stick above release-derived images. Only a
   // registry-qualified ref is hosted-ready; a bare local tag is not pullable
   // by hosted providers.
-  const explicitWorkerImage = runtimeEnv.DOCKER_WORKER_IMAGE?.trim() || null;
-  const effectiveWorkerImage =
-    explicitWorkerImage ?? deriveWorkerImageFromReleaseVersion(runtimeEnv);
-  const hostedWorkerImageRef =
-    deriveModalBaseImageRefDefault(effectiveWorkerImage) ??
-    (isDevelopmentRuntime(runtimeEnv)
-      ? DEVELOPMENT_MODAL_BASE_IMAGE_REF
-      : null);
+  const hostedWorkerImageRef = resolveDerivedModalBaseImageRef(runtimeEnv);
   const derivedModalBaseImageRef = hostedWorkerImageRef;
 
   const workerImage: SetupComputeWorkerImageStatus = {
@@ -790,7 +805,12 @@ export function buildSetupComputeStatus(input: {
   });
 
   const selectedProvider =
-    input.selectedProvider ?? persistedComputeConfig.defaultProvider ?? null;
+    input.selectedProvider && !excludedProviders.has(input.selectedProvider)
+      ? input.selectedProvider
+      : persistedComputeConfig.defaultProvider &&
+          !excludedProviders.has(persistedComputeConfig.defaultProvider)
+        ? persistedComputeConfig.defaultProvider
+        : null;
   const preselectedProvider =
     selectedProvider ??
     runtimeDefaultProvider ??
@@ -805,17 +825,31 @@ export function buildSetupComputeStatus(input: {
   const selectedProviderStatus = selectedProvider
     ? providers.find((candidate) => candidate.provider === selectedProvider)
     : null;
+  const setupSatisfiedByRuntimeEnv = providers.some(
+    (provider) =>
+      provider.provider !== DEFAULT_SETUP_COMPUTE_PROVIDER_ID &&
+      provider.fields
+        .filter(isRequiredComputeField)
+        .every((field) => field.runtimeSatisfied || field.defaultSatisfied),
+  );
   const setupSatisfied =
-    selectedProvider !== null &&
-    (selectedProviderStatus?.configSatisfied ?? false);
+    setupSatisfiedByRuntimeEnv ||
+    (selectedProvider !== null &&
+      (selectedProviderStatus?.configSatisfied ?? false));
 
   return {
     selectedProvider,
     preselectedProvider,
     runtimeDefaultProvider,
-    persistedDefaultProvider: persistedComputeConfig.defaultProvider,
+    persistedDefaultProvider:
+      persistedComputeConfig.defaultProvider &&
+      !excludedProviders.has(persistedComputeConfig.defaultProvider)
+        ? persistedComputeConfig.defaultProvider
+        : null,
     providers,
     workerImage,
     setupSatisfied,
+    excludedProviders: Array.from(excludedProviders),
+    setupSatisfiedByRuntimeEnv,
   };
 }

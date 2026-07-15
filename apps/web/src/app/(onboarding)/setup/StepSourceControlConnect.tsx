@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   isSourceControlTokenBackedProvider,
@@ -10,11 +10,22 @@ import {
 } from '@roomote/types';
 
 import { useTRPC } from '@/trpc/client';
-import { Button, Github, Spinner } from '@/components/system';
+import {
+  BrandIcon,
+  Button,
+  Github,
+  RefreshCcw,
+  Spinner,
+} from '@/components/system';
 import { useCreateGitHubInstallation } from '@/hooks/github/useCreateGitHubInstallation';
+import {
+  useAdoLinkedAccount,
+  useAuthenticateAdoAccount,
+} from '@/hooks/linked-accounts';
 import { useSyncRepositories } from '@/hooks/source-control/useSyncRepositories';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const SOURCE_CONTROL_CONNECT_STEP = getSetupStepDefinition(
@@ -42,13 +53,13 @@ function getTokenBackedConnectCopy({
 
   switch (provider) {
     case 'gitlab':
-      return 'Sync your GitLab projects so Roomote can access your codebase. Roomote also configures merge request webhooks on the synced projects so it can review merge requests automatically.';
+      return 'Sync your GitLab projects so Roomote can access your codebase.';
     case 'gitea':
-      return 'Sync your Gitea repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
-      return 'Sync your Bitbucket repositories so Roomote can access your codebase. Roomote also configures pull request webhooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Bitbucket repositories so Roomote can access your codebase.';
     case 'ado':
-      return 'Sync your Azure DevOps repositories so Roomote can access your codebase. Roomote also configures pull request service hooks on the synced repositories so it can review pull requests automatically.';
+      return 'Sync your Azure DevOps repositories so Roomote can access your codebase.';
     default:
       return `Sync your ${providerLabel} repositories so Roomote can access your codebase.`;
   }
@@ -57,9 +68,11 @@ function getTokenBackedConnectCopy({
 export function StepSourceControlConnect({
   sourceControlSetup,
   onContinue,
+  onBack,
 }: {
   sourceControlSetup: SetupSourceControlStatus;
   onContinue: () => void;
+  onBack?: () => void;
 }) {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
@@ -71,6 +84,13 @@ export function StepSourceControlConnect({
     (candidate) => candidate.provider === provider,
   );
   const [syncedWithZeroRepos, setSyncedWithZeroRepos] = useState(false);
+  const adoLinkedAccount = useAdoLinkedAccount();
+  const authenticateAdoAccount = useAuthenticateAdoAccount();
+  const saveAdoLinkedAccount = useMutation(
+    trpc.sourceControl.saveConfig.mutationOptions({
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const createInstallation = useCreateGitHubInstallation({
     onSuccess: (result) => {
@@ -135,6 +155,13 @@ export function StepSourceControlConnect({
   );
 
   const alreadyConnected = providerStatus?.connected === true;
+  const adoAuthMode = providerStatus?.fields.find(
+    (field) => field.envVarName === 'ADO_AUTH_MODE',
+  )?.savedValue;
+  const needsAdoMicrosoftConnection =
+    provider === 'ado' &&
+    adoAuthMode === 'delegated' &&
+    !adoLinkedAccount.data?.account;
   const lockedByRuntime = sourceControlSetup.lockReason === 'runtime_env';
   const providerLabel = providerStatus?.label ?? provider;
   const githubCopy = lockedByRuntime
@@ -146,12 +173,98 @@ export function StepSourceControlConnect({
     provider,
     providerLabel,
   });
+  const gitlabOAuthConfigured =
+    provider === 'gitlab' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITLAB_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
+  const giteaOAuthConfigured =
+    provider === 'gitea' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'GITEA_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
+
+  const oauthAutoSyncMarkerPresent =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).get('sync') === '1';
+  const shouldAutoSync =
+    isSourceControlTokenBackedProvider(provider) &&
+    providerStatus?.configSatisfied === true &&
+    !alreadyConnected &&
+    !needsAdoMicrosoftConnection &&
+    (provider !== 'gitlab' ||
+      !gitlabOAuthConfigured ||
+      oauthAutoSyncMarkerPresent) &&
+    (provider !== 'gitea' ||
+      !giteaOAuthConfigured ||
+      oauthAutoSyncMarkerPresent);
+
+  const handleSyncRepositories = useCallback(async () => {
+    if (
+      provider === 'ado' &&
+      adoAuthMode === 'delegated' &&
+      adoLinkedAccount.data?.account
+    ) {
+      await saveAdoLinkedAccount.mutateAsync({
+        provider: 'ado',
+        values: {
+          ADO_AUTH_MODE: 'delegated',
+          ADO_LINKED_ACCOUNT_ID: adoLinkedAccount.data.account.accountId,
+        },
+      });
+    }
+
+    syncRepositories.mutate();
+  }, [
+    adoAuthMode,
+    adoLinkedAccount.data?.account,
+    provider,
+    saveAdoLinkedAccount,
+    syncRepositories,
+  ]);
+
+  const autoSyncAttempted = useRef(false);
+  useEffect(() => {
+    if (!shouldAutoSync || autoSyncAttempted.current) {
+      return;
+    }
+
+    autoSyncAttempted.current = true;
+    void handleSyncRepositories();
+
+    if (oauthAutoSyncMarkerPresent) {
+      const params = new URLSearchParams(window.location.search);
+      params.delete('sync');
+      const query = params.toString();
+      window.history.replaceState(
+        {},
+        '',
+        query
+          ? `${window.location.pathname}?${query}`
+          : window.location.pathname,
+      );
+    }
+  }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
 
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">
       <StepTitle text={SOURCE_CONTROL_CONNECT_STEP.title} />
 
-      {alreadyConnected ? (
+      {alreadyConnected && !needsAdoMicrosoftConnection ? (
         <div className="space-y-4">
           <p>
             {providerStatus?.label ?? provider} is connected with{' '}
@@ -161,12 +274,48 @@ export function StepSourceControlConnect({
               : 'repositories'}
             .
           </p>
-          <Button onClick={onContinue}>Continue</Button>
+          <SetupFooter onBack={onBack}>
+            <Button onClick={onContinue}>Continue</Button>
+          </SetupFooter>
+        </div>
+      ) : needsAdoMicrosoftConnection ? (
+        <div className="space-y-4">
+          <p>
+            Connect your Azure DevOps account with Microsoft before syncing
+            repositories.
+          </p>
+          <SetupFooter onBack={onBack}>
+            {adoLinkedAccount.isPending ? (
+              <Spinner />
+            ) : adoLinkedAccount.data?.configured === false ? (
+              <p className="text-sm text-destructive">
+                The Microsoft Entra service-principal settings are not ready
+                yet. Go back and save the Azure DevOps app credentials first.
+              </p>
+            ) : (
+              <Button
+                className="w-full sm:w-auto"
+                onClick={() =>
+                  authenticateAdoAccount.mutate(
+                    `${window.location.pathname}?step=source-control-connect`,
+                  )
+                }
+                disabled={authenticateAdoAccount.isPending}
+              >
+                {authenticateAdoAccount.isPending ? (
+                  <Spinner />
+                ) : (
+                  <BrandIcon name="ADO" icon="ado" />
+                )}
+                Connect with your Microsoft account
+              </Button>
+            )}
+          </SetupFooter>
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
           <p>{githubCopy}</p>
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+          <SetupFooter onBack={onBack}>
             <Button
               className="w-full sm:w-auto"
               onClick={() =>
@@ -179,7 +328,7 @@ export function StepSourceControlConnect({
               {createInstallation.isPending ? <Spinner /> : <Github />}
               Connect to GitHub
             </Button>
-          </div>
+          </SetupFooter>
         </div>
       ) : (
         <div className="space-y-4">
@@ -190,16 +339,22 @@ export function StepSourceControlConnect({
               URL, then try again.
             </p>
           ) : null}
-          <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+          <SetupFooter onBack={onBack}>
             <Button
               className="w-full sm:w-auto"
-              onClick={() => syncRepositories.mutate()}
-              disabled={syncRepositories.isPending}
+              onClick={() => void handleSyncRepositories()}
+              disabled={
+                syncRepositories.isPending || saveAdoLinkedAccount.isPending
+              }
             >
-              {syncRepositories.isPending ? <Spinner /> : null}
+              {syncRepositories.isPending || saveAdoLinkedAccount.isPending ? (
+                <Spinner />
+              ) : (
+                <RefreshCcw />
+              )}
               Sync repositories
             </Button>
-          </div>
+          </SetupFooter>
         </div>
       )}
     </div>

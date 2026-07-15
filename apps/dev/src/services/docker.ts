@@ -3,6 +3,13 @@ import path from 'path';
 import { execa } from 'execa';
 import ora from 'ora';
 import Docker from 'dockerode';
+import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
+
+export const WORKER_IMAGE_SCHEMA_LABEL =
+  'dev.roomote.worker-image.schema-version';
+export const WORKER_IMAGE_SCHEMA_VERSION = String(
+  WORKER_RUNTIME_SCHEMA_VERSION,
+);
 
 export class DockerService {
   private static readonly CURRENT_COMPOSE_PROJECT = 'roomote';
@@ -61,7 +68,7 @@ export class DockerService {
     const rootDir = path.resolve(process.cwd(), '../..');
 
     if (
-      (await this.hasImage(image)) &&
+      (await this.hasCurrentWorkerImageSchema(image)) &&
       (await this.hasRequiredWorkerImageTools(image, platform))
     ) {
       return;
@@ -78,6 +85,8 @@ export class DockerService {
           'build',
           '--platform',
           platform,
+          '--build-arg',
+          `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
           '-f',
           'apps/worker/Dockerfile',
           '-t',
@@ -136,7 +145,7 @@ export class DockerService {
     stopSelfHost.succeed();
   }
 
-  static async checkContainers(_verbose: boolean): Promise<void> {
+  static async checkContainers(verbose: boolean): Promise<void> {
     const checkContainers = ora('Checking Docker containers').start();
     const rootDir = path.resolve(process.cwd(), '../..');
 
@@ -148,23 +157,39 @@ export class DockerService {
       .filter(([_, isRunning]) => !isRunning)
       .map(([name]) => name);
 
+    if (missing.length > 0) {
+      checkContainers.warn();
+
+      ora(`Starting Docker containers: ${missing.join(', ')}`).info();
+
+      await execa('pnpm', ['infra:up'], {
+        stdio: 'inherit',
+        cwd: path.resolve(process.cwd(), '../..'),
+        env: this.getInfraUpEnv(),
+        extendEnv: false,
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
+
+    // Caddy loads its config only when the container starts. Recreate the
+    // local edge on every dev startup so routing and environment changes from
+    // the checkout cannot be masked by an already-running stale container.
+    await execa(
+      'docker',
+      ['compose', 'up', 'caddy-dev', '-d', '--force-recreate', '--wait'],
+      {
+        cwd: rootDir,
+        env: this.getInfraUpEnv(),
+        extendEnv: false,
+        ...(verbose && { stdio: 'inherit' }),
+      },
+    );
+
     if (missing.length === 0) {
       checkContainers.succeed();
       return;
     }
-
-    checkContainers.warn();
-
-    ora(`Starting Docker containers: ${missing.join(', ')}`).info();
-
-    await execa('pnpm', ['infra:up'], {
-      stdio: 'inherit',
-      cwd: path.resolve(process.cwd(), '../..'),
-      env: this.getInfraUpEnv(),
-      extendEnv: false,
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 5_000));
 
     // startContainers.succeed();
 
@@ -280,10 +305,19 @@ export class DockerService {
     }
   }
 
-  private static async hasImage(image: string): Promise<boolean> {
+  private static async hasCurrentWorkerImageSchema(
+    image: string,
+  ): Promise<boolean> {
     try {
-      await execa('docker', ['image', 'inspect', image]);
-      return true;
+      const result = await execa('docker', [
+        'image',
+        'inspect',
+        '--format',
+        `{{ index .Config.Labels "${WORKER_IMAGE_SCHEMA_LABEL}" }}`,
+        image,
+      ]);
+
+      return result.stdout?.trim() === WORKER_IMAGE_SCHEMA_VERSION;
     } catch (_error) {
       return false;
     }
@@ -303,7 +337,7 @@ export class DockerService {
         '/bin/sh',
         image,
         '-c',
-        'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null',
+        'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null && command -v docker >/dev/null && docker --version >/dev/null && docker compose version >/dev/null',
       ]);
       return true;
     } catch (_error) {

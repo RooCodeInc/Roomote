@@ -16,8 +16,10 @@ import {
 
 import { useTRPC } from '@/trpc/client';
 import {
-  ArrowLeft,
   ArrowRight,
+  Alert,
+  AlertCircle,
+  AlertDescription,
   Button,
   Check,
   ChevronDown,
@@ -26,6 +28,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getComputeCredentialsHint } from './computeSetupCopy';
 import { getSetupStepDefinition } from './types';
 
@@ -104,14 +107,7 @@ export function StepComputeConfig({
     Record<string, boolean>
   >({});
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
-  // Set while the deployment is provisioning the worker base image in the
-  // operator's provider account; the step stays put and polls until it lands.
-  const [awaitingTemplateBuild, setAwaitingTemplateBuild] = useState(false);
-  const setupStatus = useQuery(
-    trpc.setupNew.status.queryOptions(undefined, {
-      refetchInterval: awaitingTemplateBuild ? 2_000 : false,
-    }),
-  );
+  const setupStatus = useQuery(trpc.setupNew.status.queryOptions());
   const templateBuild =
     effectiveSelectedProviderId &&
     isSetupProvisionableComputeProvider(effectiveSelectedProviderId) &&
@@ -121,26 +117,19 @@ export function StepComputeConfig({
           effectiveSelectedProviderId,
         )
       : null;
+  const selectedProvider = useMemo(
+    () =>
+      computeSetup.providers.find(
+        (provider) => provider.provider === effectiveSelectedProviderId,
+      ),
+    [computeSetup.providers, effectiveSelectedProviderId],
+  );
   const saveComputeConfig = useMutation(
     trpc.setupNew.saveComputeConfig.mutationOptions({
-      onSuccess: async (result) => {
+      onSuccess: async () => {
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });
-
-        const resultProvisioning =
-          selectedProvider &&
-          isSetupProvisionableComputeProvider(selectedProvider.provider)
-            ? getSetupNewComputeProvisioningState(
-                result.setupNewState,
-                selectedProvider.provider,
-              )
-            : null;
-
-        if (resultProvisioning?.status === 'building') {
-          setAwaitingTemplateBuild(true);
-          return;
-        }
 
         onContinue();
       },
@@ -154,43 +143,7 @@ export function StepComputeConfig({
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setAdvancedExpanded(false);
-    setAwaitingTemplateBuild(false);
   }, [effectiveSelectedProviderId, nonSecretInitialValues]);
-
-  // Re-attach to an in-flight build (e.g. after a page reload mid-build).
-  useEffect(() => {
-    if (templateBuild?.status === 'building') {
-      setAwaitingTemplateBuild(true);
-    }
-  }, [templateBuild?.status]);
-
-  useEffect(() => {
-    if (!awaitingTemplateBuild) {
-      return;
-    }
-
-    if (templateBuild?.status === 'succeeded') {
-      setAwaitingTemplateBuild(false);
-      void queryClient
-        .invalidateQueries({ queryKey: trpc.setupNew.status.queryKey() })
-        .then(() => onContinue());
-    } else if (templateBuild?.status === 'failed') {
-      setAwaitingTemplateBuild(false);
-      toast.error(
-        templateBuild.error ??
-          'Failed to prepare the sandbox provider setup. Try saving again.',
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [awaitingTemplateBuild, templateBuild?.status]);
-
-  const selectedProvider = useMemo(
-    () =>
-      computeSetup.providers.find(
-        (provider) => provider.provider === effectiveSelectedProviderId,
-      ),
-    [computeSetup.providers, effectiveSelectedProviderId],
-  );
 
   const credentialFields =
     selectedProvider?.fields.filter(isComputeCredentialField) ?? [];
@@ -269,10 +222,10 @@ export function StepComputeConfig({
     isHostedProvider && (missingHostedWorkerImage || advancedExpanded);
 
   const templateBuildFailed = templateBuild?.status === 'failed';
+  const templateBuildRunning = templateBuild?.status === 'building';
 
   const isActionDisabled =
     saveComputeConfig.isPending ||
-    awaitingTemplateBuild ||
     !selectedProvider ||
     !credentialsMet ||
     !hostedRequirementMet;
@@ -537,47 +490,46 @@ export function StepComputeConfig({
         ) : null}
       </div>
 
-      {awaitingTemplateBuild ? (
+      {templateBuildRunning ? (
         <p className="text-sm text-muted-foreground mt-8">
-          Provisioning the worker base image. This can take a few minutes.
+          Provisioning the worker base image in the background. You can continue
+          while Roomote prepares the sandbox provider.
         </p>
       ) : null}
 
-      <div
-        className={`flex flex-col gap-2 sm:flex-row sm:items-center ${awaitingTemplateBuild ? 'mt-2' : 'mt-8'}`}
+      {templateBuildFailed ? (
+        <Alert variant="destructive" className="mt-8">
+          <AlertCircle />
+          <AlertDescription>
+            {templateBuild.error
+              ? `Provisioning failed: ${templateBuild.error}`
+              : 'Provisioning failed. Retry to prepare this sandbox provider.'}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      <SetupFooter
+        onBack={onBack}
+        backDisabled={saveComputeConfig.isPending}
+        className={
+          templateBuildRunning || templateBuildFailed ? 'mt-2' : 'mt-8'
+        }
       >
-        {onBack ? (
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onBack}
-            disabled={saveComputeConfig.isPending || awaitingTemplateBuild}
-          >
-            <ArrowLeft />
-            Back
-          </Button>
-        ) : null}
         <Button
           type="button"
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >
-          {awaitingTemplateBuild
-            ? 'Provisioning...'
-            : saveComputeConfig.isPending
-              ? 'Saving...'
-              : templateBuildFailed
-                ? 'Retry provisioning'
-                : !hasTypedValues && canContinueWithoutNewValues
-                  ? 'Continue'
-                  : 'Save and continue'}
-          {saveComputeConfig.isPending || awaitingTemplateBuild ? (
-            <Spinner />
-          ) : (
-            <ArrowRight />
-          )}
+          {saveComputeConfig.isPending
+            ? 'Saving...'
+            : templateBuildFailed
+              ? 'Retry provisioning'
+              : !hasTypedValues && canContinueWithoutNewValues
+                ? 'Continue'
+                : 'Save and continue'}
+          {saveComputeConfig.isPending ? <Spinner /> : <ArrowRight />}
         </Button>
-      </div>
+      </SetupFooter>
     </div>
   );
 }

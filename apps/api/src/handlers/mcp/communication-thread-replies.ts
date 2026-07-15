@@ -1,10 +1,8 @@
 import {
-  TeamsCommunicationProvider,
-  TelegramCommunicationProvider,
   UnsupportedCommunicationOperationError,
   getLatestInboundMessageId,
+  type TelegramCommunicationProvider,
 } from '@roomote/communication';
-import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
 import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
@@ -12,7 +10,10 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
-import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
+import {
+  createTeamsCommunicationProviderFromRuntimeCredentials as createTeamsCommunicationProvider,
+  createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider,
+} from '@roomote/sdk/server';
 
 import { THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE } from './chat-reply-helpers';
 import {
@@ -60,20 +61,6 @@ function startTelegramTypingHeartbeat(
   timer.unref?.();
 
   return () => clearInterval(timer);
-}
-
-async function createTeamsCommunicationProvider(): Promise<TeamsCommunicationProvider | null> {
-  return createTeamsCommunicationProviderFromRuntimeCredentials();
-}
-
-async function createTelegramCommunicationProvider(): Promise<TelegramCommunicationProvider | null> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
-
-  if (!botToken) {
-    return null;
-  }
-
-  return new TelegramCommunicationProvider({ botToken });
 }
 
 async function sendTeamsThreadReply(params: {

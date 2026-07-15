@@ -451,6 +451,16 @@ function buildBasicAuthHeader(username: string, token: string): string {
   )}`;
 }
 
+function buildGitAuthHeader(
+  username: string,
+  token: string,
+  authScheme: 'basic' | 'bearer' = 'basic',
+): string {
+  return authScheme === 'bearer'
+    ? `Bearer ${token}`
+    : buildBasicAuthHeader(username, token);
+}
+
 function resolveProxyCredential(
   target: SourceControlProxyTarget,
   proxiedPath: string,
@@ -576,7 +586,11 @@ async function handleSourceControlProxyRequest(
     method: request.method,
     headers: buildProxyForwardHeaders(
       request.headers,
-      buildBasicAuthHeader(credential.username, credential.token),
+      buildGitAuthHeader(
+        credential.username,
+        credential.token,
+        credential.authScheme,
+      ),
     ),
     body:
       request.method === 'GET' || request.method === 'HEAD'

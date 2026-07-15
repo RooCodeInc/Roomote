@@ -16,6 +16,7 @@ import {
   or,
 } from '@roomote/db/server';
 
+import { pickHostScopedRepository } from '../utils';
 import type { GitLabMergeRequestWebhook } from './types';
 
 type GitLabAutomationWebhookContext = Pick<
@@ -39,11 +40,18 @@ export function isRoomoteGitLabUsername(username: string): boolean {
 export async function getGitLabAutomationTargets({
   workflow,
   payload,
+  webhookHost = null,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
   workflow: SourceControlAutomationWorkflow;
   payload: GitLabAutomationWebhookContext;
+  /**
+   * Instance host derived from the webhook's own URLs. Scopes the repository
+   * lookup host-first (legacy NULL-host rows as fallback) so same-name
+   * repositories on other self-managed hosts are never selected.
+   */
+  webhookHost?: string | null;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
 }): Promise<
@@ -66,7 +74,7 @@ export async function getGitLabAutomationTargets({
   const authorUsername = payload.user?.username;
   let linkedSenderUserId: string | null = null;
 
-  const repo = await db.query.repositories.findFirst({
+  const repoRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitlab'),
       eq(repositories.isActive, true),
@@ -78,6 +86,7 @@ export async function getGitLabAutomationTargets({
         : eq(repositories.externalRepoId, projectId),
     ),
   });
+  const repo = pickHostScopedRepository(repoRows, webhookHost);
 
   if (!repo) {
     return {

@@ -121,6 +121,31 @@ const state = vi.hoisted(() => ({
         relayReviewResultsToTask: false,
         relayUsers: [],
       },
+      resolvedDestinations: Object.fromEntries(
+        [
+          'manager_stats',
+          'sentry_triage',
+          'dependabot_triage',
+          'security_auditor',
+          'code_quality_auditor',
+          'ci_failure_triage',
+          'suggester',
+          'announcer',
+        ].map((key) => [
+          key,
+          {
+            provider: 'slack',
+            channelId: 'C123MANAGER',
+            source: 'manager_channel',
+            displayName: '#roomote-managers',
+          } as {
+            provider: string;
+            channelId: string;
+            source: string;
+            displayName: string | null;
+          } | null,
+        ]),
+      ),
       recentRuns: {},
       automationStatus: {},
     },
@@ -331,6 +356,16 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.reviewer.reviewDraftPrs = true;
     state.settingsQuery.data.reviewer.relayReviewResultsToTask = false;
     state.settingsQuery.data.reviewer.relayUsers = [];
+    for (const key of Object.keys(
+      state.settingsQuery.data.resolvedDestinations,
+    )) {
+      state.settingsQuery.data.resolvedDestinations[key] = {
+        provider: 'slack',
+        channelId: 'C123MANAGER',
+        source: 'manager_channel',
+        displayName: '#roomote-managers',
+      };
+    }
     window.location.hash = '';
     Element.prototype.scrollIntoView = vi.fn();
   });
@@ -342,6 +377,11 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.settings.sentryTriageFrequency = 'daily' as never;
     state.settingsQuery.data.settings.dependabotTriageFrequency =
       'daily' as never;
+    for (const key of Object.keys(
+      state.settingsQuery.data.resolvedDestinations,
+    )) {
+      state.settingsQuery.data.resolvedDestinations[key] = null;
+    }
 
     render(<AutomationsSettings />);
 
@@ -367,6 +407,10 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getAllByText('Select a Slack channel').length,
     ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText('Reports to: not configured — set a Manager Channel.')
+        .length,
+    ).toBeGreaterThan(1);
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {
@@ -410,6 +454,24 @@ describe('AutomationsSettings', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows exception-only capability badges from the shared descriptors', async () => {
+    render(<AutomationsSettings />);
+
+    // Dependabot and CI failure triage stay GitHub-only; manager stats is
+    // provider-neutral now and shows no source-control badge.
+    expect((await screen.findAllByText('GitHub only')).length).toBe(2);
+    // Suggester and CI failure triage still report to Slack only.
+    expect(screen.getAllByText('Slack only').length).toBe(2);
+    // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
+    // Gitea/Bitbucket conflict signal).
+    expect(
+      screen.getAllByText('GitHub · GitLab · Azure DevOps only').length,
+    ).toBe(1);
+    // Full coverage shows nothing — absence of a warning is the signal.
+    expect(screen.queryByText('All chat channels')).toBeNull();
+    expect(screen.queryByText('All source control')).toBeNull();
+  });
+
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
     state.settingsQuery.data.reviewer.enabled = true;
     state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = true;
@@ -436,7 +498,9 @@ describe('AutomationsSettings', () => {
     await openSuggesterCard();
 
     expect(
-      screen.getByText('Posts to the Manager Channel.'),
+      screen.getByText(
+        'Reports to #roomote-managers (Slack) — Manager Channel',
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText(managerInstructionsPlaceholder),

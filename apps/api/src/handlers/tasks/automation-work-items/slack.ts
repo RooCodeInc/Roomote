@@ -133,6 +133,7 @@ export async function bindLateSlackThreadToTask(params: {
     }
 
     await upsertBackgroundAutomationSlackThread(tx, {
+      surface: 'slack',
       automationKey: automationWorkItem.automationKey,
       slackChannelId: params.channelId,
       threadTs: params.threadTs,

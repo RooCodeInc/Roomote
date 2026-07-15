@@ -22,6 +22,7 @@ import {
   communicationProviderSchema,
   computeProviderLaunchModes,
   computeProviderUsageLifecycleActions,
+  environmentSetupStates,
   doneRunStatuses,
   queuedCommunicationMessageSchema,
   snapshotResumeSchema,
@@ -81,6 +82,7 @@ import {
   recordTaskRunEvent,
   stampTaskRunMilestone,
   taskRunMilestoneFields,
+  updateTaskRunEnvironmentSetup,
   recordTaskMessageEnvelope,
   recordTaskInferenceUsage,
   recordComputeProviderUsage,
@@ -176,6 +178,7 @@ const taskChannelBindingsSchema = z.object({
 const taskPrLinkageSchema = z.object({
   provider: sourceControlProviderSchema,
   host: z.string().nullish(),
+  repositoryId: z.string().uuid().nullish(),
   repository: z.string().min(1),
   prNumber: z.number().int().positive(),
   prUrl: z.string().min(1),
@@ -339,6 +342,20 @@ export const taskRunsRouter = router({
       field,
       at: at ?? undefined,
       launchMode,
+    }),
+  ),
+  updateEnvironmentSetup: runScoped(
+    z.object({
+      runId: z.number(),
+      state: z.enum(environmentSetupStates),
+      completedAt: z.date().nullish(),
+    }),
+    'runId',
+  ).mutation(({ input: { runId, state, completedAt } }) =>
+    updateTaskRunEnvironmentSetup({
+      runId,
+      state,
+      completedAt: completedAt ?? undefined,
     }),
   ),
   enqueue: userOnlyProcedure

@@ -2,8 +2,8 @@ const {
   mockEnqueueTask,
   mockGetTaskUrl,
   mockGetGiteaAutomationTargets,
-  mockGetGiteaDeploymentUser,
   mockCreateGiteaPullRequestComment,
+  mockGetGiteaDeploymentUser,
   mockFindActiveGitHubPrReviewTask,
   mockFindReusableGitHubPrFollowUpOwner,
   mockSendMessageToTask,
@@ -12,8 +12,8 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetTaskUrl: vi.fn(),
   mockGetGiteaAutomationTargets: vi.fn(),
-  mockGetGiteaDeploymentUser: vi.fn(),
   mockCreateGiteaPullRequestComment: vi.fn(),
+  mockGetGiteaDeploymentUser: vi.fn(),
   mockFindActiveGitHubPrReviewTask: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockSendMessageToTask: vi.fn(),
@@ -26,8 +26,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 vi.mock('@roomote/gitea', () => ({
-  getGiteaDeploymentUser: mockGetGiteaDeploymentUser,
   createGiteaPullRequestComment: mockCreateGiteaPullRequestComment,
+  getGiteaDeploymentUser: mockGetGiteaDeploymentUser,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -109,25 +109,26 @@ describe('handleGiteaComment', () => {
     mockEnqueueTask.mockReset();
     mockGetTaskUrl.mockReset();
     mockGetGiteaAutomationTargets.mockReset();
-    mockGetGiteaDeploymentUser.mockReset();
     mockCreateGiteaPullRequestComment.mockReset();
+    mockGetGiteaDeploymentUser.mockReset();
     mockFindActiveGitHubPrReviewTask.mockReset();
     mockFindReusableGitHubPrFollowUpOwner.mockReset();
     mockSendMessageToTask.mockReset();
     mockSteerMessageToTask.mockReset();
 
+    mockGetGiteaDeploymentUser.mockResolvedValue(null);
     mockGetGiteaAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [
         {
           id: 'gitea:pr_review:repo-1',
           settings: null,
+          repo: { id: 'repo-1', host: null },
           repositoryIds: ['repo-1'],
           userId: 'user-1',
         },
       ],
     });
-    mockGetGiteaDeploymentUser.mockResolvedValue({ login: 'roomote-bot' });
     mockCreateGiteaPullRequestComment.mockResolvedValue({ id: 1 });
     mockFindActiveGitHubPrReviewTask.mockResolvedValue(null);
     mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
@@ -172,6 +173,91 @@ describe('handleGiteaComment', () => {
         repositoryFullName: 'acme/backend',
         pullRequestNumber: 42,
         body: expect.stringContaining('I started a pull request review task'),
+      }),
+    );
+    // A repository row without a recorded host omits the payload host field
+    // entirely so resolution falls back to (provider, fullName).
+    const [{ task }] = mockEnqueueTask.mock.calls[0]! as unknown as [
+      { task: { payload: Record<string, unknown> } },
+    ];
+    expect('sourceControlHost' in task.payload).toBe(false);
+  });
+
+  it('selects and stamps the webhook host among same-name repositories on multiple hosts', async () => {
+    // Two active rows share the repository identity; only the host differs.
+    const rows = [
+      { id: 'repo-host-a', host: 'gitea.host-a.example' },
+      { id: 'repo-host-b', host: 'gitea.host-b.example' },
+    ];
+    mockGetGiteaAutomationTargets.mockImplementation(
+      async ({ webhookHost }: { webhookHost?: string | null }) => {
+        const repo = rows.find((row) => row.host === webhookHost);
+        return repo
+          ? {
+              status: 'ok',
+              targets: [
+                {
+                  id: `gitea:pr_review:${repo.id}`,
+                  settings: null,
+                  repo,
+                  repositoryIds: [repo.id],
+                  userId: 'user-1',
+                },
+              ],
+            }
+          : { status: 'error', message: 'no matching repository row' };
+      },
+    );
+
+    await handleGiteaComment(
+      makeCommentPayload({
+        pullRequest: {
+          html_url: 'https://gitea.host-a.example/acme/backend/pulls/42',
+        },
+      }),
+    );
+
+    // The handler derives the instance host from the webhook URL...
+    expect(mockGetGiteaAutomationTargets).toHaveBeenCalledWith(
+      expect.objectContaining({ webhookHost: 'gitea.host-a.example' }),
+    );
+    // ...and the launched payload pins the matching row's host.
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlHost: 'gitea.host-a.example',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('stamps the repository host into mention review payloads when the repository row has one', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'ok',
+      targets: [
+        {
+          id: 'gitea:pr_review:repo-1',
+          settings: null,
+          repo: { id: 'repo-1', host: 'git.example.com' },
+          repositoryIds: ['repo-1'],
+          userId: 'user-1',
+        },
+      ],
+    });
+
+    await handleGiteaComment(makeCommentPayload());
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            sourceControlProvider: 'gitea',
+            // Pins repository resolution to the webhook repository's host.
+            sourceControlHost: 'git.example.com',
+          }),
+        }),
       }),
     );
   });
@@ -246,6 +332,24 @@ describe('handleGiteaComment', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it('replies when no active environment target exists', async () => {
+    mockGetGiteaAutomationTargets.mockResolvedValue({
+      status: 'error',
+      message:
+        'no environment mapping associated with [gitea:123, acme/backend]',
+    });
+
+    const result = await handleGiteaComment(makeCommentPayload());
+
+    expect(result).toEqual({ status: 'ok', message: 'reviewer_gate_miss' });
+    expect(mockCreateGiteaPullRequestComment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.stringContaining('settings/environments'),
+      }),
+    );
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('handles issue comment payloads that only include issue PR context', async () => {
     const result = await handleGiteaComment(
       makeCommentPayload({
@@ -271,6 +375,26 @@ describe('handleGiteaComment', () => {
       makeCommentPayload({
         sender: { id: 11, login: 'roomote-bot' },
         comment: { user: { id: 11, login: 'roomote-bot' } },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'roomote_authored_comment',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('ignores comments from the deployment token identity even without a roomote username prefix', async () => {
+    mockGetGiteaDeploymentUser.mockResolvedValue({
+      id: 99,
+      login: 'deploy-bot',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 99, login: 'deploy-bot' },
+        comment: { user: { id: 99, login: 'deploy-bot' } },
       }),
     );
 

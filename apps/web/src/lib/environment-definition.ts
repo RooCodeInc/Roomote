@@ -19,6 +19,18 @@ type EnvironmentDefinitionRecordLike = {
   updatedAt?: Date | string | number;
 };
 
+export function buildSetupEnvironmentTaskTitle(repositoryFullNames: string[]) {
+  const repositoryNames = repositoryFullNames
+    .map((fullName) => fullName.split('/').at(-1)?.trim() || fullName.trim())
+    .filter(Boolean);
+
+  if (repositoryNames.length === 0) {
+    return 'Set up your first environment';
+  }
+
+  return `Set up the ${repositoryNames.join(' + ')} environment`;
+}
+
 function toComparableTimestamp(value: Date | string | number | null): number {
   if (!value) {
     return Number.NaN;

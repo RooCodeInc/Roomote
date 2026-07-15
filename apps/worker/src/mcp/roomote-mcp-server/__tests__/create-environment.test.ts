@@ -24,7 +24,6 @@ describe('handleCreateEnvironment', () => {
       success: true,
       environmentId: 'env-new',
       name: 'My Project',
-      missingRepositories: [],
     });
 
     const result = await handleCreateEnvironment(
@@ -45,15 +44,16 @@ repositories:
     expect(parsed.success).toBe(true);
     expect(parsed.environmentId).toBe('env-new');
     expect(parsed.name).toBe('My Project');
-    expect(parsed.missingRepositories).toEqual([]);
+    expect(parsed.message).toBe(
+      'Environment "My Project" created successfully.',
+    );
   });
 
-  it('applies name override and surfaces missing repository warnings', async () => {
+  it('applies a name override', async () => {
     vi.mocked(tasksApiClient.createEnvironment).mockResolvedValueOnce({
       success: true,
       environmentId: 'env-2',
       name: 'Renamed Project',
-      missingRepositories: ['owner/missing-repo'],
     });
 
     const result = await handleCreateEnvironment(
@@ -72,7 +72,9 @@ repositories:
 
     expect(parsed.success).toBe(true);
     expect(parsed.name).toBe('Renamed Project');
-    expect(parsed.missingRepositories).toEqual(['owner/missing-repo']);
+    expect(parsed.message).toBe(
+      'Environment "Renamed Project" created successfully.',
+    );
 
     expect(tasksApiClient.createEnvironment).toHaveBeenCalledWith(config, {
       config: expect.objectContaining({ name: 'Renamed Project' }),
@@ -132,7 +134,6 @@ describe('handleUpdateEnvironment', () => {
       success: true,
       environmentId: 'env-existing',
       name: 'My Project',
-      missingRepositories: [],
     });
 
     const result = await handleUpdateEnvironment(

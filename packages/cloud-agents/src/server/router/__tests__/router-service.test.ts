@@ -55,6 +55,8 @@ describe('routeTask', () => {
         workspaceValue: 'Full Stack',
         reasoning: 'Full Stack is the best fit.',
         confidence: 0.92,
+        kickoffMessage:
+          'Looking into daily environment snapshots for faster startup in Full Stack',
         needsExternalLookup: false,
         externalReference: null,
       },
@@ -84,6 +86,8 @@ describe('routeTask', () => {
         id: 'env-full-stack',
         name: 'Full Stack',
       },
+      kickoffMessage:
+        'Looking into daily environment snapshots for faster startup in Full Stack',
       debug: {
         phase: 'direct',
         toolsUsed: [],

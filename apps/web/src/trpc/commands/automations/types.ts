@@ -1,6 +1,8 @@
 import type {
   AnnouncerFrequency,
+  BackgroundAutomationKey,
   ChannelAutoStartLaunchMode,
+  CommunicationProvider,
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
   DependabotTriageFrequency,
@@ -86,6 +88,42 @@ export interface SlackChannelDisplayNames {
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
 }
+
+/**
+ * Automations whose reports flow through the manager-channel destination
+ * waterfall (own target -> Manager Channel -> primary conversation).
+ */
+export const MANAGER_REPORTING_AUTOMATION_KEYS = [
+  'manager_stats',
+  'sentry_triage',
+  'dependabot_triage',
+  'security_auditor',
+  'code_quality_auditor',
+  'ci_failure_triage',
+  'suggester',
+  'announcer',
+] as const satisfies readonly BackgroundAutomationKey[];
+
+export type ManagerReportingAutomationKey =
+  (typeof MANAGER_REPORTING_AUTOMATION_KEYS)[number];
+
+/**
+ * Where an automation's next run will report, resolved through the runtime
+ * destination waterfall, plus which waterfall level produced it and a
+ * human-readable channel name when one is resolvable.
+ */
+export interface ResolvedAutomationDestinationSummary {
+  provider: CommunicationProvider;
+  channelId: string;
+  source: 'automation_target' | 'manager_channel' | 'primary_conversation';
+  /** e.g. "#eng-managers" (Slack) or a Teams channel/team name; null when unknown. */
+  displayName: string | null;
+}
+
+export type ResolvedAutomationDestinations = Record<
+  ManagerReportingAutomationKey,
+  ResolvedAutomationDestinationSummary | null
+>;
 
 export interface ChannelAutoStartInputRow {
   // Canonical Slack channel ID persisted for this row. When present and valid it

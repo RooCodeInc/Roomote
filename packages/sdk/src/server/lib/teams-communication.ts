@@ -2,6 +2,7 @@ import {
   createTeamsCommunicationProviderFromEnv,
   type TeamsBotEnvConfig,
   type TeamsCommunicationProvider,
+  type TeamsCommunicationProviderExtraOptions,
 } from '@roomote/communication/teams-provider';
 import {
   resolveTeamsBotRuntimeCredentials,
@@ -35,10 +36,13 @@ function teamsBotEnvConfigFromCredentials(
  * credentials (env vars, settings-UI values, or the Microsoft sign-in app
  * doubling as the bot app), or `null` when no bot is configured.
  */
-export async function createTeamsCommunicationProviderFromRuntimeCredentials(): Promise<TeamsCommunicationProvider | null> {
+export async function createTeamsCommunicationProviderFromRuntimeCredentials(
+  extraOptions?: TeamsCommunicationProviderExtraOptions,
+): Promise<TeamsCommunicationProvider | null> {
   const credentials = await resolveTeamsBotRuntimeCredentials();
 
   return createTeamsCommunicationProviderFromEnv(
     teamsBotEnvConfigFromCredentials(credentials),
+    extraOptions,
   );
 }

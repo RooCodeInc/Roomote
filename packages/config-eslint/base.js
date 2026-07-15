@@ -1,8 +1,17 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import js from '@eslint/js';
 import eslintConfigPrettier from 'eslint-config-prettier';
+import oxlint from 'eslint-plugin-oxlint';
+import onlyWarn from 'eslint-plugin-only-warn';
 import turboPlugin from 'eslint-plugin-turbo';
 import tseslint from 'typescript-eslint';
-import onlyWarn from 'eslint-plugin-only-warn';
+
+const oxlintrcPath = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  '../../.oxlintrc.json',
+);
 
 /**
  * A shared ESLint configuration for the repository.
@@ -41,4 +50,6 @@ export const config = [
       ],
     },
   },
+  // Disable rules already covered by monorepo `oxlint` (run oxlint first in lint scripts).
+  ...oxlint.buildFromOxlintConfigFile(oxlintrcPath),
 ];

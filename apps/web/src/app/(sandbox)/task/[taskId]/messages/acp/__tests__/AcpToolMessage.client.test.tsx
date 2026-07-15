@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
 import { Bot, Eye, Search, SquarePen, Wrench } from '@/components/system';
@@ -8,6 +8,23 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 const toolHeaderSpy = vi.fn();
 const toolDetailsSpy = vi.fn();
+const openArtifactSpy = vi.fn();
+const windowOpenSpy = vi.fn();
+
+const mockArtifactLink = {
+  openArtifact: openArtifactSpy,
+  getArtifactById: () => undefined,
+  artifacts: [] as Array<{
+    id: string;
+    path: string;
+    version: number;
+    artifactType: string;
+    contentType: string;
+    size: number;
+    createdAt: Date;
+    thumbnailUrl?: string;
+  }>,
+};
 
 vi.mock('@/components/ai-elements', () => ({
   Message: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
@@ -37,6 +54,10 @@ vi.mock('../AcpToolDetails', () => ({
     toolDetailsSpy();
     return <div>tool details</div>;
   },
+}));
+
+vi.mock('../../../hooks', () => ({
+  useArtifactLink: () => mockArtifactLink,
 }));
 
 function buildMessage(
@@ -102,6 +123,14 @@ describe('AcpToolMessage', () => {
   beforeEach(() => {
     toolHeaderSpy.mockClear();
     toolDetailsSpy.mockClear();
+    openArtifactSpy.mockClear();
+    windowOpenSpy.mockClear();
+    mockArtifactLink.artifacts = [];
+    vi.stubGlobal('open', windowOpenSpy);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('uses SquarePen for edit tool calls', () => {
@@ -125,7 +154,7 @@ describe('AcpToolMessage', () => {
     );
   });
 
-  it('renders subagent launches as compact title-only rows', () => {
+  it('renders subagent launches as compact expandable rows when a prompt is available', () => {
     render(
       <AcpToolMessage
         msg={buildMessage('subagent', {
@@ -140,14 +169,16 @@ describe('AcpToolMessage', () => {
       />,
     );
 
-    expect(
-      screen.queryByText(/Inspect the task transcript path and summarize/),
-    ).not.toBeInTheDocument();
     expect(screen.queryByText('Explorer')).not.toBeInTheDocument();
     expect(screen.queryByText('gpt-5.4-mini')).not.toBeInTheDocument();
     expect(screen.queryByText('Medium effort')).not.toBeInTheDocument();
     expect(screen.queryByText('1 child thread')).not.toBeInTheDocument();
-    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('keeps subagent rows non-expandable when the launch has no prompt summary', () => {
@@ -170,6 +201,30 @@ describe('AcpToolMessage', () => {
       }),
     );
     expect(toolDetailsSpy).not.toHaveBeenCalled();
+  });
+
+  it('expands OpenCode task rows when the launch prompt lives on rawInput', () => {
+    render(
+      <AcpToolMessage
+        msg={buildMessage('subagent', {
+          prompt: null,
+          agentType: 'explore',
+          isSubagentSpawn: true,
+          rawInput: {
+            prompt:
+              'Inspect the OpenCode task tool payload path for expandable prompts.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolCallUiMessage['data']>)}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
   });
 
   it('does not render returned child text for completed subagent rows', () => {
@@ -318,5 +373,250 @@ describe('AcpToolMessage', () => {
       }),
     );
     expect(toolDetailsSpy).toHaveBeenCalled();
+  });
+
+  it('renders always-visible visual-proof media instead of tool details', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl: 'https://example.com/view',
+            rawUrl: 'https://example.com/raw.png',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Used',
+        object: 'Manage Artifacts',
+        collapsible: false,
+      }),
+    );
+    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveAttribute(
+      'src',
+      'https://example.com/raw.png',
+    );
+  });
+
+  it('opens the artifact viewer when session path is known', () => {
+    mockArtifactLink.artifacts = [
+      {
+        id: 'art-1',
+        path: 'tmp/proof.png',
+        version: 3,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 100,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        thumbnailUrl: '/api/artifacts/art-1/raw?sig=fresh',
+      },
+    ];
+
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl: 'https://example.com/view',
+            rawUrl: 'https://example.com/raw.png',
+          }),
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+
+    expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.png', 3);
+    expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders inline visual-proof media for subagent results that uploaded proofs', () => {
+    mockArtifactLink.artifacts = [
+      {
+        id: 'art-1',
+        path: 'tmp/capture-visual-proof/proof.png',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 100,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        thumbnailUrl: '/api/artifacts/art-1/raw?sig=fresh',
+      },
+    ];
+
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('subagent', {
+          title: 'Capture app screenshot',
+          agentType: 'proof-runner',
+          isSubagentSpawn: true,
+          prompt: null,
+          rawInput: {
+            prompt: 'Capture the requested screenshot and upload it.',
+            subagent_type: 'proof-runner',
+          },
+          output: [
+            '<task id="ses-1" state="completed">',
+            '<task_result>',
+            'Summary: uploaded one screenshot.',
+            '- viewUrl: https://example.com/task/t1/artifacts/tmp/capture-visual-proof/proof.png?v=1',
+            '- rawUrl: https://example.com/api/artifacts/art-1/raw?sig=stale',
+            '</task_result>',
+            '</task>',
+          ].join('\n'),
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveAttribute(
+      'src',
+      '/api/artifacts/art-1/raw?sig=fresh',
+    );
+    // The subagent row keeps its collapsible prompt/details alongside the
+    // always-visible preview.
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+
+    expect(openArtifactSpy).toHaveBeenCalledWith(
+      'tmp/capture-visual-proof/proof.png',
+      1,
+    );
+  });
+
+  it('keeps subagent results without session artifacts as plain rows', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('subagent', {
+          title: 'Capture app screenshot',
+          agentType: 'proof-runner',
+          isSubagentSpawn: true,
+          prompt: null,
+          output:
+            'viewUrl: https://example.com/task/t1/artifacts/tmp/missing.png?v=1',
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('img', { name: 'Visual proof' }),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: false,
+      }),
+    );
+  });
+
+  it('opens the artifact detail from the upload viewUrl when session path is missing', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl:
+              'https://example.com/task/task-1/artifacts/tmp/proof.png?v=2',
+            rawUrl: 'https://example.com/raw.png',
+          }),
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+
+    expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.png', 2);
+    expect(windowOpenSpy).not.toHaveBeenCalled();
+  });
+
+  it('renders a clickable filename for non-image visual-proof uploads', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl:
+              'https://example.com/task/task-1/artifacts/tmp/proof.mp4?v=1',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('proof.mp4')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+    expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.mp4', 1);
+  });
+
+  it('falls back to normal tool details when visual-proof has no path or media', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl: 'https://example.com/view-without-path',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: 'Open visual proof' }),
+    ).not.toBeInTheDocument();
   });
 });

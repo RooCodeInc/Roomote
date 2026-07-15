@@ -1,5 +1,5 @@
 const {
-  mockRepositoriesFindFirst,
+  mockRepositoriesFindMany,
   mockAuthAccountsFindFirst,
   mockSelectWhere,
   mockGetReviewCodeAutomationSettings,
@@ -8,7 +8,7 @@ const {
   mockOr,
   mockDesc,
 } = vi.hoisted(() => ({
-  mockRepositoriesFindFirst: vi.fn(),
+  mockRepositoriesFindMany: vi.fn(),
   mockAuthAccountsFindFirst: vi.fn(),
   mockSelectWhere: vi.fn(),
   mockGetReviewCodeAutomationSettings: vi.fn(),
@@ -22,7 +22,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       repositories: {
-        findFirst: (arg: unknown) => mockRepositoriesFindFirst(arg),
+        findMany: (arg: unknown) => mockRepositoriesFindMany(arg),
       },
       authAccounts: {
         findFirst: (arg: unknown) => mockAuthAccountsFindFirst(arg),
@@ -79,11 +79,14 @@ describe('getAdoAutomationTargets', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockRepositoriesFindFirst.mockResolvedValue({
-      id: 'repo-1',
-      fullName: 'acme/Platform/backend',
-      linkedByUserId: 'repo-owner-1',
-    });
+    mockRepositoriesFindMany.mockResolvedValue([
+      {
+        id: 'repo-1',
+        fullName: 'acme/Platform/backend',
+        host: null,
+        linkedByUserId: 'repo-owner-1',
+      },
+    ]);
     mockSelectWhere.mockResolvedValue([{ environmentId: 'env-1' }]);
     mockAuthAccountsFindFirst.mockResolvedValue(null);
     mockGetReviewCodeAutomationSettings.mockResolvedValue({
@@ -234,6 +237,53 @@ describe('getAdoAutomationTargets', () => {
       code: 'account_link_required',
       message:
         'Azure DevOps user alice@acme.example is not linked to a Roomote user',
+    });
+  });
+  it('selects the repository row matching the webhook host among same-name rows', async () => {
+    mockRepositoriesFindMany.mockResolvedValue([
+      {
+        id: 'repo-host-a',
+        fullName: 'acme/Platform/backend',
+        host: 'ado.host-a.example',
+      },
+      {
+        id: 'repo-host-b',
+        fullName: 'acme/Platform/backend',
+        host: 'ado.host-b.example',
+      },
+    ]);
+
+    const result = await getAdoAutomationTargets({
+      workflow: 'pr_review',
+      payload,
+      webhookHost: 'ado.host-b.example',
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [
+        {
+          id: 'ado:pr_review:repo-host-b',
+          repo: { id: 'repo-host-b', host: 'ado.host-b.example' },
+        },
+      ],
+    });
+  });
+
+  it('falls back to a legacy null-host row for a host-scoped lookup', async () => {
+    mockRepositoriesFindMany.mockResolvedValue([
+      { id: 'repo-legacy', fullName: 'acme/Platform/backend', host: null },
+    ]);
+
+    const result = await getAdoAutomationTargets({
+      workflow: 'pr_review',
+      payload,
+      webhookHost: 'ado.host-a.example',
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      targets: [{ repo: { id: 'repo-legacy', host: null } }],
     });
   });
 });

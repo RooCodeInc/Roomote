@@ -15,7 +15,10 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
-import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import {
+  buildSourceControlAccountLinkRequiredMessage,
+  buildSourceControlEnvironmentRequiredMessage,
+} from '../source-control-account-linking';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -25,6 +28,7 @@ import {
   getGiteaUsername,
   isRoomoteGiteaUsername,
 } from './getGiteaAutomationTargets';
+import { toHostFromUrl } from '../utils';
 import type { GiteaPullRequestCommentWebhook } from './types';
 
 const GITEA_MENTION_HANDLE = '@roomote';
@@ -250,6 +254,14 @@ export async function handleGiteaComment(
       sender: payload.sender,
       commentAuthor: payload.comment.user,
     },
+    // The PR (or repository) web URL carries the instance host, matching
+    // repositories.host.
+    webhookHost: toHostFromUrl(
+      pullRequest.html_url ??
+        pullRequest.url ??
+        payload.repository.html_url ??
+        '',
+    ),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -265,7 +277,10 @@ export async function handleGiteaComment(
         targetsResult.status === 'error' &&
         targetsResult.code === 'account_link_required'
           ? buildSourceControlAccountLinkRequiredMessage('gitea')
-          : buildReviewerGateMissComment(),
+          : targetsResult.status === 'error' &&
+              targetsResult.message.includes('no environment mapping')
+            ? buildSourceControlEnvironmentRequiredMessage('gitea')
+            : buildReviewerGateMissComment(),
     });
 
     return {
@@ -363,6 +378,10 @@ export async function handleGiteaComment(
   const reviewPayload = {
     repo: repoFullName,
     sourceControlProvider: 'gitea',
+    // Pin repository resolution to the webhook repository's host so
+    // same-name repositories on other hosts cannot be picked up. Legacy
+    // rows without a recorded host omit the field.
+    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
     prNumber: pullRequest.number,
     prTitle: pullRequest.title,
     prUrl,
@@ -387,6 +406,8 @@ export async function handleGiteaComment(
       trigger: 'message',
       prLinkage: {
         provider: 'gitea',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber: pullRequest.number,
         prUrl,

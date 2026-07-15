@@ -137,6 +137,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
   not: vi.fn((...args: unknown[]) => ({ not: args })),
+  recordTaskKickoffMessageBestEffort: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -681,7 +682,7 @@ describe('Slack deleted-mention suppression', () => {
         blocks: expect.arrayContaining([
           expect.objectContaining({
             text: expect.objectContaining({
-              text: 'Getting started on your task in `all repos`',
+              text: 'Getting started on your task in all repos',
             }),
           }),
         ]),

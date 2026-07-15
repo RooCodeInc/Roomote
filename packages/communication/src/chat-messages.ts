@@ -95,23 +95,138 @@ export function buildRoutingConfirmationText({
   return `I'll get started in ${workspace}${model}, OK?`;
 }
 
+/**
+ * Returns a model display name for chat acknowledgements only when the router
+ * treated the pick as an explicit user preference. Default / preserved models
+ * stay out of the "getting started" copy.
+ */
+export function getUserRequestedModelDisplayName(
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null,
+): string | undefined {
+  if (model?.source !== 'preference') {
+    return undefined;
+  }
+
+  const displayName = model.displayName?.trim();
+  return displayName || undefined;
+}
+
+/**
+ * Resolves the user-facing model display name for routing state that can carry
+ * either a freshly routed model selection or a previous correction prefill.
+ * When a new model selection is present, only preference-sourced names are kept
+ * so display names cannot outlive a later default/preserved `modelId`.
+ */
+export function resolveUserFacingModelDisplayName({
+  model,
+  previousDisplayName,
+}: {
+  model?: {
+    displayName?: string | null;
+    source?: string | null;
+  } | null;
+  previousDisplayName?: string | null;
+}): string | undefined {
+  if (model) {
+    return getUserRequestedModelDisplayName(model);
+  }
+
+  const previous = previousDisplayName?.trim();
+  return previous || undefined;
+}
+
+/**
+ * Legacy started-message prefix used by the static kickoff template.
+ * Dynamic LLM kickoffs are free-form and are detected via stored message ts
+ * and/or Follow/Cancel action blocks instead of a shared prefix.
+ */
+export const TASK_STARTING_MESSAGE_PREFIX = 'Getting started on your task';
+
+const KICKOFF_MESSAGE_MAX_LENGTH = 160;
+
+const SLACK_CONTROL_TOKEN_PATTERN =
+  /<@[^>\s]+>|<![^>\s]+>|<#C[^|>\s]+(?:\|[^>]+)?>|@everyone|@channel|@here/gi;
+
+/**
+ * Normalize a router-generated kickoff into short, display-safe text.
+ * Returns undefined when empty so callers fall back to the template path.
+ */
+export function normalizeKickoffMessage(
+  value?: string | null,
+): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  let text = value.replace(/\s+/g, ' ').trim();
+  text = stripMatchingEdgeQuotes(text);
+  // Neutralize Slack mrkdwn control tokens so router output cannot broadcast
+  // mentions or special link markup when inserted into a section block.
+  text = text.replace(SLACK_CONTROL_TOKEN_PATTERN, ' ').replace(/[<>]/g, ' ');
+  text = text.replace(/\s+/g, ' ').trim();
+
+  if (!text) {
+    return undefined;
+  }
+
+  if (text.length > KICKOFF_MESSAGE_MAX_LENGTH) {
+    const truncated = text
+      .slice(0, KICKOFF_MESSAGE_MAX_LENGTH - 1)
+      .replace(/\s+\S*$/, '')
+      .trim();
+    text = truncated.length > 0 ? `${truncated}…` : `${text.slice(0, 159)}…`;
+  }
+
+  return text;
+}
+
+function stripMatchingEdgeQuotes(value: string): string {
+  const quotes = new Set(['"', "'", '`', '“', '”', '‘', '’']);
+  let start = 0;
+  let end = value.length;
+
+  while (start < end && quotes.has(value.charAt(start))) {
+    start += 1;
+  }
+
+  while (end > start && quotes.has(value.charAt(end - 1))) {
+    end -= 1;
+  }
+
+  return value.slice(start, end);
+}
+
 export function buildTaskStartingText({
   workspaceDisplayName,
   modelDisplayName,
+  kickoffMessage,
   formatWorkspaceName = identity,
   formatModelName = identity,
 }: {
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  /**
+   * Optional full router-generated kickoff string. When present and normalizable,
+   * it is posted as-is instead of the static template.
+   */
+  kickoffMessage?: string | null;
   formatWorkspaceName?: TextFormatter;
   formatModelName?: TextFormatter;
 }): string {
+  const kickoff = normalizeKickoffMessage(kickoffMessage);
+  if (kickoff) {
+    return kickoff;
+  }
+
   const workspace = formatWorkspaceName(workspaceDisplayName);
   const model = modelDisplayName?.trim()
-    ? ` using ${formatModelName(modelDisplayName)}`
+    ? ` using ${formatModelName(modelDisplayName)} as the coding model`
     : '';
 
-  return `Getting started on your task in ${workspace}${model}`;
+  return `${TASK_STARTING_MESSAGE_PREFIX} in ${workspace}${model}`;
 }
 
 export function buildOtherRunningTasksText(
@@ -285,6 +400,29 @@ export const TASK_STARTUP_FAILURE_TEXT =
 export const TASK_RUNTIME_FAILURE_TEXT =
   "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.";
 
+export function buildPullRequestStatusNotificationText({
+  prTitle,
+  prUrl,
+  status,
+  actorLogin,
+  formatLink = (label) => label,
+  formatStatus = identity,
+}: {
+  prTitle: string;
+  prUrl: string;
+  status: 'merged' | 'closed';
+  actorLogin: string;
+  formatLink?: LinkFormatter;
+  formatStatus?: TextFormatter;
+}): { text: string; bodyText: string } {
+  return {
+    text: `${prTitle} was ${status} by ${actorLogin}`,
+    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
+      status,
+    )} by ${actorLogin}`,
+  };
+}
+
 export function buildPullRequestMergedNotificationText({
   prTitle,
   prUrl,
@@ -298,10 +436,12 @@ export function buildPullRequestMergedNotificationText({
   formatLink?: LinkFormatter;
   formatStatus?: TextFormatter;
 }): { text: string; bodyText: string } {
-  return {
-    text: `${prTitle} was merged by ${mergedBy}`,
-    bodyText: `${formatLink(prTitle, prUrl)} was ${formatStatus(
-      'merged',
-    )} by ${mergedBy}`,
-  };
+  return buildPullRequestStatusNotificationText({
+    prTitle,
+    prUrl,
+    status: 'merged',
+    actorLogin: mergedBy,
+    formatLink,
+    formatStatus,
+  });
 }

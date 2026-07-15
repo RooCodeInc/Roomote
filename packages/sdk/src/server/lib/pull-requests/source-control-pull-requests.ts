@@ -37,6 +37,7 @@ import {
   getSourceControlProviderLabel,
   normalizePrBodyAttributionAppMention,
   prActions,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
   sourceControlProviderSchema,
   type PrAction,
@@ -47,6 +48,7 @@ import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
+  buildGitLabTokenHeader,
   formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
@@ -238,9 +240,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   input: SourceControlPullRequestMutationInput;
   fetchImpl?: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  const payloadProvider = resolveSourceControlProviderFromPayload(
-    getPayloadRecord(taskRun.payload),
-  );
+  const payloadRecord = getPayloadRecord(taskRun.payload);
+  const payloadProvider =
+    resolveSourceControlProviderFromPayload(payloadRecord);
+  const payloadHost = resolveSourceControlHostFromPayload(payloadRecord);
   const provider = input.sourceControlProvider ?? payloadProvider;
 
   if (provider !== payloadProvider) {
@@ -256,6 +259,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   const repository = await resolveRepositoryRow({
     provider,
     repositoryFullName: input.repositoryFullName,
+    host: payloadHost,
   });
 
   const prAction = await resolveEffectivePrAction(taskRun);
@@ -588,7 +592,7 @@ async function createOrUpdateGitLabMergeRequest({
           )}/merge_requests/${existing.iid}`,
           {},
         ),
-        tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+        tokenHeader: buildGitLabTokenHeader(token),
         body: {
           ...common,
           ...(input.labels.length > 0
@@ -607,7 +611,7 @@ async function createOrUpdateGitLabMergeRequest({
           )}/merge_requests`,
           {},
         ),
-        tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+        tokenHeader: buildGitLabTokenHeader(token),
         body: {
           source_branch: input.sourceBranch,
           target_branch: targetBranch,
@@ -666,7 +670,7 @@ async function listGitLabMergeRequests({
         per_page: 2,
       },
     ),
-    tokenHeader: { name: 'PRIVATE-TOKEN', value: token },
+    tokenHeader: buildGitLabTokenHeader(token),
     schema: gitLabMergeRequestListSchema,
   });
 }

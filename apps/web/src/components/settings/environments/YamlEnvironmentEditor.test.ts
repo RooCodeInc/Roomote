@@ -80,6 +80,56 @@ describe('configToYaml', () => {
     expect(yaml).toContain('tool_versions:');
   });
 
+  it('preserves docker projects when serializing environment config', () => {
+    const config: EnvironmentConfig = {
+      name: 'Docker Projects Env',
+      repositories: [{ repository: 'Roomote/example-app' }],
+      ports: [
+        {
+          name: 'WEBAPP',
+          port: 3000,
+        },
+      ],
+      docker_projects: [
+        {
+          name: 'compose-app',
+          type: 'compose',
+          repository: 'Roomote/example-app',
+          working_dir: 'deploy',
+          files: ['compose.yaml', 'compose.override.yaml'],
+          profiles: ['development'],
+          services: ['web'],
+          env: { NODE_ENV: 'development' },
+          ports: [
+            {
+              named_port: 'WEBAPP',
+              service: 'web',
+              container_port: 3000,
+            },
+          ],
+          required: true,
+          startup_timeout_seconds: 120,
+        },
+        {
+          name: 'worker-image',
+          type: 'dockerfile',
+          repository: 'Roomote/example-app',
+          context: '.',
+          dockerfile: 'Dockerfile.worker',
+          target: 'development',
+          build_args: { NODE_VERSION: '22' },
+          command: ['pnpm', 'worker'],
+        },
+      ],
+    };
+
+    const yaml = configToYaml(config);
+    const parsed = YAML.parse(yaml);
+
+    expect(parsed.docker_projects).toEqual(config.docker_projects);
+    expect(yaml).toContain('docker_projects:');
+  });
+
   it('preserves manualSkills when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Manual Skills Env',

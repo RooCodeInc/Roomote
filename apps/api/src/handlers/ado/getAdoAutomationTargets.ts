@@ -17,6 +17,7 @@ import {
   or,
 } from '@roomote/db/server';
 
+import { pickHostScopedRepository } from '../utils';
 import type { AdoIdentity, AdoPullRequestWebhook } from './types';
 
 type AdoAutomationWebhookContext = Pick<AdoPullRequestWebhook, 'resource'> & {
@@ -60,11 +61,18 @@ export function isRoomoteAdoIdentity(identityName: string): boolean {
 export async function getAdoAutomationTargets({
   workflow,
   payload,
+  webhookHost = null,
   ignoreAuthorPolicy = false,
   requireLinkedSenderAccount = false,
 }: {
   workflow: SourceControlAutomationWorkflow;
   payload: AdoAutomationWebhookContext;
+  /**
+   * Instance host derived from the webhook's own URLs. Scopes the repository
+   * lookup host-first (legacy NULL-host rows as fallback) so same-name
+   * repositories on other self-managed hosts are never selected.
+   */
+  webhookHost?: string | null;
   ignoreAuthorPolicy?: boolean;
   requireLinkedSenderAccount?: boolean;
 }): Promise<
@@ -89,7 +97,7 @@ export async function getAdoAutomationTargets({
   );
   const senderName = getAdoIdentityName(payload.commentAuthor);
 
-  const repo = await db.query.repositories.findFirst({
+  const repoRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'ado'),
       eq(repositories.isActive, true),
@@ -101,6 +109,7 @@ export async function getAdoAutomationTargets({
         : eq(repositories.externalRepoId, repositoryId),
     ),
   });
+  const repo = pickHostScopedRepository(repoRows, webhookHost);
 
   if (!repo) {
     return {

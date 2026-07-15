@@ -44,6 +44,14 @@ import { normalizeModalRpcError } from '../modal/rpc-diagnostics';
 const DEFAULT_APP_NAME = 'roomote';
 
 const DEFAULT_MODAL_WORKDIR = '/sandbox';
+const MODAL_VM_DOCKER_COMMAND = [
+  '/usr/bin/sudo',
+  '/usr/bin/env',
+  'DOCKER_INSECURE_NO_IPTABLES_RAW=1',
+  '/usr/bin/dockerd',
+  '--host=unix:///var/run/docker.sock',
+  '--log-level=error',
+];
 
 const DEFAULT_MODAL_COMMAND_USER = 'roomote';
 
@@ -451,6 +459,12 @@ export class ModalClient implements ComputeProviderClient {
           ...(this.config.regions?.length
             ? { regions: this.config.regions }
             : {}),
+          ...(this.config.vmRuntime
+            ? {
+                command: MODAL_VM_DOCKER_COMMAND,
+                experimentalOptions: { vm_runtime: true },
+              }
+            : {}),
         }),
         signal: input.signal,
         abortMessage: 'Creating a Modal sandbox was aborted',
@@ -725,6 +739,101 @@ export class ModalClient implements ComputeProviderClient {
       }
     }
 
+    if (this.config.vmRuntime) {
+      for (const file of input.files) {
+        try {
+          const process = await raceWithAbort({
+            promise: sandbox.exec(['/usr/bin/tee', file.path], {
+              mode: 'binary',
+              stdout: 'ignore',
+              stderr: 'pipe',
+            }),
+            signal: input.signal,
+            abortMessage: `Starting streamed write for ${file.path} on ${input.instanceId} was aborted`,
+          });
+          const stderrPromise = process.stderr.readText().then(
+            (value) => ({ value, error: undefined }),
+            (error: unknown) => ({ value: '', error }),
+          );
+          let stdinCloseStarted = false;
+
+          try {
+            for (
+              let offset = 0;
+              offset < file.content.byteLength;
+              offset += MODAL_FILE_WRITE_CHUNK_BYTES
+            ) {
+              throwIfAborted(
+                input.signal,
+                `Writing ${file.path} on ${input.instanceId} was aborted`,
+              );
+
+              const chunkEnd = Math.min(
+                offset + MODAL_FILE_WRITE_CHUNK_BYTES,
+                file.content.byteLength,
+              );
+              const chunk = new Uint8Array(
+                file.content.buffer,
+                file.content.byteOffset + offset,
+                chunkEnd - offset,
+              );
+
+              await raceWithAbort({
+                promise: process.stdin.writeBytes(chunk),
+                signal: input.signal,
+                abortMessage: `Writing ${file.path} on ${input.instanceId} was aborted`,
+              });
+            }
+
+            stdinCloseStarted = true;
+            await process.stdin.close();
+
+            const [exitCode, stderrResult] = await raceWithAbort({
+              promise: Promise.all([process.wait(), stderrPromise]),
+              signal: input.signal,
+              abortMessage: `Waiting for streamed write of ${file.path} on ${input.instanceId} was aborted`,
+            });
+
+            if (stderrResult.error !== undefined) {
+              throw stderrResult.error;
+            }
+
+            if (exitCode !== 0) {
+              throw new Error(
+                `Streamed write failed with exit code ${exitCode}${stderrResult.value ? `: ${stderrResult.value}` : ''}`,
+              );
+            }
+          } finally {
+            if (!stdinCloseStarted) {
+              await process.stdin.close().catch(() => {
+                // Best-effort cleanup if the streamed write path aborted.
+              });
+            }
+          }
+
+          console.log(
+            `[ModalClient] Wrote VM file ${file.path} (${file.content.byteLength} bytes)`,
+          );
+        } catch (error) {
+          if (isSandboxUnavailableError(error)) {
+            this.invalidateSandboxCache(input.instanceId);
+          }
+
+          console.error(
+            `[ModalClient] Failed to stream VM file ${file.path} ${JSON.stringify(
+              {
+                error: formatError(error),
+              },
+            )}`,
+          );
+
+          throw normalizeModalRpcError(error, 'write_files_exec');
+        }
+      }
+
+      return;
+    }
+
     for (const file of input.files) {
       try {
         const handle = await raceWithAbort({
@@ -913,6 +1022,12 @@ export class ModalClient implements ComputeProviderClient {
             : {}),
           ...(this.config.regions?.length
             ? { regions: this.config.regions }
+            : {}),
+          ...(this.config.vmRuntime
+            ? {
+                command: MODAL_VM_DOCKER_COMMAND,
+                experimentalOptions: { vm_runtime: true },
+              }
             : {}),
         }),
         signal: input.signal,

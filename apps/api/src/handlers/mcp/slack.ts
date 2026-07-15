@@ -18,10 +18,12 @@ import {
 } from '@roomote/types';
 import {
   buildSlackThreadFooterText,
+  buildSlackThreadReplyFooterBlock,
   clearLatestUserMessage,
   clearSlackThreadReplyFooterMessageTs,
   getLatestUserMessage,
   getSlackThreadReplyFooterMessageTs,
+  removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
   resolveSlackThreadLinkedPr,
   resolveSlackThreadLivePreviewUrl,
@@ -30,6 +32,8 @@ import {
   SlackNotifier,
   trackLatestUserMessageForSlackQuote,
   trackSlackBotReply,
+  withSlackThreadReplyFooterLock,
+  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE as SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID,
 } from '@roomote/slack';
 import {
@@ -62,16 +66,13 @@ import {
   maybeAddCommunicationReaction,
   maybeSendCommunicationThreadReply,
 } from './communication-thread-replies';
+import { maybeSendCommunicationChannelPost } from './communication-channel-posts';
 import {
   buildThreadReplyImageBlocks,
   errorResponseForThreadReplyImageError,
-  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
-  withThreadReplyFooterLock,
 } from './chat-reply-helpers';
 
 type SlackMcpVariables = Variables & { mcpAuth: McpAuth };
-const SLACK_THREAD_REPLY_FOOTER_BLOCK_ID = 'roomote_thread_reply_footer';
-const SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX = 'slack:thread_reply_footer_lock:';
 const SLACK_MAX_MESSAGE_BLOCKS = 50;
 const SLACK_THREAD_REPLY_QUOTE_MAX_LENGTH = 100;
 const LATE_BIND_THREAD_MAX_ATTEMPTS = 3;
@@ -160,23 +161,6 @@ function isSetupThreadReplyPayload(payload: unknown): boolean {
   return getSlackThreadReplyWebPath(payload) === '/setup';
 }
 
-function buildSlackThreadReplyFooterBlock(params: { footerText: string }): {
-  type: 'context';
-  block_id: string;
-  elements: [{ type: 'mrkdwn'; text: string }];
-} {
-  return {
-    type: 'context',
-    block_id: SLACK_THREAD_REPLY_FOOTER_BLOCK_ID,
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: params.footerText,
-      },
-    ],
-  };
-}
-
 async function buildLateBoundSlackRootFooterText(params: {
   taskUrl: string;
   taskId: string;
@@ -244,54 +228,6 @@ function getAutomationWorkItemIdFromTaskPayload(
 
   const value = (payload as Record<string, unknown>).automationWorkItemId;
   return typeof value === 'string' && value.trim().length > 0 ? value : null;
-}
-
-function isSlackThreadReplyFooterText(text: string): boolean {
-  return /^_(?:Reply(?: with @-mention)? or use the <[^>]+\|web app>\.|Working on (?:<[^>]+\|PR(?:\s+#)?\d+>(?:, <[^>]+\|live preview>)?|a <[^>]+\|live preview>), reply(?: with @-mention)? or use the <[^>]+\|web app>\.)_$/.test(
-    text,
-  );
-}
-
-function isSlackThreadReplyFooterBlock(block: unknown): boolean {
-  if (!block || typeof block !== 'object') {
-    return false;
-  }
-
-  const record = block as {
-    type?: unknown;
-    block_id?: unknown;
-    text?: unknown;
-    elements?: unknown;
-  };
-
-  if (record.block_id === SLACK_THREAD_REPLY_FOOTER_BLOCK_ID) {
-    return true;
-  }
-
-  if (
-    record.type === 'markdown' &&
-    typeof record.text === 'string' &&
-    isSlackThreadReplyFooterText(record.text)
-  ) {
-    return true;
-  }
-
-  if (record.type !== 'context' || !Array.isArray(record.elements)) {
-    return false;
-  }
-
-  return record.elements.some((element) => {
-    if (!element || typeof element !== 'object') {
-      return false;
-    }
-
-    const contextElement = element as { type?: unknown; text?: unknown };
-    return (
-      contextElement.type === 'mrkdwn' &&
-      typeof contextElement.text === 'string' &&
-      isSlackThreadReplyFooterText(contextElement.text)
-    );
-  });
 }
 
 function normalizeSlackQuoteText(text: string): string {
@@ -387,58 +323,6 @@ async function peekSlackThreadReplyQuote(params: { runId: number }): Promise<{
   }
 }
 
-async function removeSlackThreadReplyFooter(params: {
-  slack: SlackNotifier;
-  channel: string;
-  threadTs: string;
-  messageTs: string;
-}): Promise<void> {
-  const blocks = await params.slack.getMessageBlocks({
-    channel: params.channel,
-    messageTs: params.messageTs,
-    threadTs: params.threadTs,
-  });
-
-  if (!blocks) {
-    return;
-  }
-
-  const updatedBlocks = blocks.filter(
-    (block) => !isSlackThreadReplyFooterBlock(block),
-  );
-
-  if (updatedBlocks.length === blocks.length) {
-    return;
-  }
-
-  const updated = await params.slack.updateMessage({
-    channel: params.channel,
-    ts: params.messageTs,
-    message: { blocks: updatedBlocks },
-  });
-
-  if (!updated) {
-    console.error(
-      `[slackMcp#thread_reply] Failed to remove footer from prior Slack message ${params.messageTs}`,
-    );
-  }
-}
-
-async function withSlackThreadReplyFooterLock<T>(params: {
-  channel: string;
-  threadTs: string;
-  maxAcquireAttempts?: number;
-  fn: () => Promise<T>;
-}): Promise<T> {
-  return withThreadReplyFooterLock({
-    lockKey: `${SLACK_THREAD_REPLY_FOOTER_LOCK_PREFIX}${params.channel}:${params.threadTs}`,
-    ...(params.maxAcquireAttempts !== undefined
-      ? { maxAcquireAttempts: params.maxAcquireAttempts }
-      : {}),
-    fn: params.fn,
-  });
-}
-
 async function refreshTrackedAutomationThreadRootFooter(params: {
   slack: SlackNotifier;
   channel: string;
@@ -451,6 +335,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   // stamp (tasks.initiator_automation).
   const [trackedThread, boundTask] = await Promise.all([
     findBackgroundAutomationSlackThread({
+      surface: 'slack',
       slackChannelId: params.channel,
       threadTs: params.threadTs,
     }),
@@ -554,6 +439,12 @@ function parseRequestBody(body: unknown): {
   return { text, blocks, images };
 }
 
+/**
+ * Parses the channel target as-provided. Slack channel-name normalization
+ * happens later in the route, after the communication-provider dispatch, so
+ * opaque Teams conversation ids and Telegram chat ids reach the dispatch
+ * untouched (Slack normalization lowercases, which breaks Teams id matching).
+ */
 function parseChannelPostRequestBody(body: unknown): {
   channel: string;
   threadTs?: string;
@@ -574,21 +465,13 @@ function parseChannelPostRequestBody(body: unknown): {
     throw new Error('channel is required');
   }
 
-  const channelTarget = normalizeSlackChannelTarget(channel);
-  if (!channelTarget) {
-    throw new Error('channel is required');
-  }
-  if ('error' in channelTarget) {
-    throw new Error(channelTarget.error);
-  }
-
   const threadTs =
     typeof record.threadTs === 'string' && record.threadTs.trim().length > 0
       ? record.threadTs.trim()
       : undefined;
 
   return {
-    channel: channelTarget.value,
+    channel,
     threadTs,
     text: parsed.text,
     images: parsed.images,
@@ -1394,7 +1277,7 @@ slackMcp.post('/thread_reply', async (c) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    if (message === THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE) {
+    if (message === SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE) {
       return c.json(
         { error: 'Slack thread reply is busy; please retry shortly' },
         503,
@@ -1731,6 +1614,7 @@ slackMcp.post('/channel_post', async (c) => {
     columns: {
       id: true,
       taskId: true,
+      payload: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
@@ -1760,6 +1644,23 @@ slackMcp.post('/channel_post', async (c) => {
       400,
     );
   }
+
+  const communicationResponse = await maybeSendCommunicationChannelPost({
+    taskRun,
+    parsedBody,
+  });
+  if (communicationResponse) {
+    return communicationResponse;
+  }
+
+  const channelTarget = normalizeSlackChannelTarget(parsedBody.channel);
+  if (!channelTarget) {
+    return c.json({ error: 'channel is required' }, 400);
+  }
+  if ('error' in channelTarget) {
+    return c.json({ error: channelTarget.error }, 400);
+  }
+  parsedBody.channel = channelTarget.value;
 
   const slackInstallation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true },

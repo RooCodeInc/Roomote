@@ -22,18 +22,27 @@ describe('normalizeDeploymentComputeConfig', () => {
   it('returns null for missing or invalid providers', () => {
     expect(normalizeDeploymentComputeConfig(null)).toEqual({
       defaultProvider: null,
+      excludedProviders: [],
     });
     expect(
       normalizeDeploymentComputeConfig({
         defaultProvider: 'fly' as never,
       }),
-    ).toEqual({ defaultProvider: null });
+    ).toEqual({ defaultProvider: null, excludedProviders: [] });
   });
 
   it('keeps valid providers', () => {
     expect(
       normalizeDeploymentComputeConfig({ defaultProvider: 'modal' }),
-    ).toEqual({ defaultProvider: 'modal' });
+    ).toEqual({ defaultProvider: 'modal', excludedProviders: [] });
+  });
+
+  it('keeps only valid unique excluded providers', () => {
+    expect(
+      normalizeDeploymentComputeConfig({
+        excludedProviders: ['docker', 'docker', 'invalid' as never],
+      }),
+    ).toEqual({ defaultProvider: null, excludedProviders: ['docker'] });
   });
 });
 
@@ -45,8 +54,22 @@ describe('buildSetupComputeStatus', () => {
 
     expect(status.selectedProvider).toBeNull();
     expect(status.setupSatisfied).toBe(false);
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
     expect(status.preselectedProvider).toBe('docker');
     expect(status.runtimeDefaultProvider).toBe('docker');
+  });
+
+  it('is satisfied when any hosted provider is configured in the runtime env', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        E2B_API_KEY: 'key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+    });
+
+    expect(status.selectedProvider).toBeNull();
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(status.setupSatisfied).toBe(true);
   });
 
   it('is satisfied when docker is chosen because it needs no credentials', () => {
@@ -56,6 +79,19 @@ describe('buildSetupComputeStatus', () => {
 
     expect(status.selectedProvider).toBe('docker');
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('does not select an excluded persisted provider', () => {
+    const status = buildSetupComputeStatus({
+      persistedComputeConfig: {
+        defaultProvider: 'docker',
+        excludedProviders: ['docker'],
+      },
+    });
+
+    expect(status.selectedProvider).toBeNull();
+    expect(status.persistedDefaultProvider).toBeNull();
+    expect(status.excludedProviders).toContain('docker');
   });
 
   it('requires credentials for hosted providers', () => {
@@ -436,6 +472,7 @@ describe('buildSetupComputeStatus', () => {
     });
     expect(modal?.configSatisfied).toBe(true);
     expect(modal?.runtimeConfigSatisfied).toBe(false);
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
     expect(status.setupSatisfied).toBe(true);
   });
 
@@ -535,6 +572,21 @@ describe('buildSetupComputeStatus', () => {
     expect(baseImageField?.defaultSatisfied).toBe(true);
     expect(modal?.configSatisfied).toBe(true);
     expect(status.setupSatisfied).toBe(true);
+  });
+
+  it('reports the immutable development worker image used for provisioning', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        NODE_ENV: 'development',
+        ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF:
+          'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      },
+    });
+
+    expect(status.workerImage).toMatchObject({
+      hostedImageRef: 'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      hostedReady: true,
+    });
   });
 
   it('reports provider infrastructure availability for the picker', () => {
@@ -756,7 +808,7 @@ describe('resolveDerivedModalBaseImageRef', () => {
 
   it('falls back to the development Modal image when no hosted image is configured', () => {
     expect(resolveDerivedModalBaseImageRef({ NODE_ENV: 'development' })).toBe(
-      DEVELOPMENT_MODAL_BASE_IMAGE_REF,
+      'ghcr.io/roocodeinc/roomote-worker:develop',
     );
     expect(
       resolveDerivedModalBaseImageRef({
@@ -764,6 +816,16 @@ describe('resolveDerivedModalBaseImageRef', () => {
         DOCKER_WORKER_IMAGE: 'roomote-worker:local',
       }),
     ).toBe(DEVELOPMENT_MODAL_BASE_IMAGE_REF);
+  });
+
+  it('uses the immutable development worker image selected by the dev launcher', () => {
+    expect(
+      resolveDerivedModalBaseImageRef({
+        NODE_ENV: 'development',
+        ROOMOTE_DEVELOPMENT_WORKER_IMAGE_REF:
+          'ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7',
+      }),
+    ).toBe('ghcr.io/roocodeinc/roomote-worker:develop-62a69ba7');
   });
 });
 

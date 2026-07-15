@@ -29,6 +29,7 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
 
@@ -129,6 +130,8 @@ export async function spawnModalWorker(
     modalEcrRegion?: string;
     /** Comma-separated Modal placement region tokens (`MODAL_REGIONS`). */
     modalRegions?: string;
+    /** Memory allocation for VM sandboxes that run nested Docker workloads. */
+    modalVmMemoryMiB: number;
     modalTimeoutMs: number;
     localTarballPath?: string;
     deploymentSlug?: string;
@@ -150,6 +153,7 @@ export async function spawnModalWorker(
     modalEcrOidcRoleArn,
     modalEcrRegion,
     modalRegions,
+    modalVmMemoryMiB,
     modalTimeoutMs,
     localTarballPath,
     deploymentSlug,
@@ -160,6 +164,12 @@ export async function spawnModalWorker(
 
   const { namedPorts, environmentSnapshotId, environmentConfig } =
     await getNamedPortsForTaskRun(taskRun);
+
+  const sandboxResources = await resolveTaskSandboxMemoryMiB(
+    taskRun,
+    environmentConfig,
+  );
+  const useVmRuntime = sandboxResources.needsNestedDocker;
 
   const shouldEnableAuthBypass = shouldEnableAuthBypassForTaskRun({
     environmentConfig,
@@ -249,8 +259,11 @@ export async function spawnModalWorker(
 
   const configuredResources = resolveConfiguredComputeProviderResources({
     provider: 'modal',
+    configuredCpuCores: 2,
+    configuredMemoryMiB: useVmRuntime
+      ? modalVmMemoryMiB
+      : sandboxResources.memoryMiB,
   });
-
   const modalConfig = {
     tokenId: modalTokenId,
     tokenSecret: modalTokenSecret,
@@ -267,6 +280,7 @@ export async function spawnModalWorker(
     ...(modalEcrOidcRoleArn ? { ecrOidcRoleArn: modalEcrOidcRoleArn } : {}),
     ...(modalEcrRegion ? { ecrRegion: modalEcrRegion } : {}),
     ...(parsedModalRegions ? { regions: parsedModalRegions } : {}),
+    ...(useVmRuntime ? { vmRuntime: true } : {}),
     ...(configuredResources.configuredCpuCores !== null
       ? { cpu: configuredResources.configuredCpuCores }
       : {}),

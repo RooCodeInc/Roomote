@@ -58,6 +58,8 @@ const adoPullRequestResourceSchema = z
     description: z.string().nullable().optional(),
     status: z.string().optional(),
     isDraft: z.boolean().optional(),
+    creationDate: z.string().optional(),
+    closedDate: z.string().optional(),
     sourceRefName: z.string().optional(),
     targetRefName: z.string().optional(),
     createdBy: adoIdentitySchema.optional(),

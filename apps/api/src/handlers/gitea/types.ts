@@ -27,6 +27,7 @@ const giteaPullRequestBranchSchema = z
 
 const giteaPullRequestSchema = z
   .object({
+    id: z.number().optional(),
     number: z.number(),
     title: z.string(),
     body: z.string().nullable().optional(),
@@ -35,6 +36,9 @@ const giteaPullRequestSchema = z
     state: z.string().optional(),
     draft: z.boolean().optional(),
     merged: z.boolean().optional(),
+    created_at: z.string().nullable().optional(),
+    updated_at: z.string().nullable().optional(),
+    merged_at: z.string().nullable().optional(),
     head: giteaPullRequestBranchSchema.optional(),
     base: giteaPullRequestBranchSchema.optional(),
     user: giteaUserSchema.optional(),

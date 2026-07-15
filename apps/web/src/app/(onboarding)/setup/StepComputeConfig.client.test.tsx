@@ -4,7 +4,7 @@ import type {
   ReactNode,
   SVGProps,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import {
   createEmptySetupNewState,
   type ComputeProvider,
@@ -16,8 +16,12 @@ const { mockSetupStatus } = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useMutation: () => ({
-    mutateAsync: vi.fn(),
+  useMutation: (options: {
+    onSuccess?: (result: unknown) => Promise<void>;
+  }) => ({
+    mutateAsync: vi.fn(async () => {
+      await options.onSuccess?.({ setupNewState: mockSetupStatus.current });
+    }),
     isPending: false,
   }),
   useQuery: () => ({ data: mockSetupStatus.current }),
@@ -43,6 +47,11 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('@/components/system', () => ({
   ArrowLeft: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertCircle: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  AlertDescription: ({ children }: { children: ReactNode }) => (
+    <div>{children}</div>
+  ),
   Button: ({
     children,
     ...props
@@ -134,6 +143,7 @@ function buildComputeSetup(
     runtimeDefaultProvider: null,
     persistedDefaultProvider: null,
     setupSatisfied: false,
+    setupSatisfiedByRuntimeEnv: false,
     workerImage: {
       envVarName: 'DOCKER_WORKER_IMAGE',
       label: 'Worker Image',
@@ -253,7 +263,7 @@ describe('StepComputeConfig', () => {
     ).toBeDisabled();
   });
 
-  it('shows the provisioning state for a Blaxel image build', async () => {
+  it('continues onboarding while a Blaxel image build runs in the background', async () => {
     mockSetupStatus.current = {
       setupNewState: {
         ...createEmptySetupNewState(),
@@ -305,21 +315,26 @@ describe('StepComputeConfig', () => {
       ],
     };
 
+    const onContinue = vi.fn();
+
     render(
       <StepComputeConfig
         computeSetup={buildComputeSetup({ providers: [blaxel] })}
         selectedProviderId="blaxel"
-        onContinue={vi.fn()}
+        onContinue={onContinue}
       />,
     );
 
     expect(
       await screen.findByText(
-        'Provisioning the worker base image. This can take a few minutes.',
+        /Provisioning the worker base image in the background/,
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: /Provisioning/i }),
-    ).toBeDisabled();
+    const continueButton = screen.getByRole('button', { name: /Continue/i });
+    expect(continueButton).toBeEnabled();
+
+    fireEvent.click(continueButton);
+
+    await waitFor(() => expect(onContinue).toHaveBeenCalledOnce());
   });
 });

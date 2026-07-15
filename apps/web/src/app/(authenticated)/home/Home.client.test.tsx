@@ -20,7 +20,10 @@ let currentGitHubInstallations = [{ id: 'installation-1' }];
 let currentGitHubInstallationsPending = false;
 let currentGitHubInstallationsFetching = false;
 let currentGitHubInstallationsSuccess = true;
-let currentEnvironments = [{ id: 'env-1', name: 'Primary Env' }];
+let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
+  { id: 'env-1', name: 'Primary Env' },
+];
+let currentEnvironmentsPending = false;
 
 const {
   mockPush,
@@ -90,7 +93,7 @@ vi.mock('@/hooks/github', () => ({
 vi.mock('@/hooks/environments', () => ({
   useEnvironments: () => ({
     data: currentEnvironments,
-    isPending: false,
+    isPending: currentEnvironmentsPending,
   }),
 }));
 
@@ -336,6 +339,7 @@ describe('Home', () => {
     currentGitHubInstallationsFetching = false;
     currentGitHubInstallationsSuccess = true;
     currentEnvironments = [{ id: 'env-1', name: 'Primary Env' }];
+    currentEnvironmentsPending = false;
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -811,9 +815,7 @@ describe('Home', () => {
       />,
     );
 
-    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
-      'Modal',
-    );
+    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Use single-repo environment' }),
@@ -893,6 +895,36 @@ describe('Home', () => {
     expect(
       screen.getByRole('button', { name: 'Submit prompt' }),
     ).toBeDisabled();
+  });
+
+  it('does not show the empty-environments warning while environments are loading', () => {
+    currentEnvironments = undefined;
+    currentEnvironmentsPending = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.queryByText(/You haven't created any environments yet/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the empty-environments warning only after load completes with none', () => {
+    currentEnvironments = undefined;
+    currentEnvironmentsPending = true;
+
+    const { rerender } = render(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.queryByText(/You haven't created any environments yet/i),
+    ).not.toBeInTheDocument();
+
+    currentEnvironments = [];
+    currentEnvironmentsPending = false;
+    rerender(<Home initialPlaceholderIndex={0} />);
+
+    expect(
+      screen.getByText(/You haven't created any environments yet/i),
+    ).toBeInTheDocument();
   });
 
   it('allows all-repositories launches when no environments exist', async () => {

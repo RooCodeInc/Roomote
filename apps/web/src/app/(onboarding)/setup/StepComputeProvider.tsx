@@ -6,6 +6,7 @@ import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
 
 import { StepTitle } from './StepTitle';
+import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const COMPUTE_PROVIDER_STEP = getSetupStepDefinition('compute-provider');
@@ -21,17 +22,21 @@ const BRAND_ICON_BY_PROVIDER = {
 export function StepComputeProvider({
   computeSetup,
   onContinue,
+  onBack,
   disabled = false,
 }: {
   computeSetup: SetupComputeStatus;
   onContinue: (provider: ComputeProvider) => void;
+  onBack?: () => void;
   disabled?: boolean;
 }) {
-  // All providers are offered. Hosted providers whose worker image is not yet
-  // available are still selectable: their config step collects a shared worker
-  // image (and can auto-derive or provision the provider artifact from it), so
-  // the operator is no longer dead-ended by missing infrastructure.
-  const availableProviders = computeSetup.providers;
+  // Hosted providers whose worker image is not yet available remain selectable:
+  // their config step can collect or provision the missing infrastructure.
+  // Explicit deployment exclusions are stronger and must not be offered.
+  const excludedProviders = new Set(computeSetup.excludedProviders ?? []);
+  const availableProviders = computeSetup.providers.filter(
+    (provider) => !excludedProviders.has(provider.provider),
+  );
 
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
@@ -73,6 +78,8 @@ export function StepComputeProvider({
             );
           })}
         </div>
+
+        <SetupFooter onBack={onBack} />
       </div>
     </div>
   );

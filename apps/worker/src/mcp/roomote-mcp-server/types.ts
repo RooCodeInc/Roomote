@@ -84,7 +84,8 @@ export interface SourceControlPullRequestReadResponse {
   success: true;
   provider: SourceControlProvider;
   repositoryFullName: string;
-  number: number;
+  /** Present for single-PR reads; list_pull_requests returns pullRequests instead. */
+  number?: number;
   warnings: string[];
   [key: string]: unknown;
 }
@@ -100,14 +101,12 @@ export interface CreateEnvironmentResponse {
   success: boolean;
   environmentId: string;
   name: string;
-  missingRepositories: string[];
 }
 
 export interface UpdateEnvironmentResponse {
   success: boolean;
   environmentId: string;
   name: string;
-  missingRepositories: string[];
 }
 
 export interface SlackThreadReplyResponse {

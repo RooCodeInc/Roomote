@@ -8,11 +8,16 @@ import { toast } from 'sonner';
 import { FeatureFlag } from '@roomote/feature-flags';
 import {
   type BackgroundAutomationKey,
+  type CommunicationProvider,
+  communicationProviders,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_SUGGESTER_ROUTING_MODE,
+  getCommunicationProviderDisplayName,
+  getSourceControlProviderLabel,
   getTriggerableBackgroundAutomationDescriptorByKey,
+  sourceControlProviders,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
   PRODUCT_NAME,
@@ -20,6 +25,7 @@ import {
   type ScheduleOnlyBackgroundAutomationFrequency,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
   type ScheduleOnlyBackgroundAutomationId,
+  type SourceControlProvider,
   type SuggesterRoutingMode,
   type TaskState,
   type TaskTrigger,
@@ -166,6 +172,18 @@ type AutomationSlackDestinationField =
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel';
 
+const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
+  managerStatsSlackChannel: 'manager_stats',
+  sentryTriageSlackChannel: 'sentry_triage',
+  dependabotTriageSlackChannel: 'dependabot_triage',
+  securityAuditorSlackChannel: 'security_auditor',
+  codeQualityAuditorSlackChannel: 'code_quality_auditor',
+  ciFailureTriageSlackChannel: 'ci_failure_triage',
+} as const satisfies Record<
+  AutomationSlackDestinationField,
+  BackgroundAutomationKey
+>;
+
 type SlackChannelOption = {
   id: string;
   name: string;
@@ -180,6 +198,22 @@ type AutomationDefinition = {
   description: string;
   icon: ComponentType<{ className?: string }>;
   availability?: 'stable' | 'beta';
+  /** Compact label for the chat surfaces the automation can report to. */
+  commsBadge?: string;
+  /** Compact label for the source-control providers the automation supports. */
+  scmBadge?: string;
+};
+
+/**
+ * Where an automation's next run will report, as resolved server-side through
+ * the destination waterfall (own target -> Manager Channel -> primary
+ * conversation).
+ */
+type ResolvedAutomationDestinationSummary = {
+  provider: CommunicationProvider;
+  channelId: string;
+  source: 'automation_target' | 'manager_channel' | 'primary_conversation';
+  displayName: string | null;
 };
 
 /**
@@ -260,6 +294,48 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
   weekly: 'Once a week',
 } as const;
 
+/**
+ * Exception-only capability badges derived from the automation descriptor:
+ * a badge appears only when an automation is LIMITED relative to full
+ * provider coverage. Full coverage (or no applicable surface at all) shows
+ * nothing — the absence of a warning is the signal.
+ */
+function getAutomationCapabilityBadges(
+  automationKey: BackgroundAutomationKey,
+): Pick<AutomationDefinition, 'commsBadge' | 'scmBadge'> {
+  const descriptor =
+    getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
+
+  if (!descriptor) {
+    return {};
+  }
+
+  const comms: readonly CommunicationProvider[] =
+    descriptor.supportedCommunicationProviders;
+  const commsLimited =
+    comms.length > 0 && comms.length < communicationProviders.length;
+  const commsBadge = commsLimited
+    ? comms.length === 1 && comms[0] === 'slack'
+      ? 'Slack only'
+      : `${comms.map(getCommunicationProviderDisplayName).join(' · ')} only`
+    : undefined;
+
+  const scm: readonly SourceControlProvider[] =
+    descriptor.supportedSourceControlProviders;
+  const scmLimited =
+    scm.length > 0 && scm.length < sourceControlProviders.length;
+  const scmBadge = scmLimited
+    ? scm.length === 1 && scm[0] === 'github'
+      ? 'GitHub only'
+      : `${scm.map(getSourceControlProviderLabel).join(' · ')} only`
+    : undefined;
+
+  return {
+    ...(commsBadge ? { commsBadge } : {}),
+    ...(scmBadge ? { scmBadge } : {}),
+  };
+}
+
 function getAutomationDefinition(
   automationId: AutomationId,
   automationKey: keyof typeof TRIGGERABLE_AUTOMATION_DESCRIPTIONS,
@@ -278,6 +354,7 @@ function getAutomationDefinition(
     description: TRIGGERABLE_AUTOMATION_DESCRIPTIONS[automationKey],
     icon,
     availability: descriptor.availability,
+    ...getAutomationCapabilityBadges(automationKey),
   };
 }
 
@@ -338,6 +415,7 @@ const SCHEDULE_ONLY_AUTOMATION_DEFINITIONS = Object.fromEntries(
         SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].description,
       icon: SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id].icon,
       availability: automation.availability,
+      ...getAutomationCapabilityBadges(automation.automationKey),
     },
   ]),
 ) as unknown as Record<
@@ -1015,6 +1093,37 @@ function SlackChannelAccessWarning({
   );
 }
 
+const DESTINATION_SOURCE_LABELS: Record<
+  ResolvedAutomationDestinationSummary['source'],
+  string
+> = {
+  automation_target: "this automation's channel",
+  manager_channel: 'Manager Channel',
+  primary_conversation: 'primary conversation (automatic)',
+};
+
+function AutomationReportsToLine({
+  destination,
+}: {
+  destination: ResolvedAutomationDestinationSummary | null | undefined;
+}) {
+  if (!destination) {
+    return (
+      <p className="text-xs text-muted-foreground md:max-w-160">
+        Reports to: not configured — set a Manager Channel.
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-xs text-muted-foreground md:max-w-160">
+      Reports to {destination.displayName ?? destination.channelId} (
+      {getCommunicationProviderDisplayName(destination.provider)}) —{' '}
+      {DESTINATION_SOURCE_LABELS[destination.source]}
+    </p>
+  );
+}
+
 function AutomationSlackDestinationInput({
   inputId,
   label,
@@ -1025,6 +1134,7 @@ function AutomationSlackDestinationInput({
   showWarning,
   slackAppMention,
   error,
+  destination,
   onChange,
 }: {
   inputId: string;
@@ -1036,6 +1146,7 @@ function AutomationSlackDestinationInput({
   showWarning: boolean;
   slackAppMention: string;
   error?: string;
+  destination: ResolvedAutomationDestinationSummary | null | undefined;
   onChange: (value: string | null) => void;
 }) {
   return (
@@ -1059,6 +1170,7 @@ function AutomationSlackDestinationInput({
           {helperText}
         </p>
       ) : null}
+      <AutomationReportsToLine destination={destination} />
       {showWarning ? (
         <SlackChannelAccessWarning slackAppMention={slackAppMention} />
       ) : null}
@@ -1316,6 +1428,16 @@ function AutomationTitle({ automation }: { automation: AutomationDefinition }) {
       <span>{automation.label}</span>
       {automation.availability === 'beta' ? (
         <Badge variant="secondary">Beta</Badge>
+      ) : null}
+      {automation.commsBadge ? (
+        <Badge variant="outline" className="font-normal text-muted-foreground">
+          {automation.commsBadge}
+        </Badge>
+      ) : null}
+      {automation.scmBadge ? (
+        <Badge variant="outline" className="font-normal text-muted-foreground">
+          {automation.scmBadge}
+        </Badge>
       ) : null}
     </span>
   );
@@ -2066,6 +2188,11 @@ export function AutomationsSettings() {
           value={value || null}
           options={buildSlackDestinationOptions(value)}
           disabled={getSlackDestinationSelectionDisabled(value, savedChannelId)}
+          destination={
+            settingsQuery.data?.resolvedDestinations[
+              SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
+            ]
+          }
           slackAppMention={slackAppMention}
           showWarning={shouldShowManagerSlackChannelWarning({
             formValue: value,
@@ -2106,6 +2233,7 @@ export function AutomationsSettings() {
       formState,
       getSlackDestinationSelectionDisabled,
       isDirty,
+      settingsQuery.data,
       slackAppMention,
     ],
   );
@@ -3044,9 +3172,11 @@ export function AutomationsSettings() {
                 <div className="space-y-5">
                   {!suggestionRoutingEnabled ? (
                     <>
-                      <p className="text-xs text-muted-foreground md:max-w-160">
-                        Posts to the Manager Channel.
-                      </p>
+                      <AutomationReportsToLine
+                        destination={
+                          settingsQuery.data?.resolvedDestinations.suggester
+                        }
+                      />
 
                       <div className="space-y-2">
                         <Label htmlFor="suggester-instructions">
@@ -3318,9 +3448,11 @@ If unclear, send to manager channel.`}
 
               {announcerIsEnabled ? (
                 <div className="space-y-5">
-                  <p className="text-xs text-muted-foreground md:max-w-160">
-                    Posts to the Manager Channel.
-                  </p>
+                  <AutomationReportsToLine
+                    destination={
+                      settingsQuery.data?.resolvedDestinations.announcer
+                    }
+                  />
 
                   <div className="space-y-2">
                     <Label htmlFor="announcer-instructions">

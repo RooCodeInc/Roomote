@@ -8,7 +8,7 @@ import type { SlackBlock } from '@roomote/types';
 import { buildSlackThreadPermalink } from '@roomote/types';
 
 import { postRouterDebugMessage } from './router-debug';
-import { setSlackStartedMessageTs } from './slack-messages';
+import { persistPostedSlackKickoff } from './persist-posted-slack-kickoff';
 import { SlackNotifier } from './slack-notifier';
 import { buildStartedBlocks } from './started-message-blocks';
 
@@ -99,6 +99,7 @@ export async function finishRoutedStart({
   agentName,
   workspaceDisplayName,
   modelDisplayName,
+  kickoffMessage,
   workspaceType,
   workspaceValue,
   workspaceOnly,
@@ -125,6 +126,7 @@ export async function finishRoutedStart({
   agentName: string;
   workspaceDisplayName: string;
   modelDisplayName?: string;
+  kickoffMessage?: string;
   workspaceType: 'environment' | 'all_repositories';
   workspaceValue: string;
   workspaceOnly?: boolean;
@@ -164,6 +166,7 @@ export async function finishRoutedStart({
   const blocks = buildStartedBlocks({
     workspaceDisplayName,
     modelDisplayName,
+    kickoffMessage,
     runId,
     taskId,
     initiatingSlackUserId,
@@ -185,11 +188,15 @@ export async function finishRoutedStart({
       });
 
   if (startedMessageTs && runId) {
-    await setSlackStartedMessageTs(runId, startedMessageTs, {
+    await persistPostedSlackKickoff({
+      runId,
+      taskId,
+      messageTs: startedMessageTs,
       agentName,
       initiatingSlackUserId,
       workspaceDisplayName,
-      ...(modelDisplayName ? { modelDisplayName } : {}),
+      modelDisplayName,
+      kickoffMessage,
       workspaceOnly,
     });
   }

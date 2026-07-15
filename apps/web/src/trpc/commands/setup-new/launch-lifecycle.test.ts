@@ -34,6 +34,8 @@ vi.mock('@roomote/github', () => ({
 }));
 
 vi.mock('@roomote/gitea', () => ({
+  normalizeGiteaBaseUrl: (value: string) =>
+    value.startsWith('http') ? value : `https://${value}`,
   resolveGiteaBaseUrl: vi.fn(async () => 'https://gitea.example.com'),
   validateGiteaToken: vi.fn(async () => ({ status: 'valid' })),
 }));

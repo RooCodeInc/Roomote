@@ -13,6 +13,7 @@ const {
   toastErrorMock,
   toastInfoMock,
   toastWarningMock,
+  authenticateAdoMutateMock,
 } = vi.hoisted(() => ({
   createInstallationMutateMock: vi.fn(),
   syncRepositoriesMutateMock: vi.fn(),
@@ -42,6 +43,7 @@ const {
   toastErrorMock: vi.fn(),
   toastInfoMock: vi.fn(),
   toastWarningMock: vi.fn(),
+  authenticateAdoMutateMock: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-query', async () => {
@@ -49,6 +51,13 @@ vi.mock('@tanstack/react-query', async () => {
 
   return {
     ...actual,
+    useMutation: (options: {
+      mutationFn?: (variables: unknown) => unknown;
+    }) => ({
+      mutateAsync: async (variables: unknown) =>
+        options.mutationFn?.(variables),
+      isPending: false,
+    }),
     useQueryClient: () => ({
       invalidateQueries: vi.fn(),
       ensureQueryData: ensureQueryDataMock,
@@ -65,8 +74,17 @@ vi.mock('@/trpc/client', () => ({
       },
     },
     sourceControl: {
+      saveConfig: {
+        mutationOptions: (options: unknown) => options,
+      },
       repositories: {
         queryKey: () => ['sourceControl.repositories'],
+      },
+    },
+    linkedAccounts: {
+      ado: {
+        queryKey: () => ['linkedAccounts.ado'],
+        queryOptions: () => ({ queryKey: ['linkedAccounts.ado'] }),
       },
     },
   }),
@@ -93,6 +111,17 @@ vi.mock('@/hooks/source-control/useSyncRepositories', () => ({
   },
 }));
 
+vi.mock('@/hooks/linked-accounts', () => ({
+  useAdoLinkedAccount: () => ({
+    data: { configured: true, account: null },
+    isPending: false,
+  }),
+  useAuthenticateAdoAccount: () => ({
+    mutate: authenticateAdoMutateMock,
+    isPending: false,
+  }),
+}));
+
 vi.mock('sonner', () => ({
   toast: {
     error: toastErrorMock,
@@ -102,7 +131,9 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  BrandIcon: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Github: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  RefreshCcw: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Spinner: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({
     children,
@@ -179,6 +210,7 @@ describe('StepSourceControlConnect', () => {
       value: {
         ...window.location,
         pathname: '/setup',
+        search: '',
       },
     });
   });
@@ -216,7 +248,7 @@ describe('StepSourceControlConnect', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Sync repositories/i }));
 
-    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(1);
+    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(2);
   });
 
   it('describes Gitea webhook setup during token-backed onboarding', () => {
@@ -232,12 +264,12 @@ describe('StepSourceControlConnect', () => {
     );
 
     expect(
-      screen.getByText(/pull request webhooks on the synced repositories/i),
+      screen.getByText(/Sync your Gitea repositories/i),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Sync repositories/i }));
 
-    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(1);
+    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(2);
     expect(syncRepositoriesOptionsRef.current?.provider).toBe('gitea');
   });
 
@@ -254,15 +286,171 @@ describe('StepSourceControlConnect', () => {
     );
 
     expect(
-      screen.getByText(
-        /pull request service hooks on the synced repositories/i,
-      ),
+      screen.getByText(/Sync your Azure DevOps repositories/i),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Sync repositories/i }));
 
-    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(1);
+    expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(2);
     expect(syncRepositoriesOptionsRef.current?.provider).toBe('ado');
+  });
+
+  it('connects a delegated Azure DevOps account before repository sync', () => {
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('ado', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('ado').providers[0]!,
+              fields: [
+                {
+                  envVarName: 'ADO_AUTH_MODE',
+                  acceptedEnvVarNames: ['ADO_AUTH_MODE'],
+                  label: 'Azure DevOps Authentication Mode',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  savedValue: 'delegated',
+                  satisfiedByEnvVarName: 'ADO_AUTH_MODE',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/before syncing repositories/i),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /Connect with your Microsoft account/i,
+      }),
+    );
+
+    expect(authenticateAdoMutateMock).toHaveBeenCalledWith(
+      '/setup?step=source-control-connect',
+    );
+    expect(syncRepositoriesMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('does not auto-sync an OAuth-configured GitLab provider before OAuth completes', () => {
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('gitlab', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('gitlab').providers[0]!,
+              fields: [
+                {
+                  envVarName: 'GITLAB_CLIENT_ID',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+                  label: 'GitLab OAuth Client ID',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_ID',
+                },
+                {
+                  envVarName: 'GITLAB_CLIENT_SECRET',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
+                  label: 'GitLab OAuth Client Secret',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_SECRET',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(syncRepositoriesMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('auto-syncs OAuth-configured GitLab once the callback marker is present', () => {
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, pathname: '/setup', search: '?sync=1' },
+    });
+
+    const { rerender } = render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('gitlab', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('gitlab').providers[0]!,
+              fields: [
+                {
+                  envVarName: 'GITLAB_CLIENT_ID',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+                  label: 'GitLab OAuth Client ID',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_ID',
+                },
+                {
+                  envVarName: 'GITLAB_CLIENT_SECRET',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
+                  label: 'GitLab OAuth Client Secret',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_SECRET',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    rerender(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('gitlab', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('gitlab').providers[0]!,
+              fields: [
+                {
+                  envVarName: 'GITLAB_CLIENT_ID',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_ID'],
+                  label: 'GitLab OAuth Client ID',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_ID',
+                },
+                {
+                  envVarName: 'GITLAB_CLIENT_SECRET',
+                  acceptedEnvVarNames: ['GITLAB_CLIENT_SECRET'],
+                  label: 'GitLab OAuth Client Secret',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  satisfiedByEnvVarName: 'GITLAB_CLIENT_SECRET',
+                },
+              ],
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(syncRepositoriesMutateMock).toHaveBeenCalledOnce();
   });
 
   it('reports Gitea webhook setup failures as repositories', async () => {

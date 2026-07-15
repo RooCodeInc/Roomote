@@ -7,7 +7,6 @@ import {
   isTaskModelIdAllowed,
 } from '@roomote/types';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
-
 import type {
   FollowUpClassification,
   GitHubRoutingDecision,
@@ -231,12 +230,15 @@ function buildStandardTaskRoutingResult(
   );
 
   if (workspace) {
+    const kickoffMessage = response.kickoffMessage?.replace(/\s+/g, ' ').trim();
+
     return {
       status: 'routed',
       result: {
         workspace,
         model: resolveRoutedTaskModel(response, context),
         reasoning: response.reasoning,
+        ...(kickoffMessage ? { kickoffMessage } : {}),
         workspaceOnly: true,
       },
       confidence: response.confidence,

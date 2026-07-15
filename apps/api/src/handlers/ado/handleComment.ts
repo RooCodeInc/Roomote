@@ -16,6 +16,7 @@ import {
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -287,6 +288,15 @@ export async function handleAdoComment(
       repositoryFullName: repoFullName,
       commentAuthor: author,
     },
+    // The PR web URL (or the account/collection base URL it is built from)
+    // carries the instance host, matching repositories.host.
+    webhookHost: toHostFromUrl(
+      getAdoPullRequestUrl({
+        resourceContainers: payload.resourceContainers,
+        pullRequest,
+        repositoryFullName: repoFullName,
+      }),
+    ),
     ignoreAuthorPolicy: true,
     requireLinkedSenderAccount: true,
   });
@@ -396,6 +406,10 @@ export async function handleAdoComment(
   const reviewPayload = {
     repo: repoFullName,
     sourceControlProvider: 'ado',
+    // Pin repository resolution to the webhook repository's host so
+    // same-name repositories on other hosts cannot be picked up. Legacy
+    // rows without a recorded host omit the field.
+    ...(target.repo.host ? { sourceControlHost: target.repo.host } : {}),
     prNumber: pullRequest.pullRequestId,
     prTitle: pullRequest.title,
     prUrl: getAdoPullRequestUrl({
@@ -424,6 +438,8 @@ export async function handleAdoComment(
       trigger: 'message',
       prLinkage: {
         provider: 'ado',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber: pullRequest.pullRequestId,
         prUrl: reviewPayload.prUrl,

@@ -628,7 +628,6 @@ describe('createEnvironment', () => {
       success: true,
       environmentId: 'env-123',
       name: 'My Project',
-      missingRepositories: [],
     };
 
     global.fetch = vi.fn().mockResolvedValueOnce({
@@ -646,7 +645,6 @@ describe('createEnvironment', () => {
     expect(result.success).toBe(true);
     expect(result.environmentId).toBe('env-123');
     expect(result.name).toBe('My Project');
-    expect(result.missingRepositories).toEqual([]);
 
     const fetchCall = vi.mocked(fetch).mock.calls[0];
     expect(fetchCall?.[0]).toBe(
@@ -691,7 +689,6 @@ describe('updateEnvironment', () => {
       success: true,
       environmentId: 'env-123',
       name: 'Updated Project',
-      missingRepositories: [],
     };
 
     global.fetch = vi.fn().mockResolvedValueOnce({

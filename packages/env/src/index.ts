@@ -2,6 +2,7 @@ import { createEnv } from '@t3-oss/env-nextjs';
 import {
   DEFAULT_LOCAL_DOCKER_WORKER_IMAGE,
   resolveEffectiveDockerWorkerImage,
+  TASK_SANDBOX_DOCKER_MEMORY_MIB,
 } from '@roomote/types';
 import { z } from 'zod';
 
@@ -81,6 +82,7 @@ const serverSchema = {
   DOCKER_WORKER_RELEASE_PATH: z.string().min(1).optional(),
   DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
   DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
+  DOCKER_TASK_DAEMON_MEMORY_LIMIT: dockerSize().default('8g'),
   DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
   DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
   DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
@@ -205,6 +207,11 @@ const serverSchema = {
   MODAL_ECR_OIDC_ROLE_ARN: z.string().optional(),
   MODAL_ECR_REGION: z.string().optional(),
   MODAL_REGIONS: z.string().optional(),
+  MODAL_VM_MEMORY_MIB: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(TASK_SANDBOX_DOCKER_MEMORY_MIB),
   DAYTONA_API_KEY: z.string().optional(),
   DAYTONA_API_URL: z.string().url().optional(),
   DAYTONA_TARGET: z.string().optional(),
@@ -410,6 +417,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'MODAL_ECR_OIDC_ROLE_ARN',
   'MODAL_ECR_REGION',
   'MODAL_REGIONS',
+  'MODAL_VM_MEMORY_MIB',
   'DAYTONA_API_KEY',
   'DAYTONA_API_URL',
   'DAYTONA_TARGET',
@@ -700,7 +708,11 @@ function buildRoomoteRuntimeEnv(
   // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
   // must fall back to the web app's linking route rather than empty string.
   if (!env.SLACK_AUTH_URI && env.R_APP_URL) {
-    env.SLACK_AUTH_URI = `${env.R_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+    let appUrl = env.R_APP_URL;
+    while (appUrl.endsWith('/')) {
+      appUrl = appUrl.slice(0, -1);
+    }
+    env.SLACK_AUTH_URI = `${appUrl}/api/slack/auth`;
   }
 
   return env;

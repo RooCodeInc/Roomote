@@ -45,12 +45,16 @@ export type TaskWorkflow = (typeof TASK_WORKFLOWS)[number];
 
 /**
  * Source-control automation workflows accepted by webhook routing gates.
- * These are workflow discriminators, not persisted agent identities.
+ * These are workflow discriminators, not persisted agent identities. Keep this
+ * list in lockstep with any attach-to-existing-PR product behavior.
  */
-export type SourceControlAutomationWorkflow = Extract<
-  TaskWorkflow,
-  'pr_review' | 'pr_conflict_resolve'
->;
+export const SOURCE_CONTROL_AUTOMATION_WORKFLOWS = [
+  'pr_review',
+  'pr_conflict_resolve',
+] as const satisfies ReadonlyArray<TaskWorkflow>;
+
+export type SourceControlAutomationWorkflow =
+  (typeof SOURCE_CONTROL_AUTOMATION_WORKFLOWS)[number];
 
 export const TASK_SURFACES = [
   'web',
@@ -858,6 +862,15 @@ const sharedTaskPayloadSchema = z.object({
    * GitHub-backed payloads omit this field and default to GitHub at runtime.
    */
   sourceControlProvider: sourceControlProviderSchema.optional(),
+
+  /**
+   * Source-control instance host for repository resolution (for example
+   * `gitlab.example.com`), matching `repositories.host`. Stamped by launch
+   * sites that know the concrete host so same-name repositories on multiple
+   * hosts resolve unambiguously. Omitted payloads resolve by
+   * (provider, fullName) alone.
+   */
+  sourceControlHost: z.string().optional(),
 
   /**
    * Per-launch PR delivery override. When present, pull requests created for
@@ -1958,10 +1971,31 @@ export const isExitedRunStatus = (status?: RunStatus): boolean =>
   !!status && exitedStatuses.has(status);
 
 /**
- * Task phases reported by the worker's HarnessManager.
- * These represent the internal state of the agent within a running container.
+ * Lifecycle of environment setup (repository setup commands and Docker
+ * projects) for a task run. Distinct from `setupCompletedAt`: that milestone
+ * stamps when the blocking portion of setup returned, while environment setup
+ * may keep running in the background after the agent has already started.
+ *
+ * - running: Background environment setup is still executing.
+ * - completed: All environment setup finished without warnings.
+ * - completed_with_warnings: Finished, but one or more steps reported warnings.
+ * - failed: Environment setup aborted with an unexpected error.
+ */
+export const environmentSetupStates = [
+  'running',
+  'completed',
+  'completed_with_warnings',
+  'failed',
+] as const;
+
+export type EnvironmentSetupState = (typeof environmentSetupStates)[number];
+
+/**
+ * Task phases reported by the worker's HarnessManager, plus control-plane
+ * phases used before a worker can start.
  *
  * - idle: No task is running yet (initial state).
+ * - waiting_for_sandbox_provider: The task is persisted but compute is not ready.
  * - running: Agent is actively working.
  * - waiting_for_prompt: Task completed, waiting for user follow-up.
  * - waiting_for_user_input: Agent is waiting for user input.
@@ -1970,6 +2004,7 @@ export const isExitedRunStatus = (status?: RunStatus): boolean =>
  */
 export type TaskPhase =
   | 'idle'
+  | 'waiting_for_sandbox_provider'
   | 'waiting_for_prompt'
   | 'waiting_for_user_input'
   | 'running'
@@ -1978,6 +2013,7 @@ export type TaskPhase =
 
 export const TASK_PHASES: readonly TaskPhase[] = [
   'idle',
+  'waiting_for_sandbox_provider',
   'waiting_for_prompt',
   'waiting_for_user_input',
   'running',

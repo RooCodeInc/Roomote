@@ -625,6 +625,103 @@ describe('runTask', () => {
     );
   });
 
+  it('passes the CodeMode flag into the runtime env when enabled for the org', async () => {
+    mockEvaluateFeatureFlag.mockImplementation(async (flag: string) => {
+      return flag === 'CodeMode';
+    });
+
+    await runTask({
+      taskRun: {
+        id: 106,
+        taskId: 'task-106',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(mockEvaluateFeatureFlag).toHaveBeenCalledWith('CodeMode');
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.objectContaining({
+          OPENCODE_EXPERIMENTAL_CODE_MODE: '1',
+        }),
+      }),
+    );
+  });
+
+  it('does not set the CodeMode env when the flag is disabled', async () => {
+    mockEvaluateFeatureFlag.mockResolvedValue(false);
+
+    await runTask({
+      taskRun: {
+        id: 107,
+        taskId: 'task-107',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: undefined,
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.not.objectContaining({
+          OPENCODE_EXPERIMENTAL_CODE_MODE: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it('always enables the terminal runtime env and sandbox server', async () => {
     await runTask({
       taskRun: {
@@ -955,7 +1052,7 @@ describe('runTask', () => {
       stateFilePath,
       JSON.stringify({
         startedAtMs: 123_456,
-        currentTurnRequiresInitialAck: true,
+        currentTurnRequiresInitialAck: false,
         currentTurnMessageTs: '111.222',
         currentTurnStartedAtMs: 123_456,
         currentTurnReactionsAllowed: false,

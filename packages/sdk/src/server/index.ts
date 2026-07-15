@@ -90,6 +90,10 @@ export {
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 
+export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
+
+export { getCommunicationProviderAdapter } from './lib/communication-providers';
+
 export {
   findTelegramPrimaryChatId,
   TELEGRAM_PRIMARY_CHAT_ENV_VAR_NAME,
@@ -177,6 +181,8 @@ export {
   type SourceControlPullRequestReadInput,
   type SourceControlPullRequestDetailsResult,
   type SourceControlPullRequestCommentsResult,
+  type SourceControlPullRequestListResult,
+  type SourceControlPullRequestSummary,
 } from './lib/pull-requests/source-control-pull-request-reads';
 export {
   writeSourceControlPullRequestForTaskRun,
@@ -190,6 +196,11 @@ export {
   syncGitHubPullRequestFactsForOrg,
   upsertGitHubPullRequestFactFromWebhook,
 } from './lib/pull-requests/github-pull-request-facts';
+export {
+  syncSourceControlPullRequestFacts,
+  upsertSourceControlPullRequestFactFromWebhook,
+} from './lib/pull-requests/source-control-pull-request-facts';
+export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
 
 export * from './lib/auth';
 

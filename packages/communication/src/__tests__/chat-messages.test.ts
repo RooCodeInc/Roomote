@@ -8,11 +8,14 @@ import {
   buildAccountLinkThreadReplyText,
   buildOtherRunningTasksText,
   buildPullRequestMergedNotificationText,
+  buildPullRequestStatusNotificationText,
   buildRoutingConfirmationText,
   buildSnapshotResumeAcknowledgementText,
   buildTaskLaunchAcknowledgementText,
   buildTaskStartingText,
   buildThreadReplyFooterText,
+  getUserRequestedModelDisplayName,
+  resolveUserFacingModelDisplayName,
 } from '../chat-messages';
 
 describe('chat message copy builders', () => {
@@ -81,9 +84,109 @@ describe('chat message copy builders', () => {
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'App',
-        formatWorkspaceName: code,
       }),
-    ).toBe('Getting started on your task in `App`');
+    ).toBe('Getting started on your task in App');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        modelDisplayName: 'Anthropic Claude Fable 5',
+      }),
+    ).toBe(
+      'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model',
+    );
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage:
+          'Looking into daily environment snapshots for faster startup in App',
+      }),
+    ).toBe(
+      'Looking into daily environment snapshots for faster startup in App',
+    );
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage:
+          'Checking login redirects in App with Anthropic Claude Fable 5.',
+        modelDisplayName: 'Anthropic Claude Fable 5',
+      }),
+    ).toBe('Checking login redirects in App with Anthropic Claude Fable 5.');
+
+    // Empty free-form falls back to the static template.
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: '   ',
+      }),
+    ).toBe('Getting started on your task in App');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'App',
+        kickoffMessage: '<!channel> Looking into auth bugs in App',
+      }),
+    ).toBe('Looking into auth bugs in App');
+
+    expect(
+      buildTaskStartingText({
+        workspaceDisplayName: 'Full Stack',
+        kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
+      }),
+    ).toBe('Digging into the flaky checkout race in Full Stack');
+  });
+
+  it('only returns model names the router treated as an explicit preference', () => {
+    expect(
+      getUserRequestedModelDisplayName({
+        displayName: 'Grok 4.5',
+        source: 'default',
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getUserRequestedModelDisplayName({
+        displayName: 'Claude Opus 4.8',
+        source: 'preserved',
+      }),
+    ).toBeUndefined();
+
+    expect(
+      getUserRequestedModelDisplayName({
+        displayName: 'Anthropic Claude Fable 5',
+        source: 'preference',
+      }),
+    ).toBe('Anthropic Claude Fable 5');
+  });
+
+  it('clears previous preference names once a non-preference model is resolved', () => {
+    expect(
+      resolveUserFacingModelDisplayName({
+        model: {
+          displayName: 'Grok 4.5',
+          source: 'default',
+        },
+        previousDisplayName: 'Anthropic Claude Fable 5',
+      }),
+    ).toBeUndefined();
+
+    expect(
+      resolveUserFacingModelDisplayName({
+        model: {
+          displayName: 'Anthropic Claude Fable 5',
+          source: 'preference',
+        },
+        previousDisplayName: 'Claude Opus 4.8',
+      }),
+    ).toBe('Anthropic Claude Fable 5');
+
+    expect(
+      resolveUserFacingModelDisplayName({
+        previousDisplayName: 'Anthropic Claude Fable 5',
+      }),
+    ).toBe('Anthropic Claude Fable 5');
   });
 
   it('builds queue count, launch, and snapshot resume acknowledgements', () => {
@@ -166,7 +269,7 @@ describe('chat message copy builders', () => {
     );
   });
 
-  it('keeps shared failure copy and PR merged copy in one place', () => {
+  it('keeps shared failure copy and PR status copy in one place', () => {
     expect(TASK_STARTUP_FAILURE_TEXT).toContain("couldn't get started");
     expect(TASK_RUNTIME_FAILURE_TEXT).toContain('while working on this task');
 
@@ -182,6 +285,21 @@ describe('chat message copy builders', () => {
       text: 'Fix auth was merged by matt',
       bodyText:
         '<https://github.com/org/repo/pull/1|Fix auth> was *merged* by matt',
+    });
+
+    expect(
+      buildPullRequestStatusNotificationText({
+        prTitle: 'Fix auth',
+        prUrl: 'https://github.com/org/repo/pull/1',
+        status: 'closed',
+        actorLogin: 'matt',
+        formatLink: (label, url) => `<${url}|${label}>`,
+        formatStatus: (status) => `*${status}*`,
+      }),
+    ).toEqual({
+      text: 'Fix auth was closed by matt',
+      bodyText:
+        '<https://github.com/org/repo/pull/1|Fix auth> was *closed* by matt',
     });
   });
 });

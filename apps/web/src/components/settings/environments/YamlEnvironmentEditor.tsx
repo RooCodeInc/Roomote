@@ -90,6 +90,26 @@ ${repoLines}
 #   - redis7
 #   - postgres16
 
+# Optional: Build and start a Docker Compose project or a single Dockerfile
+# after its repository is cloned. Paths are relative to the selected repo.
+# docker_projects:
+#   - type: compose
+#     name: app
+#     repository: owner/repo-name
+#     files:
+#       - compose.yaml
+#     services:
+#       - web
+#     ports:
+#       - named_port: WEB
+#         service: web
+#         container_port: 3000
+#   - type: dockerfile
+#     name: worker
+#     repository: owner/repo-name
+#     context: .
+#     dockerfile: Dockerfile
+
 # Optional: Install extra skills during environment setup.
 # Group skills by owner/repo source.
 # skills:

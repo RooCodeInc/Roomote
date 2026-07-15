@@ -275,6 +275,16 @@ function buildAuthSetup(
             satisfiedByEnvVarName: null,
           },
           {
+            envVarName: 'R_TEAMS_BOT_NAME',
+            acceptedEnvVarNames: ['R_TEAMS_BOT_NAME'],
+            label: 'Bot display name',
+            defaultValue: 'Roomote',
+            required: false,
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            satisfiedByEnvVarName: null,
+          },
+          {
             envVarName: 'R_TEAMS_BOT_TOKEN_ENDPOINT',
             acceptedEnvVarNames: ['R_TEAMS_BOT_TOKEN_ENDPOINT'],
             label: 'Teams Bot Token Endpoint',
@@ -508,6 +518,9 @@ describe('StepAuthEnvVars', () => {
       screen.queryByPlaceholderText('Teams Bot App ID'),
     ).not.toBeInTheDocument();
     expect(
+      screen.queryByPlaceholderText('Bot display name'),
+    ).not.toBeInTheDocument();
+    expect(
       screen.queryByPlaceholderText('Teams Bot App Password'),
     ).not.toBeInTheDocument();
     expect(
@@ -521,7 +534,58 @@ describe('StepAuthEnvVars', () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText('Teams Bot App ID (optional)')).toBeNull();
     expect(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    ).toBeInTheDocument();
+    expect(
       screen.queryByRole('link', { name: /create slack app/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('toggles Microsoft advanced Teams bot config fields', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('microsoft')}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: /hide advanced config/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Teams Bot App ID')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot App Password'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot Tenant ID'),
+    ).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Bot display name')).toHaveValue(
+      'Roomote',
+    );
+    expect(
+      screen.getByPlaceholderText('Teams Bot Token Endpoint'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Teams Bot OAuth Scope'),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /hide advanced config/i }),
+    );
+
+    expect(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Teams Bot App ID'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Bot display name'),
     ).not.toBeInTheDocument();
   });
 
@@ -557,7 +621,10 @@ describe('StepAuthEnvVars', () => {
     expect(
       screen.getByPlaceholderText('Microsoft Client ID'),
     ).toBeInTheDocument();
-    expectHeadingInNumberedStep('Enter the Microsoft app generated values.', 2);
+    expectHeadingInNumberedStep(
+      'Enter the Microsoft Entra app generated values.',
+      2,
+    );
     expectHeadingInNumberedStep('Upload Roomote to Microsoft Teams.', 3);
     expectHeadingInNumberedStep('Add the Teams bot capability to that app.', 4);
   });
@@ -594,8 +661,8 @@ describe('StepAuthEnvVars', () => {
       screen.getByRole('button', { name: /download teams app package/i }),
     ).toBeDisabled();
     expect(
-      screen.getAllByRole('button', { name: /^go/i }).at(1),
-    ).toBeDisabled();
+      screen.getByRole('link', { name: /teams developer portal/i }),
+    ).toHaveAttribute('href', 'https://dev.teams.microsoft.com/home');
 
     fireEvent.change(screen.getByPlaceholderText('Microsoft Client ID'), {
       target: { value: '11111111-2222-3333-4444-555555555555' },
@@ -616,11 +683,7 @@ describe('StepAuthEnvVars', () => {
       screen.getByRole('link', { name: /download teams app package/i }),
     ).toHaveAttribute(
       'href',
-      '/api/setup/teams-app-package?botAppId=11111111-2222-3333-4444-555555555555',
-    );
-    expect(screen.getAllByRole('link', { name: /^go/i }).at(1)).toHaveAttribute(
-      'href',
-      'https://dev.teams.microsoft.com/home',
+      '/api/setup/teams-app-package?botAppId=11111111-2222-3333-4444-555555555555&botName=Roomote',
     );
   });
 
@@ -717,6 +780,52 @@ describe('StepAuthEnvVars', () => {
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_ID');
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_APP_PASSWORD');
     expect(submittedValues).not.toHaveProperty('R_TEAMS_BOT_TENANT_ID');
+  });
+
+  it('defaults the Teams bot display name unless it is runtime configured', () => {
+    const authSetup = buildAuthSetup('microsoft');
+
+    const { rerender } = render(
+      <StepAuthEnvVars
+        authSetup={authSetup}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /show advanced config/i }),
+    );
+
+    const botNameInput = screen.getByPlaceholderText('Bot display name');
+    expect(botNameInput).toHaveValue('Roomote');
+
+    const runtimeConfiguredBotName: SetupAuthStatus = {
+      ...authSetup,
+      providers: authSetup.providers.map((provider) => ({
+        ...provider,
+        fields: provider.fields.map((field) =>
+          field.envVarName === 'R_TEAMS_BOT_NAME'
+            ? {
+                ...field,
+                runtimeSatisfied: true,
+                satisfiedByEnvVarName: 'R_TEAMS_BOT_NAME',
+              }
+            : field,
+        ),
+      })),
+    };
+
+    rerender(
+      <StepAuthEnvVars
+        authSetup={runtimeConfiguredBotName}
+        selectedProviderId="microsoft"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(botNameInput).toBeDisabled();
+    expect(botNameInput).not.toHaveValue('Roomote');
   });
 
   it('links saved Microsoft credentials to the stored app package download', () => {

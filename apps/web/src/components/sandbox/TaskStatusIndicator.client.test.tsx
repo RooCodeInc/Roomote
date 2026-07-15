@@ -41,6 +41,18 @@ describe('TaskStatusIndicator', () => {
     expect(label.parentElement).toHaveClass('text-accent-foreground');
   });
 
+  it('renders the pre-dispatch sandbox provider wait state', () => {
+    render(
+      <TaskStatusIndicator
+        status={RunStatus.Pending}
+        phase="waiting_for_sandbox_provider"
+      />,
+    );
+
+    const label = screen.getByText('Waiting for sandbox provider');
+    expect(label.parentElement).toHaveClass('text-yellow-500');
+  });
+
   it('renders compact dot-only mode without text', () => {
     const { container } = render(
       <TaskStatusIndicator compact status={RunStatus.Running} />,

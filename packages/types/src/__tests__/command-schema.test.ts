@@ -6,7 +6,28 @@ import {
   commandSchema,
   environmentConfigSchema,
   environmentRepositoryConfigSchema,
+  getMissingEnvironmentRepositoryError,
 } from '../environment-config';
+
+describe('getMissingEnvironmentRepositoryError', () => {
+  it('reports configured repositories that do not exactly match linked rows', () => {
+    expect(
+      getMissingEnvironmentRepositoryError(
+        ['roomote/Test ADO', 'roomote/Test ADO/Test ADO'],
+        [{ fullName: 'roomote/Test ADO/Test ADO' }],
+      ),
+    ).toBe('Repositories are not linked to this deployment: roomote/Test ADO');
+  });
+
+  it('returns null when every configured repository is linked', () => {
+    expect(
+      getMissingEnvironmentRepositoryError(
+        ['roomote/Test ADO/Test ADO'],
+        [{ fullName: 'roomote/Test ADO/Test ADO' }],
+      ),
+    ).toBeNull();
+  });
+});
 
 describe('commandSchema', () => {
   describe('YAML block scalar support', () => {

@@ -24,6 +24,9 @@ export function buildE2bWorkerEnv({
       deploymentSlug,
       environmentId,
     }),
+    // The template snapshots Docker's packaged service, which listens on the
+    // standard Unix socket. Keep an explicit override for custom E2B runtimes.
+    DOCKER_HOST: extraEnv?.DOCKER_HOST ?? 'unix:///var/run/docker.sock',
     MISE_DATA_DIR: '/opt/mise',
     MISE_CACHE_DIR: '/opt/mise/cache',
   };

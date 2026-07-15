@@ -115,7 +115,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in `App`',
+      'Getting started on your task in App',
     );
   });
 
@@ -129,7 +129,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in `App`',
+      'Getting started on your task in App',
     );
   });
 
@@ -143,7 +143,51 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in `App` using `Opus 4.8`',
+      'Getting started on your task in App using Opus 4.8 as the coding model',
+    );
+  });
+
+  it('uses a router kickoff phrase in started messages when present', () => {
+    const blocks = buildStartedBlocks({
+      workspaceDisplayName: 'App',
+      kickoffMessage:
+        'Looking into daily environment snapshots for faster startup in App',
+      runId: 123,
+      taskId: 'task-123',
+      initiatingSlackUserId: 'U123',
+    });
+
+    expect(getPrimarySectionText(blocks)).toBe(
+      'Looking into daily environment snapshots for faster startup in App',
+    );
+  });
+
+  it('keeps model override information with a router kickoff phrase', () => {
+    const blocks = buildStartedBlocks({
+      workspaceDisplayName: 'App',
+      kickoffMessage: 'Checking login redirects in App with Opus 4.8',
+      modelDisplayName: 'Opus 4.8',
+      runId: 123,
+      taskId: 'task-123',
+      initiatingSlackUserId: 'U123',
+    });
+
+    expect(getPrimarySectionText(blocks)).toBe(
+      'Checking login redirects in App with Opus 4.8',
+    );
+  });
+
+  it('falls back to the static template when kickoff text is empty', () => {
+    const blocks = buildStartedBlocks({
+      workspaceDisplayName: 'App',
+      kickoffMessage: '   ',
+      runId: 123,
+      taskId: 'task-123',
+      initiatingSlackUserId: 'U123',
+    });
+
+    expect(getPrimarySectionText(blocks)).toBe(
+      'Getting started on your task in App',
     );
   });
 
@@ -157,7 +201,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in `App`',
+      'Getting started on your task in App',
     );
     expect(getFirstContextText(blocks)).toBe(
       '_2 other tasks currently running_',

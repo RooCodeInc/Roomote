@@ -12,8 +12,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const {
   mockStartDefinitionTask,
-  mockCancelDefinitionTask,
   mockCreateEnvironment,
+  mockRouterPush,
   mockValidateEnvironmentConfig,
   mockYamlEditorState,
 } = vi.hoisted(() => {
@@ -31,13 +31,11 @@ const {
       taskId: 'task-1',
       startedAt: '2026-03-24T00:00:00.000Z',
     }),
-    mockCancelDefinitionTask: vi.fn().mockResolvedValue({
-      success: true,
-    }),
     mockCreateEnvironment: vi.fn().mockResolvedValue({
       success: true,
       data: { id: 'env-1' },
     }),
+    mockRouterPush: vi.fn(),
     mockValidateEnvironmentConfig: vi.fn(),
     mockYamlEditorState: {
       initialConfig,
@@ -51,6 +49,9 @@ const {
 });
 
 vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
+  }),
   useSearchParams: () => new URLSearchParams(''),
 }));
 
@@ -96,37 +97,12 @@ vi.mock('@/trpc/client', () => ({
           ...options,
         }),
       },
-      cancelDefinitionTask: {
-        mutationOptions: (options = {}) => ({
-          mutationFn: mockCancelDefinitionTask,
-          ...options,
-        }),
-      },
     },
   }),
-}));
-
-vi.mock('@/app/(sandbox)/task/[taskId]/hooks', () => ({
-  useTaskCompletionNotification: vi.fn(),
 }));
 
 vi.mock('./UpdateGitHubReposHint', () => ({
   UpdateGitHubReposHint: () => <div data-testid="update-github-repos-hint" />,
-}));
-
-vi.mock('./EnvironmentDefinitionAgentTask', () => ({
-  EnvironmentDefinitionAgentTaskPanel: () => <div>task panel</div>,
-  useEnvironmentDefinitionAgentState: () => ({
-    succeeded: false,
-    failed: false,
-    session: {
-      taskRun: {
-        taskPhase: 'running',
-      },
-    },
-    taskIsActive: true,
-    matchingEnvironment: null,
-  }),
 }));
 
 vi.mock('./YamlEnvironmentEditor', () => ({
@@ -261,7 +237,7 @@ describe('CreateEnvironmentPage', () => {
     mockYamlEditorState.reset();
   });
 
-  it('clears setup guidance when picking another repo after starting the agent', async () => {
+  it('starts an environment definition task and opens it in the task view', async () => {
     const queryClient = new QueryClient();
 
     render(
@@ -284,34 +260,7 @@ describe('CreateEnvironmentPage', () => {
       repositoryIds: ['repo-1'],
       changeRequest: 'Use the API service from the first repo set.',
     });
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: /Pick a different repo/i }),
-    );
-    fireEvent.click(screen.getByRole('button', { name: 'Pick another repo' }));
-
-    await waitFor(() => {
-      expect(mockCancelDefinitionTask).toHaveBeenCalled();
-    });
-    expect(mockCancelDefinitionTask.mock.calls[0]?.[0]).toEqual({
-      taskId: 'task-1',
-    });
-
-    const guidanceTextarea = await screen.findByPlaceholderText(
-      /Optional agent guidance/i,
-    );
-    expect(guidanceTextarea).toHaveValue('');
-
-    fireEvent.click(screen.getByLabelText(/acme\/web/i));
-    fireEvent.click(screen.getByRole('button', { name: 'Start Agent' }));
-
-    await waitFor(() => {
-      expect(mockStartDefinitionTask).toHaveBeenCalledTimes(2);
-    });
-    expect(mockStartDefinitionTask.mock.calls[1]?.[0]).toEqual({
-      repositoryIds: ['repo-2'],
-      changeRequest: undefined,
-    });
+    expect(mockRouterPush).toHaveBeenCalledWith('/task/task-1');
   });
 
   it('clears stale continue-anyway state after yaml edits', async () => {

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs';
+import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,11 +28,9 @@ import {
 export async function installNodePty(logger: StartupLogger): Promise<void> {
   try {
     // node-pty is a native module that must be compiled at install time.
-    // We use require() here (not import()) because we only need to check
-    // whether the module is resolvable — not actually load it. A failed
-    // require() throws synchronously, which is cheap to catch.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    require('node-pty');
+    // Use createRequire (not dynamic import) so a missing module throws
+    // synchronously and we cut the resolve check short.
+    createRequire(import.meta.url)('node-pty');
     return;
   } catch {
     // Not found, proceed with install.

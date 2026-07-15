@@ -9,8 +9,8 @@
     "./slack-notifier": "./src/slack-notifier.ts"
   },
   "scripts": {
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",

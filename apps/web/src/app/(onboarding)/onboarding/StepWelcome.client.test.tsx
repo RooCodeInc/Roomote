@@ -12,19 +12,15 @@ vi.mock('../setup/StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
 
-vi.mock('../OnboardingWordmark', () => ({
-  OnboardingWordmark: () => <div>Wordmark</div>,
-}));
-
 import { StepWelcome } from './StepWelcome';
 
 describe('Onboarding StepWelcome', () => {
-  it('renders the product name with a space before agents', () => {
+  it('renders the product intro copy', () => {
     render(<StepWelcome onContinue={() => {}} />);
 
     expect(
       screen.getByText(
-        /You don't even need to be an engineer\. Roomote agents are/i,
+        /You don't even need to be an engineer\. Roomote runs in/i,
       ),
     ).toBeInTheDocument();
   });

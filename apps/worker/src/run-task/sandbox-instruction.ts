@@ -1,5 +1,6 @@
 import type {
   Command,
+  DockerProject,
   EnvironmentConfig,
   EnvironmentRepositoryConfig,
   NamedPort,
@@ -12,6 +13,36 @@ function withDefinedEntries<T extends Record<string, unknown>>(
 ): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(value).filter(([, entryValue]) => entryValue !== undefined),
+  );
+}
+
+function sanitizeDockerProjectForPrompt(
+  project: DockerProject,
+): Record<string, unknown> {
+  const common = {
+    type: project.type,
+    name: project.name,
+    repository: project.repository,
+    working_dir: project.working_dir,
+    ports: project.ports,
+    required: project.required,
+  };
+
+  return withDefinedEntries(
+    project.type === 'compose'
+      ? {
+          ...common,
+          files: project.files,
+          profiles: project.profiles,
+          services: project.services,
+        }
+      : {
+          ...common,
+          context: project.context,
+          dockerfile: project.dockerfile,
+          target: project.target,
+          command: project.command,
+        },
   );
 }
 
@@ -90,6 +121,9 @@ export function sanitizeEnvironmentConfigForPrompt(
       sanitizeRepositoryForPrompt,
     ),
     services: environmentConfig.services?.map(sanitizeServiceForPrompt),
+    docker_projects: environmentConfig.docker_projects?.map(
+      sanitizeDockerProjectForPrompt,
+    ),
   });
 }
 
@@ -136,6 +170,11 @@ export function buildSandboxInstruction(
   environmentConfig?: EnvironmentConfig,
   options?: {
     envVars?: Record<string, string | undefined>;
+    /**
+     * True when repository setup commands are still running in the background
+     * at instruction-build time, so the agent must not assume they finished.
+     */
+    backgroundEnvironmentSetupPending?: boolean;
   },
 ): string | undefined {
   const lines: string[] = [
@@ -153,15 +192,29 @@ export function buildSandboxInstruction(
     );
 
     if (hasRepositoryCommands(environmentConfig)) {
-      lines.push(
-        '',
-        'Repository setup commands from this environment configuration were already executed before your task started.',
-      );
+      if (options?.backgroundEnvironmentSetupPending) {
+        lines.push(
+          '',
+          'Repository setup commands from this environment configuration run in the background and may still be executing while you work. Do not assume dependencies are installed or services are ready: check `.roomote/setup-status.json` in the workspace root for live per-command status, and read the logs under `.roomote/setup-logs/` if something you need appears to be missing. You will receive a message when background environment setup finishes. Never re-run a setup command that is still marked as running.',
+        );
+      } else {
+        lines.push(
+          '',
+          'Repository setup commands from this environment configuration were already executed before your task started. Per-command results are recorded in `.roomote/setup-status.json` in the workspace root, with output logs under `.roomote/setup-logs/`.',
+        );
+      }
     }
 
     if (hasDetachedCommands(environmentConfig)) {
       lines.push(
         'Any command marked `detached: true` was started in the background under PM2 supervision. Check its `logfile` and `pm2 status` before starting another copy.',
+      );
+    }
+
+    if (environmentConfig.docker_projects?.length) {
+      lines.push(
+        '',
+        'Roomote starts configured Docker projects with Docker Compose during environment setup. They may still be building or waiting for health checks when your task begins. Run `docker compose ls` to find each Roomote-managed project name and its config files, then inspect it with `docker compose --project-name <name> --file <file> ... ps` or `docker compose --project-name <name> --file <file> ... logs` (repeat `--file` for every listed config file). If a configured project is not listed yet, wait for the existing startup rather than starting a duplicate copy.',
       );
     }
 

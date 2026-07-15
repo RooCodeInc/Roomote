@@ -15,6 +15,7 @@ import {
   type TaskTrigger,
   type TaskVisibility,
   type TaskWorkflow,
+  type TaskPhase,
   RunStatus,
   TaskPayloadKind,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
@@ -748,6 +749,10 @@ export interface EnqueueTaskOptions {
    * normal queue-driven launches.
    */
   initialStatus?: RunStatus.Pending | RunStatus.Dequeued;
+  /** Optional pre-runtime phase shown while a persisted run is intentionally deferred. */
+  initialTaskPhase?: TaskPhase;
+  /** Optional actionable error attached to an intentionally deferred run. */
+  initialError?: string | null;
   /**
    * Avoid best-effort LLM title generation for short-lived synthetic jobs.
    */
@@ -796,6 +801,8 @@ export type TaskChannelBindings = {
 export type TaskPrLinkage = {
   provider: SourceControlProvider;
   host?: string | null;
+  /** Optional FK to the provider-scoped `repositories` row when known. */
+  repositoryId?: string | null;
   repository: string;
   prNumber: number;
   prUrl: string;
@@ -819,6 +826,8 @@ type FreshTask = Exclude<
  */
 export type FreshTaskLaunch = {
   task: FreshTask;
+  /** Explicit user-facing title. Locked against all LLM title generation. */
+  title?: string;
   initiator: TaskInitiator;
   workflow: TaskWorkflow;
   surface: TaskSurface;
@@ -1140,6 +1149,19 @@ async function pushRunOntoQueue(params: {
   }
 }
 
+/**
+ * Places an already-persisted pending run onto the controller queue. This is
+ * used when an external readiness gate (such as first-time hosted compute
+ * provisioning) releases a run that was created with `enqueue: false`.
+ */
+export async function queuePersistedTaskRun(taskRun: TaskRun): Promise<void> {
+  await pushRunOntoQueue({
+    taskRun,
+    scope: taskRun.queueScope ?? randomUUID(),
+    options: {},
+  });
+}
+
 export async function enqueueTask(
   input: EnqueueTaskInput,
   options: EnqueueTaskOptions = {},
@@ -1249,14 +1271,20 @@ async function enqueueFreshLaunch(
   const keepaliveMs = resolvedTaskPolicy.keepaliveMs;
   const nowTs = Math.floor(Date.now() / 1000);
 
-  const title = generateTaskRunTitle(
-    taskWithHarnessOverrides,
-    10_000,
-    'description' in taskWithHarnessOverrides.payload &&
-      taskWithHarnessOverrides.payload.description
-      ? taskWithHarnessOverrides.payload.description
-      : null,
-  );
+  const explicitTitle = input.title?.trim() || null;
+  const title =
+    explicitTitle ??
+    generateTaskRunTitle(
+      taskWithHarnessOverrides,
+      10_000,
+      'description' in taskWithHarnessOverrides.payload &&
+        taskWithHarnessOverrides.payload.description
+        ? taskWithHarnessOverrides.payload.description
+        : null,
+    );
+  const titleIsLocked =
+    explicitTitle !== null ||
+    hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type);
   const targetComputeProvider = resolveComputeProviderTarget(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
@@ -1323,7 +1351,7 @@ async function enqueueFreshLaunch(
         modelProvider: DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
         model: effectiveTaskModel,
         title,
-        ...(hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type)
+        ...(titleIsLocked
           ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
           : {}),
         prompt: initialPrompt,
@@ -1345,6 +1373,7 @@ async function enqueueFreshLaunch(
         taskId: createdTask.id,
         sourceControlProvider: input.prLinkage.provider,
         host: input.prLinkage.host ?? null,
+        repositoryId: input.prLinkage.repositoryId ?? null,
         repository: input.prLinkage.repository,
         prNumber: input.prLinkage.prNumber,
         prUrl: input.prLinkage.prUrl,
@@ -1366,6 +1395,8 @@ async function enqueueFreshLaunch(
         payloadKind: taskWithHarnessOverrides.type,
         actingUserId: options.skipInitialActingUser ? null : linkedUserId,
         status: options.initialStatus ?? RunStatus.Pending,
+        taskPhase: options.initialTaskPhase ?? null,
+        error: options.initialError ?? null,
         ...(options.initialStatus === RunStatus.Dequeued
           ? { dequeuedAt: new Date() }
           : {}),
@@ -1422,6 +1453,7 @@ async function enqueueFreshLaunch(
 
   if (
     !options.skipEarlyTitleGeneration &&
+    !explicitTitle &&
     !hasDeterministicTaskRunTitle(task.type) &&
     typeof description === 'string' &&
     description.trim()
@@ -1595,6 +1627,8 @@ async function enqueueSnapshotResume(
           payloadKind: TaskPayloadKind.SnapshotResume,
           actingUserId,
           status: options.initialStatus ?? RunStatus.Pending,
+          taskPhase: options.initialTaskPhase ?? null,
+          error: options.initialError ?? null,
           ...(options.initialStatus === RunStatus.Dequeued
             ? { dequeuedAt: new Date() }
             : {}),

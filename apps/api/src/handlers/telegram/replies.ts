@@ -1,18 +1,8 @@
 import type { CommunicationMessageButton } from '@roomote/communication';
-import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { resolveTelegramRuntimeCredentials } from '@roomote/db/server';
+import { createTelegramCommunicationProviderFromRuntimeCredentials as createTelegramCommunicationProvider } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
-
-async function createTelegramCommunicationProvider(): Promise<TelegramCommunicationProvider | null> {
-  const { botToken } = await resolveTelegramRuntimeCredentials();
-
-  if (!botToken) {
-    return null;
-  }
-
-  return new TelegramCommunicationProvider({ botToken });
-}
 
 const TELEGRAM_BOT_INFO_CACHE_TTL_MS = 5 * 60 * 1000;
 let privateTopicsCapabilityCache:
@@ -32,10 +22,12 @@ export async function telegramPrivateTopicsEnabledBestEffort(): Promise<boolean>
     return privateTopicsCapabilityCache.enabled;
   }
 
+  const provider = await createTelegramCommunicationProvider();
+
+  if (!provider) return false;
+
   try {
-    const { hasTopicsEnabled } = await new TelegramCommunicationProvider({
-      botToken,
-    }).getBotInfo();
+    const { hasTopicsEnabled } = await provider.getBotInfo();
     privateTopicsCapabilityCache = {
       botToken,
       enabled: hasTopicsEnabled,

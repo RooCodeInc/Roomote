@@ -53,8 +53,8 @@ describe('AcpToolDetails', () => {
     toolInputSpy.mockClear();
   });
 
-  it('hides expanded details for subagent rows', () => {
-    const { container } = render(
+  it('shows the subagent launch prompt when expanding without debug mode', () => {
+    render(
       <AcpToolDetails
         msg={buildMessage({
           prompt: 'Review the current branch and summarize the state.',
@@ -65,9 +65,48 @@ describe('AcpToolDetails', () => {
       />,
     );
 
+    expect(
+      screen.getByText('Review the current branch and summarize the state.'),
+    ).toBeInTheDocument();
+    expect(toolInputSpy).not.toHaveBeenCalled();
+    expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('hides expanded details for subagent rows without a prompt', () => {
+    const { container } = render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: null,
+          model: 'gpt-5.4',
+          reasoningEffort: 'low',
+          isSubagentSpawn: true,
+        })}
+      />,
+    );
+
     expect(container).toBeEmptyDOMElement();
     expect(toolInputSpy).not.toHaveBeenCalled();
     expect(codeBlockSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows the launch prompt from rawInput for OpenCode task rows', () => {
+    render(
+      <AcpToolDetails
+        msg={buildMessage({
+          prompt: null,
+          isSubagentSpawn: true,
+          rawInput: {
+            prompt: 'Inspect the OpenCode task tool prompt payload.',
+            subagent_type: 'explore',
+          },
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(
+      screen.getByText('Inspect the OpenCode task tool prompt payload.'),
+    ).toBeInTheDocument();
+    expect(toolInputSpy).not.toHaveBeenCalled();
   });
 
   it('shows structured payload details for subagent rows in debug mode', () => {

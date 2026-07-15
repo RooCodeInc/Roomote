@@ -302,6 +302,19 @@ describe('WorkerEnv', () => {
       expect(env.appEnv).toBe('production');
     });
 
+    it('should preserve the task-scoped Docker daemon endpoint', () => {
+      const env = WorkerEnv.fromProcessEnv({
+        HOME: '/home/worker',
+        PATH: '/usr/bin',
+        AUTH_TOKEN: 'my-auth-token',
+        TRPC_URL: 'https://trpc.example.com',
+        R_APP_URL: 'https://api.example.com',
+        DOCKER_HOST: 'tcp://127.0.0.1:2375',
+      } as NodeJS.ProcessEnv);
+
+      expect(env.buildUserFacingEnv().DOCKER_HOST).toBe('tcp://127.0.0.1:2375');
+    });
+
     it('should keep sandbox auth validation working after process.env cleanup', async () => {
       const { privateKey, publicKey } = generateKeyPairSync('ec', {
         namedCurve: 'P-256',

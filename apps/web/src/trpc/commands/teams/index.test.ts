@@ -14,6 +14,7 @@ const {
 
 vi.mock('@roomote/db/server', () => ({
   resolveTeamsBotRuntimeCredentials: mockResolveTeamsBotRuntimeCredentials,
+  resolveTeamsInvocationBotName: vi.fn(async () => 'Roomote'),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -77,6 +78,7 @@ describe('getTeamsIntegrationStatusCommand', () => {
     expect(status.openInTeamsUrl).toBe(
       'https://teams.microsoft.com/l/chat/0/0?users=28%3Abot-app-id',
     );
+    expect(status.botName).toBe('Roomote');
   });
 
   it('reports readiness when a primary Teams conversation was captured', async () => {

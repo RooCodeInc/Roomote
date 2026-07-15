@@ -8,6 +8,7 @@ import {
 } from '@roomote/types';
 import {
   type TaskRun,
+  authAccounts,
   db,
   environments,
   repositories,
@@ -21,6 +22,10 @@ const ADO_PROVIDER = 'ado' satisfies SourceControlProvider;
 const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
 const ADO_API_VERSION = '7.1';
 const ADO_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
+const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
+const ADO_ENTRA_RESOURCE_SCOPE =
+  '499b84ac-1321-427f-aa17-267ca6975798/.default';
+const ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS = 60_000;
 const DEFAULT_ADO_GIT_USERNAME = 'ado';
 const ADO_SERVICE_HOOK_ENSURE_CONCURRENCY = 5;
 const ADO_SERVICE_HOOK_PUBLISHER_ID = 'tfs';
@@ -118,6 +123,7 @@ export type AdoRepositoryCredential = {
   repositoryFullName: string;
   username: string;
   token: string;
+  authScheme: 'basic' | 'bearer';
   originBaseUrl: string;
 };
 
@@ -159,19 +165,45 @@ let cachedAdoDeploymentUser: {
   organizationApiBaseUrl: string;
   user: AdoCurrentUser;
 } | null = null;
+let cachedAdoEntraToken: { token: string; expiresAt: number } | null = null;
+let cachedAdoDelegatedToken: {
+  accountId: string;
+  token: string;
+  expiresAt: number;
+} | null = null;
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* / */) {
+    end -= 1;
+  }
+  return end === value.length ? value : value.slice(0, end);
+}
+
+function stripBoundarySlashes(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && value.charCodeAt(start) === 47 /* / */) {
+    start += 1;
+  }
+  while (end > start && value.charCodeAt(end - 1) === 47 /* / */) {
+    end -= 1;
+  }
+  return start === 0 && end === value.length ? value : value.slice(start, end);
+}
 
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const trimmed = stripTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('ADO_BASE_URL cannot be empty.');
   }
 
-  return new URL(trimmed).toString().replace(/\/+$/, '');
+  return stripTrailingSlashes(new URL(trimmed).toString());
 }
 
 function normalizeOrganization(organization: string): string {
-  const trimmed = organization.trim().replace(/^\/+|\/+$/g, '');
+  const trimmed = stripBoundarySlashes(organization.trim());
 
   if (!trimmed) {
     throw new Error(
@@ -183,7 +215,213 @@ function normalizeOrganization(organization: string): string {
 }
 
 export async function resolveAdoToken(): Promise<string | null> {
-  return resolveDeploymentEnvVar('ADO_TOKEN');
+  const authMode = await resolveDeploymentEnvVar('ADO_AUTH_MODE');
+  if (authMode === 'delegated') {
+    return resolveAdoDelegatedToken();
+  }
+
+  const pat = await resolveDeploymentEnvVar('ADO_TOKEN');
+  if (pat?.trim() && authMode !== 'entra') {
+    return pat;
+  }
+
+  const clientId = await resolveDeploymentEnvVar('ADO_CLIENT_ID');
+  const clientSecret = await resolveDeploymentEnvVar('ADO_CLIENT_SECRET');
+  const tenantId =
+    (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
+    (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID'));
+
+  if (!clientId?.trim() || !clientSecret?.trim() || !tenantId?.trim()) {
+    return null;
+  }
+
+  if (
+    cachedAdoEntraToken &&
+    cachedAdoEntraToken.expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS
+  ) {
+    return cachedAdoEntraToken.token;
+  }
+
+  const response = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+        scope: ADO_ENTRA_TOKEN_SCOPE,
+        grant_type: 'client_credentials',
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Azure DevOps Microsoft Entra token request failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: unknown;
+    expires_in?: unknown;
+  };
+  const token =
+    typeof payload.access_token === 'string' ? payload.access_token : null;
+  const expiresIn =
+    typeof payload.expires_in === 'number' ? payload.expires_in : 3600;
+
+  if (!token) {
+    throw new Error(
+      'Azure DevOps Microsoft Entra token response did not include an access token.',
+    );
+  }
+
+  cachedAdoEntraToken = {
+    token,
+    expiresAt: Date.now() + expiresIn * 1000,
+  };
+
+  return token;
+}
+
+async function resolveAdoDelegatedToken(): Promise<string | null> {
+  const linkedAccountId = await resolveDeploymentEnvVar(
+    'ADO_LINKED_ACCOUNT_ID',
+  );
+  const clientId = await resolveDeploymentEnvVar('ADO_CLIENT_ID');
+  const clientSecret = await resolveDeploymentEnvVar('ADO_CLIENT_SECRET');
+  const tenantId =
+    (await resolveDeploymentEnvVar('ADO_TENANT_ID')) ??
+    (await resolveDeploymentEnvVar('R_MICROSOFT_TENANT_ID'));
+
+  if (!linkedAccountId?.trim()) {
+    return null;
+  }
+
+  const account = await db.query.authAccounts.findFirst({
+    where: and(
+      eq(authAccounts.providerId, 'ado'),
+      eq(authAccounts.accountId, linkedAccountId.trim()),
+    ),
+    columns: {
+      id: true,
+      accountId: true,
+      accessToken: true,
+      refreshToken: true,
+      accessTokenExpiresAt: true,
+    },
+  });
+
+  if (!account?.accessToken) {
+    return null;
+  }
+
+  const expiresAt = account.accessTokenExpiresAt?.getTime() ?? 0;
+  if (
+    expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS &&
+    cachedAdoDelegatedToken?.accountId === account.accountId &&
+    cachedAdoDelegatedToken.expiresAt >
+      Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS
+  ) {
+    return cachedAdoDelegatedToken.token;
+  }
+
+  if (expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS) {
+    cachedAdoDelegatedToken = {
+      accountId: account.accountId,
+      token: account.accessToken,
+      expiresAt,
+    };
+    return account.accessToken;
+  }
+
+  if (
+    !account.refreshToken ||
+    !clientId?.trim() ||
+    !clientSecret?.trim() ||
+    !tenantId?.trim()
+  ) {
+    throw new Error(
+      'Azure DevOps delegated connection needs to be reconnected. Open Settings and connect with Microsoft again.',
+    );
+  }
+
+  const response = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: clientId.trim(),
+        client_secret: clientSecret.trim(),
+        refresh_token: account.refreshToken,
+        scope: ADO_ENTRA_RESOURCE_SCOPE,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Azure DevOps delegated token refresh failed: ${response.status} ${response.statusText}`,
+    );
+  }
+
+  const payload = (await response.json()) as {
+    access_token?: unknown;
+    refresh_token?: unknown;
+    expires_in?: unknown;
+  };
+  const accessToken =
+    typeof payload.access_token === 'string' ? payload.access_token : null;
+  if (!accessToken) {
+    throw new Error(
+      'Azure DevOps delegated token response did not include an access token.',
+    );
+  }
+
+  const nextExpiresAt =
+    Date.now() +
+    (typeof payload.expires_in === 'number' ? payload.expires_in : 3600) * 1000;
+  const nextRefreshToken =
+    typeof payload.refresh_token === 'string'
+      ? payload.refresh_token
+      : account.refreshToken;
+
+  await db
+    .update(authAccounts)
+    .set({
+      accessToken,
+      refreshToken: nextRefreshToken,
+      accessTokenExpiresAt: new Date(nextExpiresAt),
+      updatedAt: new Date(),
+    })
+    .where(eq(authAccounts.id, account.id));
+
+  cachedAdoDelegatedToken = {
+    accountId: account.accountId,
+    token: accessToken,
+    expiresAt: nextExpiresAt,
+  };
+  return accessToken;
+}
+
+export function clearAdoEntraTokenCache(): void {
+  cachedAdoEntraToken = null;
+  cachedAdoDelegatedToken = null;
+}
+
+function isEntraAccessToken(token: string): boolean {
+  return token.split('.').length === 3;
+}
+
+function buildAdoAuthorizationHeader(token: string): string {
+  if (isEntraAccessToken(token)) {
+    return `Bearer ${token}`;
+  }
+
+  return buildAdoBasicAuthHeader(token);
 }
 
 export async function resolveAdoOrganization(): Promise<string | null> {
@@ -207,12 +445,12 @@ export function buildAdoOrganizationApiBaseUrl({
   baseUrl: string;
   organization: string;
 }): string {
-  return new URL(
-    `${encodeURIComponent(normalizeOrganization(organization))}/`,
-    `${normalizeBaseUrl(baseUrl)}/`,
-  )
-    .toString()
-    .replace(/\/+$/, '');
+  return stripTrailingSlashes(
+    new URL(
+      `${encodeURIComponent(normalizeOrganization(organization))}/`,
+      `${normalizeBaseUrl(baseUrl)}/`,
+    ).toString(),
+  );
 }
 
 function buildAdoApiUrl(
@@ -261,7 +499,7 @@ async function requestAdoJson<T>({
       method,
       headers: {
         Accept: 'application/json',
-        Authorization: buildAdoBasicAuthHeader(token),
+        Authorization: buildAdoAuthorizationHeader(token),
         ...(body ? { 'Content-Type': 'application/json' } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -307,7 +545,7 @@ async function resolveAdoOrganizationApiBaseUrl({
   organizationApiBaseUrl?: string;
 } = {}): Promise<string | null> {
   if (organizationApiBaseUrl?.trim()) {
-    return organizationApiBaseUrl.replace(/\/+$/, '');
+    return stripTrailingSlashes(organizationApiBaseUrl);
   }
 
   const resolvedOrganization = organization ?? (await resolveAdoOrganization());
@@ -488,7 +726,7 @@ export async function validateAdoToken({
         method: 'GET',
         headers: {
           Accept: 'application/json',
-          Authorization: buildAdoBasicAuthHeader(token),
+          Authorization: buildAdoAuthorizationHeader(token),
         },
         signal: AbortSignal.timeout(timeoutMs),
       },
@@ -500,7 +738,7 @@ export async function validateAdoToken({
       return {
         status: 'invalid',
         error:
-          'Azure DevOps rejected the token. Confirm the PAT is active, belongs to the organization, and has Code read access.',
+          'Azure DevOps rejected the access token. Confirm it is active, belongs to the organization, and has Code read access.',
       };
     }
 
@@ -1429,14 +1667,20 @@ async function resolveAdoRepositoryRowsForTaskRun(taskRun: TaskRun) {
 }
 
 function normalizeCredentialRepositoryPath(rawPath: string): string {
-  return rawPath
-    .replace(/^\/+/, '')
-    .replace(/\.git$/, '')
-    .replace(/\/+$/, '');
+  let start = 0;
+  while (start < rawPath.length && rawPath.charCodeAt(start) === 47 /* / */) {
+    start += 1;
+  }
+
+  let path = start === 0 ? rawPath : rawPath.slice(start);
+  if (path.endsWith('.git')) {
+    path = path.slice(0, -4);
+  }
+  return stripTrailingSlashes(path);
 }
 
 function stripBasePathPrefix(rawPath: string, originBaseUrl: string): string {
-  const basePath = new URL(originBaseUrl).pathname.replace(/\/+$/, '');
+  const basePath = stripTrailingSlashes(new URL(originBaseUrl).pathname);
 
   if (!basePath || basePath === '/') {
     return rawPath;
@@ -1477,6 +1721,7 @@ function buildAdoGitCredential({
       repositoryFullName: normalizeCredentialRepositoryPath(repositoryPath),
       username,
       token,
+      authScheme: isEntraAccessToken(token) ? 'bearer' : 'basic',
       originBaseUrl,
     };
   } catch {
@@ -1485,6 +1730,7 @@ function buildAdoGitCredential({
       repositoryFullName: fallbackRepositoryFullName,
       username,
       token,
+      authScheme: isEntraAccessToken(token) ? 'bearer' : 'basic',
       originBaseUrl,
     };
   }

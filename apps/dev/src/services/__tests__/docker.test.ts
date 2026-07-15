@@ -1,9 +1,14 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import Docker from 'dockerode';
 import { execa } from 'execa';
 
-import { DockerService } from '../docker';
+import {
+  DockerService,
+  WORKER_IMAGE_SCHEMA_LABEL,
+  WORKER_IMAGE_SCHEMA_VERSION,
+} from '../docker';
 
 vi.mock('execa', () => ({
   execa: vi.fn(),
@@ -30,7 +35,8 @@ describe('DockerService.checkContainers', () => {
     vi.useRealTimers();
   });
 
-  it('does nothing when base infra containers are already running', async () => {
+  it('recreates the local edge when base infra containers are already running', async () => {
+    const expectedCwd = path.resolve(process.cwd(), '../..');
     const listContainers = vi
       .fn()
       .mockResolvedValueOnce([
@@ -53,9 +59,23 @@ describe('DockerService.checkContainers', () => {
       } as unknown as Docker;
     } as unknown as typeof Docker);
 
+    vi.mocked(execa).mockResolvedValue({} as Awaited<ReturnType<typeof execa>>);
+
     await DockerService.checkContainers(false);
 
-    expect(execa).not.toHaveBeenCalled();
+    expect(execa).toHaveBeenCalledWith(
+      'docker',
+      ['compose', 'up', 'caddy-dev', '-d', '--force-recreate', '--wait'],
+      expect.objectContaining({
+        cwd: expectedCwd,
+        extendEnv: false,
+      }),
+    );
+    expect(execa).not.toHaveBeenCalledWith(
+      'pnpm',
+      ['infra:up'],
+      expect.anything(),
+    );
   });
 
   it('starts full infra when redis is missing', async () => {
@@ -344,6 +364,20 @@ describe('DockerService.ensureWorkerImage', () => {
     process.env = originalEnv;
   });
 
+  it('keeps the worker Dockerfile schema marker in sync with the reuse check', async () => {
+    const dockerfile = await readFile(
+      path.resolve(process.cwd(), '../worker/Dockerfile'),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain(
+      `ARG ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
+    );
+    expect(dockerfile).toContain(
+      `LABEL ${WORKER_IMAGE_SCHEMA_LABEL}="\${ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION}"`,
+    );
+  });
+
   it('builds the local worker image for the default Docker platform when missing', async () => {
     const rootDir = path.resolve(process.cwd(), '../..');
 
@@ -356,6 +390,8 @@ describe('DockerService.ensureWorkerImage', () => {
     expect(execa).toHaveBeenCalledWith('docker', [
       'image',
       'inspect',
+      '--format',
+      `{{ index .Config.Labels "${WORKER_IMAGE_SCHEMA_LABEL}" }}`,
       'roomote-worker:local',
     ]);
     expect(execa).toHaveBeenCalledWith(
@@ -364,6 +400,8 @@ describe('DockerService.ensureWorkerImage', () => {
         'build',
         '--platform',
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',
@@ -374,8 +412,88 @@ describe('DockerService.ensureWorkerImage', () => {
     );
   });
 
-  it('reuses an existing worker image when required networking tools are available', async () => {
-    vi.mocked(execa).mockResolvedValue({} as Awaited<ReturnType<typeof execa>>);
+  it('reuses an existing worker image when its schema and required tools are current', async () => {
+    vi.mocked(execa)
+      .mockResolvedValueOnce({
+        stdout: `${WORKER_IMAGE_SCHEMA_VERSION}\n`,
+      } as Awaited<ReturnType<typeof execa>>)
+      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>);
+
+    await DockerService.ensureWorkerImage(false);
+
+    expect(execa).toHaveBeenCalledWith('docker', [
+      'image',
+      'inspect',
+      '--format',
+      `{{ index .Config.Labels "${WORKER_IMAGE_SCHEMA_LABEL}" }}`,
+      'roomote-worker:local',
+    ]);
+    expect(execa).toHaveBeenCalledWith('docker', [
+      'run',
+      '--rm',
+      '--platform',
+      process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+      '--entrypoint',
+      '/bin/sh',
+      'roomote-worker:local',
+      '-c',
+      'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null && command -v docker >/dev/null && docker --version >/dev/null && docker compose version >/dev/null',
+    ]);
+    expect(execa).not.toHaveBeenCalledWith(
+      'docker',
+      expect.arrayContaining(['build']),
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    ['missing', '<no value>\n'],
+    ['outdated', '0\n'],
+  ])(
+    'rebuilds an existing worker image with a %s schema',
+    async (_, schema) => {
+      const rootDir = path.resolve(process.cwd(), '../..');
+
+      vi.mocked(execa)
+        .mockResolvedValueOnce({
+          stdout: schema,
+        } as Awaited<ReturnType<typeof execa>>)
+        .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>);
+
+      await DockerService.ensureWorkerImage(false);
+
+      expect(execa).not.toHaveBeenCalledWith(
+        'docker',
+        expect.arrayContaining(['run']),
+      );
+      expect(execa).toHaveBeenCalledWith(
+        'docker',
+        [
+          'build',
+          '--platform',
+          process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+          '--build-arg',
+          `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
+          '-f',
+          'apps/worker/Dockerfile',
+          '-t',
+          'roomote-worker:local',
+          '.',
+        ],
+        { cwd: rootDir },
+      );
+    },
+  );
+
+  it('rebuilds a current worker image that lacks Docker Compose', async () => {
+    const rootDir = path.resolve(process.cwd(), '../..');
+
+    vi.mocked(execa)
+      .mockResolvedValueOnce({
+        stdout: `${WORKER_IMAGE_SCHEMA_VERSION}\n`,
+      } as Awaited<ReturnType<typeof execa>>)
+      .mockRejectedValueOnce(new Error('docker compose is missing'))
+      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>);
 
     await DockerService.ensureWorkerImage(false);
 
@@ -388,31 +506,16 @@ describe('DockerService.ensureWorkerImage', () => {
       '/bin/sh',
       'roomote-worker:local',
       '-c',
-      'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null',
+      'test -x /usr/sbin/ip && /usr/sbin/ip -Version >/dev/null && command -v docker >/dev/null && docker --version >/dev/null && docker compose version >/dev/null',
     ]);
-    expect(execa).not.toHaveBeenCalledWith(
-      'docker',
-      expect.arrayContaining(['build']),
-      expect.anything(),
-    );
-  });
-
-  it('rebuilds an existing worker image that lacks required networking tools', async () => {
-    const rootDir = path.resolve(process.cwd(), '../..');
-
-    vi.mocked(execa)
-      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>)
-      .mockRejectedValueOnce(new Error('ip is missing'))
-      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>);
-
-    await DockerService.ensureWorkerImage(false);
-
     expect(execa).toHaveBeenCalledWith(
       'docker',
       [
         'build',
         '--platform',
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',
@@ -437,6 +540,8 @@ describe('DockerService.ensureWorkerImage', () => {
     expect(execa).toHaveBeenCalledWith('docker', [
       'image',
       'inspect',
+      '--format',
+      `{{ index .Config.Labels "${WORKER_IMAGE_SCHEMA_LABEL}" }}`,
       'custom-worker:test',
     ]);
     expect(execa).toHaveBeenCalledWith(
@@ -445,6 +550,8 @@ describe('DockerService.ensureWorkerImage', () => {
         'build',
         '--platform',
         'linux/arm64',
+        '--build-arg',
+        `ROOMOTE_WORKER_RUNTIME_SCHEMA_VERSION=${WORKER_IMAGE_SCHEMA_VERSION}`,
         '-f',
         'apps/worker/Dockerfile',
         '-t',

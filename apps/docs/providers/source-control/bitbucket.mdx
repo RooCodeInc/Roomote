@@ -22,13 +22,13 @@ the workspaces or repositories Roomote should use. In that account's
 choose **Create API token with scopes**, select **Bitbucket** as the app, and
 grant these scopes:
 
-| Scope | Needed for |
-| ----- | ---------- |
-| read:repository:bitbucket and write:repository:bitbucket | cloning, branch creation, and commits |
-| read:pullrequest:bitbucket and write:pullrequest:bitbucket | pull request workflows and comments |
-| read:webhook:bitbucket and write:webhook:bitbucket | automatic webhook setup during repository sync |
-| read:workspace:bitbucket | workspace discovery during repository sync |
-| read:user:bitbucket | identity validation when saving credentials |
+| Scope                                                      | Needed for                                     |
+| ---------------------------------------------------------- | ---------------------------------------------- |
+| read:repository:bitbucket and write:repository:bitbucket   | cloning, branch creation, and commits          |
+| read:pullrequest:bitbucket and write:pullrequest:bitbucket | pull request workflows and comments            |
+| read:webhook:bitbucket and write:webhook:bitbucket         | automatic webhook setup during repository sync |
+| read:workspace:bitbucket                                   | workspace discovery during repository sync     |
+| read:user:bitbucket                                        | identity validation when saving credentials    |
 
 Save the token and the Atlassian account email in setup, deployment env vars,
 or local `.env.local`:
@@ -51,6 +51,10 @@ git-over-HTTPS, Roomote automatically uses Bitbucket's static
 `x-bitbucket-api-token-auth` user, so no extra configuration is needed.
 `BITBUCKET_BASE_URL` defaults to `https://bitbucket.org`. Only Bitbucket Cloud
 is accepted; other hosts are rejected.
+
+The setup flow asks only for the API token and its Atlassian account email.
+Roomote uses the Bitbucket Cloud URL and generates the webhook secret
+automatically; optional OAuth settings remain available under Settings.
 
 ## Sync repositories
 

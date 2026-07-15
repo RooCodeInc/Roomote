@@ -35,6 +35,12 @@ service code, resolves your public callback URL, starts Postgres, Redis, and
 MinIO if needed, builds the local worker release archive, and starts the
 Roomote services.
 
+The public development edge also proxies signed artifact-storage paths to
+local MinIO. Hosted compute providers such as E2B, Modal, and Daytona can
+therefore upload screenshots and other artifacts without direct access to your
+machine's localhost ports. An explicit `S3_PRESIGN_ENDPOINT` continues to take
+precedence when you use separate object storage.
+
 Use a public HTTPS URL, such as an ngrok domain, when testing provider
 callbacks from source control or communications providers. Local-only URLs are
 fine for dashboard work that does not need external callbacks.
