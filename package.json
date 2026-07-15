@@ -13,6 +13,7 @@
     "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "lint": "pnpm format:check && pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
     "lint:fast": "pnpm exec oxlint --deny-warnings && pnpm exec turbo lint --filter=@roomote/web --filter=@roomote/worker --log-order grouped --output-logs new-only",
+    "lint:pre-push": "node scripts/pre-push-checks.mjs",
     "check-types": "turbo check-types --log-order grouped --output-logs new-only",
     "check-types:fast": "turbo check-types:fast --log-order grouped --output-logs new-only",
     "test": "pnpm --silent --filter @roomote/db db:push:test && turbo test --concurrency=1 --log-order grouped --output-logs new-only",
