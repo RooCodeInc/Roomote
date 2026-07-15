@@ -14,6 +14,7 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
+  RunStatus,
   isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
@@ -41,7 +42,6 @@ import { Header } from './Header';
 import { HistoricalContent } from './HistoricalContent';
 import { getTaskNotificationPhase } from './hooks/task-notification-phase';
 import { MemoizedLiveContent } from './LiveContent';
-import { EnvironmentDefinitionAgentTaskPanel } from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
 
 export default function SandboxPage() {
   const { taskId: unresolvedTaskId } = useParams<{ taskId: string }>();
@@ -77,6 +77,10 @@ export default function SandboxPage() {
     taskRun?.payloadKind === TaskPayloadKind.SnapshotResume &&
     sessionState === 'boot-failed' &&
     (hasTranscriptHistory || hasArtifacts || hasVisibleSessionPrompt);
+  const shouldRenderLiveSetupOnboarding =
+    task?.workflow === 'setup_onboarding' &&
+    taskRun?.status === RunStatus.Idle &&
+    taskRun.taskPhase === 'waiting_for_prompt';
   const handleBootStatusChange = useCallback(() => {
     queryClient.invalidateQueries({
       queryKey: trpc.sandboxSession.byTaskId.queryKey(),
@@ -225,21 +229,10 @@ export default function SandboxPage() {
     );
   }
 
-  if (task?.workflow === 'setup_onboarding') {
-    return (
-      <FramedSurface>
-        <div className="h-full min-h-0 p-6">
-          <EnvironmentDefinitionAgentTaskPanel
-            session={session}
-            className="h-full"
-            showHeader={false}
-          />
-        </div>
-      </FramedSurface>
-    );
-  }
-
-  if (sessionState === 'historical' || sessionState === 'resuming') {
+  if (
+    (sessionState === 'historical' || sessionState === 'resuming') &&
+    !shouldRenderLiveSetupOnboarding
+  ) {
     return (
       <HistoricalSandboxProvider
         taskId={taskId}

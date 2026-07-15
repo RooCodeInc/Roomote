@@ -114,15 +114,6 @@ vi.mock('./LiveContent', () => ({
   MemoizedLiveContent: () => <div data-testid="live-content" />,
 }));
 
-vi.mock(
-  '@/components/settings/environments/EnvironmentDefinitionAgentTask',
-  () => ({
-    EnvironmentDefinitionAgentTaskPanel: () => (
-      <div data-testid="environment-definition-agent-task-panel" />
-    ),
-  }),
-);
-
 import SandboxPage from './page';
 
 function renderPage() {
@@ -228,7 +219,7 @@ describe('SandboxPage', () => {
     expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
   });
 
-  it('renders setup onboarding tasks with the environment definition panel', () => {
+  it('renders paused setup onboarding tasks with the live task surface', () => {
     useTaskSessionMock.mockReturnValue({
       ...baseSession,
       sessionState: 'historical',
@@ -248,10 +239,9 @@ describe('SandboxPage', () => {
 
     renderPage();
 
-    expect(
-      screen.getByTestId('environment-definition-agent-task-panel'),
-    ).toBeInTheDocument();
-    expect(screen.queryByTestId('sandbox-provider')).not.toBeInTheDocument();
+    expect(screen.getByTestId('sandbox-provider')).toBeInTheDocument();
+    expect(screen.getByTestId('live-content')).toBeInTheDocument();
+    expect(screen.queryByTestId('historical-provider')).not.toBeInTheDocument();
   });
 
   it('renders the transcript while booting when the initial prompt is visible even before messages exist', () => {

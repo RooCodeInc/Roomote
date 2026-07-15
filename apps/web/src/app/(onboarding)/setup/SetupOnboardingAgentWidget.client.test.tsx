@@ -9,19 +9,6 @@ vi.mock(
   () => ({
     useEnvironmentDefinitionAgentState: (...args: unknown[]) =>
       useEnvironmentDefinitionAgentStateMock(...args),
-    EnvironmentDefinitionAgentTaskPanel: ({
-      title,
-      showHeader = true,
-    }: {
-      title?: string;
-      session: unknown;
-      className?: string;
-      showHeader?: boolean;
-    }) => (
-      <div>
-        {showHeader ? (title ?? 'environment definition panel') : 'panel'}
-      </div>
-    ),
   }),
 );
 
@@ -63,7 +50,10 @@ vi.mock('@/components/system', () => ({
     onClick?: () => void;
     asChild?: boolean;
   } & HTMLAttributes<HTMLButtonElement>) => {
-    void asChild;
+    if (asChild) {
+      return <>{children}</>;
+    }
+
     return (
       <button onClick={onClick} type="button" {...props}>
         {children}
@@ -153,7 +143,7 @@ describe('SetupOnboardingAgentWidget', () => {
     expect(onOpenStep).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the transcript inline in the floating window when expanded without a duplicate inner header', () => {
+  it('links to the normal task page when expanded', () => {
     render(
       <SetupOnboardingAgentWidget
         taskId="task-1"
@@ -171,7 +161,11 @@ describe('SetupOnboardingAgentWidget', () => {
       screen.getByRole('button', { name: 'Collapse onboarding agent' }),
     ).toBeInTheDocument();
     expect(screen.getAllByText('Onboarding agent')).toHaveLength(1);
-    expect(screen.queryByText('task status')).not.toBeInTheDocument();
+    expect(screen.getByText('task status')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View task' })).toHaveAttribute(
+      'href',
+      '/task/task-1',
+    );
   });
 
   it('shows Finish in expanded mode when onboarding succeeded and closes with toast', () => {

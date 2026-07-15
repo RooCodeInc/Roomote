@@ -14,10 +14,7 @@ import { SETTINGS_PATHS } from '@/lib/settings';
 import { useRetryEnvironmentVerification } from '@/hooks/environments';
 import { Button, Check, GripVertical, Maximize2 } from '@/components/system';
 import { TaskStatusIndicator } from '@/components/sandbox';
-import {
-  EnvironmentDefinitionAgentTaskPanel,
-  useEnvironmentDefinitionAgentState,
-} from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
+import { useEnvironmentDefinitionAgentState } from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
 
 type WidgetPosition = {
   x: number;
@@ -250,19 +247,29 @@ export function SetupOnboardingAgentWidget({
 
         {expanded ? (
           <div className="space-y-3 p-4">
-            <EnvironmentDefinitionAgentTaskPanel
-              title="Onboarding agent"
-              session={session}
-              className="h-[min(70vh,42rem)] max-h-[70vh]"
-              showHeader={false}
-            />
-            {succeeded ? (
-              <div className="flex justify-end">
+            <div className="flex gap-2 items-start">
+              <TaskStatusIndicator
+                status={session.taskRun?.status}
+                phase={session.taskRun?.taskPhase}
+                lastErrorMessage={session.taskRun?.error}
+                compact={true}
+                className="relative top-1.5"
+              />
+              <p className="text-sm text-muted-foreground">{statusCopy}</p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/task/${taskId}`}>
+                  <Maximize2 />
+                  View task
+                </Link>
+              </Button>
+              {succeeded ? (
                 <Button type="button" size="sm" onClick={handleFinish}>
                   Finish
                 </Button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         ) : (
           <div className="space-y-4 px-4 pt-2">
