@@ -5,6 +5,7 @@ import {
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
 import {
+  createDiscordCommunicationProviderFromRuntimeCredentials,
   createTeamsCommunicationProviderFromRuntimeCredentials,
   createTelegramCommunicationProviderFromRuntimeCredentials,
 } from '@roomote/sdk/server';
@@ -179,11 +180,77 @@ async function sendTeamsChannelPost(params: {
   });
 }
 
+async function sendDiscordChannelPost(params: {
+  taskRun: ChannelPostTaskRun;
+  parsedBody: ParsedChannelPostBody;
+}): Promise<Response> {
+  const jobChannelId = getCommunicationChannelFromTaskPayload(
+    params.taskRun.payload,
+  );
+
+  if (!isOwnChannel(params.parsedBody.channel, jobChannelId)) {
+    return jsonResponse(
+      {
+        error:
+          'Discord channel posts are only available for the channel this task was launched from',
+      },
+      403,
+    );
+  }
+
+  const provider =
+    await createDiscordCommunicationProviderFromRuntimeCredentials();
+
+  if (!provider) {
+    return jsonResponse(
+      { error: 'Discord bot token is not configured for outbound posts' },
+      503,
+    );
+  }
+
+  const { images, errorResponse } = await getCommunicationReplyImages({
+    taskRun: { id: params.taskRun.id, taskId: params.taskRun.taskId },
+    parsedBody: params.parsedBody,
+  });
+  if (errorResponse) {
+    return errorResponse;
+  }
+
+  const text = params.parsedBody.text?.trim();
+  if (!text && images.length === 0) {
+    return jsonResponse(
+      { error: 'Channel posts require text or image attachments' },
+      400,
+    );
+  }
+
+  // Without an explicit thread target, keep the post in the task's own
+  // thread so it lands next to the conversation instead of the parent
+  // channel.
+  const threadId =
+    params.parsedBody.threadTs ??
+    getCommunicationThreadIdFromTaskPayload(params.taskRun.payload) ??
+    undefined;
+
+  const reply = await provider.postMessage({
+    channelId: jobChannelId!,
+    ...(threadId ? { threadId } : {}),
+    ...(text ? { text } : {}),
+    textFormat: 'markdown',
+    images,
+  });
+
+  return jsonResponse({
+    messageTs: reply.messageId,
+    channelId: jobChannelId,
+  });
+}
+
 /**
  * Provider dispatch for the channel_post MCP endpoint, mirroring
- * `maybeSendCommunicationThreadReply`: tasks originating from Teams or
- * Telegram post through their communication provider, anything else falls
- * through to the Slack path.
+ * `maybeSendCommunicationThreadReply`: tasks originating from Teams,
+ * Telegram, or Discord post through their communication provider, anything
+ * else falls through to the Slack path.
  */
 export async function maybeSendCommunicationChannelPost(params: {
   taskRun: ChannelPostTaskRun;
@@ -194,6 +261,8 @@ export async function maybeSendCommunicationChannelPost(params: {
       return sendTeamsChannelPost(params);
     case 'telegram':
       return sendTelegramChannelPost(params);
+    case 'discord':
+      return sendDiscordChannelPost(params);
     default:
       return null;
   }

@@ -1251,7 +1251,11 @@ function recordSuccessfulSlackTurnSatisfactionResult(
 }
 
 if (shouldRegisterSlackChannelPostTool()) {
-  if (hasTelegramChatContext() || hasTeamsChatContext()) {
+  if (
+    hasTelegramChatContext() ||
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
+  ) {
     const postSurface = getChatReplySurfaceLabel();
 
     roomoteMcpServer.registerTool(
@@ -1457,10 +1461,15 @@ if (shouldRegisterSlackChannelPostTool()) {
     },
   );
 
-  // Teams/Telegram tasks get the surface-generic post_to_channel instead;
-  // exposing the Slack-labeled tool there invites opaque conversation ids
-  // into Slack channel-name normalization, which mangles them.
-  if (!hasTeamsChatContext() && !hasTelegramChatContext()) {
+  // Teams/Telegram/Discord tasks get the surface-generic post_to_channel
+  // instead; exposing the Slack-labeled tool there invites opaque
+  // conversation ids into Slack channel-name normalization, which mangles
+  // them.
+  if (
+    !hasTeamsChatContext() &&
+    !hasTelegramChatContext() &&
+    !hasDiscordChatContext()
+  ) {
     roomoteMcpServer.registerTool(
       'post_to_slack_channel',
       {

@@ -121,6 +121,7 @@ vi.mock('@/components/system', () => ({
   Check: () => <svg aria-hidden="true" />,
   ExternalLink: () => <svg aria-hidden="true" />,
   Info: () => <svg aria-hidden="true" />,
+  Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
   RefreshCw: () => <svg aria-hidden="true" />,
   Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   SelectContent: ({ children }: { children: ReactNode }) => (
@@ -135,6 +136,9 @@ vi.mock('@/components/system', () => ({
   }) => <div aria-disabled={disabled}>{children}</div>,
   SelectTrigger: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
+  ),
+  SelectValue: ({ placeholder }: { placeholder?: string }) => (
+    <span>{placeholder}</span>
   ),
   Spinner: () => <span>loading</span>,
   TriangleAlert: () => <svg aria-hidden="true" />,
@@ -220,7 +224,7 @@ describe('DiscordSetupStatus', () => {
     expect(repairMock).toHaveBeenCalledOnce();
   });
 
-  it('does not include automation destination setup', () => {
+  it('shows the default channel picker once the bot identity is ready', () => {
     render(
       <DiscordSetupStatus
         status={{
@@ -243,9 +247,10 @@ describe('DiscordSetupStatus', () => {
       />,
     );
 
+    expect(screen.getByText('Default channel')).toBeInTheDocument();
     expect(
-      screen.queryByText('Default Discord destination'),
-    ).not.toBeInTheDocument();
+      screen.getByText(/Currently posting to #roomote/),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('Discord is still connecting.'),
     ).toBeInTheDocument();

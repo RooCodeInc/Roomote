@@ -1,0 +1,47 @@
+{
+  "port": 3014,
+  "roomoteTarget": {
+    "eventsUrl": "http://localhost:4000/api/internal/discord/events"
+  },
+  "state": {
+    "botToken": "mock-discord-token",
+    "bot": {
+      "id": "100000000000000001",
+      "username": "RoomoteBot",
+      "globalName": "Roomote"
+    },
+    "application": {
+      "id": "200000000000000001",
+      "name": "Roomote"
+    },
+    "guildId": "300000000000000001",
+    "channels": [
+      {
+        "id": "500000000000000001",
+        "name": "grace-dm",
+        "type": 1
+      }
+    ]
+  },
+  "replay": [
+    {
+      "kind": "message",
+      "payload": {
+        "id": "600000000000000001",
+        "channel_id": "500000000000000001",
+        "content": "!fast what file handles Discord events?",
+        "author": {
+          "id": "111000111000111001",
+          "username": "grace_mock",
+          "global_name": "Grace"
+        },
+        "mentions": [],
+        "attachments": [],
+        "channel": {
+          "id": "500000000000000001",
+          "type": 1
+        }
+      }
+    }
+  ]
+}

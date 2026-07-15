@@ -14,6 +14,7 @@ import {
   TriangleAlert,
 } from '@/components/system';
 
+import { DiscordDefaultChannelPicker } from './DiscordDefaultChannelPicker';
 import { DiscordLinkAccountStep } from './DiscordLinkAccountStep';
 
 function DiagnosticRow({
@@ -130,6 +131,8 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
           Repair
         </Button>
       </div>
+
+      {identityReady ? <DiscordDefaultChannelPicker /> : null}
 
       <DiscordLinkAccountStep />
     </div>

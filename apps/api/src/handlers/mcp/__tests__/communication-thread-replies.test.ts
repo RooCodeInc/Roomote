@@ -81,6 +81,7 @@ vi.mock('@roomote/sdk/server', () => ({
       ? {
           postMessage: discordPostMessageMock,
           addReaction: discordAddReactionMock,
+          triggerTyping: vi.fn(async () => undefined),
         }
       : null;
   }),

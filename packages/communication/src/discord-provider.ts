@@ -720,6 +720,23 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     return { provider: 'discord', ...input };
   }
 
+  /**
+   * Shows the bot as typing in the channel or thread for ~10 seconds (or
+   * until the bot's next message lands). Callers that deliver slowly should
+   * re-trigger on a heartbeat.
+   */
+  async triggerTyping(input: {
+    channelId: string;
+    threadId?: string;
+  }): Promise<void> {
+    await this.request(
+      'POST',
+      `/channels/${input.threadId ?? input.channelId}/typing`,
+      undefined,
+      { retryNetworkErrors: false, retryServerErrors: false },
+    );
+  }
+
   /** Acknowledge a Gateway-delivered interaction within Discord's 3s window. */
   async deferInteraction(input: {
     interactionId: string;

@@ -1,0 +1,68 @@
+{
+  "name": "discord-guild-mention-gating",
+  "description": "Guild root-channel messages must be ignored unless the bot is @mentioned; a mentioned message enters as a task.",
+  "criteria": [
+    "The first (unmentioned) guild message produced no bot reply, no reaction, and no task launch.",
+    "The second (mentioned) message was acknowledged and produced a task thread or a bot reply in the guild channel."
+  ],
+  "state": {
+    "channels": [
+      {
+        "id": "400000000000000001",
+        "guild_id": "300000000000000001",
+        "name": "roomote",
+        "type": 0
+      }
+    ]
+  },
+  "events": [
+    {
+      "delayMs": 0,
+      "envelope": {
+        "kind": "message",
+        "payload": {
+          "id": "$M1",
+          "channel_id": "400000000000000001",
+          "guild_id": "300000000000000001",
+          "content": "just chatting with the team, nothing for the bot here",
+          "author": { "id": "111000111000111001", "username": "grace_mock" },
+          "mentions": [],
+          "attachments": [],
+          "channel": {
+            "id": "400000000000000001",
+            "type": 0,
+            "guild_id": "300000000000000001"
+          }
+        }
+      }
+    },
+    {
+      "delayMs": 3000,
+      "envelope": {
+        "kind": "message",
+        "payload": {
+          "id": "$M2",
+          "channel_id": "400000000000000001",
+          "guild_id": "300000000000000001",
+          "content": "<@100000000000000001> !fast which handler processes Discord interactions?",
+          "author": { "id": "111000111000111001", "username": "grace_mock" },
+          "mentions": [
+            {
+              "id": "100000000000000001",
+              "username": "RoomoteBot",
+              "bot": true
+            }
+          ],
+          "attachments": [],
+          "channel": {
+            "id": "400000000000000001",
+            "type": 0,
+            "guild_id": "300000000000000001"
+          }
+        }
+      }
+    }
+  ],
+  "settleMs": 20000,
+  "timeoutMs": 180000
+}

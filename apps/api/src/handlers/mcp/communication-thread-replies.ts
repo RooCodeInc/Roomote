@@ -1,6 +1,7 @@
 import {
   UnsupportedCommunicationOperationError,
   getLatestInboundMessageId,
+  type DiscordCommunicationProvider,
   type TelegramCommunicationProvider,
 } from '@roomote/communication';
 import {
@@ -59,6 +60,42 @@ function startTelegramTypingHeartbeat(
 
   fire();
   const timer = setInterval(fire, TELEGRAM_TYPING_HEARTBEAT_MS);
+  timer.unref?.();
+
+  return () => clearInterval(timer);
+}
+
+// Discord clears a typing indicator after ~10s; re-trigger inside that window
+// so "typing…" spans the whole reply delivery instead of lapsing partway
+// through.
+const DISCORD_TYPING_HEARTBEAT_MS = 8_000;
+
+/**
+ * Show "typing…" while a Discord reply is being delivered. Fires immediately,
+ * then on a heartbeat until the returned stop function runs. Entirely
+ * best-effort: a typing failure must never disrupt the actual reply.
+ */
+function startDiscordTypingHeartbeat(
+  provider: DiscordCommunicationProvider,
+  input: { channelId: string; threadId?: string },
+): () => void {
+  const fire = () => {
+    void provider
+      .triggerTyping({
+        channelId: input.channelId,
+        ...(input.threadId ? { threadId: input.threadId } : {}),
+      })
+      .catch((error) => {
+        console.error(
+          `[${LOG_CONTEXT}] Discord typing action failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+  };
+
+  fire();
+  const timer = setInterval(fire, DISCORD_TYPING_HEARTBEAT_MS);
   timer.unref?.();
 
   return () => clearInterval(timer);
@@ -342,13 +379,27 @@ async function sendDiscordThreadReply(params: {
     );
   }
 
-  const reply = await provider.postMessage({
+  // The reply text is already composed by the worker; the only window the API
+  // owns is this delivery. Show "typing…" across it so the message(s) don't
+  // land abruptly after the silence, and stop the instant delivery finishes.
+  const stopTyping = startDiscordTypingHeartbeat(provider, {
     channelId,
     ...(threadId ? { threadId } : {}),
-    ...(text ? { text } : {}),
-    textFormat: 'markdown',
-    images,
   });
+
+  let reply;
+  try {
+    reply = await provider.postMessage({
+      channelId,
+      ...(threadId ? { threadId } : {}),
+      ...(text ? { text } : {}),
+      textFormat: 'markdown',
+      images,
+    });
+  } finally {
+    stopTyping();
+  }
+
   return new Response(JSON.stringify({ messageTs: reply.messageId }), {
     headers: { 'content-type': 'application/json' },
   });

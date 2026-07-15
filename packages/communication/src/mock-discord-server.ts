@@ -55,11 +55,37 @@ export type MockDiscordServerState = {
   gatewayEvents: DiscordGatewayEvent[];
 };
 
+export type MockDiscordRoomoteTarget = {
+  /** Roomote's internal Gateway-events endpoint, e.g. http://localhost:3001/api/internal/discord/events */
+  eventsUrl: string;
+  /** Value for the x-roomote-discord-gateway-secret header. */
+  gatewaySecret?: string;
+};
+
+export type MockDiscordReplayEvent = {
+  kind: 'message' | 'interaction';
+  /** Raw MESSAGE_CREATE or INTERACTION_CREATE payload (the Gateway `d` field). */
+  payload: Record<string, unknown>;
+  /** Override the durable-envelope event id; defaults to payload.id. */
+  eventId?: string;
+};
+
+export type MockDiscordDispatchResult = {
+  status: number;
+  body: string;
+};
+
 export type MockDiscordServerOptions = {
   botToken?: string;
   bot?: { id: string; username: string; globalName?: string | null };
   application?: { id: string; name: string };
   guildId?: string;
+  /**
+   * When set, `/mock/events` (and `dispatch`) forward durable Gateway
+   * envelopes to Roomote's internal Discord events endpoint, standing in for
+   * the real Gateway service.
+   */
+  roomoteTarget?: MockDiscordRoomoteTarget;
 };
 
 type QueuedFailure = {
@@ -115,8 +141,10 @@ export class MockDiscordServer {
   private nextId = 1_000;
   private readonly failures: QueuedFailure[] = [];
   private server: Server | null = null;
+  private readonly roomoteTarget?: MockDiscordRoomoteTarget;
 
   constructor(options: MockDiscordServerOptions = {}) {
+    this.roomoteTarget = options.roomoteTarget;
     this.botToken = options.botToken ?? 'mock-discord-token';
     this.bot = {
       id: options.bot?.id ?? '100000000000000001',
@@ -185,6 +213,53 @@ export class MockDiscordServer {
     this.state.gatewayEvents.push(event);
   }
 
+  /**
+   * Forwards a durable Gateway envelope to Roomote's internal Discord events
+   * endpoint, standing in for the real Gateway service's delivery loop.
+   */
+  async dispatch(
+    event: MockDiscordReplayEvent,
+  ): Promise<MockDiscordDispatchResult> {
+    if (!this.roomoteTarget) {
+      throw new Error(
+        'No Roomote events target configured for mock Discord replay.',
+      );
+    }
+
+    const payloadId = (event.payload as { id?: unknown }).id;
+    const eventId =
+      event.eventId ??
+      (typeof payloadId === 'string' ? payloadId : String(this.allocateId()));
+    const envelope = {
+      eventId,
+      eventType:
+        event.kind === 'interaction'
+          ? ('INTERACTION_CREATE' as const)
+          : ('MESSAGE_CREATE' as const),
+      payload: event.payload,
+      receivedAt: new Date().toISOString(),
+    };
+
+    const response = await fetch(this.roomoteTarget.eventsUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(this.roomoteTarget.gatewaySecret
+          ? {
+              'x-roomote-discord-gateway-secret':
+                this.roomoteTarget.gatewaySecret,
+            }
+          : {}),
+      },
+      body: JSON.stringify(envelope),
+    });
+
+    return {
+      status: response.status,
+      body: await response.text(),
+    };
+  }
+
   takeGatewayEvents(): DiscordGatewayEvent[] {
     return this.state.gatewayEvents.splice(0);
   }
@@ -246,6 +321,17 @@ export class MockDiscordServer {
 
   private async handleRequest(url: URL, init: RequestInit): Promise<Response> {
     const method = (init.method ?? 'GET').toUpperCase();
+
+    // Harness control endpoints; not part of the mocked Discord REST API.
+    if (method === 'GET' && url.pathname === '/mock/state') {
+      return jsonResponse(this.state);
+    }
+    if (method === 'POST' && url.pathname === '/mock/events') {
+      const event = (await readBody(init)) as MockDiscordReplayEvent;
+      const dispatchResult = await this.dispatch(event);
+      return jsonResponse({ ok: true, dispatchResult });
+    }
+
     const pathname = url.pathname.replace(/^\/api\/v\d+/u, '');
     const path = pathname + url.search;
     const body = await readBody(init);
@@ -338,6 +424,11 @@ export class MockDiscordServer {
       }
       Object.assign(channel, body);
       return jsonResponse(channel);
+    }
+
+    const typing = /^\/channels\/([^/]+)\/typing$/u.exec(path);
+    if (method === 'POST' && typing) {
+      return new Response(null, { status: 204 });
     }
 
     const threadCreate = /^\/channels\/([^/]+)\/threads$/u.exec(path);
