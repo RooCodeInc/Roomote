@@ -2,7 +2,6 @@ import type { Context } from 'hono';
 
 import {
   and,
-  beginEnvironmentVerification,
   createEnvironmentConfigVersionSnapshot,
   db,
   environmentRepositoryMappings,
@@ -174,21 +173,21 @@ export async function attachEnvironmentIdToTaskRun(
 }
 
 /**
- * Register the calling task run as the current verification attempt for an
- * environment it just created or applied a runtime-affecting update to. The
- * environment-setup skill runs verification from this same setup task and
- * records the outcome through `record_verification`; storing the caller's
- * taskId here means that recording matches server-side without the agent
- * having to hand-pass any task id. Only run-token callers register an attempt.
+ * Resolve the calling task run's Roomote task id, if the write is driven by a
+ * run-token task. Used to atomically register that task as the current
+ * verification attempt for the environment it just created or applied a
+ * runtime-affecting update to. The environment-setup skill runs verification
+ * from this same setup task and records the outcome through
+ * `record_verification`; registering the caller's taskId means that recording
+ * matches server-side without the agent having to hand-pass any task id.
  */
-export async function registerEnvironmentVerificationForTaskRun(
+export async function resolveCallingVerificationTaskId(
   auth: McpAuth,
-  environmentId: string,
-): Promise<void> {
+): Promise<string | undefined> {
   const runId = extractRunId(auth);
 
   if (!runId) {
-    return;
+    return undefined;
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
@@ -196,14 +195,7 @@ export async function registerEnvironmentVerificationForTaskRun(
     columns: { taskId: true },
   });
 
-  if (!taskRun?.taskId) {
-    return;
-  }
-
-  await beginEnvironmentVerification(db, {
-    environmentId,
-    verificationTaskId: taskRun.taskId,
-  });
+  return taskRun?.taskId ?? undefined;
 }
 
 /**
@@ -300,6 +292,8 @@ export async function createEnvironment(
       return c.json({ error: missingRepositoryError }, 400);
     }
 
+    const verificationTaskId = await resolveCallingVerificationTaskId(auth);
+
     const created = await db.transaction(async (tx) => {
       const inserted = await tx
         .insert(environments)
@@ -310,8 +304,11 @@ export async function createEnvironment(
           description: config.description,
           config,
           // New environments start configured but not yet verified. A
-          // follow-up verification task confirms the runtime works.
+          // follow-up verification task confirms the runtime works. Registering
+          // the calling task here means its record_verification matches
+          // server-side without the agent hand-passing a task id.
           isVerified: false,
+          verificationTaskId: verificationTaskId ?? null,
           verificationError: null,
         })
         .returning({ id: environments.id });
@@ -346,7 +343,6 @@ export async function createEnvironment(
     });
 
     await attachEnvironmentIdToTaskRun(auth, created.id);
-    await registerEnvironmentVerificationForTaskRun(auth, created.id);
 
     return c.json({
       success: true,

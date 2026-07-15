@@ -19,6 +19,8 @@ import {
   sql,
   updateEnvironmentDefinition,
   users,
+  withEnvironmentVerificationRetryLock,
+  type DatabaseOrTransaction,
   type SQL,
   type EnvironmentConfigVersionSource,
 } from '@roomote/db/server';
@@ -844,11 +846,13 @@ export async function startEnvironmentDefinitionTaskCommand(
 /**
  * Find an active verification task for the given environment, if any. A
  * verification task carries the `verifiesEnvironmentId` marker in its payload.
+ * Accepts a transaction so the check can run inside the retry critical section.
  */
 async function getActiveVerificationTaskId(
+  dbOrTx: DatabaseOrTransaction,
   environmentId: string,
 ): Promise<string | null> {
-  const [job] = await db
+  const [job] = await dbOrTx
     .select({ taskId: taskRuns.taskId })
     .from(taskRuns)
     .where(
@@ -868,6 +872,12 @@ async function getActiveVerificationTaskId(
  * target environment, verifies it, and records the result through the
  * `record_verification` MCP action. Resets the environment to the unverified
  * state and stores the new verification task id.
+ *
+ * The active-run check, task enqueue, and attempt registration are serialized
+ * per environment by a `withEnvironmentVerificationRetryLock` advisory lock, so
+ * two concurrent retries cannot both pass the check and enqueue duplicate
+ * verification runs; the second waits for the first to commit and then sees the
+ * active attempt and is rejected.
  */
 export async function retryEnvironmentVerificationCommand(
   auth: UserAuthSuccess,
@@ -892,44 +902,49 @@ export async function retryEnvironmentVerificationCommand(
     throw new Error('Environment not found');
   }
 
-  const activeVerificationTaskId = await getActiveVerificationTaskId(
-    environment.id,
-  );
-
-  if (activeVerificationTaskId) {
-    throw new Error('This environment is already being verified.');
-  }
-
   const prompt = buildEnvironmentVerificationPrompt({
     environmentId: environment.id,
     environmentName: environment.name,
   });
 
-  const launchResult = await enqueueTask({
-    title: `Verify environment: ${environment.name}`,
-    task: {
-      type: TaskPayloadKind.StandardTask,
-      payload: {
-        repo: ALL_REPOSITORIES,
-        environmentId: environment.id,
-        verifiesEnvironmentId: environment.id,
-        description: prompt,
+  return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
+    const activeVerificationTaskId = await getActiveVerificationTaskId(
+      tx,
+      environment.id,
+    );
+
+    if (activeVerificationTaskId) {
+      throw new Error('This environment is already being verified.');
+    }
+
+    const launchResult = await enqueueTask({
+      title: `Verify environment: ${environment.name}`,
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: ALL_REPOSITORIES,
+          environmentId: environment.id,
+          verifiesEnvironmentId: environment.id,
+          description: prompt,
+        },
       },
-    },
-    initiator: { kind: 'user', userId },
-    workflow: 'standard',
-    surface: 'web',
-    trigger: 'manual',
-  });
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
 
-  // Reset verification state and point the environment at the new task so
-  // record_verification can only be applied by this attempt.
-  await beginEnvironmentVerification(db, {
-    environmentId: environment.id,
-    verificationTaskId: launchResult.taskId,
-  });
+    // Reset verification state and point the environment at the new task so
+    // record_verification can only be applied by this attempt. Done inside the
+    // advisory-locked transaction so a concurrent retry blocks until this
+    // attempt is registered and then observes it as active.
+    await beginEnvironmentVerification(tx, {
+      environmentId: environment.id,
+      verificationTaskId: launchResult.taskId,
+    });
 
-  return { taskId: launchResult.taskId };
+    return { taskId: launchResult.taskId };
+  });
 }
 
 export async function cancelEnvironmentDefinitionTaskCommand(

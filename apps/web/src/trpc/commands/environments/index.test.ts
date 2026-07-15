@@ -5,6 +5,7 @@ const {
   mockGetBranches,
   mockGetRepositories,
   mockBeginEnvironmentVerification,
+  mockActiveVerificationRuns,
 } = vi.hoisted(() => ({
   mockCheckRepoAccess: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -26,6 +27,9 @@ const {
     },
   ]),
   mockBeginEnvironmentVerification: vi.fn(),
+  // Active verification run seen inside the retry critical section. Each entry
+  // is returned by the locked transaction's active-run lookup.
+  mockActiveVerificationRuns: [] as Array<{ taskId: string }>,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -60,6 +64,24 @@ vi.mock('@roomote/db/server', () => ({
   tasks: {},
   updateEnvironmentDefinition: vi.fn(),
   users: {},
+  withEnvironmentVerificationRetryLock: async (
+    _environmentId: string,
+    mutation: (tx: unknown) => Promise<unknown>,
+  ) => {
+    // Provide a transaction whose active-run lookup returns the seeded rows.
+    const tx = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: async () => mockActiveVerificationRuns,
+            }),
+          }),
+        }),
+      }),
+    };
+    return mutation(tx);
+  },
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -143,30 +165,25 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
 describe('retryEnvironmentVerificationCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockActiveVerificationRuns.length = 0;
     mockEnqueueTask.mockResolvedValue({
       taskId: 'task-verify-1',
       id: 'run-verify-1',
     });
   });
 
+  function mockEnvironmentLookup() {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: 'env-1', name: 'My Env' }],
+        }),
+      }),
+    });
+  }
+
   it('enqueues a verification task and registers the new attempt', async () => {
-    mockDbSelect
-      // Environment lookup.
-      .mockReturnValueOnce({
-        from: () => ({
-          where: () => ({
-            limit: async () => [{ id: 'env-1', name: 'My Env' }],
-          }),
-        }),
-      })
-      // Active verification task lookup (none active).
-      .mockReturnValueOnce({
-        from: () => ({
-          where: () => ({
-            orderBy: () => ({ limit: async () => [] }),
-          }),
-        }),
-      });
+    mockEnvironmentLookup();
 
     const result = await retryEnvironmentVerificationCommand(buildMockAuth(), {
       environmentId: 'env-1',
@@ -192,23 +209,9 @@ describe('retryEnvironmentVerificationCommand', () => {
   });
 
   it('rejects when a verification task is already active', async () => {
-    mockDbSelect
-      .mockReturnValueOnce({
-        from: () => ({
-          where: () => ({
-            limit: async () => [{ id: 'env-1', name: 'My Env' }],
-          }),
-        }),
-      })
-      .mockReturnValueOnce({
-        from: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit: async () => [{ taskId: 'task-active' }],
-            }),
-          }),
-        }),
-      });
+    mockEnvironmentLookup();
+    // A verification run is already active inside the locked critical section.
+    mockActiveVerificationRuns.push({ taskId: 'task-active' });
 
     await expect(
       retryEnvironmentVerificationCommand(buildMockAuth(), {
@@ -218,6 +221,37 @@ describe('retryEnvironmentVerificationCommand', () => {
 
     expect(mockEnqueueTask).not.toHaveBeenCalled();
     expect(mockBeginEnvironmentVerification).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent retries so only one verification task is enqueued', async () => {
+    mockEnvironmentLookup();
+    mockEnvironmentLookup();
+
+    // Model the advisory lock's serialization: the first retry through the
+    // critical section sees no active run and enqueues, and its registration
+    // makes the attempt active for the second retry.
+    let attempt = 0;
+    mockEnqueueTask.mockImplementation(async () => {
+      attempt += 1;
+      // After the first enqueue+register, a subsequent critical section sees
+      // the active run and must reject before enqueueing again.
+      mockActiveVerificationRuns.push({ taskId: `task-verify-${attempt}` });
+      return { taskId: `task-verify-${attempt}`, id: `run-verify-${attempt}` };
+    });
+
+    const first = await retryEnvironmentVerificationCommand(buildMockAuth(), {
+      environmentId: 'env-1',
+    });
+    expect(first).toEqual({ taskId: 'task-verify-1' });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-1',
+      }),
+    ).rejects.toThrow('already being verified');
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockBeginEnvironmentVerification).toHaveBeenCalledTimes(1);
   });
 
   it('rejects when the environment does not exist', async () => {

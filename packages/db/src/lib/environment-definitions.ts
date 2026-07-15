@@ -1,7 +1,7 @@
 import type { EnvironmentConfig } from '@roomote/types';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
-import type { DatabaseOrTransaction } from '../db';
+import { db, type DatabaseOrTransaction } from '../db';
 import { environmentRepositoryMappings, environments } from '../schema';
 import {
   createEnvironmentConfigVersionSnapshot,
@@ -28,6 +28,14 @@ type UpdateEnvironmentDefinitionInput = {
    * verified and never run the onboarding verification task.
    */
   preserveVerification?: boolean;
+  /**
+   * When a runtime-affecting edit clears verification, atomically set the
+   * environment's `verificationTaskId` to this value (the calling verification
+   * task) instead of leaving it null. Applied under the same row lock as the
+   * reset, so a concurrent update cannot register an older task against a newer
+   * configuration.
+   */
+  registerVerificationTaskId?: string;
 };
 
 type UpdateEnvironmentDefinitionResult = {
@@ -202,7 +210,17 @@ async function updateEnvironmentDefinitionLocked(
     .update(environments)
     .set({
       ...changedFields,
-      ...(verificationCleared ? VERIFICATION_RESET_FIELDS : {}),
+      ...(verificationCleared
+        ? {
+            ...VERIFICATION_RESET_FIELDS,
+            // Atomically claim the current verification attempt for the calling
+            // task under the same row lock as the reset, so a concurrent edit
+            // cannot register an older task against this newer configuration.
+            ...(input.registerVerificationTaskId
+              ? { verificationTaskId: input.registerVerificationTaskId }
+              : {}),
+          }
+        : {}),
       updatedAt: now,
     })
     .where(eq(environments.id, input.environmentId));
@@ -321,4 +339,26 @@ export async function beginEnvironmentVerification(
       verificationTaskId: input.verificationTaskId,
     })
     .where(eq(environments.id, input.environmentId));
+}
+
+/**
+ * Serialize verification-retry attempts for a single environment.
+ *
+ * Runs `mutation` inside a transaction that holds a per-environment advisory
+ * lock (`pg_advisory_xact_lock`), so two concurrent retries cannot both pass an
+ * "already being verified" check and enqueue duplicate verification runs. The
+ * lock is released when the transaction commits or rolls back. The callback
+ * receives the locked transaction so the active-run check, task enqueue, and
+ * attempt registration all happen inside the same critical section.
+ */
+export async function withEnvironmentVerificationRetryLock<T>(
+  environmentId: string,
+  mutation: (tx: DatabaseOrTransaction) => Promise<T>,
+): Promise<T> {
+  return runInTransactionIfAvailable(db, async (tx) => {
+    await tx.execute(
+      sql`SELECT n_xact_lock(hashtext(${`environment-verification-retry:${environmentId}`}))`,
+    );
+    return mutation(tx);
+  });
 }

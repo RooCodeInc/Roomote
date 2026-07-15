@@ -180,6 +180,41 @@ describe('environment verification state', () => {
     expect(updated?.verificationTaskId).toBe('task-keep');
   });
 
+  it('atomically registers a new verification task when a runtime-affecting edit clears verification', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      config: buildConfig({ install: 'npm install' }),
+      isVerified: true,
+      verifiedAt: new Date(),
+      verificationTaskId: 'task-old',
+      verificationError: 'stale error',
+    });
+
+    const nextConfig = buildConfig({
+      name: environment.name,
+      install: 'npm ci',
+    });
+
+    const { verificationCleared } = await updateEnvironmentDefinition(db, {
+      environmentId: environment.id,
+      fields: { config: nextConfig },
+      registerVerificationTaskId: 'task-new-setup',
+    });
+
+    expect(verificationCleared).toBe(true);
+
+    const updated = await db.query.environments.findFirst({
+      where: eq(environments.id, environment.id),
+    });
+
+    // Verification is reset, but the calling task is registered atomically
+    // rather than left null.
+    expect(updated?.isVerified).toBe(false);
+    expect(updated?.verifiedAt).toBeNull();
+    expect(updated?.verificationError).toBeNull();
+    expect(updated?.verificationTaskId).toBe('task-new-setup');
+  });
+
   it('does not clear verification for declarative edits (preserveVerification)', async () => {
     const environment = await environmentFactory.create({
       createdByUserId: null,
