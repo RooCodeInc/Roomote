@@ -19,7 +19,8 @@ something else.
 → you review, merge, done
 ```
 
-Source-available. Self-hostable. Bring your own API keys.
+Source-available. Self-hostable. Use your ChatGPT subscription or bring your own
+API keys.
 
 [![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/Rj2cFo)
 &nbsp;&nbsp;
@@ -72,10 +73,14 @@ cleans up after itself.
 
 ### Supported providers
 
-**Inference (bring your own keys):** OpenRouter, Vercel AI Gateway, Requesty,
-Baseten, Together AI, OpenAI, Anthropic, Moonshot AI (Kimi), MiniMax,
-OpenCode Zen / Go, Amazon Bedrock, Google Vertex AI, Google Gemini, xAI, and
-ChatGPT (subscription).
+**Inference:** Two ways to connect models.
+
+1. **ChatGPT subscription.** Already paying for ChatGPT Plus or Pro? Connect
+   your account directly. No API key needed, no separate billing. Roomote uses
+   the models included in your subscription.
+2. **API keys (BYOK).** Paste a key from OpenRouter, Anthropic, OpenAI, xAI,
+   Google Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway, Requesty,
+   Baseten, Together AI, Moonshot AI (Kimi), MiniMax, or OpenCode Zen / Go.
 
 **Sandbox compute:** Modal, E2B, Daytona, Blaxel, and Local Docker.
 
@@ -96,10 +101,11 @@ Pick one path. You will have a working Roomote instance at the end.
 2. Railway provisions Postgres, Redis, and the app. Follow the prompts to set
    your admin email and password.
 
-3. Open the setup link Railway gives you. Connect a model provider (paste an API
-   key from OpenRouter, Anthropic, OpenAI, Amazon Bedrock, Google Gemini, xAI,
-   or any other supported inference provider, or connect a ChatGPT
-   subscription).
+3. Open the setup link Railway gives you. Connect models. Two options:
+   - **ChatGPT subscription:** Sign in with your ChatGPT account. If you
+     already pay for Plus or Pro, you're done. No API key needed.
+   - **API key:** Paste a key from OpenRouter, Anthropic, OpenAI, or any other
+     supported provider.
 
 4. Connect source control: GitHub, GitLab, Gitea, Azure DevOps, or Bitbucket
    Cloud.
@@ -172,9 +178,9 @@ copy-pasting.
 
 - **Your code stays on your infrastructure.** No repo access leaves your
   network.
-- **Bring your own keys.** Use any supported inference provider (OpenRouter,
-  Anthropic, OpenAI, Amazon Bedrock, Google Vertex AI, Google Gemini, xAI, and
-  more). Switch models per task. No markup on tokens.
+- **Use what you already pay for.** Connect your ChatGPT subscription directly,
+  or bring API keys from any supported provider. Switch models per task. No
+  markup on tokens.
 - **Read every line.** The full source is here. Audit it, extend it, fork it.
 - **No per-seat SaaS pricing.** Free for up to 10 users. Need more? Email
   [help@roomote.dev](mailto:help@roomote.dev) for a license.
@@ -214,7 +220,7 @@ Want a managed deployment instead of self-hosting? We can run it for you.
 **Is Roomote open source?**
 It is source-available under the [Fair Core License 1.0](LICENSE) (FCL-1.0-ALv2).
 You can read, modify, and self-host the code. Free for up to 10 users. Larger
-deployments need a license — email
+deployments need a license. Email
 [help@roomote.dev](mailto:help@roomote.dev). After the license period, the code
 converts to Apache 2.0.
 
@@ -225,14 +231,14 @@ does not require an IDE or a terminal session.
 
 **How is this different from Devin?**
 Devin is a closed, hosted product. Roomote is source-available and
-self-hostable. You own your data, bring your own API keys, and pick your models.
-You can read every line of code it runs.
+self-hostable. You own your data, use your existing ChatGPT subscription or
+bring your own API keys, and pick your models. You can read every line of code
+it runs.
 
 **What models does it support?**
-Models from OpenRouter, Vercel AI Gateway, Requesty, Baseten, Together AI,
-OpenAI, Anthropic, Moonshot AI (Kimi), MiniMax, OpenCode Zen / Go, Amazon
-Bedrock, Google Vertex AI, Google Gemini, xAI, and ChatGPT (subscription). You
-bring your own keys (or connect a ChatGPT subscription).
+Two options. Connect your ChatGPT Plus or Pro subscription directly (no API key
+needed), or paste an API key from OpenRouter, Anthropic, OpenAI, xAI, Google
+Gemini, Amazon Bedrock, Google Vertex AI, and a dozen more providers.
 
 **What sandboxes does it support?**
 Modal, E2B, Daytona, Blaxel, and Local Docker.
@@ -242,8 +248,14 @@ GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 
 **What does it cost?**
 Self-hosting is free for up to 10 registered users. You pay your own model
-provider for tokens. For larger teams, licenses are available by emailing
+provider for tokens (or use the models bundled with your ChatGPT subscription).
+For larger teams, licenses are available by emailing
 [help@roomote.dev](mailto:help@roomote.dev).
+
+**I already pay for ChatGPT Plus. Do I need an API key too?**
+No. Connect your ChatGPT account and you can start using Roomote immediately.
+API keys are an alternative for people who want to use other providers or
+control costs at the token level.
 
 **Can non-engineers use it?**
 Yes. PMs, support, ops, and marketers can assign tasks in Slack without touching
