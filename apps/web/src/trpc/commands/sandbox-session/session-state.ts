@@ -117,3 +117,20 @@ export function shouldPollForFirstHarnessMessage({
 
   return hasInitialPrompt && sessionState === 'interactive';
 }
+
+export function shouldExposeOnboardingEnvironment({
+  taskWorkflow,
+  taskRunStatus,
+  taskRunPhase,
+}: {
+  taskWorkflow: string | null | undefined;
+  taskRunStatus: RunStatus;
+  taskRunPhase: string | null;
+}): boolean {
+  return (
+    taskWorkflow === 'setup_onboarding' &&
+    (taskRunStatus === RunStatus.Completed ||
+      (taskRunStatus === RunStatus.Idle &&
+        taskRunPhase === 'waiting_for_prompt'))
+  );
+}

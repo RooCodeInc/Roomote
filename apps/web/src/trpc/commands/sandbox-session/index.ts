@@ -47,6 +47,7 @@ import {
 
 import {
   getSessionState,
+  shouldExposeOnboardingEnvironment,
   shouldPollForFirstHarnessMessage,
 } from './session-state';
 
@@ -586,14 +587,13 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const task = taskById;
 
-  const onboardingEnvironmentId =
-    task.workflow === 'setup_onboarding' &&
-    (taskRun.status === RunStatus.Running ||
-      taskRun.status === RunStatus.Completed ||
-      (taskRun.status === RunStatus.Idle &&
-        taskRun.taskPhase === 'waiting_for_prompt'))
-      ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
-      : null;
+  const onboardingEnvironmentId = shouldExposeOnboardingEnvironment({
+    taskWorkflow: task.workflow,
+    taskRunStatus: taskRun.status,
+    taskRunPhase: taskRun.taskPhase,
+  })
+    ? getEnvironmentDefinitionIdFromPayload(taskRun.payload)
+    : null;
 
   const [artifacts, onboardingEnvironment] = await Promise.all([
     getArtifactsForTaskCommand(auth, {
