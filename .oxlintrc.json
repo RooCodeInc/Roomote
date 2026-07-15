@@ -67,6 +67,8 @@
     "no-shadow-restricted-names": "error",
     "no-sparse-arrays": "error",
     "no-this-before-super": "error",
+    "no-undef": "off",
+    "no-unexpected-multiline": "error",
     "no-unreachable": "error",
     "no-unsafe-finally": "error",
     "no-unsafe-negation": "error",
@@ -126,6 +128,7 @@
         "no-redeclare": "off",
         "no-setter-return": "off",
         "no-this-before-super": "off",
+        "no-undef": "off",
         "no-unreachable": "off",
         "no-unsafe-negation": "off",
         "no-var": "error",
@@ -133,6 +136,16 @@
         "prefer-const": "error",
         "prefer-rest-params": "error",
         "prefer-spread": "error"
+      }
+    },
+    {
+      "files": ["**/*.{js,jsx,cjs,mjs}"],
+      "env": {
+        "builtin": true,
+        "node": true
+      },
+      "rules": {
+        "no-undef": "error"
       }
     },
     {
