@@ -115,6 +115,9 @@ export async function createHarness({
     return await startOpenCodeServerHarness({
       ...commonOptions,
       developerInstructionsContent,
+      onDiagnostic: (input) => {
+        diagnosticEvents.record(input);
+      },
       onUnexpectedExit: (certificate) => {
         const summary = `OpenCode server exited unexpectedly (code=${
           certificate.exitCode ?? 'none'

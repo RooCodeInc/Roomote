@@ -48,7 +48,11 @@ import {
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
 
 import { OpenCodeRuntimeEventEmitter } from './runtime-event-emitter';
-import { OpenCodeServerClient, createOpenCodePromptParts } from './client';
+import {
+  OpenCodeServerClient,
+  createOpenCodePromptParts,
+  formatOpenCodeSessionCreateTimeoutText,
+} from './client';
 import {
   PLAN_WORKFLOW_SKILL,
   resolveWorkflowSkillTransition,
@@ -94,6 +98,15 @@ interface OpenCodeServerHarnessOptions {
   subagentSettlementGraceMs?: number;
   queuedPromptRetryDelayMs?: number;
   mcpServerNames?: string[];
+  /**
+   * Observer-only breadcrumb for rare harness failures that need a durable
+   * post-mortem outside the sandbox (e.g. infinite OpenCode session create).
+   */
+  onDiagnostic?: (input: {
+    kind: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }) => void;
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -1435,6 +1448,9 @@ export class OpenCodeServerHarness
   private readonly beforeQueuedPrompt:
     | OpenCodeServerHarnessOptions['beforeQueuedPrompt']
     | undefined;
+  private readonly onDiagnostic:
+    | OpenCodeServerHarnessOptions['onDiagnostic']
+    | undefined;
   private readonly eventAbortController = new AbortController();
   private readonly runtimeEvents: OpenCodeRuntimeEventEmitter;
   private readonly prompts: RuntimePromptQueue;
@@ -1547,6 +1563,7 @@ export class OpenCodeServerHarness
       ),
     ].sort((left, right) => right.length - left.length);
     this.beforeQueuedPrompt = options.beforeQueuedPrompt;
+    this.onDiagnostic = options.onDiagnostic;
     this.runtimeEvents = new OpenCodeRuntimeEventEmitter({
       taskEvent: (event) => this.emit('taskEvent', event),
       runtimeOutput: (event) => this.emit('runtimeOutput', event),
@@ -1976,7 +1993,15 @@ export class OpenCodeServerHarness
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
 
-    const sessionId = await this.ensureSession(command.data.text);
+    let sessionId: string;
+
+    try {
+      sessionId = await this.ensureSession(command.data.text);
+    } catch (error) {
+      this.failSessionCreateForInitialTask(error);
+      throw error;
+    }
+
     this.runtimeEvents.taskStarted(sessionId);
     this.runtimeEvents.userPrompt({
       sessionId,
@@ -2948,12 +2973,96 @@ export class OpenCodeServerHarness
       return this.sessionId;
     }
 
-    const session = await this.client.createSession({
-      title: title?.slice(0, 80),
-      signal: this.eventAbortController.signal,
+    const startedAt = Date.now();
+    const timeoutMs = this.client.sessionCreateTimeoutMsValue;
+
+    this.logger.info(
+      `Creating OpenCode session workspace=${this.workspacePath} mcpServers=${
+        this.knownMcpServerNames.length > 0
+          ? this.knownMcpServerNames.join(',')
+          : 'none'
+      } timeoutMs=${timeoutMs}`,
+    );
+
+    try {
+      const session = await this.client.createSession({
+        title: title?.slice(0, 80),
+        signal: this.eventAbortController.signal,
+      });
+      this.sessionId = session.id;
+      this.logger.info(
+        `Created OpenCode session sessionId=${session.id} elapsedMs=${
+          Date.now() - startedAt
+        }`,
+      );
+      return session.id;
+    } catch (error) {
+      const elapsedMs = Date.now() - startedAt;
+      const message = error instanceof Error ? error.message : String(error);
+
+      this.logger.error(
+        `OpenCode session create failed elapsedMs=${elapsedMs} timeoutMs=${timeoutMs} workspace=${this.workspacePath} mcpServers=${
+          this.knownMcpServerNames.length > 0
+            ? this.knownMcpServerNames.join(',')
+            : 'none'
+        } error=${message}`,
+      );
+      this.recordSessionCreateFailureDiagnostic({
+        message,
+        elapsedMs,
+        timeoutMs,
+      });
+      throw error;
+    }
+  }
+
+  private recordSessionCreateFailureDiagnostic(input: {
+    message: string;
+    elapsedMs: number;
+    timeoutMs: number;
+  }): void {
+    this.onDiagnostic?.({
+      kind: 'opencode_session_create_failed',
+      message: `OpenCode session creation failed after ${input.elapsedMs}ms: ${input.message}`,
+      details: {
+        workspacePath: this.workspacePath,
+        homeDir: this.commandEnv?.HOME ?? null,
+        mcpServerNames: this.knownMcpServerNames,
+        model: this.model?.qualifiedModel ?? null,
+        elapsedMs: input.elapsedMs,
+        timeoutMs: input.timeoutMs,
+        error: input.message,
+      },
     });
-    this.sessionId = session.id;
-    return session.id;
+  }
+
+  /**
+   * Leave a terminal, retryable failure when the very first session never
+   * materializes. Without this the harness manager stays in `running` forever
+   * (commandError is currently unsubscribed) and `first_assistant_output_at`
+   * never stamps.
+   */
+  private failSessionCreateForInitialTask(error: unknown): void {
+    if (this.sessionId) {
+      return;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    const sessionId = 'opencode-session-create-failed';
+    const timeoutMs = this.client.sessionCreateTimeoutMsValue;
+    const userText = message.includes('did not respond within')
+      ? message
+      : `OpenCode session creation failed before the agent could start.\n\n${message}\n\n${formatOpenCodeSessionCreateTimeoutText(timeoutMs)}`;
+
+    this.logger.error(
+      `OpenCode initial session create failed; aborting task so it does not hang in running forever error=${message}`,
+    );
+    this.runtimeEvents.taskStarted(sessionId);
+    this.runtimeEvents.assistantMessage({
+      sessionId,
+      text: userText,
+    });
+    this.runtimeEvents.taskAborted(sessionId);
   }
 
   private async validateResumedSession(sessionId: string): Promise<boolean> {
