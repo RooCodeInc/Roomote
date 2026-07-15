@@ -162,6 +162,7 @@ vi.mock('@/components/system', () => ({
     <span {...props}>{children}</span>
   ),
   BasicTooltip: ({ children }: { children: ReactNode }) => <>{children}</>,
+  ArrowUpRightIcon: Icon,
   BookMarked: Icon,
   Button: ({
     children,
@@ -185,6 +186,7 @@ vi.mock('@/components/system', () => ({
     );
   },
   Camera: Icon,
+  Check: Icon,
   CheckCircle2: Icon,
   ChevronDown: Icon,
   Collapsible: ({
@@ -304,6 +306,7 @@ vi.mock('@/components/system', () => ({
     <h2 {...props}>{children}</h2>
   ),
   Github: Icon,
+  HelpCircle: Icon,
   Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   Label: ({
     children,
