@@ -170,15 +170,21 @@ describe('retryEnvironmentVerificationCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveVerificationRuns.length = 0;
-    // The command registers the attempt through enqueueTask's beforeEnqueue
-    // hook, so the mock must invoke it to exercise registration.
+    // The command registers the attempt through enqueueTask's
+    // afterCreateInTransaction hook, so the mock must invoke it (with a stub
+    // transaction) to exercise registration.
     mockEnqueueTask.mockImplementation(
       async (
         _input: unknown,
-        options?: { beforeEnqueue?: (taskRun: unknown) => Promise<void> },
+        options?: {
+          afterCreateInTransaction?: (
+            tx: unknown,
+            taskRun: unknown,
+          ) => Promise<void>;
+        },
       ) => {
         const taskRun = { taskId: 'task-verify-1', id: 'run-verify-1' };
-        await options?.beforeEnqueue?.(taskRun);
+        await options?.afterCreateInTransaction?.({}, taskRun);
         return taskRun;
       },
     );
@@ -213,7 +219,9 @@ describe('retryEnvironmentVerificationCommand', () => {
         }),
         workflow: 'standard',
       }),
-      expect.objectContaining({ beforeEnqueue: expect.any(Function) }),
+      expect.objectContaining({
+        afterCreateInTransaction: expect.any(Function),
+      }),
     );
     expect(mockBeginEnvironmentVerification).toHaveBeenCalledWith(
       expect.anything(),
@@ -242,19 +250,25 @@ describe('retryEnvironmentVerificationCommand', () => {
 
     // Model the advisory lock's serialization: the first retry through the
     // critical section sees no active run and enqueues, and its registration
-    // (via beforeEnqueue) makes the attempt active for the second retry.
+    // (via afterCreateInTransaction) makes the attempt active for the second
+    // retry.
     let attempt = 0;
     mockEnqueueTask.mockImplementation(
       async (
         _input: unknown,
-        options?: { beforeEnqueue?: (taskRun: unknown) => Promise<void> },
+        options?: {
+          afterCreateInTransaction?: (
+            tx: unknown,
+            taskRun: unknown,
+          ) => Promise<void>;
+        },
       ) => {
         attempt += 1;
         const taskRun = {
           taskId: `task-verify-${attempt}`,
           id: `run-verify-${attempt}`,
         };
-        await options?.beforeEnqueue?.(taskRun);
+        await options?.afterCreateInTransaction?.({}, taskRun);
         // After the first enqueue+register, a subsequent critical section sees
         // the active run and must reject before enqueueing again.
         mockActiveVerificationRuns.push({ taskId: `task-verify-${attempt}` });

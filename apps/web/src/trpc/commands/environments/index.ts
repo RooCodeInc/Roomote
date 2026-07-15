@@ -904,9 +904,10 @@ export async function getActiveVerificationTaskIdForTest(
  * two concurrent retries cannot both pass the check and enqueue duplicate
  * verification runs; the second waits for the first to commit and then sees the
  * active attempt and is rejected. The attempt is registered in `enqueueTask`'s
- * `beforeEnqueue` hook so the environment points at the new task id before the
- * run becomes eligible to start, avoiding a race where the run's
- * `record_verification` is rejected as a mismatched attempt.
+ * `afterCreateInTransaction` hook, so the environment's `verificationTaskId`
+ * commits atomically with the run row and before the run is queued — avoiding a
+ * race where the run's `record_verification` is rejected as a mismatched
+ * attempt because the claim had not committed yet.
  */
 export async function retryEnvironmentVerificationCommand(
   auth: UserAuthSuccess,
@@ -964,13 +965,17 @@ export async function retryEnvironmentVerificationCommand(
         trigger: 'manual',
       },
       {
-        // Claim this verification attempt before the run becomes eligible to
-        // start. `beforeEnqueue` runs while still inside the advisory-locked
-        // transaction and before the run is pushed onto the queue, so the
-        // controller cannot start the run (and have its record_verification
-        // rejected as a mismatched attempt) before its task id is registered.
-        beforeEnqueue: async (taskRun) => {
-          await beginEnvironmentVerification(tx, {
+        // Claim this verification attempt inside enqueue's own run-creation
+        // transaction, so the task id and the environment's verificationTaskId
+        // commit atomically with the run row and before the run is pushed onto
+        // the controller queue. `beforeEnqueue` (or writing through the outer
+        // advisory-lock transaction) is not sufficient here: the run row is
+        // committed by enqueue's transaction before the outer transaction
+        // commits, so the controller could start the run and call
+        // record_verification before the claim is visible, yielding a
+        // mismatched-attempt rejection.
+        afterCreateInTransaction: async (enqueueTx, taskRun) => {
+          await beginEnvironmentVerification(enqueueTx, {
             environmentId: environment.id,
             verificationTaskId: taskRun.taskId,
           });
