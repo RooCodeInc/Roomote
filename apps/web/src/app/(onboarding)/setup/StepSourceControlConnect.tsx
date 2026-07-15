@@ -197,6 +197,18 @@ export function StepSourceControlConnect({
         field.envVarName === 'GITEA_CLIENT_SECRET' &&
         (field.runtimeSatisfied || field.savedSatisfied),
     );
+  const bitbucketOAuthConfigured =
+    provider === 'bitbucket' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'BITBUCKET_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'BITBUCKET_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
 
   const oauthAutoSyncMarkerPresent =
     typeof window !== 'undefined' &&
@@ -211,6 +223,9 @@ export function StepSourceControlConnect({
       oauthAutoSyncMarkerPresent) &&
     (provider !== 'gitea' ||
       !giteaOAuthConfigured ||
+      oauthAutoSyncMarkerPresent) &&
+    (provider !== 'bitbucket' ||
+      !bitbucketOAuthConfigured ||
       oauthAutoSyncMarkerPresent);
 
   const handleSyncRepositories = useCallback(async () => {

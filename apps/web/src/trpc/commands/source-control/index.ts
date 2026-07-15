@@ -760,13 +760,13 @@ export async function assertValidSourceControlConfigInput(params: {
       : undefined;
   const nextBitbucketClientId =
     params.provider === 'bitbucket'
-      ? (params.values?.['BITBUCKET_CLIENT_ID']?.trim() ??
-        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_ID')))
+      ? params.values?.['BITBUCKET_CLIENT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_ID'))
       : undefined;
   const nextBitbucketClientSecret =
     params.provider === 'bitbucket'
-      ? (params.values?.['BITBUCKET_CLIENT_SECRET']?.trim() ??
-        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_SECRET')))
+      ? params.values?.['BITBUCKET_CLIENT_SECRET']?.trim() ||
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_SECRET'))
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
