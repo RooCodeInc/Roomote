@@ -956,11 +956,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       },
     );
 
-    this.unsubscribeCommandError = this.harness.subscribeCommandError?.(
-      ({ command, error }) => {
+    this.unsubscribeCommandError =
+      this.harness.subscribeCommandError?.(({ command, error }) => {
         this.handleCommandError(command.commandName, error);
-      },
-    );
+      }) ?? null;
 
     this.harness.on('connected', () => {
       if (this.state.clientDisconnectedAt) {
