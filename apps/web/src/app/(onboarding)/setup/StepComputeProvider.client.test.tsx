@@ -30,10 +30,14 @@ function buildProvider({
   provider,
   label,
   infrastructureSatisfied,
+  configSatisfied = false,
+  operatorEditable = true,
 }: {
   provider: ComputeProvider;
   label: string;
   infrastructureSatisfied: boolean;
+  configSatisfied?: boolean;
+  operatorEditable?: boolean;
 }): SetupComputeStatus['providers'][number] {
   return {
     provider,
@@ -42,10 +46,24 @@ function buildProvider({
     supportsSnapshots: provider !== 'docker',
     comment:
       provider === 'modal' || provider === 'e2b' ? 'Recommended' : undefined,
-    fields: [],
+    // Real providers carry operator-editable credential fields; the picker
+    // hides providers without any (deployment-managed) unless satisfied.
+    fields: operatorEditable
+      ? [
+          {
+            envVarName: `${provider.toUpperCase().replace(/-/g, '_')}_TEST_API_KEY`,
+            label: `${label} API Key`,
+            category: 'credential',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            defaultSatisfied: false,
+            setupProvisionable: false,
+          },
+        ]
+      : [],
     runtimeConfigSatisfied: false,
     savedConfigSatisfied: false,
-    configSatisfied: false,
+    configSatisfied,
     infrastructureSatisfied,
   };
 }
@@ -141,5 +159,59 @@ describe('StepComputeProvider', () => {
     expect(
       screen.queryByRole('button', { name: /local docker/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it('offers a deployment-managed provider only when the deployment satisfies it', () => {
+    const buildSetup = (configSatisfied: boolean): SetupComputeStatus => ({
+      selectedProvider: null,
+      preselectedProvider: 'docker',
+      runtimeDefaultProvider: null,
+      persistedDefaultProvider: null,
+      setupSatisfied: false,
+      setupSatisfiedByRuntimeEnv: false,
+      excludedProviders: [],
+      workerImage: {
+        envVarName: 'DOCKER_WORKER_IMAGE',
+        label: 'Worker Image',
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        hostedImageRef: null,
+        hostedReady: false,
+      },
+      providers: [
+        buildProvider({
+          provider: 'roomote',
+          label: 'Roomote Sandbox',
+          infrastructureSatisfied: configSatisfied,
+          configSatisfied,
+          // Deployment-managed: no operator-editable fields.
+          operatorEditable: false,
+        }),
+        buildProvider({
+          provider: 'docker',
+          label: 'Local Docker',
+          infrastructureSatisfied: true,
+        }),
+      ],
+    });
+
+    const unsatisfied = render(
+      <StepComputeProvider
+        computeSetup={buildSetup(false)}
+        onContinue={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole('button', { name: /roomote/i }),
+    ).not.toBeInTheDocument();
+    unsatisfied.unmount();
+
+    render(
+      <StepComputeProvider
+        computeSetup={buildSetup(true)}
+        onContinue={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /roomote/i })).toBeTruthy();
   });
 });

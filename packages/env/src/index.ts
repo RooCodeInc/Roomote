@@ -2,6 +2,7 @@ import { createEnv } from '@t3-oss/env-nextjs';
 import {
   DEFAULT_LOCAL_DOCKER_WORKER_IMAGE,
   resolveEffectiveDockerWorkerImage,
+  ROOMOTE_CLOUD_BACKENDS,
   TASK_SANDBOX_DOCKER_MEMORY_MIB,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -63,7 +64,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b'])
+    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z
@@ -201,6 +202,12 @@ const serverSchema = {
   WEB_DEV_LOGIN_ENABLED: z.string().optional(),
   MODAL_TOKEN_ID: z.string().optional(),
   MODAL_TOKEN_SECRET: z.string().optional(),
+  // Deployment-managed Roomote Cloud credentials (Modal machinery, seeded by
+  // the hosting operator's provisioning rather than the setup flow).
+  ROOMOTE_CLOUD_TOKEN_ID: z.string().optional(),
+  ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
+  ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
+  ROOMOTE_CLOUD_SLUG: z.string().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -414,6 +421,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WEB_DEV_LOGIN_ENABLED',
   'MODAL_TOKEN_ID',
   'MODAL_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_TOKEN_ID',
+  'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_BACKEND',
+  'ROOMOTE_CLOUD_SLUG',
   'MODAL_ENDPOINT',
   'MODAL_ENVIRONMENT',
   'MODAL_APP_NAME',

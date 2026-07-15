@@ -91,7 +91,10 @@ export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
   switch (provider) {
+    // Roomote Cloud runs on deployment-managed Modal infrastructure, so its
+    // runtime capabilities are Modal's.
     case 'modal':
+    case 'roomote':
       return MODAL_CAPABILITIES;
     case 'docker':
       return DOCKER_CAPABILITIES;

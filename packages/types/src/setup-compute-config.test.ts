@@ -72,6 +72,59 @@ describe('buildSetupComputeStatus', () => {
     expect(status.setupSatisfied).toBe(true);
   });
 
+  it('satisfies Roomote Cloud from deployment-managed runtime env alone', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        ROOMOTE_CLOUD_TOKEN_ID: 'rc-id',
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-secret',
+        DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
+      },
+    });
+    const roomoteCloud = status.providers.find(
+      (provider) => provider.provider === 'roomote',
+    );
+
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
+    expect(roomoteCloud?.configSatisfied).toBe(true);
+    expect(roomoteCloud?.infrastructureSatisfied).toBe(true);
+  });
+
+  it('does not satisfy Roomote Cloud from the secret alone while Modal is the only backend', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-secret',
+        DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
+      },
+    });
+    const roomoteSandbox = status.providers.find(
+      (provider) => provider.provider === 'roomote',
+    );
+
+    // The Modal backend rejects launches without the token id, so a
+    // secret-only deployment must not be offered as usable.
+    expect(roomoteSandbox?.configSatisfied).toBe(false);
+    expect(roomoteSandbox?.infrastructureSatisfied).toBe(false);
+  });
+
+  it('leaves Roomote Cloud unsatisfiable without deployment-managed credentials', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
+      },
+    });
+    const roomoteCloud = status.providers.find(
+      (provider) => provider.provider === 'roomote',
+    );
+
+    expect(roomoteCloud?.configSatisfied).toBe(false);
+    expect(roomoteCloud?.infrastructureSatisfied).toBe(false);
+    // Every Roomote Cloud field is deployment-managed, so the wizard and
+    // Settings have nothing to collect and hide the provider entirely.
+    expect(roomoteCloud?.fields.some(isComputeOperatorEditableField)).toBe(
+      false,
+    );
+  });
+
   it('is satisfied when docker is chosen because it needs no credentials', () => {
     const status = buildSetupComputeStatus({
       persistedComputeConfig: { defaultProvider: 'docker' },
@@ -247,6 +300,7 @@ describe('buildSetupComputeStatus', () => {
     const status = buildSetupComputeStatus({});
 
     expect(status.providers.map((provider) => provider.provider)).toEqual([
+      'roomote',
       'modal',
       'e2b',
       'daytona',
@@ -613,6 +667,9 @@ describe('buildSetupComputeStatus', () => {
       // image during setup, just like E2B and Daytona provision artifacts.
       blaxel: true,
       docker: true,
+      // Roomote Cloud credentials are deployment-managed; a worker image
+      // alone cannot satisfy them.
+      roomote: false,
     });
 
     const withBlaxelImage = buildSetupComputeStatus({
@@ -641,6 +698,7 @@ describe('buildSetupComputeStatus', () => {
       e2b: false,
       blaxel: false,
       docker: true,
+      roomote: false,
     });
 
     const withRuntimeInfrastructure = buildSetupComputeStatus({
@@ -662,6 +720,7 @@ describe('buildSetupComputeStatus', () => {
       modal: true,
       daytona: true,
       e2b: true,
+      roomote: false,
       blaxel: false,
       docker: true,
     });

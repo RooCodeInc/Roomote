@@ -1,6 +1,8 @@
 import {
   resolveConfiguredComputeProviderResources,
   resolveEffectiveModalBaseImageRef,
+  resolveRoomoteCloudBackend,
+  resolveRoomoteCloudModalAppName,
   SANDBOX_DEFAULT_MEMORY_MIB,
   SANDBOX_DEFAULT_VCPUS,
 } from '@roomote/types';
@@ -51,11 +53,34 @@ export function createComputeProviderClient(
     options.envFallback?.[name] ?? process.env[name];
 
   switch (options.provider) {
-    case 'modal': {
-      const tokenId = options.config?.tokenId ?? envValue('MODAL_TOKEN_ID');
+    // Roomote is the deployment-managed provider: credentials come from
+    // ROOMOTE_CLOUD_TOKEN_ID/SECRET, and ROOMOTE_CLOUD_BACKEND selects the
+    // engine that runs its sandboxes. Only the Modal backend exists today,
+    // so both providers share the Modal client construction below; a new
+    // backend adds its branch here after the backend resolution.
+    case 'modal':
+    case 'roomote': {
+      if (options.provider === 'roomote') {
+        // Throws on an unsupported backend; the resolved value is 'modal'
+        // until more ROOMOTE_CLOUD_BACKENDS exist.
+        resolveRoomoteCloudBackend({
+          ROOMOTE_CLOUD_BACKEND: envValue('ROOMOTE_CLOUD_BACKEND'),
+        });
+      }
+
+      const tokenIdEnvVar =
+        options.provider === 'roomote'
+          ? 'ROOMOTE_CLOUD_TOKEN_ID'
+          : 'MODAL_TOKEN_ID';
+      const tokenSecretEnvVar =
+        options.provider === 'roomote'
+          ? 'ROOMOTE_CLOUD_TOKEN_SECRET'
+          : 'MODAL_TOKEN_SECRET';
+
+      const tokenId = options.config?.tokenId ?? envValue(tokenIdEnvVar);
 
       const tokenSecret =
-        options.config?.tokenSecret ?? envValue('MODAL_TOKEN_SECRET');
+        options.config?.tokenSecret ?? envValue(tokenSecretEnvVar);
 
       // The published worker image doubles as the Modal base image, so a
       // missing ref falls back to the deployment's effective worker image
@@ -82,24 +107,34 @@ export function createComputeProviderClient(
 
       const modalEndpoint = envValue('MODAL_ENDPOINT');
       const modalEnvironment = envValue('MODAL_ENVIRONMENT');
-      const modalAppName = envValue('MODAL_APP_NAME');
+      // The managed provider derives its app name from the engine-neutral
+      // deployment slug (explicit MODAL_APP_NAME still wins); plain Modal
+      // keeps reading only its own env var.
+      const modalAppName =
+        options.provider === 'roomote'
+          ? resolveRoomoteCloudModalAppName({
+              MODAL_APP_NAME: envValue('MODAL_APP_NAME'),
+              ROOMOTE_CLOUD_SLUG: envValue('ROOMOTE_CLOUD_SLUG'),
+            })
+          : envValue('MODAL_APP_NAME');
       const modalEcrOidcRoleArn = envValue('MODAL_ECR_OIDC_ROLE_ARN');
       const modalEcrRegion = envValue('MODAL_ECR_REGION');
       const modalRegions = parseModalRegions(envValue('MODAL_REGIONS'));
       const configRegions = parseModalRegions(options.config?.regions);
 
-      assertDefined(tokenId, 'Missing MODAL_TOKEN_ID');
-      assertDefined(tokenSecret, 'Missing MODAL_TOKEN_SECRET');
+      assertDefined(tokenId, `Missing ${tokenIdEnvVar}`);
+      assertDefined(tokenSecret, `Missing ${tokenSecretEnvVar}`);
       assertDefined(baseImageRef, 'Missing MODAL_BASE_IMAGE_REF');
 
       const configuredResources = resolveConfiguredComputeProviderResources({
-        provider: 'modal',
+        provider: options.provider,
         configuredCpuCores: options.config?.cpu,
         configuredMemoryMiB: options.config?.memoryMiB,
       });
 
       const config: ModalConfig = {
         ...(options.config ?? {}),
+        vendor: options.config?.vendor ?? options.provider,
         tokenId,
         tokenSecret,
         baseImageRef,

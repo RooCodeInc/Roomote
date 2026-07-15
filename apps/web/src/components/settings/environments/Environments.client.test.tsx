@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   featureFlags: {} as Record<FeatureFlag, boolean>,
   createSnapshot: vi.fn().mockResolvedValue({ success: true }),
   clearSnapshot: vi.fn(),
+  roomoteConfigured: false,
   repositories: [{ id: 'repo-1', fullName: 'acme/api' }],
   environments: [
     {
@@ -52,6 +53,13 @@ const state = vi.hoisted(() => ({
           snapshotStatus: null,
           snapshotCreatedAt: null,
           snapshotExpiresAt: null,
+        },
+        roomote: {
+          provider: 'roomote',
+          snapshotId: null as string | null,
+          snapshotStatus: null as string | null,
+          snapshotCreatedAt: null as Date | null,
+          snapshotExpiresAt: null as Date | null,
         },
       },
       isVerified: true,
@@ -117,6 +125,11 @@ vi.mock('@/hooks/environments', () => ({
     variables: undefined,
     mutate: vi.fn(),
   }),
+}));
+
+vi.mock('@/hooks/compute', () => ({
+  useComputeProviderConfigured: (provider: string) =>
+    provider === 'roomote' && state.roomoteConfigured,
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
@@ -368,6 +381,7 @@ describe('Environments', () => {
     state.featureFlags = {
       ...mockFeatureFlags,
     };
+    state.roomoteConfigured = false;
     state.repositories = [{ id: 'repo-1', fullName: 'acme/api' }];
     state.environments = [
       {
@@ -394,6 +408,13 @@ describe('Environments', () => {
             snapshotStatus: null,
             snapshotCreatedAt: null,
             snapshotExpiresAt: null,
+          },
+          roomote: {
+            provider: 'roomote',
+            snapshotId: null as string | null,
+            snapshotStatus: null as string | null,
+            snapshotCreatedAt: null as Date | null,
+            snapshotExpiresAt: null as Date | null,
           },
         },
         isVerified: true,
@@ -505,6 +526,43 @@ describe('Environments', () => {
 
     expect(screen.getByText('No snapshot')).toBeInTheDocument();
     expect(screen.getByTitle('Create e2b snapshot')).toBeInTheDocument();
+  });
+
+  it('hides roomote snapshot controls when the provider is not configured', () => {
+    render(<Environments />);
+
+    fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+    expect(
+      screen.queryByTitle('Create roomote snapshot'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('offers roomote snapshot controls when the provider is configured', () => {
+    state.roomoteConfigured = true;
+
+    render(<Environments />);
+
+    fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+    expect(screen.getByTitle('Create roomote snapshot')).toBeInTheDocument();
+  });
+
+  it('keeps an existing roomote snapshot manageable when the provider is not configured', () => {
+    state.environments[0]!.snapshots.roomote = {
+      provider: 'roomote',
+      snapshotId: 'snap-roomote-1',
+      snapshotStatus: 'ready',
+      snapshotCreatedAt: new Date('2026-03-25T09:00:00.000Z'),
+      snapshotExpiresAt: new Date('2026-03-26T09:00:00.000Z'),
+    };
+
+    render(<Environments />);
+
+    fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+    expect(screen.getByTitle('Refresh roomote snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Clear roomote snapshot')).toBeInTheDocument();
   });
 
   it('preserves the provider override for an existing non-default snapshot', async () => {
