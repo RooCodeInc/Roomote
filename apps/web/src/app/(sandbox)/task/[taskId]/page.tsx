@@ -14,7 +14,6 @@ import { CircleSlash, TriangleAlert } from '@/components/system';
 import {
   TaskPayloadKind,
   DEFAULT_CODING_HARNESS,
-  RunStatus,
   isExitedRunStatus,
   type TaskPhase,
 } from '@roomote/types';
@@ -77,10 +76,6 @@ export default function SandboxPage() {
     taskRun?.payloadKind === TaskPayloadKind.SnapshotResume &&
     sessionState === 'boot-failed' &&
     (hasTranscriptHistory || hasArtifacts || hasVisibleSessionPrompt);
-  const shouldRenderLiveSetupOnboarding =
-    task?.workflow === 'setup_onboarding' &&
-    taskRun?.status === RunStatus.Idle &&
-    taskRun.taskPhase === 'waiting_for_prompt';
   const handleBootStatusChange = useCallback(() => {
     queryClient.invalidateQueries({
       queryKey: trpc.sandboxSession.byTaskId.queryKey(),
@@ -229,10 +224,7 @@ export default function SandboxPage() {
     );
   }
 
-  if (
-    (sessionState === 'historical' || sessionState === 'resuming') &&
-    !shouldRenderLiveSetupOnboarding
-  ) {
+  if (sessionState === 'historical' || sessionState === 'resuming') {
     return (
       <HistoricalSandboxProvider
         taskId={taskId}

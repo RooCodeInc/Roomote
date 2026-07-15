@@ -222,7 +222,7 @@ describe('SandboxPage', () => {
   it('renders paused setup onboarding tasks with the live task surface', () => {
     useTaskSessionMock.mockReturnValue({
       ...baseSession,
-      sessionState: 'historical',
+      sessionState: 'interactive',
       task: {
         ...baseSession.task,
         workflow: 'setup_onboarding',

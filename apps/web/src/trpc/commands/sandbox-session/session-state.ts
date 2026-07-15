@@ -27,12 +27,10 @@ export function getSessionState(
   {
     hasMessages,
     hasHarnessMessages,
-    taskWorkflow,
     now = Date.now(),
   }: {
     hasMessages: boolean;
     hasHarnessMessages: boolean;
-    taskWorkflow?: string | null;
     now?: number;
   },
 ): SessionState {
@@ -61,14 +59,6 @@ export function getSessionState(
       return 'resuming';
     }
     return 'booting';
-  }
-
-  if (
-    taskWorkflow === 'setup_onboarding' &&
-    taskRunStatus === RunStatus.Idle &&
-    taskRun.taskPhase === 'waiting_for_prompt'
-  ) {
-    return 'historical';
   }
 
   // Keep the startup/resume surface visible until the harness has produced at

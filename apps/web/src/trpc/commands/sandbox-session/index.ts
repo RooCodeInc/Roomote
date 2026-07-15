@@ -644,7 +644,6 @@ export async function getSandboxSessionByTaskIdCommand(
   const sessionState = getSessionState(taskRun, {
     hasMessages,
     hasHarnessMessages,
-    taskWorkflow: task.workflow,
   });
   const resolvedPreviewRuntimeConfig =
     await resolveEffectivePreviewRuntimeConfig({
