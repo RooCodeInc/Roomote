@@ -15,6 +15,7 @@ import {
   isNull,
   loadEnvironmentSnapshots,
   markTaskStartParallelCountEndedAt,
+  or,
   repositories,
   sql,
   updateEnvironmentDefinition,
@@ -844,9 +845,14 @@ export async function startEnvironmentDefinitionTaskCommand(
 }
 
 /**
- * Find an active verification task for the given environment, if any. A
- * verification task carries the `verifiesEnvironmentId` marker in its payload.
- * Accepts a transaction so the check can run inside the retry critical section.
+ * Find an active verification task for the given environment, if any. This
+ * covers both retry-launched verification tasks (marked with
+ * `verifiesEnvironmentId`) and the initial onboarding setup task (workflow
+ * `setup_onboarding`, marked with `environmentDefinitionId`) that performs and
+ * records the first verification. Both are explicitly authorized to record a
+ * result for the environment, so both must block a concurrent retry from
+ * superseding an in-flight attempt. Accepts a transaction so the check can run
+ * inside the retry critical section.
  */
 async function getActiveVerificationTaskId(
   dbOrTx: DatabaseOrTransaction,
@@ -855,16 +861,36 @@ async function getActiveVerificationTaskId(
   const [job] = await dbOrTx
     .select({ taskId: taskRuns.taskId })
     .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
         inArray(taskRuns.status, [...activeRunStatuses]),
-        sql`${taskRuns.payload} ->> 'verifiesEnvironmentId' = ${environmentId}`,
+        or(
+          sql`${taskRuns.payload} ->> 'verifiesEnvironmentId' = ${environmentId}`,
+          and(
+            eq(tasks.workflow, 'setup_onboarding'),
+            sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${environmentId}`,
+          ),
+        ),
       ),
     )
     .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
     .limit(1);
 
   return job?.taskId ?? null;
+}
+
+/**
+ * Test-only export of the active-verification-attempt guard so its
+ * environment-marker matching (retry `verifiesEnvironmentId` and onboarding
+ * `setup_onboarding` + `environmentDefinitionId`) can be verified against a
+ * real database.
+ */
+export async function getActiveVerificationTaskIdForTest(
+  dbOrTx: DatabaseOrTransaction,
+  environmentId: string,
+): Promise<string | null> {
+  return getActiveVerificationTaskId(dbOrTx, environmentId);
 }
 
 /**

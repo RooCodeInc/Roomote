@@ -58,6 +58,7 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   loadEnvironmentSnapshots: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  or: vi.fn(),
   repositories: {},
   sql: vi.fn(),
   taskRuns: {},
@@ -69,15 +70,18 @@ vi.mock('@roomote/db/server', () => ({
     mutation: (tx: unknown) => Promise<unknown>,
   ) => {
     // Provide a transaction whose active-run lookup returns the seeded rows.
-    const tx = {
-      select: () => ({
-        from: () => ({
-          where: () => ({
-            orderBy: () => ({
-              limit: async () => mockActiveVerificationRuns,
-            }),
+    const activeRunQuery = {
+      innerJoin: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => mockActiveVerificationRuns,
           }),
         }),
+      }),
+    };
+    const tx = {
+      select: () => ({
+        from: () => activeRunQuery,
       }),
     };
     return mutation(tx);
