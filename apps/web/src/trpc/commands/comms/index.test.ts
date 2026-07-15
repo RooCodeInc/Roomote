@@ -147,6 +147,17 @@ vi.mock('@roomote/sdk/server', () => ({
   listDiscordInstallations: mockListDiscordInstallations,
   reconcileDiscordInstallations: mockReconcileDiscordInstallations,
   syncDiscordInstallationChannels: mockSyncDiscordInstallationChannels,
+  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await mockResolveTelegramRuntimeCredentials();
+
+    return botToken
+      ? {
+          getWebhookInfo: mockTelegramGetWebhookInfo,
+          registerWebhook: mockTelegramRegisterWebhook,
+          registerCommands: mockTelegramRegisterCommands,
+        }
+      : null;
+  }),
 }));
 
 vi.mock('@roomote/communication/discord-provider', () => ({
@@ -161,20 +172,6 @@ vi.mock('@roomote/communication/discord-provider', () => ({
     ((channel.flags ?? 0) & (1 << 4)) !== 0,
   DISCORD_REQUIRED_TAG_FORUM_ERROR:
     'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.',
-}));
-
-vi.mock('@roomote/sdk/server', () => ({
-  createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
-    const { botToken } = await mockResolveTelegramRuntimeCredentials();
-
-    return botToken
-      ? {
-          getWebhookInfo: mockTelegramGetWebhookInfo,
-          registerWebhook: mockTelegramRegisterWebhook,
-          registerCommands: mockTelegramRegisterCommands,
-        }
-      : null;
-  }),
 }));
 
 vi.mock('@/lib/server/env', () => ({
