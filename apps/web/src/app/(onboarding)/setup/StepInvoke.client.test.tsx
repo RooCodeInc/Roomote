@@ -352,6 +352,14 @@ describe('Setup StepInvoke', () => {
     ).toBeInTheDocument();
   });
 
+  it('clarifies that Bitbucket Cloud mentions work on any pull request', () => {
+    render(<StepInvoke sourceControlProviders={['bitbucket']} />);
+
+    expect(
+      screen.getByText('Mention @roomote in a comment on any pull request.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows configured providers with automations before the web UI', () => {
     render(
       <StepInvoke

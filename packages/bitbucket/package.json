@@ -3,7 +3,10 @@
   "version": "0.0.3",
   "private": true,
   "type": "module",
-  "exports": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./constants": "./src/constants.ts"
+  },
   "scripts": {
     "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",

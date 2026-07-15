@@ -16,7 +16,6 @@ type InvokeMethod = {
   icon: MethodIcon;
   title: string;
   description: string;
-  example?: string;
 };
 
 type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
@@ -73,7 +72,7 @@ const sourceControlProviderCopy: Record<
   },
   bitbucket: {
     icon: 'bitbucket',
-    description: `Start work from connected Bitbucket pull requests and repositories.`,
+    description: `Mention @roomote in a comment on any pull request.`,
   },
   ado: {
     icon: 'ado',
@@ -130,13 +129,11 @@ export function buildInvokeMethods({
   return [
     ...uniqueValues(communicationProviders).map((provider) => {
       const copy = communicationProviderCopy[provider];
-      const identity = getIdentity(invocationIdentities, provider);
 
       return {
         icon: createBrandIcon(copy.icon, copy.title),
         title: copy.title,
         description: copy.description,
-        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...uniqueValues(sourceControlProviders).map((provider) => {
@@ -154,7 +151,6 @@ export function buildInvokeMethods({
         icon: createBrandIcon(copy.icon, title),
         title,
         description,
-        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...(includeLinear

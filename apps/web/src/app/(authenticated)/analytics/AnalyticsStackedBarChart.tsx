@@ -31,8 +31,6 @@ import {
   Skeleton,
 } from '@/components/system';
 
-import { AnalyticsGranularitySelector } from './AnalyticsGranularitySelector';
-
 const CHART_COLORS = [
   'var(--color-chart-1)',
   'var(--color-chart-2)',
@@ -258,10 +256,8 @@ type AnalyticsStackedBarChartProps = {
   axisLabel: string;
   chart: AnalyticsChartResponse | undefined;
   granularity: AnalyticsGranularity;
-  availableGranularities: AnalyticsGranularity[];
   isLoading: boolean;
   isError: boolean;
-  onGranularityChange: (value: AnalyticsGranularity) => void;
   onResetFilters: () => void;
   onSelectSegment: (selection: {
     bucketKey: string;
@@ -275,10 +271,8 @@ export function AnalyticsStackedBarChart({
   axisLabel,
   chart,
   granularity,
-  availableGranularities,
   isLoading,
   isError,
-  onGranularityChange,
   onResetFilters,
   onSelectSegment,
 }: AnalyticsStackedBarChartProps) {
@@ -326,23 +320,8 @@ export function AnalyticsStackedBarChart({
       : 0;
   const xAxisMinTickGap = isMobile ? 20 : 28;
 
-  const granularitySelector = (
-    <div className="border-t-2 border-background pt-4 -mx-4">
-      <AnalyticsGranularitySelector
-        value={granularity}
-        availableGranularities={availableGranularities}
-        onChange={onGranularityChange}
-      />
-    </div>
-  );
-
   if (isLoading) {
-    return (
-      <div className="space-y-4">
-        <AnalyticsChartSkeleton />
-        {granularitySelector}
-      </div>
-    );
+    return <AnalyticsChartSkeleton />;
   }
 
   if (isError) {
@@ -359,12 +338,7 @@ export function AnalyticsStackedBarChart({
   }
 
   if (!chart || chart.buckets.length === 0 || chart.series.length === 0) {
-    return (
-      <>
-        <AnalyticsEmptyState onReset={onResetFilters} />
-        {granularitySelector}
-      </>
-    );
+    return <AnalyticsEmptyState onReset={onResetFilters} />;
   }
 
   return (
@@ -462,7 +436,6 @@ export function AnalyticsStackedBarChart({
           </BarChart>
         </ResponsiveContainer>
       </div>
-      {granularitySelector}
     </div>
   );
 }

@@ -1132,7 +1132,10 @@ export const runTask = async ({
       },
     });
     taskCancellation.bindCancelTask(() => {
-      harnessManager?.cancelTask();
+      // Polling/MCP cancel stamps canceledAt on the run row — that is a
+      // terminal intent, so shut the sandbox down instead of leaving a soft
+      // resume hold that outlives the canceled task.
+      harnessManager?.cancelTask({ terminate: true });
     });
     // Close the loop on background environment setup: when it settles while
     // the agent is actively working, push a notification into the session so
@@ -1839,6 +1842,9 @@ export const runTask = async ({
     // external sleep action. BullMQ is responsible for both resumable snapshots
     // and non-resumable shutdowns across snapshot-capable providers.
     //
+    // Terminal cancel must skip this handoff: publish no due sleepAt and
+    // finish as Canceled instead of becoming a snapshot/standby candidate.
+    //
     // NOTE: Snapshot creation ultimately tears down the provider runtime. Vercel
     // does this as part of snapshot creation, while Modal explicitly terminates
     // the sandbox immediately after snapshotting. In practice, the code below
@@ -1849,12 +1855,20 @@ export const runTask = async ({
     // primary mechanism for post-snapshot cleanup (e.g., draining pending Linear
     // messages). The drain check below is kept as a fallback for edge cases where
     // the snapshot fails or times out but the worker survives.
-    const { claimed: sleepActionTriggered } = skipExternalSleepAction
-      ? { claimed: false }
-      : await waitForExternalSleepAction({
-          taskRun,
-          logger,
-        });
+    const skipSleepAfterTerminalCancel = Boolean(finalState.cancelTriggeredAt);
+    if (skipSleepAfterTerminalCancel) {
+      logger.info(
+        `[runTask] Skipping external sleep handoff after terminal cancel for task run ${taskRun.id}`,
+      );
+    }
+
+    const { claimed: sleepActionTriggered } =
+      skipExternalSleepAction || skipSleepAfterTerminalCancel
+        ? { claimed: false }
+        : await waitForExternalSleepAction({
+            taskRun,
+            logger,
+          });
 
     // Fallback: check for pending Linear messages that arrived during the snapshot
     // window. In practice, the provider runtime is torn down during or

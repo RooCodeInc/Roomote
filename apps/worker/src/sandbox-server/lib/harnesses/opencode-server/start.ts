@@ -31,6 +31,15 @@ interface StartOpenCodeServerHarnessOptions {
    * failures inside the callback must not affect the harness lifecycle.
    */
   onUnexpectedExit?: (certificate: OpenCodeExitCertificate) => void;
+  /**
+   * Observer-only diagnostic breadcrumb for rare OpenCode runtime failures
+   * that need durable post-mortem outside the sandbox log surface.
+   */
+  onDiagnostic?: (input: {
+    kind: string;
+    message: string;
+    details?: Record<string, unknown>;
+  }) => void;
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -206,6 +215,7 @@ export async function startOpenCodeServerHarness({
   modelOverride,
   developerInstructionsContent,
   onUnexpectedExit,
+  onDiagnostic,
   beforeQueuedPrompt,
 }: StartOpenCodeServerHarnessOptions): Promise<StartOpenCodeServerHarnessResult> {
   const log = createPrefixedLogger(logger, '[opencode-server]');
@@ -349,6 +359,15 @@ export async function startOpenCodeServerHarness({
       baseUrl,
       workspacePath,
       logger,
+      httpTimeoutMs: parseTimeoutMs(
+        process.env.ROOMOTE_OPENCODE_HTTP_TIMEOUT_MS,
+      ),
+      sessionCreateTimeoutMs: parseTimeoutMs(
+        process.env.ROOMOTE_OPENCODE_SESSION_CREATE_TIMEOUT_MS,
+      ),
+      healthTimeoutMs: parseTimeoutMs(
+        process.env.ROOMOTE_OPENCODE_HEALTH_TIMEOUT_MS,
+      ),
     });
     const harness = new OpenCodeServerHarness({
       client,
@@ -370,6 +389,7 @@ export async function startOpenCodeServerHarness({
         process.env.ROOMOTE_SUBAGENT_SETTLEMENT_GRACE_MS,
       ),
       mcpServerNames: Object.keys(mcpServers),
+      onDiagnostic,
       beforeQueuedPrompt,
     });
 

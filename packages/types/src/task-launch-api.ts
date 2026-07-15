@@ -123,6 +123,14 @@ export const taskLaunchRequestSchema = z.object({
   bootstrap: standardTaskBootstrapSchema,
   trigger: z.enum(['onboarding', 'scheduled']).optional(),
   notifySlack: z.boolean().optional(),
+  /**
+   * When true and the launch is authenticated as a task run, the platform
+   * delivers a message into that launching run's session when the spawned
+   * task's run settles (completes, fails, is canceled, or goes idle). Lets a
+   * parent task consume a spawned task's outcome deterministically instead of
+   * polling. Standard launches only.
+   */
+  notifyOnSettle: z.boolean().optional(),
 });
 
 export type TaskLaunchRequest = z.infer<typeof taskLaunchRequestSchema>;

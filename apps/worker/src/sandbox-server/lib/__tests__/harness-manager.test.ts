@@ -13,6 +13,7 @@ import {
   type TaskCommand,
   TaskCommandName,
   type Harness,
+  type HarnessCommandError,
   type HarnessEvents,
 } from '../harness';
 import {
@@ -71,6 +72,13 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
     return () => this.off('runtimeTurnCompleted', listener);
   }
 
+  subscribeCommandError(
+    listener: (error: HarnessCommandError) => void,
+  ): () => void {
+    this.on('commandError', listener);
+    return () => this.off('commandError', listener);
+  }
+
   sendCommand(command: TaskCommand): boolean {
     this.sentCommands.push(command);
     return true;
@@ -102,6 +110,10 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
 
   emitRuntimeOutput(event: AcpMessage): void {
     this.emit('runtimeOutput', event);
+  }
+
+  emitCommandError(error: HarnessCommandError): void {
+    this.emit('commandError', error);
   }
 }
 
@@ -667,7 +679,7 @@ describe('HarnessManager cancelTask', () => {
     }
   });
 
-  it('forwards user-stop attribution to the harness cancel command', () => {
+  it('forwards user-stop attribution to the harness cancel command', async () => {
     const { harness, manager } = createManager();
 
     try {
@@ -682,6 +694,53 @@ describe('HarnessManager cancelTask', () => {
         commandName: TaskCommandName.CancelTask,
         data: { cancelledBy: { name: 'Daniel', source: 'web' } },
       });
+      expect(manager.getStatus().phase).toBe('stopped');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('shuts the sandbox down when cancel is terminal', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({
+        cancelledBy: { name: 'Ada', source: 'slack' },
+        terminate: true,
+      });
+
+      await expect(shutdownPromise).resolves.toMatchObject({
+        cancelTriggeredAt: expect.any(Number),
+        taskAbortedAt: expect.any(Number),
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(harness.sentCommands.at(-1)).toMatchObject({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Ada', source: 'slack' } },
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('still terminates with no active turn when terminate is requested', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({ terminate: true });
+
+      await expect(shutdownPromise).resolves.toMatchObject({
+        cancelTriggeredAt: expect.any(Number),
+        taskAbortedAt: expect.any(Number),
+      });
+      expect(manager.getStatus().phase).toBe('shutting_down');
     } finally {
       manager.dispose();
       harness.dispose();
@@ -2529,6 +2588,35 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('getSleepAt returns null after terminal cancel even while shutting down', async () => {
+    vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
+
+    const { harness, manager } = createManager({
+      keepaliveMs: 60_000,
+      sandboxTimeoutMs: 20 * 60 * 1_000,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTask({ prompt: 'hello' });
+
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-cancel-term-1'],
+      } as TaskEvent);
+
+      const shutdownPromise = manager.waitForShutdown();
+      manager.cancelTask({ terminate: true });
+      await shutdownPromise;
+
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      expect(manager.getSleepAt()).toBeNull();
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('getSleepAt returns approximately Date.now() for shutting_down phase', () => {
     vi.setSystemTime(new Date('2026-03-19T12:00:00.000Z'));
 
@@ -2726,27 +2814,100 @@ describe('HarnessManager error status', () => {
 
       harness.emitTaskEvent({
         eventName: TaskEventName.TaskStarted,
-        payload: ['task-error'],
+        payload: ['task-error-clear'],
       } as TaskEvent);
 
       harness.emitTaskEvent({
         eventName: TaskEventName.Message,
         payload: [
           {
-            taskId: 'task-error',
+            taskId: 'task-error-clear',
+            action: 'created',
             message: {
               ts: Date.now(),
               type: 'say',
               say: 'error',
-              text: 'unexpected status 401 Unauthorized: proxy token rejected',
-              partial: false,
+              text: 'temporary glitch',
             },
           },
         ],
       } as TaskEvent);
 
       expect(manager.getStatus().lastErrorMessage).toBeDefined();
-      expect(manager.sendFollowUpPrompt({ prompt: 'retry' })).toBe(true);
+      manager.sendFollowUpPrompt({ prompt: 'retry' });
+      expect(manager.getStatus().lastErrorMessage).toBeUndefined();
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('shuts down terminally when StartNewTask fails asynchronously', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.emitCommandError({
+        command: {
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'hello' },
+        },
+        error: new Error(
+          'OpenCode session creation did not respond within 90s',
+        ),
+      });
+
+      await expect(manager.waitForShutdown()).resolves.toMatchObject({
+        lastErrorMessage:
+          'OpenCode session creation did not respond within 90s',
+        taskAbortedAt: undefined,
+        taskFinishedAt: undefined,
+      });
+      expect(manager.getStatus()).toMatchObject({
+        phase: 'shutting_down',
+        lastErrorMessage:
+          'OpenCode session creation did not respond within 90s',
+      });
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('still shuts down when StartNewTask fails after cancel before a session exists', async () => {
+    const { harness, manager } = createManager();
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      expect(manager.getStatus().phase).toBe('running');
+      expect(manager.getStatus().sessionId).toBeUndefined();
+
+      // Cancel before OpenCode invents a session id — CancelTask is a no-op on
+      // the runtime side because there is nothing to abort yet.
+      manager.cancelTask();
+      expect(manager.getStatus().phase).toBe('stopped');
+      expect(manager.getSleepAt()).toBeNull();
+      expect(manager.getState().cancelTriggeredAt).toBeDefined();
+
+      harness.emitCommandError({
+        command: {
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'hello' },
+        },
+        error: new Error(
+          'OpenCode session creation did not respond within 90s',
+        ),
+      });
+
+      const finalState = await manager.waitForShutdown();
+      expect(finalState.taskAbortedAt).toBe(finalState.cancelTriggeredAt);
+      expect(finalState.taskFinishedAt).toBeUndefined();
+      expect(manager.getStatus().phase).toBe('shutting_down');
+      // User cancel wins for report status; do not rewrite it as Failed.
       expect(manager.getStatus().lastErrorMessage).toBeUndefined();
     } finally {
       manager.dispose();

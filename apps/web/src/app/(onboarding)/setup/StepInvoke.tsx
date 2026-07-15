@@ -189,11 +189,6 @@ export function StepInvoke({
                 <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
-              {method.example ? (
-                <p className="text-sm text-muted-foreground">
-                  Example: <span className="font-mono">{method.example}</span>
-                </p>
-              ) : null}
             </div>
           </div>
         ))}

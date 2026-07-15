@@ -41,6 +41,9 @@ class FakeOpenCodeServerClient {
   messages = vi.fn(async () => [] as OpenCodeSessionMessage[]);
   message = vi.fn<() => Promise<OpenCodeSessionMessage>>();
   abort = vi.fn(async () => true);
+  get sessionCreateTimeoutMsValue(): number {
+    return 90_000;
+  }
   streamEvents = vi.fn(
     async (options: {
       signal: AbortSignal;
@@ -3376,6 +3379,159 @@ describe('OpenCodeServerHarness', () => {
       expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
         sessionId: 'ses_1',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('fails the initial task and records a diagnostic when session create fails', async () => {
+    const client = new FakeOpenCodeServerClient();
+    client.createSession.mockRejectedValueOnce(
+      new Error(
+        'OpenCode session creation did not respond within 90s. The OpenCode server is up, but the first session request never finished.',
+      ),
+    );
+    const onDiagnostic = vi.fn();
+    const harness = new OpenCodeServerHarness({
+      client: client as unknown as OpenCodeServerClient,
+      workspacePath: '/sandbox/repos',
+      logger: createLogger(),
+      model: TEST_OPENCODE_MODEL,
+      eventStreamReadyTimeoutMs: 100,
+      mcpServerNames: ['roomote'],
+      commandEnv: { HOME: '/sandbox/repos/.roomote-runtime-home' },
+      onDiagnostic,
+    });
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    const commandErrors: unknown[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+    harness.subscribeCommandError?.((error) => commandErrors.push(error));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(commandErrors.length).toBeGreaterThan(0);
+      });
+
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskStarted &&
+            event.payload?.[0] === 'opencode-session-create-failed',
+        ),
+      ).toBe(true);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.Message &&
+            (event.payload?.[0] as { message?: { say?: string } })?.message
+              ?.say === 'error',
+        ),
+      ).toBe(true);
+      expect(client.promptAsync).not.toHaveBeenCalled();
+      expect(onDiagnostic).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: 'opencode_session_create_failed',
+          details: expect.objectContaining({
+            workspacePath: '/sandbox/repos',
+            homeDir: '/sandbox/repos/.roomote-runtime-home',
+            mcpServerNames: ['roomote'],
+          }),
+        }),
+      );
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'session creation did not respond',
+            ),
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('aborts a late-created session when cancel races ahead of ensureSession', async () => {
+    let resolveCreate:
+      | ((value: { id: string; title: string }) => void)
+      | undefined;
+    const client = new FakeOpenCodeServerClient();
+    client.createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    const harness = new OpenCodeServerHarness({
+      client: client as unknown as OpenCodeServerClient,
+      workspacePath: '/sandbox/repos',
+      logger: createLogger(),
+      model: TEST_OPENCODE_MODEL,
+      eventStreamReadyTimeoutMs: 100,
+    });
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalledTimes(1);
+      });
+
+      // Cancel while createSession is still pending — no session id yet.
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Matt', source: 'web' } },
+      });
+
+      resolveCreate?.({ id: 'ses_late', title: 'late' });
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_late' }),
+        );
+      });
+
+      expect(client.promptAsync).not.toHaveBeenCalled();
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskStarted &&
+            event.payload?.[0] === 'ses_late',
+        ),
+      ).toBe(true);
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskAborted &&
+            event.payload?.[0] === 'ses_late',
+        ),
+      ).toBe(true);
     } finally {
       harness.dispose();
     }

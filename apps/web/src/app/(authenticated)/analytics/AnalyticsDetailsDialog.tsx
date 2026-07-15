@@ -44,11 +44,13 @@ type AnalyticsDetailsDialogProps = {
 const DIALOG_WIDTH_BY_OBJECT: Record<AnalyticsObject, string> = {
   tasks: 'md:w-[min(96vw,1160px)] md:max-w-[1160px]',
   pullRequests: 'md:w-[min(96vw,1240px)] md:max-w-[1240px]',
+  costs: 'md:w-[min(96vw,1240px)] md:max-w-[1240px]',
 };
 
 const TABLE_MIN_WIDTH_BY_OBJECT: Record<AnalyticsObject, string> = {
   tasks: 'min-w-[980px] md:min-w-[1100px]',
   pullRequests: 'min-w-[1140px] md:min-w-[1220px]',
+  costs: 'min-w-[1140px] md:min-w-[1220px]',
 };
 
 const SERIES_LABEL_MAX_LENGTH = 28;

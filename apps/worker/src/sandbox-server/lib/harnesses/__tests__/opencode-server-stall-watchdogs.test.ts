@@ -28,7 +28,10 @@ class FakeOpenCodeServerClient {
   promptAsync = vi.fn(async (_options: unknown) => undefined);
   messages = vi.fn(async () => [] as OpenCodeSessionMessage[]);
   message = vi.fn<() => Promise<OpenCodeSessionMessage>>();
-  abort = vi.fn(async (_options: { sessionId: string }) => true);
+  abort = vi.fn(async () => true);
+  get sessionCreateTimeoutMsValue(): number {
+    return 90_000;
+  }
   streamEvents = vi.fn(
     async (options: {
       signal: AbortSignal;

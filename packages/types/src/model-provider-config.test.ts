@@ -4,6 +4,7 @@ import {
   createEmptyDeploymentModelConfig,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
+  getDisplayModelProviderId,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
   isInlineGoogleCredentialsValue,
@@ -321,6 +322,30 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       defaultRoomoteModel: 'openai/gpt-5.6-terra',
     });
     expect(chatgptProvider?.envVarName).toBeUndefined();
+  });
+
+  it('groups openai/ models under ChatGPT when a subscription is connected', () => {
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+      }),
+    ).toBe('chatgpt');
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: false,
+      }),
+    ).toBe('openai');
+    expect(
+      getDisplayModelProviderId('anthropic/claude-sonnet-5', {
+        chatgptConnected: true,
+      }),
+    ).toBe('anthropic');
+    // Subscription auth wins when both an OpenAI key and ChatGPT are present.
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+      }),
+    ).toBe('chatgpt');
   });
 
   it('maps Requesty to the REQUESTY_API_KEY env var', () => {

@@ -1574,6 +1574,7 @@ describe('Telegram webhook handler', () => {
       expect.objectContaining({
         run: expect.objectContaining({ id: 42 }),
         allowDirectCancelWithoutSandbox: true,
+        terminate: true,
       }),
     );
     expect(answerCallbackQueryMock).toHaveBeenCalledWith(

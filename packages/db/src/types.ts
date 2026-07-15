@@ -26,7 +26,7 @@ import type {
   taskStartParallelCounts,
   workItems,
   taskMessages,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   taskSlackReplyDetails,
   taskPlatformIssueReports,
   githubPendingInstallations,
@@ -133,16 +133,20 @@ export type CreateTaskStartParallelCount = Omit<
 >;
 
 /**
- * task_inference_usage_events
+ * llm_usage_events
  */
 
-export type TaskInferenceUsageEvent =
-  typeof taskInferenceUsageEvents.$inferSelect;
+export type LlmUsageEvent = typeof llmUsageEvents.$inferSelect;
 
-export type CreateTaskInferenceUsageEvent = Omit<
-  typeof taskInferenceUsageEvents.$inferInsert,
+export type CreateLlmUsageEvent = Omit<
+  typeof llmUsageEvents.$inferInsert,
   Generated
 >;
+
+/** @deprecated Use LlmUsageEvent. */
+export type TaskInferenceUsageEvent = LlmUsageEvent;
+/** @deprecated Use CreateLlmUsageEvent. */
+export type CreateTaskInferenceUsageEvent = CreateLlmUsageEvent;
 
 /**
  * workItems (Stage 4 merge of task_suggestions + automation_work_items +

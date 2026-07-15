@@ -56,9 +56,9 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
+  getDisplayModelProviderId,
   getModelProviderLabel,
   getSetupModelProvider,
-  getTaskModelProviderId,
   normalizeOptionalReasoningEffort,
 } from '@roomote/types';
 import type {
@@ -395,11 +395,17 @@ const KNOWN_MODEL_PROVIDER_ORDER = SETUP_MODEL_PROVIDER_CATALOG.map(
 
 function groupByModelProvider<T extends { id: string }>(
   items: T[],
+  options?: {
+    chatgptConnected?: boolean;
+  },
 ): ProviderModelGroup<T>[] {
   const groups = new Map<string, T[]>();
 
   for (const item of items) {
-    const providerId = getTaskModelProviderId(item.id) ?? 'other';
+    const providerId =
+      getDisplayModelProviderId(item.id, {
+        chatgptConnected: options?.chatgptConnected,
+      }) ?? 'other';
     const groupItems = groups.get(providerId) ?? [];
     groupItems.push(item);
     groups.set(providerId, groupItems);
@@ -753,6 +759,11 @@ export function ModelSettingsSection({
       ),
     [connectedProviders],
   );
+  const chatgptConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
+      provider.savedApiKeySatisfied,
+  );
   const activeNewModelProvider = useMemo(
     () =>
       sortedConnectedProviders.find(
@@ -1001,14 +1012,17 @@ export function ModelSettingsSection({
     return options;
   }, [settingsData]);
   const codingModelGroups = useMemo(
-    () => groupByModelProvider(codingModelOptions),
-    [codingModelOptions],
+    () => groupByModelProvider(codingModelOptions, { chatgptConnected }),
+    [codingModelOptions, chatgptConnected],
   );
   const helperModelGroups = useMemo(
-    () => groupByModelProvider(helperModelOptions),
-    [helperModelOptions],
+    () => groupByModelProvider(helperModelOptions, { chatgptConnected }),
+    [helperModelOptions, chatgptConnected],
   );
-  const modelGroups = useMemo(() => groupByModelProvider(models), [models]);
+  const modelGroups = useMemo(
+    () => groupByModelProvider(models, { chatgptConnected }),
+    [models, chatgptConnected],
+  );
   const roleOptionGroups: Record<
     TaskModelRole,
     ProviderModelGroup<EditableRuntimeModelOption>[]

@@ -271,11 +271,11 @@ const authClientLinkedAccountTestCases = [
     expectedLinkArgs: '/settings?service=gitea',
   },
   {
-    name: 'Bitbucket',
+    name: 'Bitbucket Cloud',
     searchParams: 'service=bitbucket',
     linkedAccount: {
       accountId: 'bb-user-1',
-      displayName: 'Bitbucket user bb-user-1',
+      displayName: 'Bitbucket Cloud user bb-user-1',
     },
     setLinkedAccount: (
       account: {

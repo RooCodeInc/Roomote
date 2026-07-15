@@ -93,7 +93,7 @@ const TOKEN_PROVIDER_UI = {
   },
   bitbucket: {
     accessibleResource: 'repositories',
-    credentialName: 'API token',
+    credentialName: 'OAuth consumer',
     repositoryTarget: '_bitbucket',
   },
   ado: {
@@ -368,7 +368,15 @@ export function SourceControl() {
             provider={provider}
             configStatus={sourceControlConfigStatus.data}
             saveSuccessMessage={`${sourceControlProviderDescriptors[provider].label} credentials saved.`}
-            onSaved={() => tokenProviderState[provider].sync.mutate()}
+            onSaved={() => {
+              if (provider === 'bitbucket') {
+                window.location.assign(
+                  '/api/source-control/bitbucket/oauth/authorize',
+                );
+              } else {
+                tokenProviderState[provider].sync.mutate();
+              }
+            }}
           />
         ),
       }),

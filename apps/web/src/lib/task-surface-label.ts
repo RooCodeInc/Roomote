@@ -8,7 +8,7 @@ export const TASK_SOURCE_ORDER: readonly string[] = [
   'GitHub',
   'GitLab',
   'Gitea',
-  'Bitbucket',
+  'Bitbucket Cloud',
   'Azure DevOps',
   'Linear',
   'Web',
@@ -36,7 +36,7 @@ export function getTaskSurfaceLabel(
     case 'gitea':
       return 'Gitea';
     case 'bitbucket':
-      return 'Bitbucket';
+      return 'Bitbucket Cloud';
     case 'ado':
       return 'Azure DevOps';
     case 'linear':

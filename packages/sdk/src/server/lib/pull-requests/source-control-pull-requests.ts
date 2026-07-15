@@ -1,29 +1,8 @@
 import { createGitHubToken } from '@roomote/auth';
 import {
-  buildAdoOrganizationApiBaseUrl,
-  resolveAdoBaseUrl,
-  resolveAdoToken,
-} from '@roomote/ado';
-import {
-  buildBitbucketApiBaseUrl,
-  resolveBitbucketBaseUrl,
-  resolveBitbucketToken,
-  resolveBitbucketUsername,
-} from '@roomote/bitbucket';
-import {
-  buildGiteaApiBaseUrl,
-  resolveGiteaBaseUrl,
-  resolveGiteaToken,
-} from '@roomote/gitea';
-import {
   getOctokit,
   resolveConfiguredGitHubAppSlugIfConfigured,
 } from '@roomote/github';
-import {
-  buildGitLabApiBaseUrl,
-  resolveGitLabBaseUrl,
-  resolveGitLabToken,
-} from '@roomote/gitlab';
 import {
   db,
   eq,
@@ -45,15 +24,32 @@ import {
 } from '@roomote/types';
 import { z } from 'zod';
 import {
+  adoPullRequestSchema,
+  bitbucketPullRequestSchema,
+  findOpenAdoPullRequestsByBranch,
+  findOpenBitbucketPullRequestsByBranch,
+  findOpenGiteaPullRequestsByBranch,
+  findOpenGitLabMergeRequestsByBranch,
+  giteaPullRequestSchema,
+  gitLabMergeRequestSchema,
+  normalizeAdoBranchRef,
+  stripAdoBranchRef,
+} from './source-control-pull-request-branch-lookup';
+import { requestSourceControlJson as requestJson } from './source-control-pull-request-http';
+import {
+  resolveAdoProviderContext,
+  resolveBitbucketProviderContext,
+  resolveGiteaProviderContext,
+  resolveGitLabProviderContext,
+} from './source-control-pull-request-provider-context';
+import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
-  formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
   isGitLabDraft,
-  parseAdoRepositoryFullName,
   resolveRepositoryRow,
   splitRepositoryFullName,
   type FetchImpl,
@@ -167,69 +163,6 @@ type GitHubPullRequestResult = {
   draft?: boolean;
   base?: { ref: string };
 };
-
-const gitLabMergeRequestSchema = z.object({
-  iid: z.number().int(),
-  title: z.string(),
-  web_url: z.string().url().optional(),
-  target_branch: z.string().optional(),
-  draft: z.boolean().optional(),
-  work_in_progress: z.boolean().optional(),
-});
-const gitLabMergeRequestListSchema = z.array(gitLabMergeRequestSchema);
-
-const giteaPullRequestSchema = z
-  .object({
-    number: z.number().int().optional(),
-    index: z.number().int().optional(),
-    title: z.string().optional(),
-    html_url: z.string().url().optional(),
-    draft: z.boolean().optional(),
-    head: z.object({ ref: z.string().optional() }).optional(),
-    base: z.object({ ref: z.string().optional() }).optional(),
-  })
-  .passthrough();
-const giteaPullRequestListSchema = z.array(giteaPullRequestSchema);
-
-const bitbucketPullRequestSchema = z
-  .object({
-    id: z.number().int(),
-    title: z.string().optional(),
-    description: z.string().nullable().optional(),
-    draft: z.boolean().optional(),
-    links: z
-      .object({
-        html: z.object({ href: z.string().url().optional() }).optional(),
-      })
-      .optional(),
-    source: z
-      .object({
-        branch: z.object({ name: z.string().optional() }).optional(),
-      })
-      .optional(),
-    destination: z
-      .object({
-        branch: z.object({ name: z.string().optional() }).optional(),
-      })
-      .optional(),
-  })
-  .passthrough();
-const bitbucketPullRequestListSchema = z.object({
-  values: z.array(bitbucketPullRequestSchema),
-  next: z.string().url().optional().nullable(),
-});
-
-const adoPullRequestSchema = z
-  .object({
-    pullRequestId: z.number().int(),
-    title: z.string(),
-    isDraft: z.boolean().optional(),
-    targetRefName: z.string().optional(),
-  })
-  .passthrough();
-const adoPullRequestListSchema = z.object({
-  value: z.array(adoPullRequestSchema),
-});
 
 export async function createOrUpdateSourceControlPullRequestForTaskRun({
   taskRun,
@@ -538,25 +471,14 @@ async function createOrUpdateGitLabMergeRequest({
   createDraft: boolean;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `GitLab repository ${repository.fullName} is missing an external project id.`,
-    );
-  }
-
-  const token = await resolveGitLabToken();
-  if (!token) {
-    throw new Error(
-      'GITLAB_TOKEN is required to create GitLab merge requests.',
-    );
-  }
-
-  const baseUrl = await resolveGitLabBaseUrl();
-  const apiBaseUrl = buildGitLabApiBaseUrl(baseUrl);
-  const host = new URL(baseUrl).host;
-  const existingMergeRequests = await listGitLabMergeRequests({
+  const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
+    repository,
+    'create',
+  );
+  const host = new URL(apiBaseUrl).host;
+  const existingMergeRequests = await findOpenGitLabMergeRequestsByBranch({
     apiBaseUrl,
-    projectId: repository.externalRepoId,
+    projectId,
     input,
     token,
     fetchImpl,
@@ -588,7 +510,7 @@ async function createOrUpdateGitLabMergeRequest({
         url: buildApiUrl(
           apiBaseUrl,
           `/projects/${encodeURIComponent(
-            repository.externalRepoId,
+            projectId,
           )}/merge_requests/${existing.iid}`,
           {},
         ),
@@ -606,9 +528,7 @@ async function createOrUpdateGitLabMergeRequest({
         method: 'POST',
         url: buildApiUrl(
           apiBaseUrl,
-          `/projects/${encodeURIComponent(
-            repository.externalRepoId,
-          )}/merge_requests`,
+          `/projects/${encodeURIComponent(projectId)}/merge_requests`,
           {},
         ),
         tokenHeader: buildGitLabTokenHeader(token),
@@ -645,36 +565,6 @@ async function createOrUpdateGitLabMergeRequest({
   };
 }
 
-async function listGitLabMergeRequests({
-  apiBaseUrl,
-  projectId,
-  input,
-  token,
-  fetchImpl,
-}: {
-  apiBaseUrl: string;
-  projectId: string;
-  input: SourceControlPullRequestMutationInput;
-  token: string;
-  fetchImpl: FetchImpl;
-}) {
-  return requestJson({
-    fetchImpl,
-    url: buildApiUrl(
-      apiBaseUrl,
-      `/projects/${encodeURIComponent(projectId)}/merge_requests`,
-      {
-        state: 'opened',
-        source_branch: input.sourceBranch,
-        ...(input.targetBranch ? { target_branch: input.targetBranch } : {}),
-        per_page: 2,
-      },
-    ),
-    tokenHeader: buildGitLabTokenHeader(token),
-    schema: gitLabMergeRequestListSchema,
-  });
-}
-
 async function createOrUpdateGiteaPullRequest({
   input,
   repository,
@@ -688,21 +578,9 @@ async function createOrUpdateGiteaPullRequest({
   createDraft: boolean;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  const token = await resolveGiteaToken();
-  if (!token) {
-    throw new Error('GITEA_TOKEN is required to create Gitea pull requests.');
-  }
-
-  const baseUrl = await resolveGiteaBaseUrl();
-  if (!baseUrl) {
-    throw new Error(
-      'GITEA_BASE_URL is required to create Gitea pull requests.',
-    );
-  }
-
-  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-  const apiBaseUrl = buildGiteaApiBaseUrl(baseUrl);
-  const existingPullRequests = await listGiteaPullRequests({
+  const { apiBaseUrl, baseUrl, owner, repo, token } =
+    await resolveGiteaProviderContext(repository, 'create');
+  const existingPullRequests = await findOpenGiteaPullRequestsByBranch({
     apiBaseUrl,
     owner,
     repo,
@@ -800,31 +678,13 @@ async function createOrUpdateBitbucketPullRequest({
   createDraft: boolean;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  const token = await resolveBitbucketToken();
-  if (!token) {
-    throw new Error(
-      'BITBUCKET_TOKEN is required to create Bitbucket pull requests.',
-    );
-  }
-
-  const username = await resolveBitbucketUsername();
-  if (!username) {
-    throw new Error(
-      'BITBUCKET_USERNAME is required to create Bitbucket pull requests.',
-    );
-  }
-
-  const baseUrl = await resolveBitbucketBaseUrl();
-  const [workspace, repo] = splitRepositoryFullName(
-    repository.fullName,
-    provider,
-  );
-  const apiBaseUrl = buildBitbucketApiBaseUrl(baseUrl);
+  const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
+    await resolveBitbucketProviderContext(repository, 'create');
   const tokenHeader = {
     name: 'Authorization',
-    value: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
+    value: authHeader,
   };
-  const existingPullRequests = await listBitbucketPullRequests({
+  const existingPullRequests = await findOpenBitbucketPullRequestsByBranch({
     apiBaseUrl,
     workspace,
     repo,
@@ -908,115 +768,6 @@ async function createOrUpdateBitbucketPullRequest({
   };
 }
 
-async function listBitbucketPullRequests({
-  apiBaseUrl,
-  workspace,
-  repo,
-  input,
-  tokenHeader,
-  fetchImpl,
-}: {
-  apiBaseUrl: string;
-  workspace: string;
-  repo: string;
-  input: SourceControlPullRequestMutationInput;
-  tokenHeader: { name: string; value: string };
-  fetchImpl: FetchImpl;
-}) {
-  const matches: z.infer<typeof bitbucketPullRequestSchema>[] = [];
-  const enoughMatches = input.targetBranch ? 1 : 2;
-  let nextUrl: string | null = buildApiUrl(
-    apiBaseUrl,
-    `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(
-      repo,
-    )}/pullrequests`,
-    { state: 'OPEN', pagelen: 50 },
-  );
-
-  while (nextUrl && matches.length < enoughMatches) {
-    const page: z.infer<typeof bitbucketPullRequestListSchema> =
-      await requestJson({
-        fetchImpl,
-        url: nextUrl,
-        tokenHeader,
-        schema: bitbucketPullRequestListSchema,
-      });
-
-    matches.push(
-      ...page.values.filter(
-        (pullRequest: z.infer<typeof bitbucketPullRequestSchema>) =>
-          pullRequest.source?.branch?.name === input.sourceBranch &&
-          (!input.targetBranch ||
-            pullRequest.destination?.branch?.name === input.targetBranch),
-      ),
-    );
-
-    nextUrl = page.next ?? null;
-  }
-
-  return matches;
-}
-
-const GITEA_PULLS_PAGE_SIZE = 50;
-const GITEA_PULLS_MAX_PAGES = 40;
-
-/**
- * Gitea's pulls listing has no head/base filter, so matching happens
- * client-side and must walk pages: stopping at the first page could
- * falsely conclude no pull request exists for the source branch. The walk
- * ends as soon as the caller has what it needs — one match when the target
- * branch pins a unique head+base pair, two when an omitted targetBranch
- * only needs enough to prove ambiguity.
- */
-async function listGiteaPullRequests({
-  apiBaseUrl,
-  owner,
-  repo,
-  input,
-  token,
-  fetchImpl,
-}: {
-  apiBaseUrl: string;
-  owner: string;
-  repo: string;
-  input: SourceControlPullRequestMutationInput;
-  token: string;
-  fetchImpl: FetchImpl;
-}) {
-  const matches: z.infer<typeof giteaPullRequestSchema>[] = [];
-  const enoughMatches = input.targetBranch ? 1 : 2;
-
-  for (let page = 1; page <= GITEA_PULLS_MAX_PAGES; page++) {
-    const pullRequests = await requestJson({
-      fetchImpl,
-      url: buildApiUrl(
-        apiBaseUrl,
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
-        { state: 'open', limit: GITEA_PULLS_PAGE_SIZE, page },
-      ),
-      tokenHeader: { name: 'Authorization', value: `token ${token}` },
-      schema: giteaPullRequestListSchema,
-    });
-
-    matches.push(
-      ...pullRequests.filter(
-        (pullRequest) =>
-          pullRequest.head?.ref === input.sourceBranch &&
-          (!input.targetBranch || pullRequest.base?.ref === input.targetBranch),
-      ),
-    );
-
-    if (
-      matches.length >= enoughMatches ||
-      pullRequests.length < GITEA_PULLS_PAGE_SIZE
-    ) {
-      break;
-    }
-  }
-
-  return matches;
-}
-
 async function createOrUpdateAdoPullRequest({
   input,
   repository,
@@ -1030,33 +781,9 @@ async function createOrUpdateAdoPullRequest({
   createDraft: boolean;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestMutationResult> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `Azure DevOps repository ${repository.fullName} is missing an external repository id.`,
-    );
-  }
-
-  const token = await resolveAdoToken();
-  if (!token) {
-    throw new Error(
-      'ADO_TOKEN is required to create Azure DevOps pull requests.',
-    );
-  }
-
-  const { organization, project } = parseAdoRepositoryFullName(
-    repository.fullName,
-  );
-  const baseUrl = await resolveAdoBaseUrl();
-  const organizationApiBaseUrl = buildAdoOrganizationApiBaseUrl({
-    baseUrl,
-    organization,
-  });
-  const repositoryPullRequestsPath = `/${encodeURIComponent(
-    project,
-  )}/_apis/git/repositories/${encodeURIComponent(
-    repository.externalRepoId,
-  )}/pullrequests`;
-  const existingPullRequests = await listAdoPullRequests({
+  const { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token } =
+    await resolveAdoProviderContext(repository, 'create');
+  const existingPullRequests = await findOpenAdoPullRequestsByBranch({
     organizationApiBaseUrl,
     repositoryPullRequestsPath,
     input,
@@ -1142,80 +869,6 @@ async function createOrUpdateAdoPullRequest({
   };
 }
 
-async function listAdoPullRequests({
-  organizationApiBaseUrl,
-  repositoryPullRequestsPath,
-  input,
-  token,
-  fetchImpl,
-}: {
-  organizationApiBaseUrl: string;
-  repositoryPullRequestsPath: string;
-  input: SourceControlPullRequestMutationInput;
-  token: string;
-  fetchImpl: FetchImpl;
-}) {
-  const result = await requestJson({
-    fetchImpl,
-    url: buildApiUrl(organizationApiBaseUrl, repositoryPullRequestsPath, {
-      'api-version': ADO_API_VERSION,
-      'searchCriteria.status': 'active',
-      'searchCriteria.sourceRefName': normalizeAdoBranchRef(input.sourceBranch),
-      ...(input.targetBranch
-        ? {
-            'searchCriteria.targetRefName': normalizeAdoBranchRef(
-              input.targetBranch,
-            ),
-          }
-        : {}),
-      $top: 2,
-    }),
-    tokenHeader: {
-      name: 'Authorization',
-      value: buildAdoBasicAuthHeader(token),
-    },
-    schema: adoPullRequestListSchema,
-  });
-
-  return result.value;
-}
-
-async function requestJson<T>({
-  fetchImpl,
-  method = 'GET',
-  url,
-  tokenHeader,
-  body,
-  schema,
-}: {
-  fetchImpl: FetchImpl;
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
-  url: string;
-  tokenHeader: { name: string; value: string };
-  body?: Record<string, unknown>;
-  schema: z.ZodType<T>;
-}): Promise<T> {
-  const response = await fetchImpl(url, {
-    method,
-    headers: {
-      Accept: 'application/json',
-      [tokenHeader.name]: tokenHeader.value,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-
-  if (![200, 201].includes(response.status)) {
-    throw new Error(
-      `Source control API request failed: ${response.status} ${
-        response.statusText
-      }${await formatResponseBody(response)}`,
-    );
-  }
-
-  return schema.parse(await response.json());
-}
-
 function getGiteaPullRequestNumber(
   pullRequest: z.infer<typeof giteaPullRequestSchema>,
 ): number {
@@ -1226,14 +879,6 @@ function getGiteaPullRequestNumber(
   }
 
   return number;
-}
-
-function normalizeAdoBranchRef(branch: string): string {
-  return branch.startsWith('refs/heads/') ? branch : `refs/heads/${branch}`;
-}
-
-function stripAdoBranchRef(ref: string | undefined): string | undefined {
-  return ref?.startsWith('refs/heads/') ? ref.slice('refs/heads/'.length) : ref;
 }
 
 function applyDraftTitle(
