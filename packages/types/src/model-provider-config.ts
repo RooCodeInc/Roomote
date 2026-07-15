@@ -42,6 +42,32 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
 export type SetupModelProviderAuthKind = 'api-key' | 'oauth';
 
 /**
+ * The default-model roles a deployment configures: one model per kind of
+ * work. `coding` drives new task launches; every other role falls back to
+ * the coding model at runtime when unset.
+ */
+export type TaskModelRole =
+  | 'coding'
+  | 'helper'
+  | 'vision'
+  | 'codeReview'
+  | 'explore'
+  | 'planning';
+
+/**
+ * A provider's recommended default models for the non-coding roles. The
+ * coding role's recommendation is always the provider's
+ * `defaultRoomoteModel`, so it is intentionally not part of this map; roles
+ * left unset are recommended to follow the coding model ("same as coding"
+ * at runtime). Every id must be one of the provider's `suggestedTaskModels`
+ * so applying recommendations never points a role at a model outside the
+ * provider's curated catalog.
+ */
+export type RecommendedRoleModels = Partial<
+  Record<Exclude<TaskModelRole, 'coding'>, string>
+>;
+
+/**
  * An additional credential value a provider needs beyond its primary API-key
  * env var (`envVarName`), such as an AWS region or a GCP project id. The
  * connect UI renders one input per field; `required` fields also participate
@@ -83,6 +109,23 @@ export type SetupModelProviderDescriptor = {
   defaultRoomoteModel: string;
   authKind: SetupModelProviderAuthKind;
   suggestedTaskModels: readonly SuggestedTaskModel[];
+  /**
+   * Hides the provider from the setup wizard and settings connect surfaces
+   * unless it is already connected (saved or runtime env). The catalog entry
+   * stays registered so existing connections keep working: model-id
+   * resolution, credential env-var forwarding, and provider labels are
+   * unaffected.
+   */
+  hidden?: boolean;
+  /**
+   * Recommended per-role default models, applied when the provider is
+   * connected during setup and by the models settings page's
+   * "Use recommended" action (see
+   * `buildRecommendedDeploymentModelConfig`). Providers without a mapping
+   * recommend `defaultRoomoteModel` for coding and "same as coding" for
+   * every other role.
+   */
+  recommendedRoleModels?: RecommendedRoleModels;
 };
 
 export const DEFAULT_SETUP_MODEL_PROVIDER_ID: SetupModelProviderId =
@@ -100,6 +143,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels(
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
+    // Vision is unset: the recommended coding model is multimodal, so image
+    // work follows the coding model ("same as coding").
+    recommendedRoleModels: {
+      helper: 'openrouter/google/gemini-3.5-flash',
+      codeReview: 'openrouter/anthropic/claude-opus-4.8',
+      explore: 'openrouter/google/gemini-3.5-flash',
+      planning: 'openrouter/anthropic/claude-opus-4.8',
+    },
   },
   {
     id: 'vercel',
@@ -126,6 +177,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'mimo-v2-5': 'vercel/xiaomi/mimo-v2.5',
       'grok-4-5': 'vercel/xai/grok-4.5',
     }),
+    // Vision is unset: the recommended coding model is multimodal, so image
+    // work follows the coding model ("same as coding").
+    recommendedRoleModels: {
+      helper: 'vercel/google/gemini-3.5-flash',
+      codeReview: 'vercel/anthropic/claude-opus-4.8',
+      explore: 'vercel/google/gemini-3.5-flash',
+      planning: 'vercel/anthropic/claude-opus-4.8',
+    },
   },
   {
     id: 'requesty',
@@ -138,6 +197,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-haiku-4-5': 'requesty/anthropic/claude-haiku-4-5',
     }),
+    // Hidden from new connections for now: the catalog above resolves too
+    // few recommended models to seed a useful default list. Existing
+    // connections keep working.
+    hidden: true,
   },
   {
     id: 'baseten',
@@ -179,6 +242,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
+    recommendedRoleModels: {
+      helper: 'openai/gpt-5.6-luna',
+      codeReview: 'openai/gpt-5.6-sol',
+      explore: 'openai/gpt-5.6-luna',
+      planning: 'openai/gpt-5.6-sol',
+    },
   },
   {
     id: 'anthropic',
@@ -192,6 +261,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-4-8': 'anthropic/claude-opus-4-8',
       'claude-sonnet-5': 'anthropic/claude-sonnet-5',
     }),
+    recommendedRoleModels: {
+      helper: 'anthropic/claude-haiku-4-5',
+      codeReview: 'anthropic/claude-opus-4-8',
+      explore: 'anthropic/claude-haiku-4-5',
+      planning: 'anthropic/claude-opus-4-8',
+    },
   },
   {
     id: 'moonshotai',
@@ -234,6 +309,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'minimax-m3': 'opencode/minimax-m3',
       'grok-4-5': 'opencode/grok-4.5',
     }),
+    // The default coding model (big-pickle) is OpenCode's own routed model,
+    // so vision gets an explicit multimodal recommendation instead of the
+    // usual same-as-coding fallback.
+    recommendedRoleModels: {
+      helper: 'opencode/gemini-3.5-flash',
+      vision: 'opencode/claude-sonnet-5',
+      codeReview: 'opencode/claude-opus-4-8',
+      explore: 'opencode/gemini-3.5-flash',
+      planning: 'opencode/claude-opus-4-8',
+    },
   },
   {
     // Bedrock's current console issues API keys for the Mantle endpoint. The
@@ -265,6 +350,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'claude-opus-4-8': 'bedrock-mantle/anthropic.claude-opus-4-8',
       'claude-sonnet-5': 'bedrock-mantle/anthropic.claude-sonnet-5',
     }),
+    recommendedRoleModels: {
+      helper: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      codeReview: 'bedrock-mantle/anthropic.claude-opus-4-8',
+      explore: 'bedrock-mantle/anthropic.claude-haiku-4-5',
+      planning: 'bedrock-mantle/anthropic.claude-opus-4-8',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `google-vertex` provider.
@@ -275,6 +366,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     label: 'Google Vertex AI',
     envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
     envVarLabel: 'Service account JSON',
+    credentialHelp: {
+      text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
+      href: 'https://console.cloud.google.com/vertex-ai/model-garden',
+      linkLabel: 'Open Vertex AI Model Garden',
+    },
     additionalEnvFields: [
       {
         envVarName: 'GOOGLE_VERTEX_PROJECT',
@@ -291,7 +387,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         placeholder: 'us-central1',
       },
     ],
-    defaultRoomoteModel: 'google-vertex/gemini-3.5-flash',
+    defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-haiku-4-5': 'google-vertex/claude-haiku-4-5@20251001',
@@ -300,6 +396,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-1-pro': 'google-vertex/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google-vertex/gemini-3.5-flash',
     }),
+    // Mirrors the Anthropic/Bedrock split. Claude models on Vertex may
+    // require Model Garden enablement in the GCP project.
+    recommendedRoleModels: {
+      helper: 'google-vertex/claude-haiku-4-5@20251001',
+      codeReview: 'google-vertex/claude-opus-4-8@default',
+      explore: 'google-vertex/claude-haiku-4-5@20251001',
+      planning: 'google-vertex/claude-opus-4-8@default',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
@@ -307,12 +411,18 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.5-flash',
+    defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gemini-3-1-pro': 'google/gemini-3.1-pro-preview',
       'gemini-3-5-flash': 'google/gemini-3.5-flash',
     }),
+    // Pro is the coding default, and code review and planning follow it via
+    // "same as coding"; Flash covers the high-volume cheap roles.
+    recommendedRoleModels: {
+      helper: 'google/gemini-3.5-flash',
+      explore: 'google/gemini-3.5-flash',
+    },
   },
   {
     // Provider id matches the models.dev/opencode `xai` provider so
@@ -337,6 +447,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-terra': 'openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'openai/gpt-5.6-luna',
     }),
+    recommendedRoleModels: {
+      helper: 'openai/gpt-5.6-luna',
+      codeReview: 'openai/gpt-5.6-sol',
+      explore: 'openai/gpt-5.6-luna',
+      planning: 'openai/gpt-5.6-sol',
+    },
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 
@@ -456,7 +572,7 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   codeReview: 'high',
   explore: 'low',
   planning: 'high',
-} as const satisfies Record<string, ReasoningEffort>;
+} as const satisfies Record<TaskModelRole, ReasoningEffort>;
 
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
@@ -538,6 +654,33 @@ export function normalizeDeploymentModelConfig(
       value?.roomotePlanningModelReasoningEffort,
     ),
   };
+}
+
+/**
+ * Resolves a provider's recommended default-model configuration: the
+ * provider's default model for the coding role plus its recommended
+ * non-coding role models, with unset roles left null so they follow the
+ * coding model at runtime. Reasoning efforts stay null so the shared
+ * per-role defaults (`DEFAULT_MODEL_ROLE_REASONING_EFFORTS`) apply. Used
+ * when a provider is connected during setup and by the models settings
+ * page's "Use recommended" action.
+ */
+export function buildRecommendedDeploymentModelConfig(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedRoleModels'
+  >,
+): DeploymentModelConfig {
+  const roleModels = provider.recommendedRoleModels ?? {};
+
+  return normalizeDeploymentModelConfig({
+    roomoteModel: provider.defaultRoomoteModel,
+    roomoteSmallModel: roleModels.helper,
+    roomoteVisionModel: roleModels.vision,
+    roomoteCodeReviewModel: roleModels.codeReview,
+    roomoteExploreModel: roleModels.explore,
+    roomotePlanningModel: roleModels.planning,
+  });
 }
 
 export function normalizeOptionalReasoningEffort(
@@ -892,58 +1035,67 @@ export function buildSetupModelStatus(input: {
     persistedProviderId ??
     DEFAULT_SETUP_MODEL_PROVIDER_ID;
 
-  const providers = SETUP_MODEL_PROVIDER_CATALOG.map((provider) => {
-    if (provider.authKind === 'oauth') {
-      // OAuth providers carry no env var. Satisfaction comes from the
-      // connection flag passed in by the caller (chatgptConnected).
+  const providers = SETUP_MODEL_PROVIDER_CATALOG.map(
+    (provider): SetupModelProviderStatus => {
+      if (provider.authKind === 'oauth') {
+        // OAuth providers carry no env var. Satisfaction comes from the
+        // connection flag passed in by the caller (chatgptConnected).
+        return {
+          ...provider,
+          additionalEnvValues: {},
+          runtimeApiKeySatisfied: false,
+          savedApiKeySatisfied: chatgptConnected,
+        };
+      }
+
+      // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
+      // when every required env var is configured. Runtime satisfaction is
+      // runtime-env-only; saved satisfaction allows mixed sources (the
+      // effective model runtime env resolves each key runtime-first with a DB
+      // fallback) as long as at least one required value is actually saved.
+      const requiredEnvVarNames =
+        getSetupModelProviderRequiredEnvVarNames(provider);
+      const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
+      const isRuntimeConfigured = (name: string) =>
+        isConfiguredEnvValue(runtimeEnv[name]);
+      const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
+      const additionalEnvValues = Object.fromEntries(
+        getSetupModelProviderAdditionalEnvFields(provider)
+          .filter((field) => !field.secret)
+          .map((field) => {
+            const runtimeValue = normalizeOptionalString(
+              runtimeEnv[field.envVarName],
+            );
+            const persistedValue = normalizeOptionalString(
+              input.persistedEnvVarValues?.[field.envVarName],
+            );
+
+            return [field.envVarName, runtimeValue ?? persistedValue];
+          })
+          .filter((entry): entry is [string, string] => entry[1] !== null),
+      );
+
       return {
         ...provider,
-        additionalEnvValues: {},
-        runtimeApiKeySatisfied: false,
-        savedApiKeySatisfied: chatgptConnected,
+        additionalEnvValues,
+        runtimeApiKeySatisfied:
+          hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
+        savedApiKeySatisfied:
+          hasRequiredEnvVars &&
+          requiredEnvVarNames.every(
+            (name) => isPersisted(name) || isRuntimeConfigured(name),
+          ) &&
+          requiredEnvVarNames.some(isPersisted),
       };
-    }
-
-    // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
-    // when every required env var is configured. Runtime satisfaction is
-    // runtime-env-only; saved satisfaction allows mixed sources (the
-    // effective model runtime env resolves each key runtime-first with a DB
-    // fallback) as long as at least one required value is actually saved.
-    const requiredEnvVarNames =
-      getSetupModelProviderRequiredEnvVarNames(provider);
-    const hasRequiredEnvVars = requiredEnvVarNames.length > 0;
-    const isRuntimeConfigured = (name: string) =>
-      isConfiguredEnvValue(runtimeEnv[name]);
-    const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
-    const additionalEnvValues = Object.fromEntries(
-      getSetupModelProviderAdditionalEnvFields(provider)
-        .filter((field) => !field.secret)
-        .map((field) => {
-          const runtimeValue = normalizeOptionalString(
-            runtimeEnv[field.envVarName],
-          );
-          const persistedValue = normalizeOptionalString(
-            input.persistedEnvVarValues?.[field.envVarName],
-          );
-
-          return [field.envVarName, runtimeValue ?? persistedValue];
-        })
-        .filter((entry): entry is [string, string] => entry[1] !== null),
-    );
-
-    return {
-      ...provider,
-      additionalEnvValues,
-      runtimeApiKeySatisfied:
-        hasRequiredEnvVars && requiredEnvVarNames.every(isRuntimeConfigured),
-      savedApiKeySatisfied:
-        hasRequiredEnvVars &&
-        requiredEnvVarNames.every(
-          (name) => isPersisted(name) || isRuntimeConfigured(name),
-        ) &&
-        requiredEnvVarNames.some(isPersisted),
-    };
-  });
+    },
+  ).filter(
+    // Hidden providers are not offered for new connections but stay listed
+    // (and manageable) while they are connected.
+    (provider) =>
+      !provider.hidden ||
+      provider.runtimeApiKeySatisfied ||
+      provider.savedApiKeySatisfied,
+  );
 
   const runtimeProviderStatus = providers.find(
     (provider) => provider.id === runtimeKnownProviderId,
