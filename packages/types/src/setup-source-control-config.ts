@@ -66,6 +66,11 @@ export type SetupSourceControlStatus = {
    * present in the form.
    */
   gitlabBaseUrl?: string | null;
+  /**
+   * Roomote Cloud portal used to connect the shared GitHub App. When present,
+   * hosted deployments should prefer this path over creating a private app.
+   */
+  managedGitHubConnectionUrl?: string | null;
 };
 
 export const SETUP_SOURCE_CONTROL_PROVIDER_IDS = sourceControlProviders;
@@ -430,6 +435,7 @@ export function buildSetupSourceControlStatus(input: {
   connectedProviders?: Iterable<SourceControlProvider>;
   repositoryCounts?: Partial<Record<SourceControlProvider, number>>;
   gitlabBaseUrl?: string | null;
+  managedGitHubConnectionUrl?: string | null;
 }): SetupSourceControlStatus {
   const runtimeEnv = input.runtimeEnv ?? {};
   const persistedEnvVarNameSet = new Set(
@@ -562,5 +568,7 @@ export function buildSetupSourceControlStatus(input: {
     setupSatisfied,
     setupSatisfiedByRuntimeEnv,
     gitlabBaseUrl: input.gitlabBaseUrl?.trim() || null,
+    managedGitHubConnectionUrl:
+      input.managedGitHubConnectionUrl?.trim() || null,
   };
 }

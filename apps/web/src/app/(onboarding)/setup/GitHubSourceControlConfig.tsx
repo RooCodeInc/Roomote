@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import {
   ArrowLeft,
   Button,
+  ExternalLink,
   Input,
   Label,
   Pencil,
@@ -16,9 +17,13 @@ import { useCreateGitHubAppManifest } from '@/hooks/github';
 export function GitHubSourceControlConfig({
   onBack,
   onManualValues,
+  managedConnectionUrl,
+  onManagedContinue,
 }: {
   onBack?: () => void;
   onManualValues: () => void;
+  managedConnectionUrl?: string | null;
+  onManagedContinue?: () => void;
 }) {
   const [githubOrganization, setGithubOrganization] = useState('');
   const [manifestForm, setManifestForm] = useState<{
@@ -43,6 +48,56 @@ export function GitHubSourceControlConfig({
       manifestFormRef.current?.submit();
     }
   }, [manifestForm]);
+
+  if (managedConnectionUrl) {
+    return (
+      <>
+        <div className="max-w-xl space-y-3">
+          <p>
+            Your deployment includes the shared Roomote Cloud GitHub App. Open
+            Roomote Cloud to choose the GitHub organization and repositories
+            this Roomote instance can access.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            You won&apos;t need to create an app, copy credentials, or configure
+            a webhook.
+          </p>
+        </div>
+
+        <div className="mt-8 flex flex-col gap-2 sm:flex-row sm:items-center">
+          {onBack ? (
+            <Button type="button" variant="outline" onClick={onBack}>
+              <ArrowLeft />
+              Back
+            </Button>
+          ) : null}
+          <Button asChild>
+            <a
+              href={managedConnectionUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open Roomote Cloud
+              <ExternalLink />
+            </a>
+          </Button>
+          {onManagedContinue ? (
+            <Button type="button" onClick={onManagedContinue} variant="outline">
+              Continue after connecting
+            </Button>
+          ) : null}
+        </div>
+
+        <button
+          type="button"
+          className="mt-4 text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          onClick={onManualValues}
+        >
+          Use my own GitHub App instead
+        </button>
+      </>
+    );
+  }
 
   return (
     <>

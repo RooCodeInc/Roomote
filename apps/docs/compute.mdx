@@ -37,13 +37,14 @@ You configure sandbox providers during setup and can change them later from
 
 Roomote supports local and hosted sandbox backends:
 
-| Provider                                                                            | Best for                                               | Notes                                                                   |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------------------- |
-| <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" />    | Local development and trusted single-host self-hosting | Retains stopped task containers so resumable work can restart in place. |
-| <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" />       | Hosted task sandboxes with snapshot support            | Uses a hosted runtime and can resume some sandboxes from snapshots.     |
-| <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" />             | Hosted task sandboxes with snapshot support            | Runs task sandboxes on E2B-managed infrastructure.                      |
-| <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" /> | Hosted task sandboxes with snapshot support            | Supports environment and task-level snapshot flows.                     |
-| <IntegrationName href="/providers/compute/blaxel" icon="blaxel" name="Blaxel" />    | Hosted perpetual task sandboxes                        | Uses automatic standby for resumable tasks.                             |
+| Provider                                                                                               | Best for                                               | Notes                                                                             |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| <IntegrationName href="/providers/compute/roomote-cloud" icon="/logo/dark.svg" name="Roomote Cloud" /> | Managed Roomote Cloud deployments                      | Uses prepaid credits for Modal-backed task sandboxes; model inference stays BYOK. |
+| <IntegrationName href="/providers/compute/docker" icon="docker" name="Docker" />                       | Local development and trusted single-host self-hosting | Retains stopped task containers so resumable work can restart in place.           |
+| <IntegrationName href="/providers/compute/modal" icon="modal" name="Modal" />                          | Hosted task sandboxes with snapshot support            | Uses a hosted runtime and can resume some sandboxes from snapshots.               |
+| <IntegrationName href="/providers/compute/e2b" icon="e2b" name="E2B" />                                | Hosted task sandboxes with snapshot support            | Runs task sandboxes on E2B-managed infrastructure.                                |
+| <IntegrationName href="/providers/compute/daytona" icon="daytona" name="Daytona" />                    | Hosted task sandboxes with snapshot support            | Supports environment and task-level snapshot flows.                               |
+| <IntegrationName href="/providers/compute/blaxel" icon="blaxel" name="Blaxel" />                       | Hosted perpetual task sandboxes                        | Uses automatic standby for resumable tasks.                                       |
 
 Docker is the default because it works well for local development and simple
 self-hosted deployments. Hosted providers are useful when you want task work to
@@ -78,12 +79,18 @@ Hosted providers move the task sandbox into a provider-managed environment.
 Roomote still controls the task, streams logs, and connects previews, but the
 compute-heavy work happens outside your Roomote server.
 
+Roomote Cloud is the lowest-setup hosted option: the managed tenant receives a
+deployment-scoped credential, and Roomote Cloud brokers Modal compute against
+prepaid workspace credits. Direct Modal, E2B, Daytona, and Blaxel keep the
+provider account and credentials under the operator's control.
+
 Hosted sandboxes are a better fit when:
 
 - several people may run tasks at the same time
 - tasks need more CPU, memory, or isolation than your Roomote host should provide
 - you want task sandboxes to be easier to start, stop, and recover
-- you are comfortable managing provider credentials and account-level limits
+- you either use Roomote Cloud credits or are comfortable managing provider
+  credentials and account-level limits
 
 The tradeoff is extra setup. Hosted providers need API credentials and network
 access back to your Roomote deployment.

@@ -12,6 +12,7 @@ import { getSetupStepDefinition } from './types';
 const COMPUTE_PROVIDER_STEP = getSetupStepDefinition('compute-provider');
 
 const BRAND_ICON_BY_PROVIDER = {
+  'roomote-cloud': 'modal',
   modal: 'modal',
   docker: 'docker',
   daytona: 'daytona',

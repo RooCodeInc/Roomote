@@ -350,12 +350,21 @@ export function StepSourceControlConfig({
       : providerSetupCopy?.creationHref;
 
   if (selectedProvider?.provider === 'github' && !showManualGitHubValues) {
+    const managedGitHubConnectionUrl =
+      sourceControlSetup.managedGitHubConnectionUrl?.trim() || null;
+
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
-        <StepTitle text="Create GitHub App" />
+        <StepTitle
+          text={
+            managedGitHubConnectionUrl ? 'Connect GitHub' : 'Create GitHub App'
+          }
+        />
         <GitHubSourceControlConfig
           onBack={onBack}
           onManualValues={() => setShowManualGitHubValues(true)}
+          managedConnectionUrl={managedGitHubConnectionUrl}
+          onManagedContinue={onContinue}
         />
       </div>
     );

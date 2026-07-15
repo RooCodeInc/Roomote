@@ -18,18 +18,63 @@ import {
   githubInstallations,
   environments,
   repositories,
+  users,
   and,
+  asc,
   eq,
   isNull,
   inArray,
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
 
+import {
+  createRoomoteCloudGitHubToken,
+  resolveRoomoteCloudRuntimeConfig,
+} from './roomote-cloud';
+
 const CONCURRENCY = 10;
 const ALL_REPOSITORIES = '__all_repositories__';
 const ANALYTICS_CONCURRENCY = 4;
 const ANALYTICS_PULL_REQUESTS_PER_PAGE = 100;
 const ANALYTICS_MAX_ALL_TIME_PULL_REQUEST_PAGES = 50;
+
+async function createInstallationAccessToken({
+  installationId,
+  repositoryIds,
+}: {
+  installationId: string | number;
+  repositoryIds?: number[];
+}): Promise<string> {
+  const cloudConfig = await resolveRoomoteCloudRuntimeConfig();
+
+  if (cloudConfig) {
+    const externalInstallationId =
+      typeof installationId === 'number'
+        ? installationId
+        : (
+            await db.query.githubInstallations.findFirst({
+              where: eq(githubInstallations.id, installationId),
+            })
+          )?.installationId;
+
+    if (!externalInstallationId) {
+      throw new Error('GitHub installation not found.');
+    }
+
+    const response = await createRoomoteCloudGitHubToken({
+      config: cloudConfig,
+      installationId: externalInstallationId,
+      ...(repositoryIds?.length ? { repositoryIds } : {}),
+    });
+    return response.token;
+  }
+
+  return createGitHubToken({
+    type: 'installationId',
+    installationId,
+    ...(repositoryIds?.length ? { repositoryIds } : {}),
+  });
+}
 
 async function createTokenForRepositoryNames({
   taskRun,
@@ -89,8 +134,7 @@ async function createTokenForRepositoryNames({
       );
     }
 
-    return createGitHubToken({
-      type: 'installationId',
+    return createInstallationAccessToken({
       installationId: installationIds[0],
       repositoryIds,
     });
@@ -219,9 +263,34 @@ export const createTaskRunGitHubToken = async (
 
   const installationId = repo?.installationId;
 
-  const gitHubToken = installationId
-    ? await createGitHubToken({ type: 'installationId', installationId })
-    : await createGitHubToken({ type: 'activeInstallation' });
+  let gitHubToken: string;
+
+  if (installationId) {
+    gitHubToken = await createInstallationAccessToken({
+      installationId,
+    });
+  } else if (await resolveRoomoteCloudRuntimeConfig()) {
+    const activeInstallations = await db.query.githubInstallations.findMany({
+      where: isNull(githubInstallations.suspendedAt),
+      limit: 2,
+    });
+
+    if (activeInstallations.length > 1) {
+      throw new Error(
+        'Multiple active GitHub installations found. Select a specific environment or repository before starting this task.',
+      );
+    }
+
+    if (!activeInstallations[0]) {
+      throw new Error('No active GitHub installation is configured.');
+    }
+
+    gitHubToken = await createInstallationAccessToken({
+      installationId: activeInstallations[0].installationId,
+    });
+  } else {
+    gitHubToken = await createGitHubToken({ type: 'activeInstallation' });
+  }
 
   return gitHubToken;
 };
@@ -416,12 +485,7 @@ export async function getResolvedAppOctokit(): Promise<Octokit> {
 export async function getInstallationOctokit({
   installationId,
 }: Pick<GitHubInstallation, 'installationId'>): Promise<Octokit> {
-  const appOctokit = await getResolvedAppOctokit();
-  const {
-    data: { token: auth },
-  } = await appOctokit.rest.apps.createInstallationAccessToken({
-    installation_id: installationId,
-  });
+  const auth = await createInstallationAccessToken({ installationId });
 
   return createOctokit({ auth, userAgent: 'Roomote' });
 }
@@ -558,6 +622,107 @@ export async function syncGitHubInstallations({ userId }: { userId: string }) {
   );
 }
 
+export type GitHubInstallationSyncMetadata = {
+  installationId: number;
+  appId: number;
+  accountLogin: string;
+  accountType: 'Organization' | 'User';
+  permissions: Record<string, string>;
+};
+
+async function syncGitHubInstallationMetadata({
+  userId,
+  metadata,
+}: {
+  userId: string;
+  metadata: GitHubInstallationSyncMetadata;
+}): Promise<{
+  success: true;
+  githubInstallation: GitHubInstallation;
+  repositories: Repository[];
+}> {
+  const { installationId, appId, accountLogin, accountType, permissions } =
+    metadata;
+  const membersCount =
+    accountType === 'Organization'
+      ? await getOrganizationMembersCount(installationId, accountLogin)
+      : null;
+  const existingInstallation = await db.query.githubInstallations.findFirst({
+    where: eq(githubInstallations.installationId, installationId),
+  });
+
+  if (existingInstallation) {
+    await db
+      .update(githubInstallations)
+      .set({
+        appId,
+        accountLogin,
+        accountType,
+        permissions,
+        membersCount,
+        suspendedAt: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(githubInstallations.id, existingInstallation.id));
+  } else {
+    await db.insert(githubInstallations).values({
+      userId: null,
+      installationId,
+      appId,
+      accountLogin,
+      accountType,
+      permissions,
+      membersCount,
+      installedByUserId: userId,
+    });
+  }
+
+  const githubInstallation = await db.query.githubInstallations.findFirst({
+    where: and(
+      eq(githubInstallations.installationId, installationId),
+      isNull(githubInstallations.suspendedAt),
+    ),
+  });
+
+  if (!githubInstallation) {
+    throw new Error('GitHub installation not found.');
+  }
+
+  const syncedRepositories = await syncRepositories({
+    userId,
+    githubInstallation,
+  });
+
+  return {
+    success: true,
+    githubInstallation,
+    repositories: syncedRepositories,
+  };
+}
+
+export async function completeRoomoteCloudGitHubInstallation(
+  metadata: GitHubInstallationSyncMetadata,
+) {
+  const existingInstallation = await db.query.githubInstallations.findFirst({
+    where: eq(githubInstallations.installationId, metadata.installationId),
+  });
+  const admin = existingInstallation
+    ? null
+    : await db.query.users.findFirst({
+        where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
+        orderBy: [asc(users.createdAt)],
+      });
+  const userId = existingInstallation?.installedByUserId ?? admin?.id;
+
+  if (!userId) {
+    throw new Error(
+      'A Roomote administrator must sign in before the managed GitHub installation can be synchronized.',
+    );
+  }
+
+  return syncGitHubInstallationMetadata({ userId, metadata });
+}
+
 export async function syncGitHubInstallation({
   userId,
   installationId,
@@ -584,69 +749,29 @@ export async function syncGitHubInstallation({
       'login' in installation.account
         ? installation.account.login
         : installation.account.name;
-
-    const accountType =
-      'type' in installation.account ? installation.account.type : 'User';
-
-    let membersCount: number | null = null;
-
-    if (accountType === 'Organization') {
-      membersCount = await getOrganizationMembersCount(
-        installationId,
-        accountLogin,
-      );
+    if (!accountLogin) {
+      throw new Error('Installation account login is not available');
     }
 
-    const existingInstallation = await db.query.githubInstallations.findFirst({
-      where: eq(githubInstallations.installationId, installationId),
-    });
+    const accountType =
+      'type' in installation.account &&
+      installation.account.type === 'Organization'
+        ? 'Organization'
+        : 'User';
+    const appId = Number.isSafeInteger(installation.app_id)
+      ? installation.app_id
+      : parseInt((await resolveDeploymentGitHubAppCredentials()).appId, 10);
 
-    const appCredentials = await resolveDeploymentGitHubAppCredentials();
-    const appId = parseInt(appCredentials.appId, 10);
-
-    if (existingInstallation) {
-      await db
-        .update(githubInstallations)
-        .set({
-          appId,
-          accountLogin,
-          accountType,
-          permissions: installation.permissions,
-          membersCount,
-          suspendedAt: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(githubInstallations.id, existingInstallation.id));
-    } else {
-      await db.insert(githubInstallations).values({
-        userId: null,
+    return await syncGitHubInstallationMetadata({
+      userId,
+      metadata: {
         installationId,
         appId,
         accountLogin,
         accountType,
         permissions: installation.permissions,
-        membersCount,
-        installedByUserId: userId,
-      });
-    }
-
-    const githubInstallation = await db.query.githubInstallations.findFirst({
-      where: and(
-        eq(githubInstallations.installationId, installationId),
-        isNull(githubInstallations.suspendedAt),
-      ),
+      },
     });
-
-    if (!githubInstallation) {
-      throw new Error('GitHub installation not found.');
-    }
-
-    const repositories = await syncRepositories({
-      userId,
-      githubInstallation,
-    });
-
-    return { success: true, githubInstallation, repositories };
   } catch (error) {
     console.error(
       `[syncGitHubInstallation] Failed to sync GitHub installation: ${error instanceof Error ? error.message : String(error)}`,

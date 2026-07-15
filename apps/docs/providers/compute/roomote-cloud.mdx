@@ -1,0 +1,71 @@
+---
+title: Roomote Cloud
+icon: cloud
+description: Run tasks in Modal-backed sandboxes managed and metered by Roomote Cloud.
+---
+
+Roomote Cloud is the managed sandbox option for a Roomote Cloud deployment. It
+removes the need to create a Modal account, copy sandbox-provider credentials,
+or operate task compute yourself. Roomote Cloud creates an isolated Modal
+sandbox for each task and charges its finalized usage against the workspace's
+prepaid credits.
+
+Model inference is separate. You continue to configure your own model provider
+and API key in **Settings > Models**; Roomote Cloud does not replace or rewrite
+that configuration.
+
+## How it works
+
+The tenant sees a stable `roomote-cloud` sandbox provider. When a task starts,
+the tenant sends a task-scoped worker environment and requested preview ports
+to the Roomote Cloud control plane. Roomote Cloud:
+
+1. reserves enough workspace credit for the task's maximum sandbox lifetime
+2. starts the worker in a tagged Modal sandbox
+3. returns an opaque lease ID and encrypted preview URLs
+4. stops the sandbox when the task finishes or reaches its timeout
+5. settles the measured duration, plus the configured service markup, against
+   the workspace credit balance
+
+The Modal credentials remain in the Roomote Cloud control plane. The tenant
+receives only its deployment-scoped Roomote Cloud credential.
+
+## Docker Compose projects
+
+Roomote Cloud runs Modal's VM sandbox runtime so environments can use
+[Docker projects](/environments/definition#docker-projects). Existing Compose
+files and Dockerfiles run inside the task sandbox; they do not run on the host
+that serves the tenant's Roomote web application. Modal currently describes
+[VM Sandboxes as beta](https://modal.com/docs/guide/vm-sandboxes), so managed
+deployments should canary representative Compose workloads before a broad
+rollout.
+
+## Configuration
+
+Roomote Cloud writes these values while provisioning a tenant:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=roomote-cloud
+ROOMOTE_CLOUD_URL=https://<cloud-control-plane>
+ROOMOTE_CLOUD_DEPLOYMENT_TOKEN=<deployment-scoped-secret>
+```
+
+Do not copy a deployment token between tenants. Rotating or replacing it is a
+Roomote Cloud control-plane operation.
+
+## Current limitations
+
+- Roomote Cloud sandboxes are created per task and destroyed when settled.
+- Snapshot and standby resume are not available through this provider yet.
+- A task needs enough prepaid credit to cover its maximum possible sandbox
+  charge before Roomote Cloud will start it.
+- Direct Modal remains available for self-hosters who prefer to own the Modal
+  account, credentials, and billing relationship.
+
+## Verify setup
+
+1. confirm the Roomote Cloud workspace has a positive credit balance
+2. confirm **Roomote Cloud** is the default in **Settings > Sandboxes**
+3. add a model provider key in **Settings > Models**
+4. start a small task and confirm its sandbox starts and streams output
+5. finish the task and confirm the workspace balance reflects the settled usage

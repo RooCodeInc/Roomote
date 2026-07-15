@@ -35,6 +35,25 @@ export const DOCKER_CAPABILITIES: ComputeProviderCapabilities = {
   supportsDockerProjects: true,
 };
 
+/**
+ * Roomote Cloud launches the worker atomically through its managed compute
+ * broker. Tenant instances retain only status and destroy access for timeout
+ * and stale-worker recovery; the underlying provider remains an implementation
+ * detail of Cloud.
+ */
+export const ROOMOTE_CLOUD_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: false,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: false,
+  supportsCommandOutputStreaming: false,
+  supportsCommandOutputLookup: false,
+  supportsSnapshots: false,
+  supportsStandbyResume: false,
+  supportsResume: false,
+  supportsFileWrite: false,
+  supportsDockerProjects: true,
+};
+
 export const MODAL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCreateInstance: true,
   supportsDestroyInstance: true,
@@ -91,6 +110,8 @@ export function getComputeProviderCapabilities(
   provider: ComputeProvider,
 ): ComputeProviderCapabilities {
   switch (provider) {
+    case 'roomote-cloud':
+      return ROOMOTE_CLOUD_CAPABILITIES;
     case 'modal':
       return MODAL_CAPABILITIES;
     case 'docker':

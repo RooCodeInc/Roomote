@@ -5,6 +5,7 @@ export { controllerHealth } from './health/controller';
 
 // webhooks
 export { github } from './github';
+export { cloudGitHub } from './github/cloud';
 export { gitlab } from './gitlab';
 export { gitea } from './gitea';
 export { bitbucket } from './bitbucket';

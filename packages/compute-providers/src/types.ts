@@ -251,6 +251,15 @@ export interface DockerConfig {
   image?: string;
 }
 
+export interface RoomoteCloudConfig {
+  /** Roomote Cloud control-plane origin (`ROOMOTE_CLOUD_URL`). */
+  baseUrl: string;
+  /** Deployment-scoped control-plane credential. */
+  deploymentToken: string;
+  /** Injectable fetch implementation for tests and non-standard runtimes. */
+  fetchFn?: typeof fetch;
+}
+
 export interface DaytonaConfig {
   /** Daytona API key (`DAYTONA_API_KEY`). */
   apiKey: string;
@@ -304,6 +313,10 @@ export interface BlaxelConfig {
 }
 
 export type ComputeProviderFactoryOptions = (
+  | {
+      provider: 'roomote-cloud';
+      config?: RoomoteCloudConfig;
+    }
   | {
       provider: 'modal';
       config?: ModalConfig;

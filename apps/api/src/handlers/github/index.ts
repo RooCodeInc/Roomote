@@ -131,6 +131,348 @@ async function resolveGitHubWebhookSecret(): Promise<string | null> {
   return secret;
 }
 
+export async function processGitHubDelivery(input: {
+  id: string;
+  name: string;
+  payload: string;
+  secret: string;
+  signature: string;
+}): Promise<void> {
+  const { id, name, payload, secret, signature } = input;
+  const webhooks = new Webhooks({ secret });
+
+  webhooks.on('installation.created', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+      handleInstallationCreated(payload),
+    ),
+  );
+
+  webhooks.on('issue_comment.created', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping comment webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      if (!payload.issue.pull_request) {
+        return { status: 'ok' as const, message: 'not_a_pr_comment' };
+      }
+
+      queuePrReviewSummaryNotification(payload);
+
+      return handlePrComment(payload);
+    }),
+  );
+
+  webhooks.on('issue_comment.edited', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping comment webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      if (!payload.issue.pull_request) {
+        return { status: 'ok' as const, message: 'not_a_pr_comment' };
+      }
+
+      // Roomote review summaries are posted as "review in progress" and
+      // patched with the results, so the terminal content arrives here.
+      queuePrReviewSummaryNotification(payload);
+
+      return { status: 'ok' as const };
+    }),
+  );
+
+  webhooks.on('pull_request.opened', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      syncPrStatus(
+        payload.repository.full_name,
+        payload.pull_request.number,
+        payload.pull_request.draft ? 'draft' : 'open',
+      );
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping review webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handlePrOpen(payload);
+    }),
+  );
+
+  webhooks.on('pull_request.reopened', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      syncPrStatus(
+        payload.repository.full_name,
+        payload.pull_request.number,
+        'open',
+      );
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping review webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handlePrReopen(payload);
+    }),
+  );
+
+  webhooks.on('pull_request.synchronize', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping review webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handlePrSynchronize(payload);
+    }),
+  );
+
+  webhooks.on('pull_request.ready_for_review', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      syncPrStatus(
+        payload.repository.full_name,
+        payload.pull_request.number,
+        'open',
+      );
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping review webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handlePrReadyForReview(payload);
+    }),
+  );
+
+  webhooks.on('pull_request.converted_to_draft', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      syncPrStatus(
+        payload.repository.full_name,
+        payload.pull_request.number,
+        'draft',
+      );
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      return { status: 'ok' as const };
+    }),
+  );
+
+  webhooks.on('pull_request_review.submitted', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping review webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      queuePrReviewActivityNotification(payload);
+
+      return handlePrComment(payload);
+    }),
+  );
+
+  webhooks.on('pull_request_review_comment.created', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping comment webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      queuePrReviewActivityNotification(payload);
+
+      return handlePrComment(payload);
+    }),
+  );
+
+  webhooks.on('push', ({ id, name, payload }) =>
+    recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
+  );
+
+  webhooks.on('workflow_run.completed', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping workflow_run webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handleWorkflowRunCompleted(payload);
+    }),
+  );
+
+  webhooks.on('pull_request.closed', ({ id, name, payload }) =>
+    recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+      const status = payload.pull_request.merged ? 'merged' : 'closed';
+
+      syncPrStatus(
+        payload.repository.full_name,
+        payload.pull_request.number,
+        status,
+      );
+      syncPullRequestFact({
+        githubRepoId: payload.repository.id,
+        repositoryFullName: payload.repository.full_name,
+        pullRequest: {
+          authorLogin: payload.pull_request.user?.login ?? null,
+          closedAt: payload.pull_request.closed_at,
+          createdAt: payload.pull_request.created_at,
+          draft: Boolean(payload.pull_request.draft),
+          externalPullRequestId: payload.pull_request.id,
+          mergedAt: payload.pull_request.merged_at,
+          number: payload.pull_request.number,
+          state: payload.pull_request.state,
+          title: payload.pull_request.title,
+          updatedAt: payload.pull_request.updated_at,
+          url: payload.pull_request.html_url,
+        },
+      });
+
+      // Persist merged/closed status into linked task history so agents get
+      // the same out-of-band context path as PR review-feedback notifications.
+      void Promise.resolve(
+        recordPrStatusChangeInTaskHistory({
+          sourceControlProvider: 'github',
+          repository: payload.repository.full_name,
+          prNumber: payload.pull_request.number,
+          prTitle: payload.pull_request.title,
+          prUrl: payload.pull_request.html_url,
+          status,
+          actorLogin:
+            (payload.pull_request.merged
+              ? payload.pull_request.merged_by?.login
+              : null) || payload.sender.login,
+        }),
+      ).catch((error) => {
+        console.warn(
+          `[pull_request.closed] Failed to record PR status in task history for ${payload.repository.full_name}#${payload.pull_request.number}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+
+      if (isRepoSkipped(payload.repository.full_name)) {
+        return {
+          status: 'ok' as const,
+          message: `Skipping merge webhook for ${payload.repository.full_name}`,
+        };
+      }
+
+      return handlePrMerge(payload);
+    }),
+  );
+
+  webhooks.onError((error) => logApiError('[GitHub] processing error', error));
+
+  // The event handlers classify logins synchronously (mention detection,
+  // bot-identity checks); refresh the configured app slug first so an app
+  // created through the /setup flow is recognized as ourselves.
+  await resolveConfiguredGitHubAppSlug();
+
+  await webhooks.verifyAndReceive({ id, name, signature, payload });
+}
+
 export const github = new Hono();
 
 github.post('/', async (c) => {
@@ -155,344 +497,13 @@ github.post('/', async (c) => {
       return c.json({ error: 'invalid_signature' }, { status: 401 });
     }
 
-    const webhooks = new Webhooks({ secret });
-
-    webhooks.on('installation.created', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
-        handleInstallationCreated(payload),
-      ),
-    );
-
-    webhooks.on('issue_comment.created', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping comment webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        if (!payload.issue.pull_request) {
-          return { status: 'ok' as const, message: 'not_a_pr_comment' };
-        }
-
-        queuePrReviewSummaryNotification(payload);
-
-        return handlePrComment(payload);
-      }),
-    );
-
-    webhooks.on('issue_comment.edited', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping comment webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        if (!payload.issue.pull_request) {
-          return { status: 'ok' as const, message: 'not_a_pr_comment' };
-        }
-
-        // Roomote review summaries are posted as "review in progress" and
-        // patched with the results, so the terminal content arrives here.
-        queuePrReviewSummaryNotification(payload);
-
-        return { status: 'ok' as const };
-      }),
-    );
-
-    webhooks.on('pull_request.opened', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
-          payload.repository.full_name,
-          payload.pull_request.number,
-          payload.pull_request.draft ? 'draft' : 'open',
-        );
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handlePrOpen(payload);
-      }),
-    );
-
-    webhooks.on('pull_request.reopened', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
-          payload.repository.full_name,
-          payload.pull_request.number,
-          'open',
-        );
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handlePrReopen(payload);
-      }),
-    );
-
-    webhooks.on('pull_request.synchronize', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handlePrSynchronize(payload);
-      }),
-    );
-
-    webhooks.on('pull_request.ready_for_review', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
-          payload.repository.full_name,
-          payload.pull_request.number,
-          'open',
-        );
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handlePrReadyForReview(payload);
-      }),
-    );
-
-    webhooks.on('pull_request.converted_to_draft', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        syncPrStatus(
-          payload.repository.full_name,
-          payload.pull_request.number,
-          'draft',
-        );
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        return { status: 'ok' as const };
-      }),
-    );
-
-    webhooks.on('pull_request_review.submitted', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        queuePrReviewActivityNotification(payload);
-
-        return handlePrComment(payload);
-      }),
-    );
-
-    webhooks.on(
-      'pull_request_review_comment.created',
-      ({ id, name, payload }) =>
-        recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping comment webhook for ${payload.repository.full_name}`,
-            };
-          }
-
-          queuePrReviewActivityNotification(payload);
-
-          return handlePrComment(payload);
-        }),
-    );
-
-    webhooks.on('push', ({ id, name, payload }) =>
-      recordWebhook(id, name, payload, () => handlePushConflictCheck(payload)),
-    );
-
-    webhooks.on('workflow_run.completed', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping workflow_run webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handleWorkflowRunCompleted(payload);
-      }),
-    );
-
-    webhooks.on('pull_request.closed', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        const status = payload.pull_request.merged ? 'merged' : 'closed';
-
-        syncPrStatus(
-          payload.repository.full_name,
-          payload.pull_request.number,
-          status,
-        );
-        syncPullRequestFact({
-          githubRepoId: payload.repository.id,
-          repositoryFullName: payload.repository.full_name,
-          pullRequest: {
-            authorLogin: payload.pull_request.user?.login ?? null,
-            closedAt: payload.pull_request.closed_at,
-            createdAt: payload.pull_request.created_at,
-            draft: Boolean(payload.pull_request.draft),
-            externalPullRequestId: payload.pull_request.id,
-            mergedAt: payload.pull_request.merged_at,
-            number: payload.pull_request.number,
-            state: payload.pull_request.state,
-            title: payload.pull_request.title,
-            updatedAt: payload.pull_request.updated_at,
-            url: payload.pull_request.html_url,
-          },
-        });
-
-        // Persist merged/closed status into linked task history so agents get
-        // the same out-of-band context path as PR review-feedback notifications.
-        void Promise.resolve(
-          recordPrStatusChangeInTaskHistory({
-            sourceControlProvider: 'github',
-            repository: payload.repository.full_name,
-            prNumber: payload.pull_request.number,
-            prTitle: payload.pull_request.title,
-            prUrl: payload.pull_request.html_url,
-            status,
-            actorLogin:
-              (payload.pull_request.merged
-                ? payload.pull_request.merged_by?.login
-                : null) || payload.sender.login,
-          }),
-        ).catch((error) => {
-          console.warn(
-            `[pull_request.closed] Failed to record PR status in task history for ${payload.repository.full_name}#${payload.pull_request.number}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
-
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping merge webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handlePrMerge(payload);
-      }),
-    );
-
-    webhooks.onError((error) =>
-      logApiError('[GitHub] processing error', error),
-    );
-
-    const payload = await c.req.text();
-
-    // The event handlers classify logins synchronously (mention detection,
-    // bot-identity checks); refresh the configured app slug first so an app
-    // created through the /setup flow is recognized as ourselves.
-    await resolveConfiguredGitHubAppSlug();
-
-    await webhooks.verifyAndReceive({ id, name, signature, payload });
+    await processGitHubDelivery({
+      id,
+      name,
+      payload: await c.req.text(),
+      secret,
+      signature,
+    });
     return c.json({ message: 'webhook_processed' });
   } catch (error) {
     logApiError('[GitHub] caught error', error);

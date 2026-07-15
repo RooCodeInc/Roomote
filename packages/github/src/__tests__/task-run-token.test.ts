@@ -43,6 +43,7 @@ vi.mock('@roomote/db/server', () => ({
     fullName: 'repositories.fullName',
     isActive: 'repositories.isActive',
   },
+  resolveDeploymentEnvVar: vi.fn().mockResolvedValue(null),
 }));
 
 import type { TaskRun } from '@roomote/db/server';

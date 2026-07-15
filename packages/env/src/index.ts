@@ -63,7 +63,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b'])
+    .enum(['roomote-cloud', 'modal', 'docker', 'daytona', 'e2b', 'blaxel'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z
@@ -141,6 +141,9 @@ const serverSchema = {
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),
   GITHUB_MCP_SERVER_URL: z.string().min(1).optional(),
   R_GITHUB_WEBHOOK_SECRET: emptyStringDefault(),
+  ROOMOTE_CLOUD_URL: z.string().url().optional(),
+  ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: z.string().min(1).optional(),
+  ROOMOTE_CLOUD_INTEGRATION_SECRET: z.string().min(1).optional(),
   GITLAB_WEBHOOK_SECRET: emptyStringDefault(),
   GITLAB_WEBHOOK_SIGNING_TOKEN: emptyStringDefault(),
   WORKER_RELEASE_CHANNEL: z.enum(['stable', 'preview']).optional(),

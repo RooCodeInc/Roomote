@@ -138,6 +138,11 @@ function getDestroyInstanceSentryMessage(
 
 async function createSleepCheckClient(provider: ComputeProvider) {
   switch (provider) {
+    case 'roomote-cloud':
+      return createComputeProviderClient({
+        provider: 'roomote-cloud',
+        envFallback: await resolveComputeProviderEnvValues('roomote-cloud'),
+      });
     case 'modal':
       return createComputeProviderClient({
         provider: 'modal',

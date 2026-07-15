@@ -36,6 +36,7 @@ import {
   apiLiveness,
   controllerHealth,
   github,
+  cloudGitHub,
   gitlab,
   gitea,
   bitbucket,
@@ -181,6 +182,7 @@ export function createApiApp(): ApiApp {
   app.route('/health/controller', controllerHealth);
 
   app.route('/api/webhooks/github', github);
+  app.route('/api/webhooks/cloud/github', cloudGitHub);
   app.route('/api/webhooks/gitlab', gitlab);
   app.route('/api/webhooks/gitea', gitea);
   app.route('/api/webhooks/bitbucket', bitbucket);

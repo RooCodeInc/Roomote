@@ -1,4 +1,8 @@
-import { type ComputeProvider } from '@roomote/types';
+import {
+  NonRetryableSpawnError,
+  TaskPayloadKind,
+  type ComputeProvider,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   type TaskRun,
@@ -13,7 +17,9 @@ import {
   spawnE2bWorker,
   spawnBlaxelWorker,
   spawnModalWorker,
+  spawnRoomoteCloudWorker,
 } from './compute-providers';
+import { readRoomoteCloudRuntimeConfig } from './roomote-cloud-runtime';
 
 export class RoomoteController extends BaseController {
   private dockerCleanupInterval?: NodeJS.Timeout;
@@ -74,6 +80,30 @@ export class RoomoteController extends BaseController {
     });
 
     switch (provider) {
+      case 'roomote-cloud': {
+        if (
+          taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment ||
+          taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+        ) {
+          throw new NonRetryableSpawnError(
+            'Roomote Cloud does not support environment snapshots or snapshot resume yet',
+          );
+        }
+        const cloudConfig = readRoomoteCloudRuntimeConfig(resolvedEnv);
+        if (!cloudConfig) {
+          throw new Error(
+            'ROOMOTE_CLOUD_URL and ROOMOTE_CLOUD_DEPLOYMENT_TOKEN are required to spawn Roomote Cloud workers',
+          );
+        }
+        await spawnRoomoteCloudWorker({
+          taskRun,
+          authToken,
+          deploymentSlug,
+          timeoutMs,
+          cloudConfig,
+        });
+        return;
+      }
       case 'modal': {
         const modalTokenId = resolvedEnv.MODAL_TOKEN_ID;
         const modalTokenSecret = resolvedEnv.MODAL_TOKEN_SECRET;

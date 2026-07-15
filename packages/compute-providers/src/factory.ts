@@ -12,6 +12,7 @@ import type {
   DaytonaConfig,
   E2bConfig,
   ModalConfig,
+  RoomoteCloudConfig,
 } from './types';
 import { assertDefined } from './errors';
 import {
@@ -20,6 +21,7 @@ import {
   DaytonaClient,
   E2bClient,
   BlaxelClient,
+  RoomoteCloudClient,
 } from './adapters';
 
 const MODAL_DEFAULT_MEMORY_LIMIT_MIB = SANDBOX_DEFAULT_MEMORY_MIB * 2;
@@ -51,6 +53,23 @@ export function createComputeProviderClient(
     options.envFallback?.[name] ?? process.env[name];
 
   switch (options.provider) {
+    case 'roomote-cloud': {
+      const baseUrl = options.config?.baseUrl ?? envValue('ROOMOTE_CLOUD_URL');
+      const deploymentToken =
+        options.config?.deploymentToken ??
+        envValue('ROOMOTE_CLOUD_DEPLOYMENT_TOKEN');
+
+      assertDefined(baseUrl, 'Missing ROOMOTE_CLOUD_URL');
+      assertDefined(deploymentToken, 'Missing ROOMOTE_CLOUD_DEPLOYMENT_TOKEN');
+
+      const config: RoomoteCloudConfig = {
+        ...(options.config ?? {}),
+        baseUrl,
+        deploymentToken,
+      };
+      return new RoomoteCloudClient(config);
+    }
+
     case 'modal': {
       const tokenId = options.config?.tokenId ?? envValue('MODAL_TOKEN_ID');
 

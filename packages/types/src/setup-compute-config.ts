@@ -233,6 +233,26 @@ export function getDefaultAvailableComputeProvider(
 
 export const SETUP_COMPUTE_PROVIDER_CATALOG = [
   {
+    provider: 'roomote-cloud',
+    label: 'Roomote Cloud',
+    description:
+      'Managed isolated sandboxes billed from prepaid Roomote Cloud credits. Inference remains configured with your own provider keys.',
+    supportsSnapshots: false,
+    fields: [
+      {
+        envVarName: 'ROOMOTE_CLOUD_URL',
+        label: 'Roomote Cloud URL',
+        category: 'credential',
+      },
+      {
+        envVarName: 'ROOMOTE_CLOUD_DEPLOYMENT_TOKEN',
+        label: 'Deployment Token',
+        secret: true,
+        category: 'credential',
+      },
+    ],
+  },
+  {
     provider: 'modal',
     label: 'Modal',
     description:

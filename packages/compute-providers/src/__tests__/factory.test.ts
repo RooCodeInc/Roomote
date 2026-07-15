@@ -7,6 +7,7 @@ const {
   daytonaClientMock,
   e2bClientMock,
   blaxelClientMock,
+  roomoteCloudClientMock,
   dockerCapabilities,
   daytonaCapabilities,
   e2bCapabilities,
@@ -17,6 +18,7 @@ const {
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
   blaxelClientMock: vi.fn(),
+  roomoteCloudClientMock: vi.fn(),
   dockerCapabilities: {
     snapshots: false,
     detachedCommands: false,
@@ -45,6 +47,7 @@ vi.mock('../adapters', () => ({
   DaytonaClient: daytonaClientMock,
   E2bClient: e2bClientMock,
   BlaxelClient: blaxelClientMock,
+  RoomoteCloudClient: roomoteCloudClientMock,
   DOCKER_CAPABILITIES: dockerCapabilities,
   DAYTONA_CAPABILITIES: daytonaCapabilities,
   E2B_CAPABILITIES: e2bCapabilities,
@@ -59,6 +62,21 @@ describe('createComputeProviderClient', () => {
     vi.clearAllMocks();
     delete process.env.MODAL_REGISTRY_USERNAME;
     delete process.env.MODAL_REGISTRY_PASSWORD;
+  });
+
+  it('resolves Roomote Cloud deployment credentials from fallback env', () => {
+    createComputeProviderClient({
+      provider: 'roomote-cloud',
+      envFallback: {
+        ROOMOTE_CLOUD_URL: 'https://cloud.example',
+        ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
+      },
+    });
+
+    expect(roomoteCloudClientMock).toHaveBeenCalledWith({
+      baseUrl: 'https://cloud.example',
+      deploymentToken: 'deployment-token',
+    });
   });
 
   afterAll(() => {

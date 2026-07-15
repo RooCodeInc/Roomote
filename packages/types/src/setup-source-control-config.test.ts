@@ -5,6 +5,16 @@ import {
 } from './setup-source-control-config';
 
 describe('buildSetupSourceControlStatus', () => {
+  it('surfaces the hosted GitHub connection URL when configured', () => {
+    const status = buildSetupSourceControlStatus({
+      managedGitHubConnectionUrl: ' https://cloud.roomote.example/connect ',
+    });
+
+    expect(status.managedGitHubConnectionUrl).toBe(
+      'https://cloud.roomote.example/connect',
+    );
+  });
+
   it('does not treat GitLab as configured when no credentials are present', () => {
     const status = buildSetupSourceControlStatus({});
     const gitlab = status.providers.find((p) => p.provider === 'gitlab');

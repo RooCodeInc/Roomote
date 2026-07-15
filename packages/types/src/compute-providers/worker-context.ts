@@ -9,6 +9,7 @@ export const WORKER_CONTEXT_ENV_VARS = {
 } as const;
 
 export type WorkerComputeProviderLabel =
+  | 'roomote-cloud'
   | 'docker'
   | 'modal'
   | 'daytona'
@@ -21,6 +22,7 @@ export function getWorkerComputeProviderLabel(
   provider: ComputeProvider,
 ): WorkerComputeProviderLabel {
   switch (provider) {
+    case 'roomote-cloud':
     case 'modal':
     case 'docker':
     case 'daytona':

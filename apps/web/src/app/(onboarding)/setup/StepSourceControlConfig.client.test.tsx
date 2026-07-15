@@ -181,6 +181,38 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
 
+  it('defaults hosted deployments to the shared GitHub App', () => {
+    const onContinue = vi.fn();
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildSourceControlSetup({
+          managedGitHubConnectionUrl: 'https://cloud.roomote.example',
+        })}
+        selectedProviderId="github"
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(
+      screen.getByRole('link', { name: 'Open Roomote Cloud' }),
+    ).toHaveAttribute('href', 'https://cloud.roomote.example');
+    expect(
+      screen.queryByRole('button', { name: 'Create GitHub App' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Continue after connecting' }),
+    );
+    expect(onContinue).toHaveBeenCalledOnce();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use my own GitHub App instead' }),
+    );
+    expect(
+      screen.getByRole('button', { name: /Save and continue/i }),
+    ).toBeInTheDocument();
+  });
+
   it('creates the app on the personal account when no organization is entered', () => {
     render(
       <StepSourceControlConfig

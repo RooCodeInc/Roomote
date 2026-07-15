@@ -168,6 +168,29 @@ type ActiveSetupQualificationBlock = {
   lastBlockedAt: Date;
 };
 
+function normalizeManagedServiceUrl(value: string | null): string | null {
+  if (!value?.trim()) return null;
+
+  try {
+    const url = new URL(value.trim());
+    const isLocalhost = url.hostname === 'localhost';
+    if (
+      url.protocol !== 'https:' &&
+      !(isLocalhost && url.protocol === 'http:')
+    ) {
+      return null;
+    }
+
+    url.username = '';
+    url.password = '';
+    url.search = '';
+    url.hash = '';
+    return url.toString().replace(/\/+$/u, '');
+  } catch {
+    return null;
+  }
+}
+
 async function assertSetupBootstrapOpen() {
   const bootstrapState = await getSetupBootstrapState();
 
@@ -1378,7 +1401,12 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   };
 
   const sourceControlConnection = await getSourceControlConnectionSummary();
-  const gitlabBaseUrl = await resolveDeploymentEnvVar('GITLAB_BASE_URL');
+  const [gitlabBaseUrl, roomoteCloudUrl, roomoteCloudGitHubAppSlug] =
+    await Promise.all([
+      resolveDeploymentEnvVar('GITLAB_BASE_URL'),
+      resolveDeploymentEnvVar('ROOMOTE_CLOUD_URL'),
+      resolveDeploymentEnvVar('R_GITHUB_APP_SLUG'),
+    ]);
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
@@ -1387,6 +1415,9 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
     gitlabBaseUrl,
+    managedGitHubConnectionUrl: roomoteCloudGitHubAppSlug?.trim()
+      ? normalizeManagedServiceUrl(roomoteCloudUrl)
+      : null,
   });
 
   return {
