@@ -405,6 +405,47 @@ describe('handleGiteaComment', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it('ignores deployment-authored comments when only the Gitea user id matches', async () => {
+    // Login strings can drift across username fields; stable id must still stop loops.
+    mockGetGiteaDeploymentUser.mockResolvedValue({
+      id: 99,
+      login: 'ci-agent',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 99, login: 'CI-Agent-Renamed' },
+        comment: {
+          body: '@roomote I started a pull request review task for this request',
+          user: { id: 99, username: 'CI-Agent-Renamed' },
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'roomote_authored_comment',
+    });
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('still enqueues mentions from non-deployment authors without a roomote prefix', async () => {
+    mockGetGiteaDeploymentUser.mockResolvedValue({
+      id: 99,
+      login: 'ci-agent',
+    });
+
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 10, login: 'alice' },
+        comment: { user: { id: 10, login: 'alice' } },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
+    expect(mockEnqueueTask).toHaveBeenCalled();
+  });
+
   it('requires linked commenter attribution for explicit mentions', async () => {
     await handleGiteaComment(makeCommentPayload());
 
