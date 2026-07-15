@@ -76,6 +76,7 @@ vi.mock('../automation-work-items/launch.js', () => ({
 vi.mock('../automation-work-items/persistence.js', () => ({
   persistAutomationWorkItems: (...args: unknown[]) =>
     mockPersistAutomationWorkItems(...args),
+  loadRelaunchableDuplicateWorkItems: vi.fn(async () => []),
 }));
 
 vi.mock('../automation-work-items/prepare.js', () => ({
