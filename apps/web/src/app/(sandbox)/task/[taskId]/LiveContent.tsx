@@ -253,7 +253,7 @@ function LiveContentInner({
                   footer={
                     session.onboardingEnvironment ? (
                       <OnboardingCompletionMessage
-                        environmentName={session.onboardingEnvironment.name}
+                        environment={session.onboardingEnvironment}
                       />
                     ) : undefined
                   }

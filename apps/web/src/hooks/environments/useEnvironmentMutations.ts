@@ -112,3 +112,31 @@ export function useDuplicateEnvironment() {
     }),
   );
 }
+
+export function useRetryEnvironmentVerification() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+
+  return useMutation(
+    trpc.environments.retryVerification.mutationOptions({
+      onSuccess: (_result, variables) => {
+        queryClient.invalidateQueries({
+          queryKey: trpc.environments.list.queryKey(),
+        });
+        queryClient.invalidateQueries({
+          queryKey: trpc.environments.byId.queryKey({
+            id: variables.environmentId,
+          }),
+        });
+        toast.success('Environment verification started');
+      },
+      onError: (error) => {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : 'Failed to start environment verification',
+        );
+      },
+    }),
+  );
+}

@@ -37,6 +37,7 @@ import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
 import {
   handleCreateEnvironment,
+  handleRecordVerification,
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
@@ -779,21 +780,22 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments.`,
+    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
     inputSchema: {
       action: z
-        .enum(['create', 'update'])
+        .enum(['create', 'update', 'record_verification'])
         .describe('The environment action to perform'),
       definition: z
         .string()
+        .optional()
         .describe(
-          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
+          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update".',
         ),
       environmentId: z
         .string()
         .optional()
         .describe(
-          'Existing environment ID to update. Required for action "update".',
+          'Existing environment ID. Required for "update" and "record_verification".',
         ),
       format: z
         .enum(['auto', 'json', 'yaml'])
@@ -811,6 +813,18 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional description override applied after parsing definition.',
         ),
+      success: z
+        .boolean()
+        .optional()
+        .describe(
+          'For "record_verification": whether the environment verification succeeded.',
+        ),
+      error: z
+        .string()
+        .optional()
+        .describe(
+          'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
+        ),
     },
     annotations: {
       readOnlyHint: false,
@@ -823,6 +837,29 @@ roomoteMcpServer.registerTool(
     const config = getRoomoteConfig();
     if (!config) {
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    if (params.action === 'record_verification') {
+      if (typeof params.success !== 'boolean') {
+        return errorResult(
+          'success (boolean) is required for record_verification',
+        );
+      }
+
+      return handleRecordVerification(
+        {
+          environmentId: params.environmentId ?? '',
+          success: params.success,
+          error: params.error,
+        },
+        config,
+      );
+    }
+
+    if (params.definition === undefined) {
+      return errorResult(
+        `definition is required for action "${params.action}"`,
+      );
     }
 
     if (params.action === 'update') {

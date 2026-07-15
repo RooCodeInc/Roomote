@@ -7,14 +7,14 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
+import Link from 'next/link';
 import { toast } from 'sonner';
 
+import { SETTINGS_PATHS } from '@/lib/settings';
+import { useRetryEnvironmentVerification } from '@/hooks/environments';
 import { Button, Check, GripVertical, Maximize2 } from '@/components/system';
 import { TaskStatusIndicator } from '@/components/sandbox';
-import {
-  EnvironmentDefinitionAgentTaskPanel,
-  useEnvironmentDefinitionAgentState,
-} from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
+import { useEnvironmentDefinitionAgentState } from '@/components/settings/environments/EnvironmentDefinitionAgentTask';
 
 type WidgetPosition = {
   x: number;
@@ -73,11 +73,18 @@ export function SetupOnboardingAgentWidget({
   onOpenStep: () => void;
   onFinish: () => void;
 }) {
-  const { session, succeeded, failed, matchingEnvironment } =
-    useEnvironmentDefinitionAgentState({
-      taskId,
-      mode: 'create',
-    });
+  const {
+    session,
+    succeeded,
+    failed,
+    matchingEnvironment,
+    verificationPending,
+    verificationSucceeded,
+    verificationFailed,
+  } = useEnvironmentDefinitionAgentState({
+    taskId,
+    mode: 'create',
+  });
   const widgetRef = useRef<HTMLDivElement>(null);
   const dragStateRef = useRef<DragState>(null);
   const positionRef = useRef(position);
@@ -85,9 +92,27 @@ export function SetupOnboardingAgentWidget({
   positionRef.current = position;
   onPositionChangeRef.current = onPositionChange;
 
+  const retryVerification = useRetryEnvironmentVerification();
+  const environmentId = matchingEnvironment?.id ?? null;
+  const verificationTaskId = matchingEnvironment?.verificationTaskId ?? null;
+  const showVerificationActions =
+    !!matchingEnvironment && (verificationPending || verificationFailed);
+
   const statusCopy = useMemo(() => {
+    if (verificationSucceeded) {
+      return 'Your environment is verified and ready to use.';
+    }
+
+    if (verificationFailed) {
+      return 'Your environment is configured, but Roomote could not verify that it works.';
+    }
+
+    if (verificationPending) {
+      return 'Your environment is configured. Roomote is checking that it works; you can continue while this finishes.';
+    }
+
     if (succeeded) {
-      return 'Your first environment is ready. Finish setup when you are ready to continue.';
+      return 'Your first environment is configured. Finish setup when you are ready to continue.';
     }
 
     if (failed) {
@@ -95,7 +120,13 @@ export function SetupOnboardingAgentWidget({
     }
 
     return 'Understanding your codebase and getting your environment ready.';
-  }, [failed, succeeded]);
+  }, [
+    failed,
+    succeeded,
+    verificationFailed,
+    verificationPending,
+    verificationSucceeded,
+  ]);
 
   const commitClampedPosition = useCallback(() => {
     const current = positionRef.current;
@@ -216,19 +247,29 @@ export function SetupOnboardingAgentWidget({
 
         {expanded ? (
           <div className="space-y-3 p-4">
-            <EnvironmentDefinitionAgentTaskPanel
-              title="Onboarding agent"
-              session={session}
-              className="h-[min(70vh,42rem)] max-h-[70vh]"
-              showHeader={false}
-            />
-            {succeeded ? (
-              <div className="flex justify-end">
+            <div className="flex gap-2 items-start">
+              <TaskStatusIndicator
+                status={session.taskRun?.status}
+                phase={session.taskRun?.taskPhase}
+                lastErrorMessage={session.taskRun?.error}
+                compact={true}
+                className="relative top-1.5"
+              />
+              <p className="text-sm text-muted-foreground">{statusCopy}</p>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" variant="outline" asChild>
+                <Link href={`/task/${taskId}`}>
+                  <Maximize2 />
+                  View task
+                </Link>
+              </Button>
+              {succeeded ? (
                 <Button type="button" size="sm" onClick={handleFinish}>
                   Finish
                 </Button>
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         ) : (
           <div className="space-y-4 px-4 pt-2">
@@ -242,7 +283,7 @@ export function SetupOnboardingAgentWidget({
               />
               <p className="text-sm text-muted-foreground">{statusCopy}</p>
             </div>
-            <div className="flex items-center gap-2 pl-4">
+            <div className="flex flex-wrap items-center gap-2 pl-4">
               {succeeded ? (
                 <Button type="button" size="sm" onClick={handleFinish}>
                   <Check />
@@ -253,6 +294,39 @@ export function SetupOnboardingAgentWidget({
                   <Maximize2 />
                   Open
                 </Button>
+              ) : null}
+              {showVerificationActions ? (
+                <>
+                  {verificationFailed && environmentId ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={retryVerification.isPending}
+                      onClick={() =>
+                        retryVerification.mutate({ environmentId })
+                      }
+                    >
+                      Retry verification
+                    </Button>
+                  ) : null}
+                  {environmentId ? (
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link
+                        href={SETTINGS_PATHS.editEnvironment(environmentId)}
+                      >
+                        Edit environment
+                      </Link>
+                    </Button>
+                  ) : null}
+                  {verificationTaskId ? (
+                    <Button size="sm" variant="ghost" asChild>
+                      <Link href={`/task/${verificationTaskId}`}>
+                        View task
+                      </Link>
+                    </Button>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </div>

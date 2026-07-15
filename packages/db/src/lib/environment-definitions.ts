@@ -1,7 +1,7 @@
 import type { EnvironmentConfig } from '@roomote/types';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
-import type { DatabaseOrTransaction } from '../db';
+import { db, type DatabaseOrTransaction } from '../db';
 import { environmentRepositoryMappings, environments } from '../schema';
 import {
   createEnvironmentConfigVersionSnapshot,
@@ -22,12 +22,49 @@ type UpdateEnvironmentDefinitionInput = {
   updatedAt?: Date;
   repositoryIds?: string[];
   configVersion?: Omit<CreateEnvironmentConfigVersionInput, 'environmentId'>;
+  /**
+   * When true, a runtime-affecting edit does not clear verification. Reserved
+   * for the declarative (file-managed) path, whose environments are treated as
+   * verified and never run the onboarding verification task.
+   */
+  preserveVerification?: boolean;
+  /**
+   * When a runtime-affecting edit clears verification, atomically set the
+   * environment's `verificationTaskId` to this value (the calling verification
+   * task) instead of leaving it null. Applied under the same row lock as the
+   * reset, so a concurrent update cannot register an older task against a newer
+   * configuration.
+   */
+  registerVerificationTaskId?: string;
 };
 
 type UpdateEnvironmentDefinitionResult = {
   updated: boolean;
   snapshotsInvalidated: boolean;
+  /**
+   * True when the update was a runtime-affecting edit that cleared verification
+   * (config or repository-mapping change, and `preserveVerification` was not
+   * set). Callers can use this to re-register a fresh verification attempt.
+   */
+  verificationCleared: boolean;
 };
+
+/**
+ * Fields applied to reset an environment back to the unverified/configured
+ * state. Used both when a runtime-affecting edit invalidates a prior
+ * verification and when a fresh verification retry starts.
+ *
+ * Clearing `verificationTaskId` invalidates any in-flight verification attempt:
+ * because `recordEnvironmentVerification` rejects a null/mismatched task id, a
+ * stale verification task cannot record a result against an edited
+ * configuration.
+ */
+const VERIFICATION_RESET_FIELDS = {
+  isVerified: false,
+  verifiedAt: null,
+  verificationError: null,
+  verificationTaskId: null,
+} as const;
 
 function hasOwnKey<T extends object, K extends PropertyKey>(
   value: T,
@@ -96,7 +133,11 @@ async function updateEnvironmentDefinitionLocked(
     .for('update');
 
   if (!currentEnvironment) {
-    return { updated: false, snapshotsInvalidated: false };
+    return {
+      updated: false,
+      snapshotsInvalidated: false,
+      verificationCleared: false,
+    };
   }
 
   const changedFields: EnvironmentDefinitionFields = {};
@@ -146,13 +187,40 @@ async function updateEnvironmentDefinitionLocked(
     Object.keys(changedFields).length > 0 || repositoryIdsChanged;
 
   if (!hasEnvironmentFieldChanges) {
-    return { updated: false, snapshotsInvalidated: false };
+    return {
+      updated: false,
+      snapshotsInvalidated: false,
+      verificationCleared: false,
+    };
   }
+
+  // A runtime-affecting edit is any change to the config JSON (repositories,
+  // install/setup commands, services and start commands, environment
+  // variables, MCP/runtime configuration, snapshot or compute configuration)
+  // or to the repository mappings. Metadata-only edits (name/description
+  // handled through `changedFields` without a config change) must preserve
+  // verification. Centralizing this here keeps the API, Settings, agent, and
+  // declarative write paths from drifting.
+  const isRuntimeAffectingEdit =
+    changedFields.config !== undefined || repositoryIdsChanged;
+  const verificationCleared =
+    isRuntimeAffectingEdit && !input.preserveVerification;
 
   await dbOrTx
     .update(environments)
     .set({
       ...changedFields,
+      ...(verificationCleared
+        ? {
+            ...VERIFICATION_RESET_FIELDS,
+            // Atomically claim the current verification attempt for the calling
+            // task under the same row lock as the reset, so a concurrent edit
+            // cannot register an older task against this newer configuration.
+            ...(input.registerVerificationTaskId
+              ? { verificationTaskId: input.registerVerificationTaskId }
+              : {}),
+          }
+        : {}),
       updatedAt: now,
     })
     .where(eq(environments.id, input.environmentId));
@@ -186,5 +254,111 @@ async function updateEnvironmentDefinitionLocked(
     }
   }
 
-  return { updated: true, snapshotsInvalidated: true };
+  return { updated: true, snapshotsInvalidated: true, verificationCleared };
+}
+
+type RecordEnvironmentVerificationInput = {
+  environmentId: string;
+  verificationTaskId: string;
+  success: boolean;
+  /** Pre-sanitized, user-safe failure message. Only used when success=false. */
+  error?: string | null;
+  verifiedAt?: Date;
+};
+
+/**
+ * Record the terminal result of an environment verification task.
+ *
+ * Only applies when `verificationTaskId` still matches the task currently
+ * stored on the environment, so a stale or superseded verification attempt
+ * cannot overwrite a newer one. Returns whether the row was updated.
+ *
+ * - success=true: marks the environment verified, sets `verifiedAt`, clears
+ *   `verificationError`.
+ * - success=false: leaves the environment usable but unverified and stores the
+ *   sanitized failure message.
+ */
+export async function recordEnvironmentVerification(
+  dbOrTx: DatabaseOrTransaction,
+  input: RecordEnvironmentVerificationInput,
+): Promise<{ recorded: boolean }> {
+  return runInTransactionIfAvailable(dbOrTx, async (tx) => {
+    const [current] = await tx
+      .select({ verificationTaskId: environments.verificationTaskId })
+      .from(environments)
+      .where(eq(environments.id, input.environmentId))
+      .for('update');
+
+    if (!current) {
+      return { recorded: false };
+    }
+
+    // Reject a mismatched verification task so a stale attempt cannot clobber
+    // a newer one. The environment must currently point at this task.
+    if (current.verificationTaskId !== input.verificationTaskId) {
+      return { recorded: false };
+    }
+
+    if (input.success) {
+      await tx
+        .update(environments)
+        .set({
+          isVerified: true,
+          verifiedAt: input.verifiedAt ?? new Date(),
+          verificationError: null,
+        })
+        .where(eq(environments.id, input.environmentId));
+    } else {
+      await tx
+        .update(environments)
+        .set({
+          isVerified: false,
+          verifiedAt: null,
+          verificationError: input.error ?? null,
+        })
+        .where(eq(environments.id, input.environmentId));
+    }
+
+    return { recorded: true };
+  });
+}
+
+/**
+ * Attach a (re)started verification task to an environment and reset it to the
+ * unverified/configured state. A new retry replaces any prior
+ * `verificationTaskId` and clears the previous error and verified timestamp.
+ */
+export async function beginEnvironmentVerification(
+  dbOrTx: DatabaseOrTransaction,
+  input: { environmentId: string; verificationTaskId: string },
+): Promise<void> {
+  await dbOrTx
+    .update(environments)
+    .set({
+      ...VERIFICATION_RESET_FIELDS,
+      verificationTaskId: input.verificationTaskId,
+    })
+    .where(eq(environments.id, input.environmentId));
+}
+
+/**
+ * Serialize verification-retry attempts for a single environment.
+ *
+ * Runs `mutation` inside a transaction that holds a per-environment advisory
+ * lock (`pg_advisory_xact_lock`), so two concurrent retries cannot both pass an
+ * "already being verified" check and enqueue duplicate verification runs. The
+ * lock is released when the transaction commits or rolls back. The callback
+ * receives the locked transaction so the active-run check, task enqueue, and
+ * attempt registration all happen inside the same critical section.
+ */
+export async function withEnvironmentVerificationRetryLock<T>(
+  environmentId: string,
+  mutation: (tx: DatabaseOrTransaction) => Promise<T>,
+): Promise<T> {
+  return runInTransactionIfAvailable(db, async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${`environment-verification-retry:${environmentId}`}))`,
+    );
+    return mutation(tx);
+  });
 }

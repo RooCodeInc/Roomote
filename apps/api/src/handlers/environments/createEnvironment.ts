@@ -173,6 +173,32 @@ export async function attachEnvironmentIdToTaskRun(
 }
 
 /**
+ * Resolve the calling task run's Roomote task id, if the write is driven by a
+ * run-token task. Used to atomically register that task as the current
+ * verification attempt for the environment it just created or applied a
+ * runtime-affecting update to. The environment-setup skill runs verification
+ * from this same setup task and records the outcome through
+ * `record_verification`; registering the caller's taskId means that recording
+ * matches server-side without the agent having to hand-pass any task id.
+ */
+export async function resolveCallingVerificationTaskId(
+  auth: McpAuth,
+): Promise<string | undefined> {
+  const runId = extractRunId(auth);
+
+  if (!runId) {
+    return undefined;
+  }
+
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { taskId: true },
+  });
+
+  return taskRun?.taskId ?? undefined;
+}
+
+/**
  * POST /api/mcp/environments
  *
  * Creates a new environment for the deployment.
@@ -266,6 +292,8 @@ export async function createEnvironment(
       return c.json({ error: missingRepositoryError }, 400);
     }
 
+    const verificationTaskId = await resolveCallingVerificationTaskId(auth);
+
     const created = await db.transaction(async (tx) => {
       const inserted = await tx
         .insert(environments)
@@ -275,6 +303,13 @@ export async function createEnvironment(
           name: config.name,
           description: config.description,
           config,
+          // New environments start configured but not yet verified. A
+          // follow-up verification task confirms the runtime works. Registering
+          // the calling task here means its record_verification matches
+          // server-side without the agent hand-passing a task id.
+          isVerified: false,
+          verificationTaskId: verificationTaskId ?? null,
+          verificationError: null,
         })
         .returning({ id: environments.id });
 

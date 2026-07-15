@@ -153,6 +153,7 @@ export {
   ScanFace,
   ScanSearch,
   Search,
+  SearchCheck,
   SearchIcon,
   SendHorizontal,
   ServerCog,

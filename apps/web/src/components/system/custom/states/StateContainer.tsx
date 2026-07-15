@@ -27,10 +27,12 @@ export function StateContainer({
         )}
         <div className="space-y-0.5">
           {title && (
-            <div className="text-sm font-semibold text-foreground">{title}</div>
+            <div className="text-base font-semibold text-foreground">
+              {title}
+            </div>
           )}
           {description && (
-            <div className="text-xs text-muted-foreground">{description}</div>
+            <div className="text-sm text-muted-foreground">{description}</div>
           )}
         </div>
       </div>

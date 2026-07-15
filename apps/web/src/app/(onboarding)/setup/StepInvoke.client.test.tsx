@@ -299,7 +299,7 @@ describe('Setup StepInvoke', () => {
 
     expect(
       screen.getByText(
-        /once your environment is ready, you can work with roomote in these ways/i,
+        /once your environment is configured, you can work with roomote in these ways/i,
       ),
     ).toBeInTheDocument();
     fireEvent.click(

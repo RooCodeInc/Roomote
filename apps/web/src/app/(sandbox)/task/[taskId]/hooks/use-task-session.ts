@@ -30,7 +30,7 @@ export type TaskArtifact = RouterOutput['artifacts']['forTask'][number];
 type QuerySessionState =
   RouterOutput['sandboxSession']['byTaskId']['sessionState'];
 
-export type SessionState = QuerySessionState | 'not-found';
+export type SessionState = QuerySessionState | 'not-found' | 'error';
 
 const EMPTY_ARTIFACTS: TaskArtifact[] = [];
 
@@ -77,7 +77,14 @@ export interface TaskSession {
   artifacts: TaskArtifact[];
 
   /** Environment created by a completed setup-onboarding task, when available. */
-  onboardingEnvironment?: { name: string } | null;
+  onboardingEnvironment?: {
+    name: string;
+    isVerified: boolean;
+    verificationTaskId: string | null;
+    verificationTaskActive: boolean;
+    verifiedAt: Date | null;
+    verificationError: string | null;
+  } | null;
 
   /** The initial prompt for the session, null if not yet loaded or not found. */
   prompt: AcpUiMessage | null;
@@ -157,7 +164,9 @@ export function useTaskSession(
     [sessionQuery.data],
   );
 
-  const sessionState = sessionQuery.data?.sessionState ?? 'not-found';
+  const sessionState =
+    sessionQuery.data?.sessionState ??
+    (sessionQuery.isError ? 'error' : 'not-found');
   const runId = sessionQuery.data?.taskRun?.id;
   const tokenEnabled = sessionState === 'interactive' && !!runId;
 

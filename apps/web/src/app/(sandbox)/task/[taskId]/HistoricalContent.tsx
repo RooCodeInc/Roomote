@@ -36,7 +36,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const draftPrompt = session.draftPrompt;
   const isAsleep = isTaskRunAsleep(session.taskRun);
   const taskRun = session.taskRun;
-  const onboardingEnvironmentName = session.onboardingEnvironment?.name;
+  const onboardingEnvironment = session.onboardingEnvironment;
   const shouldShowWakeTaskInput = isAsleep && Boolean(taskRun?.snapshotId);
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
@@ -55,10 +55,8 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
     return <TaskFailureMessage error={displayError} />;
   }, [taskRun]);
   const messagesFooter = useMemo(() => {
-    const onboardingCompletionFooter = onboardingEnvironmentName ? (
-      <OnboardingCompletionMessage
-        environmentName={onboardingEnvironmentName}
-      />
+    const onboardingCompletionFooter = onboardingEnvironment ? (
+      <OnboardingCompletionMessage environment={onboardingEnvironment} />
     ) : null;
 
     return (
@@ -67,7 +65,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         {footer ?? taskFailureFooter ?? onboardingCompletionFooter}
       </>
     );
-  }, [footer, isResuming, onboardingEnvironmentName, taskFailureFooter]);
+  }, [footer, isResuming, onboardingEnvironment, taskFailureFooter]);
 
   useEffect(() => {
     setMessagesInitialScrollBehavior('instant');
