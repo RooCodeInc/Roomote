@@ -243,17 +243,23 @@ describe('buildSetupComputeStatus', () => {
     ).toBeNull();
   });
 
-  it('keeps all providers present even when infrastructure is missing', () => {
+  it('keeps dark-launched providers hidden until the deployment opts in', () => {
     const status = buildSetupComputeStatus({});
 
     expect(status.providers.map((provider) => provider.provider)).toEqual([
-      'roomote-cloud',
       'modal',
       'e2b',
       'daytona',
       'blaxel',
       'docker',
     ]);
+    expect(status.excludedProviders).toContain('roomote-cloud');
+
+    const enabled = buildSetupComputeStatus({
+      runtimeEnv: { ROOMOTE_CLOUD_ENABLED: 'true' },
+    });
+    expect(enabled.providers[0]?.provider).toBe('roomote-cloud');
+    expect(enabled.excludedProviders).not.toContain('roomote-cloud');
     expect(
       status.providers.some((provider) => provider.comment === 'Recommended'),
     ).toBe(false);
@@ -273,6 +279,7 @@ describe('buildSetupComputeStatus', () => {
 
     const runtimeReady = buildSetupComputeStatus({
       runtimeEnv: {
+        ROOMOTE_CLOUD_ENABLED: 'true',
         DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
@@ -593,6 +600,7 @@ describe('buildSetupComputeStatus', () => {
   it('reports provider infrastructure availability for the picker', () => {
     const withWorkerImage = buildSetupComputeStatus({
       runtimeEnv: {
+        ROOMOTE_CLOUD_ENABLED: 'true',
         DOCKER_WORKER_IMAGE: 'ghcr.io/roocodeinc/roomote-worker:v1.2.3',
       },
     });
@@ -628,7 +636,9 @@ describe('buildSetupComputeStatus', () => {
       )?.infrastructureSatisfied,
     ).toBe(true);
 
-    const withoutInfrastructure = buildSetupComputeStatus({});
+    const withoutInfrastructure = buildSetupComputeStatus({
+      runtimeEnv: { ROOMOTE_CLOUD_ENABLED: 'true' },
+    });
 
     expect(
       Object.fromEntries(
@@ -648,6 +658,7 @@ describe('buildSetupComputeStatus', () => {
 
     const withRuntimeInfrastructure = buildSetupComputeStatus({
       runtimeEnv: {
+        ROOMOTE_CLOUD_ENABLED: 'true',
         DAYTONA_SNAPSHOT_NAME: 'roomote-worker',
         MODAL_BASE_IMAGE_REF: 'registry/image:tag',
         E2B_TEMPLATE_ID: 'roomote-worker',

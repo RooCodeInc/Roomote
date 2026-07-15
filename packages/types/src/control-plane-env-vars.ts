@@ -105,6 +105,12 @@ const DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'ROOMOTE_ENVIRONMENTS_YAML',
 ]);
 
+/** Managed-tenant routing metadata that must never reach task sandboxes. */
+const ROOMOTE_CLOUD_CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'ROOMOTE_CLOUD_DEPLOYMENT_ID',
+  'ROOMOTE_CLOUD_INTEGRATION_SECRET',
+]);
+
 /**
  * Canonical set of control-plane / provider / instance env var names that are
  * never generic user task environment. It is the single source of truth for two
@@ -128,6 +134,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
+    ...ROOMOTE_CLOUD_CONTROL_PLANE_ENV_VAR_NAMES,
   ],
 );
 

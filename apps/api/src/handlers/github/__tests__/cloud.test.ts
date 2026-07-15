@@ -49,6 +49,7 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
   const payload = JSON.stringify({ installation: { id: 1234 } });
 
   beforeEach(() => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'true');
     mockLogApiError.mockReset();
     mockCompleteRoomoteCloudGitHubInstallation.mockReset();
     mockProcessGitHubDelivery.mockReset();
@@ -60,6 +61,24 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
       repositories: [{ id: 'repo-1' }],
       success: true,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('returns not found while the managed integration is disabled', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'false');
+    const app = new Hono();
+    app.route('/api/webhooks/cloud/github', cloudGitHub);
+
+    const response = await app.request(
+      'http://localhost/api/webhooks/cloud/github',
+      { method: 'POST' },
+    );
+
+    expect(response.status).toBe(404);
+    expect(mockResolveDeploymentEnvVar).not.toHaveBeenCalled();
   });
 
   it('verifies a fresh tenant-scoped signature', () => {

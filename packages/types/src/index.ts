@@ -30,6 +30,7 @@ export * from './live-previews';
 export * from './logging';
 export * from './model-provider-config';
 export * from './recommended-task-models';
+export * from './roomote-cloud';
 export * from './opencode-openrouter-variants';
 export * from './opencode-reasoning';
 export * from './mcp-oauth';

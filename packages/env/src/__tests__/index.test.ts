@@ -88,6 +88,7 @@ describe('Env', () => {
       expect(env.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY).toBeUndefined();
       expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('docker');
       expect(env.EXCLUDED_COMPUTE_PROVIDERS).toBeUndefined();
+      expect(env.ROOMOTE_CLOUD_ENABLED).toBe(false);
       expect(env.DOCKER_WORKER_IMAGE).toBe('roomote-worker:local');
       expect(env.DOCKER_WORKER_PLATFORM).toBe(
         process.arch === 'arm64' ? 'linux/arm64' : 'linux/amd64',
@@ -147,6 +148,16 @@ describe('Env', () => {
     expect(
       createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
+  });
+
+  it('requires an explicit opt-in for Roomote Cloud', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      ROOMOTE_CLOUD_ENABLED: '1',
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
+    expect(createRoomoteEnv(runtimeEnv).ROOMOTE_CLOUD_ENABLED).toBe(true);
   });
 
   it('allows the Modal VM memory allocation to be overridden', () => {

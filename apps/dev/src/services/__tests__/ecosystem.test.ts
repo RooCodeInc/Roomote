@@ -122,6 +122,28 @@ describe('ecosystem.config.js', () => {
     });
   });
 
+  it('passes explicitly activated Roomote Cloud runtime values to local services', () => {
+    process.env = {
+      ...originalEnv,
+      ROOMOTE_CLOUD_ENABLED: 'true',
+      ROOMOTE_CLOUD_URL: 'http://localhost:4100',
+      ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
+      ROOMOTE_CLOUD_DEPLOYMENT_ID: 'deployment-id',
+      ROOMOTE_CLOUD_INTEGRATION_SECRET: 'integration-secret',
+    };
+
+    const apps = loadEcosystemApps();
+    const controllerApp = apps.find((app) => app.name === 'roomote-controller');
+
+    expect(controllerApp?.env).toMatchObject({
+      ROOMOTE_CLOUD_ENABLED: 'true',
+      ROOMOTE_CLOUD_URL: 'http://localhost:4100',
+      ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
+      ROOMOTE_CLOUD_DEPLOYMENT_ID: 'deployment-id',
+      ROOMOTE_CLOUD_INTEGRATION_SECRET: 'integration-secret',
+    });
+  });
+
   it('uses R_PUBLIC_URL as the local app callback base', () => {
     process.env = {
       ...originalEnv,

@@ -8,6 +8,7 @@ const {
   mockSpawnE2bWorker,
   mockSpawnModalWorker,
   mockSpawnBlaxelWorker,
+  mockSpawnRoomoteCloudWorker,
 } = vi.hoisted(() => ({
   mockEnv: {
     MODAL_TOKEN_ID: 'modal-token-id',
@@ -48,6 +49,7 @@ const {
     BL_WORKSPACE: 'roomote',
     BLAXEL_IMAGE: 'ghcr.io/roomote/worker:test',
     BLAXEL_REGION: 'us-pdx-1',
+    ROOMOTE_CLOUD_ENABLED: false,
   } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
@@ -55,6 +57,7 @@ const {
   mockSpawnE2bWorker: vi.fn(),
   mockSpawnModalWorker: vi.fn(),
   mockSpawnBlaxelWorker: vi.fn(),
+  mockSpawnRoomoteCloudWorker: vi.fn(),
 }));
 
 const { mockFinishRun } = vi.hoisted(() => ({
@@ -100,6 +103,8 @@ vi.mock('../compute-providers', () => ({
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
   spawnModalWorker: (...args: unknown[]) => mockSpawnModalWorker(...args),
   spawnBlaxelWorker: (...args: unknown[]) => mockSpawnBlaxelWorker(...args),
+  spawnRoomoteCloudWorker: (...args: unknown[]) =>
+    mockSpawnRoomoteCloudWorker(...args),
 }));
 
 import { RoomoteController } from '../RoomoteController';
@@ -143,6 +148,7 @@ describe('RoomoteController', () => {
     mockEnv.BL_WORKSPACE = 'roomote';
     mockEnv.BLAXEL_IMAGE = 'ghcr.io/roomote/worker:test';
     mockEnv.BLAXEL_REGION = 'us-pdx-1';
+    mockEnv.ROOMOTE_CLOUD_ENABLED = false;
     mockSpawnDockerWorker.mockResolvedValue({ containerId: 'worker-47' });
   });
 
@@ -150,6 +156,32 @@ describe('RoomoteController', () => {
     mockEnv.MODAL_BASE_IMAGE_REF = undefined;
 
     expect(() => new RoomoteController('development')).not.toThrow();
+  });
+
+  it('rejects Roomote Cloud dispatch unless the deployment opts in', async () => {
+    const controller = new RoomoteController('development');
+
+    await expect(
+      (
+        controller as unknown as {
+          spawnFreshWorker: (
+            taskRun: TaskRun,
+            authToken: string,
+            deploymentSlug: string,
+            timeoutMs: number,
+            provider: 'roomote-cloud',
+          ) => Promise<void>;
+        }
+      ).spawnFreshWorker(
+        { id: 55, payload: { environmentId: 'env_123' } } as TaskRun,
+        'auth-token',
+        'roomote',
+        60_000,
+        'roomote-cloud',
+      ),
+    ).rejects.toThrow('Roomote Cloud is not enabled');
+
+    expect(mockSpawnRoomoteCloudWorker).not.toHaveBeenCalled();
   });
 
   it('spawns Docker workers when Docker is the selected provider', async () => {

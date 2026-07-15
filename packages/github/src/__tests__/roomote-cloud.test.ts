@@ -22,10 +22,22 @@ describe('Roomote Cloud GitHub token broker', () => {
     await expect(resolveRoomoteCloudRuntimeConfig()).resolves.toBeNull();
   });
 
+  it('ignores runtime credentials until the deployment opts in', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      if (name === 'ROOMOTE_CLOUD_URL') return 'https://cloud.roomote.dev';
+      if (name === 'ROOMOTE_CLOUD_DEPLOYMENT_TOKEN') return 'token';
+      return null;
+    });
+
+    await expect(resolveRoomoteCloudRuntimeConfig()).resolves.toBeNull();
+  });
+
   it('fails closed when only half of the runtime credential is configured', async () => {
-    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
-      name === 'ROOMOTE_CLOUD_URL' ? 'https://cloud.roomote.dev' : null,
-    );
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      if (name === 'ROOMOTE_CLOUD_ENABLED') return 'true';
+      if (name === 'ROOMOTE_CLOUD_URL') return 'https://cloud.roomote.dev';
+      return null;
+    });
 
     await expect(resolveRoomoteCloudRuntimeConfig()).rejects.toThrow(
       'must be configured together',

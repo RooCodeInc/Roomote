@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import { completeRoomoteCloudGitHubInstallation } from '@roomote/github';
+import { isRoomoteCloudEnabled } from '@roomote/types';
 
 import { logApiError } from '../../logging';
 import { processGitHubDelivery } from './index';
@@ -71,6 +72,10 @@ const installationSetupSchema = z.object({
 });
 
 cloudGitHub.post('/', async (c) => {
+  if (!isRoomoteCloudEnabled(process.env)) {
+    return c.notFound();
+  }
+
   try {
     const headers = c.req.header();
     const provider = headers['x-roomote-cloud-provider'];
@@ -119,6 +124,10 @@ cloudGitHub.post('/', async (c) => {
 });
 
 cloudGitHub.post('/setup', async (c) => {
+  if (!isRoomoteCloudEnabled(process.env)) {
+    return c.notFound();
+  }
+
   const headers = c.req.header();
   const provider = headers['x-roomote-cloud-provider'];
   const id = headers['x-roomote-cloud-delivery'];

@@ -1,4 +1,5 @@
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
+import { isRoomoteCloudEnabled } from '@roomote/types';
 
 export type RoomoteCloudRuntimeConfig = {
   baseUrl: string;
@@ -26,10 +27,17 @@ function normalizeCloudBaseUrl(value: string): string {
 }
 
 export async function resolveRoomoteCloudRuntimeConfig(): Promise<RoomoteCloudRuntimeConfig | null> {
-  const [baseUrl, deploymentToken] = await Promise.all([
+  const [enabledValue, baseUrl, deploymentToken] = await Promise.all([
+    resolveDeploymentEnvVar('ROOMOTE_CLOUD_ENABLED'),
     resolveDeploymentEnvVar('ROOMOTE_CLOUD_URL'),
     resolveDeploymentEnvVar('ROOMOTE_CLOUD_DEPLOYMENT_TOKEN'),
   ]);
+
+  if (
+    !isRoomoteCloudEnabled({ ROOMOTE_CLOUD_ENABLED: enabledValue ?? undefined })
+  ) {
+    return null;
+  }
 
   if (!baseUrl && !deploymentToken) {
     return null;

@@ -217,6 +217,30 @@ describe('listConfiguredComputeProviders', () => {
     expect(providers).toEqual(['docker']);
   });
 
+  it('lists Roomote Cloud only after the deployment opts in', async () => {
+    const credentials = {
+      ROOMOTE_CLOUD_URL: 'https://cloud.example',
+      ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'token',
+    };
+
+    await expect(
+      listConfiguredComputeProviders({
+        runtimeEnv: credentials,
+        executor: makeExecutor([]),
+      }),
+    ).resolves.toEqual(['docker']);
+
+    await expect(
+      listConfiguredComputeProviders({
+        runtimeEnv: {
+          ...credentials,
+          ROOMOTE_CLOUD_ENABLED: 'true',
+        },
+        executor: makeExecutor([]),
+      }),
+    ).resolves.toEqual(['roomote-cloud', 'docker']);
+  });
+
   it('returns configured providers in setup catalog display order', async () => {
     const providers = await listConfiguredComputeProviders({
       runtimeEnv: {

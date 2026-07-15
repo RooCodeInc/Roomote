@@ -3,6 +3,7 @@ import {
   isComputeProvider,
   type ComputeProvider,
 } from './compute-providers';
+import { isRoomoteCloudEnabled } from './roomote-cloud';
 
 /**
  * How the setup UI treats a compute-provider field:
@@ -453,6 +454,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
  */
 export const COMPUTE_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   SHARED_WORKER_IMAGE_ENV_VAR,
+  'ROOMOTE_CLOUD_ENABLED',
   ...(
     SETUP_COMPUTE_PROVIDER_CATALOG as readonly SetupComputeProviderDescriptor[]
   ).flatMap((descriptor) => descriptor.fields.map((field) => field.envVarName)),
@@ -728,6 +730,7 @@ export function buildSetupComputeStatus(input: {
   const persistedComputeConfig = normalizeDeploymentComputeConfig(
     input.persistedComputeConfig,
   );
+  const roomoteCloudEnabled = isRoomoteCloudEnabled(runtimeEnv);
 
   const runtimeDefaultValue = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
   const excludedProviders = parseExcludedComputeProviders(
@@ -735,6 +738,9 @@ export function buildSetupComputeStatus(input: {
   );
   for (const provider of persistedComputeConfig.excludedProviders) {
     excludedProviders.add(provider);
+  }
+  if (!roomoteCloudEnabled) {
+    excludedProviders.add('roomote-cloud');
   }
   const runtimeDefaultProvider =
     runtimeDefaultValue &&
@@ -762,7 +768,10 @@ export function buildSetupComputeStatus(input: {
     hostedReady: hostedWorkerImageRef !== null,
   };
 
-  const providers = SETUP_COMPUTE_PROVIDER_CATALOG.map((descriptor) => {
+  const providers = SETUP_COMPUTE_PROVIDER_CATALOG.filter(
+    (descriptor) =>
+      descriptor.provider !== 'roomote-cloud' || roomoteCloudEnabled,
+  ).map((descriptor) => {
     const fields: SetupComputeFieldStatus[] = (
       descriptor.fields as readonly SetupComputeFieldDescriptor[]
     ).map((field) => {

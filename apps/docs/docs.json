@@ -72,7 +72,6 @@
             "root": "compute",
             "expanded": true,
             "pages": [
-              "providers/compute/roomote-cloud",
               "providers/compute/docker",
               "providers/compute/modal",
               "providers/compute/e2b",

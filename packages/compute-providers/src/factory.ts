@@ -1,6 +1,7 @@
 import {
   resolveConfiguredComputeProviderResources,
   resolveEffectiveModalBaseImageRef,
+  isRoomoteCloudEnabled,
   SANDBOX_DEFAULT_MEMORY_MIB,
   SANDBOX_DEFAULT_VCPUS,
 } from '@roomote/types';
@@ -54,6 +55,14 @@ export function createComputeProviderClient(
 
   switch (options.provider) {
     case 'roomote-cloud': {
+      if (
+        !isRoomoteCloudEnabled({
+          ROOMOTE_CLOUD_ENABLED: envValue('ROOMOTE_CLOUD_ENABLED'),
+        })
+      ) {
+        throw new Error('Roomote Cloud is not enabled for this deployment');
+      }
+
       const baseUrl = options.config?.baseUrl ?? envValue('ROOMOTE_CLOUD_URL');
       const deploymentToken =
         options.config?.deploymentToken ??

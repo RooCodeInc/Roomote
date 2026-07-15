@@ -113,7 +113,10 @@ class LocalDevStarter {
         await WorkerReleaseService.build(options);
       }
 
-      if ((process.env.DEFAULT_COMPUTE_PROVIDER ?? 'docker') === 'docker') {
+      if (
+        (process.env.DEFAULT_COMPUTE_PROVIDER ?? 'docker') === 'docker' ||
+        process.env.ROOMOTE_CLOUD_LOCAL_DEV === '1'
+      ) {
         await DockerService.ensureWorkerImage(options.verbose);
       }
 

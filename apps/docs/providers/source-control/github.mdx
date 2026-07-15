@@ -12,22 +12,14 @@ Use `<public-url>` below for your stable public Roomote URL.
 
 ## Fast path
 
-On a Roomote Cloud tenant, open `/setup`, choose GitHub, and click **Open Roomote
-Cloud**. Install the shared Roomote Cloud GitHub App on the organization and
-repositories Roomote should use, then return to the tenant and continue. The
-control plane routes signed webhooks to the correct tenant and mints
-installation tokens on demand; no app credentials or webhook setup are needed
-in the tenant.
+Open `/setup`, choose GitHub, and click **Create GitHub App**. Roomote sends
+GitHub a manifest with the callback, webhook, permissions, and events
+preconfigured. After GitHub redirects back, Roomote saves the generated app ID,
+app slug, OAuth client credentials, webhook secret, and private key, then sends
+you to install the app on repositories.
 
-On a self-hosted deployment, open `/setup`, choose GitHub, and click **Create
-GitHub App**. Roomote sends GitHub a manifest with the callback, webhook,
-permissions, and events preconfigured. After GitHub redirects back, Roomote
-saves the generated app ID, app slug, OAuth client credentials, webhook secret,
-and private key, then sends you to install the app on repositories.
-
-Use the manual steps when you already have a GitHub App, want to manage these
-values in deployment environment variables yourself, or want a private app in
-a Roomote Cloud tenant.
+Use the manual steps only when you already have a GitHub App or want to manage
+these values in deployment environment variables yourself.
 
 ## Manual GitHub App setup
 

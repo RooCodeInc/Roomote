@@ -10,6 +10,7 @@ import {
   resolveDerivedModalBaseImageRef,
   isRequiredComputeField,
   isComputeProvider,
+  isRoomoteCloudEnabled,
   normalizeDeploymentComputeConfig,
   parseExcludedComputeProviders,
   type ComputeProvider,
@@ -92,6 +93,9 @@ export async function listConfiguredComputeProviders(
   for (const provider of persistedComputeConfig.excludedProviders) {
     excludedProviders.add(provider);
   }
+  if (!isRoomoteCloudEnabled(runtimeEnv)) {
+    excludedProviders.add('roomote-cloud');
+  }
 
   // Preserve setup-catalog display order so callers that fall back to the first
   // entry match the home dropdown ordering (modal, e2b, daytona, docker).
@@ -136,6 +140,9 @@ export async function resolveDefaultComputeProvider(
   );
   for (const provider of persistedComputeConfig.excludedProviders) {
     excludedProviders.add(provider);
+  }
+  if (!isRoomoteCloudEnabled(runtimeEnv)) {
+    excludedProviders.add('roomote-cloud');
   }
 
   if (

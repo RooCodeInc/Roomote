@@ -65,6 +65,7 @@ import {
   isConfiguredEnvValue,
   isExitedRunStatus,
   isRequiredComputeField,
+  isRoomoteCloudEnabled,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -1415,9 +1416,10 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     connectedProviders: sourceControlConnection.connectedProviders,
     repositoryCounts: sourceControlConnection.repositoryCounts,
     gitlabBaseUrl,
-    managedGitHubConnectionUrl: roomoteCloudGitHubAppSlug?.trim()
-      ? normalizeManagedServiceUrl(roomoteCloudUrl)
-      : null,
+    managedGitHubConnectionUrl:
+      isRoomoteCloudEnabled(process.env) && roomoteCloudGitHubAppSlug?.trim()
+        ? normalizeManagedServiceUrl(roomoteCloudUrl)
+        : null,
   });
 
   return {

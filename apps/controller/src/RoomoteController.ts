@@ -71,6 +71,12 @@ export class RoomoteController extends BaseController {
     timeoutMs: number,
     provider: ComputeProvider,
   ) {
+    if (provider === 'roomote-cloud' && !Env.ROOMOTE_CLOUD_ENABLED) {
+      throw new NonRetryableSpawnError(
+        'Roomote Cloud is not enabled for this deployment',
+      );
+    }
+
     // Credentials resolve from the runtime env first and fall back to the
     // encrypted deployment env vars saved by the setup flow.
     const resolvedEnv = await resolveComputeProviderEnvValues(provider, {

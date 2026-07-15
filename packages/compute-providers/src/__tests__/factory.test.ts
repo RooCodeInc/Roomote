@@ -57,17 +57,20 @@ vi.mock('../adapters', () => ({
 describe('createComputeProviderClient', () => {
   const originalModalRegistryUsername = process.env.MODAL_REGISTRY_USERNAME;
   const originalModalRegistryPassword = process.env.MODAL_REGISTRY_PASSWORD;
+  const originalRoomoteCloudEnabled = process.env.ROOMOTE_CLOUD_ENABLED;
 
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.MODAL_REGISTRY_USERNAME;
     delete process.env.MODAL_REGISTRY_PASSWORD;
+    delete process.env.ROOMOTE_CLOUD_ENABLED;
   });
 
   it('resolves Roomote Cloud deployment credentials from fallback env', () => {
     createComputeProviderClient({
       provider: 'roomote-cloud',
       envFallback: {
+        ROOMOTE_CLOUD_ENABLED: 'true',
         ROOMOTE_CLOUD_URL: 'https://cloud.example',
         ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
       },
@@ -77,6 +80,18 @@ describe('createComputeProviderClient', () => {
       baseUrl: 'https://cloud.example',
       deploymentToken: 'deployment-token',
     });
+  });
+
+  it('rejects Roomote Cloud clients unless the deployment opts in', () => {
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'roomote-cloud',
+        envFallback: {
+          ROOMOTE_CLOUD_URL: 'https://cloud.example',
+          ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: 'deployment-token',
+        },
+      }),
+    ).toThrow('Roomote Cloud is not enabled');
   });
 
   afterAll(() => {
@@ -90,6 +105,12 @@ describe('createComputeProviderClient', () => {
       delete process.env.MODAL_REGISTRY_PASSWORD;
     } else {
       process.env.MODAL_REGISTRY_PASSWORD = originalModalRegistryPassword;
+    }
+
+    if (originalRoomoteCloudEnabled === undefined) {
+      delete process.env.ROOMOTE_CLOUD_ENABLED;
+    } else {
+      process.env.ROOMOTE_CLOUD_ENABLED = originalRoomoteCloudEnabled;
     }
   });
 

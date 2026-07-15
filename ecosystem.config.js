@@ -75,6 +75,15 @@ const defaultEnv = {
   // the deployed TRPC_URL contract.
   TRPC_URL: process.env.TRPC_URL,
 
+  // Dark-launched managed runtime. These remain unset in ordinary local dev;
+  // Roomote-Cloud's paired dev command supplies them explicitly.
+  ROOMOTE_CLOUD_ENABLED: process.env.ROOMOTE_CLOUD_ENABLED,
+  ROOMOTE_CLOUD_URL: process.env.ROOMOTE_CLOUD_URL,
+  ROOMOTE_CLOUD_DEPLOYMENT_TOKEN: process.env.ROOMOTE_CLOUD_DEPLOYMENT_TOKEN,
+  ROOMOTE_CLOUD_DEPLOYMENT_ID: process.env.ROOMOTE_CLOUD_DEPLOYMENT_ID,
+  ROOMOTE_CLOUD_INTEGRATION_SECRET:
+    process.env.ROOMOTE_CLOUD_INTEGRATION_SECRET,
+
   // GitHub app credentials:
   R_GITHUB_APP_SLUG: process.env.R_GITHUB_APP_SLUG,
   R_GITHUB_APP_ID: process.env.R_GITHUB_APP_ID,
