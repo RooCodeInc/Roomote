@@ -1,4 +1,5 @@
 import { Settings } from '@/components/system';
+import { BITBUCKET_OAUTH_CALLBACK_PATH } from '@roomote/bitbucket';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 export function BitbucketSourceControlCreation() {
@@ -30,7 +31,7 @@ export function BitbucketSourceControlInstructions({
       </p>
       <InstructionUrl
         heading="Callback URL"
-        url={`${publicOrigin}/api/source-control/bitbucket/oauth/callback`}
+        url={`${publicOrigin}${BITBUCKET_OAUTH_CALLBACK_PATH}`}
       />
     </div>
   );

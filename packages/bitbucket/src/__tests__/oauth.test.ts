@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  BITBUCKET_OAUTH_CALLBACK_PATH,
   buildBitbucketOAuthRedirectUri,
   createBitbucketOAuthAuthorizationUrl,
   getBitbucketOAuthScopes,
 } from '../oauth';
 
 describe('Bitbucket deployment OAuth', () => {
+  it('uses the shared Better Auth callback path', () => {
+    expect(buildBitbucketOAuthRedirectUri('https://roomote.test/')).toBe(
+      `https://roomote.test${BITBUCKET_OAUTH_CALLBACK_PATH}`,
+    );
+  });
+
   it('builds the Bitbucket authorization URL with Roomote scopes', () => {
     const result = createBitbucketOAuthAuthorizationUrl({
       clientId: 'consumer-id',

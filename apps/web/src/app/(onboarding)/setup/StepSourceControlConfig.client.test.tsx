@@ -325,7 +325,7 @@ describe('StepSourceControlConfig', () => {
     expect(screen.getByText('Callback URL')).toBeInTheDocument();
     expect(
       screen.getByText(
-        'http://localhost:3000/api/source-control/bitbucket/oauth/callback',
+        'http://localhost:3000/api/auth/oauth2/callback/bitbucket',
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText('Bitbucket Base URL')).not.toBeInTheDocument();

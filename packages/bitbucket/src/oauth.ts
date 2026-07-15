@@ -4,6 +4,8 @@ import { db, deploymentSecrets, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
 
 const SECRET_NAME = 'bitbucket_deployment_oauth_connection';
+export const BITBUCKET_OAUTH_CALLBACK_PATH =
+  '/api/auth/oauth2/callback/bitbucket';
 const DEFAULT_SCOPES = [
   'account',
   'repository',
@@ -44,7 +46,7 @@ export function getBitbucketOAuthScopes(): readonly string[] {
 
 export function buildBitbucketOAuthRedirectUri(appUrl: string): string {
   return new URL(
-    '/api/source-control/bitbucket/oauth/callback',
+    BITBUCKET_OAUTH_CALLBACK_PATH,
     `${appUrl.replace(/\/$/, '')}/`,
   ).toString();
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
+  BITBUCKET_OAUTH_CALLBACK_PATH,
   buildBitbucketOAuthRedirectUri,
   createBitbucketOAuthAuthorizationUrl,
 } from '@roomote/bitbucket';
@@ -33,7 +34,7 @@ export async function GET() {
     httpOnly: true,
     sameSite: 'lax',
     secure: publicAppUrl.startsWith('https://'),
-    path: '/api/source-control/bitbucket/oauth',
+    path: BITBUCKET_OAUTH_CALLBACK_PATH,
     maxAge: 600,
   });
   return response;
