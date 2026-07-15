@@ -61,7 +61,27 @@ export function VisualProofToolPreview({ media }: VisualProofToolPreviewProps) {
     artifactLink.openArtifact(location.path, location.version);
   }, [artifactLink, location.path, location.version]);
 
-  if (media.kind === 'link' || !('src' in media)) {
+  if (media.kind === 'link') {
+    if (!location.path) {
+      return null;
+    }
+
+    const filename =
+      location.path.split('/').filter(Boolean).pop() ?? location.path;
+
+    return (
+      <button
+        type="button"
+        onClick={handleOpen}
+        className="inline-flex max-h-[100px] max-w-full cursor-pointer items-center rounded-md border bg-card px-2.5 py-1.5 text-left text-sm font-medium text-foreground transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        aria-label="Open visual proof"
+      >
+        <span className="truncate">{filename}</span>
+      </button>
+    );
+  }
+
+  if (!('src' in media)) {
     return null;
   }
 

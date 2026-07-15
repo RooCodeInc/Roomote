@@ -383,9 +383,26 @@ export function resolveVisualProofMediaForToolMessage(
     artifacts,
   );
 
-  if (direct) {
+  // Only mount preview chrome when something can actually render/open.
+  // `kind: 'link'` without a path produced blank non-clickable tool rows.
+  if (direct && canRenderVisualProofPreview(direct)) {
     return [direct];
   }
 
   return resolveSubagentVisualProofMedia(msg, artifacts);
+}
+
+/** True when the media object can produce non-empty chat preview chrome. */
+function canRenderVisualProofPreview(
+  media: VisualProofDisplayMedia | null | undefined,
+): boolean {
+  if (!media) {
+    return false;
+  }
+
+  if (media.kind === 'image' || media.kind === 'video') {
+    return true;
+  }
+
+  return Boolean(media.path);
 }

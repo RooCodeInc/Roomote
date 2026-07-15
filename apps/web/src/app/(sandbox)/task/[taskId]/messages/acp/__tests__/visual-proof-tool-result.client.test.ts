@@ -216,6 +216,19 @@ describe('resolveVisualProofMediaForToolMessage (manage_artifacts result)', () =
       },
     ]);
   });
+
+  it('skips blank non-image previews when the link has no artifact path', () => {
+    const msg = buildResultMessage({
+      output: JSON.stringify({
+        success: true,
+        artifactId: 'art-1',
+        artifactType: 'visual-proof',
+        viewUrl: 'https://example.com/view-without-path',
+      }),
+    });
+
+    expect(resolveVisualProofMediaForToolMessage(msg, [])).toEqual([]);
+  });
 });
 
 describe('resolveVisualProofMediaForToolMessage (subagent result)', () => {

@@ -560,4 +560,63 @@ describe('AcpToolMessage', () => {
     expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.png', 2);
     expect(windowOpenSpy).not.toHaveBeenCalled();
   });
+
+  it('renders a clickable filename for non-image visual-proof uploads', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl:
+              'https://example.com/task/task-1/artifacts/tmp/proof.mp4?v=1',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolDetailsSpy).not.toHaveBeenCalled();
+    expect(screen.getByText('proof.mp4')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+    expect(openArtifactSpy).toHaveBeenCalledWith('tmp/proof.mp4', 1);
+  });
+
+  it('falls back to normal tool details when visual-proof has no path or media', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'manage_artifacts',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'manage_artifacts',
+          serverName: 'roomote',
+          toolName: 'manage_artifacts',
+          output: JSON.stringify({
+            success: true,
+            artifactId: 'art-1',
+            artifactType: 'visual-proof',
+            viewUrl: 'https://example.com/view-without-path',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
+    expect(
+      screen.queryByRole('button', { name: 'Open visual proof' }),
+    ).not.toBeInTheDocument();
+  });
 });
