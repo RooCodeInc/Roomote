@@ -19,12 +19,15 @@ export function getAnalyticsHref(itemId: AnalyticsShellItemId) {
       return '/analytics';
     case 'pullRequests':
       return '/analytics?object=pullRequests';
+    case 'costs':
+      return '/analytics/costs';
   }
 }
 
 const ANALYTICS_SHELL_ITEMS = [
   { id: 'tasks', label: 'Tasks', icon: ChartColumnIncreasing },
   { id: 'pullRequests', label: 'PRs', icon: GitPullRequest },
+  { id: 'costs', label: 'Costs', icon: ChartColumnIncreasing },
 ] as const satisfies Array<{
   id: AnalyticsObject;
   label: string;
@@ -34,8 +37,9 @@ const ANALYTICS_SHELL_ITEMS = [
 const ANALYTICS_DESCRIPTIONS: Record<AnalyticsShellItemId, string> = {
   pullRequests:
     'Track pull request activity by user, status, repository, and author.',
-  tasks:
-    'Track task activity, tokens, and cost by user, environment, and source.',
+  tasks: 'Track task activity by user, environment, source, and task type.',
+  costs:
+    'Compare inference cost across users, automations, environments, providers, and models.',
 };
 
 type AnalyticsShellProps = {

@@ -30,12 +30,12 @@ describe('AnalyticsControlRow', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('renders a metric selector for tasks analytics', () => {
+  it('does not render a metric selector for tasks analytics', () => {
     render(
       <AnalyticsControlRow
         object="tasks"
         viewBy="user"
-        metric="tokens"
+        metric="tasks"
         timePeriod={7}
         onViewByChange={vi.fn()}
         onMetricChange={vi.fn()}
@@ -43,8 +43,8 @@ describe('AnalyticsControlRow', () => {
       />,
     );
 
-    expect(screen.getByRole('combobox', { name: 'Metric' })).toHaveTextContent(
-      'Tokens',
-    );
+    expect(
+      screen.queryByRole('combobox', { name: 'Metric' }),
+    ).not.toBeInTheDocument();
   });
 });

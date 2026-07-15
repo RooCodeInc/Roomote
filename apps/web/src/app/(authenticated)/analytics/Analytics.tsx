@@ -43,6 +43,8 @@ import {
 } from './AnalyticsShell';
 import { AnalyticsStackedBarChart } from './AnalyticsStackedBarChart';
 import { PullRequestSummaryCards } from './PullRequestSummaryCards';
+import { CostBreakdownTable } from './CostBreakdownTable';
+import { CostSummaryCards } from './CostSummaryCards';
 import { downloadAnalyticsRowsCsv } from './downloadCsv';
 
 const analyticsFilterKeys = [
@@ -52,6 +54,9 @@ const analyticsFilterKeys = [
   'status',
   'repo',
   'author',
+  'taskType',
+  'provider',
+  'model',
 ] as const;
 
 type SelectedAnalyticsSegment = {
@@ -404,6 +409,9 @@ export function Analytics({
               granularity={granularity}
             />
           ) : null}
+          {object === 'costs' ? (
+            <CostSummaryCards summary={chart?.costSummary} />
+          ) : null}
 
           <div className="overflow-hidden bg-card p-4">
             <AnalyticsStackedBarChart
@@ -417,6 +425,9 @@ export function Analytics({
               onResetFilters={handleResetFilters}
               onSelectSegment={setSelectedSegment}
             />
+            {object === 'costs' ? (
+              <CostBreakdownTable rows={chart?.costBreakdown} />
+            ) : null}
           </div>
         </div>
       </AnalyticsShell>

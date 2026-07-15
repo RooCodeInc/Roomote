@@ -23,21 +23,25 @@ import {
 import {
   db,
   tasks,
+  taskRuns,
   users,
   taskPullRequests,
   githubUserMappings,
   environments,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   desc,
   eq,
   inArray,
   isNull,
   sql,
+  or,
 } from '@roomote/db/server';
 
 import {
   type AnalyticsChartBucket,
   type AnalyticsChartResponse,
+  type AnalyticsCostBreakdownRow,
+  type AnalyticsCostSummary,
   type AnalyticsDetailsColumn,
   type AnalyticsDetailsResponse,
   type AnalyticsDetailsRow,
@@ -584,6 +588,14 @@ function applyDimensionFilters<TRow extends AnalyticsRow>(
 
       const dimensionValue = row.dimensions[dimension];
 
+      if (
+        dimension === 'taskType' &&
+        values.includes('all-automated') &&
+        dimensionValue?.key.startsWith('automation:')
+      ) {
+        continue;
+      }
+
       if (!dimensionValue) {
         return false;
       }
@@ -625,6 +637,18 @@ function buildFilterOptions<TRow extends AnalyticsRow>(
         compareDimensionValues(dimension, left[1], right[1]),
       )
       .map(([value, label]) => ({ value, label }));
+
+    if (
+      dimension === 'taskType' &&
+      result[dimension]?.some((option) =>
+        option.value.startsWith('automation:'),
+      )
+    ) {
+      result[dimension] = [
+        { value: 'all-automated', label: 'All automated' },
+        ...(result[dimension] ?? []),
+      ];
+    }
   }
 
   return {
@@ -749,7 +773,7 @@ function buildChartData(
       segments: Object.fromEntries(bucket.segments),
     }));
 
-  return {
+  const response: AnalyticsChartResponse = {
     object,
     viewBy,
     metric,
@@ -757,6 +781,75 @@ function buildChartData(
     buckets,
     total: rows.reduce((sum, row) => sum + row.value, 0),
   };
+
+  if (object === 'costs') {
+    const totalCost = response.total;
+    const breakdown = new Map<
+      string,
+      {
+        provider: string;
+        model: string;
+        cost: number;
+        tasks: Set<string>;
+      }
+    >();
+
+    for (const row of rows) {
+      const provider = row.dimensions.provider?.label ?? 'Unknown provider';
+      const model = row.dimensions.model?.label ?? 'Unknown model';
+      const key = `${provider}:${model}`;
+      const current = breakdown.get(key) ?? {
+        provider,
+        model,
+        cost: 0,
+        tasks: new Set<string>(),
+      };
+      current.cost += row.value;
+      if (row.meta?.canonicalTaskId) {
+        current.tasks.add(row.meta.canonicalTaskId);
+      }
+      breakdown.set(key, current);
+    }
+
+    response.costBreakdown = [...breakdown.entries()]
+      .map(
+        ([key, row]): AnalyticsCostBreakdownRow => ({
+          key,
+          provider: row.provider,
+          model: row.model,
+          totalCost: row.cost,
+          costShare: totalCost === 0 ? 0 : (row.cost / totalCost) * 100,
+          taskCount: row.tasks.size,
+          averageCostPerTask:
+            row.tasks.size === 0 ? 0 : row.cost / row.tasks.size,
+          averageCostPerPr: null,
+        }),
+      )
+      .sort((left, right) => right.totalCost - left.totalCost);
+
+    const taskIds = new Set(
+      rows
+        .map((row) => row.meta?.canonicalTaskId)
+        .filter((taskId): taskId is string => Boolean(taskId)),
+    );
+    const userIds = new Set(
+      rows
+        .map((row) => row.dimensions.user?.key)
+        .filter(
+          (user): user is string => Boolean(user) && user !== NO_VALUE_LABEL,
+        ),
+    );
+    const summary: AnalyticsCostSummary = {
+      totalInferenceCost: totalCost,
+      averageCostPerTask: taskIds.size === 0 ? null : totalCost / taskIds.size,
+      averageCostPerPr: null,
+      averageCostPerActiveUser:
+        userIds.size === 0 ? null : totalCost / userIds.size,
+    };
+    response.costSummary = summary;
+  }
+
+  return response;
 }
 
 function formatPullRequestStatus(status: PullRequestStatus) {
@@ -1061,17 +1154,21 @@ async function getTaskInferenceUsageTotalsByTaskIds(
 
   const results = await db
     .select({
-      taskId: taskInferenceUsageEvents.taskId,
-      totalTokens: sql<number>`coalesce(sum(${taskInferenceUsageEvents.totalTokens}), 0)::bigint`,
-      costMicroUsd: sql<number>`coalesce(sum(${taskInferenceUsageEvents.costMicroUsd}), 0)::bigint`,
+      taskId: llmUsageEvents.taskId,
+      totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
-    .from(taskInferenceUsageEvents)
-    .where(inArray(taskInferenceUsageEvents.taskId, taskIds))
-    .groupBy(taskInferenceUsageEvents.taskId);
+    .from(llmUsageEvents)
+    .where(inArray(llmUsageEvents.taskId, taskIds))
+    .groupBy(llmUsageEvents.taskId);
 
   const usageByTaskId: Record<string, TaskInferenceUsageTotals> = {};
 
   for (const row of results) {
+    if (!row.taskId) {
+      continue;
+    }
+
     usageByTaskId[row.taskId] = {
       totalTokens: Number(row.totalTokens ?? 0),
       costUsd: Number(row.costMicroUsd ?? 0) / 1_000_000,
@@ -1134,6 +1231,7 @@ async function getTaskAnalyticsRows(
       user: task.userDimension.label,
       project: task.projectLabel,
       source: sourceLabel,
+      taskType: task.taskTypeDimension.label,
       taskTitle: task.title,
       task: 'View task',
     };
@@ -1152,6 +1250,7 @@ async function getTaskAnalyticsRows(
         user: task.userDimension,
         project: createLabelBackedDimensionValue(task.projectLabel),
         source: createLabelBackedDimensionValue(sourceLabel),
+        taskType: task.taskTypeDimension,
       },
       details: {
         id: task.id,
@@ -1171,7 +1270,29 @@ type TaskAnalyticsBaseRow = {
   surface: TaskSurface;
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
+  taskTypeDimension: AnalyticsDimensionValue;
 };
+
+function getTaskTypeDimensionValue(task: {
+  initiatorKind: 'user' | 'automation' | null;
+  initiatorAutomation: string | null;
+}) {
+  if (!task.initiatorKind) {
+    return createLabelBackedDimensionValue('Unknown');
+  }
+
+  if (task.initiatorKind === 'automation') {
+    const key = task.initiatorAutomation ?? 'unknown';
+    return createDimensionValue(
+      `automation:${key}`,
+      task.initiatorAutomation
+        ? formatAutomationLabel(task.initiatorAutomation)
+        : 'Unknown',
+    );
+  }
+
+  return createLabelBackedDimensionValue('Manual');
+}
 
 async function getTaskAnalyticsBaseRows(
   auth: UserAuthSuccess,
@@ -1278,7 +1399,10 @@ async function getTaskAnalyticsBaseRows(
         ? payload.environmentId
         : null;
 
-    const userDimension = getTaskInitiatorDimensionValue(task);
+    const userDimension =
+      task.initiatorKind === 'automation'
+        ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
+        : getTaskInitiatorDimensionValue(task);
 
     return {
       id: task.id,
@@ -1287,8 +1411,127 @@ async function getTaskAnalyticsBaseRows(
       surface: task.surface,
       projectLabel: getProjectLabel(task.repositoryName, environmentId),
       userDimension,
+      taskTypeDimension: getTaskTypeDimensionValue(task),
     } satisfies TaskAnalyticsBaseRow;
   });
+}
+
+async function getCostAnalyticsRows(
+  _auth: UserAuthSuccess,
+  timePeriod: TimePeriodFilter | undefined,
+  now: Date,
+): Promise<AnalyticsRow[]> {
+  const cutoff = getTimeCutoff(timePeriod, now);
+  const usageRows = await db
+    .select({
+      id: llmUsageEvents.id,
+      timestamp: llmUsageEvents.messageCompletedAt,
+      createdAt: llmUsageEvents.createdAt,
+      costMicroUsd: llmUsageEvents.costMicroUsd,
+      taskId: llmUsageEvents.taskId,
+      runId: llmUsageEvents.runId,
+      userId: llmUsageEvents.userId,
+      taskUserId: tasks.initiatorUserId,
+      providerId: llmUsageEvents.providerId,
+      modelId: llmUsageEvents.modelId,
+      environmentName: environments.name,
+      taskTitle: tasks.title,
+      initiatorKind: tasks.initiatorKind,
+      initiatorAutomation: tasks.initiatorAutomation,
+      taskUserName: users.name,
+      taskUserEmail: users.email,
+      runPayload: taskRuns.payload,
+    })
+    .from(llmUsageEvents)
+    .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
+    .leftJoin(
+      users,
+      or(
+        eq(users.id, llmUsageEvents.userId),
+        eq(users.id, tasks.initiatorUserId),
+      ),
+    )
+    .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
+    .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
+    .where(isNull(tasks.deletedAt));
+
+  const environmentRows = await db
+    .select({ id: environments.id, name: environments.name })
+    .from(environments)
+    .where(eq(environments.isEval, false));
+  const environmentNameById = new Map(
+    environmentRows.map((environment) => [environment.id, environment.name]),
+  );
+
+  return usageRows
+    .filter((row) => {
+      const timestamp = row.timestamp ?? row.createdAt;
+      return !cutoff || timestamp >= cutoff;
+    })
+    .map((row) => {
+      const isTask = Boolean(row.taskId);
+      const taskType = isTask
+        ? getTaskTypeDimensionValue({
+            initiatorKind: row.initiatorKind,
+            initiatorAutomation: row.initiatorAutomation,
+          })
+        : createLabelBackedDimensionValue('Non-task inference');
+      const attributedUserId = row.userId ?? row.taskUserId;
+      const userDimension =
+        isTask && row.initiatorKind === 'automation'
+          ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
+          : attributedUserId
+            ? getCanonicalUserDimensionValue({
+                id: attributedUserId,
+                name: row.taskUserName,
+                email: row.taskUserEmail,
+              })
+            : createLabelBackedDimensionValue(NO_VALUE_LABEL);
+      const timestamp = row.timestamp ?? row.createdAt;
+      const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
+      const provider = row.providerId ?? 'Unknown provider';
+      const model = row.modelId ?? 'Unknown model';
+      const runEnvironmentId =
+        row.runPayload &&
+        typeof row.runPayload === 'object' &&
+        'environmentId' in row.runPayload &&
+        typeof row.runPayload.environmentId === 'string'
+          ? row.runPayload.environmentId
+          : null;
+      const project =
+        row.environmentName ??
+        (runEnvironmentId
+          ? (environmentNameById.get(runEnvironmentId) ?? NO_PROJECT_LABEL)
+          : NO_PROJECT_LABEL);
+
+      return {
+        id: row.id,
+        timestamp,
+        value: cost,
+        dimensions: {
+          user: userDimension,
+          taskType,
+          project: createLabelBackedDimensionValue(project),
+          provider: createLabelBackedDimensionValue(provider),
+          model: createLabelBackedDimensionValue(model),
+        },
+        details: {
+          id: row.id,
+          values: {
+            date: formatAnalyticsDateTime(timestamp),
+            user: userDimension.label,
+            taskType: taskType.label,
+            project,
+            provider,
+            model,
+            cost: cost.toFixed(2),
+            taskTitle: row.taskTitle ?? 'Non-task inference',
+          },
+          links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
+        },
+        meta: { canonicalTaskId: row.taskId },
+      } satisfies AnalyticsRow;
+    });
 }
 
 async function getPullRequestAnalyticsRows(
@@ -1434,6 +1677,8 @@ async function getAnalyticsRows(
       return getTaskAnalyticsRows(auth, timePeriod, now, metric);
     case 'pullRequests':
       return getPullRequestAnalyticsRows(auth, timePeriod, now);
+    case 'costs':
+      return getCostAnalyticsRows(auth, timePeriod, now);
   }
 }
 
@@ -1448,6 +1693,7 @@ function getAnalyticsDetailsColumns(
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
+        { key: 'taskType', label: 'Task Type' },
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
@@ -1470,6 +1716,17 @@ function getAnalyticsDetailsColumns(
         { key: 'status', label: 'Status' },
         { key: 'createdBy', label: 'Created By' },
         { key: 'task', label: 'Task Link' },
+      ];
+    case 'costs':
+      return [
+        { key: 'date', label: 'Date' },
+        { key: 'user', label: 'User' },
+        { key: 'taskType', label: 'Task Type' },
+        { key: 'project', label: 'Environment' },
+        { key: 'provider', label: 'Provider' },
+        { key: 'model', label: 'Model' },
+        { key: 'cost', label: 'Cost (USD)' },
+        { key: 'taskTitle', label: 'Task' },
       ];
   }
 }

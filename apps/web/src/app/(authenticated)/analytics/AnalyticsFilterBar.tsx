@@ -42,6 +42,9 @@ const ANALYTICS_DIMENSION_PLURAL_LABELS: Record<AnalyticsDimension, string> = {
   status: 'Statuses',
   repo: 'Repos',
   author: 'Authors',
+  taskType: 'Task Types',
+  provider: 'Providers',
+  model: 'Models',
 };
 
 type AnalyticsFilterBarProps = {
