@@ -9,7 +9,6 @@ import {
   setDeploymentPreviewsEnabled,
 } from '@roomote/feature-flags';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
-import { isRoomoteCloudEnabled } from '@roomote/env';
 
 import {
   type AuthError,
@@ -18,7 +17,7 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
-import { Env } from './env';
+import { Env, isRoomoteCloudEnabled } from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {

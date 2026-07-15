@@ -17,7 +17,6 @@ import {
   normalizeSetupNewState,
 } from '@roomote/types';
 import { ANONYMOUS_ANALYTICS_METADATA_KEY } from '@roomote/feature-flags';
-import { isRoomoteCloudEnabled } from '@roomote/env';
 import { captureEvent } from '@roomote/telemetry/server';
 import {
   AVAILABLE_SETUP_MCP_INTEGRATIONS,
@@ -34,7 +33,7 @@ import {
   getSetupBaseStatus,
 } from './shared';
 import { ensureManagedReviewerEnabledByDefaultInTx } from '../automations';
-import { Env } from '@/lib/server/env';
+import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
 
 // --- Mutations ---
 
