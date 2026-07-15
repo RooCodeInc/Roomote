@@ -195,6 +195,8 @@ import {
 import {
   fulfillTaskEnvVarRequestCommand,
   fulfillTaskEnvVarRequestSchema,
+  markTaskEnvVarRequestFulfilledCommand,
+  markTaskEnvVarRequestFulfilledSchema,
 } from '../commands/task-env-var-requests';
 import {
   getUsersOnlyForFilterCommand,
@@ -1365,6 +1367,12 @@ export const appRouter = createRouter({
       .input(fulfillTaskEnvVarRequestSchema)
       .mutation(({ ctx: { auth }, input }) =>
         fulfillTaskEnvVarRequestCommand(auth, input),
+      ),
+
+    markFulfilled: protectedProcedure
+      .input(markTaskEnvVarRequestFulfilledSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        markTaskEnvVarRequestFulfilledCommand(auth, input),
       ),
   }),
 

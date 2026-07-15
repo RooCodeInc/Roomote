@@ -903,7 +903,10 @@ export async function getActiveVerificationTaskIdForTest(
  * per environment by a `withEnvironmentVerificationRetryLock` advisory lock, so
  * two concurrent retries cannot both pass the check and enqueue duplicate
  * verification runs; the second waits for the first to commit and then sees the
- * active attempt and is rejected.
+ * active attempt and is rejected. The attempt is registered in `enqueueTask`'s
+ * `beforeEnqueue` hook so the environment points at the new task id before the
+ * run becomes eligible to start, avoiding a race where the run's
+ * `record_verification` is rejected as a mismatched attempt.
  */
 export async function retryEnvironmentVerificationCommand(
   auth: UserAuthSuccess,
@@ -943,31 +946,37 @@ export async function retryEnvironmentVerificationCommand(
       throw new Error('This environment is already being verified.');
     }
 
-    const launchResult = await enqueueTask({
-      title: `Verify environment: ${environment.name}`,
-      task: {
-        type: TaskPayloadKind.StandardTask,
-        payload: {
-          repo: ALL_REPOSITORIES,
-          environmentId: environment.id,
-          verifiesEnvironmentId: environment.id,
-          description: prompt,
+    const launchResult = await enqueueTask(
+      {
+        title: `Verify environment: ${environment.name}`,
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: ALL_REPOSITORIES,
+            environmentId: environment.id,
+            verifiesEnvironmentId: environment.id,
+            description: prompt,
+          },
+        },
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      },
+      {
+        // Claim this verification attempt before the run becomes eligible to
+        // start. `beforeEnqueue` runs while still inside the advisory-locked
+        // transaction and before the run is pushed onto the queue, so the
+        // controller cannot start the run (and have its record_verification
+        // rejected as a mismatched attempt) before its task id is registered.
+        beforeEnqueue: async (taskRun) => {
+          await beginEnvironmentVerification(tx, {
+            environmentId: environment.id,
+            verificationTaskId: taskRun.taskId,
+          });
         },
       },
-      initiator: { kind: 'user', userId },
-      workflow: 'standard',
-      surface: 'web',
-      trigger: 'manual',
-    });
-
-    // Reset verification state and point the environment at the new task so
-    // record_verification can only be applied by this attempt. Done inside the
-    // advisory-locked transaction so a concurrent retry blocks until this
-    // attempt is registered and then observes it as active.
-    await beginEnvironmentVerification(tx, {
-      environmentId: environment.id,
-      verificationTaskId: launchResult.taskId,
-    });
+    );
 
     return { taskId: launchResult.taskId };
   });

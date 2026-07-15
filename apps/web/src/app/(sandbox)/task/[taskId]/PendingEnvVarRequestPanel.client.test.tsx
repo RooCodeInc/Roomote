@@ -7,6 +7,7 @@ const {
   appendAcpEventMock,
   reloadDeploymentEnvVarsMock,
   sendPromptMock,
+  markFulfilledMock,
   successToastMock,
   errorToastMock,
   authState,
@@ -17,6 +18,7 @@ const {
   appendAcpEventMock: vi.fn(),
   reloadDeploymentEnvVarsMock: vi.fn(),
   sendPromptMock: vi.fn(),
+  markFulfilledMock: vi.fn(),
   successToastMock: vi.fn(),
   errorToastMock: vi.fn(),
   authState: {
@@ -76,6 +78,11 @@ vi.mock('@/trpc/client', () => ({
     sandboxSession: {
       sendPrompt: {
         mutate: sendPromptMock,
+      },
+    },
+    taskEnvVarRequests: {
+      markFulfilled: {
+        mutate: markFulfilledMock,
       },
     },
   }),
@@ -464,6 +471,14 @@ describe('PendingEnvVarRequestPanel', () => {
           clientMessageId: expect.stringMatching(/^env-var-request-fulfilled:/),
         }),
         visibleInTranscript: false,
+      }),
+    );
+    // A durable fulfillment must be persisted server-side on the send-failure
+    // path so a reconnect does not resurface the already-handled request.
+    expect(markFulfilledMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        clientMessageId: expect.stringMatching(/^env-var-request-fulfilled:/),
       }),
     );
     consoleWarn.mockRestore();

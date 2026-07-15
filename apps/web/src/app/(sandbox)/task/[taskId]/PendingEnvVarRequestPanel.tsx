@@ -225,6 +225,23 @@ export function PendingEnvVarRequestPanel({
           'Saved environment variables, but failed to send the task follow-up prompt.',
           error,
         );
+
+        // The follow-up prompt (which would have persisted the durable
+        // fulfillment envelope) failed, so record that envelope directly.
+        // Without this, a reconnect or history refetch rebuilds the pending
+        // request from persisted envelopes and resurfaces it even though the
+        // values were already saved.
+        try {
+          await trpcClient.taskEnvVarRequests.markFulfilled.mutate({
+            taskId,
+            clientMessageId,
+          });
+        } catch (markError) {
+          console.warn(
+            'Failed to persist the env-var fulfillment marker after the follow-up prompt failed.',
+            markError,
+          );
+        }
       }
 
       recordFulfillmentLocally(clientMessageId);
