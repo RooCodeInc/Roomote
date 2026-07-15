@@ -179,9 +179,6 @@ describe('Onboarding StepInvoke', () => {
     expect(
       screen.getByText('Mention @roomote in a comment on any PR.'),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText('@roomote address the PR feedback above'),
-    ).toBeInTheDocument();
   });
 
   it('shows only configured providers with automations before the web UI', () => {

@@ -547,13 +547,15 @@ export function LinkedAccounts() {
     }),
     createAuthClientLinkedAccountDescriptor({
       key: 'bitbucket',
-      name: 'Bitbucket',
-      icon: <BrandIcon icon="bitbucket" name="Bitbucket" className="size-4" />,
+      name: 'Bitbucket Cloud',
+      icon: (
+        <BrandIcon icon="bitbucket" name="Bitbucket Cloud" className="size-4" />
+      ),
       redirectTarget,
       state: bitbucketAccount.data,
       authenticateAccount: authenticateBitbucketAccount,
       unlinkAccount: unlinkBitbucketAccount,
-      fallbackDisplayName: (accountId) => `Bitbucket user ${accountId}`,
+      fallbackDisplayName: (accountId) => `Bitbucket Cloud user ${accountId}`,
     }),
     createAuthClientLinkedAccountDescriptor({
       key: 'ado',

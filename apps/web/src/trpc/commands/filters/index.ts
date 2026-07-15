@@ -58,7 +58,7 @@ function getSurfaceSubLabel(surface: TaskSurface | null): string | undefined {
     case 'gitea':
       return 'Gitea';
     case 'bitbucket':
-      return 'Bitbucket';
+      return 'Bitbucket Cloud';
     case 'ado':
       return 'Azure DevOps';
     case 'linear':

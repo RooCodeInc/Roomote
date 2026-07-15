@@ -3,11 +3,7 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import {
-  createBitbucketPullRequestComment,
-  getBitbucketDeploymentUser,
-  normalizeBitbucketLinkedAccountKey,
-} from '@roomote/bitbucket';
+import { createBitbucketPullRequestComment } from '@roomote/bitbucket';
 import {
   type TaskPayload,
   TaskPayloadKind,
@@ -17,14 +13,16 @@ import {
 
 import type { WebhookResponse } from '../../types';
 import { toHostFromUrl } from '../utils';
-import { buildSourceControlAccountLinkRequiredMessage } from '../source-control-account-linking';
+import {
+  buildSourceControlAccountLinkRequiredMessage,
+  buildSourceControlEnvironmentRequiredMessage,
+} from '../source-control-account-linking';
 import {
   sendMessageToTask,
   steerMessageToTask,
 } from '../tasks/sendMessageToTask';
 import {
   getBitbucketAutomationTargets,
-  getBitbucketUserAccountKey,
   getBitbucketUsername,
   isRoomoteBitbucketUsername,
 } from './getBitbucketAutomationTargets';
@@ -37,7 +35,6 @@ import {
   getBitbucketPullRequestNumber,
   getBitbucketPullRequestUrl,
   type BitbucketPullRequestCommentWebhook,
-  type BitbucketWebhookUser,
 } from './types';
 
 const BITBUCKET_MENTION_HANDLE = '@roomote';
@@ -49,50 +46,6 @@ type BitbucketPrMentionReplyKind =
 
 function isBitbucketMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(BITBUCKET_MENTION_HANDLE);
-}
-
-async function isDeploymentTokenAuthor(
-  author: BitbucketWebhookUser | undefined,
-): Promise<boolean> {
-  try {
-    const deploymentUser = await getBitbucketDeploymentUser();
-
-    if (!deploymentUser) {
-      return false;
-    }
-
-    const authorKey = getBitbucketUserAccountKey(author);
-
-    if (authorKey) {
-      if (
-        deploymentUser.accountId &&
-        normalizeBitbucketLinkedAccountKey(deploymentUser.accountId) ===
-          authorKey
-      ) {
-        return true;
-      }
-
-      if (
-        deploymentUser.uuid &&
-        normalizeBitbucketLinkedAccountKey(deploymentUser.uuid) === authorKey
-      ) {
-        return true;
-      }
-    }
-
-    const username = getBitbucketUsername(author);
-
-    return (
-      !!username &&
-      deploymentUser.login.toLowerCase() === username.toLowerCase()
-    );
-  } catch (error) {
-    console.warn(
-      `[handleBitbucketComment] failed to resolve Bitbucket deployment token identity: ${error instanceof Error ? error.message : String(error)}`,
-    );
-
-    return false;
-  }
 }
 
 async function postMentionResponseComment({
@@ -110,10 +63,15 @@ async function postMentionResponseComment({
       pullRequestNumber,
       body,
     });
+    console.info(
+      `[handleBitbucketComment] posted mention response comment on ${repositoryFullName}#${pullRequestNumber}`,
+    );
   } catch (error) {
     console.warn(
       `[handleBitbucketComment] failed to post mention response comment on ${repositoryFullName}#${pullRequestNumber}: ${error instanceof Error ? error.message : String(error)}`,
     );
+
+    throw error;
   }
 }
 
@@ -180,7 +138,7 @@ function buildReviewerGateMissComment(): string {
 }
 
 function buildTaskStartFailedComment(): string {
-  return 'I saw the mention, but I could not start a task for this pull request right now. Please try again in a moment.';
+  return 'I saw the mention, but Roomote could not queue a review task for this pull request. Please try again in a moment. If it keeps failing, an administrator should check the deployment logs.';
 }
 
 function formatQuotedText(text: string): string {
@@ -245,10 +203,7 @@ export async function handleBitbucketComment(
     return { status: 'ok', message: 'no_comment_author' };
   }
 
-  if (
-    isRoomoteBitbucketUsername(commenter) ||
-    (await isDeploymentTokenAuthor(payload.comment.user ?? payload.actor))
-  ) {
+  if (isRoomoteBitbucketUsername(commenter)) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }
 
@@ -278,25 +233,41 @@ export async function handleBitbucketComment(
     requireLinkedSenderAccount: true,
   });
 
+  if (targetsResult.status === 'error') {
+    console.warn('[handleBitbucketComment] automation target rejected', {
+      repository: repoFullName,
+      pullRequestNumber: prNumber,
+      code: targetsResult.code ?? null,
+      reason: targetsResult.message,
+    });
+  }
+
   const target =
     targetsResult.status === 'ok' ? targetsResult.targets[0] : undefined;
+
+  const requiresEnvironment =
+    targetsResult.status === 'error' &&
+    targetsResult.message.includes('no environment mapping');
+  const requiresAccountLink =
+    targetsResult.status === 'error' &&
+    targetsResult.code === 'account_link_required';
 
   if (!target || !target.userId) {
     await postMentionResponseComment({
       ...mentionResponseTarget,
-      body:
-        targetsResult.status === 'error' &&
-        targetsResult.code === 'account_link_required'
-          ? buildSourceControlAccountLinkRequiredMessage('bitbucket')
+      body: requiresAccountLink
+        ? buildSourceControlAccountLinkRequiredMessage('bitbucket')
+        : requiresEnvironment
+          ? buildSourceControlEnvironmentRequiredMessage('bitbucket')
           : buildReviewerGateMissComment(),
     });
 
     return {
       status: 'ok',
-      message:
-        targetsResult.status === 'error' &&
-        targetsResult.code === 'account_link_required'
-          ? 'account_link_required'
+      message: requiresAccountLink
+        ? 'account_link_required'
+        : requiresEnvironment
+          ? 'environment_required'
           : 'reviewer_gate_miss',
     };
   }
@@ -433,9 +404,22 @@ export async function handleBitbucketComment(
 
     return { status: 'ok', metadata: { ids: [launch.id] } };
   } catch (error) {
-    console.warn(
-      `[handleBitbucketComment] failed to start PR review task for ${repoFullName}#${prNumber}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const failure =
+      error instanceof Error
+        ? {
+            name: error.name,
+            message: error.message,
+            stack: error.stack,
+          }
+        : { name: 'unknown_error', message: String(error) };
+    console.error('[handleBitbucketComment] failed to enqueue PR review task', {
+      repository: repoFullName,
+      pullRequestNumber: prNumber,
+      repositoryId: target.repo.id,
+      userId: target.userId,
+      sourceControlHost: target.repo.host ?? null,
+      error: failure,
+    });
 
     await postMentionResponseComment({
       ...mentionResponseTarget,
@@ -444,7 +428,7 @@ export async function handleBitbucketComment(
 
     return {
       status: 'error',
-      message: `review_start_failed:${error instanceof Error ? error.message : String(error)}`,
+      message: `review_start_failed:${failure.message}`,
     };
   }
 }
