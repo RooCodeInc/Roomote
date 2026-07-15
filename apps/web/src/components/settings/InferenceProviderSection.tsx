@@ -595,12 +595,17 @@ export function InferenceProviderSection({
     trpc.chatgptSubscription.disconnect.mutationOptions({
       onSuccess: async () => {
         toast.success('Disconnected ChatGPT subscription.');
-        await queryClient.invalidateQueries({
-          queryKey: trpc.taskModels.providerSetup.queryKey(),
-        });
-        await queryClient.invalidateQueries({
-          queryKey: trpc.chatgptSubscription.status.queryKey(),
-        });
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.providerSetup.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.chatgptSubscription.status.queryKey(),
+          }),
+        ]);
       },
       onError: (error) => {
         toast.error(error.message);
