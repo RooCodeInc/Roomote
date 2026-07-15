@@ -179,7 +179,7 @@ describe('useLogFiles', () => {
     expect(getSetupStatusQueryMock).toHaveBeenCalled();
   });
 
-  it('disambiguates setup log labels with the repo only when names collide', async () => {
+  it('disambiguates setup log labels only when names collide', async () => {
     useEnvironmentMock.mockReturnValue({ data: undefined });
 
     getSetupStatusQueryMock.mockResolvedValue({
@@ -191,6 +191,18 @@ describe('useLogFiles', () => {
         startedAt: '2026-07-14T00:00:00.000Z',
         commands: [
           {
+            repository: 'owner-a/web',
+            name: 'Install dependencies',
+            state: 'succeeded',
+            logFile: '.roomote/setup-logs/owner-a/web/install-dependencies.log',
+          },
+          {
+            repository: 'owner-b/web',
+            name: 'Install dependencies',
+            state: 'succeeded',
+            logFile: '.roomote/setup-logs/owner-b/web/install-dependencies.log',
+          },
+          {
             repository: 'RooCodeInc/Roomote',
             name: 'Install dependencies',
             state: 'succeeded',
@@ -198,11 +210,11 @@ describe('useLogFiles', () => {
               '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies.log',
           },
           {
-            repository: 'RooCodeInc/web',
+            repository: 'RooCodeInc/Roomote',
             name: 'Install dependencies',
             state: 'succeeded',
             logFile:
-              '.roomote/setup-logs/RooCodeInc/web/install-dependencies.log',
+              '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies-2.log',
           },
           {
             repository: 'RooCodeInc/Roomote',
@@ -226,14 +238,22 @@ describe('useLogFiles', () => {
       expect(store.getState().logfiles).toEqual([
         { label: 'harness.log', filePath: '/tmp/harness.log' },
         {
-          label: 'Setup: Install dependencies (Roomote)',
+          label: 'Setup: Install dependencies (owner-a/web)',
+          filePath: '.roomote/setup-logs/owner-a/web/install-dependencies.log',
+        },
+        {
+          label: 'Setup: Install dependencies (owner-b/web)',
+          filePath: '.roomote/setup-logs/owner-b/web/install-dependencies.log',
+        },
+        {
+          label: 'Setup: Install dependencies (RooCodeInc/Roomote)',
           filePath:
             '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies.log',
         },
         {
-          label: 'Setup: Install dependencies (web)',
+          label: 'Setup: Install dependencies (RooCodeInc/Roomote) 2',
           filePath:
-            '.roomote/setup-logs/RooCodeInc/web/install-dependencies.log',
+            '.roomote/setup-logs/RooCodeInc/Roomote/install-dependencies-2.log',
         },
         {
           label: 'Setup: Migrate database',
