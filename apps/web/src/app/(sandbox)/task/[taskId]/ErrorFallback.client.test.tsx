@@ -24,7 +24,7 @@ vi.mock('@/trpc/client', () => ({
 
 vi.mock('@/components/system', () => ({
   AlertCircle: () => <svg aria-hidden="true" />,
-  RefreshCw: () => <svg aria-hidden="true" />,
+  Spinner: () => <svg aria-hidden="true" />,
 }));
 
 vi.mock('./hooks', () => ({
