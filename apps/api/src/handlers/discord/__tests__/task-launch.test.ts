@@ -19,6 +19,8 @@ vi.mock('@roomote/redis', () => ({
   }),
 }));
 
+import { DiscordApiError } from '@roomote/communication/discord-provider';
+
 import { launchDiscordTask } from '../task-launch.js';
 
 describe('launchDiscordTask', () => {
@@ -156,6 +158,190 @@ describe('launchDiscordTask', () => {
     expect(mocks.redisDel).toHaveBeenCalledWith(
       'discord:pending_task_thread:message-1',
     );
+  });
+
+  it('anchors the task thread to the triggering channel message', async () => {
+    const anchoredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(anchoredThread),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi.fn().mockResolvedValue(anchoredThread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'Fix the flaky tests',
+    });
+    expect(provider.reserveTaskThread).not.toHaveBeenCalled();
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: 'standard',
+          payload: expect.objectContaining({
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'message-1',
+            communicationMessageId: 'message-1',
+            discordTaskThread: true,
+          }),
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('falls back to a detached thread when the anchor message was deleted', async () => {
+    const reservedThread = {
+      channelId: 'thread-41',
+      parentChannelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      kind: 'thread' as const,
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockRejectedValue(
+        new DiscordApiError({
+          method: 'POST',
+          path: '/channels/channel-1/messages/message-1/threads',
+          status: 404,
+          message: 'Unknown Message',
+          code: 10008,
+        }),
+      ),
+      reserveTaskThread: vi.fn().mockResolvedValue(reservedThread),
+      completeTaskThread: vi
+        .fn()
+        .mockResolvedValue({ ...reservedThread, messageId: 'starter-1' }),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).toHaveBeenCalled();
+    expect(provider.reserveTaskThread).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      name: 'Fix the flaky tests',
+      initialText: 'Task request from Matt:\n\nFix the flaky tests',
+    });
+  });
+
+  it('keeps forum launches as detached forum posts even with an anchor message', async () => {
+    const forumPost = {
+      channelId: 'post-41',
+      parentChannelId: 'forum-1',
+      name: 'Fix the flaky tests',
+      kind: 'forum_post' as const,
+      messageId: 'post-message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn(),
+      reserveTaskThread: vi.fn().mockResolvedValue(forumPost),
+      completeTaskThread: vi.fn().mockResolvedValue(forumPost),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'forum-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'forum-1',
+        channelName: 'ideas',
+        channelType: 15,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).not.toHaveBeenCalled();
+    expect(provider.reserveTaskThread).toHaveBeenCalled();
   });
 
   it('keeps direct-message tasks in the DM conversation', async () => {

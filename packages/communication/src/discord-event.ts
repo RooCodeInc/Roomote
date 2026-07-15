@@ -175,6 +175,12 @@ export type DiscordEventCommunicationMetadata = {
   communicationThreadId?: string;
   communicationMessageId: string;
   communicationGuildId?: string;
+  /**
+   * Id of the real channel message that triggered the event, present only
+   * for message events. Interactions (slash commands, buttons) have no
+   * channel message a task thread could anchor to.
+   */
+  communicationAnchorMessageId?: string;
 };
 
 export type DiscordEventNormalizationOptions = {
@@ -238,12 +244,14 @@ export function getDiscordEventCommunicationMetadata(
 ): DiscordEventCommunicationMetadata {
   const channel = getEventChannel(event);
   const parentChannelId = options.parentChannelId ?? channel.parentChannelId;
+  const message = getDiscordMessageCreate(event);
   return {
     communicationProvider: 'discord',
     communicationChannelId: parentChannelId ?? channel.channelId,
     ...(parentChannelId ? { communicationThreadId: channel.channelId } : {}),
     communicationMessageId: event.payload.id,
     ...(channel.guildId ? { communicationGuildId: channel.guildId } : {}),
+    ...(message ? { communicationAnchorMessageId: message.id } : {}),
   };
 }
 

@@ -10,9 +10,10 @@ import {
   getTaskUrl,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
-import type {
-  DiscordCommunicationProvider,
-  DiscordTaskThread,
+import {
+  isDiscordUnknownMessageError,
+  type DiscordCommunicationProvider,
+  type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
@@ -21,6 +22,9 @@ import { buildCommunicationTaskThreadName } from '../tasks/communication-task-th
 
 const DISCORD_THREAD_TYPES = new Set([10, 11, 12]);
 const DISCORD_ROOT_TASK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
+// Text and announcement channels support Slack-style threads anchored to the
+// triggering message; forum/media channels can only host detached posts.
+const DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES = new Set([0, 5]);
 const DISCORD_PENDING_TASK_THREAD_PREFIX = 'discord:pending_task_thread:';
 const DISCORD_PENDING_TASK_THREAD_TTL_SECONDS = 24 * 60 * 60;
 
@@ -201,10 +205,37 @@ export async function launchDiscordTask(input: {
   const parentId = taskThreadParentId(input);
   if (parentId) {
     const initialText = `Task request from ${input.queuedMessage.user}:\n\n${input.queuedMessage.text}`;
+    // Slack model: the task thread hangs off the message that asked for it.
+    // Only launches triggered by a real root-channel message can anchor;
+    // interactions, forum posts, and `/new` siblings from inside a thread
+    // fall back to a detached task thread.
+    const anchorMessageId =
+      !input.channel.isThread &&
+      DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES.has(input.channel.channelType)
+        ? input.metadata.communicationAnchorMessageId
+        : undefined;
     createdThread = await findPendingTaskThread(
       input.queuedMessage.ts,
       parentId,
     );
+    if (!createdThread && anchorMessageId) {
+      try {
+        createdThread = await input.provider.createThreadFromMessage({
+          channelId: parentId,
+          messageId: anchorMessageId,
+          name: buildCommunicationTaskThreadName(input.queuedMessage.text),
+        });
+      } catch (error) {
+        // The triggering message was deleted before the thread could start;
+        // fall back to a detached task thread rather than failing the launch.
+        if (!isDiscordUnknownMessageError(error)) {
+          throw error;
+        }
+      }
+      if (createdThread) {
+        await rememberPendingTaskThread(input.queuedMessage.ts, createdThread);
+      }
+    }
     if (!createdThread) {
       createdThread = await input.provider.reserveTaskThread({
         channelId: parentId,

@@ -5,6 +5,7 @@ import {
   chunkDiscordMessage,
   DiscordApiTransportError,
   DiscordCommunicationProvider,
+  isDiscordUnknownMessageError,
 } from '../discord-provider';
 
 function createHarness() {
@@ -314,6 +315,52 @@ describe('DiscordCommunicationProvider', () => {
       server.state.messages[forumPost.channelId]?.[0]?.content;
     expect(forumStarter).toHaveLength(2_000);
     expect(forumStarter?.endsWith('…')).toBe(true);
+  });
+
+  it('anchors threads to an existing message and recovers the thread on retry', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const posted = await provider.postMessage({
+      channelId,
+      text: 'Please fix the login flow',
+    });
+
+    const thread = await provider.createThreadFromMessage({
+      channelId,
+      messageId: posted.messageId,
+      name: 'Fix the login flow',
+    });
+    expect(thread).toMatchObject({
+      channelId: posted.messageId,
+      parentChannelId: channelId,
+      name: 'Fix the login flow',
+      kind: 'thread',
+      messageId: posted.messageId,
+    });
+
+    // A message can only have one thread; a duplicate creation (e.g. an
+    // ambiguous retry) recovers the existing thread instead of failing.
+    const recovered = await provider.createThreadFromMessage({
+      channelId,
+      messageId: posted.messageId,
+      name: 'Fix the login flow',
+    });
+    expect(recovered).toMatchObject({
+      channelId: posted.messageId,
+      parentChannelId: channelId,
+      kind: 'thread',
+      messageId: posted.messageId,
+    });
+
+    await expect(
+      provider.createThreadFromMessage({
+        channelId,
+        messageId: '999999999999999999',
+        name: 'Anchor on a deleted message',
+      }),
+    ).rejects.toSatisfy((error: unknown) =>
+      isDiscordUnknownMessageError(error),
+    );
   });
 
   it('can resume a public-thread starter failure without creating another thread', async () => {

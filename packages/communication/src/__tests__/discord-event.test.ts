@@ -120,6 +120,7 @@ describe('Discord Gateway event normalization', () => {
       communicationThreadId: 'thread-1',
       communicationMessageId: 'message-1',
       communicationGuildId: 'guild-1',
+      communicationAnchorMessageId: 'message-1',
     });
     expect(
       discordEventToQueuedCommunicationMessage(event, { isTaskThread: true }),

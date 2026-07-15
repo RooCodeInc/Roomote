@@ -351,6 +351,16 @@ const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT = 5;
 const DISCORD_CHANNEL_TYPES_FORUM = new Set([15, 16]);
+const DISCORD_ERROR_CODE_UNKNOWN_MESSAGE = 10008;
+const DISCORD_ERROR_CODE_MESSAGE_ALREADY_HAS_THREAD = 160004;
+
+/** True when a Discord API error means the referenced message no longer exists. */
+export function isDiscordUnknownMessageError(error: unknown): boolean {
+  return (
+    error instanceof DiscordApiError &&
+    Number(error.code) === DISCORD_ERROR_CODE_UNKNOWN_MESSAGE
+  );
+}
 export const DISCORD_CHANNEL_FLAG_REQUIRE_TAG = 1 << 4;
 export const DISCORD_REQUIRED_TAG_FORUM_ERROR =
   'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.';
@@ -528,6 +538,57 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       parentChannelId: input.channelId,
       name: channel.name ?? input.name,
       kind: 'thread',
+    };
+  }
+
+  /**
+   * Starts a thread on an existing channel message — Discord's analog of a
+   * Slack threaded reply. The created thread's id equals the source message
+   * id, and because a message can only ever have one thread, a duplicate
+   * creation (including an ambiguous retry) recovers the existing thread
+   * instead of failing.
+   */
+  async createThreadFromMessage(input: {
+    channelId: string;
+    messageId: string;
+    name: string;
+    autoArchiveDuration?: 60 | 1440 | 4320 | 10080;
+  }): Promise<DiscordTaskThread> {
+    let channel: DiscordApiChannel;
+    try {
+      channel = await this.request<DiscordApiChannel>(
+        'POST',
+        `/channels/${input.channelId}/messages/${input.messageId}/threads`,
+        {
+          name: input.name.slice(0, 100),
+          auto_archive_duration: input.autoArchiveDuration ?? 1440,
+        },
+        // Retries are safe here: a creation that already succeeded surfaces
+        // as MESSAGE_ALREADY_HAS_THREAD and is recovered below.
+        { retryNetworkErrors: true, retryServerErrors: true },
+      );
+    } catch (error) {
+      if (
+        error instanceof DiscordApiError &&
+        Number(error.code) === DISCORD_ERROR_CODE_MESSAGE_ALREADY_HAS_THREAD
+      ) {
+        const existing = await this.getChannel(input.messageId);
+        return {
+          channelId: existing.id,
+          parentChannelId: input.channelId,
+          name: existing.name,
+          kind: 'thread',
+          messageId: input.messageId,
+        };
+      }
+      throw error;
+    }
+    return {
+      channelId: requireId(channel.id, 'createThreadFromMessage'),
+      parentChannelId: input.channelId,
+      name: channel.name ?? input.name,
+      kind: 'thread',
+      messageId: input.messageId,
     };
   }
 

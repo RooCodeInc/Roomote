@@ -230,6 +230,24 @@ export class MockDiscordServer {
     const eventId =
       event.eventId ??
       (typeof payloadId === 'string' ? payloadId : String(this.allocateId()));
+    // A replayed user message exists on "Discord" the moment it is
+    // dispatched, so record it — message-anchored thread creation looks the
+    // message up before starting a thread on it.
+    if (event.kind !== 'interaction') {
+      const message = event.payload as {
+        id?: string;
+        channel_id?: string;
+      };
+      if (
+        typeof message.id === 'string' &&
+        typeof message.channel_id === 'string' &&
+        !this.findMessage(message.channel_id, message.id)
+      ) {
+        (this.state.messages[message.channel_id] ??= []).push(
+          event.payload as MockDiscordMessage,
+        );
+      }
+    }
     const envelope = {
       eventId,
       eventType:
@@ -429,6 +447,38 @@ export class MockDiscordServer {
     const typing = /^\/channels\/([^/]+)\/typing$/u.exec(path);
     if (method === 'POST' && typing) {
       return new Response(null, { status: 204 });
+    }
+
+    const messageThreadCreate =
+      /^\/channels\/([^/]+)\/messages\/([^/]+)\/threads$/u.exec(path);
+    if (method === 'POST' && messageThreadCreate) {
+      const parentId = messageThreadCreate[1] ?? '';
+      const messageId = messageThreadCreate[2] ?? '';
+      if (!this.findMessage(parentId, messageId)) {
+        return jsonResponse({ message: 'Unknown Message', code: 10008 }, 404);
+      }
+      // A message can only ever have one thread, and a message-anchored
+      // thread reuses the source message id.
+      if (this.state.channels[messageId]) {
+        return jsonResponse(
+          {
+            message: 'A thread has already been created for this message',
+            code: 160004,
+          },
+          400,
+        );
+      }
+      const payload = body as { name?: string };
+      const parent = this.state.channels[parentId];
+      const channel: MockDiscordChannel = {
+        id: messageId,
+        guild_id: parent?.guild_id,
+        parent_id: parentId,
+        name: payload.name ?? 'New thread',
+        type: parent?.type === 5 ? 10 : 11,
+      };
+      this.addChannel(channel);
+      return jsonResponse(channel);
     }
 
     const threadCreate = /^\/channels\/([^/]+)\/threads$/u.exec(path);
