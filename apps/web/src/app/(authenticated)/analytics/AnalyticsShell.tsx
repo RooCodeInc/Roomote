@@ -35,7 +35,7 @@ const ANALYTICS_DESCRIPTIONS: Record<AnalyticsShellItemId, string> = {
   pullRequests:
     'Track pull request activity by user, status, repository, and author.',
   tasks:
-    'Track task activity, tokens, and cost by user, environment, and source.',
+    'Track task activity, tokens, and cost by user, environment, source, and model.',
 };
 
 type AnalyticsShellProps = {

@@ -49,6 +49,7 @@ const analyticsFilterKeys = [
   'user',
   'project',
   'source',
+  'model',
   'status',
   'repo',
   'author',
