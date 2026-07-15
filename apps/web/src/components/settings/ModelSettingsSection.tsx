@@ -55,13 +55,12 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
-  SETUP_MODEL_PROVIDER_CATALOG,
-  getDisplayModelProviderId,
-  getModelProviderLabel,
+  groupModelsByDisplayProvider,
   getSetupModelProvider,
   normalizeOptionalReasoningEffort,
 } from '@roomote/types';
 import type {
+  DisplayModelProviderGroup,
   ReasoningEffort,
   SetupModelProviderId,
   SetupModelProviderStatus,
@@ -301,7 +300,7 @@ function TaskModelRoleEditor({
   managedByEnv: boolean;
   reasoningManagedByEnv: boolean;
   selectValue: string;
-  optionGroups: ProviderModelGroup<EditableRuntimeModelOption>[];
+  optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
   supportsReasoning: boolean;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
@@ -320,6 +319,7 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${config.modelEnvVarName}, not changeable in the UI.`
         : `Set by ${config.reasoningEnvVarName}, not changeable in the UI.`;
+  const showProviderHeaders = optionGroups.length > 1;
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -356,16 +356,24 @@ function TaskModelRoleEditor({
                   Same as coding model
                 </SelectItem>
               )}
-              {optionGroups.map((group) => (
-                <SelectGroup key={group.providerId}>
-                  <SelectLabel>{group.label}</SelectLabel>
-                  {group.items.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
+              {showProviderHeaders
+                ? optionGroups.map((group) => (
+                    <SelectGroup key={group.providerId}>
+                      <SelectLabel>{group.label}</SelectLabel>
+                      {group.items.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))
+                : optionGroups.flatMap((group) =>
+                    group.items.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.displayName}
+                      </SelectItem>
+                    )),
+                  )}
             </SelectContent>
           </Select>
           {supportsReasoning && (
@@ -381,52 +389,6 @@ function TaskModelRoleEditor({
       </div>
     </div>
   );
-}
-
-type ProviderModelGroup<T extends { id: string }> = {
-  providerId: string;
-  label: string;
-  items: T[];
-};
-
-const KNOWN_MODEL_PROVIDER_ORDER = SETUP_MODEL_PROVIDER_CATALOG.map(
-  (provider) => provider.id as string,
-);
-
-function groupByModelProvider<T extends { id: string }>(
-  items: T[],
-  options?: {
-    chatgptConnected?: boolean;
-  },
-): ProviderModelGroup<T>[] {
-  const groups = new Map<string, T[]>();
-
-  for (const item of items) {
-    const providerId =
-      getDisplayModelProviderId(item.id, {
-        chatgptConnected: options?.chatgptConnected,
-      }) ?? 'other';
-    const groupItems = groups.get(providerId) ?? [];
-    groupItems.push(item);
-    groups.set(providerId, groupItems);
-  }
-
-  return [...groups.entries()]
-    .sort(([left], [right]) => {
-      const leftIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(left);
-      const rightIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(right);
-      const leftOrder =
-        leftIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : leftIndex;
-      const rightOrder =
-        rightIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : rightIndex;
-
-      return leftOrder - rightOrder || left.localeCompare(right);
-    })
-    .map(([providerId, groupItems]) => ({
-      providerId,
-      label: getModelProviderLabel(providerId),
-      items: groupItems,
-    }));
 }
 
 // The ChatGPT subscription provider has no model-id prefix of its own: its
@@ -1012,20 +974,22 @@ export function ModelSettingsSection({
     return options;
   }, [settingsData]);
   const codingModelGroups = useMemo(
-    () => groupByModelProvider(codingModelOptions, { chatgptConnected }),
+    () =>
+      groupModelsByDisplayProvider(codingModelOptions, { chatgptConnected }),
     [codingModelOptions, chatgptConnected],
   );
   const helperModelGroups = useMemo(
-    () => groupByModelProvider(helperModelOptions, { chatgptConnected }),
+    () =>
+      groupModelsByDisplayProvider(helperModelOptions, { chatgptConnected }),
     [helperModelOptions, chatgptConnected],
   );
   const modelGroups = useMemo(
-    () => groupByModelProvider(models, { chatgptConnected }),
+    () => groupModelsByDisplayProvider(models, { chatgptConnected }),
     [models, chatgptConnected],
   );
   const roleOptionGroups: Record<
     TaskModelRole,
-    ProviderModelGroup<EditableRuntimeModelOption>[]
+    DisplayModelProviderGroup<EditableRuntimeModelOption>[]
   > = {
     coding: codingModelGroups,
     helper: helperModelGroups,

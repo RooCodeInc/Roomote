@@ -611,6 +611,56 @@ export function getDisplayModelProviderId(
   return runtimeProviderId;
 }
 
+export type DisplayModelProviderGroup<T extends { id: string }> = {
+  providerId: string;
+  label: string;
+  items: T[];
+};
+
+const KNOWN_MODEL_PROVIDER_ORDER = SETUP_MODEL_PROVIDER_CATALOG.map(
+  (provider) => provider.id as string,
+);
+
+/**
+ * Groups model options by display provider for chooser UIs. Preserves input
+ * order within each group and sorts groups by the setup provider catalog.
+ */
+export function groupModelsByDisplayProvider<T extends { id: string }>(
+  items: T[],
+  options?: {
+    chatgptConnected?: boolean;
+  },
+): DisplayModelProviderGroup<T>[] {
+  const groups = new Map<string, T[]>();
+
+  for (const item of items) {
+    const providerId =
+      getDisplayModelProviderId(item.id, {
+        chatgptConnected: options?.chatgptConnected,
+      }) ?? 'other';
+    const groupItems = groups.get(providerId) ?? [];
+    groupItems.push(item);
+    groups.set(providerId, groupItems);
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => {
+      const leftIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(left);
+      const rightIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(right);
+      const leftOrder =
+        leftIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : leftIndex;
+      const rightOrder =
+        rightIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : rightIndex;
+
+      return leftOrder - rightOrder || left.localeCompare(right);
+    })
+    .map(([providerId, groupItems]) => ({
+      providerId,
+      label: getModelProviderLabel(providerId),
+      items: groupItems,
+    }));
+}
+
 export function getSetupModelProviderForEnvVarName(
   envVarName: string | null | undefined,
 ): SetupModelProviderDescriptor | undefined {

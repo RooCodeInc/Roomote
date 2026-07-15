@@ -5,6 +5,7 @@ import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
   getDisplayModelProviderId,
+  groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
   isInlineGoogleCredentialsValue,
@@ -346,6 +347,39 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         chatgptConnected: true,
       }),
     ).toBe('chatgpt');
+  });
+
+  it('groups model chooser options by display provider and catalog order', () => {
+    const groups = groupModelsByDisplayProvider(
+      [
+        { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
+        {
+          id: 'openrouter/x-ai/grok-4.5',
+          displayName: 'Grok 4.5',
+        },
+        {
+          id: 'openrouter/anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+        },
+      ],
+      { chatgptConnected: true },
+    );
+
+    expect(groups.map((group) => group.providerId)).toEqual([
+      'openrouter',
+      'chatgpt',
+    ]);
+    expect(groups[0]).toMatchObject({
+      label: 'OpenRouter',
+      items: [
+        { id: 'openrouter/x-ai/grok-4.5' },
+        { id: 'openrouter/anthropic/claude-sonnet-5' },
+      ],
+    });
+    expect(groups[1]).toMatchObject({
+      label: 'ChatGPT (subscription)',
+      items: [{ id: 'openai/gpt-5.6-terra' }],
+    });
   });
 
   it('maps Requesty to the REQUESTY_API_KEY env var', () => {
