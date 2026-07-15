@@ -269,23 +269,6 @@ describe('dequeueResumeTaskRun', () => {
     );
   });
 
-  it('returns style guidance for resume task runs', async () => {
-    const resumeRun = makeSnapshotResumeRun();
-
-    mockTxExecute.mockResolvedValue([{ id: resumeRun.id }]);
-    mockTxFindFirstTaskRuns.mockResolvedValueOnce(resumeRun);
-    mockTxFindFirstBackgroundAgentSettings.mockResolvedValue({
-      globalAgentInstructions: 'Org guidance',
-      styleGuidance: 'Be direct and calm.',
-    });
-
-    const result = await dequeueResumeTaskRun({ orgId: 'org-1' } as never, {
-      runId: resumeRun.id,
-    });
-
-    expect(result?.styleGuidance).toBe('Be direct and calm.');
-  });
-
   it('marks resumed setup onboarding jobs when routing resolves /setup', async () => {
     const resumeRun = makeSnapshotResumeRun();
 

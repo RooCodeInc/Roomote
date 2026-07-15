@@ -29,6 +29,16 @@ function commandText(command) {
   return String(command ?? '');
 }
 
+function normalizedEnvironment(environment) {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(environment ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+  );
+}
+
 const composeEnv = {
   ...process.env,
   R_APP_ENV: 'production',
@@ -199,6 +209,9 @@ assert(
   'render: shared app environment must include R_DISCORD_BOT_TOKEN',
 );
 
+const productionCompose = YAML.parse(
+  read('deploy/compose/docker-compose.prod.yml'),
+);
 const coolify = YAML.parse(read('deploy/coolify/docker-compose.yaml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
   const service = coolify.services?.[name];
@@ -214,6 +227,17 @@ for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
     );
   }
 }
+assert(
+  coolify.services?.['docker-proxy']?.environment?.VOLUMES === '1',
+  'coolify: Docker proxy must allow managed workspace volume operations',
+);
+assert(
+  normalizedEnvironment(coolify.services?.['docker-proxy']?.environment) ===
+    normalizedEnvironment(
+      productionCompose.services?.['docker-proxy']?.environment,
+    ),
+  'coolify: Docker proxy environment must match production Compose',
+);
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {

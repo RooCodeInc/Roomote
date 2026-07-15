@@ -39,13 +39,9 @@ import {
   TASK_SUGGESTION_TYPES,
 } from '../constants.js';
 import type { SlackWebhookContext } from '../context.js';
-import {
-  isConfiguredSlackReaction,
-  isThumbsUpReaction,
-} from '../helpers/event-normalization.js';
+import { isThumbsUpReaction } from '../helpers/event-normalization.js';
 import { postTaskSuggestionStartedMessage } from '../helpers/thread-posting.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
-import { handleSlackEntryEvent } from './message-entry.js';
 import {
   runTaskSuggestionReactionContention,
   type TaskSuggestionReactionLaunchResult,
@@ -715,12 +711,6 @@ export async function handleReactionAddedEvent(params: {
     return;
   }
 
-  const isThumbsUp = isThumbsUpReaction(event.reaction);
-  const isSummonReaction = isConfiguredSlackReaction(
-    event.reaction,
-    reactionNames.summonEmoji,
-  );
-
   if (event.user === context.slackInstallation.botUserId) {
     apiLogger.debug(
       `[SlackWebhook] Ignoring self-reaction from bot user ${event.user} on ${event.item.channel}:${event.item.ts}`,
@@ -728,90 +718,36 @@ export async function handleReactionAddedEvent(params: {
     return;
   }
 
-  if (isThumbsUp) {
-    apiLogger.debug(
-      `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
-    );
-    const setupSuggestionLockKey = `${SLACK_SETUP_SUGGESTION_LOCK_PREFIX}${event.item.channel}:${event.item.ts}`;
-    const setupSuggestionHandled = await launchTaskSuggestionTaskWithContention(
-      {
-        lockKey: setupSuggestionLockKey,
-        channelId: event.item.channel,
-        messageTs: event.item.ts,
-        launch: () =>
-          launchTaskSuggestionTaskFromReaction({
-            teamId: context.teamId,
-            slack: context.slack,
-            reactionEvent: event,
-            ackEmoji: reactionNames.ackEmoji,
-            completionEmoji: reactionNames.completionEmoji,
-          }),
-      },
-    );
-
-    if (setupSuggestionHandled) {
-      apiLogger.debug(
-        `[SlackWebhook] Setup suggestion reaction handled for ${event.item.channel}:${event.item.ts}`,
-      );
-      return;
-    }
-
-    apiLogger.debug(
-      `[SlackWebhook] Reaction no-op for ${event.item.channel}:${event.item.ts}`,
-    );
-  }
-
-  if (!isSummonReaction) {
+  if (!isThumbsUpReaction(event.reaction)) {
     return;
   }
 
-  const sourceMessage = await context.slack.getMessage({
-    channel: event.item.channel,
+  apiLogger.debug(
+    `[SetupSuggestionLifecycle] Processing thumbs-up reaction team=${context.teamId} channel=${event.item.channel} messageTs=${event.item.ts} reaction=${event.reaction} user=${event.user}`,
+  );
+  const setupSuggestionLockKey = `${SLACK_SETUP_SUGGESTION_LOCK_PREFIX}${event.item.channel}:${event.item.ts}`;
+  const setupSuggestionHandled = await launchTaskSuggestionTaskWithContention({
+    lockKey: setupSuggestionLockKey,
+    channelId: event.item.channel,
     messageTs: event.item.ts,
+    launch: () =>
+      launchTaskSuggestionTaskFromReaction({
+        teamId: context.teamId,
+        slack: context.slack,
+        reactionEvent: event,
+        ackEmoji: reactionNames.ackEmoji,
+        completionEmoji: reactionNames.completionEmoji,
+      }),
   });
 
-  if (!sourceMessage) {
+  if (setupSuggestionHandled) {
     apiLogger.debug(
-      `[SlackWebhook] Summon reaction source message unavailable for ${event.item.channel}:${event.item.ts}`,
+      `[SlackWebhook] Setup suggestion reaction handled for ${event.item.channel}:${event.item.ts}`,
     );
     return;
   }
 
-  const isRoomoteAuthoredBotMessage =
-    sourceMessage.user === context.slackInstallation.botUserId ||
-    sourceMessage.app_id === context.slackInstallation.appId;
-
-  if (isRoomoteAuthoredBotMessage) {
-    apiLogger.debug(
-      `[SlackWebhook] Ignoring summon reaction on Roomote-authored bot message ${event.item.channel}:${event.item.ts}`,
-    );
-    return;
-  }
-
-  if (sourceMessage.text.trim().length === 0 && !sourceMessage.files?.length) {
-    apiLogger.debug(
-      `[SlackWebhook] Ignoring summon reaction on empty source message ${event.item.channel}:${event.item.ts}`,
-    );
-    return;
-  }
-
-  await handleSlackEntryEvent({
-    event: {
-      type: 'message',
-      channel: event.item.channel,
-      user: event.user,
-      text: sourceMessage.text,
-      ts: sourceMessage.ts,
-      thread_ts: sourceMessage.thread_ts ?? sourceMessage.ts,
-      app_id: sourceMessage.app_id,
-      files: sourceMessage.files,
-      attachments: sourceMessage.attachments,
-    },
-    slackInstallation: context.slackInstallation as never,
-    slack: context.slack,
-    teamId: context.teamId,
-    ackEmoji: reactionNames.ackEmoji,
-    completionEmoji: reactionNames.completionEmoji,
-    skipThreadFollowupHandling: true,
-  });
+  apiLogger.debug(
+    `[SlackWebhook] Reaction no-op for ${event.item.channel}:${event.item.ts}`,
+  );
 }

@@ -26,7 +26,6 @@ const {
     mockResolveSlackReactionNames: vi.fn().mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
-      summonEmoji: null,
     }),
     mockStickyFooterPost: vi.fn().mockResolvedValue('msg-ts-123'),
     mockGetCommunicationProviderAdapter: vi.fn(),
@@ -157,7 +156,6 @@ describe('notifyPullRequestTerminalStatus', () => {
     mockResolveSlackReactionNames.mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
-      summonEmoji: null,
     });
     mockStickyFooterPost.mockResolvedValue('msg-ts-123');
     mockPostMessage.mockResolvedValue({
@@ -250,6 +248,7 @@ describe('notifyPullRequestTerminalStatus', () => {
       timestamp: 'thread-ts-1',
       name: SLACK_PR_CLOSED_REACTION_EMOJI,
     });
+    expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
   });
 
   it('posts Teams, Telegram, and Discord via the shared communication adapter', async () => {

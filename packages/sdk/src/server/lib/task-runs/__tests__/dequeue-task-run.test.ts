@@ -352,23 +352,6 @@ describe('dequeueTaskRun', () => {
     expect(result?.orgAgentInstructions).toBe('Prefer concise summaries.');
   });
 
-  it('returns style guidance when configured', async () => {
-    const taskRun = makeStandardTaskRun();
-
-    mockTxExecute.mockResolvedValue([{ id: taskRun.id }]);
-    mockTxFindFirstTaskRuns.mockResolvedValue(taskRun);
-    mockTxFindFirstBackgroundAgentSettings.mockResolvedValue({
-      globalAgentInstructions: 'Prefer concise summaries.',
-      styleGuidance: 'Be direct and calm.',
-    });
-
-    const result = await dequeueTaskRun({ orgId: 'org-1' } as never, {
-      runId: taskRun.id,
-    });
-
-    expect(result?.styleGuidance).toBe('Be direct and calm.');
-  });
-
   it('marks Slack setup onboarding jobs from the routing contract', async () => {
     const taskRun = makeSlackAppMentionRun({
       payload: {

@@ -99,7 +99,6 @@ export async function resume(runId: number): Promise<boolean> {
         workspaceReadinessWarnings,
         backgroundEnvironmentSetup,
         orgAgentInstructions: jobContext.orgAgentInstructions,
-        styleGuidance: jobContext.styleGuidance,
         agentInstructions:
           'environmentConfig' in workspace
             ? workspace.environmentConfig.agentInstructions

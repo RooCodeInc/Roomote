@@ -31,11 +31,13 @@ export function StepAuthProvider({
   onBack,
   onSkip,
   additionalProviders = [],
+  disabled = false,
 }: {
   onContinue: (provider: CommunicationProviderChoice) => void;
   onBack?: () => void;
   onSkip?: () => void;
   additionalProviders?: readonly AdditionalCommunicationProviderChoice[];
+  disabled?: boolean;
 }) {
   const providers = [
     ...SETUP_AUTH_PROVIDER_CATALOG,
@@ -60,6 +62,7 @@ export function StepAuthProvider({
                 key={provider.id}
                 type="button"
                 onClick={() => onContinue(provider.id)}
+                disabled={disabled}
                 className={cn(
                   'group flex w-full py-5',
                   'hover:text-accent-foreground hover:bg-foreground',
@@ -79,12 +82,13 @@ export function StepAuthProvider({
           })}
         </div>
 
-        <SetupFooter onBack={onBack}>
+        <SetupFooter onBack={onBack} backDisabled={disabled}>
           {onSkip ? (
             <button
               type="button"
-              className="cursor-pointer text-sm text-muted-foreground underline"
+              className="cursor-pointer text-sm text-muted-foreground underline disabled:cursor-not-allowed disabled:opacity-50"
               onClick={onSkip}
+              disabled={disabled}
             >
               Do this later
             </button>

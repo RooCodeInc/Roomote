@@ -47,6 +47,7 @@ import {
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
 import {
+  buildRecommendedDeploymentModelConfig,
   buildSetupAuthStatus,
   buildSetupComputeStatus,
   buildSetupModelStatus,
@@ -1553,9 +1554,10 @@ export async function saveSetupNewModelConfigCommand(
       modelProvider: input.provider,
       lastInteractedByUserId: userId,
     });
-    const runtimeModelConfig = normalizeDeploymentModelConfig({
-      roomoteModel: provider.defaultRoomoteModel,
-    });
+    // Connecting a provider applies its recommended per-role model defaults:
+    // the provider's default coding model plus any recommended helper,
+    // vision, code review, explore, and planning models.
+    const runtimeModelConfig = buildRecommendedDeploymentModelConfig(provider);
 
     // Mirror the models settings page: connecting a provider the deployment
     // has no models for yet auto-adds its recommended models so the first

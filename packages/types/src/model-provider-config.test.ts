@@ -1,17 +1,21 @@
 import {
+  buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
   getDisplayModelProviderId,
+  groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
+  getSetupModelProvider,
   isInlineGoogleCredentialsValue,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
   type ReasoningEffort,
+  type SetupModelProviderDescriptor,
 } from './index';
 
 describe('normalizeDeploymentModelConfig', () => {
@@ -237,6 +241,26 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('only recommends role models from the provider suggested catalog', () => {
+    const providers: readonly SetupModelProviderDescriptor[] =
+      SETUP_MODEL_PROVIDER_CATALOG;
+
+    for (const provider of providers) {
+      const suggestedModelIds = new Set(
+        provider.suggestedTaskModels.map((suggestion) => suggestion.id),
+      );
+
+      for (const [role, modelId] of Object.entries(
+        provider.recommendedRoleModels ?? {},
+      )) {
+        expect(
+          modelId !== undefined && suggestedModelIds.has(modelId),
+          `${provider.id} recommends ${modelId} for ${role}, which is not in its suggestedTaskModels`,
+        ).toBe(true);
+      }
+    }
+  });
+
   it('maps Amazon Bedrock to a Bedrock API key plus an optional AWS region', () => {
     const bedrockProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'amazon-bedrock',
@@ -273,7 +297,12 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       label: 'Google Vertex AI',
       envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
       envVarLabel: 'Service account JSON',
-      defaultRoomoteModel: 'google-vertex/gemini-3.5-flash',
+      defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
+      credentialHelp: {
+        text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
+        href: 'https://console.cloud.google.com/vertex-ai/model-garden',
+        linkLabel: 'Open Vertex AI Model Garden',
+      },
     });
     expect(
       vertexProvider?.additionalEnvFields?.map((field) => ({
@@ -294,7 +323,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.5-flash',
+      defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
     });
   });
 
@@ -348,7 +377,40 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ).toBe('chatgpt');
   });
 
-  it('maps Requesty to the REQUESTY_API_KEY env var', () => {
+  it('groups model chooser options by display provider and catalog order', () => {
+    const groups = groupModelsByDisplayProvider(
+      [
+        { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
+        {
+          id: 'openrouter/x-ai/grok-4.5',
+          displayName: 'Grok 4.5',
+        },
+        {
+          id: 'openrouter/anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+        },
+      ],
+      { chatgptConnected: true },
+    );
+
+    expect(groups.map((group) => group.providerId)).toEqual([
+      'openrouter',
+      'chatgpt',
+    ]);
+    expect(groups[0]).toMatchObject({
+      label: 'OpenRouter',
+      items: [
+        { id: 'openrouter/x-ai/grok-4.5' },
+        { id: 'openrouter/anthropic/claude-sonnet-5' },
+      ],
+    });
+    expect(groups[1]).toMatchObject({
+      label: 'ChatGPT (subscription)',
+      items: [{ id: 'openai/gpt-5.6-terra' }],
+    });
+  });
+
+  it('maps Requesty to the REQUESTY_API_KEY env var and hides it from new connections', () => {
     const requestyProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'requesty',
     );
@@ -357,7 +419,25 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       label: 'Requesty',
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/anthropic/claude-haiku-4-5',
+      hidden: true,
     });
+  });
+
+  it('excludes hidden providers from the setup status unless they are connected', () => {
+    const unconnected = buildSetupModelStatus({});
+
+    expect(
+      unconnected.providers.some((provider) => provider.id === 'requesty'),
+    ).toBe(false);
+
+    const connected = buildSetupModelStatus({
+      persistedEnvVarNames: ['REQUESTY_API_KEY'],
+    });
+    const requestyStatus = connected.providers.find(
+      (provider) => provider.id === 'requesty',
+    );
+
+    expect(requestyStatus?.savedApiKeySatisfied).toBe(true);
   });
 
   it('maps Baseten to the BASETEN_API_KEY env var', () => {
@@ -383,6 +463,36 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'TOGETHER_API_KEY',
       defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       authKind: 'api-key',
+    });
+  });
+});
+
+describe('buildRecommendedDeploymentModelConfig', () => {
+  it('maps the provider default to coding and recommended models to their roles', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
+    ).toEqual({
+      roomoteModel: 'anthropic/claude-sonnet-5',
+      roomoteSmallModel: 'anthropic/claude-haiku-4-5',
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: 'anthropic/claude-opus-4-8',
+      roomoteExploreModel: 'anthropic/claude-haiku-4-5',
+      roomotePlanningModel: 'anthropic/claude-opus-4-8',
+      roomoteModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
+  it('recommends only the coding default for providers without a role mapping', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('xai')),
+    ).toEqual({
+      ...createEmptyDeploymentModelConfig(),
+      roomoteModel: 'xai/grok-4.5',
     });
   });
 });

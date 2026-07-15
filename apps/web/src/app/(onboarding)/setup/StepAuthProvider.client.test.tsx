@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 vi.mock('@/components/system', () => ({
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  ArrowLeft: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   BrandIcon: ({
     name,
     ...props
@@ -61,6 +62,45 @@ describe('StepAuthProvider', () => {
     fireEvent.click(screen.getByRole('button', { name: /slack/i }));
 
     expect(onContinue).toHaveBeenCalledWith('slack');
+  });
+
+  it('disables the provider choices while a selection is being saved', () => {
+    const onContinue = vi.fn();
+
+    render(<StepAuthProvider onContinue={onContinue} disabled={true} />);
+
+    const slackButton = screen.getByRole('button', { name: /slack/i });
+    expect(slackButton).toBeDisabled();
+
+    fireEvent.click(slackButton);
+
+    expect(onContinue).not.toHaveBeenCalled();
+  });
+
+  it('disables Back and the skip link while a selection is being saved', () => {
+    const onBack = vi.fn();
+    const onSkip = vi.fn();
+
+    render(
+      <StepAuthProvider
+        onContinue={vi.fn()}
+        onBack={onBack}
+        onSkip={onSkip}
+        disabled={true}
+      />,
+    );
+
+    const backButton = screen.getByRole('button', { name: /back/i });
+    const skipButton = screen.getByRole('button', { name: 'Do this later' });
+
+    expect(backButton).toBeDisabled();
+    expect(skipButton).toBeDisabled();
+
+    fireEvent.click(backButton);
+    fireEvent.click(skipButton);
+
+    expect(onBack).not.toHaveBeenCalled();
+    expect(onSkip).not.toHaveBeenCalled();
   });
 
   it('shows a subtle skip link when onSkip is provided', () => {

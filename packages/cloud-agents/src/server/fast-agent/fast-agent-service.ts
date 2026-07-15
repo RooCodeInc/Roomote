@@ -1,5 +1,4 @@
 import type { ModelMessage } from 'ai';
-import { getBackgroundAgentSettings } from '@roomote/db/server';
 import { formatErrorForLog } from '@roomote/types';
 
 import {
@@ -237,18 +236,12 @@ export async function answerFastAgentQuestion({
   const userMessage = buildUserTextMessage(normalizedQuestion);
 
   try {
-    const [availableEnvironments, session, settings] = await Promise.all([
+    const [availableEnvironments, session] = await Promise.all([
       getAvailableEnvironments(),
       getOrCreateFastAgentSession({
         userId,
         slackChannel,
         slackThreadTs,
-      }),
-      getBackgroundAgentSettings().catch((error) => {
-        console.warn(
-          `[Fast Agent] Failed to load background agent settings: ${formatErrorForLog(error)}`,
-        );
-        return null;
       }),
     ]);
     sessionId = session.id;
@@ -264,7 +257,6 @@ export async function answerFastAgentQuestion({
       system: buildFastAgentSystemPrompt({
         availableEnvironments,
         hasGitHubTools: false,
-        styleGuidance: settings?.styleGuidance,
       }),
       prompt: serializeFastAgentMessages(fastAgentMessages),
     });

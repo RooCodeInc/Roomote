@@ -27,7 +27,6 @@ const {
   postRouterDebugMessageMock,
   setSlackStartedMessageTsMock,
   deliveryTrackerCommitMock,
-  getSlackEmojiPreferencesForDeploymentMock,
 } = vi.hoisted(() => ({
   buildSlackRoutingContextMock: vi.fn(),
   routeTaskMock: vi.fn(),
@@ -57,7 +56,6 @@ const {
   postRouterDebugMessageMock: vi.fn(),
   setSlackStartedMessageTsMock: vi.fn(),
   deliveryTrackerCommitMock: vi.fn(),
-  getSlackEmojiPreferencesForDeploymentMock: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -132,8 +130,6 @@ vi.mock('@roomote/db/server', () => ({
   repositories: { orgId: 'orgId', isActive: 'isActive' },
   slackInstallations: { teamId: 'teamId' },
   slackUserMappings: { slackTeamId: 'slackTeamId', slackUserId: 'slackUserId' },
-  getSlackEmojiPreferencesForDeployment:
-    getSlackEmojiPreferencesForDeploymentMock,
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
   not: vi.fn((...args: unknown[]) => ({ not: args })),
@@ -263,11 +259,6 @@ describe('Slack deleted-mention suppression', () => {
     });
     setSlackStartedMessageTsMock.mockResolvedValue(undefined);
     deliveryTrackerCommitMock.mockResolvedValue(undefined);
-    getSlackEmojiPreferencesForDeploymentMock.mockResolvedValue({
-      slackAckEmoji: 'eyes',
-      slackCompletionEmoji: 'white_check_mark',
-      slackSummonEmoji: null,
-    });
     getTaskUrlMock.mockReturnValue('https://app.example.com/task/task_123');
   });
 

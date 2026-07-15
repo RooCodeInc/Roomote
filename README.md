@@ -79,7 +79,7 @@ cleans up after itself.
    your account directly. No API key needed, no separate billing. Roomote uses
    the models included in your subscription.
 2. **API keys (BYOK).** Paste a key from OpenRouter, Anthropic, OpenAI, xAI,
-   Google Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway, Requesty,
+   Google Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway,
    Baseten, Together AI, Moonshot AI (Kimi), MiniMax, or OpenCode Zen / Go.
 
 **Sandbox compute:** Modal, E2B, Daytona, Blaxel, and Local Docker.
@@ -238,7 +238,7 @@ it runs.
 **What models does it support?**
 Two options. Connect your ChatGPT Plus or Pro subscription directly (no API key
 needed), or paste an API key from OpenRouter, Anthropic, OpenAI, xAI, Google
-Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway, Requesty, Baseten,
+Gemini, Amazon Bedrock, Google Vertex AI, Vercel AI Gateway, Baseten,
 Together AI, Moonshot AI (Kimi), MiniMax, or OpenCode Zen / Go.
 
 **What sandboxes does it support?**

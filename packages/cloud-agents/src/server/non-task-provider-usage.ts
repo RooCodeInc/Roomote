@@ -35,7 +35,6 @@ export const NON_TASK_INFERENCE_SURFACES = {
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
   videoDescription: 'video_description',
-  vibesStyleValidation: 'vibes_style_validation',
 } as const;
 
 export interface GenerateTrackedNonTaskTextParams extends NonTaskInferenceTrackingInput {

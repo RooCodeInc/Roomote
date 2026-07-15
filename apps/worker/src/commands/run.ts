@@ -80,7 +80,6 @@ export async function run({
         backgroundEnvironmentSetup,
         cancelSignal,
         orgAgentInstructions: jobContext.orgAgentInstructions,
-        styleGuidance: jobContext.styleGuidance,
         agentInstructions:
           'environmentConfig' in workspace
             ? workspace.environmentConfig.agentInstructions

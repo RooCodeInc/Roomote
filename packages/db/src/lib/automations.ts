@@ -22,8 +22,6 @@ import {
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   DEFAULT_PR_REVIEW_SETTINGS,
-  DEFAULT_SLACK_ACK_EMOJI,
-  DEFAULT_SLACK_COMPLETION_EMOJI,
   DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isChannelAutoStartLaunchMode,
@@ -82,11 +80,6 @@ export const CODE_QUALITY_AUDITOR_FREQUENCIES =
   getScheduleModes<CodeQualityAuditorFrequency>('code_quality_auditor');
 
 export const DEFAULT_CONFLICT_RESOLVER_LABEL = AUTO_RESOLVE_CONFLICTS_LABEL;
-export {
-  DEFAULT_SLACK_ACK_EMOJI,
-  DEFAULT_SLACK_COMPLETION_EMOJI,
-} from '@roomote/types';
-
 export const MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS = {
   suggesterFrequency: 'daily',
   announcerFrequency: 'weekly',
@@ -94,11 +87,6 @@ export const MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS = {
 } as const satisfies Pick<
   BackgroundAgentSettings,
   'suggesterFrequency' | 'announcerFrequency' | 'managerStatsFrequency'
->;
-
-export type SlackEmojiPreferences = Pick<
-  BackgroundAgentSettings,
-  'slackSummonEmoji' | 'slackAckEmoji' | 'slackCompletionEmoji'
 >;
 
 function isConflictResolverFrequency(
@@ -351,36 +339,6 @@ export function normalizeReviewCodeAutomationSettings(
       getAutomationSettingBoolean(automation, 'approvePr') ??
       DEFAULT_PR_REVIEW_SETTINGS.approvePr,
   };
-}
-
-function stripBoundaryColons(value: string): string {
-  let start = 0;
-  let end = value.length;
-  while (start < end && value.charCodeAt(start) === 58 /* : */) {
-    start += 1;
-  }
-  while (end > start && value.charCodeAt(end - 1) === 58 /* : */) {
-    end -= 1;
-  }
-  return start === 0 && end === value.length ? value : value.slice(start, end);
-}
-
-export function normalizeSlackReactionName(value: string | null | undefined) {
-  const trimmed = value?.trim();
-
-  if (!trimmed) {
-    return '';
-  }
-
-  const withoutBoundaryColons = stripBoundaryColons(trimmed);
-  return withoutBoundaryColons.trim().toLowerCase().split('::')[0] ?? '';
-}
-
-export function normalizeOptionalSlackEmojiName(
-  value: string | null | undefined,
-) {
-  const normalized = normalizeSlackReactionName(value);
-  return normalized.length > 0 ? normalized : null;
 }
 
 /**
@@ -662,11 +620,6 @@ export async function ensureDeploymentSettingsRow(): Promise<void> {
   });
 }
 
-function normalizeOptionalText(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : null;
-}
-
 function buildAutomationMap(
   rows: Automation[],
 ): Map<BackgroundAutomationKey, Automation> {
@@ -739,14 +692,6 @@ export function normalizeBackgroundAgentSettings(
     compiledAuthorshipRules: row?.compiledAuthorshipRules ?? [],
     compiledAuthorshipIssues: row?.compiledAuthorshipIssues ?? [],
     compiledAuthorshipAt: row?.compiledAuthorshipAt ?? null,
-    styleGuidance: normalizeOptionalText(row?.styleGuidance),
-    slackSummonEmoji: normalizeOptionalSlackEmojiName(row?.slackSummonEmoji),
-    slackAckEmoji:
-      normalizeOptionalSlackEmojiName(row?.slackAckEmoji) ??
-      DEFAULT_SLACK_ACK_EMOJI,
-    slackCompletionEmoji:
-      normalizeOptionalSlackEmojiName(row?.slackCompletionEmoji) ??
-      DEFAULT_SLACK_COMPLETION_EMOJI,
     createdAt: row?.createdAt ?? now,
     updatedAt: row?.updatedAt ?? now,
 
@@ -896,19 +841,4 @@ export async function getReviewCodeAutomationSettings(): Promise<PrReviewSetting
   });
 
   return normalizeReviewCodeAutomationSettings(automation);
-}
-
-export async function getSlackEmojiPreferencesForDeployment(): Promise<SlackEmojiPreferences> {
-  await ensureDeploymentSettingsRow();
-  const row = await db.query.deploymentSettings.findFirst();
-
-  return {
-    slackSummonEmoji: normalizeOptionalSlackEmojiName(row?.slackSummonEmoji),
-    slackAckEmoji:
-      normalizeOptionalSlackEmojiName(row?.slackAckEmoji) ??
-      DEFAULT_SLACK_ACK_EMOJI,
-    slackCompletionEmoji:
-      normalizeOptionalSlackEmojiName(row?.slackCompletionEmoji) ??
-      DEFAULT_SLACK_COMPLETION_EMOJI,
-  };
 }

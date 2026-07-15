@@ -132,6 +132,7 @@ services:
       EXEC: '1'
       IMAGES: '1'
       NETWORKS: '1'
+      VOLUMES: '1'
       POST: '1'
       EVENTS: '0'
     volumes:
