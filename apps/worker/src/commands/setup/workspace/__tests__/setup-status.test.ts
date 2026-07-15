@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ExecutionResult } from '../../../../command-executor';
 import {
   EnvironmentSetupStatusWriter,
+  readEnvironmentSetupStatus,
   SETUP_STATUS_RELATIVE_PATH,
   type EnvironmentSetupStatus,
 } from '../setup-status';
@@ -260,5 +261,45 @@ describe('EnvironmentSetupStatusWriter', () => {
     expect(status.commands[0]!.state).toBe('failed');
     expect(status.commands[1]!.state).toBe('pending');
     expect(status.warnings).toContain('Repository path missing');
+  });
+});
+
+describe('readEnvironmentSetupStatus', () => {
+  let workspacePath: string;
+
+  beforeEach(() => {
+    workspacePath = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'setup-status-read-'),
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(workspacePath, { recursive: true, force: true });
+  });
+
+  it('returns null when the status file is missing', () => {
+    expect(readEnvironmentSetupStatus(workspacePath)).toBeNull();
+  });
+
+  it('returns the written status document', () => {
+    const writer = new EnvironmentSetupStatusWriter(workspacePath);
+    writer.initialize(REPOSITORIES);
+    writer.markCommandRunning('owner/repo', 'Install deps');
+    writer.markCommandResult('owner/repo', successResult('Install deps'));
+    writer.finalize({ warnings: [] });
+
+    const status = readEnvironmentSetupStatus(workspacePath);
+    expect(status?.state).toBe('completed');
+    expect(status?.commands[0]?.logFile).toBe(
+      '.roomote/setup-logs/owner/repo/install-deps.log',
+    );
+  });
+
+  it('returns null when the status document is invalid JSON', () => {
+    const statusPath = path.join(workspacePath, SETUP_STATUS_RELATIVE_PATH);
+    fs.mkdirSync(path.dirname(statusPath), { recursive: true });
+    fs.writeFileSync(statusPath, '{not-json', 'utf8');
+
+    expect(readEnvironmentSetupStatus(workspacePath)).toBeNull();
   });
 });

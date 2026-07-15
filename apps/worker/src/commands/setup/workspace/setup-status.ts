@@ -300,3 +300,148 @@ export class EnvironmentSetupStatusWriter {
     }
   }
 }
+
+const ENVIRONMENT_SETUP_COMMAND_STATES = [
+  'pending',
+  'running',
+  'started_detached',
+  'succeeded',
+  'failed',
+] as const;
+
+const ENVIRONMENT_SETUP_OVERALL_STATES = [
+  'running',
+  'completed',
+  'completed_with_warnings',
+  'failed',
+] as const;
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isEnvironmentSetupCommandState(
+  value: unknown,
+): value is EnvironmentSetupCommandState {
+  return (
+    typeof value === 'string' &&
+    (ENVIRONMENT_SETUP_COMMAND_STATES as readonly string[]).includes(value)
+  );
+}
+
+function isEnvironmentSetupOverallState(
+  value: unknown,
+): value is EnvironmentSetupOverallState {
+  return (
+    typeof value === 'string' &&
+    (ENVIRONMENT_SETUP_OVERALL_STATES as readonly string[]).includes(value)
+  );
+}
+
+function parseEnvironmentSetupStatus(
+  value: unknown,
+): EnvironmentSetupStatus | null {
+  if (!isObject(value) || value.version !== 1) {
+    return null;
+  }
+
+  if (!isEnvironmentSetupOverallState(value.state)) {
+    return null;
+  }
+
+  if (typeof value.startedAt !== 'string') {
+    return null;
+  }
+
+  if (!Array.isArray(value.commands) || !Array.isArray(value.warnings)) {
+    return null;
+  }
+
+  const commands: EnvironmentSetupCommandStatus[] = [];
+
+  for (const command of value.commands) {
+    if (
+      !isObject(command) ||
+      typeof command.repository !== 'string' ||
+      typeof command.name !== 'string' ||
+      !isEnvironmentSetupCommandState(command.state)
+    ) {
+      return null;
+    }
+
+    const entry: EnvironmentSetupCommandStatus = {
+      repository: command.repository,
+      name: command.name,
+      state: command.state,
+    };
+
+    if (typeof command.detached === 'boolean') {
+      entry.detached = command.detached;
+    }
+
+    if (typeof command.exitCode === 'number') {
+      entry.exitCode = command.exitCode;
+    }
+
+    if (typeof command.durationMs === 'number') {
+      entry.durationMs = command.durationMs;
+    }
+
+    if (typeof command.error === 'string') {
+      entry.error = command.error;
+    }
+
+    if (typeof command.logFile === 'string') {
+      entry.logFile = command.logFile;
+    }
+
+    if (typeof command.startedAt === 'string') {
+      entry.startedAt = command.startedAt;
+    }
+
+    if (typeof command.finishedAt === 'string') {
+      entry.finishedAt = command.finishedAt;
+    }
+
+    commands.push(entry);
+  }
+
+  const warnings = value.warnings.filter(
+    (warning): warning is string => typeof warning === 'string',
+  );
+
+  if (warnings.length !== value.warnings.length) {
+    return null;
+  }
+
+  const status: EnvironmentSetupStatus = {
+    version: 1,
+    state: value.state,
+    startedAt: value.startedAt,
+    commands,
+    warnings,
+  };
+
+  if (typeof value.finishedAt === 'string') {
+    status.finishedAt = value.finishedAt;
+  }
+
+  return status;
+}
+
+/**
+ * Read and parse `.roomote/setup-status.json` from a workspace. Returns
+ * `null` when the file is missing or unreadable/invalid.
+ */
+export function readEnvironmentSetupStatus(
+  workspacePath: string,
+): EnvironmentSetupStatus | null {
+  const statusPath = path.join(workspacePath, SETUP_STATUS_RELATIVE_PATH);
+
+  try {
+    const raw = fs.readFileSync(statusPath, 'utf8');
+    return parseEnvironmentSetupStatus(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}

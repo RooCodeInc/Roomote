@@ -17,4 +17,5 @@ export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
 // Queries
 export { getRuntimeState } from './getRuntimeState';
 export { getHarnessLog } from './getHarnessLog';
+export { getSetupStatus } from './getSetupStatus';
 export { searchFiles } from './searchFiles';
