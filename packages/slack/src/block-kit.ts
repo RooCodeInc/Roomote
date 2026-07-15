@@ -51,7 +51,6 @@ import {
   routeTask,
   classifyFollowUp,
   buildSlackRoutingContext,
-  isDynamicKickoffMessageEnabled,
 } from '@roomote/cloud-agents/server';
 
 import type {
@@ -1717,16 +1716,11 @@ export async function handleTaskConfiguration(
       taskId: taskRun.taskId,
     });
 
-    const freeformKickoffEnabled = await isDynamicKickoffMessageEnabled();
-    const effectiveKickoffMessage =
-      freeformKickoffEnabled && prefill?.kickoffMessage
-        ? prefill.kickoffMessage
-        : undefined;
+    const effectiveKickoffMessage = prefill?.kickoffMessage;
 
     const blocks = buildStartedBlocks({
       workspaceDisplayName,
       kickoffMessage: effectiveKickoffMessage,
-      freeformKickoffEnabled,
       runId: taskRun.id,
       taskId: taskRun.taskId,
       initiatingSlackUserId: payload.user.id,

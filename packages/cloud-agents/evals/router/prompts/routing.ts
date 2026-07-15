@@ -160,9 +160,7 @@ Respond with a single JSON object containing exactly these fields:
 export default function generatePrompt({ vars }: PromptInput): string {
   const context = buildContext(vars);
   const availableModels = buildAvailableModelsSection(vars.extraModels);
-  const routingPrompt = buildWorkspaceRoutingPrompt({
-    includeKickoffMessage: true,
-  });
+  const routingPrompt = buildWorkspaceRoutingPrompt();
 
   return `${routingPrompt}
 

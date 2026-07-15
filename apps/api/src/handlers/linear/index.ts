@@ -19,7 +19,6 @@ import {
   enqueueTask,
   routeTask,
   buildLinearRoutingContext,
-  isDynamicKickoffMessageEnabled,
 } from '@roomote/cloud-agents/server';
 import { buildTaskStartingText } from '@roomote/communication/chat-messages';
 import { getRedis } from '@roomote/redis';
@@ -229,7 +228,6 @@ async function startLinearTask({
     buildTaskStartingText({
       workspaceDisplayName: routedTask.workspaceDisplayName,
       kickoffMessage: routedTask.kickoffMessage,
-      freeformKickoffEnabled: await isDynamicKickoffMessageEnabled(),
     }),
     true,
   );

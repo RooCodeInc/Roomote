@@ -52,7 +52,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
   routeTask: vi.fn(),
   buildLinearRoutingContext: vi.fn(),
-  isDynamicKickoffMessageEnabled: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('@roomote/slack', () => ({

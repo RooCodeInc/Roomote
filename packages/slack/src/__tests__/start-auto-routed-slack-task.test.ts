@@ -83,7 +83,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   detectSlackMcpSetupRequirement: detectSlackMcpSetupRequirementMock,
   routeTask: routeTaskMock,
   getTaskUrl: getTaskUrlMock,
-  isDynamicKickoffMessageEnabled: vi.fn().mockResolvedValue(false),
 }));
 
 vi.mock('../block-kit', () => ({

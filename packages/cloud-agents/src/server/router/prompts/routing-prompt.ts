@@ -59,15 +59,12 @@ Also always set \`kickoffMessage\` to a short user-facing kickoff sentence for c
 
 export function buildWorkspaceRoutingPrompt(options?: {
   forceDisablePlatformWorkspace?: boolean;
-  includeKickoffMessage?: boolean;
 }): string {
   const platformOverride = options?.forceDisablePlatformWorkspace
     ? `\nFor this request, you must not choose ${PLATFORM_WORKSPACE_VALUE}. Choose a real environment instead.\n`
     : '';
 
-  const kickoffSection = options?.includeKickoffMessage
-    ? `\n\n${KICKOFF_MESSAGE_SECTION}\n`
-    : '\n';
+  const kickoffSection = `\n\n${KICKOFF_MESSAGE_SECTION}\n`;
 
   return `You are a workspace routing assistant for ${PRODUCT_NAME}, an AI coding platform.
 
