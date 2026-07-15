@@ -16,6 +16,7 @@ import { TaskPayloadKind } from '@roomote/types';
 
 import {
   buildDestinationTaskPayloadFields,
+  listConnectedCommunicationProviders,
   resolveAutomationRuntimeDestination,
 } from './destination';
 import {
@@ -55,18 +56,14 @@ export async function ciFailureTriageJob(
       return result;
     }
 
+    const connectedProviders = await listConnectedCommunicationProviders();
     const destination = await resolveAutomationRuntimeDestination({
       runtime,
-      slackConnected: true,
+      slackConnected: connectedProviders.includes('slack'),
     });
 
     if (!destination) {
       result.skippedReason = 'Manager channel is not configured.';
-      return result;
-    }
-
-    if (destination.provider !== 'slack') {
-      result.skippedReason = 'CI failure triage reports to Slack only for now.';
       return result;
     }
 
@@ -135,6 +132,7 @@ export async function ciFailureTriageJob(
                   repositoryFullNames: [coverage.repositoryFullName],
                   repositoryCoverage: coverageSlice,
                   trigger: 'manual',
+                  destinationProvider: destination.provider,
                 }),
                 ...buildDestinationTaskPayloadFields(destination),
                 visibleInTranscript: false,
@@ -145,7 +143,9 @@ export async function ciFailureTriageJob(
             surface: 'system',
             trigger: 'manual',
             visibility: 'hidden',
-            channels: { slackChannelId: channelId },
+            ...(destination.provider === 'slack'
+              ? { channels: { slackChannelId: channelId } }
+              : {}),
           },
           { launchClass: 'automation' },
         );
