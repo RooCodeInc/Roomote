@@ -35,6 +35,7 @@ vi.mock('@/components/system', () => ({
   CircleDollarSign: Icon,
   Download: Icon,
   GitPullRequest: Icon,
+  Spinner: Icon,
   Button: ({
     children,
     ...props
@@ -47,7 +48,11 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-import { AnalyticsShell, getAnalyticsHref } from './AnalyticsShell';
+import {
+  AnalyticsShell,
+  AnalyticsShellDownloadAction,
+  getAnalyticsHref,
+} from './AnalyticsShell';
 
 describe('AnalyticsShell', () => {
   it('renders Tasks before PRs in the navigation', () => {
@@ -78,5 +83,31 @@ describe('AnalyticsShell', () => {
       '/analytics?object=pullRequests',
     );
     expect(getAnalyticsHref('costs')).toBe('/analytics/costs');
+  });
+
+  it('names the export action in each state', () => {
+    const { rerender } = render(
+      <AnalyticsShellDownloadAction
+        isDisabled={false}
+        isExporting={false}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Download data' }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <AnalyticsShellDownloadAction
+        isDisabled
+        isExporting
+        onDownload={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Preparing download' }),
+    ).toHaveAttribute('aria-busy', 'true');
   });
 });

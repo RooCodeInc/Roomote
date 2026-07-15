@@ -97,6 +97,8 @@ export function AnalyticsShellDownloadAction({
       variant="outline"
       size="sm"
       disabled={isDisabled}
+      aria-label={isExporting ? 'Preparing download' : 'Download data'}
+      aria-busy={isExporting}
       onClick={onDownload}
       className="gap-2 disabled:cursor-default disabled:border-border/40 disabled:text-muted-foreground disabled:opacity-45 disabled:hover:border-border/40 disabled:hover:text-muted-foreground"
     >
