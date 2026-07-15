@@ -1,3 +1,5 @@
+'use client';
+
 import type { ReactNode } from 'react';
 
 import {
@@ -24,11 +26,15 @@ import {
   ToolHeader,
 } from '@/components/ai-elements';
 
+import { useArtifactLink } from '../../hooks';
 import { messageAnchorId } from '../message-anchor';
 
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { AcpToolDetails } from './AcpToolDetails';
+import { isSubagentToolPayload } from './subagent-tool';
 import { hidesExpandedToolResult } from './tool-detail-visibility';
+import { VisualProofToolPreview } from './VisualProofToolPreview';
+import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -41,6 +47,7 @@ export function AcpToolMessage({
   showSubagentPayload = false,
   children,
 }: AcpToolMessageProps) {
+  const artifactLink = useArtifactLink();
   const anchorId = messageAnchorId(msg.ts);
   const kind = msg.data.kind;
   const title = sanitizeSandboxPathString(msg.data.title ?? 'Tool use');
@@ -60,11 +67,21 @@ export function AcpToolMessage({
 
   const isMcp = msg.data.isMcp;
   const isMcpLabelPresent = Boolean(msg.data.toolName || msg.data.serverName);
-  const showExpandedDetails = !hidesExpandedToolResult(msg, {
-    showSubagentPayload,
-  });
+  const visualProofMedia = resolveVisualProofMediaForToolMessage(
+    msg,
+    artifactLink?.artifacts,
+  );
+  const showVisualProofPreview = visualProofMedia.length > 0;
+  const isSubagentRow = isSubagentToolPayload(msg.data);
+  // Direct manage_artifacts rows collapse to just the preview; subagent rows
+  // keep their collapsible prompt/result details alongside it.
+  const showExpandedDetails =
+    (isSubagentRow || !showVisualProofPreview) &&
+    !hidesExpandedToolResult(msg, {
+      showSubagentPayload,
+    });
   const showNestedActivity = Boolean(children);
-  const showToolContent = showExpandedDetails || showNestedActivity;
+  const showCollapsibleContent = showExpandedDetails || showNestedActivity;
 
   const subagentActivity = readSubagentActivity(
     msg.data as unknown as Record<string, unknown>,
@@ -108,9 +125,16 @@ export function AcpToolMessage({
             icon={ToolIcon}
             state={toolState}
             params={sanitizedToolData}
-            collapsible={showToolContent}
+            collapsible={showCollapsibleContent}
           />
-          {showToolContent ? (
+          {showVisualProofPreview ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {visualProofMedia.map((media) => (
+                <VisualProofToolPreview key={media.artifactId} media={media} />
+              ))}
+            </div>
+          ) : null}
+          {showCollapsibleContent ? (
             <ToolContent className="mt-2">
               {showExpandedDetails ? (
                 <AcpToolDetails
