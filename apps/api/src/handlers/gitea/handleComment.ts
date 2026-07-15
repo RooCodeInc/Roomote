@@ -46,13 +46,46 @@ function isGiteaMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(GITEA_MENTION_HANDLE);
 }
 
-async function isDeploymentTokenAuthor(username: string): Promise<boolean> {
+type GiteaWebhookAuthor =
+  | GiteaPullRequestCommentWebhook['comment']['user']
+  | GiteaPullRequestCommentWebhook['sender']
+  | undefined;
+
+function matchesDeploymentIdentity(
+  author: GiteaWebhookAuthor,
+  deploymentUser: Awaited<ReturnType<typeof getGiteaDeploymentUser>>,
+): boolean {
+  if (!deploymentUser || !author) {
+    return false;
+  }
+
+  if (
+    typeof author.id === 'number' &&
+    typeof deploymentUser.id === 'number' &&
+    author.id === deploymentUser.id
+  ) {
+    return true;
+  }
+
+  const username = getGiteaUsername(author);
+
+  return (
+    !!username && deploymentUser.login.toLowerCase() === username.toLowerCase()
+  );
+}
+
+async function isDeploymentTokenAuthor(
+  authors: GiteaWebhookAuthor[],
+): Promise<boolean> {
   try {
     const deploymentUser = await getGiteaDeploymentUser();
 
-    return (
-      !!deploymentUser &&
-      deploymentUser.login.toLowerCase() === username.toLowerCase()
+    if (!deploymentUser) {
+      return false;
+    }
+
+    return authors.some((author) =>
+      matchesDeploymentIdentity(author, deploymentUser),
     );
   } catch (error) {
     console.warn(
@@ -230,7 +263,7 @@ export async function handleGiteaComment(
 
   if (
     isRoomoteGiteaUsername(commenter) ||
-    (await isDeploymentTokenAuthor(commenter))
+    (await isDeploymentTokenAuthor([payload.comment.user, payload.sender]))
   ) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }

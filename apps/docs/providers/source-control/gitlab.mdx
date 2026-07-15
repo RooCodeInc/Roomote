@@ -8,7 +8,9 @@ GitLab does not have a GitHub-style App installation flow. Configure a GitLab
 OAuth application for Roomote's deployment, then authorize it once so Roomote
 can sync repositories, run tasks, add merge-request notes, and manage webhooks.
 
-Use `<public-url>` below for your stable public Roomote URL.
+Use `<public-url>` below for your stable public Roomote URL (`R_PUBLIC_URL`
+when set, otherwise `R_APP_URL`). The GitLab OAuth application redirect URI must
+match the callback Roomote builds for authorize and token exchange.
 
 ## Create a GitLab OAuth application
 

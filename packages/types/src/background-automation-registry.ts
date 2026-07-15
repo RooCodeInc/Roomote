@@ -219,7 +219,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'ci_failure_triage',
   },
