@@ -7,6 +7,7 @@ interface RoutingResponse {
   workspaceValue?: string;
   reasoning?: string;
   confidence?: number;
+  kickoffMessage?: string | null;
   needsExternalLookup?: boolean;
   externalReference?: string | null;
   requestedModelId?: string | null;
@@ -273,6 +274,49 @@ function requestedModelIdMatchesExpected(
 }
 
 /**
+ * Asserts that kickoffMessage is present as short display text ending with a
+ * single period (the router prompt contract for chat started messages).
+ */
+function hasValidKickoffMessage(output: string): AssertionResult {
+  const json = extractJson(output);
+  if (!json) {
+    return { pass: false, score: 0, reason: 'Invalid JSON response' };
+  }
+
+  const kickoff = json.kickoffMessage;
+  if (typeof kickoff !== 'string' || kickoff.trim().length === 0) {
+    return {
+      pass: false,
+      score: 0,
+      reason: 'kickoffMessage is missing or empty',
+    };
+  }
+
+  const text = kickoff.trim();
+  if (!text.endsWith('.')) {
+    return {
+      pass: false,
+      score: 0,
+      reason: `kickoffMessage must end with a period: ${text}`,
+    };
+  }
+
+  if (text.length < 8 || text.length > 200) {
+    return {
+      pass: false,
+      score: 0,
+      reason: `kickoffMessage length looks off (${text.length} chars): ${text}`,
+    };
+  }
+
+  return {
+    pass: true,
+    score: 1,
+    reason: `Valid kickoffMessage: ${text}`,
+  };
+}
+
+/**
  * Asserts that the router did not report a model preference when the user did
  * not express one: requestedModelId must be the explicit `__no_model__`
  * sentinel (or a legacy null/empty response).
@@ -304,6 +348,7 @@ export {
   workspaceValueMatchesExpected,
   reasoningContainsExpected,
   requestedModelIdMatchesExpected,
+  hasValidKickoffMessage,
   requestedModelIdIsNull,
   extractJson,
 };
