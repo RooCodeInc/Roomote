@@ -298,7 +298,7 @@ function buildProviderSetupData(
         buildProvider('anthropic', 'Anthropic', 'ANTHROPIC_API_KEY'),
         {
           id: 'chatgpt' as SetupModelProviderId,
-          label: 'ChatGPT',
+          label: 'ChatGPT (subscription)',
           envVarName: undefined,
           defaultRoomoteModel: 'openai/gpt-5.4',
           authKind: 'oauth' as const,
@@ -717,7 +717,7 @@ describe('ModelSettingsSection', () => {
 
       expect(
         screen.getByRole('combobox', { name: 'New model provider' }),
-      ).toHaveTextContent('ChatGPT');
+      ).toHaveTextContent('ChatGPT (subscription)');
       // The placeholder example comes from the OpenAI catalog entry because
       // subscription models keep the openai/ model-id prefix.
       expect(screen.getByLabelText('New model slug')).toHaveAttribute(
@@ -738,6 +738,72 @@ describe('ModelSettingsSection', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('groups openai/ models under ChatGPT when a subscription is connected', () => {
+    settingsData.current = {
+      ...buildSettingsData(),
+      models: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+          metadata: {
+            contextWindow: 1_000_000,
+            inputPricePerToken: 0.00001,
+            outputPricePerToken: 0.00003,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: true,
+        },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+          metadata: {
+            contextWindow: 200_000,
+            inputPricePerToken: 0.000003,
+            outputPricePerToken: 0.000015,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: false,
+        },
+      ],
+      defaultModelId: 'openai/gpt-5.6-terra',
+      runtimeModels: {
+        ...buildSettingsData().runtimeModels,
+        codingModel: {
+          ...buildSettingsData().runtimeModels.codingModel,
+          effectiveModelId: 'openai/gpt-5.6-terra',
+          persistedModelId: 'openai/gpt-5.6-terra',
+        },
+      },
+      helperModelOptions: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+        },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['chatgpt'],
+    });
+
+    renderModelSettingsSection();
+
+    const availableSection = screen.getByTestId('section-Available Models');
+    expect(availableSection).toHaveTextContent('ChatGPT (subscription)');
+    expect(availableSection).toHaveTextContent('GPT 5.6 Terra');
+    expect(availableSection).toHaveTextContent('Anthropic');
+    // openai/ models should not surface under the native OpenAI group label.
+    expect(
+      within(availableSection).queryByText('OpenAI'),
+    ).not.toBeInTheDocument();
   });
 
   it('hides the add-model flow when no provider is connected', () => {
