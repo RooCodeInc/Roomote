@@ -44,6 +44,7 @@ describe('instance-report pure helpers', () => {
     const deduped = dedupeAuthoredPullRequests([
       {
         sourceControlProvider: 'github',
+        host: 'github.com',
         repository: 'Acme/App',
         repositoryId: 'repo-1',
         prNumber: 7,
@@ -54,6 +55,7 @@ describe('instance-report pure helpers', () => {
       },
       {
         sourceControlProvider: 'github',
+        host: 'github.com',
         repository: 'acme/app',
         repositoryId: 'repo-1',
         prNumber: 7,
@@ -81,7 +83,9 @@ describe('instance-report pure helpers', () => {
     const result = summarizePullRequestCohort(
       [
         {
-          key: 'github:acme/app#1',
+          key: 'github:github.com:acme/app#1',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 1,
@@ -89,7 +93,9 @@ describe('instance-report pure helpers', () => {
           firstDetectedAt: inWindow,
         },
         {
-          key: 'github:acme/app#2',
+          key: 'github:github.com:acme/app#2',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 2,
@@ -97,7 +103,9 @@ describe('instance-report pure helpers', () => {
           firstDetectedAt: inWindow,
         },
         {
-          key: 'github:acme/app#3',
+          key: 'github:github.com:acme/app#3',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 3,
@@ -105,7 +113,9 @@ describe('instance-report pure helpers', () => {
           firstDetectedAt: inWindow,
         },
         {
-          key: 'github:acme/app#4',
+          key: 'github:github.com:acme/app#4',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 4,
@@ -113,7 +123,9 @@ describe('instance-report pure helpers', () => {
           firstDetectedAt: inWindow,
         },
         {
-          key: 'github:acme/app#5',
+          key: 'github:github.com:acme/app#5',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 5,
@@ -121,7 +133,9 @@ describe('instance-report pure helpers', () => {
           firstDetectedAt: inWindow,
         },
         {
-          key: 'github:acme/app#old',
+          key: 'github:github.com:acme/app#old',
+          sourceControlProvider: 'github',
+          host: 'github.com',
           repository: 'acme/app',
           repositoryId: 'r1',
           prNumber: 99,
@@ -131,8 +145,8 @@ describe('instance-report pure helpers', () => {
       ],
       since,
       new Map([
-        ['github:acme/app#4', 100],
-        ['github:acme/app#5', 300],
+        ['github:github.com:acme/app#4', 100],
+        ['github:github.com:acme/app#5', 300],
       ]),
     );
 
@@ -143,6 +157,38 @@ describe('instance-report pure helpers', () => {
       merged: 2,
       medianTimeToMergeSeconds: 200,
     });
+  });
+
+  it('keeps same-named repos on different hosts as distinct PR keys', () => {
+    const now = new Date('2026-07-10T12:00:00.000Z');
+
+    const deduped = dedupeAuthoredPullRequests([
+      {
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.a.example',
+        repository: 'acme/app',
+        repositoryId: 'repo-a',
+        prNumber: 3,
+        prUrl: 'https://gitlab.a.example/acme/app/-/merge_requests/3',
+        status: 'open',
+        detectedAt: now,
+        updatedAt: now,
+      },
+      {
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.b.example',
+        repository: 'acme/app',
+        repositoryId: 'repo-b',
+        prNumber: 3,
+        prUrl: 'https://gitlab.b.example/acme/app/-/merge_requests/3',
+        status: 'merged',
+        detectedAt: now,
+        updatedAt: now,
+      },
+    ]);
+
+    expect(deduped).toHaveLength(2);
+    expect(new Set(deduped.map((entry) => entry.key)).size).toBe(2);
   });
 });
 
@@ -315,6 +361,7 @@ describe('collectInstanceReportStats pullRequests7d isolation', () => {
     const productOpenedRows = await db
       .select({
         sourceControlProvider: taskPullRequests.sourceControlProvider,
+        host: taskPullRequests.host,
         repository: taskPullRequests.repository,
         repositoryId: taskPullRequests.repositoryId,
         prNumber: taskPullRequests.prNumber,

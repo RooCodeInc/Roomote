@@ -173,13 +173,10 @@ export function SourceControlConfigForm({
             : 'pat',
       );
     }
-  }, [
-    provider,
-    nonSecretInitialValues,
-    isAdo,
-    nonSecretInitialValuesKey,
-    providerStatus?.fields,
-  ]);
+    // providerStatus.fields array identity is intentionally omitted; content
+    // key and derived non-secret values drive resets instead of query refetches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
+  }, [provider, nonSecretInitialValues, isAdo, nonSecretInitialValuesKey]);
 
   if (!providerStatus) {
     return null;

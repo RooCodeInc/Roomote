@@ -14,7 +14,8 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const redirect = new URL('/setup', webEnv.R_APP_URL);
+  const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
+  const redirect = new URL('/setup', publicAppUrl);
   redirect.searchParams.set('step', 'source-control-connect');
   const response = () => NextResponse.redirect(redirect);
   const authResult = await authorize();
@@ -46,7 +47,7 @@ export async function GET(request: NextRequest) {
       clientId,
       clientSecret,
       code,
-      redirectUri: buildGitLabOAuthRedirectUri(webEnv.R_APP_URL),
+      redirectUri: buildGitLabOAuthRedirectUri(publicAppUrl),
     });
     redirect.searchParams.set('gitlab', 'connected');
     redirect.searchParams.set('sync', '1');
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
   result.cookies.set('roomote-gitlab-oauth-state', '', {
     httpOnly: true,
     sameSite: 'lax',
-    secure: webEnv.R_APP_URL.startsWith('https://'),
+    secure: publicAppUrl.startsWith('https://'),
     path: '/api/source-control/gitlab/oauth',
     maxAge: 0,
   });

@@ -127,6 +127,7 @@ export type InstanceReportStats = {
 
 type AuthoredPullRequestRow = {
   sourceControlProvider: string;
+  host: string | null;
   repository: string | null;
   repositoryId: string | null;
   prNumber: number | null;
@@ -138,6 +139,8 @@ type AuthoredPullRequestRow = {
 
 type DedupedAuthoredPullRequest = {
   key: string;
+  sourceControlProvider: string;
+  host: string | null;
   repository: string | null;
   repositoryId: string | null;
   prNumber: number | null;
@@ -155,15 +158,18 @@ function toNumber(value: string | number | null | undefined): number {
 
 function getAuthoredPullRequestKey(row: {
   sourceControlProvider: string;
+  host: string | null;
   repository: string | null;
   prNumber: number | null;
   prUrl: string;
 }): string {
+  const host = (row.host ?? '').toLowerCase();
+
   if (row.repository && row.prNumber != null) {
-    return `${row.sourceControlProvider}:${row.repository.toLowerCase()}#${row.prNumber}`;
+    return `${row.sourceControlProvider}:${host}:${row.repository.toLowerCase()}#${row.prNumber}`;
   }
 
-  return `${row.sourceControlProvider}:url:${row.prUrl.toLowerCase()}`;
+  return `${row.sourceControlProvider}:${host}:url:${row.prUrl.toLowerCase()}`;
 }
 
 /**
@@ -224,6 +230,8 @@ export function dedupeAuthoredPullRequests(
     if (!existing) {
       byKey.set(key, {
         key,
+        sourceControlProvider: row.sourceControlProvider,
+        host: row.host,
         repository: row.repository,
         repositoryId: row.repositoryId,
         prNumber: row.prNumber,
@@ -241,6 +249,8 @@ export function dedupeAuthoredPullRequests(
     if (row.updatedAt >= existing.latestUpdatedAt) {
       existing.latestUpdatedAt = row.updatedAt;
       existing.status = row.status;
+      existing.sourceControlProvider = row.sourceControlProvider;
+      existing.host = row.host;
       existing.repository = row.repository;
       existing.repositoryId = row.repositoryId;
       existing.prNumber = row.prNumber;
@@ -354,11 +364,14 @@ async function collectPullRequestFactsDurations(
     .select({
       repositoryId: pullRequestFacts.repositoryId,
       repositoryFullName: pullRequestFacts.repositoryFullName,
+      sourceControlProvider: pullRequestFacts.sourceControlProvider,
+      host: repositories.host,
       prNumber: pullRequestFacts.prNumber,
       createdAtRemote: pullRequestFacts.createdAtRemote,
       mergedAtRemote: pullRequestFacts.mergedAtRemote,
     })
     .from(pullRequestFacts)
+    .innerJoin(repositories, eq(repositories.id, pullRequestFacts.repositoryId))
     .where(
       and(
         inArray(pullRequestFacts.prNumber, prNumbers),
@@ -383,7 +396,7 @@ async function collectPullRequestFactsDurations(
 
     factsByRepoIdPr.set(`${fact.repositoryId}#${fact.prNumber}`, seconds);
     factsByNamePr.set(
-      `${fact.repositoryFullName.toLowerCase()}#${fact.prNumber}`,
+      `${fact.sourceControlProvider}:${(fact.host ?? '').toLowerCase()}:${fact.repositoryFullName.toLowerCase()}#${fact.prNumber}`,
       seconds,
     );
   }
@@ -399,7 +412,7 @@ async function collectPullRequestFactsDurations(
     }
     if (seconds == null && entry.repository) {
       seconds = factsByNamePr.get(
-        `${entry.repository.toLowerCase()}#${entry.prNumber}`,
+        `${entry.sourceControlProvider}:${(entry.host ?? '').toLowerCase()}:${entry.repository.toLowerCase()}#${entry.prNumber}`,
       );
     }
 
@@ -413,6 +426,7 @@ async function collectPullRequestFactsDurations(
 
 const authoredPullRequestSelect = {
   sourceControlProvider: taskPullRequests.sourceControlProvider,
+  host: taskPullRequests.host,
   repository: taskPullRequests.repository,
   repositoryId: taskPullRequests.repositoryId,
   prNumber: taskPullRequests.prNumber,

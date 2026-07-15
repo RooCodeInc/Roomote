@@ -3,7 +3,10 @@ import {
   findActiveGitHubPrReviewTask,
   findReusableGitHubPrFollowUpOwner,
 } from '@roomote/db/server';
-import { createGiteaPullRequestComment } from '@roomote/gitea';
+import {
+  createGiteaPullRequestComment,
+  getGiteaDeploymentUser,
+} from '@roomote/gitea';
 import {
   type TaskPayload,
   TaskPayloadKind,
@@ -41,6 +44,23 @@ type GiteaCommentPullRequest = NonNullable<
 
 function isGiteaMention(commentBody: string): boolean {
   return commentBody.toLowerCase().includes(GITEA_MENTION_HANDLE);
+}
+
+async function isDeploymentTokenAuthor(username: string): Promise<boolean> {
+  try {
+    const deploymentUser = await getGiteaDeploymentUser();
+
+    return (
+      !!deploymentUser &&
+      deploymentUser.login.toLowerCase() === username.toLowerCase()
+    );
+  } catch (error) {
+    console.warn(
+      `[handleGiteaComment] failed to resolve Gitea deployment token identity: ${error instanceof Error ? error.message : String(error)}`,
+    );
+
+    return false;
+  }
 }
 
 async function postMentionResponseComment({
@@ -208,7 +228,10 @@ export async function handleGiteaComment(
     return { status: 'ok', message: 'no_comment_author' };
   }
 
-  if (isRoomoteGiteaUsername(commenter)) {
+  if (
+    isRoomoteGiteaUsername(commenter) ||
+    (await isDeploymentTokenAuthor(commenter))
+  ) {
     return { status: 'ok', message: 'roomote_authored_comment' };
   }
 

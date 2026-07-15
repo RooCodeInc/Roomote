@@ -28,7 +28,8 @@ export async function GET() {
       { status: 400 },
     );
 
-  const redirectUri = buildGitLabOAuthRedirectUri(webEnv.R_APP_URL);
+  const publicAppUrl = webEnv.R_PUBLIC_URL ?? webEnv.R_APP_URL;
+  const redirectUri = buildGitLabOAuthRedirectUri(publicAppUrl);
   const { url, state } = createGitLabOAuthAuthorizationUrl({
     baseUrl,
     clientId,
@@ -38,7 +39,7 @@ export async function GET() {
   response.cookies.set('roomote-gitlab-oauth-state', state, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: webEnv.R_APP_URL.startsWith('https://'),
+    secure: publicAppUrl.startsWith('https://'),
     path: '/api/source-control/gitlab/oauth',
     maxAge: 600,
   });

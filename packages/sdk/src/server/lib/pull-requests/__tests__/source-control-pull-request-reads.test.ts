@@ -39,7 +39,7 @@ vi.mock('@roomote/github', () => ({
 
 vi.mock('@roomote/gitlab', () => ({
   resolveGitLabToken: (...args: unknown[]) => mockResolveGitLabToken(...args),
-  isGitLabOAuthAccessToken: () => false,
+  isGitLabOAuthAccessToken: (token: string) => token === 'oauth-token',
   resolveGitLabBaseUrl: async () => 'https://gitlab.com',
   buildGitLabApiBaseUrl: (baseUrl: string) =>
     `${baseUrl.replace(/\/+$/, '')}/api/v4`,
@@ -1249,6 +1249,46 @@ describe('listMergedSourceControlPullRequestsForRepository', () => {
         author: { id: '7', login: 'gitlab-user' },
       }),
     ]);
+  });
+
+  it('lists GitLab MRs with Authorization Bearer when the deployment token is OAuth-backed', async () => {
+    mockResolveGitLabToken.mockResolvedValue('oauth-token');
+    const fetchImpl = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          id: 992,
+          iid: 43,
+          title: 'OAuth listed MR',
+          state: 'merged',
+          web_url: 'https://gitlab.com/acme/backend/-/merge_requests/43',
+          source_branch: 'feature/oauth',
+          target_branch: 'main',
+          created_at: '2026-06-30T00:00:00Z',
+          updated_at: '2026-07-10T00:00:00Z',
+          merged_at: '2026-07-10T00:00:00Z',
+          closed_at: null,
+          author: { id: 8, username: 'oauth-user' },
+        },
+      ]),
+    );
+
+    await listMergedSourceControlPullRequestsForRepository({
+      repository: makeRepositoryRow({
+        sourceControlProvider: 'gitlab',
+        externalRepoId: '101',
+      }),
+      provider: 'gitlab',
+      fetchImpl,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining('/merge_requests?'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oauth-token',
+        }),
+      }),
+    );
   });
 
   it('lists Gitea merged PRs from the closed list, dropping unmerged rows', async () => {
