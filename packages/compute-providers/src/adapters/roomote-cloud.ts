@@ -157,6 +157,8 @@ export class RoomoteCloudClient implements ComputeProviderClient {
   private request(path: string, init: RequestInit = {}) {
     return this.fetchFn(`${this.baseUrl}${path}`, {
       ...init,
+      redirect: 'manual',
+      signal: init.signal ?? AbortSignal.timeout(30_000),
       headers: {
         authorization: `Bearer ${this.config.deploymentToken}`,
         ...init.headers,

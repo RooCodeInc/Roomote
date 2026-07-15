@@ -50,6 +50,11 @@ export type SetupAuthStatus = {
   lockReason: SetupProviderLockReason;
   providers: SetupAuthProviderStatus[];
   setupSatisfiedByRuntimeEnv: boolean;
+  managedConnection: {
+    cloudUrl: string;
+    deploymentId: string;
+    providers: SetupAuthProviderId[];
+  } | null;
 };
 
 export const DEFAULT_SETUP_AUTH_PROVIDER_ID: SetupAuthProviderId = 'slack';
@@ -197,6 +202,7 @@ export function buildSetupAuthStatus(input: {
   persistedEnvVarNames?: Iterable<string>;
   persistedEnvVarValues?: Partial<Record<string, string>>;
   selectedProvider?: SetupAuthProviderId | null;
+  managedConnection?: SetupAuthStatus['managedConnection'];
 }): SetupAuthStatus {
   const runtimeEnv = input.runtimeEnv ?? {};
   const persistedEnvVarNameSet = new Set(
@@ -211,6 +217,7 @@ export function buildSetupAuthStatus(input: {
         persistedEnvVarNameSet.has(name),
     }).fieldSourceEnvVarNames;
 
+  const managedProviders = new Set(input.managedConnection?.providers ?? []);
   const providers = SETUP_AUTH_PROVIDER_CATALOG.map((provider) => {
     const fields = provider.fields.map((field) => {
       const inferredMatch =
@@ -264,16 +271,29 @@ export function buildSetupAuthStatus(input: {
       savedSatisfied: fields
         .filter(isRequiredField)
         .every((field) => field.savedSatisfied),
-      setupSatisfied: fields
-        .filter(isRequiredField)
-        .every((field) => field.runtimeSatisfied || field.savedSatisfied),
+      setupSatisfied:
+        managedProviders.has(provider.id) ||
+        fields
+          .filter(isRequiredField)
+          .every((field) => field.runtimeSatisfied || field.savedSatisfied),
     };
   });
 
+  // Managed communication credentials belong to the Cloud gateway, not to a
+  // tenant-owned OAuth app. In particular, a managed Teams deployment carries
+  // proxy credentials that satisfy the bot runtime but cannot authenticate the
+  // founding admin with Microsoft. Do not let those credentials lock bootstrap
+  // into a provider sign-in flow.
   const runtimeProvider =
-    providers.find((provider) => provider.runtimeSatisfied) ?? null;
+    providers.find(
+      (provider) =>
+        provider.runtimeSatisfied && !managedProviders.has(provider.id),
+    ) ?? null;
   const runtimeConfiguredProviders = providers
-    .filter((provider) => provider.runtimeSatisfied)
+    .filter(
+      (provider) =>
+        provider.runtimeSatisfied && !managedProviders.has(provider.id),
+    )
     .map((provider) => provider.id);
   const savedProvider = providers.find((provider) => provider.setupSatisfied);
   const requestedSelectedProvider = isSetupAuthProviderId(
@@ -285,6 +305,7 @@ export function buildSetupAuthStatus(input: {
   const preselectedProvider =
     runtimeProvider?.id ??
     requestedSelectedProvider ??
+    input.managedConnection?.providers[0] ??
     savedProvider?.id ??
     DEFAULT_SETUP_AUTH_PROVIDER_ID;
   const selectedProvider =
@@ -303,7 +324,9 @@ export function buildSetupAuthStatus(input: {
     providers,
     setupSatisfiedByRuntimeEnv:
       input.selectedProvider !== undefined && requestedSelectedProvider !== null
-        ? selectedProviderStatus?.runtimeSatisfied === true
+        ? selectedProviderStatus?.runtimeSatisfied === true &&
+          !managedProviders.has(requestedSelectedProvider)
         : runtimeProvider !== null,
+    managedConnection: input.managedConnection ?? null,
   };
 }

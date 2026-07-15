@@ -44,6 +44,16 @@ describe('Roomote Cloud GitHub token broker', () => {
     );
   });
 
+  it('fails closed when Cloud is enabled without runtime credentials', async () => {
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) =>
+      name === 'ROOMOTE_CLOUD_ENABLED' ? 'true' : null,
+    );
+
+    await expect(resolveRoomoteCloudRuntimeConfig()).rejects.toThrow(
+      'must be configured together',
+    );
+  });
+
   it('requests a repository-scoped installation token', async () => {
     const fetchFn = vi.fn(async () =>
       Response.json({
@@ -71,6 +81,7 @@ describe('Roomote Cloud GitHub token broker', () => {
       new URL('https://cloud.roomote.dev/runtime/v1/integrations/github/token'),
       expect.objectContaining({
         method: 'POST',
+        redirect: 'manual',
         headers: {
           authorization: 'Bearer deployment-secret',
           'content-type': 'application/json',

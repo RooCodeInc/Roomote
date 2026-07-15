@@ -58,6 +58,13 @@ export function shouldSkipBootstrapAccountStep(
 export function getBootstrapStepAfterWelcome(
   authSetup: SetupAuthStatus | null | undefined,
 ): Exclude<BootstrapStep, 'welcome'> {
+  // Shared Cloud apps connect after an account exists. They intentionally do
+  // not expose provider secrets to the tenant, so the founding admin needs a
+  // local account before the managed Slack/Teams handoff can begin.
+  if (authSetup?.managedConnection) {
+    return 'email-password';
+  }
+
   if (shouldSkipBootstrapAccountStep(authSetup)) {
     return getNextBootstrapStep(authSetup);
   }

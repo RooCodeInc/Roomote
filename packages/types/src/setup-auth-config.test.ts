@@ -385,4 +385,73 @@ describe('buildSetupAuthStatus', () => {
     expect(status.lockReason).toBe('runtime_env');
     expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
   });
+
+  it('preselects Cloud-managed communication providers without pretending tenant secrets exist', () => {
+    const status = buildSetupAuthStatus({
+      managedConnection: {
+        cloudUrl: 'https://cloud.example',
+        deploymentId: 'deployment-1',
+        providers: ['slack', 'microsoft'],
+      },
+    });
+
+    expect(status.preselectedProvider).toBe('slack');
+    expect(status.selectedProvider).toBeNull();
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.runtimeConfiguredProviders).toEqual([]);
+    expect(status.lockReason).toBeNull();
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(
+      status.providers.find((provider) => provider.id === 'slack'),
+    ).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      setupSatisfied: true,
+    });
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft'),
+    ).toMatchObject({
+      runtimeSatisfied: false,
+      savedSatisfied: false,
+      setupSatisfied: true,
+    });
+  });
+
+  it('does not treat managed Teams proxy credentials as Microsoft sign-in configuration', () => {
+    const status = buildSetupAuthStatus({
+      runtimeEnv: {
+        // Even if a deployment accidentally exposes the shared sign-in
+        // identifiers alongside its required bot proxy credentials, Cloud
+        // ownership must win and keep bootstrap out of Microsoft OAuth.
+        R_MICROSOFT_CLIENT_ID: 'shared-sign-in-client-id',
+        R_MICROSOFT_CLIENT_SECRET: 'shared-sign-in-client-secret',
+        R_MICROSOFT_TENANT_ID: 'shared-sign-in-tenant-id',
+        R_TEAMS_BOT_APP_ID: 'shared-bot-app-id',
+        R_TEAMS_BOT_APP_PASSWORD: 'deployment-proxy-token',
+        R_TEAMS_BOT_TENANT_ID: 'shared-bot-tenant-id',
+        R_TEAMS_BOT_TOKEN_ENDPOINT:
+          'https://cloud.example/runtime/v1/teams/token',
+        R_TEAMS_BOT_OAUTH_SCOPE: 'https://api.botframework.com/.default',
+      },
+      selectedProvider: 'microsoft',
+      managedConnection: {
+        cloudUrl: 'https://cloud.example',
+        deploymentId: 'deployment-1',
+        providers: ['microsoft'],
+      },
+    });
+
+    expect(status.preselectedProvider).toBe('microsoft');
+    expect(status.selectedProvider).toBe('microsoft');
+    expect(status.runtimeConfiguredProvider).toBeNull();
+    expect(status.runtimeConfiguredProviders).toEqual([]);
+    expect(status.lockReason).toBeNull();
+    expect(status.setupSatisfiedByRuntimeEnv).toBe(false);
+    expect(
+      status.providers.find((provider) => provider.id === 'microsoft'),
+    ).toMatchObject({
+      runtimeSatisfied: true,
+      setupSatisfied: true,
+    });
+  });
 });

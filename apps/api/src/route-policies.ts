@@ -160,6 +160,18 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
   {
+    name: 'webhook-cloud-slack',
+    match: { type: 'prefix', path: '/api/webhooks/cloud/slack' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
+    name: 'webhook-cloud-teams',
+    match: { type: 'prefix', path: '/api/webhooks/cloud/teams' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
+  {
     name: 'webhook-github',
     match: { type: 'prefix', path: '/api/webhooks/github' },
     policy: 'webhook',

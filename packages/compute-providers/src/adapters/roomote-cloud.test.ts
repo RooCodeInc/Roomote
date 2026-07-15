@@ -21,6 +21,8 @@ describe('RoomoteCloudClient', () => {
     expect(fetchFn).toHaveBeenCalledWith(
       'https://cloud.example/runtime/v1/compute/leases/lease-1',
       expect.objectContaining({
+        redirect: 'manual',
+        signal: expect.any(AbortSignal),
         headers: expect.objectContaining({
           authorization: 'Bearer deployment-token',
         }),
@@ -43,7 +45,12 @@ describe('RoomoteCloudClient', () => {
     ).resolves.toEqual({});
     expect(fetchFn).toHaveBeenCalledWith(
       'https://cloud.example/runtime/v1/compute/leases/lease-1/stop',
-      expect.objectContaining({ method: 'POST', body: '{}' }),
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+        redirect: 'manual',
+        signal: expect.any(AbortSignal),
+      }),
     );
   });
 

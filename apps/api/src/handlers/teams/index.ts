@@ -32,12 +32,15 @@ import {
 import { Env } from '@roomote/env';
 import {
   and,
+  asc,
   authAccounts,
   authUsers,
   db,
   environments,
   eq,
+  isNull,
   microsoftAuthUserMappings,
+  resolveDeploymentEnvVar,
   resolveTeamsBotRuntimeCredentials,
   teamsInstallations,
   teamsUserMappings,
@@ -53,6 +56,7 @@ import {
   type QueuedCommunicationMessage,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
+  isRoomoteCloudEnabled,
 } from '@roomote/types';
 import {
   buildTeamsRoutingContext,
@@ -63,6 +67,7 @@ import {
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
+import { verifyRoomoteCloudDelivery } from '../cloud-delivery.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import { verifyBotFrameworkJwt } from './bot-framework-auth.js';
 import {
@@ -156,6 +161,50 @@ async function verifyTeamsWebhookAuthorization(input: {
       error: 'teams_webhook_unauthorized',
     };
   }
+}
+
+async function verifyCloudTeamsRequest(input: {
+  headers: Record<string, string>;
+  rawBody: string;
+  expectedEvent?: string;
+}): Promise<
+  { ok: true } | { ok: false; status: 400 | 401 | 503; error: string }
+> {
+  const id = input.headers['x-roomote-cloud-delivery'];
+  const event = input.headers['x-roomote-cloud-event'];
+  const timestamp = input.headers['x-roomote-cloud-timestamp'];
+  const signature = input.headers['x-roomote-cloud-signature'];
+  if (
+    input.headers['x-roomote-cloud-provider'] !== 'teams' ||
+    !id ||
+    !event ||
+    !timestamp ||
+    !signature ||
+    (input.expectedEvent && event !== input.expectedEvent)
+  )
+    return { ok: false, status: 400, error: 'missing_headers' };
+  const secret = await resolveDeploymentEnvVar(
+    'ROOMOTE_CLOUD_INTEGRATION_SECRET',
+  );
+  if (!secret)
+    return {
+      ok: false,
+      status: 503,
+      error: 'cloud_integration_not_configured',
+    };
+  if (
+    !verifyRoomoteCloudDelivery({
+      deliveryId: id,
+      provider: 'teams',
+      eventName: event,
+      payload: input.rawBody,
+      secret,
+      signature,
+      timestamp,
+    })
+  )
+    return { ok: false, status: 401, error: 'invalid_signature' };
+  return { ok: true };
 }
 
 async function claimTeamsActivity(activityId: string): Promise<boolean> {
@@ -344,6 +393,42 @@ async function persistTeamsInstallationFromActivity(
         updatedAt: now,
       },
     });
+}
+
+async function mapRoomoteCloudTeamsInstaller(
+  activity: TeamsActivity,
+): Promise<string> {
+  const tenantId = getTeamsActivityTenantId(activity);
+  const teamsUserId = cleanOptionalString(activity.from?.id);
+  if (!tenantId || !teamsUserId)
+    throw new Error('Teams setup activity is missing its tenant or sender.');
+  const admin = await db.query.users.findFirst({
+    where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
+    orderBy: [asc(users.createdAt)],
+  });
+  if (!admin)
+    throw new Error(
+      'A Roomote administrator must sign in before Teams can be connected.',
+    );
+  const now = new Date();
+  await db
+    .insert(teamsUserMappings)
+    .values({
+      teamsUserId,
+      teamsTenantId: tenantId,
+      teamsAadObjectId: cleanOptionalString(activity.from?.aadObjectId),
+      userId: admin.id,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [teamsUserMappings.teamsUserId, teamsUserMappings.teamsTenantId],
+      set: {
+        teamsAadObjectId: cleanOptionalString(activity.from?.aadObjectId),
+        userId: admin.id,
+        updatedAt: now,
+      },
+    });
+  return admin.id;
 }
 
 function decodeJwtPayload(token: string | null | undefined) {
@@ -1485,6 +1570,11 @@ async function resumePendingTeamsAuthToken(
 }
 
 export const teams = new Hono();
+const CLOUD_TEAMS_PATH = '/api/webhooks/cloud/teams';
+
+function isCloudTeamsPath(path: string): boolean {
+  return path === CLOUD_TEAMS_PATH || path.startsWith(`${CLOUD_TEAMS_PATH}/`);
+}
 
 teams.post('/auth/resume', async (c) => {
   let rawBody: unknown;
@@ -1526,11 +1616,60 @@ teams.post('/auth/resume', async (c) => {
   return c.json(result, { status });
 });
 
+teams.post('/setup', async (c) => {
+  if (!isCloudTeamsPath(c.req.path) || !isRoomoteCloudEnabled(process.env))
+    return c.notFound();
+  const rawBody = await c.req.text();
+  const verification = await verifyCloudTeamsRequest({
+    headers: c.req.header(),
+    rawBody,
+    expectedEvent: 'installation.setup',
+  });
+  if (!verification.ok)
+    return c.json(
+      { ok: false, error: verification.error },
+      { status: verification.status },
+    );
+  let value: unknown;
+  try {
+    value = JSON.parse(rawBody) as unknown;
+  } catch {
+    return c.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
+  const parsed = parseTeamsActivity(value);
+  if (!parsed.success)
+    return c.json(
+      { ok: false, error: 'invalid_teams_activity' },
+      { status: 400 },
+    );
+  try {
+    await persistTeamsInstallationFromActivity(parsed.data);
+    const userId = await mapRoomoteCloudTeamsInstaller(parsed.data);
+    return c.json({
+      tenantId: getTeamsActivityTenantId(parsed.data),
+      userId,
+      synchronized: true,
+    });
+  } catch (error) {
+    apiLogger.warn(
+      `[teams] Managed installation setup is pending: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return c.json(
+      { ok: false, error: 'installation_sync_pending' },
+      { status: 409 },
+    );
+  }
+});
+
 teams.post('/', async (c) => {
   let rawBody: unknown;
+  let rawBodyText: string;
 
   try {
-    rawBody = await c.req.json();
+    rawBodyText = await c.req.text();
+    rawBody = JSON.parse(rawBodyText) as unknown;
   } catch {
     return c.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
@@ -1545,20 +1684,33 @@ teams.post('/', async (c) => {
   }
 
   const activity = parsed.data;
-  const verificationError = await verifyTeamsWebhookAuthorization({
-    authorizationHeader: c.req.header('authorization'),
-    activity,
-  });
+  if (isCloudTeamsPath(c.req.path)) {
+    if (!isRoomoteCloudEnabled(process.env)) return c.notFound();
+    const verification = await verifyCloudTeamsRequest({
+      headers: c.req.header(),
+      rawBody: rawBodyText,
+    });
+    if (!verification.ok)
+      return c.json(
+        { ok: false, error: verification.error },
+        { status: verification.status },
+      );
+  } else {
+    const verificationError = await verifyTeamsWebhookAuthorization({
+      authorizationHeader: c.req.header('authorization'),
+      activity,
+    });
 
-  if (verificationError) {
-    apiLogger.warn(
-      `[teams] Rejected Teams webhook: ${verificationError.error}`,
-    );
+    if (verificationError) {
+      apiLogger.warn(
+        `[teams] Rejected Teams webhook: ${verificationError.error}`,
+      );
 
-    return c.json(
-      { ok: false, error: verificationError.error },
-      { status: verificationError.status },
-    );
+      return c.json(
+        { ok: false, error: verificationError.error },
+        { status: verificationError.status },
+      );
+    }
   }
 
   const { botAppId } = await resolveTeamsBotRuntimeCredentials();

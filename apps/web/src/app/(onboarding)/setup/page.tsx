@@ -204,6 +204,20 @@ export default function SetupPage() {
       },
     }),
   );
+  const saveAuthProviderChoice = useMutation(
+    trpc.setupNew.saveAuthProviderChoice.mutationOptions({
+      onSuccess: async () => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        setPendingAuthProvider(null);
+        goToStep('slack');
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
   const saveComputeProviderChoice = useMutation(
     trpc.setupNew.saveComputeProviderChoice.mutationOptions({
       onSuccess: async (_data, variables) => {
@@ -444,7 +458,13 @@ export default function SetupPage() {
             )}
             {bootstrapStep === 'email-password' && (
               <StepBootstrapEmailPassword
-                onBack={() => setBootstrapStepWithTransition('email-account')}
+                onBack={() =>
+                  setBootstrapStepWithTransition(
+                    bootstrapStatus.authSetup.managedConnection
+                      ? 'welcome'
+                      : 'email-account',
+                  )
+                }
               />
             )}
             {bootstrapStep === 'auth-provider' && (
@@ -529,9 +549,19 @@ export default function SetupPage() {
             <StepAuthProvider
               includeTelegram
               onContinue={(provider) => {
+                if (
+                  provider !== 'telegram' &&
+                  status.authSetup.managedConnection?.providers.includes(
+                    provider,
+                  )
+                ) {
+                  saveAuthProviderChoice.mutate({ provider });
+                  return;
+                }
                 setPendingAuthProvider(provider);
                 goToStep('auth-env-vars');
               }}
+              disabled={saveAuthProviderChoice.isPending}
               onSkip={() => {
                 setupSession.setCommunicationStepState('skipped');
                 goToNextStep();

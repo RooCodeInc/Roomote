@@ -63,6 +63,9 @@ describe('Roomote Cloud runtime', () => {
       portUrls: { '4200': 'https://sandbox.example' },
     });
     const request = fetchFn.mock.calls[0];
+    expect(request?.[1]).toEqual(
+      expect.objectContaining({ redirect: 'manual' }),
+    );
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({
       activeSeatCount: 3,
       environment: {
@@ -90,6 +93,7 @@ describe('Roomote Cloud runtime', () => {
       'https://cloud.example/runtime/v1/compute/leases/lease-1/stop',
       expect.objectContaining({
         method: 'POST',
+        redirect: 'manual',
         headers: expect.objectContaining({
           authorization: 'Bearer deployment-token',
         }),

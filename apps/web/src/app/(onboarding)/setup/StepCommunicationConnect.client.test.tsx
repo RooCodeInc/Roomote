@@ -8,8 +8,20 @@ import type {
 import { fireEvent, render, screen } from '@testing-library/react';
 import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
-const { connectSlackMutateMock, teamsStatusState } = vi.hoisted(() => ({
+const {
+  connectSlackMutateMock,
+  slackInstallationState,
+  slackInstallationOptionsMock,
+  teamsStatusState,
+  teamsStatusOptionsMock,
+} = vi.hoisted(() => ({
   connectSlackMutateMock: vi.fn(),
+  slackInstallationState: {
+    data: null as unknown,
+    isPending: false,
+    isError: false,
+  },
+  slackInstallationOptionsMock: vi.fn(),
   teamsStatusState: {
     data: {
       botConfigured: true,
@@ -27,6 +39,7 @@ const { connectSlackMutateMock, teamsStatusState } = vi.hoisted(() => ({
     isPending: false,
     isError: false,
   },
+  teamsStatusOptionsMock: vi.fn(),
 }));
 
 vi.mock('@/hooks/slack', () => ({
@@ -34,10 +47,17 @@ vi.mock('@/hooks/slack', () => ({
     mutate: connectSlackMutateMock,
     isPending: false,
   }),
+  useSlackInstallation: (options: unknown) => {
+    slackInstallationOptionsMock(options);
+    return slackInstallationState;
+  },
 }));
 
 vi.mock('@/hooks/teams', () => ({
-  useTeamsIntegrationStatus: () => teamsStatusState,
+  useTeamsIntegrationStatus: (options: unknown) => {
+    teamsStatusOptionsMock(options);
+    return teamsStatusState;
+  },
 }));
 
 vi.mock('sonner', () => ({
@@ -110,6 +130,7 @@ function buildAuthSetup(provider: SetupAuthProviderId): SetupAuthStatus {
     runtimeConfiguredProviders: [provider],
     lockReason: 'runtime_env',
     setupSatisfiedByRuntimeEnv: true,
+    managedConnection: null,
     providers: [
       {
         id: provider,
@@ -120,6 +141,19 @@ function buildAuthSetup(provider: SetupAuthProviderId): SetupAuthStatus {
         setupSatisfied: true,
       },
     ],
+  };
+}
+
+function buildManagedAuthSetup(
+  provider: 'slack' | 'microsoft',
+): SetupAuthStatus {
+  return {
+    ...buildAuthSetup(provider),
+    managedConnection: {
+      cloudUrl: 'https://cloud.example/account',
+      deploymentId: 'deployment-1',
+      providers: [provider],
+    },
   };
 }
 
@@ -139,6 +173,9 @@ describe('StepCommunicationConnect', () => {
     };
     teamsStatusState.isPending = false;
     teamsStatusState.isError = false;
+    slackInstallationState.data = null;
+    slackInstallationState.isPending = false;
+    slackInstallationState.isError = false;
   });
 
   it('renders the Slack OAuth CTA for Slack', () => {
@@ -292,5 +329,70 @@ describe('StepCommunicationConnect', () => {
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Do this later' }));
     expect(onSkip).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens Cloud for a managed Slack connection and polls until it is ready', () => {
+    render(
+      <StepCommunicationConnect
+        authSetup={buildManagedAuthSetup('slack')}
+        onContinue={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Roomote Cloud provides the app for this deployment/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Open Roomote Cloud/i }),
+    ).toHaveAttribute(
+      'href',
+      'https://cloud.example/account?connect=slack&deployment=deployment-1',
+    );
+    expect(screen.getByRole('button', { name: /Continue/i })).toBeDisabled();
+    expect(slackInstallationOptionsMock).toHaveBeenCalledWith({
+      enabled: true,
+      refetchInterval: 2_000,
+    });
+    expect(connectSlackMutateMock).not.toHaveBeenCalled();
+  });
+
+  it('continues after a managed Slack installation reaches the tenant', () => {
+    const onContinue = vi.fn();
+    slackInstallationState.data = { teamId: 'team-1' };
+
+    render(
+      <StepCommunicationConnect
+        authSetup={buildManagedAuthSetup('slack')}
+        onContinue={onContinue}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Slack connected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Continue/i }));
+    expect(onContinue).toHaveBeenCalledOnce();
+  });
+
+  it('uses the managed Teams Cloud flow and polls tenant readiness', () => {
+    render(
+      <StepCommunicationConnect
+        authSetup={buildManagedAuthSetup('microsoft')}
+        onContinue={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Microsoft Teams connected')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /Open Roomote Cloud/i }),
+    ).toHaveAttribute(
+      'href',
+      'https://cloud.example/account?connect=teams&deployment=deployment-1',
+    );
+    expect(teamsStatusOptionsMock).toHaveBeenCalledWith({
+      enabled: true,
+      refetchInterval: 2_000,
+    });
   });
 });

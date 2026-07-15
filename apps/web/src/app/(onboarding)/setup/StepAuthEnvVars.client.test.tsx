@@ -181,6 +181,7 @@ function buildAuthSetup(
     runtimeConfiguredProvider: null,
     runtimeConfiguredProviders: [],
     lockReason: null,
+    managedConnection: null,
     providers: [
       {
         id: 'slack',

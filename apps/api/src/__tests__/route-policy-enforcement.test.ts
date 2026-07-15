@@ -238,6 +238,22 @@ describe('route policy enforcement', () => {
   });
 
   describe('webhook routes', () => {
+    it('rejects oversized Roomote Cloud webhook deliveries before routing', async () => {
+      const response = await createApiApp().request(
+        'http://localhost/api/webhooks/cloud/github',
+        {
+          method: 'POST',
+          body: 'x'.repeat(2 * 1024 * 1024 + 1),
+          headers: { 'content-type': 'application/json' },
+        },
+      );
+
+      expect(response.status).toBe(413);
+      await expect(response.json()).resolves.toEqual({
+        error: 'request_body_too_large',
+      });
+    });
+
     it('lets webhook deliveries through to handler-level verification', async () => {
       const response = await createApiApp().request(
         'http://localhost/api/webhooks/linear',

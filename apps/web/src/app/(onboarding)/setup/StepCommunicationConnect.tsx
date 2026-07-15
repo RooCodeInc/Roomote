@@ -3,7 +3,7 @@
 import type { SetupAuthStatus } from '@roomote/types';
 import { toast } from 'sonner';
 
-import { useConnectSlack } from '@/hooks/slack';
+import { useConnectSlack, useSlackInstallation } from '@/hooks/slack';
 import { useTeamsIntegrationStatus } from '@/hooks/teams';
 import { TaskStatusIndicator } from '@/components/sandbox';
 import {
@@ -28,6 +28,16 @@ function getCommunicationProvider(authSetup: SetupAuthStatus) {
   );
 }
 
+function getManagedConnectionUrl(
+  connection: NonNullable<SetupAuthStatus['managedConnection']>,
+  provider: 'slack' | 'microsoft',
+) {
+  const url = new URL(connection.cloudUrl);
+  url.searchParams.set('connect', provider === 'slack' ? 'slack' : 'teams');
+  url.searchParams.set('deployment', connection.deploymentId);
+  return url.toString();
+}
+
 export function StepCommunicationConnect({
   authSetup,
   onContinue,
@@ -42,13 +52,25 @@ export function StepCommunicationConnect({
   returnPath?: string;
 }) {
   const provider = getCommunicationProvider(authSetup);
+  const managedConnection = authSetup.managedConnection;
+  const managedProvider = Boolean(
+    provider && managedConnection?.providers.includes(provider),
+  );
   const connectSlack = useConnectSlack(returnPath, {
     onSuccess: (url) => {
       window.location.href = url;
     },
     onError: () => toast.error('Failed to connect Slack. Please try again.'),
   });
-  const teamsIntegrationStatus = useTeamsIntegrationStatus();
+  const teamsIntegrationStatus = useTeamsIntegrationStatus({
+    enabled: provider === 'microsoft',
+    refetchInterval:
+      managedProvider && provider === 'microsoft' ? 2_000 : false,
+  });
+  const slackInstallation = useSlackInstallation({
+    enabled: managedProvider && provider === 'slack',
+    refetchInterval: managedProvider && provider === 'slack' ? 2_000 : false,
+  });
   const skipLink = (
     <button
       type="button"
@@ -58,6 +80,70 @@ export function StepCommunicationConnect({
       Do this later
     </button>
   );
+  if (
+    managedProvider &&
+    managedConnection &&
+    (provider === 'slack' || provider === 'microsoft')
+  ) {
+    const connected =
+      provider === 'slack'
+        ? Boolean(slackInstallation.data)
+        : Boolean(teamsIntegrationStatus.data?.primaryConversationReady);
+    const pending =
+      provider === 'slack'
+        ? slackInstallation.isPending
+        : teamsIntegrationStatus.isPending;
+    const label = provider === 'slack' ? 'Slack' : 'Microsoft Teams';
+    const connectUrl = getManagedConnectionUrl(managedConnection, provider);
+
+    return (
+      <div className="relative w-full max-w-xl space-y-6 py-2 md:py-0">
+        <StepTitle text={`Connect ${label}`} />
+        <p className="text-foreground">
+          Roomote Cloud provides the app for this deployment. Open Cloud to
+          authorize your workspace—there are no app credentials to create or
+          paste here.
+        </p>
+        <div>
+          <div className="flex items-center gap-2 font-semibold">
+            {pending ? (
+              <Spinner />
+            ) : (
+              <TaskStatusIndicator
+                phase={connected ? 'waiting_for_prompt' : 'stopped'}
+                compact={true}
+              />
+            )}
+            <span>
+              {connected ? `${label} connected` : 'Waiting for connection'}
+            </span>
+          </div>
+          <p className="pl-4 text-sm text-muted-foreground">
+            Keep this page open; it will notice the connection automatically.
+          </p>
+        </div>
+        <SetupFooter onBack={onBack}>
+          <Button asChild variant="outline">
+            <a href={connectUrl} target="_blank" rel="noopener noreferrer">
+              <BrandIcon icon={provider} name="" className="size-4 shrink-0" />
+              Open Roomote Cloud
+              <ExternalLink className="size-4 shrink-0" />
+            </a>
+          </Button>
+          <Button
+            type="button"
+            className="w-full sm:w-auto"
+            onClick={onContinue}
+            disabled={!connected}
+          >
+            Continue
+            <ArrowRight />
+          </Button>
+          {skipLink}
+        </SetupFooter>
+      </div>
+    );
+  }
   if (provider === 'microsoft') {
     const teamsStatus = teamsIntegrationStatus.data;
     const openInTeamsUrl = teamsStatus?.openInTeamsUrl ?? null;

@@ -352,9 +352,11 @@ describe('setup bootstrap token gating', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockResolveDeploymentEnvVar.mockResolvedValue(null);
     mockSetupTokenState.requiredToken = 'expected-setup-token';
     mockSetupTokenState.inviteCookieToken = null;
     mockGetSetupBootstrapState.mockResolvedValue({ setupOpen: true });
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'false');
 
     mockDbTransaction.mockImplementation(async (callback) => {
       const tx = {
@@ -377,6 +379,7 @@ describe('setup bootstrap token gating', () => {
   afterEach(() => {
     mockSetupTokenState.requiredToken = undefined;
     mockSetupTokenState.inviteCookieToken = null;
+    vi.unstubAllEnvs();
   });
 
   it('redacts bootstrap status without a valid setup token', async () => {
@@ -406,6 +409,35 @@ describe('setup bootstrap token gating', () => {
 
     expect(status.setupTokenRequired).toBe(true);
     expect(status.setupTokenSatisfied).toBe(true);
+  });
+
+  it('exposes shared Cloud communication apps during founding-admin bootstrap', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', '1');
+    mockResolveDeploymentEnvVar.mockImplementation(async (name: string) => {
+      const values: Record<string, string> = {
+        ROOMOTE_CLOUD_URL: 'https://cloud.example/path?ignored=true',
+        ROOMOTE_CLOUD_DEPLOYMENT_ID: 'deployment-1',
+        ROOMOTE_CLOUD_SHARED_SLACK_ENABLED: 'true',
+        ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED: '1',
+      };
+      return values[name] ?? null;
+    });
+    mockTxSelect.mockReset();
+    mockTxSelect.mockReturnValueOnce(
+      createSelectChain([{ setupNewState: {} }]),
+    );
+
+    const status = await getSetupBootstrapStatusCommand({
+      setupToken: 'expected-setup-token',
+    });
+
+    expect(status.authSetup?.managedConnection).toEqual({
+      cloudUrl: 'https://cloud.example/path',
+      deploymentId: 'deployment-1',
+      providers: ['slack', 'microsoft'],
+    });
+    expect(status.authSetup?.preselectedProvider).toBe('slack');
+    expect(status.authSetup?.runtimeConfiguredProvider).toBeNull();
   });
 
   it('redacts bootstrap status when the invite cookie holds the wrong token', async () => {

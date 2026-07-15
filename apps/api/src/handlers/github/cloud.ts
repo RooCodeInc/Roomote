@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 
 import { Hono } from 'hono';
 import { z } from 'zod';
@@ -8,52 +8,11 @@ import { completeRoomoteCloudGitHubInstallation } from '@roomote/github';
 import { isRoomoteCloudEnabled } from '@roomote/types';
 
 import { logApiError } from '../../logging';
+import { verifyRoomoteCloudDelivery } from '../cloud-delivery';
 import { processGitHubDelivery } from './index';
 
-const CLOUD_SIGNATURE_PREFIX = 'v1=';
 const GITHUB_SIGNATURE_PREFIX = 'sha256=';
-const MAX_DELIVERY_AGE_SECONDS = 5 * 60;
-
-function secureEqual(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left);
-  const rightBytes = Buffer.from(right);
-
-  return (
-    leftBytes.length === rightBytes.length &&
-    timingSafeEqual(leftBytes, rightBytes)
-  );
-}
-
-export function verifyRoomoteCloudDelivery(input: {
-  deliveryId: string;
-  payload: string;
-  secret: string;
-  signature: string;
-  timestamp: string;
-  nowSeconds?: number;
-}): boolean {
-  if (!/^\d+$/u.test(input.timestamp)) {
-    return false;
-  }
-
-  const timestamp = Number(input.timestamp);
-  const nowSeconds = input.nowSeconds ?? Math.floor(Date.now() / 1000);
-  if (
-    !Number.isSafeInteger(timestamp) ||
-    Math.abs(nowSeconds - timestamp) > MAX_DELIVERY_AGE_SECONDS
-  ) {
-    return false;
-  }
-
-  const expected = `${CLOUD_SIGNATURE_PREFIX}${createHmac(
-    'sha256',
-    input.secret,
-  )
-    .update(`${input.timestamp}.${input.deliveryId}.${input.payload}`)
-    .digest('hex')}`;
-
-  return secureEqual(input.signature, expected);
-}
+export { verifyRoomoteCloudDelivery } from '../cloud-delivery';
 
 function signAsGitHubDelivery(payload: string, secret: string): string {
   return `${GITHUB_SIGNATURE_PREFIX}${createHmac('sha256', secret)
@@ -99,6 +58,8 @@ cloudGitHub.post('/', async (c) => {
     if (
       !verifyRoomoteCloudDelivery({
         deliveryId: id,
+        provider,
+        eventName: name,
         payload,
         secret,
         signature,
@@ -156,6 +117,8 @@ cloudGitHub.post('/setup', async (c) => {
   if (
     !verifyRoomoteCloudDelivery({
       deliveryId: id,
+      provider,
+      eventName: name,
       payload,
       secret,
       signature,

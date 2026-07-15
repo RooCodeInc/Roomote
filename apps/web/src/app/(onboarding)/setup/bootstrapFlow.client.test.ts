@@ -20,6 +20,7 @@ function buildAuthSetup(
     providers: [],
     setupSatisfiedByRuntimeEnv: false,
     ...overrides,
+    managedConnection: overrides.managedConnection ?? null,
   };
 }
 
@@ -63,6 +64,19 @@ describe('bootstrapFlow', () => {
     expect(getBootstrapStepAfterWelcome(authSetup)).toBe('email-account');
     expect(shouldSkipBootstrapAccountStep(authSetup)).toBe(false);
     expect(getBootstrapAuthProvider(authSetup, null)).toBeNull();
+  });
+
+  it('creates the founding Cloud admin with email/password before connecting shared apps', () => {
+    const authSetup = buildAuthSetup({
+      managedConnection: {
+        cloudUrl: 'https://cloud.example',
+        deploymentId: 'deployment-1',
+        providers: ['slack', 'microsoft'],
+      },
+    });
+
+    expect(getBootstrapStepAfterWelcome(authSetup)).toBe('email-password');
+    expect(shouldSkipBootstrapAccountStep(authSetup)).toBe(false);
   });
 
   it('skips the chooser when a provider is pending from the account step', () => {

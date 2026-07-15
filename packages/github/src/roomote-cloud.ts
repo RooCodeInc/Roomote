@@ -39,10 +39,6 @@ export async function resolveRoomoteCloudRuntimeConfig(): Promise<RoomoteCloudRu
     return null;
   }
 
-  if (!baseUrl && !deploymentToken) {
-    return null;
-  }
-
   if (!baseUrl || !deploymentToken) {
     throw new Error(
       'ROOMOTE_CLOUD_URL and ROOMOTE_CLOUD_DEPLOYMENT_TOKEN must be configured together.',
@@ -77,6 +73,7 @@ export async function createRoomoteCloudGitHubToken(input: {
         ? { repositoryIds: input.repositoryIds }
         : {}),
     }),
+    redirect: 'manual',
     signal: AbortSignal.timeout(15_000),
   });
 

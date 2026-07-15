@@ -70,6 +70,7 @@ export async function launchRoomoteCloudCompute(
         'content-type': 'application/json',
       },
       body: JSON.stringify(input),
+      redirect: 'manual',
       signal: AbortSignal.timeout(180_000),
     },
   );
@@ -105,6 +106,7 @@ export async function stopRoomoteCloudCompute(
         'content-type': 'application/json',
       },
       body: '{}',
+      redirect: 'manual',
       signal: AbortSignal.timeout(30_000),
     },
   );

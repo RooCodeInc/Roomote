@@ -4,6 +4,7 @@ import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { basicAuth } from 'hono/basic-auth';
+import { bodyLimit } from 'hono/body-limit';
 import { showRoutes } from 'hono/dev';
 import { HTTPException } from 'hono/http-exception';
 import { createAdaptorServer, type ServerType } from '@hono/node-server';
@@ -141,6 +142,13 @@ export function createApiApp(): ApiApp {
   // app.use(logger());
 
   app.use('*', requestObservabilityMiddleware);
+  app.use(
+    '/api/webhooks/cloud/*',
+    bodyLimit({
+      maxSize: 2 * 1024 * 1024,
+      onError: (c) => c.json({ error: 'request_body_too_large' }, 413),
+    }),
+  );
 
   const corsOptions = {
     origin: resolveApiCorsOrigin,
@@ -183,6 +191,8 @@ export function createApiApp(): ApiApp {
 
   app.route('/api/webhooks/github', github);
   app.route('/api/webhooks/cloud/github', cloudGitHub);
+  app.route('/api/webhooks/cloud/slack', slack);
+  app.route('/api/webhooks/cloud/teams', teams);
   app.route('/api/webhooks/gitlab', gitlab);
   app.route('/api/webhooks/gitea', gitea);
   app.route('/api/webhooks/bitbucket', bitbucket);

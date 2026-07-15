@@ -154,10 +154,16 @@ describe('Env', () => {
     const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       ROOMOTE_CLOUD_ENABLED: '1',
+      ROOMOTE_CLOUD_SHARED_SLACK_ENABLED: 'true',
+      ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED: '0',
     };
     delete runtimeEnv.SKIP_ENV_VALIDATION;
 
-    expect(createRoomoteEnv(runtimeEnv).ROOMOTE_CLOUD_ENABLED).toBe(true);
+    expect(createRoomoteEnv(runtimeEnv)).toMatchObject({
+      ROOMOTE_CLOUD_ENABLED: true,
+      ROOMOTE_CLOUD_SHARED_SLACK_ENABLED: true,
+      ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED: false,
+    });
   });
 
   it('allows the Modal VM memory allocation to be overridden', () => {

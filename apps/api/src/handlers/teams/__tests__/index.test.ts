@@ -1,5 +1,7 @@
+import { createHmac } from 'node:crypto';
+
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   authAccountsFindFirstMock,
@@ -24,6 +26,7 @@ const {
   redisGetMock,
   queueCommunicationMessageMock,
   redisSetMock,
+  resolveDeploymentEnvVarMock,
   routeTaskMock,
   setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
@@ -70,6 +73,7 @@ const {
   redisGetMock: vi.fn(),
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
+  resolveDeploymentEnvVarMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
@@ -102,6 +106,8 @@ vi.mock('@roomote/redis', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ and: conditions })),
+  asc: vi.fn((column: unknown) => ({ asc: column })),
+  resolveDeploymentEnvVar: resolveDeploymentEnvVarMock,
   setTrustedRunActingUser: setTrustedRunActingUserMock,
   resolveTeamsBotRuntimeCredentials: vi.fn(async () => ({
     botAppId: envMock.R_TEAMS_BOT_APP_ID?.trim() || null,
@@ -266,6 +272,7 @@ function createApp() {
   const app = new Hono();
 
   app.route('/teams', teams);
+  app.route('/api/webhooks/cloud/teams', teams);
 
   return app;
 }
@@ -350,6 +357,7 @@ describe('Teams webhook handler', () => {
     redisEvalMock.mockResolvedValue(null);
     redisGetMock.mockResolvedValue(null);
     redisSetMock.mockResolvedValue('OK');
+    resolveDeploymentEnvVarMock.mockResolvedValue(null);
     insertMock.mockReturnValue({ values: insertValuesMock });
     insertValuesMock.mockReturnValue({
       onConflictDoNothing: insertOnConflictDoNothingMock,
@@ -373,6 +381,10 @@ describe('Teams webhook handler', () => {
         value: await options.onAcquired(),
       }),
     );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('rejects Teams webhooks without a valid Bot Framework JWT', async () => {
@@ -452,6 +464,153 @@ describe('Teams webhook handler', () => {
       runId: 77,
       userId: 'mapped-user-1',
     });
+  });
+
+  it('accepts signed Roomote Cloud activities without trusting a tenant Bot Framework JWT', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'true');
+    const secret = 'tenant-integration-secret';
+    resolveDeploymentEnvVarMock.mockResolvedValue(secret);
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    const payload = JSON.stringify(
+      createTeamsActivity({
+        serviceUrl: 'https://cloud.example/runtime/v1/integrations/teams/proxy',
+      }),
+    );
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const deliveryId = 'teams-delivery-1';
+    const eventName = 'message';
+    const signature = `v2=${createHmac('sha256', secret)
+      .update(`${timestamp}.${deliveryId}.teams.${eventName}.${payload}`)
+      .digest('hex')}`;
+
+    const response = await createApp().request('/api/webhooks/cloud/teams', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-roomote-cloud-delivery': deliveryId,
+        'x-roomote-cloud-event': eventName,
+        'x-roomote-cloud-provider': 'teams',
+        'x-roomote-cloud-signature': signature,
+        'x-roomote-cloud-timestamp': timestamp,
+      },
+      body: payload,
+    });
+
+    expect(response.status).toBe(200);
+    expect(verifyBotFrameworkJwtMock).not.toHaveBeenCalled();
+    expect(resolveDeploymentEnvVarMock).toHaveBeenCalledWith(
+      'ROOMOTE_CLOUD_INTEGRATION_SECRET',
+    );
+    expect(insertValuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        serviceUrl: 'https://cloud.example/runtime/v1/integrations/teams/proxy',
+      }),
+    );
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      expect.objectContaining({ ts: 'activity-2' }),
+    );
+  });
+
+  it('does not accept Cloud authentication on the direct Teams route', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'true');
+    const secret = 'tenant-integration-secret';
+    resolveDeploymentEnvVarMock.mockResolvedValue(secret);
+    verifyBotFrameworkJwtMock.mockRejectedValueOnce(new Error('missing JWT'));
+    const payload = JSON.stringify(createTeamsActivity());
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const deliveryId = 'teams-delivery-direct';
+    const eventName = 'message';
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-roomote-cloud-delivery': deliveryId,
+        'x-roomote-cloud-event': eventName,
+        'x-roomote-cloud-provider': 'teams',
+        'x-roomote-cloud-signature': `v2=${createHmac('sha256', secret)
+          .update(`${timestamp}.${deliveryId}.teams.${eventName}.${payload}`)
+          .digest('hex')}`,
+        'x-roomote-cloud-timestamp': timestamp,
+      },
+      body: payload,
+    });
+
+    expect(response.status).toBe(401);
+    expect(verifyBotFrameworkJwtMock).toHaveBeenCalledOnce();
+    expect(resolveDeploymentEnvVarMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fall back to Bot Framework authentication on the Cloud route', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'true');
+    const response = await createApp().request('/api/webhooks/cloud/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-provider-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(createTeamsActivity()),
+    });
+
+    expect(response.status).toBe(400);
+    expect(verifyBotFrameworkJwtMock).not.toHaveBeenCalled();
+  });
+
+  it('persists a signed managed Teams setup for the founding admin', async () => {
+    vi.stubEnv('ROOMOTE_CLOUD_ENABLED', 'true');
+    const secret = 'tenant-integration-secret';
+    resolveDeploymentEnvVarMock.mockResolvedValue(secret);
+    usersFindFirstMock.mockResolvedValueOnce({ id: 'admin-user-1' });
+    const payload = JSON.stringify(createTeamsActivity());
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const deliveryId = 'teams-setup-1';
+    const eventName = 'installation.setup';
+
+    const response = await createApp().request(
+      '/api/webhooks/cloud/teams/setup',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-roomote-cloud-delivery': deliveryId,
+          'x-roomote-cloud-event': eventName,
+          'x-roomote-cloud-provider': 'teams',
+          'x-roomote-cloud-signature': `v2=${createHmac('sha256', secret)
+            .update(`${timestamp}.${deliveryId}.teams.${eventName}.${payload}`)
+            .digest('hex')}`,
+          'x-roomote-cloud-timestamp': timestamp,
+        },
+        body: payload,
+      },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      tenantId: 'tenant-1',
+      userId: 'admin-user-1',
+      synchronized: true,
+    });
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        conversationId: '19:conversation@thread.v2',
+        isActive: true,
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        teamsUserId: '29:user',
+        teamsTenantId: 'tenant-1',
+        userId: 'admin-user-1',
+      }),
+    );
+    expect(verifyBotFrameworkJwtMock).not.toHaveBeenCalled();
   });
 
   it('queues untagged Teams thread replies for matching active task runs using the root thread id', async () => {

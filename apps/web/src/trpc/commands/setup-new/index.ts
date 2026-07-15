@@ -81,6 +81,7 @@ import {
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
+  type SetupAuthStatus,
   type SetupComputeStatus,
   type SetupModelProviderId,
   type SetupProvisionableComputeProvider,
@@ -190,6 +191,44 @@ function normalizeManagedServiceUrl(value: string | null): string | null {
   } catch {
     return null;
   }
+}
+
+function isEnabledManagedServiceFlag(value: string | null): boolean {
+  const normalized = value?.trim().toLowerCase();
+  return normalized === 'true' || normalized === '1';
+}
+
+async function resolveRoomoteCloudSetupConfig(): Promise<{
+  cloudUrl: string | null;
+  managedConnection: SetupAuthStatus['managedConnection'];
+}> {
+  if (!isRoomoteCloudEnabled(process.env)) {
+    return { cloudUrl: null, managedConnection: null };
+  }
+
+  const [rawCloudUrl, rawDeploymentId, slackEnabled, teamsEnabled] =
+    await Promise.all([
+      resolveDeploymentEnvVar('ROOMOTE_CLOUD_URL'),
+      resolveDeploymentEnvVar('ROOMOTE_CLOUD_DEPLOYMENT_ID'),
+      resolveDeploymentEnvVar('ROOMOTE_CLOUD_SHARED_SLACK_ENABLED'),
+      resolveDeploymentEnvVar('ROOMOTE_CLOUD_SHARED_TEAMS_ENABLED'),
+    ]);
+  const cloudUrl = normalizeManagedServiceUrl(rawCloudUrl);
+  const deploymentId = rawDeploymentId?.trim() || null;
+  const providers: SetupAuthProviderId[] = [
+    ...(isEnabledManagedServiceFlag(slackEnabled) ? (['slack'] as const) : []),
+    ...(isEnabledManagedServiceFlag(teamsEnabled)
+      ? (['microsoft'] as const)
+      : []),
+  ];
+
+  return {
+    cloudUrl,
+    managedConnection:
+      cloudUrl && deploymentId && providers.length > 0
+        ? { cloudUrl, deploymentId, providers }
+        : null,
+  };
 }
 
 async function assertSetupBootstrapOpen() {
@@ -1366,12 +1405,6 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   const queuedOnboardingTasks = await getPersistedQueuedSetupTasks(
     setupNewState.onboardingTaskId,
   );
-  const authSetup = buildSetupAuthStatus({
-    runtimeEnv: process.env,
-    persistedEnvVarNames: envVarNames,
-    persistedEnvVarValues: nonSecretAuthEnvValues,
-    selectedProvider: setupNewState.authProvider,
-  });
   const modelSetup = buildSetupModelStatus({
     runtimeEnv: process.env,
     persistedModelConfig: persistedRuntimeModelConfig,
@@ -1402,12 +1435,19 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
   };
 
   const sourceControlConnection = await getSourceControlConnectionSummary();
-  const [gitlabBaseUrl, roomoteCloudUrl, roomoteCloudGitHubAppSlug] =
+  const [gitlabBaseUrl, roomoteCloudSetup, roomoteCloudGitHubAppSlug] =
     await Promise.all([
       resolveDeploymentEnvVar('GITLAB_BASE_URL'),
-      resolveDeploymentEnvVar('ROOMOTE_CLOUD_URL'),
+      resolveRoomoteCloudSetupConfig(),
       resolveDeploymentEnvVar('R_GITHUB_APP_SLUG'),
     ]);
+  const authSetup = buildSetupAuthStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretAuthEnvValues,
+    selectedProvider: setupNewState.authProvider,
+    managedConnection: roomoteCloudSetup.managedConnection,
+  });
   const sourceControlSetup = buildSetupSourceControlStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames: envVarNames,
@@ -1418,7 +1458,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     gitlabBaseUrl,
     managedGitHubConnectionUrl:
       isRoomoteCloudEnabled(process.env) && roomoteCloudGitHubAppSlug?.trim()
-        ? normalizeManagedServiceUrl(roomoteCloudUrl)
+        ? roomoteCloudSetup.cloudUrl
         : null,
   });
 
@@ -2182,12 +2222,17 @@ export async function getSetupBootstrapStatusCommand(input?: {
     };
   }
 
-  const [setupNewState, persistedEnvVarNames, nonSecretAuthEnvValues] =
-    await Promise.all([
-      getPersistedSetupNewState(),
-      getPersistedEnvironmentVariableNames(),
-      getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
-    ]);
+  const [
+    setupNewState,
+    persistedEnvVarNames,
+    nonSecretAuthEnvValues,
+    roomoteCloudSetup,
+  ] = await Promise.all([
+    getPersistedSetupNewState(),
+    getPersistedEnvironmentVariableNames(),
+    getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    resolveRoomoteCloudSetupConfig(),
+  ]);
 
   return {
     setupOpen: bootstrapState.setupOpen,
@@ -2198,6 +2243,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
       persistedEnvVarNames,
       persistedEnvVarValues: nonSecretAuthEnvValues,
       selectedProvider: setupNewState.authProvider,
+      managedConnection: roomoteCloudSetup.managedConnection,
     }),
   };
 }

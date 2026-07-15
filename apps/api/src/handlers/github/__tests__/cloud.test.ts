@@ -38,9 +38,12 @@ function cloudSignature(input: {
   payload: string;
   secret: string;
   timestamp: string;
+  eventName?: string;
 }): string {
-  return `v1=${createHmac('sha256', input.secret)
-    .update(`${input.timestamp}.${input.deliveryId}.${input.payload}`)
+  return `v2=${createHmac('sha256', input.secret)
+    .update(
+      `${input.timestamp}.${input.deliveryId}.github.${input.eventName ?? 'push'}.${input.payload}`,
+    )
     .digest('hex')}`;
 }
 
@@ -86,6 +89,8 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
     expect(
       verifyRoomoteCloudDelivery({
         deliveryId: 'delivery-1',
+        provider: 'github',
+        eventName: 'push',
         payload,
         secret,
         signature: cloudSignature({
@@ -112,6 +117,8 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
     expect(
       verifyRoomoteCloudDelivery({
         deliveryId: 'delivery-1',
+        provider: 'github',
+        eventName: 'push',
         payload: `${payload} `,
         secret,
         signature,
@@ -122,11 +129,25 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
     expect(
       verifyRoomoteCloudDelivery({
         deliveryId: 'delivery-1',
+        provider: 'github',
+        eventName: 'push',
         payload,
         secret,
         signature,
         timestamp,
         nowSeconds: 1301,
+      }),
+    ).toBe(false);
+    expect(
+      verifyRoomoteCloudDelivery({
+        deliveryId: 'delivery-1',
+        provider: 'github',
+        eventName: 'pull_request',
+        payload,
+        secret,
+        signature,
+        timestamp,
+        nowSeconds: 1000,
       }),
     ).toBe(false);
   });
@@ -185,7 +206,7 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
           'x-roomote-cloud-delivery': 'delivery-3',
           'x-roomote-cloud-event': 'push',
           'x-roomote-cloud-timestamp': Math.floor(Date.now() / 1000).toString(),
-          'x-roomote-cloud-signature': 'v1=bad',
+          'x-roomote-cloud-signature': 'v2=bad',
         },
         body: payload,
       },
@@ -222,6 +243,7 @@ describe('Roomote Cloud GitHub webhook ingress', () => {
             payload: setupPayload,
             secret,
             timestamp,
+            eventName: 'installation.setup',
           }),
         },
         body: setupPayload,
