@@ -71,12 +71,13 @@ export function StepAuthProvider({
           })}
         </div>
 
-        <SetupFooter onBack={onBack}>
+        <SetupFooter onBack={onBack} backDisabled={disabled}>
           {onSkip ? (
             <button
               type="button"
-              className="cursor-pointer text-sm text-muted-foreground underline"
+              className="cursor-pointer text-sm text-muted-foreground underline disabled:cursor-not-allowed disabled:opacity-50"
               onClick={onSkip}
+              disabled={disabled}
             >
               Do this later
             </button>
