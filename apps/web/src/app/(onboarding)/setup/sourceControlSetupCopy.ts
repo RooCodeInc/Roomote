@@ -29,7 +29,7 @@ const SOURCE_CONTROL_SETUP_COPY: Record<
       'In Gitea 1.23+, go to your org → Settings → Application → New OAuth2 app.',
   },
   bitbucket: {
-    setupLabel: 'Bitbucket OAuth consumer',
+    setupLabel: 'Bitbucket Cloud OAuth client',
   },
   ado: {
     creationHref: 'https://dev.azure.com/_usersSettings/tokens',

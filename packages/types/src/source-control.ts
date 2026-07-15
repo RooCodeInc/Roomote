@@ -92,7 +92,7 @@ export const sourceControlProviderDescriptors = {
   },
   bitbucket: {
     provider: 'bitbucket',
-    label: 'Bitbucket',
+    label: 'Bitbucket Cloud',
     defaultHost: 'bitbucket.org',
     tokenEnvVar: 'BITBUCKET_OAUTH',
     connectionMode: 'token',

@@ -57,7 +57,7 @@ function getTokenBackedConnectCopy({
     case 'gitea':
       return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
-      return 'Sync your Bitbucket repositories so Roomote can access your codebase.';
+      return 'Sync your Bitbucket Cloud repositories so Roomote can access your codebase.';
     case 'ado':
       return 'Sync your Azure DevOps repositories so Roomote can access your codebase.';
     default:
