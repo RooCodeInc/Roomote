@@ -189,16 +189,16 @@ You are executing a command to create a draft pull request with the current chan
       </step>
       <step number="8">
         <title>Offer automatic CI and review follow-up</title>
-        <description>After successful draft pull request delivery, ask once whether the user wants this agent to automatically address later CI failures or review feedback on those pull requests.</description>
+        <description>After successful draft pull request delivery, ask once with a lightweight conversational question whether the user wants this agent to automatically address later CI failures or review feedback on those pull requests.</description>
         <actions>
           <action>Run this step only when at least one draft pull request was successfully created or refreshed in this run. Skip it for no-op or fully blocked deliveries.</action>
-          <action>After the PR summary, ask the user whether they want the agent to automatically address CI failures or review feedback on the opened pull request(s). Do not start that follow-up work until they opt in.</action>
-          <action>Prefer a single structured `request_user_input` question with clear Yes/No choices when that tool is available. On Slack-backed runs where lightweight clarification should stay in-thread, the same Yes/No ask can use `send_chat_reply` with purpose `clarification` instead. Recommended default label: Yes, auto-address CI failures and review feedback.</action>
-          <action>Frame the option descriptions briefly: Yes means the agent stays responsible for fixing CI failures and review feedback on these PRs when they appear; No means delivery is complete and the user will ask later if they want follow-up.</action>
-          <action>If the user opts in, acknowledge that follow-up stays in this task, then when CI failures or review feedback appear later on these PRs, address them using the existing PR-fixer and CI-repair paths (`fix-pr`, `address-pr-feedback`, or equivalent CI failure investigation) instead of opening a new PR.</action>
+          <action>After the PR summary, ask once in plain language whether they want the agent to automatically address CI failures or review feedback on the opened pull request(s). Keep it short—one brief question, not a form or multi-part questionnaire. Do not start that follow-up work until they opt in.</action>
+          <action>Prefer a lightweight conversational ask in the normal closeout channel for the surface (for Slack, fold it into `send_chat_reply` with purpose `clarification` or the same closeout when that already carries the PR result). Example: "Want me to automatically address CI failures or review feedback on this PR if they come up?"</action>
+          <action>Do not use `request_user_input` for this ask. A single casual Yes/No is enough; structured input is too heavy for this follow-up offer.</action>
+          <action>If the user opts in, acknowledge briefly, then when CI failures or review feedback appear later on these PRs, address them using the existing PR-fixer and CI-repair paths (`fix-pr`, `address-pr-feedback`, or equivalent CI failure investigation) instead of opening a new PR.</action>
           <action>If the user declines, or does not answer after the ask is posted, end the delivery cleanly without watching CI or polluting the PR with unsolicited fixes.</action>
         </actions>
-        <validation>Successful PR delivery either records a clear user choice about automatic CI/review follow-up or leaves an explicit waiting state after that one ask; unsuccessful deliveries skip the ask.</validation>
+        <validation>Successful PR delivery either records a clear user choice about automatic CI/review follow-up or leaves an explicit waiting state after that one lightweight ask; unsuccessful deliveries skip the ask.</validation>
       </step>
     </steps>
   </phase>
@@ -254,9 +254,9 @@ You are executing a command to create a draft pull request with the current chan
     <template>For each repository: analyze, commit if needed, push the branch, create or refresh the pull request, and capture the live pull request reference.</template>
   </pattern>
   <pattern name="post_delivery_followup_opt_in">
-    <description>After successful PR delivery, ask once whether the user wants automatic CI failure and review-feedback follow-up before ending.</description>
+    <description>After successful PR delivery, ask once with a lightweight conversational question whether the user wants automatic CI failure and review-feedback follow-up before ending.</description>
     <context>Use after the created or refreshed pull request summary when at least one pull request succeeded.</context>
-    <template>Report PR URLs -> ask once about auto-addressing CI failures or review feedback -> only continue that follow-up after explicit opt-in.</template>
+    <template>Report PR URLs -> ask once casually about auto-addressing CI failures or review feedback (never via request_user_input) -> only continue that follow-up after explicit opt-in.</template>
   </pattern>
 </patterns>
 
