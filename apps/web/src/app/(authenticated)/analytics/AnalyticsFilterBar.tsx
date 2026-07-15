@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
   type AnalyticsDimension,
@@ -268,27 +268,28 @@ export function AnalyticsFilterBar({
     0,
   );
 
-  const renderControls = (
-    presentation: AnalyticsFilterControlProps['presentation'],
-  ) =>
-    filterDimensions.map((dimension) => (
-      <AnalyticsFilterControl
-        key={dimension}
-        dimension={dimension}
-        value={filters[dimension]}
-        options={filterOptions[dimension] ?? []}
-        presentation={presentation}
-        onChange={(value) => onFilterChange(dimension, value)}
-      />
-    ));
+  const renderControls = useCallback(
+    (presentation: AnalyticsFilterControlProps['presentation']) =>
+      filterDimensions.map((dimension) => (
+        <AnalyticsFilterControl
+          key={dimension}
+          dimension={dimension}
+          value={filters[dimension]}
+          options={filterOptions[dimension] ?? []}
+          presentation={presentation}
+          onChange={(value) => onFilterChange(dimension, value)}
+        />
+      )),
+    [filterDimensions, filterOptions, filters, onFilterChange],
+  );
 
   const toolbarControls = useMemo(
     () => renderControls('toolbar'),
-    [filterDimensions, filterOptions, filters, onFilterChange],
+    [renderControls],
   );
   const drawerControls = useMemo(
     () => renderControls('drawer'),
-    [filterDimensions, filterOptions, filters, onFilterChange],
+    [renderControls],
   );
 
   return (
