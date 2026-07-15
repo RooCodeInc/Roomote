@@ -35,34 +35,34 @@ Roomote is a full-stack application, not an extension or a wrapper. It connects
 to the tools you already use and runs agents in throwaway sandboxes.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  You (in Slack / Teams / Telegram / Web UI)                  │
-│  "Add dark mode to the settings page"                        │
-└──────────────┬───────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Roomote                                                     │
-│                                                              │
-│  ┌────────────┐   ┌───────────────┐   ┌──────────────────┐  │
-│  │ Your models │   │ Your repo     │   │ Your tools       │  │
-│  │ (BYOK)     │   │ (GitHub,      │   │ (Linear, Sentry, │  │
-│  │ Claude,    │   │  GitLab,      │   │  Notion, Jira,   │  │
-│  │ GPT, etc.  │   │  Gitea,       │   │  Grafana, PH,    │  │
-│  │            │   │  Azure DevOps) │   │  Figma, etc.)    │  │
-│  └──────┬─────┘   └───────┬───────┘   └────────┬─────────┘  │
-│         │                 │                     │            │
-│         └────────┬────────┘─────────────────────┘            │
-│                  ▼                                            │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │  Ephemeral sandbox (Modal, E2B, Daytona, or Docker)  │    │
-│  │                                                      │    │
-│  │  clone repo → make changes → run tests → screenshot  │    │
-│  │  → push branch → open PR                             │    │
-│  └──────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────┘
-               │
-               ▼
+┌────────────────────────────────────────────────────────────────┐
+│  You (in Slack / Teams / Telegram / Web UI)                    │
+│  "Add dark mode to the settings page"                          │
+└─────────────────────────────┬──────────────────────────────────┘
+                              │
+                              ▼
+┌────────────────────────────────────────────────────────────────┐
+│  Roomote                                                       │
+│                                                                │
+│  ┌─────────────┐   ┌────────────────┐   ┌──────────────────┐   │
+│  │ Your models │   │ Your repo      │   │ Your tools       │   │
+│  │ (BYOK)      │   │ (GitHub,       │   │ (Linear, Sentry, │   │
+│  │ Claude,     │   │  GitLab,       │   │  Notion, Jira,   │   │
+│  │ GPT, etc.   │   │  Gitea,        │   │  Grafana, PH,    │   │
+│  │             │   │  Azure DevOps) │   │  Figma, etc.)    │   │
+│  └──────┬──────┘   └────────┬───────┘   └─────────┬────────┘   │
+│         │                   │                     │            │
+│         └───────────────────┼─────────────────────┘            │
+│                             ▼                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ Ephemeral sandbox (Modal, E2B, Daytona, or Docker)      │   │
+│  │                                                         │   │
+│  │ clone repo → make changes → run tests → screenshot      │   │
+│  │ → push branch → open PR                                 │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
         Pull request with diff, screenshots, and a live preview URL
 ```
 
