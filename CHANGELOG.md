@@ -25,6 +25,7 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 - Local development artifact uploads from hosted workers succeed through the Caddy edge, and presigned upload responses without an S3 ETag are no longer treated as successful.
 - Slack notifications no longer target the wrong task thread or post to destinations whose Slack connection was disconnected.
 - The homepage empty-environments warning no longer flashes orange while environments are still loading.
+- Blaxel Docker projects no longer pass the unsupported Compose `--wait` flag: the provider check now reads the worker's process environment, where the compute provider is actually set.
 
 ## 0.4.2 (2026-07-13)
 
