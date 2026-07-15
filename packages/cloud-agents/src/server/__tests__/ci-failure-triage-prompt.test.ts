@@ -84,4 +84,20 @@ describe('buildCiFailureTriagePrompt', () => {
     expect(prompt).toContain('investigating Slack thread already exists');
     expect(prompt).toContain('Always close it out');
   });
+
+  it('uses Teams surface labels and channel tags for Teams destinations', () => {
+    const prompt = buildCiFailureTriagePrompt({
+      ...baseParams,
+      channelId: '19:teams-channel@thread.tacv2',
+      trigger: 'manual',
+      destinationProvider: 'teams',
+    });
+
+    expect(prompt).toContain(
+      '<channel_id>19:teams-channel@thread.tacv2</channel_id>',
+    );
+    expect(prompt).not.toContain('<slack_channel_id>');
+    expect(prompt).toContain('Stay quiet on Teams');
+    expect(prompt).not.toContain('Stay quiet on Slack');
+  });
 });
