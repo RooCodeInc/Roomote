@@ -43,7 +43,17 @@ type GiteaAutomationTarget = {
 export function getGiteaUsername(
   user: GiteaAutomationWebhookContext['sender'],
 ): string | undefined {
-  return user?.login ?? user?.username;
+  const login = user?.login?.trim();
+  if (login) {
+    return login;
+  }
+
+  const username = user?.username?.trim();
+  if (username) {
+    return username;
+  }
+
+  return undefined;
 }
 
 export function isRoomoteGiteaUsername(username: string): boolean {

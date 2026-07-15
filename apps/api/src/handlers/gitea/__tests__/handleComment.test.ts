@@ -465,6 +465,20 @@ describe('handleGiteaComment', () => {
     );
   });
 
+  it('falls back to sender when comment.user.login is blank', async () => {
+    const result = await handleGiteaComment(
+      makeCommentPayload({
+        sender: { id: 10, login: 'alice' },
+        comment: {
+          user: { id: 10, login: '' },
+        },
+      }),
+    );
+
+    expect(result).toEqual({ status: 'ok', metadata: { ids: [1234] } });
+    expect(mockEnqueueTask).toHaveBeenCalled();
+  });
+
   it('ignores deployment-authored comments when only sender carries the login', async () => {
     // No deployment id — id match must not hide the sender.login path.
     mockGetGiteaDeploymentUser.mockResolvedValue({
