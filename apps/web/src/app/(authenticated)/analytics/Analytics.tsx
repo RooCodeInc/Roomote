@@ -218,7 +218,7 @@ export function Analytics({
       return;
     }
 
-    if (fixedObject) {
+    if (fixedObject || nextObject === 'costs') {
       resetSelection();
       startParamsTransition(() => {
         router.push(getAnalyticsHref(nextObject));

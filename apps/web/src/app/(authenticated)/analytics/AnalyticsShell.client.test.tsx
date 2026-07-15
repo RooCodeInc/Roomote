@@ -61,16 +61,21 @@ describe('AnalyticsShell', () => {
     );
 
     const nav = screen.getByRole('navigation');
-    const navItems = within(nav).getAllByText(/^(Tasks|PRs)$/);
+    const navItems = within(nav).getAllByText(/^(Tasks|PRs|Costs)$/);
 
     expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
-    expect(navItems.map((item) => item.textContent)).toEqual(['Tasks', 'PRs']);
+    expect(navItems.map((item) => item.textContent)).toEqual([
+      'Tasks',
+      'PRs',
+      'Costs',
+    ]);
   });
 
-  it('uses Tasks as the default analytics URL and keeps PRs addressable', () => {
+  it('uses Tasks as the default analytics URL and keeps PRs and Costs addressable', () => {
     expect(getAnalyticsHref('tasks')).toBe('/analytics');
     expect(getAnalyticsHref('pullRequests')).toBe(
       '/analytics?object=pullRequests',
     );
+    expect(getAnalyticsHref('costs')).toBe('/analytics/costs');
   });
 });
