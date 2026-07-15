@@ -9,6 +9,7 @@ import {
   setDeploymentPreviewsEnabled,
 } from '@roomote/feature-flags';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
+import { isRoomoteCloudEnabled } from '@roomote/env';
 
 import {
   type AuthError,
@@ -17,6 +18,7 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
+import { Env } from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {
@@ -348,7 +350,10 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
 
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
-    isAnonymousAnalyticsEnabledFromMetadata(authContext.deploymentMetadata);
+    isAnonymousAnalyticsEnabledFromMetadata(
+      authContext.deploymentMetadata,
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    );
 
   return {
     success: true,
@@ -359,6 +364,7 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     isAdmin: authContext.isAdmin,
     featureFlags,
     anonymousAnalyticsEnabled,
+    cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     resource: authContext.resource,
   };
 }

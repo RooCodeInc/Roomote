@@ -8,6 +8,8 @@ import { RootProviders } from '@/components/layout/RootProviders';
 import { RouteTitle } from '@/components/layout/RouteTitle';
 import { getAppIcons } from '@/lib/app-icons';
 import { resolveAppEnv } from '@/lib/app-env';
+import { Env } from '@/lib/server/env';
+import { isRoomoteCloudEnabled } from '@roomote/env';
 import { authorize } from '@/lib/server/auth-context';
 import { isSetupBootstrapOpen } from '@/lib/server/setup-bootstrap';
 import { getThemeBootScript } from '@/lib/shared/theme-boot';
@@ -126,6 +128,10 @@ export default async function RootLayout({
         <RootProviders
           authStatus={authStatus}
           authUser={authUser}
+          cloudEnabled={isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)}
+          intercomAppId={Env.R_INTERCOM_APP_ID}
+          posthogProjectKey={Env.R_POSTHOG_PROJECT_KEY}
+          posthogHost={Env.R_POSTHOG_HOST}
           setupBootstrapOpen={setupBootstrapOpen}
         >
           {children}

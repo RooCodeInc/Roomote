@@ -9,7 +9,7 @@
  *   setting to be enabled.
  */
 
-import { Env } from '@roomote/env';
+import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   db,
   deploymentSettings,
@@ -102,7 +102,10 @@ export async function isAnonymousAnalyticsEnabled(): Promise<boolean> {
       columns: { metadata: true },
     });
 
-    return isAnonymousAnalyticsEnabledFromMetadata(settings?.metadata);
+    return isAnonymousAnalyticsEnabledFromMetadata(
+      settings?.metadata,
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    );
   } catch {
     return false;
   }

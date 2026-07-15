@@ -34,6 +34,10 @@ vi.mock('./TelemetryProvider', () => ({
   TelemetryProvider: () => null,
 }));
 
+vi.mock('./CloudAnalyticsProvider', () => ({
+  CloudAnalyticsProvider: () => null,
+}));
+
 import { RootProviders } from './RootProviders';
 
 describe('RootProviders', () => {
@@ -46,6 +50,7 @@ describe('RootProviders', () => {
       <RootProviders
         authStatus="signed-out"
         authUser={null}
+        cloudEnabled={false}
         setupBootstrapOpen={false}
       >
         <div>child</div>

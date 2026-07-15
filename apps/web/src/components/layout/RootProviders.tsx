@@ -15,15 +15,24 @@ import {
 import { DebugUiAttributeController } from './DebugUiAttributeController';
 import { UserAnalyticsContext } from './UserAnalyticsContext';
 import { TelemetryProvider } from './TelemetryProvider';
+import { CloudAnalyticsProvider } from './CloudAnalyticsProvider';
 
 export function RootProviders({
   authStatus,
   authUser,
+  cloudEnabled,
+  intercomAppId,
+  posthogProjectKey,
+  posthogHost,
   setupBootstrapOpen,
   children,
 }: {
   authStatus: AuthStatus;
   authUser: AuthorizedUser | null;
+  cloudEnabled: boolean;
+  intercomAppId?: string;
+  posthogProjectKey?: string;
+  posthogHost?: string;
   setupBootstrapOpen: boolean;
   children: React.ReactNode;
 }) {
@@ -42,6 +51,13 @@ export function RootProviders({
         <TRPCReactProvider>
           <UserAnalyticsContext />
           <TelemetryProvider />
+          <CloudAnalyticsProvider
+            cloudEnabled={cloudEnabled}
+            intercomAppId={intercomAppId}
+            posthogHost={posthogHost}
+            posthogProjectKey={posthogProjectKey}
+            userId={authUser?.userId}
+          />
           <PersonalThemeSync />
           <DebugUiAttributeController />
           {children}

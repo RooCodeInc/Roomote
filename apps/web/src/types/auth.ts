@@ -27,6 +27,8 @@ export type AuthorizedUser = {
    * the client tracking module is loaded at all.
    */
   anonymousAnalyticsEnabled: boolean;
+  /** Whether this deployment uses Roomote Cloud-only behavior. */
+  cloudEnabled: boolean;
   resource: UserResource;
 };
 

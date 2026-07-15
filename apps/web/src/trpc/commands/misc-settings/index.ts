@@ -22,6 +22,7 @@ import {
 } from '@roomote/feature-flags';
 import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
+import { isRoomoteCloudEnabled } from '@roomote/env';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, getWebRuntimeEnvDiagnostics } from '@/lib/server/env';
@@ -50,6 +51,7 @@ export type DeploymentDiagnostics = {
 export type MiscSettings = {
   /** The admin-controlled opt-out setting (default: enabled). */
   anonymousAnalyticsEnabled: boolean;
+  cloudEnabled: boolean;
   /**
    * Whether this environment can send telemetry at all. False in
    * development or when no release version is baked in; the setting is
@@ -554,8 +556,11 @@ export async function getMiscSettingsCommand(
   const diagnostics = await collectDeploymentDiagnostics();
 
   return {
-    anonymousAnalyticsEnabled:
-      isAnonymousAnalyticsEnabledFromMetadata(metadata),
+    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
+      metadata,
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    ),
+    cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
   };
@@ -572,9 +577,10 @@ export async function setAnonymousAnalyticsCommand(
     columns: { metadata: true },
   });
 
+  const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
   const nextMetadata: Record<string, unknown> = {
     ...normalizeMetadata(existingSettings?.metadata),
-    [ANONYMOUS_ANALYTICS_METADATA_KEY]: input.enabled,
+    [ANONYMOUS_ANALYTICS_METADATA_KEY]: cloudEnabled ? true : input.enabled,
   };
 
   if (!existingSettings) {
@@ -595,8 +601,11 @@ export async function setAnonymousAnalyticsCommand(
   await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
   return {
-    anonymousAnalyticsEnabled:
-      isAnonymousAnalyticsEnabledFromMetadata(nextMetadata),
+    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
+      nextMetadata,
+      cloudEnabled,
+    ),
+    cloudEnabled,
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics: await collectDeploymentDiagnostics(),
   };

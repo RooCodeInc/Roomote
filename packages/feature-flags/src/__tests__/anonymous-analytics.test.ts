@@ -28,6 +28,15 @@ describe('isAnonymousAnalyticsEnabledFromMetadata', () => {
     ).toBe(false);
   });
 
+  it('forces analytics enabled for Roomote Cloud', () => {
+    expect(
+      isAnonymousAnalyticsEnabledFromMetadata(
+        { [ANONYMOUS_ANALYTICS_METADATA_KEY]: false },
+        true,
+      ),
+    ).toBe(true);
+  });
+
   it('respects an explicit true', () => {
     expect(
       isAnonymousAnalyticsEnabledFromMetadata({
