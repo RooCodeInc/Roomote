@@ -85,7 +85,7 @@ describe('chat message copy builders', () => {
       buildTaskStartingText({
         workspaceDisplayName: 'App',
       }),
-    ).toBe('Getting started on your task in App.');
+    ).toBe('Getting started on your task in App');
 
     expect(
       buildTaskStartingText({
@@ -93,7 +93,7 @@ describe('chat message copy builders', () => {
         modelDisplayName: 'Anthropic Claude Fable 5',
       }),
     ).toBe(
-      'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model.',
+      'Getting started on your task in App using Anthropic Claude Fable 5 as the coding model',
     );
 
     expect(
@@ -104,7 +104,7 @@ describe('chat message copy builders', () => {
           'Looking into daily environment snapshots for faster startup in App',
       }),
     ).toBe(
-      'Looking into daily environment snapshots for faster startup in App.',
+      'Looking into daily environment snapshots for faster startup in App',
     );
 
     expect(
@@ -123,7 +123,7 @@ describe('chat message copy builders', () => {
         workspaceDisplayName: 'App',
         kickoffMessage: 'Looking into environment snapshot checks',
       }),
-    ).toBe('Getting started on your task in App.');
+    ).toBe('Getting started on your task in App');
 
     expect(
       buildTaskStartingText({
@@ -131,15 +131,15 @@ describe('chat message copy builders', () => {
         freeformKickoffEnabled: true,
         kickoffMessage: '<!channel> Looking into auth bugs in App',
       }),
-    ).toBe('Looking into auth bugs in App.');
+    ).toBe('Looking into auth bugs in App');
 
     expect(
       buildTaskStartingText({
         workspaceDisplayName: 'Full Stack',
         freeformKickoffEnabled: true,
-        kickoffMessage: 'Digging into the flaky checkout race in Full Stack!',
+        kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
       }),
-    ).toBe('Digging into the flaky checkout race in Full Stack.');
+    ).toBe('Digging into the flaky checkout race in Full Stack');
   });
 
   it('only returns model names the router treated as an explicit preference', () => {

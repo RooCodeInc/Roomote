@@ -115,7 +115,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in App.',
+      'Getting started on your task in App',
     );
   });
 
@@ -129,7 +129,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in App.',
+      'Getting started on your task in App',
     );
   });
 
@@ -143,7 +143,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in App using Opus 4.8 as the coding model.',
+      'Getting started on your task in App using Opus 4.8 as the coding model',
     );
   });
 
@@ -159,7 +159,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Looking into daily environment snapshots for faster startup in App.',
+      'Looking into daily environment snapshots for faster startup in App',
     );
   });
 
@@ -175,7 +175,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Checking login redirects in App with Opus 4.8.',
+      'Checking login redirects in App with Opus 4.8',
     );
   });
 
@@ -191,7 +191,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in App.',
+      'Getting started on your task in App',
     );
   });
 
@@ -205,7 +205,7 @@ describe('Slack routing blocks', () => {
     });
 
     expect(getPrimarySectionText(blocks)).toBe(
-      'Getting started on your task in App.',
+      'Getting started on your task in App',
     );
     expect(getFirstContextText(blocks)).toBe(
       '_2 other tasks currently running_',
