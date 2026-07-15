@@ -31,6 +31,7 @@ import {
   useCreateEnvironmentSnapshot,
   useClearEnvironmentSnapshot,
 } from '@/hooks/snapshots';
+import { useComputeProviderConfigured } from '@/hooks/compute';
 import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
@@ -74,10 +75,16 @@ export function Environments() {
   const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  // Deliberately excludes the deployment-managed 'roomote' provider until
-  // this list is gated on configured providers: an unconditional entry would
-  // offer roomote snapshot controls on deployments without the provider.
-  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b'];
+  // Modal and E2B stay unconditional (existing behavior). The
+  // deployment-managed 'roomote' provider is offered only when configured,
+  // so deployments without it never see roomote snapshot controls;
+  // environments that already hold a roomote snapshot keep its controls
+  // regardless (see visibleSnapshotProviders) so stale snapshots stay
+  // manageable.
+  const roomoteConfigured = useComputeProviderConfigured('roomote');
+  const allSnapshotProviders: ComputeProvider[] = roomoteConfigured
+    ? ['modal', 'e2b', 'roomote']
+    : ['modal', 'e2b'];
 
   if (environments.isPending || repositories.isPending) {
     return (
@@ -129,8 +136,15 @@ export function Environments() {
         ) : (
           <div className="space-y-4 divide-y -mb-2">
             {environments.data.map((env) => {
+              // An existing roomote snapshot stays visible and manageable
+              // (refresh/clear) even when the provider is no longer
+              // configured.
+              const roomoteSnapshot = getEnvironmentSnapshot(env, 'roomote');
               const visibleSnapshotProviders: ComputeProvider[] =
-                allSnapshotProviders;
+                !roomoteConfigured &&
+                (roomoteSnapshot?.snapshotId || roomoteSnapshot?.snapshotStatus)
+                  ? [...allSnapshotProviders, 'roomote']
+                  : allSnapshotProviders;
               const verificationState = getEnvironmentVerificationState(env);
               const isRetryingVerification =
                 retryVerification.isPending &&
