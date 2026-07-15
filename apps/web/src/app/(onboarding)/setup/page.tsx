@@ -349,7 +349,7 @@ export default function SetupPage() {
   }, [
     bootstrapStatus,
     isSignedIn,
-    pendingAuthProvider,
+    pendingSetupAuthProvider,
     router,
     setBootstrapStepWithTransition,
   ]);

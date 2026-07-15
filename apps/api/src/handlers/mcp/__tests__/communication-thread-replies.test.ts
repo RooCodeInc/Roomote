@@ -74,6 +74,16 @@ vi.mock('@roomote/sdk/server', () => ({
       ? { postMessage: postMessageMock, sendChatAction: sendChatActionMock }
       : null;
   }),
+  createDiscordCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await resolveDiscordRuntimeCredentialsMock();
+
+    return botToken
+      ? {
+          postMessage: discordPostMessageMock,
+          addReaction: discordAddReactionMock,
+        }
+      : null;
+  }),
 }));
 
 vi.mock('@roomote/slack', () => ({
