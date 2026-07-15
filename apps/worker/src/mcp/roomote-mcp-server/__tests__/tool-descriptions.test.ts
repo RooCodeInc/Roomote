@@ -137,6 +137,29 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('documents the await action on manage_tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
+    const timeoutField = getInputSchemaField(manageTasksTool, 'timeoutMs');
+    const pollIntervalField = getInputSchemaField(
+      manageTasksTool,
+      'pollIntervalMs',
+    );
+
+    expect(manageTasksTool.config.description).toContain(
+      'Use action "await" to block until a task settles',
+    );
+    expect(manageTasksTool.config.description).toContain(
+      'Prefer await after launch when this task must own the outcome of a follow-up task such as environment verification.',
+    );
+    expect(timeoutField.description).toContain(
+      'Optional max wait for action "await"',
+    );
+    expect(pollIntervalField.description).toContain(
+      'Optional poll interval for action "await"',
+    );
+  });
+
   it('keeps debug actions out of manage_tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
@@ -153,6 +176,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(actionField.options).toEqual([
       'search',
       'get_summary',
+      'await',
       'get_compute_logs',
       'get_messages',
       'launch',
@@ -161,7 +185,7 @@ describe('roomote MCP tool descriptions', () => {
       'list_environments',
     ]);
     expect(taskIdField.description).toBe(
-      'The task ID (required for get_summary, get_compute_logs, get_messages, cancel, and send_message)',
+      'The task ID (required for get_summary, await, get_compute_logs, get_messages, cancel, and send_message)',
     );
     expect(limitField.description).toBe(
       'Max results for search (default 20, max 100) or max latest messages for get_messages (max 1000)',
