@@ -1,4 +1,4 @@
-import { db, eq, taskInferenceUsageEvents, taskRuns } from '@roomote/db/server';
+import { db, eq, llmUsageEvents, taskRuns } from '@roomote/db/server';
 
 type TaskInferenceUsageCostSource = 'opencode_message' | 'missing';
 
@@ -20,6 +20,34 @@ interface RecordTaskInferenceUsageInput {
   costSource?: TaskInferenceUsageCostSource | null;
   messageCreatedAt?: Date | null;
   messageCompletedAt?: Date | null;
+  details?: Record<string, unknown> | null;
+}
+
+export interface RecordLlmUsageInput {
+  source?: string;
+  usageType?: 'inference' | 'embedding' | 'rerank' | 'other';
+  eventKey?: string | null;
+  taskId?: string | null;
+  runId?: number | null;
+  userId?: string | null;
+  environmentId?: string | null;
+  harnessSessionId?: string | null;
+  messageId?: string | null;
+  providerId?: string | null;
+  modelId?: string | null;
+  agent?: string | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+  cacheReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  totalTokens?: number | null;
+  contextTokens?: number | null;
+  costMicroUsd?: number | null;
+  costSource?: TaskInferenceUsageCostSource | null;
+  messageCreatedAt?: Date | null;
+  messageCompletedAt?: Date | null;
+  pricingMetadata?: Record<string, unknown> | null;
   details?: Record<string, unknown> | null;
 }
 
@@ -87,6 +115,22 @@ export async function recordTaskInferenceUsage(
     return { recorded: false };
   }
 
+  return recordLlmUsage({
+    ...input,
+    source: 'opencode',
+    usageType: 'inference',
+    taskId: taskRun.taskId,
+    runId: taskRun.id,
+  }).then(() => ({ recorded: true, taskId: taskRun.taskId! }));
+}
+
+export async function recordLlmUsage(
+  input: RecordLlmUsageInput,
+): Promise<{ recorded: boolean; id?: string }> {
+  if (!input.taskId && !input.eventKey) {
+    throw new Error('Non-task LLM usage requires an eventKey');
+  }
+
   const now = new Date();
   const inputTokens = clampOptionalInteger(input.inputTokens);
   const outputTokens = clampOptionalInteger(input.outputTokens);
@@ -108,56 +152,50 @@ export async function recordTaskInferenceUsage(
   const costSource = input.costSource ?? 'missing';
   const agent = normalizeAgent(input.agent);
 
-  await db
-    .insert(taskInferenceUsageEvents)
-    .values({
-      source: 'opencode',
-      taskId: taskRun.taskId,
-      runId: taskRun.id,
-      harnessSessionId: input.harnessSessionId,
-      messageId: input.messageId,
-      providerId: input.providerId ?? null,
-      modelId: input.modelId ?? null,
-      agent,
-      inputTokens,
-      outputTokens,
-      reasoningTokens,
-      cacheReadTokens,
-      cacheWriteTokens,
-      totalTokens,
-      contextTokens,
-      costMicroUsd: clampOptionalCostMicroUsd(input.costMicroUsd),
-      costSource,
-      messageCreatedAt: input.messageCreatedAt ?? null,
-      messageCompletedAt: input.messageCompletedAt ?? null,
-      details: normalizeDetails(input.details),
-      updatedAt: now,
-    })
-    .onConflictDoUpdate({
-      target: [
-        taskInferenceUsageEvents.harnessSessionId,
-        taskInferenceUsageEvents.messageId,
-      ],
-      set: {
-        runId: taskRun.id,
-        providerId: input.providerId ?? null,
-        modelId: input.modelId ?? null,
-        agent,
-        inputTokens,
-        outputTokens,
-        reasoningTokens,
-        cacheReadTokens,
-        cacheWriteTokens,
-        totalTokens,
-        contextTokens,
-        costMicroUsd: clampOptionalCostMicroUsd(input.costMicroUsd),
-        costSource,
-        messageCreatedAt: input.messageCreatedAt ?? null,
-        messageCompletedAt: input.messageCompletedAt ?? null,
-        details: normalizeDetails(input.details),
-        updatedAt: now,
-      },
-    });
+  const values = {
+    source: input.source ?? 'roomote',
+    usageType: input.usageType ?? 'inference',
+    taskId: input.taskId ?? null,
+    runId: input.runId ?? null,
+    userId: input.userId ?? null,
+    environmentId: input.environmentId ?? null,
+    eventKey: input.eventKey ?? null,
+    harnessSessionId: input.harnessSessionId ?? null,
+    messageId: input.messageId ?? null,
+    providerId: input.providerId ?? null,
+    modelId: input.modelId ?? null,
+    agent,
+    inputTokens,
+    outputTokens,
+    reasoningTokens,
+    cacheReadTokens,
+    cacheWriteTokens,
+    totalTokens,
+    contextTokens,
+    costMicroUsd: clampOptionalCostMicroUsd(input.costMicroUsd),
+    costSource,
+    messageCreatedAt: input.messageCreatedAt ?? null,
+    messageCompletedAt: input.messageCompletedAt ?? null,
+    pricingMetadata: input.pricingMetadata ? { ...input.pricingMetadata } : {},
+    details: normalizeDetails(input.details),
+    updatedAt: now,
+  };
 
-  return { recorded: true, taskId: taskRun.taskId };
+  const query = db.insert(llmUsageEvents).values(values);
+
+  if (input.eventKey) {
+    await query.onConflictDoUpdate({
+      target: llmUsageEvents.eventKey,
+      set: { ...values },
+    });
+  } else if (input.harnessSessionId && input.messageId) {
+    await query.onConflictDoUpdate({
+      target: [llmUsageEvents.harnessSessionId, llmUsageEvents.messageId],
+      set: { ...values },
+    });
+  } else {
+    await query;
+  }
+
+  return { recorded: true };
 }

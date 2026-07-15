@@ -107,6 +107,8 @@ export {
   taskStartParallelCountsRelations,
   taskMessages,
   taskMessagesRelations,
+  llmUsageEvents,
+  llmUsageEventsRelations,
   taskInferenceUsageEvents,
   taskInferenceUsageEventsRelations,
   taskSlackReplyDetails,

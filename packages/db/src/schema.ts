@@ -668,7 +668,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   taskPins: many(taskPins),
   runs: many(taskRuns),
-  inferenceUsageEvents: many(taskInferenceUsageEvents),
+  inferenceUsageEvents: many(llmUsageEvents),
   workItemsAsSource: many(workItems, {
     relationName: 'workItemSourceTask',
   }),
@@ -1235,22 +1235,36 @@ export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
 }));
 
 /**
- * task_inference_usage_events
+ * llm_usage_events
  */
 
-export const taskInferenceUsageEvents = pgTable(
-  'task_inference_usage_events',
+export const llmUsageEvents = pgTable(
+  'llm_usage_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     source: text('source').notNull().default('opencode'),
-    taskId: text('task_id')
+    usageType: text('usage_type')
       .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
+      .default('inference')
+      .$type<'inference' | 'embedding' | 'rerank' | 'other'>(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
-    harnessSessionId: text('harness_session_id').notNull(),
-    messageId: text('message_id').notNull(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    environmentId: uuid('environment_id').references(() => environments.id, {
+      onDelete: 'set null',
+    }),
+    // Non-task producers use eventKey for idempotency. Task harness events use
+    // the session/message pair below because a message may be retried with
+    // progressively richer usage data.
+    eventKey: text('event_key'),
+    harnessSessionId: text('harness_session_id'),
+    messageId: text('message_id'),
     providerId: text('provider_id'),
     modelId: text('model_id'),
     /**
@@ -1285,6 +1299,10 @@ export const taskInferenceUsageEvents = pgTable(
     costSource: text('cost_source')
       .notNull()
       .$type<'opencode_message' | 'missing'>(),
+    pricingMetadata: jsonb('pricing_metadata')
+      .notNull()
+      .default({})
+      .$type<Record<string, unknown>>(),
     messageCreatedAt: timestamp('message_created_at'),
     messageCompletedAt: timestamp('message_completed_at'),
     details: jsonb('details')
@@ -1295,29 +1313,46 @@ export const taskInferenceUsageEvents = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('task_inference_usage_events_session_message_unique').on(
+    uniqueIndex('llm_usage_events_session_message_unique').on(
       table.harnessSessionId,
       table.messageId,
     ),
-    index('task_inference_usage_events_task_id_idx').on(table.taskId),
-    index('task_inference_usage_events_run_id_idx').on(table.runId),
-    index('task_inference_usage_events_created_at_idx').on(table.createdAt),
+    uniqueIndex('llm_usage_events_event_key_unique').on(table.eventKey),
+    index('llm_usage_events_task_id_idx').on(table.taskId),
+    index('llm_usage_events_run_id_idx').on(table.runId),
+    index('llm_usage_events_user_id_idx').on(table.userId),
+    index('llm_usage_events_environment_id_idx').on(table.environmentId),
+    index('llm_usage_events_provider_model_idx').on(
+      table.providerId,
+      table.modelId,
+    ),
+    index('llm_usage_events_created_at_idx').on(table.createdAt),
   ],
 );
 
-export const taskInferenceUsageEventsRelations = relations(
-  taskInferenceUsageEvents,
-  ({ one }) => ({
-    task: one(tasks, {
-      fields: [taskInferenceUsageEvents.taskId],
-      references: [tasks.id],
-    }),
-    run: one(taskRuns, {
-      fields: [taskInferenceUsageEvents.runId],
-      references: [taskRuns.id],
-    }),
+export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
+  task: one(tasks, {
+    fields: [llmUsageEvents.taskId],
+    references: [tasks.id],
   }),
-);
+  run: one(taskRuns, {
+    fields: [llmUsageEvents.runId],
+    references: [taskRuns.id],
+  }),
+  user: one(users, {
+    fields: [llmUsageEvents.userId],
+    references: [users.id],
+  }),
+  environment: one(environments, {
+    fields: [llmUsageEvents.environmentId],
+    references: [environments.id],
+  }),
+}));
+
+/** @deprecated Use llmUsageEvents. */
+export const taskInferenceUsageEvents = llmUsageEvents;
+/** @deprecated Use llmUsageEventsRelations. */
+export const taskInferenceUsageEventsRelations = llmUsageEventsRelations;
 
 export const taskSlackReplyDetails = pgTable(
   'task_slack_reply_details',
@@ -1427,7 +1462,7 @@ export const taskRunsRelations = relations(taskRuns, ({ one, many }) => ({
   }),
   events: many(taskRunEvents),
   messages: many(taskMessages),
-  inferenceUsageEvents: many(taskInferenceUsageEvents),
+  inferenceUsageEvents: many(llmUsageEvents),
   platformIssueReports: many(taskPlatformIssueReports),
 }));
 
