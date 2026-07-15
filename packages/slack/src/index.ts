@@ -24,6 +24,7 @@ export * from './prompt-ready-thread-messages';
 export * from './start-slack-app-mention';
 export * from './start-auto-routed-slack-task';
 export * from './started-message';
+export * from './persist-posted-slack-kickoff';
 export * from './suggested-tasks-onboarding-followup';
 export * from './slack-thread-delivery-tracker';
 export * from './task-cancellation-blocks';

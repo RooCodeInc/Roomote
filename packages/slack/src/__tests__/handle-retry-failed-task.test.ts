@@ -70,6 +70,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((...args: unknown[]) => ({ eq: args })),
   inArray: vi.fn((...args: unknown[]) => ({ inArray: args })),
   not: vi.fn((...args: unknown[]) => ({ not: args })),
+  recordTaskKickoffMessageBestEffort: vi.fn().mockResolvedValue(undefined),
   repositories: {},
   slackAuthTokens: {},
   slackInstallations: {
@@ -106,6 +107,30 @@ vi.mock('../router-debug', () => ({
 vi.mock('../slack-messages', () => ({
   setQueuedSlackStartedMessageTs: vi.fn(),
   setSlackStartedMessageTs: setSlackStartedMessageTsMock,
+}));
+
+vi.mock('../persist-posted-slack-kickoff', () => ({
+  persistPostedSlackKickoff: vi.fn(
+    async (input: {
+      runId: number;
+      messageTs: string;
+      agentName: string;
+      initiatingSlackUserId?: string;
+      workspaceDisplayName: string;
+      modelDisplayName?: string;
+      workspaceOnly?: boolean;
+    }) => {
+      await setSlackStartedMessageTsMock(input.runId, input.messageTs, {
+        agentName: input.agentName,
+        initiatingSlackUserId: input.initiatingSlackUserId,
+        workspaceDisplayName: input.workspaceDisplayName,
+        ...(input.modelDisplayName
+          ? { modelDisplayName: input.modelDisplayName }
+          : {}),
+        workspaceOnly: input.workspaceOnly,
+      });
+    },
+  ),
 }));
 
 vi.mock('../slack-notifier', () => ({

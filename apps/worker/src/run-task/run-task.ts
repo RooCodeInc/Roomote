@@ -242,9 +242,22 @@ function hasAutomationWorkItemId(taskRun: { payload: unknown }): boolean {
 }
 
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
+  payloadKind: string;
   payload: unknown;
 }): boolean {
-  return !hasAutomationWorkItemId(taskRun);
+  // Automation work items deliberately skip opening acknowledgements.
+  if (hasAutomationWorkItemId(taskRun)) {
+    return false;
+  }
+
+  // Slack launches already post a free-form/template kickoff into the
+  // originating thread before the worker runs. Forcing another opening reply
+  // only duplicates that message.
+  if (taskRun.payloadKind === TaskPayloadKind.SlackAppMention) {
+    return false;
+  }
+
+  return true;
 }
 
 function unwrapRequestTag(prompt: string): string | undefined {

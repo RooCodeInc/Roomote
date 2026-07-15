@@ -110,10 +110,29 @@ export const PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE =
   'pr_status_notification';
 
 /**
+ * `metadata.source` value for the provider-posted task kickoff/started message
+ * (including free-form router kickoffs). Written directly to task history so
+ * the chat transcript keeps a durable copy without entering the harness
+ * session as an agent turn.
+ */
+export const TASK_KICKOFF_MESSAGE_SOURCE = 'task_kickoff';
+
+/**
  * All `metadata.source` values that mark a transcript message as out-of-band
  * (persisted to task history without entering the harness session).
  */
 export const OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
+  PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  TASK_KICKOFF_MESSAGE_SOURCE,
+] as const;
+
+/**
+ * Out-of-band sources that should be re-surfaced into later agent prompts.
+ * Kickoff messages are history-only: the worker already knows one was posted
+ * via launch payload, so re-injection would only add start-of-turn noise.
+ */
+export const RESURFACE_OUT_OF_BAND_TASK_MESSAGE_SOURCES = [
   PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   PR_STATUS_NOTIFICATION_TASK_MESSAGE_SOURCE,
 ] as const;

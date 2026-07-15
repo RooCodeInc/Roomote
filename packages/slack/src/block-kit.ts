@@ -63,7 +63,7 @@ import { postRouterDebugMessage } from './router-debug';
 import { postSlackInteractiveResponse } from './interactive-response';
 import { getPromptReadyThreadMessages } from './prompt-ready-thread-messages';
 import { SlackNotifier } from './slack-notifier';
-import { setSlackStartedMessageTs } from './slack-messages';
+import { persistPostedSlackKickoff } from './persist-posted-slack-kickoff';
 import { startSlackAppMentionTask } from './start-slack-app-mention';
 import { SlackThreadDeliveryTracker } from './slack-thread-delivery-tracker';
 import {
@@ -1734,13 +1734,14 @@ export async function handleTaskConfiguration(
     });
 
     if (taskRun.id) {
-      await setSlackStartedMessageTs(taskRun.id, payload.message.ts, {
+      await persistPostedSlackKickoff({
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        messageTs: payload.message.ts,
         agentName,
         initiatingSlackUserId: payload.user.id,
         workspaceDisplayName,
-        ...(effectiveKickoffMessage
-          ? { kickoffMessage: effectiveKickoffMessage }
-          : {}),
+        kickoffMessage: effectiveKickoffMessage,
         workspaceOnly: false,
       });
     }
@@ -3173,11 +3174,14 @@ export async function handleRetryFailedTask(
     });
 
     if (taskRun.id) {
-      await setSlackStartedMessageTs(taskRun.id, payload.message.ts, {
+      await persistPostedSlackKickoff({
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        messageTs: payload.message.ts,
         agentName: AGENT_DISPLAY_NAME,
         initiatingSlackUserId: originalPayload.user,
         workspaceDisplayName,
-        ...(modelDisplayName ? { modelDisplayName } : {}),
+        modelDisplayName,
         workspaceOnly: false,
       });
     }

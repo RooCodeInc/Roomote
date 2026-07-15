@@ -1052,7 +1052,7 @@ describe('runTask', () => {
       stateFilePath,
       JSON.stringify({
         startedAtMs: 123_456,
-        currentTurnRequiresInitialAck: true,
+        currentTurnRequiresInitialAck: false,
         currentTurnMessageTs: '111.222',
         currentTurnStartedAtMs: 123_456,
         currentTurnReactionsAllowed: false,

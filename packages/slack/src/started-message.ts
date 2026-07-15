@@ -8,7 +8,7 @@ import type { SlackBlock } from '@roomote/types';
 import { buildSlackThreadPermalink } from '@roomote/types';
 
 import { postRouterDebugMessage } from './router-debug';
-import { setSlackStartedMessageTs } from './slack-messages';
+import { persistPostedSlackKickoff } from './persist-posted-slack-kickoff';
 import { SlackNotifier } from './slack-notifier';
 import { buildStartedBlocks } from './started-message-blocks';
 
@@ -188,12 +188,15 @@ export async function finishRoutedStart({
       });
 
   if (startedMessageTs && runId) {
-    await setSlackStartedMessageTs(runId, startedMessageTs, {
+    await persistPostedSlackKickoff({
+      runId,
+      taskId,
+      messageTs: startedMessageTs,
       agentName,
       initiatingSlackUserId,
       workspaceDisplayName,
-      ...(modelDisplayName ? { modelDisplayName } : {}),
-      ...(kickoffMessage ? { kickoffMessage } : {}),
+      modelDisplayName,
+      kickoffMessage,
       workspaceOnly,
     });
   }
