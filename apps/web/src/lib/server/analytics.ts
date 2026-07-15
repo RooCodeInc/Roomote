@@ -29,12 +29,12 @@ import {
   githubUserMappings,
   environments,
   llmUsageEvents,
+  alias,
   desc,
   eq,
   inArray,
   isNull,
   sql,
-  or,
 } from '@roomote/db/server';
 
 import {
@@ -111,6 +111,9 @@ type AnalyticsDimensionValue = {
   disambiguationLabel?: string;
 };
 
+const usageUsers = alias(users, 'analytics_usage_users');
+const taskInitiatorUsers = alias(users, 'analytics_task_initiator_users');
+
 type AnalyticsRow = {
   id: string;
   timestamp: Date;
@@ -122,6 +125,7 @@ type AnalyticsRow = {
     canonicalTaskId?: string | null;
     isMerged?: boolean;
     isRoomote?: boolean;
+    prKeys?: string[];
   };
 };
 
@@ -790,7 +794,10 @@ function buildChartData(
         provider: string;
         model: string;
         cost: number;
+        taskCost: number;
+        prCost: number;
         tasks: Set<string>;
+        prs: Set<string>;
       }
     >();
 
@@ -802,11 +809,21 @@ function buildChartData(
         provider,
         model,
         cost: 0,
+        taskCost: 0,
+        prCost: 0,
         tasks: new Set<string>(),
+        prs: new Set<string>(),
       };
       current.cost += row.value;
       if (row.meta?.canonicalTaskId) {
         current.tasks.add(row.meta.canonicalTaskId);
+        current.taskCost += row.value;
+        for (const prKey of row.meta.prKeys ?? []) {
+          current.prs.add(prKey);
+        }
+        if ((row.meta.prKeys ?? []).length > 0) {
+          current.prCost += row.value;
+        }
       }
       breakdown.set(key, current);
     }
@@ -821,17 +838,26 @@ function buildChartData(
           costShare: totalCost === 0 ? 0 : (row.cost / totalCost) * 100,
           taskCount: row.tasks.size,
           averageCostPerTask:
-            row.tasks.size === 0 ? 0 : row.cost / row.tasks.size,
-          averageCostPerPr: null,
+            row.tasks.size === 0 ? 0 : row.taskCost / row.tasks.size,
+          averageCostPerPr:
+            row.prs.size === 0 ? null : row.prCost / row.prs.size,
         }),
       )
       .sort((left, right) => right.totalCost - left.totalCost);
 
-    const taskIds = new Set(
-      rows
-        .map((row) => row.meta?.canonicalTaskId)
-        .filter((taskId): taskId is string => Boolean(taskId)),
-    );
+    const taskIds = new Set<string>();
+    const qualifyingPrs = new Set<string>();
+    let taskCost = 0;
+    for (const row of rows) {
+      if (!row.meta?.canonicalTaskId) {
+        continue;
+      }
+      taskIds.add(row.meta.canonicalTaskId);
+      taskCost += row.value;
+      for (const prKey of row.meta.prKeys ?? []) {
+        qualifyingPrs.add(prKey);
+      }
+    }
     const userIds = new Set(
       rows
         .map((row) => row.dimensions.user?.key)
@@ -841,8 +867,9 @@ function buildChartData(
     );
     const summary: AnalyticsCostSummary = {
       totalInferenceCost: totalCost,
-      averageCostPerTask: taskIds.size === 0 ? null : totalCost / taskIds.size,
-      averageCostPerPr: null,
+      averageCostPerTask: taskIds.size === 0 ? null : taskCost / taskIds.size,
+      averageCostPerPr:
+        qualifyingPrs.size === 0 ? null : taskCost / qualifyingPrs.size,
       averageCostPerActiveUser:
         userIds.size === 0 ? null : totalCost / userIds.size,
     };
@@ -953,12 +980,15 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       taskInitiatorAutomation: tasks.initiatorAutomation,
       taskActorExternalId: tasks.actorExternalId,
       taskActorDisplayName: tasks.actorDisplayName,
-      taskUserName: users.name,
-      taskUserEmail: users.email,
+      taskUserName: taskInitiatorUsers.name,
+      taskUserEmail: taskInitiatorUsers.email,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-    .leftJoin(users, eq(users.id, tasks.initiatorUserId));
+    .leftJoin(
+      taskInitiatorUsers,
+      eq(taskInitiatorUsers.id, tasks.initiatorUserId),
+    );
 
   const deduped = new Map<
     string,
@@ -1438,18 +1468,18 @@ async function getCostAnalyticsRows(
       taskTitle: tasks.title,
       initiatorKind: tasks.initiatorKind,
       initiatorAutomation: tasks.initiatorAutomation,
-      taskUserName: users.name,
-      taskUserEmail: users.email,
+      eventUserName: usageUsers.name,
+      eventUserEmail: usageUsers.email,
+      taskUserName: taskInitiatorUsers.name,
+      taskUserEmail: taskInitiatorUsers.email,
       runPayload: taskRuns.payload,
     })
     .from(llmUsageEvents)
     .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
+    .leftJoin(usageUsers, eq(usageUsers.id, llmUsageEvents.userId))
     .leftJoin(
-      users,
-      or(
-        eq(users.id, llmUsageEvents.userId),
-        eq(users.id, tasks.initiatorUserId),
-      ),
+      taskInitiatorUsers,
+      eq(taskInitiatorUsers.id, tasks.initiatorUserId),
     )
     .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
@@ -1462,6 +1492,30 @@ async function getCostAnalyticsRows(
   const environmentNameById = new Map(
     environmentRows.map((environment) => [environment.id, environment.name]),
   );
+  const taskIds = usageRows
+    .map((row) => row.taskId)
+    .filter((taskId): taskId is string => Boolean(taskId));
+  const pullRequestRows =
+    taskIds.length === 0
+      ? []
+      : await db
+          .select({
+            taskId: taskPullRequests.taskId,
+            repository: taskPullRequests.repository,
+            prNumber: taskPullRequests.prNumber,
+          })
+          .from(taskPullRequests)
+          .where(inArray(taskPullRequests.taskId, taskIds));
+  const prKeysByTaskId = new Map<string, Set<string>>();
+  for (const pullRequest of pullRequestRows) {
+    if (pullRequest.prNumber === null || !pullRequest.repository) {
+      continue;
+    }
+
+    const keys = prKeysByTaskId.get(pullRequest.taskId) ?? new Set<string>();
+    keys.add(getPullRequestKey(pullRequest.repository, pullRequest.prNumber));
+    prKeysByTaskId.set(pullRequest.taskId, keys);
+  }
 
   return usageRows
     .filter((row) => {
@@ -1483,8 +1537,8 @@ async function getCostAnalyticsRows(
           : attributedUserId
             ? getCanonicalUserDimensionValue({
                 id: attributedUserId,
-                name: row.taskUserName,
-                email: row.taskUserEmail,
+                name: row.userId ? row.eventUserName : row.taskUserName,
+                email: row.userId ? row.eventUserEmail : row.taskUserEmail,
               })
             : createLabelBackedDimensionValue(NO_VALUE_LABEL);
       const timestamp = row.timestamp ?? row.createdAt;
@@ -1529,7 +1583,10 @@ async function getCostAnalyticsRows(
           },
           links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
         },
-        meta: { canonicalTaskId: row.taskId },
+        meta: {
+          canonicalTaskId: row.taskId,
+          prKeys: row.taskId ? [...(prKeysByTaskId.get(row.taskId) ?? [])] : [],
+        },
       } satisfies AnalyticsRow;
     });
 }

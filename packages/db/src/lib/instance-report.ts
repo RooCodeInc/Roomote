@@ -663,7 +663,12 @@ export async function collectInstanceReportStats(
         costMicroUsd: sum(llmUsageEvents.costMicroUsd),
       })
       .from(llmUsageEvents)
-      .where(gte(llmUsageEvents.createdAt, since)),
+      .where(
+        and(
+          gte(llmUsageEvents.createdAt, since),
+          isNotNull(llmUsageEvents.taskId),
+        ),
+      ),
     db
       .select({ total: count() })
       .from(slackInstallations)
