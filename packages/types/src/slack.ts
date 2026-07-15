@@ -23,6 +23,8 @@ export type SlackBlock =
 export const DEFAULT_SLACK_ACK_EMOJI = 'eyes';
 export const DEFAULT_SLACK_COMPLETION_EMOJI = 'white_check_mark';
 export const DEFAULT_SLACK_PR_CLOSED_EMOJI = 'x';
+/** Origin-message reaction when a Slack task is cancelled via the Cancel button. */
+export const DEFAULT_SLACK_CANCEL_EMOJI = 'x';
 
 export function buildSlackThreadPermalink(params: {
   slackWorkspaceDomain?: string | null;

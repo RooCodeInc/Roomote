@@ -17,10 +17,6 @@ vi.mock('@/hooks/useIsMobile', () => ({
   useIsMobile: () => false,
 }));
 
-vi.mock('./AnalyticsGranularitySelector', () => ({
-  AnalyticsGranularitySelector: () => <div>By Day</div>,
-}));
-
 vi.mock('recharts', async () => {
   const React = await import('react');
 
@@ -152,10 +148,8 @@ describe('AnalyticsStackedBarChart', () => {
         axisLabel="PRs"
         chart={CHART}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -186,10 +180,8 @@ describe('AnalyticsStackedBarChart', () => {
           axisLabel="PRs"
           chart={CHART}
           granularity="day"
-          availableGranularities={['day', 'week', 'month', 'year']}
           isLoading={false}
           isError={false}
-          onGranularityChange={vi.fn()}
           onResetFilters={vi.fn()}
           onSelectSegment={vi.fn()}
         />
@@ -220,10 +212,8 @@ describe('AnalyticsStackedBarChart', () => {
         axisLabel="PRs"
         chart={CHART}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -252,10 +242,8 @@ describe('AnalyticsStackedBarChart', () => {
         axisLabel="PRs"
         chart={STATUS_CHART}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -274,10 +262,8 @@ describe('AnalyticsStackedBarChart', () => {
         axisLabel="Tasks"
         chart={PALETTE_CHART}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -300,10 +286,8 @@ describe('AnalyticsStackedBarChart', () => {
         axisLabel="PRs"
         chart={STATUS_CHART}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,
@@ -340,10 +324,8 @@ describe('AnalyticsStackedBarChart', () => {
           ],
         }}
         granularity="day"
-        availableGranularities={['day', 'week', 'month', 'year']}
         isLoading={false}
         isError={false}
-        onGranularityChange={vi.fn()}
         onResetFilters={vi.fn()}
         onSelectSegment={vi.fn()}
       />,

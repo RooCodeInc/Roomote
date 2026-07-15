@@ -7,10 +7,14 @@ const {
   mockEnvironmentVariablesFindMany,
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
+  mockGetGiteaOAuthConnection,
+  mockResolveGiteaOAuthAccessToken,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
+  mockGetGiteaOAuthConnection: vi.fn(),
+  mockResolveGiteaOAuthAccessToken: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -60,6 +64,18 @@ vi.mock('@roomote/db/encryption', () => ({
   decryptSecrets: vi.fn(async (value: unknown) => value),
 }));
 
+vi.mock('../oauth', async () => {
+  const actual = await vi.importActual<typeof import('../oauth')>('../oauth');
+
+  return {
+    ...actual,
+    getGiteaOAuthConnection: (...args: unknown[]) =>
+      mockGetGiteaOAuthConnection(...args),
+    resolveGiteaOAuthAccessToken: (...args: unknown[]) =>
+      mockResolveGiteaOAuthAccessToken(...args),
+  };
+});
+
 import {
   buildGiteaApiBaseUrl,
   normalizeGiteaBaseUrl,
@@ -69,6 +85,8 @@ import {
   ensureGiteaWebhooksForRepositories,
   removeGiteaWebhooksForRepositories,
   getGiteaAuthenticatedUser,
+  getGiteaDeploymentUser,
+  clearGiteaDeploymentUserCache,
   listGiteaRepositories,
   type GiteaRepository,
 } from '../api';
@@ -92,6 +110,7 @@ describe('Gitea API helpers', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearGiteaDeploymentUserCache();
     process.env.GITEA_BASE_URL = 'https://git.example.com/';
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -100,6 +119,8 @@ describe('Gitea API helpers', () => {
         fullName: 'acme/backend',
       },
     ]);
+    mockGetGiteaOAuthConnection.mockResolvedValue(null);
+    mockResolveGiteaOAuthAccessToken.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -274,6 +295,56 @@ describe('Gitea API helpers', () => {
         }),
       }),
     );
+  });
+
+  it('returns the OAuth connection identity when /user is unavailable', async () => {
+    mockGetGiteaOAuthConnection.mockResolvedValue({
+      baseUrl: 'https://git.example.com',
+      clientId: 'client',
+      clientSecret: 'secret',
+      accountId: '99',
+      username: 'ci-agent',
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      scopes: [],
+      status: 'active',
+    });
+    mockResolveGiteaOAuthAccessToken.mockResolvedValue(null);
+
+    await expect(getGiteaDeploymentUser()).resolves.toEqual({
+      id: 99,
+      login: 'ci-agent',
+    });
+  });
+
+  it('resolves deployment user via /user and preserves connection id when needed', async () => {
+    mockGetGiteaOAuthConnection.mockResolvedValue({
+      baseUrl: 'https://git.example.com',
+      clientId: 'client',
+      clientSecret: 'secret',
+      accountId: '99',
+      username: 'ci-agent',
+      accessToken: 'token',
+      refreshToken: 'refresh',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      scopes: [],
+      status: 'active',
+    });
+    mockResolveGiteaOAuthAccessToken.mockResolvedValue('gitea_live_token');
+
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ login: 'ci-agent' }), {
+        status: 200,
+      }),
+    );
+
+    await expect(
+      getGiteaDeploymentUser({ fetchImpl: fetchMock }),
+    ).resolves.toEqual({
+      id: 99,
+      login: 'ci-agent',
+    });
   });
 
   it('removes the Roomote webhook from repositories and reports not_found when absent', async () => {

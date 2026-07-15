@@ -1,26 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import {
-  buildAdoOrganizationApiBaseUrl,
-  resolveAdoBaseUrl,
-  resolveAdoToken,
-} from '@roomote/ado';
-import {
-  buildBitbucketApiBaseUrl,
-  resolveBitbucketBaseUrl,
-  resolveBitbucketToken,
-  resolveBitbucketUsername,
-} from '@roomote/bitbucket';
-import {
-  buildGiteaApiBaseUrl,
-  resolveGiteaBaseUrl,
-  resolveGiteaToken,
-} from '@roomote/gitea';
 import { getOctokit } from '@roomote/github';
-import {
-  buildGitLabApiBaseUrl,
-  resolveGitLabBaseUrl,
-  resolveGitLabToken,
-} from '@roomote/gitlab';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -31,21 +10,54 @@ import {
   type SourceControlProvider,
 } from '@roomote/types';
 import { z } from 'zod';
+import { requestSourceControlJson } from './source-control-pull-request-http';
+import {
+  resolveAdoProviderContext,
+  resolveBitbucketProviderContext,
+  resolveGiteaProviderContext,
+  resolveGitLabProviderContext,
+} from './source-control-pull-request-provider-context';
 import {
   assertRepositoryInTaskRunScope,
   buildAdoBasicAuthHeader,
   buildApiUrl,
   buildGitLabTokenHeader,
-  formatResponseBody,
   getPayloadRecord,
   isDraftTitle,
   isGitLabDraft,
-  parseAdoRepositoryFullName,
   resolveRepositoryRow,
   splitRepositoryFullName,
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+
+async function requestJson<T>({
+  fetchImpl,
+  method = 'GET',
+  url,
+  tokenHeader,
+  body,
+  schema,
+  acceptedStatuses,
+}: {
+  fetchImpl: FetchImpl;
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
+  url: string;
+  tokenHeader: { name: string; value: string };
+  body?: Record<string, unknown>;
+  schema: z.ZodType<T>;
+  acceptedStatuses?: readonly number[];
+}): Promise<T> {
+  return requestSourceControlJson({
+    fetchImpl,
+    method,
+    url,
+    tokenHeader,
+    body,
+    schema,
+    acceptedStatuses: acceptedStatuses ?? [200],
+  });
+}
 
 const ADO_API_VERSION = '7.1';
 
@@ -1132,8 +1144,10 @@ async function getGitLabMergeRequestDetails({
   provider: 'gitlab';
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestDetailsResult> {
-  const { projectId, token, apiBaseUrl } =
-    await resolveGitLabReadContext(repository);
+  const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
+    repository,
+    'read',
+  );
 
   const mergeRequest = await requestJson({
     fetchImpl,
@@ -1202,8 +1216,10 @@ async function listGitLabMergeRequestComments({
   provider: 'gitlab';
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestCommentsResult> {
-  const { projectId, token, apiBaseUrl } =
-    await resolveGitLabReadContext(repository);
+  const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
+    repository,
+    'read',
+  );
 
   const discussions = await requestJson({
     fetchImpl,
@@ -1267,25 +1283,6 @@ async function listGitLabMergeRequestComments({
   };
 }
 
-async function resolveGitLabReadContext(
-  repository: RepositoryRow,
-): Promise<{ projectId: string; token: string; apiBaseUrl: string }> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `GitLab repository ${repository.fullName} is missing an external project id.`,
-    );
-  }
-
-  const token = await resolveGitLabToken();
-  if (!token) {
-    throw new Error('GITLAB_TOKEN is required to read GitLab merge requests.');
-  }
-
-  const apiBaseUrl = buildGitLabApiBaseUrl(await resolveGitLabBaseUrl());
-
-  return { projectId: repository.externalRepoId, token, apiBaseUrl };
-}
-
 async function getGiteaPullRequestDetails({
   prNumber,
   repository,
@@ -1298,7 +1295,7 @@ async function getGiteaPullRequestDetails({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestDetailsResult> {
   const { apiBaseUrl, baseUrl, owner, repo, token } =
-    await resolveGiteaReadContext(repository, provider);
+    await resolveGiteaProviderContext(repository, 'read');
 
   const pullRequest = await requestJson({
     fetchImpl,
@@ -1363,9 +1360,9 @@ async function listGiteaPullRequestComments({
   provider: 'gitea';
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestCommentsResult> {
-  const { apiBaseUrl, owner, repo, token } = await resolveGiteaReadContext(
+  const { apiBaseUrl, owner, repo, token } = await resolveGiteaProviderContext(
     repository,
-    provider,
+    'read',
   );
   const tokenHeader = { name: 'Authorization', value: `token ${token}` };
   const warnings: string[] = [];
@@ -1450,37 +1447,6 @@ function mapGiteaComment(
   };
 }
 
-async function resolveGiteaReadContext(
-  repository: RepositoryRow,
-  provider: 'gitea',
-): Promise<{
-  apiBaseUrl: string;
-  baseUrl: string;
-  owner: string;
-  repo: string;
-  token: string;
-}> {
-  const token = await resolveGiteaToken();
-  if (!token) {
-    throw new Error('GITEA_TOKEN is required to read Gitea pull requests.');
-  }
-
-  const baseUrl = await resolveGiteaBaseUrl();
-  if (!baseUrl) {
-    throw new Error('GITEA_BASE_URL is required to read Gitea pull requests.');
-  }
-
-  const [owner, repo] = splitRepositoryFullName(repository.fullName, provider);
-
-  return {
-    apiBaseUrl: buildGiteaApiBaseUrl(baseUrl),
-    baseUrl,
-    owner,
-    repo,
-    token,
-  };
-}
-
 async function getBitbucketPullRequestDetails({
   prNumber,
   repository,
@@ -1493,7 +1459,7 @@ async function getBitbucketPullRequestDetails({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestDetailsResult> {
   const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
-    await resolveBitbucketReadContext(repository, provider);
+    await resolveBitbucketProviderContext(repository, 'read');
 
   const pullRequest = await requestJson({
     fetchImpl,
@@ -1569,7 +1535,7 @@ async function listBitbucketPullRequestComments({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestCommentsResult> {
   const { apiBaseUrl, authHeader, workspace, repo } =
-    await resolveBitbucketReadContext(repository, provider);
+    await resolveBitbucketProviderContext(repository, 'read');
   const tokenHeader = { name: 'Authorization', value: authHeader };
   const comments: z.infer<typeof bitbucketCommentSchema>[] = [];
   let nextUrl: string | null = buildApiUrl(
@@ -1656,45 +1622,6 @@ function mapBitbucketComment(
   };
 }
 
-async function resolveBitbucketReadContext(
-  repository: RepositoryRow,
-  provider: 'bitbucket',
-): Promise<{
-  apiBaseUrl: string;
-  authHeader: string;
-  baseUrl: string;
-  workspace: string;
-  repo: string;
-}> {
-  const token = await resolveBitbucketToken();
-  if (!token) {
-    throw new Error(
-      'BITBUCKET_TOKEN is required to read Bitbucket pull requests.',
-    );
-  }
-
-  const username = await resolveBitbucketUsername();
-  if (!username) {
-    throw new Error(
-      'BITBUCKET_USERNAME is required to read Bitbucket pull requests.',
-    );
-  }
-
-  const baseUrl = await resolveBitbucketBaseUrl();
-  const [workspace, repo] = splitRepositoryFullName(
-    repository.fullName,
-    provider,
-  );
-
-  return {
-    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
-    authHeader: `Basic ${Buffer.from(`${username}:${token}`, 'utf8').toString('base64')}`,
-    baseUrl,
-    workspace,
-    repo,
-  };
-}
-
 async function getAdoPullRequestDetails({
   prNumber,
   repository,
@@ -1707,7 +1634,7 @@ async function getAdoPullRequestDetails({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestDetailsResult> {
   const { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token } =
-    await resolveAdoReadContext(repository);
+    await resolveAdoProviderContext(repository, 'read');
 
   const pullRequest = await requestJson({
     fetchImpl,
@@ -1779,7 +1706,7 @@ async function listAdoPullRequestComments({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestCommentsResult> {
   const { organizationApiBaseUrl, repositoryPullRequestsPath, token } =
-    await resolveAdoReadContext(repository);
+    await resolveAdoProviderContext(repository, 'read');
 
   const threadList = await requestJson({
     fetchImpl,
@@ -1856,73 +1783,6 @@ function mapAdoThreadResolution(status: string | null): boolean | null {
     default:
       return null;
   }
-}
-
-async function resolveAdoReadContext(repository: RepositoryRow): Promise<{
-  baseUrl: string;
-  organizationApiBaseUrl: string;
-  repositoryPullRequestsPath: string;
-  token: string;
-}> {
-  if (!repository.externalRepoId) {
-    throw new Error(
-      `Azure DevOps repository ${repository.fullName} is missing an external repository id.`,
-    );
-  }
-
-  const token = await resolveAdoToken();
-  if (!token) {
-    throw new Error(
-      'ADO_TOKEN is required to read Azure DevOps pull requests.',
-    );
-  }
-
-  const { organization, project } = parseAdoRepositoryFullName(
-    repository.fullName,
-  );
-  const baseUrl = await resolveAdoBaseUrl();
-  const organizationApiBaseUrl = buildAdoOrganizationApiBaseUrl({
-    baseUrl,
-    organization,
-  });
-  const repositoryPullRequestsPath = `/${encodeURIComponent(
-    project,
-  )}/_apis/git/repositories/${encodeURIComponent(
-    repository.externalRepoId,
-  )}/pullrequests`;
-
-  return { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token };
-}
-
-// Mirrors requestJson in source-control-pull-requests.ts (reads are GET-only).
-async function requestJson<T>({
-  fetchImpl,
-  url,
-  tokenHeader,
-  schema,
-}: {
-  fetchImpl: FetchImpl;
-  url: string;
-  tokenHeader: { name: string; value: string };
-  schema: z.ZodType<T>;
-}): Promise<T> {
-  const response = await fetchImpl(url, {
-    method: 'GET',
-    headers: {
-      Accept: 'application/json',
-      [tokenHeader.name]: tokenHeader.value,
-    },
-  });
-
-  if (response.status !== 200) {
-    throw new Error(
-      `Source control API request failed: ${response.status} ${
-        response.statusText
-      }${await formatResponseBody(response)}`,
-    );
-  }
-
-  return schema.parse(await response.json());
 }
 
 function stripAdoBranchRef(ref: string): string {
@@ -2076,8 +1936,10 @@ async function listGitLabMergeRequests({
   updatedAfter?: Date | null;
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
-  const { projectId, token, apiBaseUrl } =
-    await resolveGitLabReadContext(repository);
+  const { projectId, token, apiBaseUrl } = await resolveGitLabProviderContext(
+    repository,
+    'read',
+  );
   const host = new URL(apiBaseUrl).host;
   const warnings: string[] = [];
   const rows: z.infer<typeof gitLabMergeRequestListItemSchema>[] = [];
@@ -2190,7 +2052,7 @@ async function listGiteaPullRequests({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { apiBaseUrl, baseUrl, owner, repo, token } =
-    await resolveGiteaReadContext(repository, provider);
+    await resolveGiteaProviderContext(repository, 'read');
   const host = new URL(baseUrl).host;
   const warnings: string[] = [];
   const rows: z.infer<typeof giteaPullRequestListItemSchema>[] = [];
@@ -2308,7 +2170,7 @@ async function listBitbucketPullRequests({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { apiBaseUrl, authHeader, baseUrl, workspace, repo } =
-    await resolveBitbucketReadContext(repository, provider);
+    await resolveBitbucketProviderContext(repository, 'read');
   const host = new URL(baseUrl).host;
   const warnings: string[] = [];
   const rows: z.infer<typeof bitbucketPullRequestListItemSchema>[] = [];
@@ -2440,7 +2302,7 @@ async function listAdoPullRequests({
   fetchImpl: FetchImpl;
 }): Promise<SourceControlPullRequestListResult> {
   const { baseUrl, organizationApiBaseUrl, repositoryPullRequestsPath, token } =
-    await resolveAdoReadContext(repository);
+    await resolveAdoProviderContext(repository, 'read');
   const host = new URL(baseUrl).host;
   const warnings: string[] = [];
   const rows: z.infer<typeof adoPullRequestListItemSchema>[] = [];

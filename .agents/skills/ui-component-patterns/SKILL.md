@@ -95,6 +95,18 @@ import { useTRPC } from '@/trpc/client';
 
 Cards MUST always use subcomponents. Never dump raw content with padding overrides.
 
+### Analytics Summary Cards
+
+Analytics overview metrics in `apps/web/src/app/(authenticated)/analytics/`
+must use the shared `AnalyticsSummaryCardsGrid` and `AnalyticsSummaryCard`
+components. Build new analytics summary rows like the PR analytics cards:
+tight `gap-0.5` grid, unbordered `bg-card p-4` metric blocks, muted
+medium-weight labels, large semibold values, and a muted secondary line. The
+secondary/footer line should carry concrete context for the metric whenever
+possible, such as the selected time period or the denominator behind an average.
+Do not wrap the row in an extra padded card or add bordered inner tiles for
+sibling analytics views.
+
 ### Full card (with header, content, footer)
 
 ```tsx

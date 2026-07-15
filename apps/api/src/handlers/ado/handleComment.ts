@@ -438,6 +438,8 @@ export async function handleAdoComment(
       trigger: 'message',
       prLinkage: {
         provider: 'ado',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber: pullRequest.pullRequestId,
         prUrl: reviewPayload.prUrl,

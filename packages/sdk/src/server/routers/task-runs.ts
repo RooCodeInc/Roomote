@@ -178,6 +178,7 @@ const taskChannelBindingsSchema = z.object({
 const taskPrLinkageSchema = z.object({
   provider: sourceControlProviderSchema,
   host: z.string().nullish(),
+  repositoryId: z.string().uuid().nullish(),
   repository: z.string().min(1),
   prNumber: z.number().int().positive(),
   prUrl: z.string().min(1),

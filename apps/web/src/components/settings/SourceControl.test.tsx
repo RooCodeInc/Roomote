@@ -384,7 +384,7 @@ describe('SourceControl settings', () => {
       'href',
       'https://dev.azure.com/acme/Platform/_git/backend',
     );
-    expect(screen.getAllByText('Bitbucket')).not.toHaveLength(0);
+    expect(screen.getAllByText('Bitbucket Cloud')).not.toHaveLength(0);
     expect(
       screen.getByRole('link', { name: 'acme/bitbucket-app' }),
     ).toHaveAttribute('href', 'https://bitbucket.org/acme/bitbucket-app');
@@ -408,7 +408,7 @@ describe('SourceControl settings', () => {
       screen.getByRole('button', { name: 'Refresh Azure DevOps' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'Refresh Bitbucket' }),
+      screen.getByRole('button', { name: 'Refresh Bitbucket Cloud' }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('github-icon')).toHaveClass('shrink-0');
     expect(
@@ -520,7 +520,9 @@ describe('SourceControl settings', () => {
   it('syncs Bitbucket repositories from the source control section', () => {
     render(<SourceControl />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh Bitbucket' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Refresh Bitbucket Cloud' }),
+    );
 
     expect(mutations.syncBitbucket).toHaveBeenCalledOnce();
   });

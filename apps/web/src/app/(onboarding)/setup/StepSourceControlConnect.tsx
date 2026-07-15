@@ -57,7 +57,7 @@ function getTokenBackedConnectCopy({
     case 'gitea':
       return 'Sync your Gitea repositories so Roomote can access your codebase.';
     case 'bitbucket':
-      return 'Sync your Bitbucket repositories so Roomote can access your codebase.';
+      return 'Sync your Bitbucket Cloud repositories so Roomote can access your codebase.';
     case 'ado':
       return 'Sync your Azure DevOps repositories so Roomote can access your codebase.';
     default:
@@ -197,6 +197,18 @@ export function StepSourceControlConnect({
         field.envVarName === 'GITEA_CLIENT_SECRET' &&
         (field.runtimeSatisfied || field.savedSatisfied),
     );
+  const bitbucketOAuthConfigured =
+    provider === 'bitbucket' &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'BITBUCKET_CLIENT_ID' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    ) &&
+    providerStatus?.fields.some(
+      (field) =>
+        field.envVarName === 'BITBUCKET_CLIENT_SECRET' &&
+        (field.runtimeSatisfied || field.savedSatisfied),
+    );
 
   const oauthAutoSyncMarkerPresent =
     typeof window !== 'undefined' &&
@@ -211,6 +223,9 @@ export function StepSourceControlConnect({
       oauthAutoSyncMarkerPresent) &&
     (provider !== 'gitea' ||
       !giteaOAuthConfigured ||
+      oauthAutoSyncMarkerPresent) &&
+    (provider !== 'bitbucket' ||
+      !bitbucketOAuthConfigured ||
       oauthAutoSyncMarkerPresent);
 
   const handleSyncRepositories = useCallback(async () => {
@@ -259,6 +274,31 @@ export function StepSourceControlConnect({
       );
     }
   }, [handleSyncRepositories, oauthAutoSyncMarkerPresent, shouldAutoSync]);
+
+  useEffect(() => {
+    if (
+      !oauthAutoSyncMarkerPresent ||
+      !alreadyConnected ||
+      needsAdoMicrosoftConnection
+    ) {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    params.delete('sync');
+    const query = params.toString();
+    window.history.replaceState(
+      {},
+      '',
+      query ? `${window.location.pathname}?${query}` : window.location.pathname,
+    );
+    onContinue();
+  }, [
+    alreadyConnected,
+    needsAdoMicrosoftConnection,
+    oauthAutoSyncMarkerPresent,
+    onContinue,
+  ]);
 
   return (
     <div className="relative w-full max-w-lg space-y-6 py-2 md:py-0">

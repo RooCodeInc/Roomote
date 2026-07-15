@@ -23,6 +23,30 @@ export function convertMarkdownToSlack(text: string): string {
   return converted;
 }
 
+function isConvertibleSlackUrl(rawUrl: string): boolean {
+  const url = rawUrl.trim().toLowerCase();
+  return (
+    url.startsWith('https://') ||
+    url.startsWith('http://') ||
+    url.startsWith('mailto:') ||
+    url.startsWith('tel:') ||
+    url.startsWith('ftp://') ||
+    url.startsWith('www.')
+  );
+}
+
+function hasDisallowedSlackUrlChars(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index] ?? '';
+    const code = value.charCodeAt(index);
+    // < > | plus any whitespace (including non-breaking space and other \s)
+    if (code === 60 || code === 62 || code === 124 || char.trim() === '') {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Converts markdown link syntax to Slack link syntax.
  *
@@ -38,7 +62,7 @@ export function convertMarkdownLinksToSlack(text: string): string {
   return text.replace(
     /\[([^[\]]+)\]\(((?:[^()]|\([^()]*\))+)\)/g,
     (match, label: string, target: string) => {
-      if (/^(?:https?:\/\/|mailto:|tel:|ftp:\/\/|www\.)/i.test(target.trim())) {
+      if (isConvertibleSlackUrl(target)) {
         return `<${target}|${label}>`;
       }
 
@@ -48,10 +72,11 @@ export function convertMarkdownLinksToSlack(text: string): string {
 }
 
 function decodeSlackEntity(text: string): string {
+  // Decode lt/gt before amp so nested entities are not double-unescaped.
   return text
-    .replaceAll('&amp;', '&')
     .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>');
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&');
 }
 
 /**
@@ -61,25 +86,57 @@ function decodeSlackEntity(text: string): string {
  * - `<https://example.com>` -> `https://example.com`
  *
  * Other Slack entity forms (mentions/channels) are intentionally untouched.
+ * Parsing is a linear left-to-right scan so untrusted payloads cannot drive
+ * polynomial regular-expression matching.
  */
 export function convertSlackLinksToMarkdown(text: string): string {
-  let converted = text;
+  let result = '';
+  let index = 0;
 
-  // Convert labeled links first.
-  converted = converted.replace(
-    /<((?:https?:\/\/|mailto:|tel:|ftp:\/\/|www\.)[^|>\s]+)\|([^>]+)>/g,
-    (_match, rawUrl: string, rawLabel: string) => {
-      const url = decodeSlackEntity(rawUrl);
-      const label = decodeSlackEntity(rawLabel);
-      return `[${label}](${url})`;
-    },
-  );
+  while (index < text.length) {
+    if (text.charCodeAt(index) !== 60 /* < */) {
+      result += text[index];
+      index += 1;
+      continue;
+    }
 
-  // Convert bare links.
-  converted = converted.replace(
-    /<((?:https?:\/\/|mailto:|tel:|ftp:\/\/|www\.)[^>\s]+)>/g,
-    (_match, rawUrl: string) => decodeSlackEntity(rawUrl),
-  );
+    const closeIndex = text.indexOf('>', index + 1);
+    if (closeIndex === -1) {
+      result += text.slice(index);
+      break;
+    }
 
-  return converted;
+    const inner = text.slice(index + 1, closeIndex);
+    const pipeIndex = inner.indexOf('|');
+
+    if (pipeIndex === -1) {
+      if (
+        inner.length > 0 &&
+        !hasDisallowedSlackUrlChars(inner) &&
+        isConvertibleSlackUrl(inner)
+      ) {
+        result += decodeSlackEntity(inner);
+        index = closeIndex + 1;
+        continue;
+      }
+    } else {
+      const rawUrl = inner.slice(0, pipeIndex);
+      const rawLabel = inner.slice(pipeIndex + 1);
+
+      if (
+        rawUrl.length > 0 &&
+        !hasDisallowedSlackUrlChars(rawUrl) &&
+        isConvertibleSlackUrl(rawUrl)
+      ) {
+        result += `[${decodeSlackEntity(rawLabel)}](${decodeSlackEntity(rawUrl)})`;
+        index = closeIndex + 1;
+        continue;
+      }
+    }
+
+    result += text.slice(index, closeIndex + 1);
+    index = closeIndex + 1;
+  }
+
+  return result;
 }

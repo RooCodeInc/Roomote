@@ -109,15 +109,20 @@ export async function resolveAutomationRuntimeDestination(params: {
   const destination = params.runtime.destination;
 
   if (destination) {
-    if (destination.provider !== 'teams') {
+    const staleSlackDestination =
+      destination.provider === 'slack' && !params.slackConnected;
+
+    if (!staleSlackDestination) {
+      if (destination.provider === 'teams') {
+        const serviceUrl = await findTeamsConversationServiceUrl(
+          destination.channelId,
+        );
+
+        return serviceUrl ? { ...destination, serviceUrl } : null;
+      }
+
       return destination;
     }
-
-    const serviceUrl = await findTeamsConversationServiceUrl(
-      destination.channelId,
-    );
-
-    return serviceUrl ? { ...destination, serviceUrl } : null;
   }
 
   if (params.slackConnected) {

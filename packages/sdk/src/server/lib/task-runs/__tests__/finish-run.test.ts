@@ -19,6 +19,7 @@ const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
   .mockResolvedValue(undefined);
+const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 
 /**
@@ -237,6 +238,11 @@ vi.mock('../../mcp/data', () => ({
 vi.mock('../../sandbox-oidc', () => ({
   cleanupSandboxOidcTargetsForTaskRun: (...args: unknown[]) =>
     mockCleanupSandboxOidcTargetsForTaskRun(...args),
+}));
+
+vi.mock('../notify-source-run-on-settle', () => ({
+  notifySourceRunOnSettle: (...args: unknown[]) =>
+    mockNotifySourceRunOnSettle(...args),
 }));
 
 import { finishRun } from '../finish-run';

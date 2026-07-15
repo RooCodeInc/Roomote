@@ -19,6 +19,7 @@ import {
 import { substituteEnvVars } from '../../../env';
 import type { StartupLogger } from '../../../logging';
 
+import { resolveComputeProviderFromEnv } from './shared';
 import type { PrepareWorkspaceOptions, PrepareWorkspaceResult } from './types';
 
 const DEFAULT_STARTUP_TIMEOUT_SECONDS = 600;
@@ -398,7 +399,10 @@ async function startDockerProject({
     resolved.project.type === 'compose'
       ? (resolved.project.services ?? [])
       : [];
-  const waitForServices = resolved.env.COMPUTE_PROVIDER !== 'blaxel';
+  // The provider lives in the worker's process env (injected at sandbox
+  // creation), not in resolved.env, which only carries deployment and
+  // user-facing vars.
+  const waitForServices = resolveComputeProviderFromEnv() !== 'blaxel';
   if (!waitForServices) {
     logger.userLog.warn(
       'Blaxel does not support Docker healthchecks; continuing after Compose starts the services.',

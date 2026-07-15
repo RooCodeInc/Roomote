@@ -708,7 +708,11 @@ function buildRoomoteRuntimeEnv(
   // "Link accounts" button URL is not absolute, so an unset SLACK_AUTH_URI
   // must fall back to the web app's linking route rather than empty string.
   if (!env.SLACK_AUTH_URI && env.R_APP_URL) {
-    env.SLACK_AUTH_URI = `${env.R_APP_URL.replace(/\/+$/, '')}/api/slack/auth`;
+    let appUrl = env.R_APP_URL;
+    while (appUrl.endsWith('/')) {
+      appUrl = appUrl.slice(0, -1);
+    }
+    env.SLACK_AUTH_URI = `${appUrl}/api/slack/auth`;
   }
 
   return env;

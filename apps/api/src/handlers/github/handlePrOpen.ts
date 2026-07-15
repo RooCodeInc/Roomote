@@ -9,6 +9,7 @@ import {
 import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import type { WebhookResponse } from '../../types';
+import { toHostFromUrl } from '../utils';
 
 import type {
   WebhookPullRequestOpened,
@@ -108,6 +109,8 @@ export async function handlePrOpen(
       trigger: 'webhook',
       prLinkage: {
         provider: 'github',
+        host: target.repo.host ?? toHostFromUrl(pr.html_url) ?? 'github.com',
+        repositoryId: target.repo.id,
         repository: repository.full_name,
         prNumber: pr.number,
         prUrl: pr.html_url,

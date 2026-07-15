@@ -460,8 +460,9 @@ describe('AutomationsSettings', () => {
     // Dependabot and CI failure triage stay GitHub-only; manager stats is
     // provider-neutral now and shows no source-control badge.
     expect((await screen.findAllByText('GitHub only')).length).toBe(2);
-    // Suggester and CI failure triage still report to Slack only.
-    expect(screen.getAllByText('Slack only').length).toBe(2);
+    // Only the suggester is limited to Slack; CI failure triage posts to all
+    // configured communication providers after multi-comms support.
+    expect(screen.getAllByText('Slack only').length).toBe(1);
     // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
     // Gitea/Bitbucket conflict signal).
     expect(

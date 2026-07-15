@@ -30,6 +30,10 @@ import {
 import { GitHubSourceControlConfig } from './GitHubSourceControlConfig';
 import { GiteaSourceControlInstructions } from './GiteaSourceControlConfig';
 import { GitLabSourceControlInstructions } from './GitLabSourceControlConfig';
+import {
+  BitbucketSourceControlCreation,
+  BitbucketSourceControlInstructions,
+} from './BitbucketSourceControlConfig';
 import { getSourceControlSetupCopy } from './sourceControlSetupCopy';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
@@ -321,7 +325,8 @@ export function StepSourceControlConfig({
 
     if (
       selectedProvider.provider === 'gitea' ||
-      selectedProvider.provider === 'gitlab'
+      selectedProvider.provider === 'gitlab' ||
+      selectedProvider.provider === 'bitbucket'
     ) {
       window.location.assign(
         `/api/source-control/${selectedProvider.provider}/oauth/authorize`,
@@ -367,32 +372,38 @@ export function StepSourceControlConfig({
 
       {!isAdo ? (
         <NumberedStep number={1} className="mt-6">
-          <p className="font-semibold">
-            {providerSetupCopy ? (
-              <>
-                Create a new {providerSetupCopy.setupLabel}.
-                {creationHref && (
-                  <Button variant="outline" className="ml-2" asChild>
-                    <a
-                      href={creationHref ?? providerSetupCopy.creationHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
-                      <ExternalLink className="inline size-4 -mt-1 ml-1" />
-                    </a>
-                  </Button>
+          {selectedProvider?.provider === 'bitbucket' ? (
+            <BitbucketSourceControlCreation />
+          ) : (
+            <>
+              <p className="font-semibold">
+                {providerSetupCopy ? (
+                  <>
+                    Create a new {providerSetupCopy.setupLabel}.
+                    {creationHref && (
+                      <Button variant="outline" className="ml-2" asChild>
+                        <a
+                          href={creationHref ?? providerSetupCopy.creationHref}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {providerSetupCopy.creationLinkLabel ?? 'Open'}{' '}
+                          <ExternalLink className="inline size-4 -mt-1 ml-1" />
+                        </a>
+                      </Button>
+                    )}
+                  </>
+                ) : (
+                  <>Create a new {providerSetupLabel}.</>
                 )}
-              </>
-            ) : (
-              <>Create a new {providerSetupLabel}.</>
-            )}
-          </p>
-          {providerSetupCopy?.creationHint ? (
-            <p className="text-sm text-muted-foreground">
-              {providerSetupCopy.creationHint}
-            </p>
-          ) : null}
+              </p>
+              {providerSetupCopy?.creationHint ? (
+                <p className="text-sm text-muted-foreground">
+                  {providerSetupCopy.creationHint}
+                </p>
+              ) : null}
+            </>
+          )}
         </NumberedStep>
       ) : (
         <NumberedStep number={1} className="mt-6">
@@ -408,7 +419,8 @@ export function StepSourceControlConfig({
 
       {isAdo ||
       selectedProvider?.provider === 'gitea' ||
-      selectedProvider?.provider === 'gitlab' ? (
+      selectedProvider?.provider === 'gitlab' ||
+      selectedProvider?.provider === 'bitbucket' ? (
         <NumberedStep number={2}>
           {isAdo ? (
             <AdoSourceControlInstructions
@@ -417,8 +429,10 @@ export function StepSourceControlConfig({
             />
           ) : selectedProvider?.provider === 'gitea' ? (
             <GiteaSourceControlInstructions publicOrigin={publicOrigin} />
-          ) : (
+          ) : selectedProvider?.provider === 'gitlab' ? (
             <GitLabSourceControlInstructions publicOrigin={publicOrigin} />
+          ) : (
+            <BitbucketSourceControlInstructions publicOrigin={publicOrigin} />
           )}
         </NumberedStep>
       ) : null}
@@ -427,15 +441,27 @@ export function StepSourceControlConfig({
         number={
           isAdo ||
           selectedProvider?.provider === 'gitea' ||
-          selectedProvider?.provider === 'gitlab'
+          selectedProvider?.provider === 'gitlab' ||
+          selectedProvider?.provider === 'bitbucket'
             ? 3
             : 2
         }
       >
-        <p className="font-semibold">
-          Enter the values below for your {provider ?? 'source control'}{' '}
-          integration.
-        </p>
+        {selectedProvider?.provider === 'bitbucket' ? (
+          <>
+            <p className="font-semibold">
+              Enter the values below for your Bitbucket integration.
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Once created,, copy these values:
+            </p>
+          </>
+        ) : (
+          <p className="font-semibold">
+            Enter the values below for your {provider ?? 'source control'}{' '}
+            integration.
+          </p>
+        )}
 
         <div className="space-y-2">
           {isAdo && adoAuthMode === 'delegated' && (

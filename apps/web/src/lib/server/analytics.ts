@@ -23,11 +23,13 @@ import {
 import {
   db,
   tasks,
+  taskRuns,
   users,
   taskPullRequests,
   githubUserMappings,
   environments,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
+  alias,
   desc,
   eq,
   inArray,
@@ -38,6 +40,8 @@ import {
 import {
   type AnalyticsChartBucket,
   type AnalyticsChartResponse,
+  type AnalyticsCostBreakdownRow,
+  type AnalyticsCostSummary,
   type AnalyticsDetailsColumn,
   type AnalyticsDetailsResponse,
   type AnalyticsDetailsRow,
@@ -67,7 +71,6 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 import { formatAutomationLabel } from '@/lib/task-creator-filter';
 
 import { getLatestTaskRunsByTaskId } from './task-runs';
-import { getTaskModelDisplayNameMap } from './task-models';
 import { getRepositories } from './source-control';
 import {
   getPullRequestFactRepositoryIdsNeedingBackfill,
@@ -108,6 +111,9 @@ type AnalyticsDimensionValue = {
   disambiguationLabel?: string;
 };
 
+const usageUsers = alias(users, 'analytics_usage_users');
+const taskInitiatorUsers = alias(users, 'analytics_task_initiator_users');
+
 type AnalyticsRow = {
   id: string;
   timestamp: Date;
@@ -119,6 +125,7 @@ type AnalyticsRow = {
     canonicalTaskId?: string | null;
     isMerged?: boolean;
     isRoomote?: boolean;
+    prKeys?: string[];
   };
 };
 
@@ -573,12 +580,7 @@ function applyDimensionFilters<TRow extends AnalyticsRow>(
   rows: TRow[],
   filters: AnalyticsFilters,
   omitDimension?: AnalyticsDimension,
-  object?: AnalyticsObject,
 ) {
-  const allowedDimensions = object
-    ? new Set(ANALYTICS_OBJECT_CONFIG[object].filterDimensions)
-    : null;
-
   return rows.filter((row) => {
     for (const [dimension, values] of Object.entries(filters) as [
       AnalyticsDimension,
@@ -588,11 +590,15 @@ function applyDimensionFilters<TRow extends AnalyticsRow>(
         continue;
       }
 
-      if (allowedDimensions && !allowedDimensions.has(dimension)) {
+      const dimensionValue = row.dimensions[dimension];
+
+      if (
+        dimension === 'taskType' &&
+        values.includes('all-automated') &&
+        dimensionValue?.key.startsWith('automation:')
+      ) {
         continue;
       }
-
-      const dimensionValue = row.dimensions[dimension];
 
       if (!dimensionValue) {
         return false;
@@ -621,12 +627,7 @@ function buildFilterOptions<TRow extends AnalyticsRow>(
 
   for (const dimension of config.filterDimensions) {
     const options = new Map<string, string>();
-    const dimensionRows = applyDimensionFilters(
-      rows,
-      filters,
-      dimension,
-      object,
-    );
+    const dimensionRows = applyDimensionFilters(rows, filters, dimension);
 
     for (const row of dimensionRows) {
       const value = row.dimensions[dimension];
@@ -640,6 +641,18 @@ function buildFilterOptions<TRow extends AnalyticsRow>(
         compareDimensionValues(dimension, left[1], right[1]),
       )
       .map(([value, label]) => ({ value, label }));
+
+    if (
+      dimension === 'taskType' &&
+      result[dimension]?.some((option) =>
+        option.value.startsWith('automation:'),
+      )
+    ) {
+      result[dimension] = [
+        { value: 'all-automated', label: 'All automated' },
+        ...(result[dimension] ?? []),
+      ];
+    }
   }
 
   return {
@@ -764,7 +777,7 @@ function buildChartData(
       segments: Object.fromEntries(bucket.segments),
     }));
 
-  return {
+  const response: AnalyticsChartResponse = {
     object,
     viewBy,
     metric,
@@ -772,6 +785,107 @@ function buildChartData(
     buckets,
     total: rows.reduce((sum, row) => sum + row.value, 0),
   };
+
+  if (object === 'costs') {
+    const totalCost = response.total;
+    const breakdown = new Map<
+      string,
+      {
+        provider: string;
+        model: string;
+        cost: number;
+        taskCost: number;
+        prCost: number;
+        tasks: Set<string>;
+        prs: Set<string>;
+      }
+    >();
+
+    for (const row of rows) {
+      const provider = row.dimensions.provider?.label ?? 'Unknown provider';
+      const model = row.dimensions.model?.label ?? 'Unknown model';
+      const key = `${provider}:${model}`;
+      const current = breakdown.get(key) ?? {
+        provider,
+        model,
+        cost: 0,
+        taskCost: 0,
+        prCost: 0,
+        tasks: new Set<string>(),
+        prs: new Set<string>(),
+      };
+      current.cost += row.value;
+      if (row.meta?.canonicalTaskId) {
+        current.tasks.add(row.meta.canonicalTaskId);
+        current.taskCost += row.value;
+        for (const prKey of row.meta.prKeys ?? []) {
+          current.prs.add(prKey);
+        }
+        if ((row.meta.prKeys ?? []).length > 0) {
+          current.prCost += row.value;
+        }
+      }
+      breakdown.set(key, current);
+    }
+
+    response.costBreakdown = [...breakdown.entries()]
+      .map(
+        ([key, row]): AnalyticsCostBreakdownRow => ({
+          key,
+          provider: row.provider,
+          model: row.model,
+          totalCost: row.cost,
+          costShare: totalCost === 0 ? 0 : (row.cost / totalCost) * 100,
+          taskCount: row.tasks.size,
+          averageCostPerTask:
+            row.tasks.size === 0 ? 0 : row.taskCost / row.tasks.size,
+          averageCostPerPr:
+            row.prs.size === 0 ? null : row.prCost / row.prs.size,
+        }),
+      )
+      .sort((left, right) => right.totalCost - left.totalCost);
+
+    const taskIds = new Set<string>();
+    const qualifyingPrs = new Set<string>();
+    let taskCost = 0;
+    let prTaskCost = 0;
+    for (const row of rows) {
+      if (!row.meta?.canonicalTaskId) {
+        continue;
+      }
+      taskIds.add(row.meta.canonicalTaskId);
+      taskCost += row.value;
+      const prKeys = row.meta.prKeys ?? [];
+      if (prKeys.length === 0) {
+        continue;
+      }
+      prTaskCost += row.value;
+      for (const prKey of prKeys) {
+        qualifyingPrs.add(prKey);
+      }
+    }
+    const userIds = new Set(
+      rows
+        .map((row) => row.dimensions.user?.key)
+        .filter(
+          (user): user is string => Boolean(user) && user !== NO_VALUE_LABEL,
+        ),
+    );
+    const summary: AnalyticsCostSummary = {
+      totalInferenceCost: totalCost,
+      averageCostPerTask: taskIds.size === 0 ? null : taskCost / taskIds.size,
+      averageCostPerPr:
+        qualifyingPrs.size === 0 ? null : prTaskCost / qualifyingPrs.size,
+      averageCostPerActiveUser:
+        userIds.size === 0 ? null : totalCost / userIds.size,
+      taskCount: taskIds.size,
+      prCount: qualifyingPrs.size,
+      activeUserCount: userIds.size,
+    };
+    response.costSummary = summary;
+  }
+
+  return response;
 }
 
 function formatPullRequestStatus(status: PullRequestStatus) {
@@ -789,8 +903,13 @@ function formatPullRequestStatus(status: PullRequestStatus) {
   }
 }
 
-function getPullRequestKey(repository: string, prNumber: number) {
-  return `${repository.toLowerCase()}#${prNumber}`;
+function getPullRequestKey(
+  repository: string,
+  prNumber: number,
+  provider = 'github',
+  host = 'github.com',
+) {
+  return `${provider.toLowerCase()}:${host.toLowerCase()}:${repository.toLowerCase()}#${prNumber}`;
 }
 
 function formatPullRequestLabel(title: string, prNumber: number) {
@@ -875,12 +994,17 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       taskInitiatorAutomation: tasks.initiatorAutomation,
       taskActorExternalId: tasks.actorExternalId,
       taskActorDisplayName: tasks.actorDisplayName,
-      taskUserName: users.name,
-      taskUserEmail: users.email,
+      taskUserName: taskInitiatorUsers.name,
+      taskUserEmail: taskInitiatorUsers.email,
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      host: taskPullRequests.host,
     })
     .from(taskPullRequests)
     .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
-    .leftJoin(users, eq(users.id, tasks.initiatorUserId));
+    .leftJoin(
+      taskInitiatorUsers,
+      eq(taskInitiatorUsers.id, tasks.initiatorUserId),
+    );
 
   const deduped = new Map<
     string,
@@ -897,7 +1021,12 @@ async function getRoomotePullRequestMetadataByKey(_auth: UserAuthSuccess) {
       continue;
     }
 
-    const dedupeKey = getPullRequestKey(result.repository, result.prNumber);
+    const dedupeKey = getPullRequestKey(
+      result.repository,
+      result.prNumber,
+      result.sourceControlProvider,
+      result.host ?? undefined,
+    );
     const existing = deduped.get(dedupeKey);
 
     if (
@@ -1076,17 +1205,21 @@ async function getTaskInferenceUsageTotalsByTaskIds(
 
   const results = await db
     .select({
-      taskId: taskInferenceUsageEvents.taskId,
-      totalTokens: sql<number>`coalesce(sum(${taskInferenceUsageEvents.totalTokens}), 0)::bigint`,
-      costMicroUsd: sql<number>`coalesce(sum(${taskInferenceUsageEvents.costMicroUsd}), 0)::bigint`,
+      taskId: llmUsageEvents.taskId,
+      totalTokens: sql<number>`coalesce(sum(${llmUsageEvents.totalTokens}), 0)::bigint`,
+      costMicroUsd: sql<number>`coalesce(sum(${llmUsageEvents.costMicroUsd}), 0)::bigint`,
     })
-    .from(taskInferenceUsageEvents)
-    .where(inArray(taskInferenceUsageEvents.taskId, taskIds))
-    .groupBy(taskInferenceUsageEvents.taskId);
+    .from(llmUsageEvents)
+    .where(inArray(llmUsageEvents.taskId, taskIds))
+    .groupBy(llmUsageEvents.taskId);
 
   const usageByTaskId: Record<string, TaskInferenceUsageTotals> = {};
 
   for (const row of results) {
+    if (!row.taskId) {
+      continue;
+    }
+
     usageByTaskId[row.taskId] = {
       totalTokens: Number(row.totalTokens ?? 0),
       costUsd: Number(row.costMicroUsd ?? 0) / 1_000_000,
@@ -1140,58 +1273,45 @@ async function getTaskAnalyticsRows(
           taskRows.map((task) => task.id),
         );
 
-  const rows = resolveDimensionLabelCollisions(
-    taskRows.map((task) => {
-      const sourceLabel = mapTaskSource(task.surface);
-      const usage = usageByTaskId[task.id];
-      const value = getTaskMetricValue(metric, usage);
-      const values: Record<string, string> = {
-        date: formatAnalyticsDateTime(task.timestamp),
-        user: task.userDimension.label,
-        project: task.projectLabel,
-        source: sourceLabel,
-        model: task.modelDimension.label,
-        taskTitle: task.title,
-        task: 'View task',
-      };
+  return taskRows.map((task) => {
+    const sourceLabel = mapTaskSource(task.surface);
+    const usage = usageByTaskId[task.id];
+    const value = getTaskMetricValue(metric, usage);
+    const values: Record<string, string> = {
+      date: formatAnalyticsDateTime(task.timestamp),
+      user: task.userDimension.label,
+      project: task.projectLabel,
+      source: sourceLabel,
+      taskType: task.taskTypeDimension.label,
+      taskTitle: task.title,
+      task: 'View task',
+    };
 
-      if (metric === 'tokens') {
-        values.tokens = formatTaskMetricDetailValue(metric, usage);
-      } else if (metric === 'cost') {
-        values.cost = formatTaskMetricDetailValue(metric, usage);
-      }
+    if (metric === 'tokens') {
+      values.tokens = formatTaskMetricDetailValue(metric, usage);
+    } else if (metric === 'cost') {
+      values.cost = formatTaskMetricDetailValue(metric, usage);
+    }
 
-      return {
+    return {
+      id: task.id,
+      timestamp: task.timestamp,
+      value,
+      dimensions: {
+        user: task.userDimension,
+        project: createLabelBackedDimensionValue(task.projectLabel),
+        source: createLabelBackedDimensionValue(sourceLabel),
+        taskType: task.taskTypeDimension,
+      },
+      details: {
         id: task.id,
-        timestamp: task.timestamp,
-        value,
-        dimensions: {
-          user: task.userDimension,
-          project: createLabelBackedDimensionValue(task.projectLabel),
-          source: createLabelBackedDimensionValue(sourceLabel),
-          model: task.modelDimension,
+        values,
+        links: {
+          task: `/task/${task.id}`,
         },
-        details: {
-          id: task.id,
-          values,
-          links: {
-            task: `/task/${task.id}`,
-          },
-        },
-      } satisfies AnalyticsRow;
-    }),
-  );
-
-  for (const row of rows) {
-    if (row.dimensions.user) {
-      row.details.values.user = row.dimensions.user.label;
-    }
-    if (row.dimensions.model) {
-      row.details.values.model = row.dimensions.model.label;
-    }
-  }
-
-  return rows;
+      },
+    } satisfies AnalyticsRow;
+  });
 }
 
 type TaskAnalyticsBaseRow = {
@@ -1201,8 +1321,29 @@ type TaskAnalyticsBaseRow = {
   surface: TaskSurface;
   projectLabel: string;
   userDimension: AnalyticsDimensionValue;
-  modelDimension: AnalyticsDimensionValue;
+  taskTypeDimension: AnalyticsDimensionValue;
 };
+
+function getTaskTypeDimensionValue(task: {
+  initiatorKind: 'user' | 'automation' | null;
+  initiatorAutomation: string | null;
+}) {
+  if (!task.initiatorKind) {
+    return createLabelBackedDimensionValue('Unknown');
+  }
+
+  if (task.initiatorKind === 'automation') {
+    const key = task.initiatorAutomation ?? 'unknown';
+    return createDimensionValue(
+      `automation:${key}`,
+      task.initiatorAutomation
+        ? formatAutomationLabel(task.initiatorAutomation)
+        : 'Unknown',
+    );
+  }
+
+  return createLabelBackedDimensionValue('Manual');
+}
 
 async function getTaskAnalyticsBaseRows(
   auth: UserAuthSuccess,
@@ -1211,7 +1352,7 @@ async function getTaskAnalyticsBaseRows(
 ): Promise<TaskAnalyticsBaseRow[]> {
   const cutoff = getTimeCutoff(timePeriod, now);
 
-  // Single-table read: creator, source, model, and repo are all columns on tasks.
+  // Single-table read: creator, source, and repo are all columns on tasks.
   const taskResults = await db
     .select({
       id: tasks.id,
@@ -1219,7 +1360,6 @@ async function getTaskAnalyticsBaseRows(
       timestamp: tasks.createdAt,
       repositoryName: tasks.repositoryName,
       surface: tasks.surface,
-      model: tasks.model,
       initiatorKind: tasks.initiatorKind,
       initiatorUserId: tasks.initiatorUserId,
       initiatorAutomation: tasks.initiatorAutomation,
@@ -1237,10 +1377,9 @@ async function getTaskAnalyticsBaseRows(
     ? taskResults.filter((task) => task.timestamp >= cutoff)
     : taskResults;
 
-  const [latestRunsByTaskId, modelDisplayNames] = await Promise.all([
-    getLatestTaskRunsByTaskId(filteredTasks.map((task) => task.id)),
-    getTaskModelDisplayNameMap(filteredTasks.map((task) => task.model)),
-  ]);
+  const latestRunsByTaskId = await getLatestTaskRunsByTaskId(
+    filteredTasks.map((task) => task.id),
+  );
 
   const environmentIds = [
     ...new Set(
@@ -1300,12 +1439,6 @@ async function getTaskAnalyticsBaseRows(
     return NO_PROJECT_LABEL;
   }
 
-  function getModelDimension(modelId: string) {
-    const label = modelDisplayNames.get(modelId) ?? modelId;
-
-    return createDimensionValue(modelId, label, modelId);
-  }
-
   return filteredTasks.map((task) => {
     const latestRun = latestRunsByTaskId[task.id];
     const payload = latestRun?.payload;
@@ -1317,7 +1450,10 @@ async function getTaskAnalyticsBaseRows(
         ? payload.environmentId
         : null;
 
-    const userDimension = getTaskInitiatorDimensionValue(task);
+    const userDimension =
+      task.initiatorKind === 'automation'
+        ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
+        : getTaskInitiatorDimensionValue(task);
 
     return {
       id: task.id,
@@ -1326,9 +1462,163 @@ async function getTaskAnalyticsBaseRows(
       surface: task.surface,
       projectLabel: getProjectLabel(task.repositoryName, environmentId),
       userDimension,
-      modelDimension: getModelDimension(task.model),
+      taskTypeDimension: getTaskTypeDimensionValue(task),
     } satisfies TaskAnalyticsBaseRow;
   });
+}
+
+async function getCostAnalyticsRows(
+  _auth: UserAuthSuccess,
+  timePeriod: TimePeriodFilter | undefined,
+  now: Date,
+): Promise<AnalyticsRow[]> {
+  const cutoff = getTimeCutoff(timePeriod, now);
+  const usageRows = await db
+    .select({
+      id: llmUsageEvents.id,
+      timestamp: llmUsageEvents.messageCompletedAt,
+      createdAt: llmUsageEvents.createdAt,
+      costMicroUsd: llmUsageEvents.costMicroUsd,
+      taskId: llmUsageEvents.taskId,
+      runId: llmUsageEvents.runId,
+      userId: llmUsageEvents.userId,
+      taskUserId: tasks.initiatorUserId,
+      providerId: llmUsageEvents.providerId,
+      modelId: llmUsageEvents.modelId,
+      environmentName: environments.name,
+      taskTitle: tasks.title,
+      initiatorKind: tasks.initiatorKind,
+      initiatorAutomation: tasks.initiatorAutomation,
+      eventUserName: usageUsers.name,
+      eventUserEmail: usageUsers.email,
+      taskUserName: taskInitiatorUsers.name,
+      taskUserEmail: taskInitiatorUsers.email,
+      runPayload: taskRuns.payload,
+    })
+    .from(llmUsageEvents)
+    .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
+    .leftJoin(usageUsers, eq(usageUsers.id, llmUsageEvents.userId))
+    .leftJoin(
+      taskInitiatorUsers,
+      eq(taskInitiatorUsers.id, tasks.initiatorUserId),
+    )
+    .leftJoin(taskRuns, eq(taskRuns.id, llmUsageEvents.runId))
+    .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
+    .where(isNull(tasks.deletedAt));
+
+  const environmentRows = await db
+    .select({ id: environments.id, name: environments.name })
+    .from(environments)
+    .where(eq(environments.isEval, false));
+  const environmentNameById = new Map(
+    environmentRows.map((environment) => [environment.id, environment.name]),
+  );
+  const taskIds = usageRows
+    .map((row) => row.taskId)
+    .filter((taskId): taskId is string => Boolean(taskId));
+  const pullRequestRows =
+    taskIds.length === 0
+      ? []
+      : await db
+          .select({
+            taskId: taskPullRequests.taskId,
+            repository: taskPullRequests.repository,
+            prNumber: taskPullRequests.prNumber,
+            sourceControlProvider: taskPullRequests.sourceControlProvider,
+            host: taskPullRequests.host,
+          })
+          .from(taskPullRequests)
+          .where(inArray(taskPullRequests.taskId, taskIds));
+  const prKeysByTaskId = new Map<string, Set<string>>();
+  for (const pullRequest of pullRequestRows) {
+    if (pullRequest.prNumber === null || !pullRequest.repository) {
+      continue;
+    }
+
+    const keys = prKeysByTaskId.get(pullRequest.taskId) ?? new Set<string>();
+    keys.add(
+      getPullRequestKey(
+        pullRequest.repository,
+        pullRequest.prNumber,
+        pullRequest.sourceControlProvider,
+        pullRequest.host ?? undefined,
+      ),
+    );
+    prKeysByTaskId.set(pullRequest.taskId, keys);
+  }
+
+  return usageRows
+    .filter((row) => {
+      const timestamp = row.timestamp ?? row.createdAt;
+      return !cutoff || timestamp >= cutoff;
+    })
+    .map((row) => {
+      const isTask = Boolean(row.taskId);
+      const taskType = isTask
+        ? getTaskTypeDimensionValue({
+            initiatorKind: row.initiatorKind,
+            initiatorAutomation: row.initiatorAutomation,
+          })
+        : createLabelBackedDimensionValue('Non-task inference');
+      const attributedUserId = row.userId ?? row.taskUserId;
+      const userDimension =
+        isTask && row.initiatorKind === 'automation'
+          ? createLabelBackedDimensionValue(NO_VALUE_LABEL)
+          : attributedUserId
+            ? getCanonicalUserDimensionValue({
+                id: attributedUserId,
+                name: row.userId ? row.eventUserName : row.taskUserName,
+                email: row.userId ? row.eventUserEmail : row.taskUserEmail,
+              })
+            : createLabelBackedDimensionValue(NO_VALUE_LABEL);
+      const timestamp = row.timestamp ?? row.createdAt;
+      const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
+      const provider = row.providerId ?? 'Unknown provider';
+      const model = row.modelId ?? 'Unknown model';
+      const runEnvironmentId =
+        row.runPayload &&
+        typeof row.runPayload === 'object' &&
+        'environmentId' in row.runPayload &&
+        typeof row.runPayload.environmentId === 'string'
+          ? row.runPayload.environmentId
+          : null;
+      const project =
+        row.environmentName ??
+        (runEnvironmentId
+          ? (environmentNameById.get(runEnvironmentId) ?? NO_PROJECT_LABEL)
+          : NO_PROJECT_LABEL);
+
+      return {
+        id: row.id,
+        timestamp,
+        value: cost,
+        dimensions: {
+          user: userDimension,
+          taskType,
+          project: createLabelBackedDimensionValue(project),
+          provider: createLabelBackedDimensionValue(provider),
+          model: createLabelBackedDimensionValue(model),
+        },
+        details: {
+          id: row.id,
+          values: {
+            date: formatAnalyticsDateTime(timestamp),
+            user: userDimension.label,
+            taskType: taskType.label,
+            project,
+            provider,
+            model,
+            cost: cost.toFixed(2),
+            taskTitle: row.taskTitle ?? 'Non-task inference',
+          },
+          links: row.taskId ? { task: `/task/${row.taskId}` } : undefined,
+        },
+        meta: {
+          canonicalTaskId: row.taskId,
+          prKeys: row.taskId ? [...(prKeysByTaskId.get(row.taskId) ?? [])] : [],
+        },
+      } satisfies AnalyticsRow;
+    });
 }
 
 async function getPullRequestAnalyticsRows(
@@ -1474,6 +1764,8 @@ async function getAnalyticsRows(
       return getTaskAnalyticsRows(auth, timePeriod, now, metric);
     case 'pullRequests':
       return getPullRequestAnalyticsRows(auth, timePeriod, now);
+    case 'costs':
+      return getCostAnalyticsRows(auth, timePeriod, now);
   }
 }
 
@@ -1488,15 +1780,15 @@ function getAnalyticsDetailsColumns(
         { key: 'user', label: 'User' },
         { key: 'project', label: 'Environment' },
         { key: 'source', label: 'Source' },
-        { key: 'model', label: 'Model' },
+        { key: 'taskType', label: 'Task Type' },
         { key: 'taskTitle', label: 'Task Title' },
         { key: 'task', label: 'Task Link' },
       ];
 
       if (metric === 'tokens') {
-        columns.splice(6, 0, { key: 'tokens', label: 'Tokens' });
+        columns.splice(5, 0, { key: 'tokens', label: 'Tokens' });
       } else if (metric === 'cost') {
-        columns.splice(6, 0, { key: 'cost', label: 'Cost (USD)' });
+        columns.splice(5, 0, { key: 'cost', label: 'Cost (USD)' });
       }
 
       return columns;
@@ -1511,6 +1803,17 @@ function getAnalyticsDetailsColumns(
         { key: 'status', label: 'Status' },
         { key: 'createdBy', label: 'Created By' },
         { key: 'task', label: 'Task Link' },
+      ];
+    case 'costs':
+      return [
+        { key: 'date', label: 'Date' },
+        { key: 'user', label: 'User' },
+        { key: 'taskType', label: 'Task Type' },
+        { key: 'project', label: 'Environment' },
+        { key: 'provider', label: 'Provider' },
+        { key: 'model', label: 'Model' },
+        { key: 'cost', label: 'Cost (USD)' },
+        { key: 'taskTitle', label: 'Task' },
       ];
   }
 }
@@ -1535,12 +1838,7 @@ export async function getAnalyticsChartData(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const granularity = getResolvedGranularity(
     input.timePeriod,
     input.granularity,
@@ -1568,12 +1866,7 @@ export async function getPullRequestAnalyticsOverview(
   now: Date = new Date(),
 ): Promise<PullRequestAnalyticsOverviewResponse> {
   const rows = await getPullRequestAnalyticsRows(auth, input.timePeriod, now);
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    'pullRequests',
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const granularity = getResolvedGranularity(
     input.timePeriod,
     input.granularity,
@@ -1642,12 +1935,7 @@ export async function getAnalyticsExportData(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
     ? input.viewBy
     : getDefaultAnalyticsViewBy(input.object);
@@ -1686,12 +1974,7 @@ export async function getAnalyticsDetails(
     now,
     metric,
   );
-  const filteredRows = applyDimensionFilters(
-    rows,
-    input.filters ?? {},
-    undefined,
-    input.object,
-  );
+  const filteredRows = applyDimensionFilters(rows, input.filters ?? {});
   const viewBy = isValidAnalyticsViewBy(input.object, input.viewBy)
     ? input.viewBy
     : getDefaultAnalyticsViewBy(input.object);

@@ -3,10 +3,15 @@ import {
   buildTaskNotRunningResponseBlocks,
   parseTaskCancellationActionValue,
   postSlackInteractiveResponse,
+  SlackNotifier,
   TASK_CANCELED_RESPONSE_TEXT,
   type SlackInteractivePayload,
 } from '@roomote/slack';
-import { activeRunStatuses } from '@roomote/types';
+import {
+  activeRunStatuses,
+  DEFAULT_SLACK_CANCEL_EMOJI,
+  getSlackChannelFromTaskPayload,
+} from '@roomote/types';
 import {
   and,
   db,
@@ -14,6 +19,7 @@ import {
   eq,
   inArray,
   isNull,
+  slackInstallations,
   taskRuns,
 } from '@roomote/db/server';
 
@@ -22,7 +28,23 @@ import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 
 type CancelableTaskRunTarget = Parameters<typeof stopTaskRun>[0]['run'] & {
   taskId: string | null;
+  payload?: unknown;
 };
+
+function getSlackOriginMessageTsFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const origin =
+    (typeof record.ts === 'string' && record.ts.trim()) ||
+    (typeof record.slackOriginMessageTs === 'string' &&
+      record.slackOriginMessageTs.trim()) ||
+    '';
+
+  return origin || null;
+}
 
 async function findLatestActiveTaskRunForTask(
   taskId: string,
@@ -40,6 +62,7 @@ async function findLatestActiveTaskRunForTask(
       status: true,
       sandboxServerUrl: true,
       actingUserId: true,
+      payload: true,
     },
   });
 
@@ -58,6 +81,7 @@ async function resolveCancelableTaskRun(
       sandboxServerUrl: true,
       actingUserId: true,
       canceledAt: true,
+      payload: true,
     },
   });
 
@@ -75,11 +99,49 @@ async function resolveCancelableTaskRun(
           status: sourceRun.status,
           sandboxServerUrl: sourceRun.sandboxServerUrl,
           actingUserId: sourceRun.actingUserId,
+          payload: sourceRun.payload,
         }
       : null;
   }
 
   return findLatestActiveTaskRunForTask(sourceRun.taskId);
+}
+
+async function addSlackCancelReactionBestEffort(params: {
+  teamId: string;
+  channelId: string;
+  originMessageTs: string | null;
+}): Promise<void> {
+  if (!params.originMessageTs) {
+    return;
+  }
+
+  try {
+    const slackInstallation = await db.query.slackInstallations.findFirst({
+      where: and(
+        eq(slackInstallations.teamId, params.teamId),
+        eq(slackInstallations.isActive, true),
+      ),
+      columns: { botAccessToken: true },
+    });
+
+    if (!slackInstallation?.botAccessToken) {
+      return;
+    }
+
+    const slack = new SlackNotifier(slackInstallation.botAccessToken);
+    await slack.addReaction({
+      channel: params.channelId,
+      timestamp: params.originMessageTs,
+      name: DEFAULT_SLACK_CANCEL_EMOJI,
+    });
+  } catch (error) {
+    console.warn(
+      `[handleTaskCancellation] Failed to add cancel reaction for channel ${params.channelId} ts ${params.originMessageTs}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 function isTerminalStopResult(
@@ -140,6 +202,8 @@ export async function handleTaskCancellation(
       run: cancelableTaskRun,
       authUserId: cancelerMapping.activeMapping?.userId ?? null,
       allowDirectCancelWithoutSandbox: true,
+      // Provider Cancel is terminal: stop the turn and kill the sandbox.
+      terminate: true,
       cancelledBy: {
         ...(payload.user.name ? { name: payload.user.name } : {}),
         source: 'slack',
@@ -161,6 +225,19 @@ export async function handleTaskCancellation(
     if (!stopResult.success) {
       throw new Error(stopResult.error || 'Failed to stop task');
     }
+
+    const originMessageTs = getSlackOriginMessageTsFromPayload(
+      cancelableTaskRun.payload,
+    );
+    const originChannel =
+      getSlackChannelFromTaskPayload(cancelableTaskRun.payload) ??
+      payload.channel.id;
+
+    await addSlackCancelReactionBestEffort({
+      teamId: payload.team.id,
+      channelId: originChannel,
+      originMessageTs,
+    });
 
     await postSlackInteractiveResponse(payload.response_url, {
       replace_original: true,

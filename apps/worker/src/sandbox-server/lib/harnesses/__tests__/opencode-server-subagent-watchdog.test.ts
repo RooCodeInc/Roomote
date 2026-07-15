@@ -28,6 +28,9 @@ class FakeOpenCodeServerClient {
   children = vi.fn(
     async (_options: { sessionId: string }) => [] as OpenCodeSession[],
   );
+  get sessionCreateTimeoutMsValue(): number {
+    return 90_000;
+  }
   streamEvents = vi.fn(
     async (options: {
       signal: AbortSignal;

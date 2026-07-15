@@ -4,6 +4,8 @@ import type { AnalyticsDimension } from '@/types';
 import {
   Brain,
   CircleUserRound,
+  Bot,
+  Cpu,
   FolderIcon,
   GitPullRequest,
   RadioTower,
@@ -17,8 +19,10 @@ export const ANALYTICS_DIMENSION_ICONS: Record<
   user: CircleUserRound,
   project: VectorSquare,
   source: RadioTower,
-  model: Brain,
   status: GitPullRequest,
   repo: FolderIcon,
   author: CircleUserRound,
+  taskType: Bot,
+  provider: Cpu,
+  model: Brain,
 };

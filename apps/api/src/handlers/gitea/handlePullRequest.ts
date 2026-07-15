@@ -22,7 +22,7 @@ import {
 import type { WebhookResponse } from '../../types';
 import { scheduleNotifyPullRequestTerminalStatus } from '../github/notifyPullRequestTerminalStatus';
 import { scheduleSourceControlPullRequestFactSync } from '../pull-request-fact-sync';
-import { toHostFromUrl } from '../utils';
+import { pickHostScopedRepository, toHostFromUrl } from '../utils';
 import {
   getGiteaAutomationTargets,
   getGiteaUsername,
@@ -65,14 +65,17 @@ async function notifyTerminalPullRequestThreads(
   repoFullName: string,
   status: 'merged' | 'closed',
 ): Promise<void> {
-  const repositoryRow = await db.query.repositories.findFirst({
+  const prUrl = getPullRequestUrl(payload);
+  const webhookHost = toHostFromUrl(prUrl);
+  const repositoryRows = await db.query.repositories.findMany({
     where: and(
       eq(repositories.sourceControlProvider, 'gitea'),
       eq(repositories.fullName, repoFullName),
       eq(repositories.isActive, true),
     ),
-    columns: { id: true },
+    columns: { id: true, host: true },
   });
+  const repositoryRow = pickHostScopedRepository(repositoryRows, webhookHost);
 
   if (!repositoryRow) {
     return;
@@ -82,9 +85,11 @@ async function notifyTerminalPullRequestThreads(
     {
       sourceControlProvider: 'gitea',
       repository: repoFullName,
+      repositoryId: repositoryRow.id,
+      host: repositoryRow.host ?? webhookHost,
       prNumber: payload.number,
       prTitle: payload.pull_request.title,
-      prUrl: getPullRequestUrl(payload),
+      prUrl,
       status,
       actorLogin: getGiteaUsername(payload.sender) ?? 'someone on Gitea',
     },
@@ -250,6 +255,8 @@ export async function handleGiteaPullRequest(
         trigger: 'webhook',
         prLinkage: {
           provider: 'gitea',
+          ...(target.repo.host ? { host: target.repo.host } : {}),
+          repositoryId: target.repo.id,
           repository: repoFullName,
           prNumber: payload.number,
           prUrl,

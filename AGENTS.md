@@ -27,9 +27,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — Prettier format check + ESLint across workspaces
+- `pnpm lint` — oxfmt format check + oxlint + residual ESLint across workspaces
 - `pnpm check-types` — TypeScript type checking
-- `pnpm format` — Prettier formatting
+- `pnpm format` — oxfmt formatting
 
 ## Validation
 
@@ -37,10 +37,10 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Targeted tests: `pnpm exec dotenvx run -f .env.test -- pnpm --filter <package> exec vitest run path/to/file.test.ts`
 - If `pnpm` is missing or resolves to the wrong version, run `mise install` and retry the command with `mise exec --`
 - `pnpm lint && pnpm check-types` — Full static analysis
-- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the pre-push hook
+- `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the full pre-push suite (pre-push runs the same gates in parallel after oxlint)
 - `pnpm check` — Runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
-- Pre-commit hooks: `lint-staged`. Pre-push: `pnpm lint:fast` + `pnpm check-types:fast` + `pnpm knip`.
+- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `node scripts/pre-push-checks.mjs` (oxlint, then residual ESLint + `check-types:fast` + knip in parallel).
 
 ## Working notes
 

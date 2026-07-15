@@ -85,7 +85,7 @@ export function redactSourceControlProviderEnvVars(
       : sourceControlProvider === 'gitea'
         ? ['GITEA_TOKEN']
         : sourceControlProvider === 'bitbucket'
-          ? ['BITBUCKET_TOKEN']
+          ? []
           : sourceControlProvider === 'ado'
             ? ['ADO_TOKEN']
             : [];
@@ -390,7 +390,7 @@ async function createProviderToken(
       return {
         provider,
         token: '',
-        envVar: 'BITBUCKET_TOKEN',
+        envVar: 'BITBUCKET_OAUTH',
         envVars: {},
         gitProxyCredentials: credentials.credentials.map((credential) => ({
           ...credential,

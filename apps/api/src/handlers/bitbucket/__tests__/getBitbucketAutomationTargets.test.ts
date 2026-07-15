@@ -36,4 +36,22 @@ describe('getBitbucketAutomationTargets helpers', () => {
       }),
     ).toBe('abcd-ef');
   });
+
+  it('falls back past blank username fields and trims the selected value', () => {
+    expect(
+      getBitbucketUsername({
+        username: '  ',
+        nickname: '  nick  ',
+        display_name: 'Display',
+      }),
+    ).toBe('nick');
+
+    expect(
+      getBitbucketUsername({
+        username: '  ',
+        nickname: '  ',
+        display_name: '  Display  ',
+      }),
+    ).toBe('Display');
+  });
 });

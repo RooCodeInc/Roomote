@@ -399,6 +399,8 @@ export async function handleGitLabNote(
       trigger: 'message',
       prLinkage: {
         provider: 'gitlab',
+        ...(target.repo.host ? { host: target.repo.host } : {}),
+        repositoryId: target.repo.id,
         repository: repoFullName,
         prNumber: mergeRequest.iid,
         prUrl,

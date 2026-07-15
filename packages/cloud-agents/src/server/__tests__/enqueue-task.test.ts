@@ -194,6 +194,38 @@ describe('enqueueTask initiator stamping', () => {
     expect(run.sourceRunId).toBeNull();
   });
 
+  it('persists the launching run pointer on the fresh run row', async () => {
+    const userId = await createUser();
+
+    const parentRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    const childRun = await launchFresh({
+      task: standardTaskInput({
+        sourceRunId: parentRun.id,
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Verify the environment',
+          notifySourceRunOnSettle: true,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(childRun.sourceRunId).toBe(parentRun.id);
+    expect(
+      (childRun.payload as { notifySourceRunOnSettle?: boolean })
+        .notifySourceRunOnSettle,
+    ).toBe(true);
+  });
+
   it('persists an unlinked external actor with actor context and external commit author', async () => {
     const run = await launchFresh({
       task: standardTaskInput({
