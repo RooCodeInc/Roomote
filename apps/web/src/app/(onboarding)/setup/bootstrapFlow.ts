@@ -2,6 +2,7 @@ import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
 export type BootstrapStep =
   | 'welcome'
+  | 'cloud-enrollment'
   | 'email-account'
   | 'email-password'
   | 'auth-provider'

@@ -211,6 +211,8 @@ import {
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
+  enrollSetupBootstrapRoomoteCloudCommand,
+  enrollSetupNewRoomoteCloudCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
@@ -1659,6 +1661,12 @@ export const appRouter = createRouter({
       getSetupNewStatusCommand(auth),
     ),
 
+    enrollRoomoteCloud: protectedProcedure
+      .input(z.object({ connectionLink: z.string().trim().min(1).max(2_048) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        enrollSetupNewRoomoteCloudCommand(auth, input),
+      ),
+
     saveAuthProviderChoice: protectedProcedure
       .input(
         z.object({
@@ -1788,6 +1796,15 @@ export const appRouter = createRouter({
           .optional(),
       )
       .query(({ input }) => getSetupBootstrapStatusCommand(input)),
+
+    enrollRoomoteCloud: publicProcedure
+      .input(
+        z.object({
+          connectionLink: z.string().trim().min(1).max(2_048),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) => enrollSetupBootstrapRoomoteCloudCommand(input)),
 
     saveAuthProviderChoice: publicProcedure
       .input(

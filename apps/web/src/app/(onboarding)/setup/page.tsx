@@ -27,6 +27,7 @@ import { useTRPC } from '@/trpc/client';
 import { Button, Spinner } from '@/components/system';
 
 import { StepWelcome } from './StepWelcome';
+import { StepRoomoteCloudEnrollment } from './StepRoomoteCloudEnrollment';
 import { StepAuthEnvVars } from './StepAuthEnvVars';
 import { StepBootstrapAccount } from './StepBootstrapAccount';
 import { StepBootstrapEmailPassword } from './StepBootstrapEmailPassword';
@@ -96,6 +97,7 @@ function getInitialBootstrapStep(): BootstrapStep {
 
 const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
   'welcome',
+  'cloud-enrollment',
   'email-account',
   'email-password',
   'auth-provider',
@@ -337,7 +339,14 @@ export default function SetupPage() {
     let nextStep = currentStep;
 
     if (currentStep !== 'welcome') {
-      if (currentStep === 'email-account' || currentStep === 'email-password') {
+      if (currentStep === 'cloud-enrollment') {
+        nextStep = bootstrapStatus.authSetup?.managedConnection
+          ? 'email-password'
+          : currentStep;
+      } else if (
+        currentStep === 'email-account' ||
+        currentStep === 'email-password'
+      ) {
         const nextBootstrapStep = getBootstrapStepAfterWelcome(
           bootstrapStatus.authSetup,
         );
@@ -441,6 +450,21 @@ export default function SetupPage() {
                     getBootstrapStepAfterWelcome(bootstrapStatus.authSetup),
                   );
                 }}
+                onConnectCloud={
+                  bootstrapStatus.cloudEnrollmentEnabled &&
+                  !bootstrapStatus.authSetup.managedConnection
+                    ? () => setBootstrapStepWithTransition('cloud-enrollment')
+                    : undefined
+                }
+              />
+            )}
+            {bootstrapStep === 'cloud-enrollment' && (
+              <StepRoomoteCloudEnrollment
+                setupToken={setupToken}
+                onConnected={() =>
+                  setBootstrapStepWithTransition('email-password')
+                }
+                onBack={() => setBootstrapStepWithTransition('welcome')}
               />
             )}
             {bootstrapStep === 'email-account' && (

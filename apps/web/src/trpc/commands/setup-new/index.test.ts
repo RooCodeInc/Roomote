@@ -391,6 +391,7 @@ describe('setup bootstrap token gating', () => {
       setupOpen: true,
       setupTokenRequired: true,
       setupTokenSatisfied: false,
+      cloudEnrollmentEnabled: false,
       authSetup: null,
     });
   });
@@ -436,6 +437,7 @@ describe('setup bootstrap token gating', () => {
       deploymentId: 'deployment-1',
       providers: ['slack', 'microsoft'],
     });
+    expect(status.cloudEnrollmentEnabled).toBe(true);
     expect(status.authSetup?.preselectedProvider).toBe('slack');
     expect(status.authSetup?.runtimeConfiguredProvider).toBeNull();
   });
@@ -449,6 +451,7 @@ describe('setup bootstrap token gating', () => {
       setupOpen: true,
       setupTokenRequired: true,
       setupTokenSatisfied: false,
+      cloudEnrollmentEnabled: false,
       authSetup: null,
     });
   });

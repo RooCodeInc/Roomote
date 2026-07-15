@@ -28,6 +28,7 @@ import {
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
+import { StepRoomoteCloudEnrollment } from './StepRoomoteCloudEnrollment';
 import { SetupFooter } from './SetupFooter';
 import { getComputeCredentialsHint } from './computeSetupCopy';
 import { getSetupStepDefinition } from './types';
@@ -229,6 +230,17 @@ export function StepComputeConfig({
     !selectedProvider ||
     !credentialsMet ||
     !hostedRequirementMet;
+
+  if (effectiveSelectedProviderId === 'roomote-cloud' && !credentialsMet) {
+    return (
+      <StepRoomoteCloudEnrollment
+        mode="authenticated"
+        setupToken={null}
+        onConnected={onContinue}
+        onBack={onBack}
+      />
+    );
+  }
 
   const handleContinue = async () => {
     if (!selectedProvider) {

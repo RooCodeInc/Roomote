@@ -100,7 +100,8 @@ describe('bootstrapFlow', () => {
     );
   });
 
-  it('maps only auth setup query steps into the signed-out bootstrap flow', () => {
+  it('maps supported query steps into the signed-out bootstrap flow', () => {
+    expect(getBootstrapStepFromSetupStepParam('cloud-enrollment')).toBeNull();
     expect(getBootstrapStepFromSetupStepParam('auth-provider')).toBe(
       'auth-provider',
     );

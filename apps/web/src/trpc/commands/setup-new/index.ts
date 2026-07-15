@@ -145,6 +145,7 @@ import {
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
 import { triggerTaskSuggestionsCommand } from '../task-suggestions';
+import { enrollCustomerHostedRoomoteCommand } from '../roomote-cloud-enrollment';
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
 type PersistedRuntimeModelConfig = DeploymentModelConfig;
@@ -2218,6 +2219,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
       setupOpen: bootstrapState.setupOpen,
       setupTokenRequired,
       setupTokenSatisfied: false,
+      cloudEnrollmentEnabled: isRoomoteCloudEnabled(process.env),
       authSetup: null,
     };
   }
@@ -2238,6 +2240,7 @@ export async function getSetupBootstrapStatusCommand(input?: {
     setupOpen: bootstrapState.setupOpen,
     setupTokenRequired,
     setupTokenSatisfied: true,
+    cloudEnrollmentEnabled: isRoomoteCloudEnabled(process.env),
     authSetup: buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
@@ -2273,6 +2276,29 @@ export async function saveSetupBootstrapAuthConfigCommand(input: {
     values: input.values,
     actorUserId: null,
     requireBootstrapOpen: true,
+  });
+}
+
+export async function enrollSetupBootstrapRoomoteCloudCommand(input: {
+  connectionLink: string;
+  setupToken?: string;
+}) {
+  assertSetupTokenValid(await resolveSetupTokenInput(input.setupToken));
+  await assertSetupBootstrapOpen();
+  return enrollCustomerHostedRoomoteCommand({
+    connectionLink: input.connectionLink,
+    actorUserId: null,
+  });
+}
+
+export async function enrollSetupNewRoomoteCloudCommand(
+  auth: UserAuthSuccess,
+  input: { connectionLink: string },
+) {
+  assertAdmin(auth);
+  return enrollCustomerHostedRoomoteCommand({
+    connectionLink: input.connectionLink,
+    actorUserId: auth.userId,
   });
 }
 
