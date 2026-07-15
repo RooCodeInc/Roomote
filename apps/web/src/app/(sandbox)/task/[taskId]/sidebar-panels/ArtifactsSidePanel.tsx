@@ -22,9 +22,13 @@ export function ArtifactsSidePanel({ session }: ArtifactsSidePanelProps) {
       selectedArtifactVersion ??
       session.artifacts
         .filter((artifact) => artifact.path === selectedArtifactPath)
-        .reduce<
-          number | undefined
-        >((maxVersion, artifact) => (maxVersion === undefined || artifact.version > maxVersion ? artifact.version : maxVersion), undefined),
+        .reduce<number | undefined>(
+          (maxVersion, artifact) =>
+            maxVersion === undefined || artifact.version > maxVersion
+              ? artifact.version
+              : maxVersion,
+          undefined,
+        ),
     [selectedArtifactPath, selectedArtifactVersion, session.artifacts],
   );
 

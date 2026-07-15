@@ -13,7 +13,8 @@
 
   "testing.automaticallyOpenTestResults": "neverOpen",
 
-  "prettier.enable": true,
+  "oxc.fmt.configPath": ".oxfmtrc.json",
+  "editor.defaultFormatter": "oxc.oxc-vscode",
 
   "vitest.disableWorkspaceWarning": true
 }
