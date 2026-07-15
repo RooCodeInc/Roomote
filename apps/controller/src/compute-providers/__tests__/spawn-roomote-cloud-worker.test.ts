@@ -12,10 +12,6 @@ const {
   mockStampTaskRunMilestone: vi.fn(),
 }));
 
-vi.mock('@roomote/env', () => ({
-  Env: { TRPC_URL: 'http://api', R_APP_URL: 'http://app' },
-}));
-
 vi.mock('@roomote/db/server', () => ({
   count: () => 'count',
   db: {
@@ -32,6 +28,9 @@ vi.mock('@roomote/compute-providers', () => ({
     ...input.extraEnv,
     R_MODEL: 'anthropic/claude-sonnet',
     ANTHROPIC_API_KEY: 'customer-key',
+    TRPC_URL: 'http://api:3001',
+    R_APP_URL: 'http://web:3000',
+    ROOMOTE_APP_URL: 'http://web:3000',
     COMPUTE_PROVIDER: 'docker',
     ROOMOTE_WORKER_COMPUTE_PROVIDER: 'docker',
   }),
@@ -76,11 +75,7 @@ describe('spawnRoomoteCloudWorker', () => {
     mockUpdateTaskRunMachine.mockReset();
     mockUpdateTaskRunMachine.mockResolvedValue(true);
     mockStampTaskRunMilestone.mockReset();
-    vi.stubEnv('TRPC_URL', 'http://127.0.0.1:13001');
-    vi.stubEnv('R_APP_URL', 'http://localhost:3000');
   });
-
-  afterEach(() => vi.unstubAllEnvs());
 
   it('persists the opaque Cloud lease and preserves customer model env', async () => {
     mockLaunchRoomoteCloudCompute.mockResolvedValue({
@@ -119,12 +114,14 @@ describe('spawnRoomoteCloudWorker', () => {
           ANTHROPIC_API_KEY: 'customer-key',
           COMPUTE_PROVIDER: 'roomote-cloud',
           ROOMOTE_WORKER_COMPUTE_PROVIDER: 'roomote-cloud',
-          TRPC_URL: 'http://127.0.0.1:13001',
-          R_APP_URL: 'http://localhost:3000',
-          ROOMOTE_APP_URL: 'http://localhost:3000',
         }),
       }),
     );
+    const environment = mockLaunchRoomoteCloudCompute.mock.calls[0]?.[1]
+      ?.environment as Record<string, string>;
+    expect(environment).not.toHaveProperty('TRPC_URL');
+    expect(environment).not.toHaveProperty('R_APP_URL');
+    expect(environment).not.toHaveProperty('ROOMOTE_APP_URL');
     expect(mockUpdateTaskRunMachine).toHaveBeenCalledWith(
       expect.objectContaining({
         taskRun,
