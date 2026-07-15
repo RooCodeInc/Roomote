@@ -57,6 +57,14 @@ thread started on the message that requested it — like a threaded reply — so
 the conversation stays anchored where it began. A task started in a forum gets
 its own forum post, and `/new` starts a fresh, separate task thread.
 
+<Warning>
+  Unlike a Slack workspace, a Discord server can be public or shared with
+  people outside your team. Task threads are visible to everyone who can see
+  the channel, including repository names, task descriptions, and PR links.
+  Only add Roomote to servers whose members you trust with that context, and
+  use private channels for sensitive work.
+</Warning>
+
 If Roomote cannot see the server or channel, confirm that the bot was added to
 the server and that its role and channel overrides grant the permissions above.
 Use **Repair** to register commands again and refresh server discovery.
