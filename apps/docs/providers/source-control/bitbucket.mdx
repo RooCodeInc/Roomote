@@ -4,14 +4,14 @@ icon: 'https://api.iconify.design/simple-icons:bitbucket.svg?color=currentColor'
 description: Configure Bitbucket Cloud repository sync and pull request webhooks for Roomote.
 ---
 
-Bitbucket Cloud support uses one deployment-scoped OAuth consumer. The
+Bitbucket Cloud support uses one deployment-scoped OAuth client. The
 authorized account's accessible workspaces define the repositories Roomote can
 sync. Bitbucket Server and Data Center are not supported.
 
-## Create a Bitbucket OAuth consumer
+## Create a Bitbucket OAuth client
 
-Create a consumer in the
-[Atlassian developer console](https://developer.atlassian.com/console/myapps/).
+In the Bitbucket Cloud workspace that owns the repositories, open **Workspace
+settings → Apps and features → OAuth clients**, then create an OAuth client.
 Set its callback URL to:
 
 ```text
@@ -27,7 +27,7 @@ Grant these scopes:
 | `pullrequest` and `pullrequest:write` | pull request workflows |
 | `webhook` | automatic webhook setup |
 
-Save the consumer values in setup or deployment environment variables:
+Save the client values in setup or deployment environment variables:
 
 ```sh
 BITBUCKET_CLIENT_ID=<oauth-consumer-key>
