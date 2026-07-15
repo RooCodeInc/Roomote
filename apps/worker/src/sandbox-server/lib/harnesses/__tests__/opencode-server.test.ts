@@ -3468,6 +3468,74 @@ describe('OpenCodeServerHarness', () => {
       harness.dispose();
     }
   });
+
+  it('aborts a late-created session when cancel races ahead of ensureSession', async () => {
+    let resolveCreate:
+      | ((value: { id: string; title: string }) => void)
+      | undefined;
+    const client = new FakeOpenCodeServerClient();
+    client.createSession.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+
+    const harness = new OpenCodeServerHarness({
+      client: client as unknown as OpenCodeServerClient,
+      workspacePath: '/sandbox/repos',
+      logger: createLogger(),
+      model: TEST_OPENCODE_MODEL,
+      eventStreamReadyTimeoutMs: 100,
+    });
+    const taskEvents: TaskEvent[] = [];
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalledTimes(1);
+      });
+
+      // Cancel while createSession is still pending — no session id yet.
+      harness.sendCommand({
+        commandName: TaskCommandName.CancelTask,
+        data: { cancelledBy: { name: 'Matt', source: 'web' } },
+      });
+
+      resolveCreate?.({ id: 'ses_late', title: 'late' });
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_late' }),
+        );
+      });
+
+      expect(client.promptAsync).not.toHaveBeenCalled();
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskStarted &&
+            event.payload?.[0] === 'ses_late',
+        ),
+      ).toBe(true);
+      expect(
+        taskEvents.some(
+          (event) =>
+            event.eventName === TaskEventName.TaskAborted &&
+            event.payload?.[0] === 'ses_late',
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
 });
 
 describe('OpenCodeServerHarness cancel marker', () => {

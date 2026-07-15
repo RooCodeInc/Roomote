@@ -1499,6 +1499,13 @@ export class OpenCodeServerHarness
   private sessionId: string | undefined;
   private resumedSessionPendingValidation = false;
   private inFlight = false;
+  /**
+   * Set when CancelTask arrives before any OpenCode session id exists. A
+   * later-successful createSession must abort that session instead of starting
+   * a prompt while the HarnessManager has already moved to `stopped`.
+   */
+  private cancelRequestedBeforeSession = false;
+  private sessionCreateAbortController = new AbortController();
   private queuedPromptRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private currentWorkflowPhase: string | null = null;
   // Most recent packaged workflow skill loaded by the primary session's agent
@@ -1993,14 +2000,30 @@ export class OpenCodeServerHarness
     this.stopHookReminderCount = 0;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
+    this.cancelRequestedBeforeSession = false;
+    this.resetSessionCreateAbortController();
 
     let sessionId: string;
 
     try {
       sessionId = await this.ensureSession(command.data.text);
     } catch (error) {
+      if (this.cancelRequestedBeforeSession || this.isAbortError(error)) {
+        this.logger.info(
+          `OpenCode initial session create aborted because cancel was requested before a session existed error=${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        return;
+      }
+
       this.failSessionCreateForInitialTask(error);
       throw error;
+    }
+
+    if (this.cancelRequestedBeforeSession) {
+      await this.terminateLateCreatedSessionAfterCancel(sessionId);
+      return;
     }
 
     this.runtimeEvents.taskStarted(sessionId);
@@ -2101,6 +2124,11 @@ export class OpenCodeServerHarness
     const sessionId = this.sessionId;
 
     if (!sessionId) {
+      // Cancel raced ahead of ensureSession. Remember the request so a late
+      // successful create is aborted instead of submitting the initial prompt
+      // while the manager has already moved to stopped.
+      this.cancelRequestedBeforeSession = true;
+      this.sessionCreateAbortController.abort();
       this.inFlight = false;
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
@@ -2988,7 +3016,7 @@ export class OpenCodeServerHarness
     try {
       const session = await this.client.createSession({
         title: title?.slice(0, 80),
-        signal: this.eventAbortController.signal,
+        signal: this.composeSessionCreateSignal(),
       });
       this.sessionId = session.id;
       this.logger.info(
@@ -3000,6 +3028,13 @@ export class OpenCodeServerHarness
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;
       const message = error instanceof Error ? error.message : String(error);
+
+      if (this.cancelRequestedBeforeSession || this.isAbortError(error)) {
+        this.logger.info(
+          `OpenCode session create canceled/aborted elapsedMs=${elapsedMs} error=${message}`,
+        );
+        throw error;
+      }
 
       this.logger.error(
         `OpenCode session create failed elapsedMs=${elapsedMs} timeoutMs=${timeoutMs} workspace=${this.workspacePath} mcpServers=${
@@ -3015,6 +3050,66 @@ export class OpenCodeServerHarness
       });
       throw error;
     }
+  }
+
+  private composeSessionCreateSignal(): AbortSignal {
+    return AbortSignal.any([
+      this.eventAbortController.signal,
+      this.sessionCreateAbortController.signal,
+    ]);
+  }
+
+  private resetSessionCreateAbortController(): void {
+    if (!this.sessionCreateAbortController.signal.aborted) {
+      return;
+    }
+
+    this.sessionCreateAbortController = new AbortController();
+  }
+
+  private isAbortError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+      return false;
+    }
+
+    return error.name === 'AbortError' || /aborted/i.test(error.message);
+  }
+
+  /**
+   * Cancel raced with ensureSession and arrived first. The create still
+   * succeeded — stop the late session before it becomes an orphan turn while
+   * the manager is already stopped.
+   */
+  private async terminateLateCreatedSessionAfterCancel(
+    sessionId: string,
+  ): Promise<void> {
+    this.logger.warn(
+      `OpenCode session ${sessionId} was created after cancel was requested with no prior session; aborting the late session instead of starting the turn`,
+    );
+    this.sessionId = sessionId;
+    this.cancelRequestedBeforeSession = false;
+    this.armReplayAbortErrorSuppression();
+
+    try {
+      await this.client.abort({
+        sessionId,
+        signal: this.eventAbortController.signal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to abort late OpenCode session ${sessionId} after racey cancel: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    this.inFlight = false;
+    this.prompts.clear();
+    this.clearQueuedPromptRetryTimer();
+    this.pendingUserInputRequests.clear();
+    this.clearAllExecuteToolProgress();
+    this.runtimeEvents.taskStarted(sessionId);
+    this.runtimeEvents.taskAborted(sessionId);
   }
 
   private recordSessionCreateFailureDiagnostic(input: {
