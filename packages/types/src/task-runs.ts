@@ -926,6 +926,15 @@ const sharedTaskPayloadSchema = z.object({
   environmentDefinitionId: z.string().uuid().optional(),
 
   /**
+   * Marks this task as an environment verification flow for the given
+   * environment id. Set by the verification-retry command and by the
+   * environment-setup skill's follow-up verification task. Only tasks carrying
+   * this marker may record a verification result for that environment through
+   * the `record_verification` MCP action.
+   */
+  verifiesEnvironmentId: z.string().uuid().optional(),
+
+  /**
    * Optional validated repository subset to prepare when `repo` is the
    * ALL_REPOSITORIES sentinel. This allows multi-repo tasks to start a shared
    * workspace without cloning every active repository in the organization.

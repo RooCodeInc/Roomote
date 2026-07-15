@@ -138,6 +138,7 @@ import {
   updateEnvironmentCommand,
   startEnvironmentDefinitionTaskCommand,
   cancelEnvironmentDefinitionTaskCommand,
+  retryEnvironmentVerificationCommand,
   deleteEnvironmentCommand,
   duplicateEnvironmentCommand,
   validateConfigCommand,
@@ -1051,6 +1052,12 @@ export const appRouter = createRouter({
       .input(z.object({ taskId: z.string() }))
       .mutation(({ ctx: { auth }, input }) =>
         cancelEnvironmentDefinitionTaskCommand(auth, input),
+      ),
+
+    retryVerification: protectedProcedure
+      .input(z.object({ environmentId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        retryEnvironmentVerificationCommand(auth, input),
       ),
 
     delete: protectedProcedure

@@ -8,6 +8,7 @@ import {
   taskRuns,
   tasks,
   and,
+  beginEnvironmentVerification,
   desc,
   eq,
   inArray,
@@ -23,11 +24,13 @@ import {
 } from '@roomote/db/server';
 import {
   activeRunStatuses,
+  ALL_REPOSITORIES,
   RunStatus,
   TaskPayloadKind,
   appendEnvironmentDefinitionGuidance,
   buildCreateEnvironmentDefinitionPrompt,
   buildEnvironmentDefinitionWorkspacePayload,
+  buildEnvironmentVerificationPrompt,
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
@@ -73,6 +76,19 @@ export interface EnvironmentWithMeta {
   createdAt: Date;
   updatedAt: Date;
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>;
+  /**
+   * Verification state. `isVerified` is true once a verification task reported
+   * success for the current configuration. `verificationTaskId` links to the
+   * Roomote task that most recently ran (or is running) verification.
+   * `verificationTaskActive` is true only while that task still has an active
+   * run, so the UI can distinguish "verification in progress" from a stale
+   * task id left by a crashed or unreported attempt.
+   */
+  isVerified: boolean;
+  verificationTaskId: string | null;
+  verificationTaskActive: boolean;
+  verifiedAt: Date | null;
+  verificationError: string | null;
 }
 
 export interface EnvironmentConfigVersionDetail {
@@ -202,6 +218,7 @@ function toEnvironmentWithMeta(
   env: typeof environments.$inferSelect,
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>,
   repositoryMappings: Array<{ repositoryId: string }>,
+  activeVerificationTaskIds: Set<string>,
 ): EnvironmentWithMeta {
   return {
     id: env.id,
@@ -215,7 +232,47 @@ function toEnvironmentWithMeta(
     createdAt: env.createdAt,
     updatedAt: env.updatedAt,
     snapshots,
+    isVerified: env.isVerified,
+    verificationTaskId: env.verificationTaskId,
+    verificationTaskActive:
+      env.verificationTaskId !== null &&
+      activeVerificationTaskIds.has(env.verificationTaskId),
+    verifiedAt: env.verifiedAt,
+    verificationError: env.verificationError,
   };
+}
+
+/**
+ * Given a set of environments, return the subset of their `verificationTaskId`
+ * values that still have an active task run. Used to distinguish an in-progress
+ * verification from a stale task id left by a crashed or unreported attempt.
+ */
+async function getActiveVerificationTaskIds(
+  envs: Array<{ verificationTaskId: string | null }>,
+): Promise<Set<string>> {
+  const taskIds = [
+    ...new Set(
+      envs
+        .map((env) => env.verificationTaskId)
+        .filter((taskId): taskId is string => taskId !== null),
+    ),
+  ];
+
+  if (taskIds.length === 0) {
+    return new Set();
+  }
+
+  const activeRuns = await db
+    .selectDistinct({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(
+      and(
+        inArray(taskRuns.taskId, taskIds),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+    );
+
+  return new Set(activeRuns.map((run) => run.taskId));
 }
 
 async function getRepositoryMappingsByEnvironmentId(environmentIds: string[]) {
@@ -266,12 +323,14 @@ export async function getEnvironmentsCommand(
     await getRepositoryMappingsByEnvironmentId(
       envs.map((environment) => environment.id),
     );
+  const activeVerificationTaskIds = await getActiveVerificationTaskIds(envs);
 
   return envs.map((env) =>
     toEnvironmentWithMeta(
       env,
       snapshotsByEnvironment.get(env.id) ?? {},
       repositoryMappingsByEnvironmentId.get(env.id) ?? [],
+      activeVerificationTaskIds,
     ),
   );
 }
@@ -329,11 +388,13 @@ export async function getEnvironmentByIdCommand(
   const snapshotsByEnvironment = await loadEnvironmentSnapshots([env]);
   const repositoryMappingsByEnvironmentId =
     await getRepositoryMappingsByEnvironmentId([env.id]);
+  const activeVerificationTaskIds = await getActiveVerificationTaskIds([env]);
 
   return toEnvironmentWithMeta(
     env,
     snapshotsByEnvironment.get(env.id) ?? {},
     repositoryMappingsByEnvironmentId.get(env.id) ?? [],
+    activeVerificationTaskIds,
   );
 }
 
@@ -402,6 +463,9 @@ export async function createEnvironmentCommand(
         description: input.description,
         config: parseResult.data,
         createdByUserId: userId,
+        // New environments start configured but not yet verified.
+        isVerified: false,
+        verificationError: null,
       })
       .returning({ id: environments.id });
 
@@ -775,6 +839,97 @@ export async function startEnvironmentDefinitionTaskCommand(
     runId: launchResult.id,
     startedAt,
   };
+}
+
+/**
+ * Find an active verification task for the given environment, if any. A
+ * verification task carries the `verifiesEnvironmentId` marker in its payload.
+ */
+async function getActiveVerificationTaskId(
+  environmentId: string,
+): Promise<string | null> {
+  const [job] = await db
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(
+      and(
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        sql`${taskRuns.payload} ->> 'verifiesEnvironmentId' = ${environmentId}`,
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return job?.taskId ?? null;
+}
+
+/**
+ * Re-run environment verification: enqueue a standard task that runs inside the
+ * target environment, verifies it, and records the result through the
+ * `record_verification` MCP action. Resets the environment to the unverified
+ * state and stores the new verification task id.
+ */
+export async function retryEnvironmentVerificationCommand(
+  auth: UserAuthSuccess,
+  input: { environmentId: string },
+): Promise<{ taskId: string }> {
+  assertAdmin(auth);
+
+  const { userId } = auth;
+
+  const [environment] = await db
+    .select({
+      id: environments.id,
+      name: environments.name,
+    })
+    .from(environments)
+    .where(
+      and(eq(environments.id, input.environmentId), buildOwnershipFilter()),
+    )
+    .limit(1);
+
+  if (!environment) {
+    throw new Error('Environment not found');
+  }
+
+  const activeVerificationTaskId = await getActiveVerificationTaskId(
+    environment.id,
+  );
+
+  if (activeVerificationTaskId) {
+    throw new Error('This environment is already being verified.');
+  }
+
+  const prompt = buildEnvironmentVerificationPrompt({
+    environmentId: environment.id,
+    environmentName: environment.name,
+  });
+
+  const launchResult = await enqueueTask({
+    title: `Verify environment: ${environment.name}`,
+    task: {
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        environmentId: environment.id,
+        verifiesEnvironmentId: environment.id,
+        description: prompt,
+      },
+    },
+    initiator: { kind: 'user', userId },
+    workflow: 'standard',
+    surface: 'web',
+    trigger: 'manual',
+  });
+
+  // Reset verification state and point the environment at the new task so
+  // record_verification can only be applied by this attempt.
+  await beginEnvironmentVerification(db, {
+    environmentId: environment.id,
+    verificationTaskId: launchResult.taskId,
+  });
+
+  return { taskId: launchResult.taskId };
 }
 
 export async function cancelEnvironmentDefinitionTaskCommand(

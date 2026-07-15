@@ -31,25 +31,45 @@ vi.mock('sonner', () => ({
   },
 }));
 
+vi.mock('next/link', () => ({
+  default: ({ children, href }: { children: ReactNode; href: string }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
+vi.mock('@/hooks/environments', () => ({
+  useRetryEnvironmentVerification: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: vi.fn(),
+  }),
+}));
+
 vi.mock('@/components/sandbox', () => ({
   TaskStatusIndicator: () => <div>task status</div>,
 }));
 
 vi.mock('@/components/system', () => ({
+  Check: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   GripVertical: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Maximize2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({
     children,
     onClick,
+    asChild,
     ...props
   }: {
     children: ReactNode;
     onClick?: () => void;
-  } & HTMLAttributes<HTMLButtonElement>) => (
-    <button onClick={onClick} type="button" {...props}>
-      {children}
-    </button>
-  ),
+    asChild?: boolean;
+  } & HTMLAttributes<HTMLButtonElement>) => {
+    void asChild;
+    return (
+      <button onClick={onClick} type="button" {...props}>
+        {children}
+      </button>
+    );
+  },
 }));
 
 import { SetupOnboardingAgentWidget } from './SetupOnboardingAgentWidget';

@@ -1,5 +1,6 @@
 import {
   handleCreateEnvironment,
+  handleRecordVerification,
   handleUpdateEnvironment,
 } from '../create-environment.js';
 import * as tasksApiClient from '../tasks-api-client.js';
@@ -178,5 +179,86 @@ repositories:
     expect(parsed.success).toBe(false);
     expect(parsed.error).toBe('environmentId is required for update');
     expect(tasksApiClient.updateEnvironment).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleRecordVerification', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('records a successful verification', async () => {
+    vi.mocked(
+      tasksApiClient.recordEnvironmentVerification,
+    ).mockResolvedValueOnce({
+      success: true,
+      environmentId: 'env-1',
+      isVerified: true,
+    });
+
+    const result = await handleRecordVerification(
+      { environmentId: 'env-1', success: true },
+      config,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? '');
+
+    expect(parsed.isVerified).toBe(true);
+    expect(parsed.message).toBe(
+      'Environment verification recorded as successful.',
+    );
+    expect(tasksApiClient.recordEnvironmentVerification).toHaveBeenCalledWith(
+      config,
+      {
+        environmentId: 'env-1',
+        success: true,
+        error: undefined,
+      },
+    );
+  });
+
+  it('records a failed verification with an error message', async () => {
+    vi.mocked(
+      tasksApiClient.recordEnvironmentVerification,
+    ).mockResolvedValueOnce({
+      success: true,
+      environmentId: 'env-1',
+      isVerified: false,
+    });
+
+    const result = await handleRecordVerification(
+      { environmentId: 'env-1', success: false, error: 'boot failed' },
+      config,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? '');
+
+    expect(parsed.isVerified).toBe(false);
+    expect(parsed.message).toBe('Environment verification recorded as failed.');
+    expect(tasksApiClient.recordEnvironmentVerification).toHaveBeenCalledWith(
+      config,
+      {
+        environmentId: 'env-1',
+        success: false,
+        error: 'boot failed',
+      },
+    );
+  });
+
+  it('requires an environment id', async () => {
+    const result = await handleRecordVerification(
+      { environmentId: '   ', success: true },
+      config,
+    );
+
+    const parsed = JSON.parse(result.content[0]?.text ?? '');
+
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe(
+      'environmentId is required for record_verification',
+    );
+    expect(tasksApiClient.recordEnvironmentVerification).not.toHaveBeenCalled();
   });
 });

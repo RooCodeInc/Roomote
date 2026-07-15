@@ -4,5 +4,6 @@ export {
   useUpdateEnvironment,
   useDeleteEnvironment,
   useDuplicateEnvironment,
+  useRetryEnvironmentVerification,
 } from './useEnvironmentMutations';
 export { useValidateEnvironmentConfig } from './useValidateEnvironmentConfig';

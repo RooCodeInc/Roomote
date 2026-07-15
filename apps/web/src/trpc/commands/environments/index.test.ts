@@ -4,6 +4,7 @@ const {
   mockEnqueueTask,
   mockGetBranches,
   mockGetRepositories,
+  mockBeginEnvironmentVerification,
 } = vi.hoisted(() => ({
   mockCheckRepoAccess: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -24,6 +25,7 @@ const {
       installationId: 'installation-1',
     },
   ]),
+  mockBeginEnvironmentVerification: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -37,6 +39,7 @@ vi.mock('@roomote/github', () => ({
 vi.mock('@roomote/db/server', () => ({
   activeRunStatuses: [],
   and: vi.fn(),
+  beginEnvironmentVerification: mockBeginEnvironmentVerification,
   cancelTaskRunDirect: vi.fn(),
   createEnvironmentConfigVersionSnapshot: vi.fn(),
   db: {
@@ -68,6 +71,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   createEnvironmentCommand,
+  retryEnvironmentVerificationCommand,
   startEnvironmentDefinitionTaskCommand,
   updateEnvironmentCommand,
   validateConfigCommand,
@@ -133,6 +137,101 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         trigger: 'manual',
       }),
     );
+  });
+});
+
+describe('retryEnvironmentVerificationCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockEnqueueTask.mockResolvedValue({
+      taskId: 'task-verify-1',
+      id: 'run-verify-1',
+    });
+  });
+
+  it('enqueues a verification task and registers the new attempt', async () => {
+    mockDbSelect
+      // Environment lookup.
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ id: 'env-1', name: 'My Env' }],
+          }),
+        }),
+      })
+      // Active verification task lookup (none active).
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({ limit: async () => [] }),
+          }),
+        }),
+      });
+
+    const result = await retryEnvironmentVerificationCommand(buildMockAuth(), {
+      environmentId: 'env-1',
+    });
+
+    expect(result).toEqual({ taskId: 'task-verify-1' });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: 'env-1',
+            verifiesEnvironmentId: 'env-1',
+          }),
+        }),
+        workflow: 'standard',
+      }),
+    );
+    expect(mockBeginEnvironmentVerification).toHaveBeenCalledWith(
+      expect.anything(),
+      { environmentId: 'env-1', verificationTaskId: 'task-verify-1' },
+    );
+  });
+
+  it('rejects when a verification task is already active', async () => {
+    mockDbSelect
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ id: 'env-1', name: 'My Env' }],
+          }),
+        }),
+      })
+      .mockReturnValueOnce({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: async () => [{ taskId: 'task-active' }],
+            }),
+          }),
+        }),
+      });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-1',
+      }),
+    ).rejects.toThrow('already being verified');
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockBeginEnvironmentVerification).not.toHaveBeenCalled();
+  });
+
+  it('rejects when the environment does not exist', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({ limit: async () => [] }),
+      }),
+    });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-missing',
+      }),
+    ).rejects.toThrow('Environment not found');
   });
 });
 

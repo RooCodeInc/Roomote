@@ -14,10 +14,10 @@ export function useEnvironments({
   enabled?: boolean;
 } = {}) {
   const trpc = useTRPC();
-  const [isSnapshotting, setIsSnapshotting] = useState(false);
+  const [hasActiveWork, setHasActiveWork] = useState(false);
 
   const { refetchInterval } = useRealtimePolling({
-    enabled: poll && isSnapshotting,
+    enabled: poll && hasActiveWork,
     interval: 3000,
   });
 
@@ -30,12 +30,21 @@ export function useEnvironments({
 
   useEffect(() => {
     if (!poll || !enabled) return;
-    setIsSnapshotting(
-      query.data?.some(({ snapshots }) =>
-        Object.values(snapshots).some(
+    // Keep polling while a snapshot is being created or an environment's
+    // verification is still in progress, so status badges update on their own.
+    setHasActiveWork(
+      query.data?.some((environment) => {
+        const isSnapshotting = Object.values(environment.snapshots).some(
           (snapshot) => snapshot?.snapshotStatus === 'pending',
-        ),
-      ) ?? false,
+        );
+        const verificationInProgress =
+          !environment.isVerified &&
+          !environment.verificationError &&
+          !!environment.verificationTaskId &&
+          environment.verificationTaskActive;
+
+        return isSnapshotting || verificationInProgress;
+      }) ?? false,
     );
   }, [enabled, poll, query.data]);
 

@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 
 import {
   and,
+  beginEnvironmentVerification,
   createEnvironmentConfigVersionSnapshot,
   db,
   environmentRepositoryMappings,
@@ -173,6 +174,39 @@ export async function attachEnvironmentIdToTaskRun(
 }
 
 /**
+ * Register the calling task run as the current verification attempt for an
+ * environment it just created or applied a runtime-affecting update to. The
+ * environment-setup skill runs verification from this same setup task and
+ * records the outcome through `record_verification`; storing the caller's
+ * taskId here means that recording matches server-side without the agent
+ * having to hand-pass any task id. Only run-token callers register an attempt.
+ */
+export async function registerEnvironmentVerificationForTaskRun(
+  auth: McpAuth,
+  environmentId: string,
+): Promise<void> {
+  const runId = extractRunId(auth);
+
+  if (!runId) {
+    return;
+  }
+
+  const taskRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, runId),
+    columns: { taskId: true },
+  });
+
+  if (!taskRun?.taskId) {
+    return;
+  }
+
+  await beginEnvironmentVerification(db, {
+    environmentId,
+    verificationTaskId: taskRun.taskId,
+  });
+}
+
+/**
  * POST /api/mcp/environments
  *
  * Creates a new environment for the deployment.
@@ -275,6 +309,10 @@ export async function createEnvironment(
           name: config.name,
           description: config.description,
           config,
+          // New environments start configured but not yet verified. A
+          // follow-up verification task confirms the runtime works.
+          isVerified: false,
+          verificationError: null,
         })
         .returning({ id: environments.id });
 
@@ -308,6 +346,7 @@ export async function createEnvironment(
     });
 
     await attachEnvironmentIdToTaskRun(auth, created.id);
+    await registerEnvironmentVerificationForTaskRun(auth, created.id);
 
     return c.json({
       success: true,

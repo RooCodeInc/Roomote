@@ -110,6 +110,12 @@ export interface UpdateEnvironmentResponse {
   name: string;
 }
 
+export interface RecordVerificationResponse {
+  success: boolean;
+  environmentId: string;
+  isVerified: boolean;
+}
+
 export interface SlackThreadReplyResponse {
   messageTs: string;
 }

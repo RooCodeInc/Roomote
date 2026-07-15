@@ -677,14 +677,19 @@ describe('roomote MCP tool descriptions', () => {
   it('serializes manage_environments definition as a plain string schema, not a union', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const envTool = getRegisteredTool(registeredTools, 'manage_environments');
-    const definitionSchema = envTool.config.inputSchema
+    const definitionField = envTool.config.inputSchema
       .definition as unknown as z.ZodType;
+
+    // `definition` is optional (not required for the record_verification
+    // action), so unwrap the optional before asserting the inner string schema.
+    const definitionSchema =
+      definitionField instanceof z.ZodOptional
+        ? (definitionField.unwrap() as z.ZodType)
+        : definitionField;
 
     expect(definitionSchema).toBeInstanceOf(z.ZodString);
     expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);
-    expect((definitionSchema as z.ZodString).description).toContain(
-      'YAML or JSON string',
-    );
+    expect(definitionField.description).toContain('YAML or JSON string');
   });
 
   it('documents hidden investigation context on task suggestions', () => {

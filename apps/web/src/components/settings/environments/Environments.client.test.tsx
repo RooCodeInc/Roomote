@@ -54,6 +54,11 @@ const state = vi.hoisted(() => ({
           snapshotExpiresAt: null,
         },
       },
+      isVerified: true,
+      verificationTaskId: 'task-verify-1',
+      verificationTaskActive: true,
+      verifiedAt: new Date('2026-03-25T09:00:00.000Z'),
+      verificationError: null,
     },
   ],
 }));
@@ -106,6 +111,11 @@ vi.mock('@/hooks/environments', () => ({
   useDuplicateEnvironment: () => ({
     isPending: false,
     mutateAsync: vi.fn(),
+  }),
+  useRetryEnvironmentVerification: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: vi.fn(),
   }),
 }));
 
@@ -304,6 +314,7 @@ vi.mock('@/components/system', () => ({
   Loader2: Icon,
   Pencil: Icon,
   Plus: Icon,
+  RefreshCw: Icon,
   Popover: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   PopoverContent: ({
     children,
@@ -381,6 +392,11 @@ describe('Environments', () => {
             snapshotExpiresAt: null,
           },
         },
+        isVerified: true,
+        verificationTaskId: 'task-verify-1',
+        verificationTaskActive: true,
+        verifiedAt: new Date('2026-03-25T09:00:00.000Z'),
+        verificationError: null,
       },
     ];
     state.createSnapshot.mockClear();

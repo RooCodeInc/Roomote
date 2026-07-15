@@ -158,8 +158,33 @@ export function useEnvironmentDefinitionAgentState({
   const taskIsActive =
     !!session.taskRun && !isExitedRunStatus(session.taskRun.status);
 
+  // Resolve verification state from the linked/updated environment metadata,
+  // which is the source of truth for the web UI. Setup/configuration success is
+  // distinct from environment verification, which continues asynchronously.
+  const resolvedEnvironment =
+    mode === 'create' ? matchingEnvironment : updatedEnvironment;
+
+  const verificationSucceeded = resolvedEnvironment?.isVerified === true;
+  const verificationFailed =
+    !!resolvedEnvironment &&
+    !resolvedEnvironment.isVerified &&
+    resolvedEnvironment.verificationError !== null &&
+    resolvedEnvironment.verificationError !== undefined;
+  const verificationPending =
+    !!resolvedEnvironment &&
+    !resolvedEnvironment.isVerified &&
+    !verificationFailed &&
+    resolvedEnvironment.verificationTaskId !== null &&
+    resolvedEnvironment.verificationTaskId !== undefined &&
+    resolvedEnvironment.verificationTaskActive === true;
+  const verificationTaskId = resolvedEnvironment?.verificationTaskId ?? null;
+  const verificationError = resolvedEnvironment?.verificationError ?? null;
+
   useEffect(() => {
-    if (succeeded || failed) {
+    // Keep polling while the definition task is unresolved, and also while the
+    // environment exists but verification is still pending, so the UI can move
+    // from configured -> pending -> verified/failed on its own.
+    if ((succeeded || failed) && !verificationPending) {
       return;
     }
 
@@ -192,6 +217,7 @@ export function useEnvironmentDefinitionAgentState({
     refetchEnvironment,
     refetchLinkedEnvironment,
     succeeded,
+    verificationPending,
   ]);
 
   return {
@@ -201,6 +227,11 @@ export function useEnvironmentDefinitionAgentState({
     taskIsActive,
     matchingEnvironment,
     updatedEnvironment,
+    verificationSucceeded,
+    verificationFailed,
+    verificationPending,
+    verificationTaskId,
+    verificationError,
   };
 }
 

@@ -149,7 +149,7 @@ export function StepInvoke({
       <StepTitle text={INVOKE_STEP.title} />
       <p className="mb-4">
         {onboardingTaskId
-          ? `Once your environment is ready, you can work with ${PRODUCT_NAME} in these ways:`
+          ? `Once your environment is configured, you can work with ${PRODUCT_NAME} in these ways (verification may still be in progress):`
           : `How to work with ${PRODUCT_NAME}:`}
       </p>
       {computeProvisioning?.status === 'building' ? (

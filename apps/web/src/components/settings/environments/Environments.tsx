@@ -49,6 +49,7 @@ import { Section } from '@/components/settings';
 
 import { DuplicateEnvironmentDialog } from './DuplicateEnvironmentDialog';
 import { SnapshotStatusBadge } from './SnapshotStatusBadge';
+import { EnvironmentVerificationStatus } from './EnvironmentVerificationStatus';
 
 function getEnvironmentSnapshot(
   environment: EnvironmentWithMeta,
@@ -249,6 +250,8 @@ export function Environments() {
                           </div>
                         ))}
                       </div>
+
+                      <EnvironmentVerificationStatus env={env} />
 
                       <div className="space-y-2 pb-2">
                         <div className="space-y-0">
