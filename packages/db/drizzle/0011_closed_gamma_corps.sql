@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_settings" ADD COLUMN "slack_pr_closed_emoji" text DEFAULT 'x' NOT NULL;

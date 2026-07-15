@@ -58,7 +58,8 @@ const VIBES_IDEA_DOWNLOADS = [
 type VibesFieldName =
   | 'slackSummonEmoji'
   | 'slackAckEmoji'
-  | 'slackCompletionEmoji';
+  | 'slackCompletionEmoji'
+  | 'slackPrClosedEmoji';
 
 type VibesDraft = Record<VibesFieldName, string>;
 
@@ -77,11 +78,13 @@ function toDraft(settings: {
   slackSummonEmoji: string | null;
   slackAckEmoji: string;
   slackCompletionEmoji: string;
+  slackPrClosedEmoji: string;
 }): VibesDraft {
   return {
     slackSummonEmoji: settings.slackSummonEmoji ?? '',
     slackAckEmoji: settings.slackAckEmoji,
     slackCompletionEmoji: settings.slackCompletionEmoji,
+    slackPrClosedEmoji: settings.slackPrClosedEmoji,
   };
 }
 
@@ -93,13 +96,15 @@ const FIELD_TO_TOAST_TYPE: Record<VibesFieldName, string> = {
   slackSummonEmoji: 'summon',
   slackAckEmoji: 'acknowledgement',
   slackCompletionEmoji: 'completion',
+  slackPrClosedEmoji: 'closed PR',
 };
 
 function hasDirtyField(draft: VibesDraft, saved: VibesDraft) {
   return (
     draft.slackSummonEmoji !== saved.slackSummonEmoji ||
     draft.slackAckEmoji !== saved.slackAckEmoji ||
-    draft.slackCompletionEmoji !== saved.slackCompletionEmoji
+    draft.slackCompletionEmoji !== saved.slackCompletionEmoji ||
+    draft.slackPrClosedEmoji !== saved.slackPrClosedEmoji
   );
 }
 
@@ -140,11 +145,13 @@ export function VibesSettings() {
     slackSummonEmoji: '',
     slackAckEmoji: '',
     slackCompletionEmoji: '',
+    slackPrClosedEmoji: '',
   });
   const [savedDraft, setSavedDraft] = useState<VibesDraft>({
     slackSummonEmoji: '',
     slackAckEmoji: '',
     slackCompletionEmoji: '',
+    slackPrClosedEmoji: '',
   });
   const [fieldErrors, setFieldErrors] = useState<VibesFieldErrors>({});
   const [hasLoadedInitialState, setHasLoadedInitialState] = useState(false);
@@ -386,6 +393,8 @@ export function VibesSettings() {
   const ackDefault = settingsQuery.data?.defaults.slackAckEmoji ?? 'eyes';
   const completionDefault =
     settingsQuery.data?.defaults.slackCompletionEmoji ?? 'white_check_mark';
+  const prClosedDefault =
+    settingsQuery.data?.defaults.slackPrClosedEmoji ?? 'x';
   const isStyleGuidanceDirty = styleGuidance !== savedStyleGuidance;
   const showStyleGuidanceCounter =
     styleGuidance.length >= ROOMOTE_STYLE_GUIDANCE_MAX_LENGTH * 0.9;
@@ -529,6 +538,49 @@ export function VibesSettings() {
             {fieldErrors.slackCompletionEmoji ? (
               <p className="text-xs text-destructive">
                 {fieldErrors.slackCompletionEmoji}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="slack-pr-closed-emoji">Closed PR</Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Used when a linked pull request is closed without merging.
+                  Default ❌
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                type="button"
+                onClick={() =>
+                  updateField({
+                    field: 'slackPrClosedEmoji',
+                    value: prClosedDefault,
+                    saveImmediately: true,
+                  })
+                }
+                aria-label="Reset closed PR emoji"
+              >
+                <RotateCcw />
+              </Button>
+            </div>
+            <Input
+              id="slack-pr-closed-emoji"
+              value={draft.slackPrClosedEmoji}
+              onChange={(event) =>
+                updateField({
+                  field: 'slackPrClosedEmoji',
+                  value: event.target.value,
+                })
+              }
+              onBlur={() => handleBlur('slackPrClosedEmoji')}
+            />
+            {fieldErrors.slackPrClosedEmoji ? (
+              <p className="text-xs text-destructive">
+                {fieldErrors.slackPrClosedEmoji}
               </p>
             ) : null}
           </div>

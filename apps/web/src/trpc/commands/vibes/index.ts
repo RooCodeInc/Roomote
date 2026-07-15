@@ -2,6 +2,7 @@ import {
   db,
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  DEFAULT_SLACK_PR_CLOSED_EMOJI,
   deploymentSettings,
   getBackgroundAgentSettingsForDeployment,
   normalizeOptionalSlackEmojiName,
@@ -24,10 +25,12 @@ export async function getVibesSettingsCommand(auth: UserAuthSuccess): Promise<{
   slackSummonEmoji: string | null;
   slackAckEmoji: string;
   slackCompletionEmoji: string;
+  slackPrClosedEmoji: string;
   styleGuidance: string | null;
   defaults: {
     slackAckEmoji: string;
     slackCompletionEmoji: string;
+    slackPrClosedEmoji: string;
   };
 }> {
   assertAdmin(auth);
@@ -38,10 +41,12 @@ export async function getVibesSettingsCommand(auth: UserAuthSuccess): Promise<{
     slackSummonEmoji: settings.slackSummonEmoji,
     slackAckEmoji: settings.slackAckEmoji,
     slackCompletionEmoji: settings.slackCompletionEmoji,
+    slackPrClosedEmoji: settings.slackPrClosedEmoji,
     styleGuidance: settings.styleGuidance,
     defaults: {
       slackAckEmoji: DEFAULT_SLACK_ACK_EMOJI,
       slackCompletionEmoji: DEFAULT_SLACK_COMPLETION_EMOJI,
+      slackPrClosedEmoji: DEFAULT_SLACK_PR_CLOSED_EMOJI,
     },
   };
 }
@@ -50,6 +55,7 @@ interface UpdateVibesSettingsInput {
   slackSummonEmoji?: string | null;
   slackAckEmoji?: string;
   slackCompletionEmoji?: string;
+  slackPrClosedEmoji?: string;
   styleGuidance?: string | null;
 }
 
@@ -67,6 +73,7 @@ export async function updateVibesSettingsCommand(
         slackSummonEmoji?: string;
         slackAckEmoji?: string;
         slackCompletionEmoji?: string;
+        slackPrClosedEmoji?: string;
         styleGuidance?: string;
       };
     }
@@ -77,6 +84,7 @@ export async function updateVibesSettingsCommand(
     slackSummonEmoji?: string;
     slackAckEmoji?: string;
     slackCompletionEmoji?: string;
+    slackPrClosedEmoji?: string;
     styleGuidance?: string;
   } = {};
   const now = new Date();
@@ -109,6 +117,18 @@ export async function updateVibesSettingsCommand(
       fieldErrors.slackCompletionEmoji = 'Completion emoji is required.';
     } else {
       updates.slackCompletionEmoji = normalizedCompletionEmoji;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(input, 'slackPrClosedEmoji')) {
+    const normalizedPrClosedEmoji = normalizeOptionalSlackEmojiName(
+      input.slackPrClosedEmoji,
+    );
+
+    if (!normalizedPrClosedEmoji) {
+      fieldErrors.slackPrClosedEmoji = 'Closed PR emoji is required.';
+    } else {
+      updates.slackPrClosedEmoji = normalizedPrClosedEmoji;
     }
   }
 

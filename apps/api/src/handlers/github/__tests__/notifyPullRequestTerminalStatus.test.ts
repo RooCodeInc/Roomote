@@ -26,6 +26,7 @@ const {
     mockResolveSlackReactionNames: vi.fn().mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
+      prClosedEmoji: 'x',
       summonEmoji: null,
     }),
     mockStickyFooterPost: vi.fn().mockResolvedValue('msg-ts-123'),
@@ -93,10 +94,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 import { db } from '@roomote/db/server';
-import {
-  notifyPullRequestTerminalStatus,
-  SLACK_PR_CLOSED_REACTION_EMOJI,
-} from '../notifyPullRequestTerminalStatus';
+import { notifyPullRequestTerminalStatus } from '../notifyPullRequestTerminalStatus';
 
 const mockedGithubFind = vi.mocked(db.query.githubInstallations.findFirst);
 const mockedTaskPullRequestsFind = vi.mocked(
@@ -144,6 +142,7 @@ describe('notifyPullRequestTerminalStatus', () => {
     mockResolveSlackReactionNames.mockResolvedValue({
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
+      prClosedEmoji: 'x',
       summonEmoji: null,
     });
     mockStickyFooterPost.mockResolvedValue('msg-ts-123');
@@ -234,7 +233,41 @@ describe('notifyPullRequestTerminalStatus', () => {
     expect(mockAddReaction).toHaveBeenCalledWith({
       channel: 'C123',
       timestamp: 'thread-ts-1',
-      name: SLACK_PR_CLOSED_REACTION_EMOJI,
+      name: 'x',
+    });
+  });
+
+  it('uses the configured closed-PR emoji reaction', async () => {
+    mockResolveSlackReactionNames.mockResolvedValue({
+      ackEmoji: 'eyes',
+      completionEmoji: 'white_check_mark',
+      prClosedEmoji: 'no_entry_sign',
+      summonEmoji: null,
+    });
+    mockedGithubFind.mockResolvedValue({ id: 1 } as any);
+    mockedTaskPullRequestsFind.mockResolvedValue([{ taskId: 'task-1' }] as any);
+    mockedTasksFind.mockResolvedValue([
+      {
+        id: 'task-1',
+        slackThreadTs: 'thread-ts-1',
+        slackChannelId: 'C123',
+        linearSessionId: null,
+      },
+    ] as any);
+    mockedSlackFind.mockResolvedValue({
+      botAccessToken: 'xoxb-token',
+    } as any);
+
+    await notifyPullRequestTerminalStatus({
+      ...baseParams,
+      status: 'closed',
+      actorLogin: 'closer',
+    });
+
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: 'thread-ts-1',
+      name: 'no_entry_sign',
     });
   });
 

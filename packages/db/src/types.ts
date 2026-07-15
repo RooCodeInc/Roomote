@@ -406,6 +406,7 @@ type StoredBackgroundAgentSettings = Pick<
   | 'slackSummonEmoji'
   | 'slackAckEmoji'
   | 'slackCompletionEmoji'
+  | 'slackPrClosedEmoji'
   | 'createdAt'
   | 'updatedAt'
 >;

@@ -33,9 +33,6 @@ import {
   getCommunicationThreadIdFromTaskPayload,
 } from '@roomote/types';
 
-/** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
-export const SLACK_PR_CLOSED_REACTION_EMOJI = 'heavy_multiplication_x';
-
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
 interface NotifyPullRequestTerminalStatusParams {
@@ -189,7 +186,8 @@ async function deliverSlackTerminalStatus({
 
   const notifiedThreads = new Set<string>();
   const notifier = new SlackNotifier(slackInstallation.botAccessToken);
-  const { ackEmoji, completionEmoji } = await resolveSlackReactionNames();
+  const { ackEmoji, completionEmoji, prClosedEmoji } =
+    await resolveSlackReactionNames();
   const statusNotification = buildPullRequestStatusNotificationText({
     prTitle,
     prUrl,
@@ -199,7 +197,7 @@ async function deliverSlackTerminalStatus({
     formatStatus: (value) => `*${value}*`,
   });
   const terminalReaction =
-    status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : completionEmoji;
+    status === 'closed' ? prClosedEmoji : completionEmoji;
 
   for (const target of slackTargets) {
     if (notifiedThreads.has(target.slackThreadTs)) {

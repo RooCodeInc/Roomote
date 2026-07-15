@@ -22,6 +22,7 @@ export type SlackBlock =
 
 export const DEFAULT_SLACK_ACK_EMOJI = 'eyes';
 export const DEFAULT_SLACK_COMPLETION_EMOJI = 'white_check_mark';
+export const DEFAULT_SLACK_PR_CLOSED_EMOJI = 'x';
 
 export function buildSlackThreadPermalink(params: {
   slackWorkspaceDomain?: string | null;

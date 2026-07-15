@@ -17,6 +17,7 @@ in team-facing messages.
 | ------------------------- | --------------------------------------------------------------------------- | ------------------------ |
 | **Acknowledgement emoji** | The reaction Roomote uses to show it saw a Slack message                    | `eyes`                   |
 | **Completion emoji**      | The reaction Roomote can use when supported work finishes                   | `white_check_mark`       |
+| **Closed PR emoji**       | The reaction Roomote adds when a linked pull request is closed without merge | `x`                      |
 | **Summon emoji**          | The reaction teammates can add to an existing Slack message to start a task | `shipit`                 |
 | **Style guidance**        | Optional guidance for how Roomote should sound in messages                  | "Direct, concise, calm." |
 
@@ -44,7 +45,8 @@ channels.
 
 The acknowledgement reaction is the quick "I saw this" signal. The completion
 reaction is for supported completion moments where a Slack reaction is the
-right confirmation.
+right confirmation. The closed PR reaction is applied to the originating Slack
+message when a linked pull request is closed without merging.
 
 If teammates are missing Roomote's status updates, choose reactions that stand
 out in your workspace. If channels feel too busy, keep the defaults or use

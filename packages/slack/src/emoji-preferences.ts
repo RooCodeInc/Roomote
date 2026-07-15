@@ -1,6 +1,7 @@
 import {
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  DEFAULT_SLACK_PR_CLOSED_EMOJI,
   getSlackEmojiPreferencesForDeployment as getSlackEmojiPreferencesForDeploymentFromDb,
   type SlackEmojiPreferences,
 } from '@roomote/db/server';
@@ -8,6 +9,7 @@ import {
 export {
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  DEFAULT_SLACK_PR_CLOSED_EMOJI,
   type SlackEmojiPreferences,
 };
 
@@ -18,6 +20,7 @@ export async function getSlackEmojiPreferencesForDeployment() {
 export async function resolveSlackReactionNames(): Promise<{
   ackEmoji: string;
   completionEmoji: string;
+  prClosedEmoji: string;
   summonEmoji: string | null;
 }> {
   const preferences = await getSlackEmojiPreferencesForDeployment();
@@ -26,6 +29,8 @@ export async function resolveSlackReactionNames(): Promise<{
     ackEmoji: preferences.slackAckEmoji || DEFAULT_SLACK_ACK_EMOJI,
     completionEmoji:
       preferences.slackCompletionEmoji || DEFAULT_SLACK_COMPLETION_EMOJI,
+    prClosedEmoji:
+      preferences.slackPrClosedEmoji || DEFAULT_SLACK_PR_CLOSED_EMOJI,
     summonEmoji: preferences.slackSummonEmoji,
   };
 }

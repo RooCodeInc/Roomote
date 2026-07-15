@@ -190,6 +190,7 @@ export const deploymentSettings = pgTable('deployment_settings', {
   slackCompletionEmoji: text('slack_completion_emoji')
     .notNull()
     .default('white_check_mark'),
+  slackPrClosedEmoji: text('slack_pr_closed_emoji').notNull().default('x'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

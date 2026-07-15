@@ -1989,6 +1989,7 @@ export const appRouter = createRouter({
             slackSummonEmoji: z.string().max(255).nullable(),
             slackAckEmoji: z.string().max(255),
             slackCompletionEmoji: z.string().max(255),
+            slackPrClosedEmoji: z.string().max(255),
             styleGuidance: z.string().max(400).nullable(),
           })
           .partial(),

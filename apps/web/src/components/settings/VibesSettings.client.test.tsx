@@ -37,10 +37,12 @@ const {
       slackSummonEmoji: null as string | null,
       slackAckEmoji: 'eyes',
       slackCompletionEmoji: 'white_check_mark',
+      slackPrClosedEmoji: 'x',
       styleGuidance: null as string | null,
       defaults: {
         slackAckEmoji: 'eyes',
         slackCompletionEmoji: 'white_check_mark',
+        slackPrClosedEmoji: 'x',
       },
     },
   },
@@ -49,6 +51,7 @@ const {
       slackSummonEmoji?: string | null;
       slackAckEmoji?: string;
       slackCompletionEmoji?: string;
+      slackPrClosedEmoji?: string;
       styleGuidance?: string | null;
     }): Promise<
       | {
@@ -59,7 +62,10 @@ const {
           success: false;
           fieldErrors: Partial<
             Record<
-              'slackAckEmoji' | 'slackCompletionEmoji' | 'styleGuidance',
+              | 'slackAckEmoji'
+              | 'slackCompletionEmoji'
+              | 'slackPrClosedEmoji'
+              | 'styleGuidance',
               string
             >
           >;
@@ -97,6 +103,18 @@ const {
         };
       }
 
+      if (
+        Object.prototype.hasOwnProperty.call(input, 'slackPrClosedEmoji') &&
+        !normalize(input.slackPrClosedEmoji)
+      ) {
+        return {
+          success: false as const,
+          fieldErrors: {
+            slackPrClosedEmoji: 'Closed PR emoji is required.',
+          },
+        };
+      }
+
       mockSettingsState.current = {
         ...mockSettingsState.current,
         ...(Object.prototype.hasOwnProperty.call(input, 'slackSummonEmoji')
@@ -109,6 +127,11 @@ const {
           ? {
               slackCompletionEmoji:
                 normalize(input.slackCompletionEmoji) ?? 'white_check_mark',
+            }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(input, 'slackPrClosedEmoji')
+          ? {
+              slackPrClosedEmoji: normalize(input.slackPrClosedEmoji) ?? 'x',
             }
           : {}),
         ...(Object.prototype.hasOwnProperty.call(input, 'styleGuidance')
@@ -245,6 +268,9 @@ async function renderLoadedVibesSettings() {
     expect(screen.getByLabelText('Completion')).toHaveValue(
       mockSettingsState.current.slackCompletionEmoji,
     );
+    expect(screen.getByLabelText('Closed PR')).toHaveValue(
+      mockSettingsState.current.slackPrClosedEmoji,
+    );
   });
 
   await waitFor(() => {
@@ -332,10 +358,12 @@ describe('VibesSettings', () => {
       slackSummonEmoji: null,
       slackAckEmoji: 'eyes',
       slackCompletionEmoji: 'white_check_mark',
+      slackPrClosedEmoji: 'x',
       styleGuidance: null,
       defaults: {
         slackAckEmoji: 'eyes',
         slackCompletionEmoji: 'white_check_mark',
+        slackPrClosedEmoji: 'x',
       },
     };
   });
@@ -500,6 +528,32 @@ describe('VibesSettings', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Acknowledgement')).toHaveValue('eyes');
+    });
+  });
+
+  it('resets the closed PR emoji back to its default value', async () => {
+    await renderLoadedVibesSettings();
+
+    const input = screen.getByLabelText('Closed PR');
+    await changeControlledInput(input, 'no_entry_sign');
+    await blurControlledInput(input);
+
+    await waitFor(() => {
+      expect(mockUpdateVibesSettings.mock.calls.at(-1)?.[0]).toEqual({
+        slackPrClosedEmoji: 'no_entry_sign',
+      });
+    });
+
+    fireEvent.click(screen.getByLabelText('Reset closed PR emoji'));
+
+    await waitFor(() => {
+      expect(mockUpdateVibesSettings.mock.calls.at(-1)?.[0]).toEqual({
+        slackPrClosedEmoji: 'x',
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Closed PR')).toHaveValue('x');
     });
   });
 

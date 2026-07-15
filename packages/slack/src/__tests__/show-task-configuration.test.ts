@@ -266,6 +266,7 @@ describe('Slack deleted-mention suppression', () => {
     getSlackEmojiPreferencesForDeploymentMock.mockResolvedValue({
       slackAckEmoji: 'eyes',
       slackCompletionEmoji: 'white_check_mark',
+      slackPrClosedEmoji: 'x',
       slackSummonEmoji: null,
     });
     getTaskUrlMock.mockReturnValue('https://app.example.com/task/task_123');

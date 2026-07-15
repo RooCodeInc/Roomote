@@ -24,6 +24,7 @@ import {
   DEFAULT_PR_REVIEW_SETTINGS,
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  DEFAULT_SLACK_PR_CLOSED_EMOJI,
   DEFAULT_SUGGESTER_ROUTING_MODE,
   getTriggerableBackgroundAutomationDescriptorByKey,
   isChannelAutoStartLaunchMode,
@@ -85,6 +86,7 @@ export const DEFAULT_CONFLICT_RESOLVER_LABEL = AUTO_RESOLVE_CONFLICTS_LABEL;
 export {
   DEFAULT_SLACK_ACK_EMOJI,
   DEFAULT_SLACK_COMPLETION_EMOJI,
+  DEFAULT_SLACK_PR_CLOSED_EMOJI,
 } from '@roomote/types';
 
 export const MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS = {
@@ -98,7 +100,10 @@ export const MANAGER_CHANNEL_STARTER_AUTOMATION_SETTINGS = {
 
 export type SlackEmojiPreferences = Pick<
   BackgroundAgentSettings,
-  'slackSummonEmoji' | 'slackAckEmoji' | 'slackCompletionEmoji'
+  | 'slackSummonEmoji'
+  | 'slackAckEmoji'
+  | 'slackCompletionEmoji'
+  | 'slackPrClosedEmoji'
 >;
 
 function isConflictResolverFrequency(
@@ -726,6 +731,9 @@ export function normalizeBackgroundAgentSettings(
     slackCompletionEmoji:
       normalizeOptionalSlackEmojiName(row?.slackCompletionEmoji) ??
       DEFAULT_SLACK_COMPLETION_EMOJI,
+    slackPrClosedEmoji:
+      normalizeOptionalSlackEmojiName(row?.slackPrClosedEmoji) ??
+      DEFAULT_SLACK_PR_CLOSED_EMOJI,
     createdAt: row?.createdAt ?? now,
     updatedAt: row?.updatedAt ?? now,
 
@@ -877,5 +885,8 @@ export async function getSlackEmojiPreferencesForDeployment(): Promise<SlackEmoj
     slackCompletionEmoji:
       normalizeOptionalSlackEmojiName(row?.slackCompletionEmoji) ??
       DEFAULT_SLACK_COMPLETION_EMOJI,
+    slackPrClosedEmoji:
+      normalizeOptionalSlackEmojiName(row?.slackPrClosedEmoji) ??
+      DEFAULT_SLACK_PR_CLOSED_EMOJI,
   };
 }
