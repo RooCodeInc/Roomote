@@ -35,39 +35,51 @@ Roomote is a full-stack application, not an extension or a wrapper. It connects
 to the tools you already use and runs agents in throwaway sandboxes.
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  You (in Slack / Teams / Telegram / Web UI)                  │
-│  "Add dark mode to the settings page"                        │
-└──────────────┬───────────────────────────────────────────────┘
-               │
-               ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Roomote                                                     │
-│                                                              │
-│  ┌────────────┐   ┌───────────────┐   ┌──────────────────┐  │
-│  │ Your models │   │ Your repo     │   │ Your tools       │  │
-│  │ (BYOK)     │   │ (GitHub,      │   │ (Linear, Sentry, │  │
-│  │ Claude,    │   │  GitLab,      │   │  Notion, Jira,   │  │
-│  │ GPT, etc.  │   │  Gitea,       │   │  Grafana, PH,    │  │
-│  │            │   │  Azure DevOps) │   │  Figma, etc.)    │  │
-│  └──────┬─────┘   └───────┬───────┘   └────────┬─────────┘  │
-│         │                 │                     │            │
-│         └────────┬────────┘─────────────────────┘            │
-│                  ▼                                            │
-│  ┌──────────────────────────────────────────────────────┐    │
-│  │  Ephemeral sandbox (Modal, E2B, Daytona, or Docker)  │    │
-│  │                                                      │    │
-│  │  clone repo → make changes → run tests → screenshot  │    │
-│  │  → push branch → open PR                             │    │
-│  └──────────────────────────────────────────────────────┘    │
-└──────────────────────────────────────────────────────────────┘
-               │
-               ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  You (in Slack / Teams / Telegram / Web UI)                        │
+│  "Add dark mode to the settings page"                              │
+└───────────────────────────────┬────────────────────────────────────┘
+                                │
+                                ▼
+┌────────────────────────────────────────────────────────────────────┐
+│  Roomote                                                           │
+│                                                                    │
+│    ┌─────────────┐   ┌────────────────┐   ┌──────────────────┐     │
+│    │ Your models │   │ Your repo      │   │ Your tools       │     │
+│    │ (BYOK)      │   │ (GitHub,       │   │ (Linear, Sentry, │     │
+│    │ OpenRouter, │   │  GitLab,       │   │  Notion, Jira,   │     │
+│    │ Anthropic,  │   │  Gitea,        │   │  Grafana,        │     │
+│    │ OpenAI, …   │   │  Azure DevOps, │   │  PostHog, Figma, │     │
+│    │             │   │  Bitbucket)    │   │  etc.)           │     │
+│    └──────┬──────┘   └────────┬───────┘   └─────────┬────────┘     │
+│           │                   │                     │              │
+│           └───────────────────┼─────────────────────┘              │
+│                               ▼                                    │
+│    ┌─────────────────────────────────────────────────────────┐     │
+│    │ Ephemeral sandbox (Modal, E2B, Daytona, Blaxel, Docker) │     │
+│    │                                                         │     │
+│    │ clone repo → make changes → run tests → screenshot      │     │
+│    │ → push branch → open PR                                 │     │
+│    └─────────────────────────────────────────────────────────┘     │
+└────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
         Pull request with diff, screenshots, and a live preview URL
 ```
 
 Every task gets its own sandbox. Nothing touches your local machine. The agent
 cleans up after itself.
+
+### Supported providers
+
+**Inference (bring your own keys):** OpenRouter, Vercel AI Gateway, Requesty,
+Baseten, Together AI, OpenAI, Anthropic, Moonshot AI (Kimi), MiniMax,
+OpenCode Zen / Go, Amazon Bedrock, Google Vertex AI, Google Gemini, xAI, and
+ChatGPT (subscription).
+
+**Sandbox compute:** Modal, E2B, Daytona, Blaxel, and Local Docker.
+
+**Source control:** GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud.
 
 ---
 
@@ -85,9 +97,12 @@ Pick one path. You will have a working Roomote instance at the end.
    your admin email and password.
 
 3. Open the setup link Railway gives you. Connect a model provider (paste an API
-   key from Anthropic, OpenAI, OpenRouter, or others).
+   key from OpenRouter, Anthropic, OpenAI, Amazon Bedrock, Google Gemini, xAI,
+   or any other supported inference provider, or connect a ChatGPT
+   subscription).
 
-4. Connect GitHub (or GitLab, Gitea, Azure DevOps).
+4. Connect source control: GitHub, GitLab, Gitea, Azure DevOps, or Bitbucket
+   Cloud.
 
 5. Open Slack, send Roomote a message:
 
@@ -157,11 +172,12 @@ copy-pasting.
 
 - **Your code stays on your infrastructure.** No repo access leaves your
   network.
-- **Bring your own keys.** Use Anthropic, OpenAI, OpenRouter, or any provider.
-  Switch models per task. No markup on tokens.
+- **Bring your own keys.** Use any supported inference provider (OpenRouter,
+  Anthropic, OpenAI, Amazon Bedrock, Google Vertex AI, Google Gemini, xAI, and
+  more). Switch models per task. No markup on tokens.
 - **Read every line.** The full source is here. Audit it, extend it, fork it.
-- **No per-seat SaaS pricing.** Free for up to 10 users. Need more? Get a
-  license key.
+- **No per-seat SaaS pricing.** Free for up to 10 users. Need more? Email
+  [help@roomote.dev](mailto:help@roomote.dev) for a license.
 
 ---
 
@@ -198,8 +214,9 @@ Want a managed deployment instead of self-hosting? We can run it for you.
 **Is Roomote open source?**
 It is source-available under the [Fair Core License 1.0](LICENSE) (FCL-1.0-ALv2).
 You can read, modify, and self-host the code. Free for up to 10 users. Larger
-deployments need a license key. After the license period, the code converts to
-Apache 2.0.
+deployments need a license — email
+[help@roomote.dev](mailto:help@roomote.dev). After the license period, the code
+converts to Apache 2.0.
 
 **How is this different from Cursor / Copilot / Claude Code?**
 Those are IDE tools that help you write code faster in your editor. Roomote is a
@@ -212,16 +229,21 @@ self-hostable. You own your data, bring your own API keys, and pick your models.
 You can read every line of code it runs.
 
 **What models does it support?**
-Any model accessible through Anthropic, OpenAI, OpenRouter, AWS Bedrock, Google
-Vertex, Azure OpenAI, or a compatible API. You bring your own keys.
+Models from OpenRouter, Vercel AI Gateway, Requesty, Baseten, Together AI,
+OpenAI, Anthropic, Moonshot AI (Kimi), MiniMax, OpenCode Zen / Go, Amazon
+Bedrock, Google Vertex AI, Google Gemini, xAI, and ChatGPT (subscription). You
+bring your own keys (or connect a ChatGPT subscription).
+
+**What sandboxes does it support?**
+Modal, E2B, Daytona, Blaxel, and Local Docker.
 
 **What repos can it access?**
-GitHub, GitLab, Gitea, and Azure DevOps. Connect one or many.
+GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud. Connect one or many.
 
 **What does it cost?**
 Self-hosting is free for up to 10 registered users. You pay your own model
-provider for tokens. For larger teams, license keys are available at
-[roomote.dev](https://roomote.dev).
+provider for tokens. For larger teams, licenses are available by emailing
+[help@roomote.dev](mailto:help@roomote.dev).
 
 **Can non-engineers use it?**
 Yes. PMs, support, ops, and marketers can assign tasks in Slack without touching
@@ -252,5 +274,7 @@ Report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 ## License
 
 [Fair Core License 1.0 (FCL-1.0-ALv2)](LICENSE). Free for up to 10 users.
-The license key functionality may not be disabled or circumvented.
-[TRADEMARKS.md](TRADEMARKS.md) covers trademark usage.
+Licenses for larger deployments are available by emailing
+[help@roomote.dev](mailto:help@roomote.dev). The license key functionality may
+not be disabled or circumvented. [TRADEMARKS.md](TRADEMARKS.md) covers trademark
+usage.
