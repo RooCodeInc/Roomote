@@ -309,7 +309,11 @@ describe('StepSourceControlConfig', () => {
     expect(
       screen.queryByRole('link', { name: /Open/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByText('In Authorization, add:')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'When creating the OAuth client, set the callback URL to:',
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByText('Once created,, copy these values:'),
     ).toBeInTheDocument();

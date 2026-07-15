@@ -910,6 +910,7 @@ export async function createBitbucketPullRequestComment({
     )}/pullrequests/${pullRequestNumber}/comments`,
     username: auth.username,
     token: auth.token,
+    authScheme: auth.authScheme,
     body: {
       content: {
         raw: body,
@@ -1212,6 +1213,7 @@ export async function removeBitbucketWebhooksForRepositories({
               webhookUrl,
               username: auth.username,
               token: auth.token,
+              authScheme: auth.authScheme,
               apiBaseUrl: auth.apiBaseUrl,
               fetchImpl,
             })

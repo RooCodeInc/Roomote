@@ -25,7 +25,9 @@ export function BitbucketSourceControlInstructions({
       <p className="font-semibold text-foreground">
         Configure the OAuth callback.
       </p>
-      <p className="text-sm">In Authorization, add:</p>
+      <p className="text-sm">
+        When creating the OAuth client, set the callback URL to:
+      </p>
       <InstructionUrl
         heading="Callback URL"
         url={`${publicOrigin}/api/source-control/bitbucket/oauth/callback`}

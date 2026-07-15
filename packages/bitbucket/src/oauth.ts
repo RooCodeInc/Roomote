@@ -176,6 +176,7 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
   }
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
+    let requiresReauthorization = false;
     try {
       const response = await (options?.fetchImpl ?? fetch)(
         'https://bitbucket.org/site/oauth2/access_token',
@@ -193,6 +194,7 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
         },
       );
       if (!response.ok) {
+        requiresReauthorization = [400, 401, 403].includes(response.status);
         throw new Error(
           `Bitbucket OAuth refresh failed: ${response.status} ${response.statusText}`,
         );
@@ -214,13 +216,15 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
       await writeConnection(next);
       return next.accessToken;
     } catch (error) {
-      try {
-        await writeConnection({
-          ...connection,
-          status: 'reauthorization_required',
-        });
-      } catch {
-        // Preserve the original refresh error when persistence is unavailable.
+      if (requiresReauthorization) {
+        try {
+          await writeConnection({
+            ...connection,
+            status: 'reauthorization_required',
+          });
+        } catch {
+          // Preserve the original refresh error when persistence is unavailable.
+        }
       }
       throw error;
     }
