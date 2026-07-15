@@ -53,9 +53,6 @@ vi.mock('@roomote/bitbucket', () => ({
     apiBaseUrl: 'https://api.bitbucket.org/2.0',
     authScheme: 'basic',
   }),
-  resolveBitbucketToken: async () => 'bitbucket-token',
-  resolveBitbucketUsername: async () => 'bb-bot',
-  resolveBitbucketBaseUrl: async () => 'https://bitbucket.org',
   buildBitbucketApiBaseUrl: () => 'https://api.bitbucket.org/2.0',
 }));
 

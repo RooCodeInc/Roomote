@@ -24,7 +24,6 @@ const BITBUCKET_PROVIDER = 'bitbucket' satisfies SourceControlProvider;
 const DEFAULT_BITBUCKET_BASE_URL = 'https://bitbucket.org';
 const BITBUCKET_REPOSITORIES_PER_PAGE = 50;
 const BITBUCKET_WEBHOOK_ENSURE_CONCURRENCY = 5;
-const BITBUCKET_TOKEN_VALIDATION_TIMEOUT_MS = 10_000;
 
 const BITBUCKET_WEBHOOK_EVENTS = [
   'pullrequest:created',
@@ -184,11 +183,6 @@ export class BitbucketApiError extends Error {
   }
 }
 
-export type BitbucketTokenValidationResult =
-  | { status: 'valid'; login: string }
-  | { status: 'invalid'; error: string }
-  | { status: 'unknown'; error: string };
-
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '');
 
@@ -218,18 +212,6 @@ export function buildBitbucketApiBaseUrl(baseUrl: string): string {
 
 function buildAuthorizationHeader(username: string, token: string): string {
   return `Basic ${Buffer.from(`${username}:${token}`).toString('base64')}`;
-}
-
-/**
- * Static username Bitbucket Cloud accepts for git-over-HTTPS when the secret
- * is an Atlassian API token. API tokens pair with the Atlassian account email
- * for REST calls, but git rejects the email form, so git credentials must use
- * this documented static user instead.
- */
-export const BITBUCKET_API_TOKEN_GIT_USERNAME = 'x-bitbucket-api-token-auth';
-
-export function getBitbucketGitUsername(username: string): string {
-  return username.includes('@') ? BITBUCKET_API_TOKEN_GIT_USERNAME : username;
 }
 
 function stripUuidBraces(value: string): string {
@@ -271,10 +253,7 @@ export async function resolveBitbucketToken(): Promise<string | null> {
       'Bitbucket OAuth authorization requires reconnection. Reconnect the Bitbucket OAuth consumer in source-control settings.',
     );
   }
-  return (
-    (await resolveBitbucketOAuthAccessToken()) ??
-    resolveDeploymentEnvVar('BITBUCKET_TOKEN')
-  );
+  return resolveBitbucketOAuthAccessToken();
 }
 
 export async function resolveBitbucketBaseUrl(): Promise<string> {
@@ -287,7 +266,7 @@ export async function resolveBitbucketBaseUrl(): Promise<string> {
 export async function resolveBitbucketUsername(): Promise<string | null> {
   return (await getBitbucketOAuthConnection())?.status === 'active'
     ? (await getBitbucketOAuthConnection())?.username || 'x-token-auth'
-    : resolveDeploymentEnvVar('BITBUCKET_USERNAME');
+    : null;
 }
 
 export type BitbucketAuthDescriptor = {
@@ -316,22 +295,9 @@ export async function resolveBitbucketAuth(): Promise<BitbucketAuthDescriptor> {
       authScheme: 'bearer',
     };
   }
-  const legacyToken = await resolveDeploymentEnvVar('BITBUCKET_TOKEN');
-  const username = await resolveDeploymentEnvVar('BITBUCKET_USERNAME');
-  if (!legacyToken?.trim())
-    throw new Error(
-      'Bitbucket source-control credentials are not configured. Connect a Bitbucket OAuth consumer or configure BITBUCKET_TOKEN and BITBUCKET_USERNAME.',
-    );
-  if (!username?.trim())
-    throw new Error('BITBUCKET_USERNAME is required with BITBUCKET_TOKEN.');
-  const baseUrl = await resolveBitbucketBaseUrl();
-  return {
-    token: legacyToken,
-    username: username.trim(),
-    baseUrl,
-    apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
-    authScheme: 'basic',
-  };
+  throw new Error(
+    'Bitbucket OAuth authorization is required. Connect the Bitbucket OAuth consumer in source-control settings.',
+  );
 }
 
 let cachedBitbucketDeploymentUser: {
@@ -439,11 +405,10 @@ async function resolveAuthIdentity({
     return resolveBitbucketAuth();
   const resolvedToken = token ?? (await resolveBitbucketToken());
 
-  if (!resolvedToken?.trim()) {
+  if (!resolvedToken?.trim())
     throw new Error(
-      'BITBUCKET_TOKEN is required for Bitbucket source control.',
+      'Bitbucket OAuth authorization is required for Bitbucket source control.',
     );
-  }
 
   const resolvedBaseUrl = baseUrl ?? (await resolveBitbucketBaseUrl());
   const resolvedApiBaseUrl =
@@ -468,11 +433,8 @@ async function resolveAuthIdentity({
     };
   }
 
-  // Bitbucket Cloud REST auth pairs the API token with the Atlassian account
-  // email. There is no discovery endpoint that works without it, so the value
-  // must be configured up front.
   throw new Error(
-    'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
+    'Bitbucket OAuth authorization is required for source-control API requests.',
   );
 }
 
@@ -512,55 +474,6 @@ export async function getBitbucketAuthenticatedUser({
     accountId: getBitbucketAccountKey(data),
     uuid: data.uuid ? stripUuidBraces(data.uuid) : null,
   };
-}
-
-export async function validateBitbucketToken({
-  token,
-  username,
-  baseUrl,
-  apiBaseUrl,
-  fetchImpl = fetch,
-  timeoutMs = BITBUCKET_TOKEN_VALIDATION_TIMEOUT_MS,
-}: {
-  token: string;
-  username?: string;
-  baseUrl?: string;
-  apiBaseUrl?: string;
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-}): Promise<BitbucketTokenValidationResult> {
-  const timedFetch: typeof fetch = (input, init) =>
-    fetchImpl(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
-
-  try {
-    const { login } = await getBitbucketAuthenticatedUser({
-      token,
-      username,
-      baseUrl,
-      apiBaseUrl,
-      fetchImpl: timedFetch,
-    });
-
-    return { status: 'valid', login };
-  } catch (error) {
-    if (
-      error instanceof BitbucketApiError &&
-      [401, 403].includes(error.status)
-    ) {
-      return {
-        status: 'invalid',
-        error:
-          'Bitbucket rejected the credentials. Confirm the API token is active, is paired with the Atlassian account email that owns it, and includes the read:user:bitbucket scope alongside repository access.',
-      };
-    }
-
-    return {
-      status: 'unknown',
-      error: `Could not verify the Bitbucket token: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    };
-  }
 }
 
 export async function listBitbucketRepositories({
@@ -1344,10 +1257,7 @@ export async function createTaskRunBitbucketCredentials(
     credentials: repositoriesList.map((repository) => ({
       host,
       repositoryFullName: repository.fullName,
-      username:
-        auth.authScheme === 'bearer'
-          ? 'x-token-auth'
-          : getBitbucketGitUsername(auth.username),
+      username: 'x-token-auth',
       token: auth.token,
       originBaseUrl: auth.baseUrl,
       authScheme: 'basic',

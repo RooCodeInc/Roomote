@@ -22,7 +22,7 @@ export type SourceControlTokenEnvVar =
   | 'GITLAB_TOKEN'
   | 'GITEA_TOKEN'
   | 'ADO_TOKEN'
-  | 'BITBUCKET_TOKEN';
+  | 'BITBUCKET_OAUTH';
 
 export type SourceControlGitCredential = {
   host: string;
@@ -94,7 +94,7 @@ export const sourceControlProviderDescriptors = {
     provider: 'bitbucket',
     label: 'Bitbucket',
     defaultHost: 'bitbucket.org',
-    tokenEnvVar: 'BITBUCKET_TOKEN',
+    tokenEnvVar: 'BITBUCKET_OAUTH',
     connectionMode: 'token',
   },
 } as const satisfies Record<

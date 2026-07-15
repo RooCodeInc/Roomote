@@ -176,46 +176,54 @@ export async function resolveBitbucketOAuthAccessToken(options?: {
   }
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
-    const response = await (options?.fetchImpl ?? fetch)(
-      'https://bitbucket.org/site/oauth2/access_token',
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Basic ${Buffer.from(`${connection.clientId}:${connection.clientSecret}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+    try {
+      const response = await (options?.fetchImpl ?? fetch)(
+        'https://bitbucket.org/site/oauth2/access_token',
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Basic ${Buffer.from(`${connection.clientId}:${connection.clientSecret}`).toString('base64')}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: connection.refreshToken,
+          }),
         },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: connection.refreshToken,
-        }),
-      },
-    );
-    if (!response.ok) {
-      await writeConnection({
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Bitbucket OAuth refresh failed: ${response.status} ${response.statusText}`,
+        );
+      }
+      const token = (await response.json()) as BitbucketOAuthTokenResponse;
+      if (!token.access_token)
+        throw new Error(
+          'Bitbucket OAuth refresh did not return an access token.',
+        );
+      const next = {
         ...connection,
-        status: 'reauthorization_required',
-      });
-      throw new Error(
-        'Bitbucket OAuth authorization has expired. Reconnect the Bitbucket OAuth consumer.',
-      );
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token ?? connection.refreshToken,
+        expiresAt: new Date(
+          Date.now() + (token.expires_in ?? 3600) * 1000,
+        ).toISOString(),
+        status: 'active' as const,
+      };
+      await writeConnection(next);
+      return next.accessToken;
+    } catch (error) {
+      try {
+        await writeConnection({
+          ...connection,
+          status: 'reauthorization_required',
+        });
+      } catch {
+        // Preserve the original refresh error when persistence is unavailable.
+      }
+      throw error;
     }
-    const token = (await response.json()) as BitbucketOAuthTokenResponse;
-    if (!token.access_token)
-      throw new Error(
-        'Bitbucket OAuth refresh did not return an access token.',
-      );
-    const next = {
-      ...connection,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? connection.refreshToken,
-      expiresAt: new Date(
-        Date.now() + (token.expires_in ?? 3600) * 1000,
-      ).toISOString(),
-      status: 'active' as const,
-    };
-    await writeConnection(next);
-    return next.accessToken;
   })();
   try {
     return await refreshPromise;

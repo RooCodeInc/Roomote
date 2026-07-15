@@ -3,10 +3,10 @@ import { resolveDeploymentEnvVar } from '@roomote/db/server';
 import {
   buildBitbucketOAuthRedirectUri,
   exchangeBitbucketOAuthCode,
-  syncBitbucketRepositories,
 } from '@roomote/bitbucket';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { syncRepositoriesCommand } from '@/trpc/commands/source-control';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       code,
       redirectUri: buildBitbucketOAuthRedirectUri(publicAppUrl),
     });
-    await syncBitbucketRepositories({ userId: authResult.userId });
+    await syncRepositoriesCommand(authResult, { provider: 'bitbucket' });
     redirect.searchParams.set('bitbucket', 'connected');
     redirect.searchParams.set('sync', '1');
   } catch (error) {

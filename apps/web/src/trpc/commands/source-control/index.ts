@@ -414,6 +414,7 @@ async function configureBitbucketWebhooks(
     actorUserId,
     logPrefix: '[configureBitbucketWebhooks]',
     removalDescription: 'remove webhooks from unmapped repositories',
+    scopeToEnvironmentMappings: false,
   });
 }
 
@@ -746,10 +747,6 @@ export async function assertValidSourceControlConfigInput(params: {
       ? (params.values?.['GITEA_CLIENT_SECRET']?.trim() ??
         (await resolveDeploymentEnvVar('GITEA_CLIENT_SECRET')))
       : undefined;
-  const nextBitbucketToken =
-    params.provider === 'bitbucket'
-      ? params.values?.['BITBUCKET_TOKEN']?.trim()
-      : undefined;
   const nextBitbucketClientId =
     params.provider === 'bitbucket'
       ? (params.values?.['BITBUCKET_CLIENT_ID']?.trim() ??
@@ -825,36 +822,11 @@ export async function assertValidSourceControlConfigInput(params: {
     );
   }
 
-  if (nextBitbucketToken) {
-    const nextBitbucketUsername =
-      params.values?.['BITBUCKET_USERNAME']?.trim() ??
-      (await Bitbucket.resolveBitbucketUsername());
-
-    if (!nextBitbucketUsername) {
-      throw new Error(
-        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
-      );
-    }
-
-    const validation = await Bitbucket.validateBitbucketToken({
-      token: nextBitbucketToken,
-      username: nextBitbucketUsername,
-      baseUrl: params.values?.['BITBUCKET_BASE_URL']?.trim() || undefined,
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
-  }
-
   if (
     params.provider === 'bitbucket' &&
-    !(nextBitbucketClientId && nextBitbucketClientSecret) &&
-    !nextBitbucketToken
+    !(nextBitbucketClientId && nextBitbucketClientSecret)
   ) {
-    throw new Error(
-      'Configure the Bitbucket OAuth consumer ID and secret, or provide the legacy API token and username.',
-    );
+    throw new Error('Configure the Bitbucket OAuth consumer ID and secret.');
   }
 
   if (nextAdoToken) {

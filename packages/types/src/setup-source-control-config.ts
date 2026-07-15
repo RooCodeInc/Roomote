@@ -378,21 +378,6 @@ function buildProviderFields(
     case 'bitbucket':
       return [
         {
-          envVarName: 'BITBUCKET_TOKEN',
-          acceptedEnvVarNames: ['BITBUCKET_TOKEN'],
-          label: 'Bitbucket API Token',
-          secret: true,
-          required: false,
-          advanced: true,
-        },
-        {
-          envVarName: 'BITBUCKET_USERNAME',
-          acceptedEnvVarNames: ['BITBUCKET_USERNAME'],
-          label: 'Atlassian Account Email',
-          required: false,
-          advanced: true,
-        },
-        {
           envVarName: 'BITBUCKET_BASE_URL',
           acceptedEnvVarNames: ['BITBUCKET_BASE_URL'],
           label: 'Bitbucket Base URL',
@@ -403,7 +388,7 @@ function buildProviderFields(
           envVarName: 'BITBUCKET_CLIENT_ID',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
           label: 'Bitbucket OAuth Client ID',
-          required: false,
+          required: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_SECRET',

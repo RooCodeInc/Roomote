@@ -297,7 +297,7 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText('Bitbucket OAuth Client ID')).toBeInTheDocument();
+    expect(screen.getByText(/Bitbucket OAuth Client ID/)).toBeInTheDocument();
     expect(
       screen.getByText(/Bitbucket OAuth Client Secret/),
     ).toBeInTheDocument();
