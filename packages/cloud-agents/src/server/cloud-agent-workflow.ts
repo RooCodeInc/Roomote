@@ -2,6 +2,7 @@ import {
   type TaskSpec,
   TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationGuildIdFromTaskPayload,
   getCommunicationMessageIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
@@ -235,14 +236,15 @@ export async function generatePrompt({
       );
       const nonSlackChatProvider =
         communicationProvider === 'teams' ||
-        communicationProvider === 'telegram'
+        communicationProvider === 'telegram' ||
+        communicationProvider === 'discord'
           ? communicationProvider
           : null;
       const slackThreadTs =
         getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
         taskRow?.slackThreadTs ??
         null;
-      // Telegram and Teams persist generic conversation ids on the payload;
+      // Telegram, Teams, and Discord persist generic conversation ids on the payload;
       // resolve them into the surface-specific fields the PR provenance line
       // needs to deep-link back to the originating chat message.
       const communicationChannelId = getCommunicationChannelFromTaskPayload(
@@ -255,6 +257,9 @@ export async function generatePrompt({
         taskSpec.payload,
       );
       const teamsTenantId = getCommunicationTenantIdFromTaskPayload(
+        taskSpec.payload,
+      );
+      const discordGuildId = getCommunicationGuildIdFromTaskPayload(
         taskSpec.payload,
       );
 
@@ -302,6 +307,18 @@ export async function generatePrompt({
         teamsBotAppId:
           nonSlackChatProvider === 'teams'
             ? (Env.R_TEAMS_BOT_APP_ID ?? undefined)
+            : undefined,
+        discordGuildId:
+          nonSlackChatProvider === 'discord'
+            ? (discordGuildId ?? undefined)
+            : undefined,
+        discordChannelId:
+          nonSlackChatProvider === 'discord'
+            ? (communicationThreadId ?? communicationChannelId ?? undefined)
+            : undefined,
+        discordMessageId:
+          nonSlackChatProvider === 'discord'
+            ? (communicationMessageId ?? undefined)
             : undefined,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,

@@ -3,6 +3,7 @@ import {
   db,
   deploymentMcpEnablements,
   deploymentSettings,
+  discordInstallations,
   eq,
   max,
   mcpConnections,
@@ -27,6 +28,7 @@ import { Env, getWebRuntimeEnvDiagnostics } from '@/lib/server/env';
 import { getS3Client } from '@/lib/server/s3-client';
 
 import { assertAdmin } from '../setup/shared';
+import { buildConfiguredCommunicationProviders } from './provider-diagnostics';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const CONTROLLER_STALE_THRESHOLD_MS = 90_000;
@@ -298,6 +300,7 @@ async function getProviderDiagnostics() {
     slackActive,
     teamsActive,
     telegramMappings,
+    discordActive,
     sourceControlProviders,
     deploymentMcps,
     userMcps,
@@ -316,6 +319,10 @@ async function getProviderDiagnostics() {
       .where(eq(teamsInstallations.isActive, true)),
     db.select({ total: count() }).from(telegramUserMappings),
     db
+      .select({ total: count() })
+      .from(discordInstallations)
+      .where(eq(discordInstallations.isActive, true)),
+    db
       .selectDistinct({ provider: repositories.sourceControlProvider })
       .from(repositories)
       .where(eq(repositories.isActive, true)),
@@ -329,19 +336,16 @@ async function getProviderDiagnostics() {
       .where(eq(mcpConnections.enabled, true)),
   ]);
 
-  const comms: string[] = [];
-  if ((slackActive[0]?.total ?? 0) > 0 || present(Env.SLACK_APP_ID)) {
-    comms.push('slack');
-  }
-  if ((teamsActive[0]?.total ?? 0) > 0 || present(Env.R_TEAMS_BOT_APP_ID)) {
-    comms.push('teams');
-  }
-  if (
-    (telegramMappings[0]?.total ?? 0) > 0 ||
-    present(Env.R_TELEGRAM_BOT_TOKEN)
-  ) {
-    comms.push('telegram');
-  }
+  const comms = buildConfiguredCommunicationProviders({
+    slackActiveCount: slackActive[0]?.total ?? 0,
+    teamsActiveCount: teamsActive[0]?.total ?? 0,
+    telegramMappingCount: telegramMappings[0]?.total ?? 0,
+    discordActiveCount: discordActive[0]?.total ?? 0,
+    slackRuntimeConfigured: present(Env.SLACK_APP_ID),
+    teamsRuntimeConfigured: present(Env.R_TEAMS_BOT_APP_ID),
+    telegramRuntimeConfigured: present(Env.R_TELEGRAM_BOT_TOKEN),
+    discordRuntimeConfigured: present(Env.R_DISCORD_BOT_TOKEN),
+  });
 
   return {
     comms,

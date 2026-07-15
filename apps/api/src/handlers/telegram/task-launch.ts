@@ -21,6 +21,7 @@ import {
   consumeTelegramImplicitTopic,
   rememberTelegramImplicitTopic,
 } from './webhook-gate.js';
+import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import type {
   QueuedTelegramCommunicationMessage,
   TelegramWorkspaceSelection,
@@ -206,12 +207,8 @@ export async function launchTelegramTask(input: {
 const TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH = 96;
 
 export function buildTelegramTaskTopicName(description: string): string {
-  const normalized = description.replace(/\s+/gu, ' ').trim();
-  const characters = Array.from(normalized || 'Roomote task');
-
-  return characters.length > TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH
-    ? `${characters
-        .slice(0, TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH - 1)
-        .join('')}…`
-    : characters.join('');
+  return buildCommunicationTaskThreadName(
+    description,
+    TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH,
+  );
 }

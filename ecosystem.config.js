@@ -91,6 +91,10 @@ const defaultEnv = {
   SLACK_AUTH_URI: publicUrl ? `${publicUrl}/api/slack/auth` : undefined,
   R_SLACK_SIGNING_SECRET: process.env.R_SLACK_SIGNING_SECRET,
 
+  // Discord bot credentials and the gateway-to-API authentication secret:
+  R_DISCORD_BOT_TOKEN: process.env.R_DISCORD_BOT_TOKEN,
+  R_DISCORD_GATEWAY_SECRET: process.env.R_DISCORD_GATEWAY_SECRET,
+
   // Linear app credentials:
   R_LINEAR_CLIENT_ID: process.env.R_LINEAR_CLIENT_ID,
   R_LINEAR_CLIENT_SECRET: process.env.R_LINEAR_CLIENT_SECRET,

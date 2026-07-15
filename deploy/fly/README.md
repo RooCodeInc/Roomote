@@ -113,7 +113,7 @@ fly secrets set --app "$APP" \
   DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
   SETUP_TOKEN="$(openssl rand -hex 16)"
 
-# One Machine per process group (web, api, controller, bullmq). The
+# One Machine per process group (web, api, controller, and bullmq). The
 # db-migrate release command runs schema migrations first.
 fly deploy --ha=false
 ```

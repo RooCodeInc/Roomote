@@ -136,6 +136,12 @@ type FieldErrors = Partial<
     | 'securityAuditorSlackChannel'
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
+    | 'managerStatsDiscordChannel'
+    | 'sentryTriageDiscordChannel'
+    | 'dependabotTriageDiscordChannel'
+    | 'securityAuditorDiscordChannel'
+    | 'codeQualityAuditorDiscordChannel'
+    | 'ciFailureTriageDiscordChannel'
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
@@ -183,6 +189,34 @@ const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
   AutomationSlackDestinationField,
   BackgroundAutomationKey
 >;
+
+type AutomationDiscordDestinationField =
+  | 'managerStatsDiscordChannel'
+  | 'sentryTriageDiscordChannel'
+  | 'dependabotTriageDiscordChannel'
+  | 'securityAuditorDiscordChannel'
+  | 'codeQualityAuditorDiscordChannel'
+  | 'ciFailureTriageDiscordChannel';
+
+// The form field holding the same automation's Discord destination; the
+// destination picker is one-of, so selecting one provider clears the other.
+const SLACK_TO_DISCORD_DESTINATION_FIELDS = {
+  managerStatsSlackChannel: 'managerStatsDiscordChannel',
+  sentryTriageSlackChannel: 'sentryTriageDiscordChannel',
+  dependabotTriageSlackChannel: 'dependabotTriageDiscordChannel',
+  securityAuditorSlackChannel: 'securityAuditorDiscordChannel',
+  codeQualityAuditorSlackChannel: 'codeQualityAuditorDiscordChannel',
+  ciFailureTriageSlackChannel: 'ciFailureTriageDiscordChannel',
+} as const satisfies Record<
+  AutomationSlackDestinationField,
+  AutomationDiscordDestinationField
+>;
+
+/**
+ * Discord options share the Slack destination combobox, so their option ids
+ * are prefixed to distinguish them from (unprefixed) Slack channel ids.
+ */
+export const DISCORD_DESTINATION_OPTION_PREFIX = 'discord:';
 
 type SlackChannelOption = {
   id: string;
@@ -642,13 +676,16 @@ function mapSettingsToFormState(
     managerStatsFrequency: ManagerStatsFrequency;
     managerStatsSlackChannelId: string | null;
     managerStatsSlackChannelName?: string | null;
+    managerStatsDiscordChannelId: string | null;
     sentryTriageFrequency: SentryTriageFrequency;
     sentryTriageSlackChannelId: string | null;
     sentryTriageSlackChannelName?: string | null;
+    sentryTriageDiscordChannelId: string | null;
     sentryTriageProjectSlugs: string | null;
     dependabotTriageFrequency: DependabotTriageFrequency;
     dependabotTriageSlackChannelId: string | null;
     dependabotTriageSlackChannelName?: string | null;
+    dependabotTriageDiscordChannelId: string | null;
     suggesterFrequency: SuggesterFrequency;
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
@@ -663,10 +700,13 @@ function mapSettingsToFormState(
     platformIssueSlackChannelName?: string | null;
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
+    securityAuditorDiscordChannelId: string | null;
     codeQualityAuditorSlackChannelId: string | null;
     codeQualityAuditorSlackChannelName?: string | null;
+    codeQualityAuditorDiscordChannelId: string | null;
     ciFailureTriageSlackChannelId: string | null;
     ciFailureTriageSlackChannelName?: string | null;
+    ciFailureTriageDiscordChannelId: string | null;
   } & ScheduleOnlyAutomationFrequencyState,
 ): FormState {
   return {
@@ -710,17 +750,21 @@ function mapSettingsToFormState(
       settings.managerStatsSlackChannelName ??
       settings.managerStatsSlackChannelId ??
       '',
+    managerStatsDiscordChannel: settings.managerStatsDiscordChannelId ?? '',
     sentryTriageFrequency: settings.sentryTriageFrequency,
     sentryTriageSlackChannel:
       settings.sentryTriageSlackChannelName ??
       settings.sentryTriageSlackChannelId ??
       '',
+    sentryTriageDiscordChannel: settings.sentryTriageDiscordChannelId ?? '',
     sentryTriageProjectSlugs: settings.sentryTriageProjectSlugs ?? '',
     dependabotTriageFrequency: settings.dependabotTriageFrequency,
     dependabotTriageSlackChannel:
       settings.dependabotTriageSlackChannelName ??
       settings.dependabotTriageSlackChannelId ??
       '',
+    dependabotTriageDiscordChannel:
+      settings.dependabotTriageDiscordChannelId ?? '',
     ...mapScheduleOnlyAutomationFormState(settings),
     suggesterFrequency: settings.suggesterFrequency,
     suggesterSlackChannel:
@@ -745,14 +789,20 @@ function mapSettingsToFormState(
       settings.securityAuditorSlackChannelName ??
       settings.securityAuditorSlackChannelId ??
       '',
+    securityAuditorDiscordChannel:
+      settings.securityAuditorDiscordChannelId ?? '',
     codeQualityAuditorSlackChannel:
       settings.codeQualityAuditorSlackChannelName ??
       settings.codeQualityAuditorSlackChannelId ??
       '',
+    codeQualityAuditorDiscordChannel:
+      settings.codeQualityAuditorDiscordChannelId ?? '',
     ciFailureTriageSlackChannel:
       settings.ciFailureTriageSlackChannelName ??
       settings.ciFailureTriageSlackChannelId ??
       '',
+    ciFailureTriageDiscordChannel:
+      settings.ciFailureTriageDiscordChannelId ?? '',
   };
 }
 
@@ -934,6 +984,40 @@ export function buildManagerSlackChannelOptions(params: {
         ? selectedValue.slice(1)
         : selectedValue,
       label: formatSlackChannelValue(selectedValue),
+    },
+    ...options,
+  ];
+}
+
+export function buildAutomationDiscordDestinationOptions(params: {
+  channels: Array<{ id: string; name: string; label: string }>;
+  selectedChannelId: string | null | undefined;
+}): SlackChannelOption[] {
+  const options = params.channels.map((channel) => ({
+    id: `${DISCORD_DESTINATION_OPTION_PREFIX}${channel.id}`,
+    name: channel.name,
+    label: `${channel.label} (Discord)`,
+  }));
+
+  const selectedChannelId = params.selectedChannelId?.trim();
+  const selectedOptionId = selectedChannelId
+    ? `${DISCORD_DESTINATION_OPTION_PREFIX}${selectedChannelId}`
+    : null;
+
+  if (
+    !selectedOptionId ||
+    options.some((option) => option.id === selectedOptionId)
+  ) {
+    return options;
+  }
+
+  // Keep a saved channel selectable/displayable even when the cached channel
+  // catalog no longer lists it (or has not loaded yet).
+  return [
+    {
+      id: selectedOptionId,
+      name: selectedChannelId!,
+      label: `#${selectedChannelId} (Discord)`,
     },
     ...options,
   ];
@@ -1131,6 +1215,7 @@ function AutomationSlackDestinationInput({
   value,
   options,
   disabled,
+  discordConnected = false,
   showWarning,
   slackAppMention,
   error,
@@ -1143,6 +1228,7 @@ function AutomationSlackDestinationInput({
   value: string | null;
   options: SlackChannelOption[];
   disabled: boolean;
+  discordConnected?: boolean;
   showWarning: boolean;
   slackAppMention: string;
   error?: string;
@@ -1162,7 +1248,9 @@ function AutomationSlackDestinationInput({
         placeholder={
           disabled && options.length === 0
             ? 'Connect Slack to choose a channel'
-            : 'Select a Slack channel'
+            : discordConnected
+              ? 'Select a channel'
+              : 'Select a Slack channel'
         }
       />
       {helperText ? (
@@ -1592,6 +1680,11 @@ export function AutomationsSettings() {
   const slackChannelsQuery = useQuery(
     trpc.automations.listSlackChannels.queryOptions(undefined, {
       enabled: settingsQuery.data?.capabilities.slackConnected ?? false,
+    }),
+  );
+  const discordChannelsQuery = useQuery(
+    trpc.automations.listDiscordChannels.queryOptions(undefined, {
+      enabled: settingsQuery.data?.capabilities.discordConnected ?? false,
     }),
   );
 
@@ -2152,16 +2245,7 @@ export function AutomationsSettings() {
       }),
     [slackChannelChoices],
   );
-  const getSlackDestinationSelectionDisabled = useCallback(
-    (value: string | null | undefined, savedChannelId: string | null) =>
-      isManagerChannelSelectionDisabled({
-        slackConnected: capabilities?.slackConnected === true,
-        isFetching: slackChannelsQuery.isFetching,
-        hasValue: Boolean(value?.trim()),
-        isConfigured: Boolean(savedChannelId),
-      }),
-    [capabilities?.slackConnected, slackChannelsQuery.isFetching],
-  );
+  const discordConnected = capabilities?.discordConnected === true;
   const renderSlackDestinationField = useCallback(
     ({
       field,
@@ -2169,6 +2253,7 @@ export function AutomationsSettings() {
       label,
       helperText,
       savedChannelId,
+      savedDiscordChannelId,
       warningChannelId,
     }: {
       field: AutomationSlackDestinationField;
@@ -2176,65 +2261,112 @@ export function AutomationsSettings() {
       label: string;
       helperText?: string;
       savedChannelId: string | null;
+      savedDiscordChannelId: string | null;
       warningChannelId: string | null;
     }) => {
+      const discordField = SLACK_TO_DISCORD_DESTINATION_FIELDS[field];
       const value = formState?.[field] ?? '';
+      const discordValue = formState?.[discordField] ?? '';
+      const showDiscordOptions = discordConnected || Boolean(discordValue);
+      const options = [
+        ...buildSlackDestinationOptions(value),
+        ...(showDiscordOptions
+          ? buildAutomationDiscordDestinationOptions({
+              channels: discordChannelsQuery.data?.channels ?? [],
+              selectedChannelId: discordValue || null,
+            })
+          : []),
+      ];
+      // One-of destination: a selected Discord channel wins the combobox
+      // value; picking one provider clears the other on change.
+      const selectedValue = discordValue
+        ? `${DISCORD_DESTINATION_OPTION_PREFIX}${discordValue}`
+        : value || null;
 
       return (
         <AutomationSlackDestinationInput
           inputId={inputId}
           label={label}
           helperText={helperText}
-          value={value || null}
-          options={buildSlackDestinationOptions(value)}
-          disabled={getSlackDestinationSelectionDisabled(value, savedChannelId)}
+          value={selectedValue}
+          options={options}
+          disabled={isManagerChannelSelectionDisabled({
+            slackConnected:
+              capabilities?.slackConnected === true || discordConnected,
+            isFetching:
+              slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
+            hasValue: Boolean(value.trim()) || Boolean(discordValue.trim()),
+            isConfigured:
+              Boolean(savedChannelId) || Boolean(savedDiscordChannelId),
+          })}
+          discordConnected={discordConnected}
           destination={
             settingsQuery.data?.resolvedDestinations[
               SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
             ]
           }
           slackAppMention={slackAppMention}
-          showWarning={shouldShowManagerSlackChannelWarning({
-            formValue: value,
-            savedChannelId,
-            warningChannelId,
-            isDirty:
-              isDirty[
-                field === 'managerStatsSlackChannel'
-                  ? 'managerStats'
-                  : field === 'sentryTriageSlackChannel'
-                    ? 'sentryTriage'
-                    : field === 'dependabotTriageSlackChannel'
-                      ? 'dependabotTriage'
-                      : field === 'securityAuditorSlackChannel'
-                        ? 'securityAuditor'
-                        : field === 'codeQualityAuditorSlackChannel'
-                          ? 'codeQualityAuditor'
-                          : 'ciFailureTriage'
-              ],
-          })}
-          error={fieldErrors[field]}
+          showWarning={
+            !discordValue &&
+            shouldShowManagerSlackChannelWarning({
+              formValue: value,
+              savedChannelId,
+              warningChannelId,
+              isDirty:
+                isDirty[
+                  field === 'managerStatsSlackChannel'
+                    ? 'managerStats'
+                    : field === 'sentryTriageSlackChannel'
+                      ? 'sentryTriage'
+                      : field === 'dependabotTriageSlackChannel'
+                        ? 'dependabotTriage'
+                        : field === 'securityAuditorSlackChannel'
+                          ? 'securityAuditor'
+                          : field === 'codeQualityAuditorSlackChannel'
+                            ? 'codeQualityAuditor'
+                            : 'ciFailureTriage'
+                ],
+            })
+          }
+          error={fieldErrors[field] ?? fieldErrors[discordField]}
           onChange={(nextValue) =>
-            setFormState((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    [field]: nextValue ?? '',
-                  }
-                : prev,
-            )
+            setFormState((prev) => {
+              if (!prev) {
+                return prev;
+              }
+
+              if (nextValue?.startsWith(DISCORD_DESTINATION_OPTION_PREFIX)) {
+                return {
+                  ...prev,
+                  [field]: '',
+                  [discordField]: nextValue.slice(
+                    DISCORD_DESTINATION_OPTION_PREFIX.length,
+                  ),
+                };
+              }
+
+              return {
+                ...prev,
+                [field]: nextValue ?? '',
+                [discordField]: '',
+              };
+            })
           }
         />
       );
     },
     [
       buildSlackDestinationOptions,
+      capabilities?.slackConnected,
+      discordChannelsQuery.data?.channels,
+      discordChannelsQuery.isFetching,
+      discordConnected,
       fieldErrors,
       formState,
-      getSlackDestinationSelectionDisabled,
       isDirty,
       settingsQuery.data,
       slackAppMention,
+      slackChannelsQuery.isFetching,
     ],
   );
 
@@ -2729,6 +2861,9 @@ export function AutomationsSettings() {
                     savedChannelId:
                       settingsQuery.data?.settings.managerStatsSlackChannelId ??
                       null,
+                    savedDiscordChannelId:
+                      settingsQuery.data?.settings
+                        .managerStatsDiscordChannelId ?? null,
                     warningChannelId:
                       slackChannelAccessWarnings.managerStatsSlackChannel,
                   })}
@@ -2871,6 +3006,9 @@ export function AutomationsSettings() {
                       savedChannelId:
                         settingsQuery.data?.settings
                           .sentryTriageSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .sentryTriageDiscordChannelId ?? null,
                       warningChannelId:
                         slackChannelAccessWarnings.sentryTriageSlackChannel,
                     })}
@@ -2974,6 +3112,9 @@ export function AutomationsSettings() {
                       savedChannelId:
                         settingsQuery.data?.settings
                           .dependabotTriageSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .dependabotTriageDiscordChannelId ?? null,
                       warningChannelId:
                         slackChannelAccessWarnings.dependabotTriageSlackChannel,
                     })
@@ -3090,6 +3231,15 @@ export function AutomationsSettings() {
                                 .codeQualityAuditorSlackChannelId ?? null)
                             : (settingsQuery.data?.settings
                                 .ciFailureTriageSlackChannelId ?? null),
+                      savedDiscordChannelId:
+                        automation.id === 'securityAuditor'
+                          ? (settingsQuery.data?.settings
+                              .securityAuditorDiscordChannelId ?? null)
+                          : automation.id === 'codeQualityAuditor'
+                            ? (settingsQuery.data?.settings
+                                .codeQualityAuditorDiscordChannelId ?? null)
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageDiscordChannelId ?? null),
                       warningChannelId:
                         automation.id === 'securityAuditor'
                           ? slackChannelAccessWarnings.securityAuditorSlackChannel

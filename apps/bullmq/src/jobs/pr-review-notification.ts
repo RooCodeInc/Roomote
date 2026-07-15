@@ -58,6 +58,13 @@ function buildPrReviewNotificationPostInput(
         ...(route.threadId ? { threadId: route.threadId } : {}),
         text,
       };
+    case 'discord':
+      return {
+        channelId: route.channelId,
+        ...(route.threadId ? { threadId: route.threadId } : {}),
+        text,
+        textFormat: 'markdown',
+      };
   }
 }
 
@@ -108,7 +115,7 @@ async function postPrReviewNotification({
 
 /**
  * Posts an informational message about new PR review feedback into the owning
- * task's originating conversation (Slack, Teams, or Telegram) once that task
+ * task's originating conversation once that task
  * is idle. This never starts an agent turn or changes any code on its own.
  */
 export const prReviewNotificationJob = async (

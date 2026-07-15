@@ -48,11 +48,15 @@ describe('resolveAutomationTeamsTarget', () => {
     });
   });
 
-  it('returns null when an active Slack installation exists, matching the summary gate', async () => {
+  it('leaves Slack precedence to the caller when Slack is installed but unusable', async () => {
     selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
 
-    await expect(resolveAutomationTeamsTarget()).resolves.toBeNull();
-    expect(findPrimaryConversationMock).not.toHaveBeenCalled();
+    await expect(resolveAutomationTeamsTarget()).resolves.toEqual({
+      provider: 'teams',
+      conversationId: '19:channel@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+    });
+    expect(findPrimaryConversationMock).toHaveBeenCalled();
   });
 
   it('returns null without a primary conversation', async () => {

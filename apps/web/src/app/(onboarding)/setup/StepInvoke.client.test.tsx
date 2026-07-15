@@ -7,6 +7,10 @@ const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
+  commsProviders: [] as Array<{
+    id: 'telegram' | 'discord';
+    setupSatisfied: boolean;
+  }>,
 }));
 const queryKeys = {
   setupStatus: ['setup.status'],
@@ -33,6 +37,7 @@ vi.mock('@tanstack/react-query', async () => {
     }),
     useQuery: () => ({
       data: {
+        providers: environmentState.commsProviders,
         invocationIdentities: [
           {
             provider: 'github',
@@ -137,7 +142,6 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Loader2: () => <span>Loader2</span>,
-  CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
   Zap: () => <span>Zap</span>,
@@ -168,6 +172,7 @@ describe('Setup StepInvoke', () => {
       setupNewState: { onboardingTaskId: null },
     });
     environmentState.environments = [{ id: 'env-1' }];
+    environmentState.commsProviders = [];
   });
 
   it('shows an actionable retry when sandbox provisioning fails', () => {
@@ -378,6 +383,19 @@ describe('Setup StepInvoke', () => {
       'Automations',
       'Web UI',
     ]);
+  });
+
+  it('discovers configured Discord and explains task threads', () => {
+    environmentState.commsProviders = [{ id: 'discord', setupSatisfied: true }];
+
+    render(<StepInvoke />);
+
+    expect(screen.getByText(/^Discord:/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'mention it in a server channel, use /new, or continue work in a task thread.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('includes the link_suggested param when selected suggested tasks were started', async () => {

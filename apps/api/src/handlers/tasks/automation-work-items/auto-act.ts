@@ -1,16 +1,21 @@
+import { getAutomationRuntime } from '@roomote/db/server';
 import { getSlackThreadTsFromTaskPayload } from '@roomote/types';
 
 import {
   AutomationWorkItemValidationError,
   resolvePreparedAutomationWorkItems,
 } from './prepare.js';
-import { persistAutomationWorkItems } from './persistence.js';
+import {
+  loadRelaunchableDuplicateWorkItems,
+  persistAutomationWorkItems,
+} from './persistence.js';
 import { resolveRepositoryIdsForSuggestedTask } from './repositories.js';
 import type { AutomationWorkItemInput } from './schema.js';
 import { launchActWorkItems, type AutomationChatTarget } from './launch.js';
 import { resolveAutomationTelegramTarget } from './telegram.js';
 import { resolveAutomationTeamsTarget } from './teams.js';
 import { resolveAutomationSlackTarget } from './slack.js';
+import { resolveAutomationDiscordTarget } from './discord.js';
 import type { AutomationKey } from './source.js';
 import type {
   PersistedAutomationWorkItem,
@@ -165,9 +170,30 @@ export async function submitAutoActWorkItems(params: {
   const actItems = persisted.workItems.filter(
     (workItem) => workItem.disposition === 'act',
   );
-  const launchableActItems = actItems.filter(isLaunchableActWorkItem);
-  const resolvedSlackTarget =
+  // A fingerprint duplicate that is still open with no linked task is a
+  // previous submission whose launch failed transiently and was reopened.
+  // The duplicate row blocks re-inserting the finding, so this scan must
+  // relaunch it or the work item strands indefinitely.
+  const relaunchableDuplicates = await loadRelaunchableDuplicateWorkItems(
+    persisted.duplicateWorkItemRefs.map((ref) => ref.id),
+  );
+  const launchableActItems = [
+    ...actItems,
+    ...relaunchableDuplicates.filter(
+      (duplicate) => !actItems.some((item) => item.id === duplicate.id),
+    ),
+  ].filter(isLaunchableActWorkItem);
+  // An automation whose own destination target is a Discord channel reports
+  // there, not to the Slack manager channel — the same way a per-automation
+  // Slack channel would. Slack keeps precedence otherwise.
+  const automationRuntime =
     launchableActItems.length > 0
+      ? await getAutomationRuntime(params.automationKey)
+      : null;
+  const discordTargeted =
+    automationRuntime?.destination?.provider === 'discord';
+  const resolvedSlackTarget =
+    launchableActItems.length > 0 && !discordTargeted
       ? await resolveAutomationSlackTarget({
           slackConfig: resolveScheduledSuggestionSlackConfig(
             params.automationKey,
@@ -185,7 +211,8 @@ export async function submitAutoActWorkItems(params: {
         threadTs: sourceThreadTs ?? null,
       } satisfies AutomationChatTarget)
     : launchableActItems.length > 0
-      ? ((await resolveAutomationTelegramTarget()) ??
+      ? ((await resolveAutomationDiscordTarget(params.automationKey)) ??
+        (await resolveAutomationTelegramTarget()) ??
         (await resolveAutomationTeamsTarget()))
       : null;
   const launchResult = await launchActWorkItems({

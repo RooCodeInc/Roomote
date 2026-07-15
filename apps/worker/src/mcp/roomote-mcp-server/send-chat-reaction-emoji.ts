@@ -70,13 +70,15 @@ export async function handleSendChatReactionEmoji(
   const communicationProvider =
     process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
   const isCommunicationReactionContext =
-    communicationProvider === 'telegram' || communicationProvider === 'teams';
+    communicationProvider === 'telegram' ||
+    communicationProvider === 'teams' ||
+    communicationProvider === 'discord';
   const channel = isCommunicationReactionContext
     ? process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim()
     : process.env.ROOMOTE_SLACK_CHANNEL?.trim();
   if (!channel) {
     return errorResult(
-      'no chat channel is configured for this task (ROOMOTE_SLACK_CHANNEL or Telegram/Teams communication context)',
+      'no chat channel is configured for this task (ROOMOTE_SLACK_CHANNEL or communication provider context)',
     );
   }
 

@@ -37,6 +37,12 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
+  | 'managerStatsDiscordChannel'
+  | 'sentryTriageDiscordChannel'
+  | 'dependabotTriageDiscordChannel'
+  | 'securityAuditorDiscordChannel'
+  | 'codeQualityAuditorDiscordChannel'
+  | 'ciFailureTriageDiscordChannel'
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
@@ -60,6 +66,25 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
 >;
+
+export type DiscordChannelFieldErrorKey = Extract<
+  BackgroundAgentFieldErrorKey,
+  | 'managerStatsDiscordChannel'
+  | 'sentryTriageDiscordChannel'
+  | 'dependabotTriageDiscordChannel'
+  | 'securityAuditorDiscordChannel'
+  | 'codeQualityAuditorDiscordChannel'
+  | 'ciFailureTriageDiscordChannel'
+>;
+
+/** A Discord channel the automations destination picker can target. */
+export type AutomationDiscordChannelOption = {
+  id: string;
+  name: string;
+  label: string;
+  guildId: string;
+  guildName: string | null;
+};
 
 export interface SlackChannelAccessWarnings {
   channelAutoStartSlackChannels: string[];
@@ -186,11 +211,14 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   managerSlackChannel?: string | null;
   managerStatsFrequency?: ManagerStatsFrequency;
   managerStatsSlackChannel?: string | null;
+  managerStatsDiscordChannel?: string | null;
   sentryTriageFrequency?: SentryTriageFrequency;
   sentryTriageSlackChannel?: string | null;
+  sentryTriageDiscordChannel?: string | null;
   sentryTriageProjectSlugs?: string | null;
   dependabotTriageFrequency?: DependabotTriageFrequency;
   dependabotTriageSlackChannel?: string | null;
+  dependabotTriageDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterInstructions: string | null;
@@ -201,6 +229,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   announcerInstructions: string | null;
   platformIssueSlackChannel: string | null;
   securityAuditorSlackChannel?: string | null;
+  securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;
+  codeQualityAuditorDiscordChannel?: string | null;
   ciFailureTriageSlackChannel?: string | null;
+  ciFailureTriageDiscordChannel?: string | null;
 }

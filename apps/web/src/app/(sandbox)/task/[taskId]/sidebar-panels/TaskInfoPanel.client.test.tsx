@@ -419,6 +419,28 @@ describe('TaskInfoPanel', () => {
     expect(screen.getByText('Telegram')).toBeInTheDocument();
   });
 
+  it('labels Discord-started tasks from the communication provider payload', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={
+          {
+            ...baseTaskRun,
+            payload: {
+              ...baseTaskRun.payload,
+              communicationProvider: 'discord',
+            },
+          } as never
+        }
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Discord')).toBeInTheDocument();
+  });
+
   it('labels Teams-started tasks from the communication provider payload', () => {
     render(
       <TaskInfoPanel

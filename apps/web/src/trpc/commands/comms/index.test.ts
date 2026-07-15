@@ -15,6 +15,16 @@ const {
   mockTelegramGetWebhookInfo,
   mockTelegramRegisterCommands,
   mockTelegramRegisterWebhook,
+  mockResolveDiscordRuntimeCredentials,
+  mockValidateDiscordBotToken,
+  mockDiscordRegisterCommands,
+  mockDiscordListGuilds,
+  mockDiscordListGuildChannels,
+  mockDiscordDiagnoseChannelPermissions,
+  mockCaptureDiscordDefaultDestination,
+  mockReconcileDiscordInstallations,
+  mockSyncDiscordInstallationChannels,
+  mockListDiscordInstallations,
 } = vi.hoisted(() => ({
   mockDbDelete: vi.fn(() => ({
     where: vi.fn(async () => undefined),
@@ -34,6 +44,52 @@ const {
   mockTelegramGetWebhookInfo: vi.fn(),
   mockTelegramRegisterCommands: vi.fn(),
   mockTelegramRegisterWebhook: vi.fn(),
+  mockResolveDiscordRuntimeCredentials: vi.fn(async () => ({
+    botToken: null as string | null,
+    applicationId: null as string | null,
+    applicationName: null as string | null,
+    botUserId: null as string | null,
+    botUsername: null as string | null,
+    botDisplayName: null as string | null,
+    identitySource: null as 'live' | 'persistent_cache' | null,
+    identityErrorCode: null,
+  })),
+  mockValidateDiscordBotToken: vi.fn(),
+  mockDiscordRegisterCommands: vi.fn(),
+  mockDiscordListGuilds: vi.fn(
+    async () =>
+      [] as Array<{
+        id: string;
+        name: string;
+        icon: string | null;
+        owner?: boolean;
+        permissions?: string;
+      }>,
+  ),
+  mockDiscordListGuildChannels: vi.fn(
+    async () =>
+      [] as Array<{
+        id: string;
+        guildId?: string;
+        parentId?: string;
+        name: string;
+        type: number;
+        position?: number;
+        flags?: number;
+        availableTags?: Array<{
+          id: string;
+          name: string;
+          moderated: boolean;
+          emojiId: string | null;
+          emojiName: string | null;
+        }>;
+      }>,
+  ),
+  mockDiscordDiagnoseChannelPermissions: vi.fn(),
+  mockCaptureDiscordDefaultDestination: vi.fn(),
+  mockReconcileDiscordInstallations: vi.fn(),
+  mockSyncDiscordInstallationChannels: vi.fn(),
+  mockListDiscordInstallations: vi.fn(async () => []),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -42,11 +98,20 @@ vi.mock('@roomote/db/server', () => ({
     select: mockTxSelect,
     transaction: mockDbTransaction,
     delete: mockDbDelete,
+    query: {
+      discordGatewaySessions: { findFirst: vi.fn(async () => null) },
+    },
   },
+  discordGatewaySessions: {
+    id: 'gateway.id',
+    updatedAt: 'gateway.updated_at',
+  },
+  desc: vi.fn(),
   environmentVariables: { name: 'env.name', userId: 'env.user_id' },
   eq: vi.fn(),
   inArray: vi.fn(),
   isNull: vi.fn(),
+  like: vi.fn(),
   resolveEffectiveDeploymentEnvVars: mockResolveEffectiveDeploymentEnvVars,
   resolveInvocationIdentities: mockResolveInvocationIdentities,
   resolveTelegramRuntimeCredentials: mockResolveTelegramRuntimeCredentials,
@@ -60,9 +125,28 @@ vi.mock('@roomote/db/server', () => ({
   invalidateTelegramRuntimeCredentialsCache: vi.fn(),
   invalidateSlackSigningSecretCache: vi.fn(),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
+  resolveDiscordRuntimeCredentials: mockResolveDiscordRuntimeCredentials,
+  validateDiscordBotToken: mockValidateDiscordBotToken,
+  normalizeDiscordBotToken: (value: string | null | undefined) =>
+    typeof value === 'string'
+      ? value
+          .trim()
+          .replace(/^Bot\s+/i, '')
+          .replace(/\s+/g, '') || null
+      : null,
+  invalidateDiscordRuntimeCredentialsCache: vi.fn(),
+  DiscordBotTokenValidationError: class extends Error {},
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ get: vi.fn(async () => null) }),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  captureDiscordDefaultDestination: mockCaptureDiscordDefaultDestination,
+  listDiscordInstallations: mockListDiscordInstallations,
+  reconcileDiscordInstallations: mockReconcileDiscordInstallations,
+  syncDiscordInstallationChannels: mockSyncDiscordInstallationChannels,
   createTelegramCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
     const { botToken } = await mockResolveTelegramRuntimeCredentials();
 
@@ -74,6 +158,20 @@ vi.mock('@roomote/sdk/server', () => ({
         }
       : null;
   }),
+}));
+
+vi.mock('@roomote/communication/discord-provider', () => ({
+  DiscordCommunicationProvider: class {
+    registerCommands = mockDiscordRegisterCommands;
+    listGuilds = mockDiscordListGuilds;
+    listGuildChannels = mockDiscordListGuildChannels;
+    diagnoseChannelPermissions = mockDiscordDiagnoseChannelPermissions;
+  },
+  discordChannelRequiresTag: (channel: { type: number; flags?: number }) =>
+    (channel.type === 15 || channel.type === 16) &&
+    ((channel.flags ?? 0) & (1 << 4)) !== 0,
+  DISCORD_REQUIRED_TAG_FORUM_ERROR:
+    'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.',
 }));
 
 vi.mock('@/lib/server/env', () => ({
@@ -98,8 +196,11 @@ import {
   classifyTelegramWebhookCheckError,
   clearCommsAuthConfigCommand,
   getCommsStatusCommand,
+  listDiscordChannelsCommand,
+  listDiscordGuildsCommand,
   repairTelegramWebhookCommand,
   saveCommsAuthConfigCommand,
+  selectDiscordDestinationCommand,
 } from './index';
 
 function buildMockAuth(
@@ -139,6 +240,127 @@ describe('comms commands', () => {
       botUsername: null,
     });
     mockTelegramGetWebhookInfo.mockReset();
+    mockDiscordListGuilds.mockResolvedValue([]);
+    mockDiscordListGuildChannels.mockResolvedValue([]);
+    mockDiscordDiagnoseChannelPermissions.mockReset();
+    mockCaptureDiscordDefaultDestination.mockReset();
+    mockReconcileDiscordInstallations.mockReset();
+    mockSyncDiscordInstallationChannels.mockReset();
+    mockListDiscordInstallations.mockResolvedValue([]);
+    mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+      botToken: null,
+      applicationId: null,
+      applicationName: null,
+      botUserId: null,
+      botUsername: null,
+      botDisplayName: null,
+      identitySource: null,
+      identityErrorCode: null,
+    });
+  });
+
+  describe('Discord destinations', () => {
+    it('reconciles the complete live guild list for the configured bot identity', async () => {
+      mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+        botToken: 'discord-token',
+        applicationId: 'application-1',
+        applicationName: 'Roomote',
+        botUserId: 'bot-1',
+        botUsername: 'roomote',
+        botDisplayName: 'Roomote',
+        identitySource: 'live',
+        identityErrorCode: null,
+      });
+      mockDiscordListGuilds.mockResolvedValue([
+        { id: 'guild-1', name: 'Engineering', icon: null },
+      ]);
+
+      await expect(
+        listDiscordGuildsCommand(buildMockAuth()),
+      ).resolves.toMatchObject({
+        guilds: [{ id: 'guild-1', name: 'Engineering' }],
+      });
+      expect(mockReconcileDiscordInstallations).toHaveBeenCalledWith({
+        applicationId: 'application-1',
+        botUserId: 'bot-1',
+        installedByUserId: 'comms-test-user',
+        guilds: [{ guildId: 'guild-1', guildName: 'Engineering' }],
+      });
+    });
+
+    beforeEach(() => {
+      mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+        botToken: 'discord-token',
+        applicationId: 'app-1',
+        applicationName: 'Roomote',
+        botUserId: 'bot-1',
+        botUsername: 'roomote',
+        botDisplayName: 'Roomote',
+        identitySource: 'live',
+        identityErrorCode: null,
+      });
+    });
+
+    it('retains forum flags and tags while marking required-tag forums unsupported', async () => {
+      mockDiscordListGuildChannels.mockResolvedValue([
+        {
+          id: 'forum-1',
+          guildId: 'guild-1',
+          name: 'tasks',
+          type: 15,
+          position: 2,
+          flags: 1 << 4,
+          availableTags: [
+            {
+              id: 'tag-1',
+              name: 'Engineering',
+              moderated: false,
+              emojiId: null,
+              emojiName: '🛠️',
+            },
+          ],
+        },
+      ]);
+
+      await expect(
+        listDiscordChannelsCommand(buildMockAuth(), { guildId: 'guild-1' }),
+      ).resolves.toEqual({
+        channels: [
+          expect.objectContaining({
+            id: 'forum-1',
+            flags: 1 << 4,
+            requiresTag: true,
+            supported: false,
+            availableTags: [expect.objectContaining({ id: 'tag-1' })],
+          }),
+        ],
+      });
+      expect(mockSyncDiscordInstallationChannels).toHaveBeenCalledOnce();
+    });
+
+    it('rejects a required-tag forum before checking permissions or saving it', async () => {
+      mockDiscordListGuildChannels.mockResolvedValue([
+        {
+          id: 'forum-1',
+          guildId: 'guild-1',
+          name: 'tasks',
+          type: 15,
+          flags: 1 << 4,
+          availableTags: [],
+        },
+      ]);
+
+      await expect(
+        selectDiscordDestinationCommand(buildMockAuth(), {
+          guildId: 'guild-1',
+          channelId: 'forum-1',
+        }),
+      ).rejects.toThrow(
+        'Roomote does not yet support Discord forum or media channels that require a tag.',
+      );
+      expect(mockDiscordDiagnoseChannelPermissions).not.toHaveBeenCalled();
+      expect(mockCaptureDiscordDefaultDestination).not.toHaveBeenCalled();
+    });
   });
 
   describe('classifyTelegramWebhookCheckError', () => {
@@ -239,6 +461,42 @@ describe('comms commands', () => {
   });
 
   describe('saveCommsAuthConfigCommand', () => {
+    it('validates, saves, and registers a Discord bot token', async () => {
+      mockDbTransaction.mockImplementation(async (callback) =>
+        callback({} as never),
+      );
+      mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+        botToken: 'discord-token',
+        applicationId: 'app-1',
+        applicationName: 'Roomote',
+        botUserId: 'bot-1',
+        botUsername: 'roomote',
+        botDisplayName: 'Roomote',
+        identitySource: 'live',
+        identityErrorCode: null,
+      });
+
+      await expect(
+        saveCommsAuthConfigCommand(buildMockAuth(), {
+          provider: 'discord',
+          values: { R_DISCORD_BOT_TOKEN: ' Bot discord-token\n' },
+        }),
+      ).resolves.toMatchObject({
+        discord: { registered: true, guildCount: 0, error: null },
+      });
+
+      expect(mockValidateDiscordBotToken).toHaveBeenCalledWith('discord-token');
+      expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          values: [{ name: 'R_DISCORD_BOT_TOKEN', value: 'discord-token' }],
+        }),
+      );
+      expect(mockDiscordRegisterCommands).toHaveBeenCalledWith({
+        applicationId: 'app-1',
+      });
+    });
+
     it('upserts only non-empty submitted values', async () => {
       process.env.R_SLACK_CLIENT_SECRET = 'env-secret';
       mockDbTransaction.mockImplementation(async (callback) => {

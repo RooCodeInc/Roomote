@@ -27,6 +27,7 @@ import {
   useAuthenticateBitbucketAccount,
   useAuthenticateGiteaAccount,
   useCreateTelegramLinkCode,
+  useDiscordLinkedAccount,
   useGitLabLinkedAccount,
   useBitbucketLinkedAccount,
   useGiteaLinkedAccount,
@@ -44,6 +45,7 @@ import {
   useUnlinkMicrosoftTeamsLinkedAccount,
   useUnlinkSlackLinkedAccount,
   useUnlinkTelegramLinkedAccount,
+  useUnlinkDiscordLinkedAccount,
 } from '@/hooks/linked-accounts';
 import {
   useAuthenticateSlackAccount,
@@ -76,6 +78,7 @@ import {
 
 import { McpIcon } from './McpIcon';
 import { Section } from './Section';
+import { DiscordLinkAccountStep } from './DiscordLinkAccountStep';
 
 type LinkedAccountRowProps = {
   icon: ReactNode;
@@ -480,6 +483,10 @@ export function LinkedAccounts() {
     expiresInSeconds: number;
   } | null>(null);
   const linkedTelegramAccount = telegramAccount.data?.mapping ?? null;
+  const discordAccount = useDiscordLinkedAccount();
+  const unlinkDiscordAccount = useUnlinkDiscordLinkedAccount();
+  const [discordLinkOpen, setDiscordLinkOpen] = useState(false);
+  const linkedDiscordAccount = discordAccount.data?.mapping ?? null;
 
   const linkedAccountDescriptors = [
     createLinkedAccountDescriptor({
@@ -658,6 +665,43 @@ export function LinkedAccounts() {
             },
     }),
     createLinkedAccountDescriptor({
+      visible: Boolean(discordAccount.data?.configured),
+      key: 'discord',
+      name: 'Discord',
+      icon: <BrandIcon icon="discord" name="Discord" className="size-4" />,
+      details: linkedDiscordAccount ? (
+        <span className="ph-no-capture">
+          {linkedDiscordAccount.discordGlobalName ??
+            (linkedDiscordAccount.discordUsername
+              ? `@${linkedDiscordAccount.discordUsername}`
+              : linkedDiscordAccount.discordUserId)}
+        </span>
+      ) : null,
+      unlinkAction: linkedDiscordAccount
+        ? {
+            ariaLabel: 'Unlink Discord account',
+            isPending: unlinkDiscordAccount.isPending,
+            onClick: () => {
+              startResultAwareUnlink({
+                mutation: unlinkDiscordAccount,
+                variables: undefined,
+                successMessage: 'Discord account unlinked.',
+                failureMessage:
+                  'Failed to unlink Discord account. Please try again.',
+              });
+            },
+          }
+        : undefined,
+      linkAction:
+        linkedDiscordAccount || discordAccount.isPending
+          ? undefined
+          : {
+              ariaLabel: 'Link Discord account',
+              isPending: false,
+              onClick: () => setDiscordLinkOpen(true),
+            },
+    }),
+    createLinkedAccountDescriptor({
       visible: Boolean(linearInstallation.data),
       key: 'linear',
       name: 'Linear',
@@ -775,6 +819,7 @@ export function LinkedAccounts() {
     slackInstallation.isPending ||
     linearInstallation.isPending ||
     microsoftTeamsAccount.isPending ||
+    discordAccount.isPending ||
     deploymentEnablements.isPending ||
     userConnections.isPending;
   const showLoadingState = isLoadingVisibleRows && !hasVisibleRows;
@@ -851,6 +896,26 @@ export function LinkedAccounts() {
               </p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={discordLinkOpen}
+        onOpenChange={(open) => {
+          setDiscordLinkOpen(open);
+          if (!open) void discordAccount.refetch();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Link your Discord account</DialogTitle>
+            <DialogDescription>
+              Run the one-time <span className="font-mono">/link</span> command
+              in a DM with the bot. Once the bot confirms, tasks you start in
+              Discord are attributed to you.
+            </DialogDescription>
+          </DialogHeader>
+          <DiscordLinkAccountStep autoGenerate pollUntilLinked />
         </DialogContent>
       </Dialog>
     </Section>

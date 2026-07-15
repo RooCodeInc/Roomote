@@ -25,7 +25,7 @@ import { getSetupStepDefinition } from './types';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
-type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
 export function StepInvoke({
   onTryItOut,
@@ -53,11 +53,12 @@ export function StepInvoke({
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const effectiveCommunicationProviders = [
     ...communicationProviders,
-    ...(commsStatus.data?.providers?.some(
-      (provider) => provider.id === 'telegram' && provider.setupSatisfied,
-    ) && !communicationProviders.includes('telegram')
-      ? (['telegram'] as const)
-      : []),
+    ...(['telegram', 'discord'] as const).filter(
+      (providerId) =>
+        commsStatus.data?.providers?.some(
+          (provider) => provider.id === providerId && provider.setupSatisfied,
+        ) && !communicationProviders.includes(providerId),
+    ),
   ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);

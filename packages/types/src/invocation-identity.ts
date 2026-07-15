@@ -4,6 +4,7 @@ export const invocationProviders = [
   'slack',
   'microsoft',
   'telegram',
+  'discord',
   'github',
   'linear',
   'gitlab',
@@ -91,6 +92,32 @@ export function buildTelegramInvocationIdentity(
       ? `https://t.me/${normalizedUsername}`
       : null,
     guidanceName: mentionText ?? 'Telegram bot',
+    examplePrompt: mentionText
+      ? `${mentionText} Add support for a reset password flow.`
+      : null,
+  };
+}
+
+export function buildDiscordInvocationIdentity(input: {
+  botUserId: string | null | undefined;
+  username: string | null | undefined;
+  displayName?: string | null;
+}): InvocationIdentity {
+  const botUserId = input.botUserId?.trim() || null;
+  const username = input.username?.trim().replace(/^@/u, '') || null;
+  const displayName = input.displayName?.trim() || username;
+  const mentionText = username ? normalizeMentionHandle(username) : null;
+  const nativeMention = botUserId ? `<@${botUserId}>` : null;
+
+  return {
+    provider: 'discord',
+    label: 'Discord',
+    configured: Boolean(botUserId && username),
+    displayName,
+    mentionText,
+    nativeMention,
+    deepLinkUrl: botUserId ? `https://discord.com/users/${botUserId}` : null,
+    guidanceName: mentionText ?? 'Discord bot',
     examplePrompt: mentionText
       ? `${mentionText} Add support for a reset password flow.`
       : null,

@@ -19,6 +19,12 @@ import { apiLogger } from '../../../logging.js';
 import { postLateBoundWorkItemFailureMessage } from './slack.js';
 import { postLateBoundWorkItemFailureToTelegram } from './telegram.js';
 import { postLateBoundWorkItemFailureToTeams } from './teams.js';
+import {
+  createAutomationDiscordTaskThread,
+  DiscordAutomationTargetPreparationError,
+  postLateBoundWorkItemFailureToDiscord,
+  type AutomationDiscordTarget,
+} from './discord.js';
 import type { PersistedAutomationWorkItem } from './types.js';
 
 type AutomationExecutionTaskBootstrap =
@@ -30,7 +36,7 @@ const DEFAULT_AUTOMATION_EXECUTION_INSTRUCTIONS =
 
 function buildLateBoundChatReplyInstructions(
   hasThread: boolean,
-  surface: 'Slack' | 'Telegram' | 'Teams',
+  surface: 'Slack' | 'Telegram' | 'Teams' | 'Discord',
 ): string {
   return [
     'Treat this as an automation-started execution task.',
@@ -69,7 +75,7 @@ function buildExecutionTaskPrompt(
     executionTaskBootstrap: AutomationExecutionTaskBootstrap;
     lateBoundChatReplies: boolean;
     hasChatThread: boolean;
-    chatSurface: 'Slack' | 'Telegram' | 'Teams';
+    chatSurface: 'Slack' | 'Telegram' | 'Teams' | 'Discord';
   },
 ): string {
   const lines = [
@@ -108,6 +114,15 @@ async function postLateBoundWorkItemFailureToChatTarget(params: {
   workItem: PersistedAutomationWorkItem;
   reason: string;
 }): Promise<void> {
+  if (params.chatTarget.provider === 'discord') {
+    await postLateBoundWorkItemFailureToDiscord({
+      target: params.chatTarget,
+      workItem: params.workItem,
+      reason: params.reason,
+    });
+    return;
+  }
+
   if (params.chatTarget.provider === 'telegram') {
     await postLateBoundWorkItemFailureToTelegram({
       chatId: params.chatTarget.chatId,
@@ -151,7 +166,8 @@ export type AutomationChatTarget =
       provider: 'teams';
       conversationId: string;
       serviceUrl: string;
-    };
+    }
+  | AutomationDiscordTarget;
 
 export async function launchActWorkItems(params: {
   /** The originating automation's key; stamped as the task initiator. */
@@ -173,6 +189,7 @@ export async function launchActWorkItems(params: {
     }
 
     let linkedTaskId: string | null = null;
+    let workItemChatTarget = params.chatTarget;
 
     try {
       if (!workItem.targetRepositoryFullName) {
@@ -198,6 +215,13 @@ export async function launchActWorkItems(params: {
         linkedTaskId = taskId;
       };
 
+      if (workItemChatTarget?.provider === 'discord') {
+        workItemChatTarget = await createAutomationDiscordTaskThread({
+          target: workItemChatTarget,
+          workItem,
+        });
+      }
+
       await enqueueTask(
         {
           task: {
@@ -210,43 +234,64 @@ export async function launchActWorkItems(params: {
               selectedRepositories: [workItem.targetRepositoryFullName],
               description: buildExecutionTaskPrompt(workItem, {
                 executionTaskBootstrap: params.executionTaskBootstrap,
-                lateBoundChatReplies: params.chatTarget !== null,
+                lateBoundChatReplies: workItemChatTarget !== null,
                 hasChatThread:
-                  params.chatTarget?.provider === 'slack' &&
-                  Boolean(params.chatTarget.threadTs),
+                  (workItemChatTarget?.provider === 'slack' &&
+                    Boolean(workItemChatTarget.threadTs)) ||
+                  (workItemChatTarget?.provider === 'discord' &&
+                    Boolean(workItemChatTarget.threadId)),
                 chatSurface:
-                  params.chatTarget?.provider === 'telegram'
+                  workItemChatTarget?.provider === 'telegram'
                     ? 'Telegram'
-                    : params.chatTarget?.provider === 'teams'
+                    : workItemChatTarget?.provider === 'teams'
                       ? 'Teams'
-                      : 'Slack',
+                      : workItemChatTarget?.provider === 'discord'
+                        ? 'Discord'
+                        : 'Slack',
               }),
-              ...(params.chatTarget?.provider === 'slack'
+              ...(workItemChatTarget?.provider === 'slack'
                 ? {
                     automationWorkItemId: workItem.id,
-                    channel: params.chatTarget.channelId,
-                    slackChannel: params.chatTarget.channelId,
-                    ...(params.chatTarget.threadTs
+                    channel: workItemChatTarget.channelId,
+                    slackChannel: workItemChatTarget.channelId,
+                    ...(workItemChatTarget.threadTs
                       ? {
-                          thread_ts: params.chatTarget.threadTs,
-                          slackThreadTs: params.chatTarget.threadTs,
+                          thread_ts: workItemChatTarget.threadTs,
+                          slackThreadTs: workItemChatTarget.threadTs,
                         }
                       : {}),
                   }
                 : {}),
-              ...(params.chatTarget?.provider === 'telegram'
+              ...(workItemChatTarget?.provider === 'telegram'
                 ? {
                     automationWorkItemId: workItem.id,
                     communicationProvider: 'telegram',
-                    communicationChannelId: params.chatTarget.chatId,
+                    communicationChannelId: workItemChatTarget.chatId,
                   }
                 : {}),
-              ...(params.chatTarget?.provider === 'teams'
+              ...(workItemChatTarget?.provider === 'teams'
                 ? {
                     automationWorkItemId: workItem.id,
                     communicationProvider: 'teams',
-                    communicationChannelId: params.chatTarget.conversationId,
-                    communicationServiceUrl: params.chatTarget.serviceUrl,
+                    communicationChannelId: workItemChatTarget.conversationId,
+                    communicationServiceUrl: workItemChatTarget.serviceUrl,
+                  }
+                : {}),
+              ...(workItemChatTarget?.provider === 'discord'
+                ? {
+                    automationWorkItemId: workItem.id,
+                    communicationProvider: 'discord',
+                    communicationGuildId: workItemChatTarget.guildId,
+                    communicationChannelId: workItemChatTarget.channelId,
+                    ...(workItemChatTarget.threadId
+                      ? { communicationThreadId: workItemChatTarget.threadId }
+                      : {}),
+                    ...(workItemChatTarget.messageId
+                      ? {
+                          communicationMessageId: workItemChatTarget.messageId,
+                        }
+                      : {}),
+                    discordTaskThread: Boolean(workItemChatTarget.threadId),
                   }
                 : {}),
               visibleInTranscript: false,
@@ -254,13 +299,14 @@ export async function launchActWorkItems(params: {
           },
           initiator: { kind: 'automation', key: params.automationKey },
           workflow: 'standard',
-          surface: 'system',
+          surface:
+            workItemChatTarget?.provider === 'discord' ? 'discord' : 'system',
           trigger: 'schedule',
-          ...(params.chatTarget?.provider === 'slack'
+          ...(workItemChatTarget?.provider === 'slack'
             ? {
                 channels: {
-                  slackChannelId: params.chatTarget.channelId,
-                  slackThreadTs: params.chatTarget.threadTs ?? null,
+                  slackChannelId: workItemChatTarget.channelId,
+                  slackThreadTs: workItemChatTarget.threadTs ?? null,
                 },
               }
             : {}),
@@ -272,14 +318,14 @@ export async function launchActWorkItems(params: {
       );
 
       if (
-        params.chatTarget?.provider === 'slack' &&
-        params.chatTarget.threadTs &&
+        workItemChatTarget?.provider === 'slack' &&
+        workItemChatTarget.threadTs &&
         linkedTaskId
       ) {
         await updateBackgroundAutomationSlackThreadMetadata(db, {
           surface: 'slack',
-          slackChannelId: params.chatTarget.channelId,
-          threadTs: params.chatTarget.threadTs,
+          slackChannelId: workItemChatTarget.channelId,
+          threadTs: workItemChatTarget.threadTs,
           metadata: {
             sourceTaskId: linkedTaskId,
           },
@@ -294,13 +340,21 @@ export async function launchActWorkItems(params: {
       const retryLaunchedTaskId =
         error instanceof TaskRunQueueEnqueueError ? linkedTaskId : null;
       const shouldRetry = retryLaunchedTaskId !== null;
+      // A transient chat-target failure happens before finalize, so the row
+      // is still `launching` under our claim; reopen it instead of terminally
+      // failing — the persisted thread coordinate lets the retry resume in
+      // the same conversation.
+      const shouldReopenUnderClaim =
+        error instanceof DiscordAutomationTargetPreparationError;
 
-      // Both failure writes are fenced so a stale launcher whose claim was
+      // All failure writes are fenced so a stale launcher whose claim was
       // reclaimed can never fail or clear the fresh claimant's row:
       // - retry (finalize succeeded, queue publish failed): the row is OUR
       //   `launched` row, so guard on status='launched' + our task link.
-      // - terminal failure: the row must still be `launching` under OUR claim
-      //   token (`launch_claimed_at`); after a reclaim this is a no-op.
+      // - reopen (transient failure before finalize): the row must still be
+      //   `launching` under OUR claim token.
+      // - terminal failure: same `launching`-under-our-claim guard; after a
+      //   reclaim this is a no-op.
       const [failureWriteApplied] = shouldRetry
         ? await db
             .update(workItems)
@@ -321,23 +375,47 @@ export async function launchActWorkItems(params: {
               ),
             )
             .returning({ id: workItems.id })
-        : await db
-            .update(workItems)
-            .set({
-              status: 'failed',
-              failedAt: new Date(),
-              launchClaimedAt: null,
-              launchError: message,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                eq(workItems.id, workItem.id),
-                eq(workItems.status, 'launching'),
-                eq(workItems.launchClaimedAt, claimedWorkItem.launchClaimedAt),
-              ),
-            )
-            .returning({ id: workItems.id });
+        : shouldReopenUnderClaim
+          ? await db
+              .update(workItems)
+              .set({
+                status: 'open',
+                failedAt: null,
+                launchClaimedAt: null,
+                launchError: message,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workItems.id, workItem.id),
+                  eq(workItems.status, 'launching'),
+                  eq(
+                    workItems.launchClaimedAt,
+                    claimedWorkItem.launchClaimedAt,
+                  ),
+                ),
+              )
+              .returning({ id: workItems.id })
+          : await db
+              .update(workItems)
+              .set({
+                status: 'failed',
+                failedAt: new Date(),
+                launchClaimedAt: null,
+                launchError: message,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  eq(workItems.id, workItem.id),
+                  eq(workItems.status, 'launching'),
+                  eq(
+                    workItems.launchClaimedAt,
+                    claimedWorkItem.launchClaimedAt,
+                  ),
+                ),
+              )
+              .returning({ id: workItems.id });
 
       if (!failureWriteApplied) {
         apiLogger.warn(
@@ -345,11 +423,11 @@ export async function launchActWorkItems(params: {
         );
       }
 
-      if (params.chatTarget && !shouldRetry) {
+      if (workItemChatTarget && !shouldRetry && !shouldReopenUnderClaim) {
         // Late-bound launches have no execution task to report through, so a
         // terminal launch failure must surface here or it disappears entirely.
         await postLateBoundWorkItemFailureToChatTarget({
-          chatTarget: params.chatTarget,
+          chatTarget: workItemChatTarget,
           workItem,
           reason: message,
         }).catch((postError) => {

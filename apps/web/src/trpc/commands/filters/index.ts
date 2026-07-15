@@ -28,6 +28,7 @@ import {
   buildCreatorFilterValue,
   formatAutomationLabel,
 } from '@/lib/task-creator-filter';
+import { getTaskSurfaceLabel } from '@/lib/task-surface-label';
 import { getCreatorFilterCondition } from '@/lib/server/tasks';
 
 type FilterOption = { value: string; label: string; subLabel?: string };
@@ -44,32 +45,7 @@ function getVisibleTaskHistoryConditions() {
 }
 
 function getSurfaceSubLabel(surface: TaskSurface | null): string | undefined {
-  switch (surface) {
-    case 'slack':
-      return 'Slack';
-    case 'teams':
-      return 'Teams';
-    case 'telegram':
-      return 'Telegram';
-    case 'github':
-      return 'GitHub';
-    case 'gitlab':
-      return 'GitLab';
-    case 'gitea':
-      return 'Gitea';
-    case 'bitbucket':
-      return 'Bitbucket Cloud';
-    case 'ado':
-      return 'Azure DevOps';
-    case 'linear':
-      return 'Linear';
-    case 'web':
-      return 'Web';
-    case 'api':
-      return 'API';
-    default:
-      return undefined;
-  }
+  return getTaskSurfaceLabel(surface);
 }
 
 function getCategoryCondition(category: string | null | undefined) {

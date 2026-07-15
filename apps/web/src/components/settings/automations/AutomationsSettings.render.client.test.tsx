@@ -32,6 +32,7 @@ const state = vi.hoisted(() => ({
     data: {
       capabilities: {
         slackConnected: true,
+        discordConnected: false,
         requiresSlackReconnect: false,
         missingScopes: [],
         slackWorkspaceDomain: 'acme',
@@ -62,17 +63,23 @@ const state = vi.hoisted(() => ({
         managerSlackChannelId: 'C123MANAGER',
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
+        managerStatsDiscordChannelId: null,
         sentryTriageFrequency: 'off' as const,
         sentryTriageSlackChannelId: null,
+        sentryTriageDiscordChannelId: null,
         sentryTriageProjectSlugs: null,
         dependabotTriageFrequency: 'off' as const,
         dependabotTriageSlackChannelId: null,
+        dependabotTriageDiscordChannelId: null,
         securityAuditorFrequency: 'off' as const,
         securityAuditorSlackChannelId: null,
+        securityAuditorDiscordChannelId: null,
         codeQualityAuditorFrequency: 'off' as const,
         codeQualityAuditorSlackChannelId: null,
+        codeQualityAuditorDiscordChannelId: null,
         ciFailureTriageFrequency: 'off' as const,
         ciFailureTriageSlackChannelId: null,
+        ciFailureTriageDiscordChannelId: null,
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
         suggesterInstructions: null,
@@ -174,6 +181,21 @@ const state = vi.hoisted(() => ({
     },
     refetch: vi.fn(),
   },
+  discordChannelsQuery: {
+    isPending: false,
+    isFetching: false,
+    isError: false,
+    data: {
+      channels: [] as Array<{
+        id: string;
+        name: string;
+        label: string;
+        guildId: string;
+        guildName: string | null;
+      }>,
+    },
+    refetch: vi.fn(),
+  },
 }));
 
 const queryClient = vi.hoisted(() => ({
@@ -222,6 +244,10 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: (queryOptions: { queryKey?: string[] }) => {
     if (queryOptions.queryKey?.[1] === 'listSlackChannels') {
       return state.slackChannelsQuery;
+    }
+
+    if (queryOptions.queryKey?.[1] === 'listDiscordChannels') {
+      return state.discordChannelsQuery;
     }
 
     if (queryOptions.queryKey?.[0] === 'comms') {
@@ -291,6 +317,11 @@ vi.mock('@/trpc/client', () => ({
           queryKey: ['automations', 'listSlackChannels'],
         }),
       },
+      listDiscordChannels: {
+        queryOptions: () => ({
+          queryKey: ['automations', 'listDiscordChannels'],
+        }),
+      },
       updateSettings: {
         mutationOptions: (options?: Record<string, unknown>) => {
           mutations.latestSettingsOptions =
@@ -339,6 +370,9 @@ describe('AutomationsSettings', () => {
     state.nextUpdateSettingsResult = null;
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
+    state.settingsQuery.data.capabilities.discordConnected = false;
+    state.discordChannelsQuery.data.channels = [];
+    state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
     state.settingsQuery.data.settings.managerStatsFrequency = 'off' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'off' as never;
@@ -411,6 +445,45 @@ describe('AutomationsSettings', () => {
       screen.getAllByText('Reports to: not configured — set a Manager Channel.')
         .length,
     ).toBeGreaterThan(1);
+  });
+
+  it('shows a saved Discord destination and a provider-neutral placeholder when Discord is connected', async () => {
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.discordChannelsQuery.data.channels = [
+      {
+        id: '111222333444555666',
+        name: 'automation-reports',
+        label: '#automation-reports',
+        guildId: 'guild-1',
+        guildName: 'Acme',
+      },
+    ];
+    state.settingsQuery.data.settings.managerStatsFrequency = 'weekly' as never;
+    (
+      state.settingsQuery.data.settings as Record<string, unknown>
+    ).managerStatsDiscordChannelId = '111222333444555666';
+    state.settingsQuery.data.settings.sentryTriageFrequency = 'daily' as never;
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Expand Weekly Manager Stats',
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Expand Triage Sentry Issues' }),
+    );
+
+    // The saved Discord channel is the selected destination.
+    expect(
+      screen.getByText('#automation-reports (Discord)'),
+    ).toBeInTheDocument();
+    // Pickers without a saved value use the provider-neutral placeholder.
+    expect(screen.getAllByText('Select a channel').length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText('Select a Slack channel'),
+    ).not.toBeInTheDocument();
   });
 
   it('hides the launch mode picker when decision mode is disabled', async () => {

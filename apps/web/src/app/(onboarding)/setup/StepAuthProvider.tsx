@@ -13,27 +13,38 @@ import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
-export type CommunicationProviderChoice = SetupAuthProviderId | 'telegram';
+export type AdditionalCommunicationProviderChoice = 'telegram' | 'discord';
+export type CommunicationProviderChoice =
+  | SetupAuthProviderId
+  | AdditionalCommunicationProviderChoice;
+
+const ADDITIONAL_COMMUNICATION_PROVIDERS: Record<
+  AdditionalCommunicationProviderChoice,
+  { id: AdditionalCommunicationProviderChoice; label: string }
+> = {
+  telegram: { id: 'telegram', label: 'Telegram' },
+  discord: { id: 'discord', label: 'Discord' },
+};
 
 export function StepAuthProvider({
   onContinue,
   onBack,
   onSkip,
-  includeTelegram = false,
+  additionalProviders = [],
   disabled = false,
 }: {
   onContinue: (provider: CommunicationProviderChoice) => void;
   onBack?: () => void;
   onSkip?: () => void;
-  includeTelegram?: boolean;
+  additionalProviders?: readonly AdditionalCommunicationProviderChoice[];
   disabled?: boolean;
 }) {
-  const providers = includeTelegram
-    ? [
-        ...SETUP_AUTH_PROVIDER_CATALOG,
-        { id: 'telegram' as const, label: 'Telegram' },
-      ]
-    : SETUP_AUTH_PROVIDER_CATALOG;
+  const providers = [
+    ...SETUP_AUTH_PROVIDER_CATALOG,
+    ...additionalProviders.map(
+      (provider) => ADDITIONAL_COMMUNICATION_PROVIDERS[provider],
+    ),
+  ];
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={AUTH_PROVIDER_STEP.title} />

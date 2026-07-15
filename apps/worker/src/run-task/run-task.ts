@@ -171,11 +171,12 @@ function getInitialSlackTurnMessageTs(taskRun: {
     communicationMessageId?: unknown;
   };
 
-  // Telegram and Teams tasks track the launch message so the turn-satisfaction
+  // Non-Slack communication tasks track the launch message so turn-satisfaction
   // machinery (ack/closeout enforcement, current-turn reactions) applies.
   if (
     (payload.communicationProvider === 'telegram' ||
-      payload.communicationProvider === 'teams') &&
+      payload.communicationProvider === 'teams' ||
+      payload.communicationProvider === 'discord') &&
     typeof payload.communicationMessageId === 'string' &&
     payload.communicationMessageId.trim()
   ) {
@@ -210,7 +211,9 @@ function isCommunicationLaunchPayload(payload: unknown): boolean {
   const provider = (payload as { communicationProvider?: unknown })
     .communicationProvider;
 
-  return provider === 'telegram' || provider === 'teams';
+  return (
+    provider === 'telegram' || provider === 'teams' || provider === 'discord'
+  );
 }
 
 function shouldAllowEmojiReactionOnInitialTurn(taskRun: {
@@ -1560,7 +1563,8 @@ export const runTask = async ({
         if (
           message.provider === 'slack' ||
           message.provider === 'telegram' ||
-          message.provider === 'teams'
+          message.provider === 'teams' ||
+          message.provider === 'discord'
         ) {
           recordChatTurnStart({
             turnMessageTs: message.ts,

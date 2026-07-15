@@ -68,6 +68,7 @@ COPY apps/api/package.json ./apps/api/
 COPY apps/web/package.json ./apps/web/
 COPY apps/controller/package.json ./apps/controller/
 COPY apps/bullmq/package.json ./apps/bullmq/
+COPY apps/discord-gateway/package.json ./apps/discord-gateway/
 COPY apps/preview-proxy/package.json ./apps/preview-proxy/
 COPY apps/worker/package.json ./apps/worker/
 RUN pnpm install --frozen-lockfile
@@ -77,6 +78,7 @@ COPY apps/api ./apps/api/
 COPY apps/web ./apps/web/
 COPY apps/controller ./apps/controller/
 COPY apps/bullmq ./apps/bullmq/
+COPY apps/discord-gateway ./apps/discord-gateway/
 COPY apps/preview-proxy ./apps/preview-proxy/
 COPY apps/worker ./apps/worker/
 

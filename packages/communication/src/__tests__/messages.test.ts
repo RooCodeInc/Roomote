@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   execMock,
+  evalMock,
   expireMock,
   getMock,
   lrangeMock,
@@ -13,6 +14,7 @@ const {
   setMock,
 } = vi.hoisted(() => ({
   execMock: vi.fn(),
+  evalMock: vi.fn(),
   expireMock: vi.fn(),
   getMock: vi.fn(),
   lrangeMock: vi.fn(),
@@ -27,6 +29,7 @@ const {
 vi.mock('@roomote/redis', () => ({
   getRedis: vi.fn(() => ({
     get: getMock,
+    eval: evalMock,
     multi: multiMock,
     expire: expireMock,
     rpush: rpushMock,
@@ -39,6 +42,7 @@ import {
   getLatestInboundMessageId,
   prependCommunicationMessages,
   queueCommunicationMessage,
+  queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '../messages';
 
@@ -48,6 +52,7 @@ describe('communication message queues', () => {
     rpushMock.mockResolvedValue(1);
     expireMock.mockResolvedValue(1);
     execMock.mockResolvedValue([]);
+    evalMock.mockResolvedValue(1);
 
     const multi = {
       lpush: multiLpushMock,
@@ -104,6 +109,33 @@ describe('communication message queues', () => {
       }),
     );
     expect(expireMock).toHaveBeenCalledWith('teams:messages:43', 3600);
+  });
+
+  it('queues a retried provider message only once by upstream id', async () => {
+    const message = {
+      provider: 'discord' as const,
+      text: 'hello from Discord',
+      user: 'discord-user-1',
+      ts: 'message-1',
+    };
+
+    await expect(
+      queueCommunicationMessageOnce('discord', 44, message),
+    ).resolves.toBe(true);
+    expect(evalMock).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('RPUSH'"),
+      2,
+      'discord:messages:44',
+      'discord:messages:dedupe:44:message-1',
+      JSON.stringify(message),
+      '3600',
+      '86400',
+    );
+
+    evalMock.mockResolvedValue(0);
+    await expect(
+      queueCommunicationMessageOnce('discord', 44, message),
+    ).resolves.toBe(false);
   });
 
   it('prepends messages in delivery order for a provider queue', async () => {

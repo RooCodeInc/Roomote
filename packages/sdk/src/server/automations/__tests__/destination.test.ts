@@ -2,16 +2,20 @@ const {
   mockFindFirstSlackInstallation,
   mockResolveTeamsCredentials,
   mockResolveTelegramCredentials,
+  mockResolveDiscordCredentials,
   mockTeamsServiceUrlRows,
   mockFindTeamsPrimaryConversation,
   mockFindTelegramPrimaryChatId,
+  mockFindDiscordDefaultDestination,
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
   mockResolveTeamsCredentials: vi.fn(),
   mockResolveTelegramCredentials: vi.fn(),
+  mockResolveDiscordCredentials: vi.fn(),
   mockTeamsServiceUrlRows: vi.fn(),
   mockFindTeamsPrimaryConversation: vi.fn(),
   mockFindTelegramPrimaryChatId: vi.fn(),
+  mockFindDiscordDefaultDestination: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -32,6 +36,7 @@ vi.mock('@roomote/db/server', () => ({
   isNotNull: vi.fn((column: unknown) => ({ isNotNull: column })),
   resolveTeamsBotRuntimeCredentials: mockResolveTeamsCredentials,
   resolveTelegramRuntimeCredentials: mockResolveTelegramCredentials,
+  resolveDiscordRuntimeCredentials: mockResolveDiscordCredentials,
   slackInstallations: { id: 'id', isActive: 'isActive' },
   teamsInstallations: {
     conversationId: 'conversationId',
@@ -46,6 +51,10 @@ vi.mock('../../lib/teams-primary-conversation', () => ({
 
 vi.mock('../../lib/telegram-primary-chat', () => ({
   findTelegramPrimaryChatId: mockFindTelegramPrimaryChatId,
+}));
+
+vi.mock('../../lib/discord-persistence', () => ({
+  findDiscordDefaultDestination: mockFindDiscordDefaultDestination,
 }));
 
 import {
@@ -67,11 +76,13 @@ describe('listConnectedCommunicationProviders', () => {
       botAppPassword: 'secret',
     });
     mockResolveTelegramCredentials.mockResolvedValue({ botToken: '123:abc' });
+    mockResolveDiscordCredentials.mockResolvedValue({ botToken: 'discord' });
 
     await expect(listConnectedCommunicationProviders()).resolves.toEqual([
       'slack',
       'teams',
       'telegram',
+      'discord',
     ]);
   });
 
@@ -82,6 +93,7 @@ describe('listConnectedCommunicationProviders', () => {
       botAppPassword: null,
     });
     mockResolveTelegramCredentials.mockResolvedValue({ botToken: null });
+    mockResolveDiscordCredentials.mockResolvedValue({ botToken: null });
 
     await expect(listConnectedCommunicationProviders()).resolves.toEqual([]);
   });
@@ -223,6 +235,27 @@ describe('resolveAutomationRuntimeDestination', () => {
       source: 'primary_conversation',
     });
   });
+
+  it('falls back to the Discord default destination after Telegram', async () => {
+    mockFindTeamsPrimaryConversation.mockResolvedValue(null);
+    mockFindTelegramPrimaryChatId.mockResolvedValue(null);
+    mockFindDiscordDefaultDestination.mockResolvedValue({
+      guildId: 'guild-1',
+      channelId: 'channel-1',
+      channelType: 0,
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: { destination: null },
+        slackConnected: false,
+      }),
+    ).resolves.toEqual({
+      provider: 'discord',
+      channelId: 'channel-1',
+      source: 'primary_conversation',
+    });
+  });
 });
 
 describe('payload fields and prompt context', () => {
@@ -273,6 +306,17 @@ describe('payload fields and prompt context', () => {
       channelTag: 'channel_id',
       postToolName: 'post_to_channel',
       surfaceLabel: 'Telegram',
+    });
+    expect(
+      buildDestinationPromptContext({
+        provider: 'discord',
+        channelId: 'channel-1',
+        source: 'automation_target',
+      }),
+    ).toEqual({
+      channelTag: 'channel_id',
+      postToolName: 'post_to_channel',
+      surfaceLabel: 'Discord',
     });
   });
 });

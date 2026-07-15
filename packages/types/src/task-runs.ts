@@ -62,6 +62,7 @@ export const TASK_SURFACES = [
   'slack',
   'teams',
   'telegram',
+  'discord',
   'linear',
   'github',
   'gitlab',
@@ -301,7 +302,12 @@ export const WORK_ITEM_ACTIVE_STATUSES: readonly WorkItemStatus[] = [
  * tracked_messages (Stage 4): the registry of chat messages Roomote posted for
  * a work item or automation. Pure registry — launch state lives on work_items.
  */
-export const TRACKED_MESSAGE_SURFACES = ['slack', 'teams', 'telegram'] as const;
+export const TRACKED_MESSAGE_SURFACES = [
+  'slack',
+  'teams',
+  'telegram',
+  'discord',
+] as const;
 export type TrackedMessageSurface = (typeof TRACKED_MESSAGE_SURFACES)[number];
 
 export const TRACKED_MESSAGE_KINDS = [
@@ -981,12 +987,17 @@ const sharedTaskPayloadSchema = z.object({
   communicationProvider: communicationProviderSchema.optional(),
   communicationTeamId: z.string().optional(),
   communicationTeamDomain: z.string().optional(),
+  communicationGuildId: z.string().optional(),
   communicationServiceUrl: z.string().optional(),
   communicationChannelId: z.string().optional(),
   communicationThreadId: z.string().optional(),
   communicationMessageId: z.string().optional(),
+  /** Provider event that caused this fresh launch; used for idempotent retries. */
+  communicationSourceEventId: z.string().optional(),
   /** True when the Telegram topic was created specifically for this task. */
   telegramTaskTopic: z.boolean().optional(),
+  /** True when the Discord thread/forum post was created for this task. */
+  discordTaskThread: z.boolean().optional(),
 
   /**
    * Optional Slack routing metadata for non-Slack task types that still own a
@@ -1585,6 +1596,12 @@ export function getCommunicationTeamDomainFromTaskPayload(
   );
 }
 
+export function getCommunicationGuildIdFromTaskPayload(
+  payload: unknown,
+): string | null {
+  return getNonEmptyTaskPayloadString(payload, 'communicationGuildId');
+}
+
 export function getCommunicationServiceUrlFromTaskPayload(
   payload: unknown,
 ): string | null {
@@ -1734,6 +1751,7 @@ export function populateSnapshotResumeCommunicationMetadata(
     provider?: CommunicationProvider | null;
     sourcePayload?: unknown;
     teamId?: string | null;
+    guildId?: string | null;
     teamDomain?: string | null;
     serviceUrl?: string | null;
     channelId?: string | null;
@@ -1755,6 +1773,14 @@ export function populateSnapshotResumeCommunicationMetadata(
 
   if (teamId) {
     payload.communicationTeamId = teamId;
+  }
+
+  const guildId =
+    (hasNonEmptyValue(options.guildId ?? undefined) ? options.guildId : null) ??
+    getCommunicationGuildIdFromTaskPayload(options.sourcePayload);
+
+  if (guildId) {
+    payload.communicationGuildId = guildId;
   }
 
   const teamDomain =

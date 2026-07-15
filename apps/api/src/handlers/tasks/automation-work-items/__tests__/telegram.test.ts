@@ -61,11 +61,14 @@ describe('resolveAutomationTelegramTarget', () => {
     });
   });
 
-  it('returns null when an active Slack installation exists, matching the summary gate', async () => {
+  it('leaves Slack precedence to the caller when Slack is installed but unusable', async () => {
     selectLimitMock.mockResolvedValueOnce([{ id: 'install-1' }]);
 
-    await expect(resolveAutomationTelegramTarget()).resolves.toBeNull();
-    expect(credentialsMock).not.toHaveBeenCalled();
+    await expect(resolveAutomationTelegramTarget()).resolves.toEqual({
+      provider: 'telegram',
+      chatId: '8846357662',
+    });
+    expect(credentialsMock).toHaveBeenCalled();
   });
 
   it('returns null without a bot token or primary chat', async () => {

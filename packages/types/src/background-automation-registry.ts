@@ -151,7 +151,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
   },
   {
@@ -163,7 +163,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // primitives plus taskPullRequests, so any active repository qualifies.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
   },
   {
@@ -173,7 +173,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'sentry'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'sentry_triage',
   },
@@ -184,7 +184,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'dependabot_triage',
   },
@@ -196,7 +196,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'security_auditor',
   },
@@ -208,7 +208,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: sourceControlProviders,
     scheduledSuggestionSource: 'code_quality_auditor',
   },
@@ -219,7 +219,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram'],
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'ci_failure_triage',
   },

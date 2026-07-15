@@ -41,6 +41,21 @@ export function CommsProviders() {
           return;
         }
 
+        if (result?.discord) {
+          if (result.discord.registered) {
+            toast.success(
+              result.discord.guildCount > 0
+                ? 'Discord connected and slash commands registered.'
+                : 'Discord credentials saved. Add the bot to a server to finish setup.',
+            );
+          } else {
+            toast.warning(
+              `Discord credentials saved, but setup could not finish: ${result.discord.error ?? 'unknown error'}`,
+            );
+          }
+          return;
+        }
+
         toast.success('Communications provider credentials saved.');
       },
       onError: (error) => {

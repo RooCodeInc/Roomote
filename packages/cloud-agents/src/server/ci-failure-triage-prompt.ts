@@ -28,7 +28,12 @@ function destinationPromptContext(provider: CommunicationProvider): {
 
   return {
     channelTag: 'channel_id',
-    surfaceLabel: provider === 'teams' ? 'Teams' : 'Telegram',
+    surfaceLabel:
+      provider === 'teams'
+        ? 'Teams'
+        : provider === 'discord'
+          ? 'Discord'
+          : 'Telegram',
   };
 }
 

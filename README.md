@@ -2,9 +2,9 @@
 
 **A cloud coding agent you deploy in minutes and actually own.**
 
-You give it a task in Slack (or Teams, or Telegram). It clones your repo into an
-isolated sandbox, writes the code, runs the tests, takes a screenshot, and opens
-a PR. You review the diff like you would from any teammate.
+You give it a task in Slack (or Teams, or Telegram, or Discord). It clones your
+repo into an isolated sandbox, writes the code, runs the tests, takes a
+screenshot, and opens a PR. You review the diff like you would from any teammate.
 
 No IDE plugin. No terminal session. No babysitting. It works while you do
 something else.
@@ -37,7 +37,7 @@ to the tools you already use and runs agents in throwaway sandboxes.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
-│  You (in Slack / Teams / Telegram / Web UI)                        │
+│  You (in Slack / Teams / Telegram / Discord / Web UI)              │
 │  "Add dark mode to the settings page"                              │
 └───────────────────────────────┬────────────────────────────────────┘
                                 │

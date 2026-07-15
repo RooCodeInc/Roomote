@@ -13,6 +13,7 @@ import type {
   SlackRoutingSource,
   TeamsRoutingSource,
   TelegramRoutingSource,
+  DiscordRoutingSource,
   LinearRoutingSource,
   GitHubRoutingSource,
 } from './types';
@@ -66,6 +67,17 @@ export interface TelegramContextParams {
   routingModel?: string;
   taskDescription: string;
   chatName?: string;
+  threadMessages?: Array<{ text: string; user: string }>;
+  images?: string[];
+  apiBaseUrl?: string;
+}
+
+export interface DiscordContextParams {
+  userId?: string;
+  routingModel?: string;
+  taskDescription: string;
+  guildName?: string;
+  channelName?: string;
   threadMessages?: Array<{ text: string; user: string }>;
   images?: string[];
   apiBaseUrl?: string;
@@ -191,6 +203,38 @@ export async function buildTelegramRoutingContext(
     images: params.images,
   };
 
+  return {
+    routingModel: params.routingModel,
+    taskDescription: params.taskDescription,
+    source,
+    availableEnvironments: envs,
+    taskModelSettings,
+    ...(params.userId
+      ? {
+          routingActor: {
+            userId: params.userId,
+            apiBaseUrl: params.apiBaseUrl,
+          },
+        }
+      : {}),
+  };
+}
+
+/** Builds a routing context for a Discord request. */
+export async function buildDiscordRoutingContext(
+  params: DiscordContextParams,
+): Promise<RoutingContext> {
+  const [envs, taskModelSettings] = await Promise.all([
+    getAvailableEnvironments(),
+    fetchDeploymentTaskModelSettings(),
+  ]);
+  const source: DiscordRoutingSource = {
+    type: 'discord',
+    guildName: params.guildName,
+    channelName: params.channelName,
+    threadMessages: params.threadMessages,
+    images: params.images,
+  };
   return {
     routingModel: params.routingModel,
     taskDescription: params.taskDescription,

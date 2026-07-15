@@ -5,6 +5,7 @@ import {
   resolveSingleSourceControlProvider,
 } from '@/lib/server/source-control-provider';
 import { buildSetupKickoffText } from '@roomote/communication/chat-messages';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
@@ -32,6 +33,7 @@ import {
   resolveDeploymentEnvVar,
   purgeSavedDeploymentWorkerImage,
   resolveTelegramRuntimeCredentials,
+  resolveDiscordRuntimeCredentials,
   syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
   type DatabaseOrTransaction,
@@ -39,6 +41,8 @@ import {
 import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
   findTelegramPrimaryChatId,
+  findDiscordDefaultDestination,
+  findDiscordUserMappingByRoomoteUserId,
   findTeamsPrimaryConversation,
   recordSlackConversationMessageBestEffort,
 } from '@roomote/sdk/server';
@@ -449,6 +453,13 @@ async function resolveSetupSlackHandoffTarget(
 }
 
 type SetupChatFallbackHandoffTarget =
+  | {
+      provider: 'discord';
+      channelId: string;
+      guildId?: string;
+      botToken: string;
+      applicationId: string;
+    }
   | { provider: 'telegram'; chatId: string; botToken: string }
   | {
       provider: 'teams';
@@ -459,13 +470,61 @@ type SetupChatFallbackHandoffTarget =
 
 /**
  * Resolves the non-Slack chat destination for the setup onboarding kickoff,
- * matching the proactive-messaging fallback ordering (Slack > Telegram >
- * Teams). Returns null when no chat surface is available, so setup falls
+ * matching the proactive-messaging fallback ordering (Slack > Discord >
+ * Telegram > Teams). Returns null when no chat surface is available, so setup falls
  * back to a web-only onboarding task. Teams is only selected when both a
  * captured primary conversation and resolvable bot credentials exist, so a
  * half-configured Teams deployment never blocks onboarding.
  */
-async function resolveSetupChatFallbackHandoffTarget(): Promise<SetupChatFallbackHandoffTarget | null> {
+async function resolveSetupChatFallbackHandoffTarget(
+  userId: string,
+): Promise<SetupChatFallbackHandoffTarget | null> {
+  const [discordCredentials, discordDestination, discordUserMapping] =
+    await Promise.all([
+      resolveDiscordRuntimeCredentials(),
+      findDiscordDefaultDestination(),
+      findDiscordUserMappingByRoomoteUserId(userId),
+    ]);
+  if (
+    discordCredentials.botToken &&
+    discordCredentials.applicationId &&
+    discordUserMapping
+  ) {
+    try {
+      const discord = new DiscordCommunicationProvider({
+        botToken: discordCredentials.botToken,
+        applicationId: discordCredentials.applicationId,
+      });
+      const directMessage = await discord.createDirectMessage(
+        discordUserMapping.discordUserId,
+      );
+      return {
+        provider: 'discord',
+        channelId: directMessage.id,
+        botToken: discordCredentials.botToken,
+        applicationId: discordCredentials.applicationId,
+      };
+    } catch (error) {
+      console.warn(
+        '[setup-new] Failed to open a Discord DM with the linked setup user; trying another chat destination.',
+        error,
+      );
+    }
+  }
+  if (
+    discordCredentials.botToken &&
+    discordCredentials.applicationId &&
+    discordDestination
+  ) {
+    return {
+      provider: 'discord',
+      channelId: discordDestination.channelId,
+      guildId: discordDestination.guildId,
+      botToken: discordCredentials.botToken,
+      applicationId: discordCredentials.applicationId,
+    };
+  }
+
   const { botToken } = await resolveTelegramRuntimeCredentials();
 
   if (botToken) {
@@ -977,11 +1036,13 @@ export async function launchQueuedSetupTasksIfReady({
     return;
   }
 
-  // Non-Slack kickoffs (Telegram, Teams) carry provider-neutral
+  // Non-Slack kickoffs (Discord, Telegram, Teams) carry provider-neutral
   // communication metadata so the launched starter tasks reply into the same
   // chat that hosted the setup kickoff.
   const nonSlackChatHandoffProvider =
-    chatHandoffProvider === 'telegram' || chatHandoffProvider === 'teams'
+    chatHandoffProvider === 'discord' ||
+    chatHandoffProvider === 'telegram' ||
+    chatHandoffProvider === 'teams'
       ? chatHandoffProvider
       : null;
   const communicationMetadata =
@@ -2347,11 +2408,12 @@ export async function startSetupNewOnboardingTaskCommand(
 
     if (!handoffTarget) {
       // No connected Slack workspace (or the admin never linked their Slack
-      // account). Fall back to the next chat surface (Telegram, then Teams)
+      // account). Fall back to the next chat surface (Discord, Telegram, then Teams)
       // so the kickoff still gets a real conversation thread; only when no
       // chat surface exists does onboarding run as a web-only task whose
       // progress stays visible in the setup wizard's task panel.
-      const fallbackTarget = await resolveSetupChatFallbackHandoffTarget();
+      const fallbackTarget =
+        await resolveSetupChatFallbackHandoffTarget(userId);
 
       if (fallbackTarget) {
         const kickoffMessage = buildSetupKickoffText();
@@ -2359,7 +2421,46 @@ export async function startSetupNewOnboardingTaskCommand(
         let kickoffChannelId: string | null = null;
         let kickoffThreadId: string | null = null;
 
-        if (fallbackTarget.provider === 'telegram') {
+        if (fallbackTarget.provider === 'discord') {
+          const discord = new DiscordCommunicationProvider({
+            botToken: fallbackTarget.botToken,
+            applicationId: fallbackTarget.applicationId,
+          });
+          try {
+            if (fallbackTarget.guildId) {
+              const thread = await discord.createTaskThread({
+                channelId: fallbackTarget.channelId,
+                name: 'Set up Roomote',
+                initialText: kickoffMessage,
+              });
+              if (thread.messageId) {
+                kickoffMessageId = thread.messageId;
+                kickoffChannelId = thread.parentChannelId;
+                kickoffThreadId = thread.channelId;
+              }
+            } else {
+              const posted = await discord.postMessage({
+                channelId: fallbackTarget.channelId,
+                text: kickoffMessage,
+                textFormat: 'markdown',
+              });
+              kickoffMessageId = posted.messageId ?? null;
+              kickoffChannelId = posted.messageId
+                ? fallbackTarget.channelId
+                : null;
+            }
+            if (!kickoffMessageId) {
+              console.warn(
+                '[setup-new] The Discord setup kickoff returned no message id; onboarding continues as a web-only task.',
+              );
+            }
+          } catch (error) {
+            console.warn(
+              '[setup-new] Failed to create a Discord setup thread; onboarding continues as a web-only task.',
+              error,
+            );
+          }
+        } else if (fallbackTarget.provider === 'telegram') {
           const telegram = new TelegramCommunicationProvider({
             botToken: fallbackTarget.botToken,
           });
@@ -2445,8 +2546,17 @@ export async function startSetupNewOnboardingTaskCommand(
                   ...(kickoffThreadId
                     ? {
                         communicationThreadId: kickoffThreadId,
-                        telegramTaskTopic: true,
+                        ...(fallbackTarget.provider === 'telegram'
+                          ? { telegramTaskTopic: true }
+                          : {}),
+                        ...(fallbackTarget.provider === 'discord'
+                          ? { discordTaskThread: true }
+                          : {}),
                       }
+                    : {}),
+                  ...(fallbackTarget.provider === 'discord' &&
+                  fallbackTarget.guildId
+                    ? { communicationGuildId: fallbackTarget.guildId }
                     : {}),
                   ...(fallbackTarget.provider === 'teams'
                     ? {

@@ -358,7 +358,19 @@ function hasTeamsChatContext(): boolean {
   );
 }
 
-function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
+function hasDiscordChatContext(): boolean {
+  return (
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim() === 'discord' &&
+    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  );
+}
+
+function getChatReplySurfaceLabel():
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'chat' {
   const provider = process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
 
   if (provider === 'teams') {
@@ -367,6 +379,10 @@ function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
 
   if (provider === 'telegram') {
     return 'Telegram';
+  }
+
+  if (provider === 'discord') {
+    return 'Discord';
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
@@ -1279,7 +1295,11 @@ function recordSuccessfulSlackTurnSatisfactionResult(
 }
 
 if (shouldRegisterSlackChannelPostTool()) {
-  if (hasTelegramChatContext() || hasTeamsChatContext()) {
+  if (
+    hasTelegramChatContext() ||
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
+  ) {
     const postSurface = getChatReplySurfaceLabel();
 
     roomoteMcpServer.registerTool(
@@ -1361,7 +1381,8 @@ if (shouldRegisterSlackChannelPostTool()) {
   if (
     hasSlackChatContext() ||
     hasTelegramChatContext() ||
-    hasTeamsChatContext()
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 
@@ -1484,10 +1505,15 @@ if (shouldRegisterSlackChannelPostTool()) {
     },
   );
 
-  // Teams/Telegram tasks get the surface-generic post_to_channel instead;
-  // exposing the Slack-labeled tool there invites opaque conversation ids
-  // into Slack channel-name normalization, which mangles them.
-  if (!hasTeamsChatContext() && !hasTelegramChatContext()) {
+  // Teams/Telegram/Discord tasks get the surface-generic post_to_channel
+  // instead; exposing the Slack-labeled tool there invites opaque
+  // conversation ids into Slack channel-name normalization, which mangles
+  // them.
+  if (
+    !hasTeamsChatContext() &&
+    !hasTelegramChatContext() &&
+    !hasDiscordChatContext()
+  ) {
     roomoteMcpServer.registerTool(
       'post_to_slack_channel',
       {

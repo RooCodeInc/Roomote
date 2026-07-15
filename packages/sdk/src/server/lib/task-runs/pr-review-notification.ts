@@ -114,7 +114,8 @@ export type PrReviewNotificationRoute =
       threadId: string | null;
       serviceUrl: string;
     }
-  | { provider: 'telegram'; channelId: string; threadId: string | null };
+  | { provider: 'telegram'; channelId: string; threadId: string | null }
+  | { provider: 'discord'; channelId: string; threadId: string | null };
 
 let prReviewNotificationQueue: Queue<PrReviewNotificationRequest> | null = null;
 
@@ -221,6 +222,16 @@ export async function resolvePrReviewNotificationRoute(
       return null;
     }
 
+    return {
+      provider,
+      channelId,
+      threadId: getCommunicationThreadIdFromTaskPayload(job.payload),
+    };
+  }
+
+  if (provider === 'discord') {
+    const channelId = getCommunicationChannelFromTaskPayload(job.payload);
+    if (!channelId) return null;
     return {
       provider,
       channelId,
@@ -472,6 +483,8 @@ function getPrReviewLinkFormatter(
       return (label, url) => `[${label}](${url})`;
     case 'telegram':
       return (label, url) => `${label} (${url})`;
+    case 'discord':
+      return (label, url) => `[${label}](${url})`;
   }
 }
 

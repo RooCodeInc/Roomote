@@ -19,6 +19,8 @@ const mockRecordTaskRunLifecycleEvent = vi.fn().mockResolvedValue(undefined);
 const mockCleanupSandboxOidcTargetsForTaskRun = vi
   .fn()
   .mockResolvedValue(undefined);
+const mockResolveDiscordRuntimeCredentials = vi.fn();
+const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 
@@ -143,6 +145,8 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    resolveDiscordRuntimeCredentials: (...args: unknown[]) =>
+      mockResolveDiscordRuntimeCredentials(...args),
   };
 });
 
@@ -224,6 +228,12 @@ const mockCreateTeamsCommunicationProviderFromEnv = vi.fn();
 vi.mock('@roomote/communication/teams-provider', () => ({
   createTeamsCommunicationProviderFromEnv: (...args: unknown[]) =>
     mockCreateTeamsCommunicationProviderFromEnv(...args),
+}));
+
+vi.mock('@roomote/communication/discord-provider', () => ({
+  DiscordCommunicationProvider: class MockDiscordCommunicationProvider {
+    postMessage = mockDiscordPostMessage;
+  },
 }));
 
 vi.mock('../../mcp/linear-connections', () => ({
@@ -372,6 +382,17 @@ describe('finishRun', () => {
     mockDbUpdateSet.mockClear();
     mockDbUpdateWhere.mockClear();
     mockCleanupSandboxOidcTargetsForTaskRun.mockResolvedValue(undefined);
+    mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+      botToken: null,
+      applicationId: null,
+      botUserId: null,
+    });
+    mockDiscordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+    });
     vi.mocked(createTaskRunGitHubToken).mockResolvedValue('github-token');
   });
 
@@ -1712,6 +1733,94 @@ describe('finishRun', () => {
         status: RunStatus.Failed,
         error: 'test error',
       });
+    });
+  });
+
+  describe('Discord task notifications', () => {
+    const discordPayload = {
+      repo: 'owner/repo',
+      communicationProvider: 'discord',
+      communicationGuildId: 'guild-1',
+      communicationChannelId: 'channel-1',
+      communicationThreadId: 'thread-1',
+      communicationMessageId: 'message-1',
+      discordTaskThread: true,
+    } as unknown as TaskRun['payload'];
+
+    beforeEach(() => {
+      mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+        botToken: 'discord-token',
+        applicationId: 'application-1',
+        botUserId: 'bot-1',
+      });
+    });
+
+    it('posts startup failures into the originating Discord task thread', async () => {
+      mockFindFirstRun.mockResolvedValue(makeRun({ payload: discordPayload }));
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        text: "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.\n\n[Open the task](https://example.com/task)",
+        textFormat: 'markdown',
+      });
+    });
+
+    it('uses runtime-failure copy after Discord work has started', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({
+          payload: discordPayload,
+          result: { runtimeTaskId: 'runtime-1' },
+        }),
+      );
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'runtime crash',
+      });
+
+      expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining(
+            'I ran into a hiccup while working on this task.',
+          ),
+        }),
+      );
+    });
+
+    it('does not post a setup completion message when setup onboarding completes', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({ payload: discordPayload }, { workflow: 'setup_onboarding' }),
+      );
+
+      await finishRun({ id: 1, status: RunStatus.Completed });
+
+      expect(mockRedisSet).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^discord:setup-completion:/),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not fail finalization when Discord delivery fails', async () => {
+      mockFindFirstRun.mockResolvedValue(makeRun({ payload: discordPayload }));
+      mockDiscordPostMessage.mockRejectedValueOnce(
+        new Error('Discord API error'),
+      );
+
+      await expect(
+        finishRun({ id: 1, status: RunStatus.Failed, error: 'task failed' }),
+      ).resolves.toBeUndefined();
     });
   });
 

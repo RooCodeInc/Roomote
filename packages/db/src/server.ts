@@ -67,6 +67,7 @@ export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
+export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
 export * from './lib/pr-action-settings';
 export * from './lib/setup-qualification';
@@ -137,6 +138,13 @@ export {
   slackUserMappingsRelations,
   telegramUserMappings,
   telegramUserMappingsRelations,
+  discordInstallations,
+  discordInstallationsRelations,
+  discordInstallationChannels,
+  discordInstallationChannelsRelations,
+  discordUserMappings,
+  discordUserMappingsRelations,
+  discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
   teamsUserMappingsRelations,

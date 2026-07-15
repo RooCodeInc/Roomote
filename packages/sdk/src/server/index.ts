@@ -68,16 +68,20 @@ export {
 } from './lib/slack-account-link-education';
 
 export {
+  DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_DELAY_MS,
   SLACK_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   TEAMS_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   TELEGRAM_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
+  discordSuggestedTasksOnboardingFollowupRequestSchema,
+  enqueueDiscordSuggestedTasksOnboardingFollowup,
   enqueueSlackSuggestedTasksOnboardingFollowup,
   enqueueTeamsSuggestedTasksOnboardingFollowup,
   enqueueTelegramSuggestedTasksOnboardingFollowup,
   slackSuggestedTasksOnboardingFollowupRequestSchema,
   teamsSuggestedTasksOnboardingFollowupRequestSchema,
   telegramSuggestedTasksOnboardingFollowupRequestSchema,
+  type DiscordSuggestedTasksOnboardingFollowupRequest,
   type EnqueueSuggestedTasksOnboardingFollowupResult,
   type SlackSuggestedTasksOnboardingFollowupRequest,
   type TeamsSuggestedTasksOnboardingFollowupRequest,
@@ -91,6 +95,45 @@ export {
   isTelegramLinkCode,
   restoreTelegramLinkCode,
 } from './lib/telegram-link-codes';
+
+export {
+  DISCORD_LINK_CODE_TTL_SECONDS,
+  consumeDiscordLinkCode,
+  createDiscordLinkCode,
+  isDiscordLinkCode,
+  restoreDiscordLinkCode,
+} from './lib/discord-link-codes';
+
+export {
+  captureDiscordDefaultDestination,
+  clearDiscordGatewayResumeState,
+  deactivateDiscordInstallation,
+  findDiscordAutomationDestination,
+  findDiscordDefaultDestination,
+  findDiscordDestinationByChannelId,
+  findDiscordGatewayResumeState,
+  findDiscordInstallationByGuildId,
+  findDiscordMappedUserId,
+  findDiscordUserMappingByRoomoteUserId,
+  listDiscordInstallationChannels,
+  listDiscordInstallations,
+  reconcileDiscordInstallations,
+  recordDiscordGatewayHeartbeatAck,
+  saveDiscordGatewayResumeState,
+  syncDiscordInstallationChannels,
+  updateDiscordGatewaySequence,
+  upsertDiscordInstallation,
+  upsertDiscordUserMapping,
+  type DiscordDefaultDestination,
+  type DiscordGatewayResumeState,
+  type DiscordGatewaySessionKey,
+  type DiscordInstallationChannelInput,
+  type DiscordInstallationReconciliationInput,
+  type DiscordInstallationReconciliationResult,
+  type DiscordInstallationUpsert,
+} from './lib/discord-persistence';
+
+export { createDiscordCommunicationProviderFromRuntimeCredentials } from './lib/discord-communication';
 
 export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/teams-communication';
 

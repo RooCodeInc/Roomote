@@ -78,7 +78,7 @@ describe('background automation registry', () => {
     });
   });
 
-  it('allows Teams and Telegram destinations for CI failure triage Run now', () => {
+  it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');
 
@@ -86,6 +86,7 @@ describe('background automation registry', () => {
       'slack',
       'teams',
       'telegram',
+      'discord',
     ]);
     expect(descriptor?.supportedSourceControlProviders).toEqual(['github']);
   });

@@ -201,6 +201,14 @@ export function getAutomationSlackChannelTarget(
   );
 }
 
+export function getAutomationDiscordChannelTarget(
+  automation: Pick<Automation, 'targets'> | undefined,
+): string | null {
+  return (
+    getAutomationTargetRefs(automation, 'discord', 'discord_channel')[0] ?? null
+  );
+}
+
 /**
  * Two-level Slack channel resolution: the automation's own slack_channel
  * target wins, otherwise the deployment-wide manager channel.
@@ -214,7 +222,7 @@ export function resolveAutomationSlackChannelId(
 
 /** Provider-neutral resolved destination an automation reports to. */
 export type AutomationDestination = {
-  provider: 'slack' | 'teams' | 'telegram';
+  provider: 'slack' | 'teams' | 'telegram' | 'discord';
   channelId: string;
   /** Which waterfall level produced this destination. */
   source: 'automation_target' | 'manager_channel';
@@ -224,6 +232,7 @@ const DESTINATION_TARGET_KINDS = [
   ['slack', 'slack_channel'],
   ['teams', 'teams_channel'],
   ['telegram', 'telegram_chat'],
+  ['discord', 'discord_channel'],
 ] as const;
 
 /**
@@ -741,6 +750,8 @@ export function normalizeBackgroundAgentSettings(
       managerStats,
       managerSlackChannelId,
     ),
+    managerStatsDiscordChannelId:
+      getAutomationDiscordChannelTarget(managerStats),
     managerStatsLastRunAt: managerStats?.lastRunAt ?? null,
 
     sentryTriageFrequency: getAutomationFrequency(
@@ -751,6 +762,8 @@ export function normalizeBackgroundAgentSettings(
       sentryTriage,
       managerSlackChannelId,
     ),
+    sentryTriageDiscordChannelId:
+      getAutomationDiscordChannelTarget(sentryTriage),
     sentryTriageProjectSlugs:
       sentryProjectSlugs.length > 0 ? sentryProjectSlugs.join('\n') : null,
     sentryTriageLastRunAt: sentryTriage?.lastRunAt ?? null,
@@ -763,6 +776,8 @@ export function normalizeBackgroundAgentSettings(
       dependabotTriage,
       managerSlackChannelId,
     ),
+    dependabotTriageDiscordChannelId:
+      getAutomationDiscordChannelTarget(dependabotTriage),
     dependabotTriageLastRunAt: dependabotTriage?.lastRunAt ?? null,
 
     securityAuditorFrequency: getAutomationFrequency(
@@ -773,6 +788,8 @@ export function normalizeBackgroundAgentSettings(
       securityAuditor,
       managerSlackChannelId,
     ),
+    securityAuditorDiscordChannelId:
+      getAutomationDiscordChannelTarget(securityAuditor),
     securityAuditorLastRunAt: securityAuditor?.lastRunAt ?? null,
     securityAuditorScanCursor: securityAuditor?.scanCursor ?? null,
 
@@ -784,6 +801,8 @@ export function normalizeBackgroundAgentSettings(
       codeQualityAuditor,
       managerSlackChannelId,
     ),
+    codeQualityAuditorDiscordChannelId:
+      getAutomationDiscordChannelTarget(codeQualityAuditor),
     codeQualityAuditorLastRunAt: codeQualityAuditor?.lastRunAt ?? null,
     codeQualityAuditorScanCursor: codeQualityAuditor?.scanCursor ?? null,
 
@@ -795,6 +814,8 @@ export function normalizeBackgroundAgentSettings(
       ciFailureTriage,
       managerSlackChannelId,
     ),
+    ciFailureTriageDiscordChannelId:
+      getAutomationDiscordChannelTarget(ciFailureTriage),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
   };

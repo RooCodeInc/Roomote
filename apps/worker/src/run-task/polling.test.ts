@@ -264,4 +264,27 @@ describe('startPolling', () => {
     });
     expect(options.state.communicationMessageIntervals?.telegram).toBeDefined();
   });
+
+  it('starts generic communication polling for Discord-linked task runs', () => {
+    const options = createListenerOptions({
+      payloadKind: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: 'owner/repo',
+        description: 'Discord-originated task',
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+      },
+    });
+
+    startPolling(options);
+
+    expect(mockCreateSlackMessageInterval).not.toHaveBeenCalled();
+    expect(mockCreateCommunicationMessageInterval).toHaveBeenCalledWith({
+      provider: 'discord',
+      options,
+    });
+    expect(options.state.communicationMessageIntervals?.discord).toBeDefined();
+  });
 });

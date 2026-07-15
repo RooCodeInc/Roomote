@@ -619,7 +619,7 @@ export const tasks = pgTable(
     ),
     check(
       'tasks_surface_check',
-      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
     ),
     check(
       'tasks_trigger_check',
@@ -1046,6 +1046,11 @@ export const taskRuns = pgTable(
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
+    uniqueIndex('task_runs_discord_source_event_unique')
+      .on(sql`(${table.payload}->>'communicationSourceEventId')`)
+      .where(
+        sql`${table.payload}->>'communicationProvider' = 'discord' AND ${table.payload}->>'communicationSourceEventId' IS NOT NULL AND ${table.canceledAt} IS NULL`,
+      ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
@@ -2120,6 +2125,165 @@ export const telegramUserMappingsRelations = relations(
     }),
   }),
 );
+
+/**
+ * discord_installations
+ *
+ * One row per Discord guild where the deployment's bot is installed. The
+ * default destination is the channel Roomote uses for proactive work; task
+ * conversations still create their own thread or forum post from there.
+ */
+
+export const discordInstallations = pgTable(
+  'discord_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    guildId: text('guild_id').notNull(),
+    guildName: text('guild_name'),
+    applicationId: text('application_id').notNull(),
+    botUserId: text('bot_user_id').notNull(),
+    installedByUserId: text('installed_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    defaultChannelId: text('default_channel_id'),
+    defaultChannelName: text('default_channel_name'),
+    defaultChannelType: integer('default_channel_type'),
+    isActive: boolean('is_active').notNull().default(true),
+    lastSeenAt: timestamp('last_seen_at'),
+    lastUsedAt: timestamp('last_used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('discord_installations_guild_id_unique').on(table.guildId),
+    index('discord_installations_active_idx').on(table.isActive),
+    index('discord_installations_default_channel_idx').on(
+      table.defaultChannelId,
+    ),
+  ],
+);
+
+export const discordInstallationsRelations = relations(
+  discordInstallations,
+  ({ one, many }) => ({
+    installedByUser: one(users, {
+      fields: [discordInstallations.installedByUserId],
+      references: [users.id],
+    }),
+    channels: many(discordInstallationChannels),
+  }),
+);
+
+/**
+ * discord_installation_channels
+ *
+ * A best-effort catalog of channels visible to Roomote. Discord channel type
+ * is stored as its numeric API value so new upstream channel kinds do not
+ * require a schema migration.
+ */
+
+export const discordInstallationChannels = pgTable(
+  'discord_installation_channels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discordInstallationId: uuid('discord_installation_id')
+      .notNull()
+      .references(() => discordInstallations.id, { onDelete: 'cascade' }),
+    channelId: text('channel_id').notNull(),
+    channelName: text('channel_name'),
+    channelType: integer('channel_type').notNull(),
+    parentId: text('parent_id'),
+    position: integer('position'),
+    permissions: text('permissions'),
+    isAvailable: boolean('is_available').notNull().default(true),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('discord_installation_channels_installation_id_idx').on(
+      table.discordInstallationId,
+    ),
+    uniqueIndex('discord_installation_channels_unique').on(
+      table.discordInstallationId,
+      table.channelId,
+    ),
+  ],
+);
+
+export const discordInstallationChannelsRelations = relations(
+  discordInstallationChannels,
+  ({ one }) => ({
+    installation: one(discordInstallations, {
+      fields: [discordInstallationChannels.discordInstallationId],
+      references: [discordInstallations.id],
+    }),
+  }),
+);
+
+/**
+ * discord_user_mappings
+ *
+ * Discord user snowflakes are global, so attribution is deployment-wide and
+ * does not need to be duplicated per guild. The last DM channel is retained
+ * as the safe destination for user-specific proactive messages.
+ */
+
+export const discordUserMappings = pgTable(
+  'discord_user_mappings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discordUserId: text('discord_user_id').notNull(),
+    discordUsername: text('discord_username'),
+    discordGlobalName: text('discord_global_name'),
+    discordDmChannelId: text('discord_dm_channel_id'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('discord_user_mappings_user_id_idx').on(table.userId),
+    uniqueIndex('discord_user_mappings_discord_user_id_unique').on(
+      table.discordUserId,
+    ),
+  ],
+);
+
+export const discordUserMappingsRelations = relations(
+  discordUserMappings,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [discordUserMappings.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * discord_gateway_sessions
+ *
+ * Discord Gateway sessions can be resumed after a process restart when the
+ * session id, resume URL, and last sequence number survive the process. This
+ * table stores one row per token fingerprint and shard. It contains only
+ * resumability metadata; the bot token remains in encrypted deployment
+ * configuration.
+ */
+
+export const discordGatewaySessions = pgTable('discord_gateway_sessions', {
+  id: text('id').notNull().primaryKey(),
+  sessionId: text('session_id'),
+  resumeGatewayUrl: text('resume_gateway_url'),
+  sequence: bigint('sequence', { mode: 'number' }),
+  shardCount: integer('shard_count'),
+  lastConnectedAt: timestamp('last_connected_at'),
+  lastHeartbeatAckAt: timestamp('last_heartbeat_ack_at'),
+  disconnectedAt: timestamp('disconnected_at'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
 
 /**
  * teams_installations

@@ -210,6 +210,10 @@ envVarGroups:
         value: 'true'
       - key: ENCRYPTION_KEY
         generateValue: true
+      # Optional process-env override. The setup UI stores the token encrypted
+      # in Postgres when this is left blank.
+      - key: R_DISCORD_BOT_TOKEN
+        value: ''
       - key: ARTIFACT_SIGNING_KEY
         generateValue: true
       - key: DASHBOARD_PASSWORD

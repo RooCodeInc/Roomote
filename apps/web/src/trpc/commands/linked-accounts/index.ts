@@ -5,6 +5,8 @@ import {
   slackInstallations,
   slackUserMappings,
   telegramUserMappings,
+  discordUserMappings,
+  resolveDiscordRuntimeCredentials,
   resolveTelegramRuntimeCredentials,
   and,
   desc,
@@ -12,6 +14,8 @@ import {
   mcpConnections,
 } from '@roomote/db/server';
 import {
+  createDiscordLinkCode,
+  findDiscordDefaultDestination,
   findLinearDeploymentMcpConnection,
   findLinearUserMcpConnection,
 } from '@roomote/sdk/server';
@@ -384,6 +388,61 @@ export async function unlinkLinkedTelegramAccountCommand(
     .delete(telegramUserMappings)
     .where(eq(telegramUserMappings.userId, auth.userId))
     .returning({ id: telegramUserMappings.id });
+
+  return {
+    success: true as const,
+    deletedCount: deleted.length,
+  };
+}
+
+export async function getLinkedDiscordAccountCommand(auth: UserAuthSuccess) {
+  const [{ botToken, botUsername }, mapping] = await Promise.all([
+    resolveDiscordRuntimeCredentials(),
+    db.query.discordUserMappings.findFirst({
+      where: eq(discordUserMappings.userId, auth.userId),
+      orderBy: [desc(discordUserMappings.updatedAt)],
+      columns: {
+        discordUserId: true,
+        discordUsername: true,
+        discordGlobalName: true,
+      },
+    }),
+  ]);
+
+  return {
+    configured: Boolean(botToken),
+    botUsername,
+    mapping: mapping ?? null,
+  };
+}
+
+export async function createDiscordLinkCodeCommand(auth: UserAuthSuccess) {
+  const { botToken, botUsername } = await resolveDiscordRuntimeCredentials();
+  if (!botToken) {
+    throw new Error(
+      'Discord is not configured for this deployment. Set it up under Settings → Communications first.',
+    );
+  }
+  const [{ code, expiresInSeconds }, destination] = await Promise.all([
+    createDiscordLinkCode(auth.userId),
+    findDiscordDefaultDestination(),
+  ]);
+  return {
+    code,
+    expiresInSeconds,
+    command: `/link code:${code}`,
+    botUsername,
+    openDiscordUrl: destination
+      ? `https://discord.com/channels/${destination.guildId}/${destination.channelId}`
+      : 'https://discord.com/channels/@me',
+  };
+}
+
+export async function unlinkLinkedDiscordAccountCommand(auth: UserAuthSuccess) {
+  const deleted = await db
+    .delete(discordUserMappings)
+    .where(eq(discordUserMappings.userId, auth.userId))
+    .returning({ id: discordUserMappings.id });
 
   return {
     success: true as const,

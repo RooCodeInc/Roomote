@@ -62,6 +62,9 @@ export function standardTask({
   teamsMessageId,
   teamsTenantId,
   teamsBotAppId,
+  discordGuildId,
+  discordChannelId,
+  discordMessageId,
   linkedWorkItems,
   interactiveMode = false,
   requestFormat = 'plain',
@@ -78,6 +81,7 @@ export function standardTask({
     | 'slack'
     | 'teams'
     | 'telegram'
+    | 'discord'
     | 'linear'
     | 'github'
     | 'gitlab'
@@ -102,6 +106,9 @@ export function standardTask({
   teamsMessageId?: string;
   teamsTenantId?: string;
   teamsBotAppId?: string;
+  discordGuildId?: string;
+  discordChannelId?: string;
+  discordMessageId?: string;
   linkedWorkItems?: LinkedWorkItem[];
   interactiveMode?: boolean;
   requestFormat?: 'plain' | 'structured';
@@ -131,6 +138,9 @@ export function standardTask({
     teamsMessageId,
     teamsTenantId,
     teamsBotAppId,
+    discordGuildId,
+    discordChannelId,
+    discordMessageId,
   });
   const resolvedConflictResolverLabel = resolveConflictResolverLabel(
     conflictResolverLabel,
@@ -222,41 +232,47 @@ export function standardTask({
     <rule>This run was launched from a Telegram conversation surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes chat-started tasks from other surfaces, treat this run as Telegram-started rather than as a generic web dashboard task.</rule>
   </task_surface_context>`
-            : taskSurface === 'github'
+            : taskSurface === 'discord'
               ? `
+  <task_surface_context>
+    <rule>This run was launched from a Discord conversation surface and also has a Roomote web task view.</rule>
+    <rule>If a workflow or packaged skill distinguishes chat-started tasks from other surfaces, treat this run as Discord-started rather than as a generic web dashboard task.</rule>
+  </task_surface_context>`
+              : taskSurface === 'github'
+                ? `
   <task_surface_context>
     <rule>This run was launched from a GitHub conversation surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes GitHub-started tasks from other surfaces, treat this run as GitHub-started rather than as a generic web dashboard task.</rule>
   </task_surface_context>`
-              : taskSurface === 'gitlab'
-                ? `
+                : taskSurface === 'gitlab'
+                  ? `
   <task_surface_context>
     <rule>This run was launched from a GitLab merge request surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes GitLab-started tasks from other surfaces, treat this run as GitLab-started rather than as a generic web dashboard task.</rule>
     <rule>Use GitLab URLs and local git state for merge request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                : taskSurface === 'gitea'
-                  ? `
+                  : taskSurface === 'gitea'
+                    ? `
   <task_surface_context>
     <rule>This run was launched from a Gitea pull request surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes Gitea-started tasks from other surfaces, treat this run as Gitea-started rather than as a generic web dashboard task.</rule>
     <rule>Use Gitea URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                  : taskSurface === 'bitbucket'
-                    ? `
+                    : taskSurface === 'bitbucket'
+                      ? `
   <task_surface_context>
     <rule>This run was launched from a Bitbucket pull request surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes Bitbucket-started tasks from other surfaces, treat this run as Bitbucket-started rather than as a generic web dashboard task.</rule>
     <rule>Use Bitbucket URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                    : taskSurface === 'ado'
-                      ? `
+                      : taskSurface === 'ado'
+                        ? `
   <task_surface_context>
     <rule>This run was launched from an Azure DevOps pull request surface and also has a Roomote web task view.</rule>
     <rule>If a workflow or packaged skill distinguishes Azure DevOps-started tasks from other surfaces, treat this run as Azure DevOps-started rather than as a generic web dashboard task.</rule>
     <rule>Use Azure DevOps URLs and local git state for pull request context; do not use GitHub-only CLI commands such as \`gh pr\` for this task.</rule>
   </task_surface_context>`
-                      : `
+                        : `
   <task_surface_context>
     <rule>This StandardTask run was launched from the Roomote web task UI.</rule>
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>

@@ -56,6 +56,7 @@ const composeEnv = {
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
   JOB_AUTH_PUBLIC_KEY: 'deployment-ci-job-public-key',
   R_GITHUB_APP_SLUG: 'deployment-ci',
+  R_DISCORD_BOT_TOKEN: 'deployment-ci-discord-bot-token',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
   REDIS_URL: 'redis://redis:6379',
@@ -129,6 +130,14 @@ function validateComposeShape(shape) {
       }
     }
 
+    if (config.services.bullmq) {
+      assert(
+        config.services.bullmq.environment?.R_DISCORD_BOT_TOKEN ===
+          composeEnv.R_DISCORD_BOT_TOKEN,
+        `${shape.name}: bullmq must receive R_DISCORD_BOT_TOKEN`,
+      );
+    }
+
     console.log(`validated compose shape: ${shape.name}`);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -158,6 +167,10 @@ for (const key of catalog.sharedPlatformEnvironment) {
     `railway: api is missing shared ${key}`,
   );
 }
+assert(
+  'R_DISCORD_BOT_TOKEN' in railway.services.bullmq.env,
+  'railway: bullmq must receive R_DISCORD_BOT_TOKEN',
+);
 
 const render = YAML.parse(read('render.yaml'));
 const renderServices = new Map(
@@ -185,6 +198,15 @@ for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
 assert(
   renderServices.get('api')?.preDeployCommand?.endsWith(' db-migrate'),
   'render: api must run migrations before deploy',
+);
+const renderSharedEnvironment = render.envVarGroups.find(
+  (group) => group.name === 'roomote-shared',
+);
+assert(
+  renderSharedEnvironment?.envVars?.some(
+    (entry) => entry.key === 'R_DISCORD_BOT_TOKEN',
+  ),
+  'render: shared app environment must include R_DISCORD_BOT_TOKEN',
 );
 
 const productionCompose = YAML.parse(
