@@ -298,7 +298,7 @@ function buildProviderSetupData(
         buildProvider('anthropic', 'Anthropic', 'ANTHROPIC_API_KEY'),
         {
           id: 'chatgpt' as SetupModelProviderId,
-          label: 'ChatGPT (subscription)',
+          label: 'ChatGPT',
           envVarName: undefined,
           defaultRoomoteModel: 'openai/gpt-5.4',
           authKind: 'oauth' as const,
@@ -717,7 +717,7 @@ describe('ModelSettingsSection', () => {
 
       expect(
         screen.getByRole('combobox', { name: 'New model provider' }),
-      ).toHaveTextContent('ChatGPT (subscription)');
+      ).toHaveTextContent('ChatGPT');
       // The placeholder example comes from the OpenAI catalog entry because
       // subscription models keep the openai/ model-id prefix.
       expect(screen.getByLabelText('New model slug')).toHaveAttribute(

@@ -122,7 +122,7 @@ function chatgptProviderStatus(
 ): SetupModelStatus['providers'][number] {
   return {
     id: 'chatgpt',
-    label: 'ChatGPT (subscription)',
+    label: 'ChatGPT',
     envVarName: undefined,
     defaultRoomoteModel: 'openai/gpt-5.4',
     authKind: 'oauth',

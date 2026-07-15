@@ -316,7 +316,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
     expect(chatgptProvider).toMatchObject({
       id: 'chatgpt',
-      label: 'ChatGPT (subscription)',
+      label: 'ChatGPT',
       authKind: 'oauth',
       defaultRoomoteModel: 'openai/gpt-5.6-terra',
     });

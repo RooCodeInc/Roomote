@@ -327,7 +327,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
   },
   {
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
-    label: 'ChatGPT (subscription)',
+    label: 'ChatGPT',
     envVarName: undefined,
     defaultRoomoteModel: 'openai/gpt-5.6-terra',
     authKind: 'oauth',

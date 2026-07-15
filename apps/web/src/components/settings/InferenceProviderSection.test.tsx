@@ -198,7 +198,7 @@ function buildProviderSetup(
           : []),
         {
           id: 'chatgpt' as SetupModelProviderId,
-          label: 'ChatGPT (subscription)',
+          label: 'ChatGPT',
           envVarName: undefined,
           defaultRoomoteModel: 'openai/gpt-5.4',
           authKind: 'oauth' as const,
@@ -255,9 +255,7 @@ describe('InferenceProviderSection', () => {
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Anthropic')).toBeInTheDocument();
     expect(screen.queryByText('OpenAI')).not.toBeInTheDocument();
-    expect(
-      screen.queryByText('ChatGPT (subscription)'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText('ChatGPT')).not.toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: /Add provider/ }),
     ).toBeInTheDocument();
@@ -278,12 +276,12 @@ describe('InferenceProviderSection', () => {
 
     expect(
       screen.getByRole('combobox', { name: 'Provider to add' }),
-    ).toHaveTextContent('ChatGPT (subscription)');
+    ).toHaveTextContent('ChatGPT');
     expect(
       screen.getByRole('button', { name: /Connect ChatGPT/ }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByLabelText('API key for ChatGPT (subscription)'),
+      screen.queryByLabelText('API key for ChatGPT'),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Save' }),
@@ -300,7 +298,7 @@ describe('InferenceProviderSection', () => {
 
     renderInferenceProviderSection();
 
-    expect(screen.getByText('ChatGPT (subscription)')).toBeInTheDocument();
+    expect(screen.getByText('ChatGPT')).toBeInTheDocument();
     expect(
       screen.getByText('Connected as user@example.com'),
     ).toBeInTheDocument();
