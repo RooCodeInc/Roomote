@@ -27,9 +27,9 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 
 ## Build
 
-- `pnpm lint` — Prettier format check + ESLint across workspaces
+- `pnpm lint` — oxfmt format check + ESLint across workspaces
 - `pnpm check-types` — TypeScript type checking
-- `pnpm format` — Prettier formatting
+- `pnpm format` — oxfmt formatting
 
 ## Validation
 
@@ -40,7 +40,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - `pnpm lint:fast && pnpm check-types:fast && pnpm knip` — Matches the pre-push hook
 - `pnpm check` — Runs lint + check-types + test + knip
 - If `pnpm lint` fails because of formatting, run `pnpm format` and rerun `pnpm lint`
-- Pre-commit hooks: `lint-staged`. Pre-push: `pnpm lint:fast` + `pnpm check-types:fast` + `pnpm knip`.
+- Pre-commit hooks: `lint-staged` (oxfmt on staged files). Pre-push: `pnpm lint:fast` + `pnpm check-types:fast` + `pnpm knip`.
 
 ## Working notes
 

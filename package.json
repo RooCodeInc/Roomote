@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -9,8 +9,8 @@
   },
   "scripts": {
     "prepare": "[ -d .git ] && husky || true",
-    "format": "prettier --write --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
-    "format:check": "prettier --check --ignore-unknown \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
     "lint": "pnpm format:check && turbo lint --log-order grouped --output-logs new-only",
     "lint:fast": "turbo lint --log-order grouped --output-logs new-only",
     "check-types": "turbo check-types --log-order grouped --output-logs new-only",
@@ -55,7 +55,7 @@
     "husky": "^9.1.7",
     "knip": "^5.85.0",
     "lint-staged": "^16.2.7",
-    "prettier": "^3.8.1",
+    "oxfmt": "^0.58.0",
     "rimraf": "^6.1.2",
     "smol-toml": "1.6.1",
     "tsx": "4.20.4",
@@ -65,7 +65,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,json,css}": [
-      "prettier --write"
+      "oxfmt"
     ],
     "*.{yml,yaml}": []
   },

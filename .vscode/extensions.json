@@ -7,6 +7,6 @@
     "vitest.explorer",
     "yoavbls.pretty-ts-errors",
     "tamasfe.even-better-toml",
-    "esbenp.prettier-vscode"
+    "oxc.oxc-vscode"
   ]
 }
