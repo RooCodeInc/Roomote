@@ -206,10 +206,14 @@ export default function SetupPage() {
   );
   const saveAuthProviderChoice = useMutation(
     trpc.setupNew.saveAuthProviderChoice.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (_data, variables) => {
         await queryClient.invalidateQueries({
           queryKey: trpc.setupNew.status.queryKey(),
         });
+        // Only expose the choice as pending once the save has succeeded, so a
+        // failed request can never prematurely skip the chooser with an
+        // unsaved selection.
+        setPendingAuthProvider(variables.provider);
         goToStep('auth-env-vars');
       },
       onError: (error) => {
@@ -542,19 +546,18 @@ export default function SetupPage() {
             <StepAuthProvider
               includeTelegram
               onContinue={(provider) => {
-                setPendingAuthProvider(provider);
-
                 // Telegram is a UI-only choice with no persisted auth provider
                 // and its own setup step, so keep it on the pending-only path.
                 if (provider === 'telegram') {
+                  setPendingAuthProvider(provider);
                   goToStep('auth-env-vars');
                   return;
                 }
 
-                // Persist the chosen provider before navigating so the choice
-                // survives a reload even when the config step is auto-skipped
-                // for a runtime-configured provider. saveAuthProviderChoice
-                // advances to auth-env-vars on success.
+                // Persist the chosen provider first; the choice only becomes
+                // pending and navigates on a successful save, so it survives a
+                // reload and a failed save never skips the chooser with an
+                // unsaved selection.
                 saveAuthProviderChoice.mutate({ provider });
               }}
               onSkip={() => {
