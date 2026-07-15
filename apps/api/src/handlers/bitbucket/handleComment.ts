@@ -20,7 +20,6 @@ import {
 } from '../tasks/sendMessageToTask';
 import {
   getBitbucketAutomationTargets,
-  getBitbucketUserAccountKey,
   getBitbucketUsername,
   isRoomoteBitbucketUsername,
 } from './getBitbucketAutomationTargets';
