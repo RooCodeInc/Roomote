@@ -31,12 +31,10 @@ import { messageAnchorId } from '../message-anchor';
 
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { AcpToolDetails } from './AcpToolDetails';
+import { isSubagentToolPayload } from './subagent-tool';
 import { hidesExpandedToolResult } from './tool-detail-visibility';
 import { VisualProofToolPreview } from './VisualProofToolPreview';
-import {
-  extractVisualProofUploadFromToolMessage,
-  resolveVisualProofDisplayMedia,
-} from './visual-proof-tool-result';
+import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
 interface AcpToolMessageProps {
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage;
@@ -69,19 +67,21 @@ export function AcpToolMessage({
 
   const isMcp = msg.data.isMcp;
   const isMcpLabelPresent = Boolean(msg.data.toolName || msg.data.serverName);
-  const visualProofMedia = resolveVisualProofDisplayMedia(
-    extractVisualProofUploadFromToolMessage(msg),
+  const visualProofMedia = resolveVisualProofMediaForToolMessage(
+    msg,
     artifactLink?.artifacts,
   );
-  const showVisualProofPreview = visualProofMedia !== null;
+  const showVisualProofPreview = visualProofMedia.length > 0;
+  const isSubagentRow = isSubagentToolPayload(msg.data);
+  // Direct manage_artifacts rows collapse to just the preview; subagent rows
+  // keep their collapsible prompt/result details alongside it.
   const showExpandedDetails =
-    !showVisualProofPreview &&
+    (isSubagentRow || !showVisualProofPreview) &&
     !hidesExpandedToolResult(msg, {
       showSubagentPayload,
     });
   const showNestedActivity = Boolean(children);
-  const showToolContent =
-    showVisualProofPreview || showExpandedDetails || showNestedActivity;
+  const showCollapsibleContent = showExpandedDetails || showNestedActivity;
 
   const subagentActivity = readSubagentActivity(
     msg.data as unknown as Record<string, unknown>,
@@ -125,35 +125,29 @@ export function AcpToolMessage({
             icon={ToolIcon}
             state={toolState}
             params={sanitizedToolData}
-            collapsible={showToolContent && !showVisualProofPreview}
+            collapsible={showCollapsibleContent}
           />
-          {showToolContent ? (
-            showVisualProofPreview ? (
-              <div className="mt-2 space-y-2">
-                {visualProofMedia ? (
-                  <VisualProofToolPreview media={visualProofMedia} />
-                ) : null}
-                {showNestedActivity ? (
-                  <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
-                    {children}
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <ToolContent className="mt-2">
-                {showExpandedDetails ? (
-                  <AcpToolDetails
-                    msg={msg}
-                    showSubagentPayload={showSubagentPayload}
-                  />
-                ) : null}
-                {showNestedActivity ? (
-                  <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
-                    {children}
-                  </div>
-                ) : null}
-              </ToolContent>
-            )
+          {showVisualProofPreview ? (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {visualProofMedia.map((media) => (
+                <VisualProofToolPreview key={media.artifactId} media={media} />
+              ))}
+            </div>
+          ) : null}
+          {showCollapsibleContent ? (
+            <ToolContent className="mt-2">
+              {showExpandedDetails ? (
+                <AcpToolDetails
+                  msg={msg}
+                  showSubagentPayload={showSubagentPayload}
+                />
+              ) : null}
+              {showNestedActivity ? (
+                <div className="mt-4 space-y-4 border-l border-border/60 pl-4">
+                  {children}
+                </div>
+              ) : null}
+            </ToolContent>
           ) : null}
         </Tool>
       </MessageContent>

@@ -450,6 +450,89 @@ describe('AcpToolMessage', () => {
     expect(windowOpenSpy).not.toHaveBeenCalled();
   });
 
+  it('renders inline visual-proof media for subagent results that uploaded proofs', () => {
+    mockArtifactLink.artifacts = [
+      {
+        id: 'art-1',
+        path: 'tmp/capture-visual-proof/proof.png',
+        version: 1,
+        artifactType: 'visual-proof',
+        contentType: 'image/png',
+        size: 100,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        thumbnailUrl: '/api/artifacts/art-1/raw?sig=fresh',
+      },
+    ];
+
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('subagent', {
+          title: 'Capture app screenshot',
+          agentType: 'proof-runner',
+          isSubagentSpawn: true,
+          prompt: null,
+          rawInput: {
+            prompt: 'Capture the requested screenshot and upload it.',
+            subagent_type: 'proof-runner',
+          },
+          output: [
+            '<task id="ses-1" state="completed">',
+            '<task_result>',
+            'Summary: uploaded one screenshot.',
+            '- viewUrl: https://example.com/task/t1/artifacts/tmp/capture-visual-proof/proof.png?v=1',
+            '- rawUrl: https://example.com/api/artifacts/art-1/raw?sig=stale',
+            '</task_result>',
+            '</task>',
+          ].join('\n'),
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(screen.getByRole('img', { name: 'Visual proof' })).toHaveAttribute(
+      'src',
+      '/api/artifacts/art-1/raw?sig=fresh',
+    );
+    // The subagent row keeps its collapsible prompt/details alongside the
+    // always-visible preview.
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: true,
+      }),
+    );
+    expect(toolDetailsSpy).toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open visual proof' }));
+
+    expect(openArtifactSpy).toHaveBeenCalledWith(
+      'tmp/capture-visual-proof/proof.png',
+      1,
+    );
+  });
+
+  it('keeps subagent results without session artifacts as plain rows', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('subagent', {
+          title: 'Capture app screenshot',
+          agentType: 'proof-runner',
+          isSubagentSpawn: true,
+          prompt: null,
+          output:
+            'viewUrl: https://example.com/task/t1/artifacts/tmp/missing.png?v=1',
+        } as Partial<AcpToolResultUiMessage['data']>)}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('img', { name: 'Visual proof' }),
+    ).not.toBeInTheDocument();
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collapsible: false,
+      }),
+    );
+  });
+
   it('opens the artifact detail from the upload viewUrl when session path is missing', () => {
     render(
       <AcpToolMessage

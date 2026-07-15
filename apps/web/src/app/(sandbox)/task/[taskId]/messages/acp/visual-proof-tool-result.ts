@@ -1,5 +1,7 @@
 import type { TaskArtifact } from '@/types';
 
+import { isSubagentToolPayload } from './subagent-tool';
+
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
@@ -114,18 +116,21 @@ function parseVisualProofSuccessPayload(
   };
 }
 
-export function extractVisualProofUploadFromToolMessage(
+function isSettledToolResult(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): msg is AcpToolResultUiMessage {
+  return (
+    msg.kind === 'tool_result' &&
+    !msg.partial &&
+    msg.data.status !== 'failed' &&
+    msg.data.status !== 'in_progress'
+  );
+}
+
+function extractVisualProofUploadFromToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): VisualProofUploadExtraction | null {
-  if (msg.kind !== 'tool_result') {
-    return null;
-  }
-
-  if (
-    msg.partial ||
-    msg.data.status === 'failed' ||
-    msg.data.status === 'in_progress'
-  ) {
+  if (!isSettledToolResult(msg)) {
     return null;
   }
 
@@ -182,7 +187,7 @@ function parseArtifactLocationFromViewUrl(viewUrl: string): {
   }
 }
 
-export function resolveVisualProofDisplayMedia(
+function resolveVisualProofDisplayMedia(
   extraction: VisualProofUploadExtraction | null,
   artifacts: readonly TaskArtifact[] | null | undefined,
 ): VisualProofDisplayMedia | null {
@@ -242,4 +247,145 @@ export function resolveVisualProofDisplayMedia(
     path,
     version,
   };
+}
+
+const URL_CANDIDATE_PATTERN = /https?:\/\/[^\s"'`<>]+/g;
+const TASK_ARTIFACT_VIEW_PATH_PATTERN = /^\/task\/[^/]+\/artifacts\/.+$/;
+
+/**
+ * Pull task-artifact viewUrls (`/task/<id>/artifacts/<path>?v=N`) out of
+ * free-form subagent result text. Signed rawUrls (`/api/artifacts/...`) are
+ * deliberately skipped: their signatures expire, so they cannot back a
+ * durable inline preview.
+ */
+function extractArtifactViewUrlsFromText(text: string): string[] {
+  const viewUrls: string[] = [];
+
+  for (const match of text.matchAll(URL_CANDIDATE_PATTERN)) {
+    const candidate = match[0].replace(/[)\],.;'"`]+$/, '');
+
+    try {
+      const url = new URL(candidate);
+
+      if (TASK_ARTIFACT_VIEW_PATH_PATTERN.test(url.pathname)) {
+        viewUrls.push(candidate);
+      }
+    } catch {
+      // Not a parseable URL; skip.
+    }
+  }
+
+  return viewUrls;
+}
+
+function findSessionArtifactByLocation(
+  artifacts: readonly TaskArtifact[],
+  path: string,
+  version: number | undefined,
+): TaskArtifact | undefined {
+  const matches = artifacts.filter((artifact) => artifact.path === path);
+
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  if (version !== undefined) {
+    const exact = matches.find((artifact) => artifact.version === version);
+
+    if (exact) {
+      return exact;
+    }
+  }
+
+  return matches.reduce((best, artifact) =>
+    artifact.version > best.version ? artifact : best,
+  );
+}
+
+/**
+ * Proof-runner delegation path: the subagent uploads through
+ * manage_artifacts inside its own session, so the transcript only carries
+ * the spawn's terminal tool_result — a text blob with artifact viewUrls in
+ * prose, not the structured upload JSON. Recover those viewUrls and resolve
+ * them against the session artifact list, which supplies fresh signed
+ * thumbnail/preview URLs.
+ */
+function resolveSubagentVisualProofMedia(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  artifacts: readonly TaskArtifact[] | null | undefined,
+): VisualProofDisplayMedia[] {
+  if (!isSettledToolResult(msg) || !isSubagentToolPayload(msg.data)) {
+    return [];
+  }
+
+  if (!artifacts || artifacts.length === 0) {
+    return [];
+  }
+
+  const text = [asNonEmptyString(msg.data.output), asNonEmptyString(msg.text)]
+    .filter(Boolean)
+    .join('\n');
+
+  if (!text) {
+    return [];
+  }
+
+  const media: VisualProofDisplayMedia[] = [];
+  const seenArtifactIds = new Set<string>();
+
+  for (const viewUrl of extractArtifactViewUrlsFromText(text)) {
+    const location = parseArtifactLocationFromViewUrl(viewUrl);
+
+    if (!location.path) {
+      continue;
+    }
+
+    const artifact = findSessionArtifactByLocation(
+      artifacts,
+      location.path,
+      location.version,
+    );
+
+    if (
+      !artifact ||
+      artifact.artifactType !== 'visual-proof' ||
+      seenArtifactIds.has(artifact.id)
+    ) {
+      continue;
+    }
+
+    const resolved = resolveVisualProofDisplayMedia(
+      {
+        artifactId: artifact.id,
+        artifactType: 'visual-proof',
+        viewUrl,
+      },
+      artifacts,
+    );
+
+    // Without renderable media there is nothing to preview inline; the
+    // subagent row's regular details already carry the artifact link.
+    if (resolved && resolved.kind !== 'link') {
+      seenArtifactIds.add(artifact.id);
+      media.push(resolved);
+    }
+  }
+
+  return media;
+}
+
+export function resolveVisualProofMediaForToolMessage(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+  artifacts: readonly TaskArtifact[] | null | undefined,
+): VisualProofDisplayMedia[] {
+  const direct = resolveVisualProofDisplayMedia(
+    extractVisualProofUploadFromToolMessage(msg),
+    artifacts,
+  );
+
+  if (direct) {
+    return [direct];
+  }
+
+  return resolveSubagentVisualProofMedia(msg, artifacts);
 }
