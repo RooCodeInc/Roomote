@@ -239,6 +239,7 @@ describe('notifyPullRequestTerminalStatus', () => {
       timestamp: 'thread-ts-1',
       name: SLACK_PR_CLOSED_REACTION_EMOJI,
     });
+    expect(SLACK_PR_CLOSED_REACTION_EMOJI).toBe('-1');
   });
 
   it('posts Teams and Telegram via the shared communication adapter', async () => {
