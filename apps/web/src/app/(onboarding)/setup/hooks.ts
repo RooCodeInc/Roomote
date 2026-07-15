@@ -452,7 +452,20 @@ export function useSetupFlow(
             return true;
           }
 
-          return computeProviderStatus.configSatisfied;
+          // configSatisfied proves the provider can run, not that dispatch
+          // targets it: the runtime default commits with the config
+          // confirmation (or with the choice itself when it is already
+          // configured). Skip only once the chosen provider is the
+          // effective default, so a canonical /setup re-entry cannot
+          // advance past config while dispatch still uses the old default.
+          const effectiveDefaultComputeProvider =
+            status.computeSetup.persistedDefaultProvider ??
+            status.computeSetup.runtimeDefaultProvider;
+
+          return (
+            computeProviderStatus.configSatisfied &&
+            selectedComputeProvider === effectiveDefaultComputeProvider
+          );
         }
         case 'slack':
           if (communicationStepResolved) {

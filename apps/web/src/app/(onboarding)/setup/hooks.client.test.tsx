@@ -529,6 +529,86 @@ describe('useSetupFlow', () => {
     });
   });
 
+  it('keeps compute-config for a configured provider that is not yet the dispatch default', async () => {
+    // configSatisfied alone must not skip config: until the runtime default
+    // commits, dispatch still targets the previous provider.
+    mockStatus({
+      hasSlack: true,
+      authSetup: {
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'slack',
+        preselectedProvider: 'slack',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        providers: [
+          {
+            id: 'slack',
+            label: 'Slack',
+            fields: [],
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            setupSatisfied: true,
+          },
+        ],
+      },
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        preselectedProvider: 'openrouter',
+      },
+      sourceControlSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: 'github',
+        providers: [],
+      },
+      computeSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'modal',
+        preselectedProvider: 'modal',
+        runtimeDefaultProvider: 'docker',
+        persistedDefaultProvider: null,
+        providers: [
+          {
+            provider: 'modal',
+            label: 'Modal',
+            description: '',
+            supportsSnapshots: true,
+            comment: 'Recommended',
+            fields: [],
+            runtimeConfigSatisfied: false,
+            savedConfigSatisfied: true,
+            configSatisfied: true,
+          },
+        ],
+      },
+      setupNewState: {
+        authProvider: 'slack',
+        modelProvider: 'openrouter',
+        computeProvider: 'modal',
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('compute-config');
+    });
+  });
+
   it('shows compute-provider after source control when compute setup is pending', async () => {
     mockStatus({
       hasSlack: true,
@@ -778,7 +858,9 @@ describe('useSetupFlow', () => {
         selectedProvider: 'docker',
         preselectedProvider: 'docker',
         runtimeDefaultProvider: null,
-        persistedDefaultProvider: null,
+        // Choosing a credentialless provider commits the runtime default in
+        // the same mutation, so the refetched status already reflects it.
+        persistedDefaultProvider: 'docker',
         providers: [
           {
             provider: 'docker',
