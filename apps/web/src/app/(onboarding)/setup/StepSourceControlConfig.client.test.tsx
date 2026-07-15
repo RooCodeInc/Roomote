@@ -288,7 +288,7 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('Gitea Webhook Secret')).not.toBeInTheDocument();
   });
 
-  it('guides Bitbucket OAuth consumer creation', () => {
+  it('guides Bitbucket OAuth client creation', () => {
     render(
       <StepSourceControlConfig
         sourceControlSetup={buildCatalogProviderSetup('bitbucket')}
@@ -297,38 +297,21 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText(/Bitbucket OAuth Client ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Client ID/)).toBeInTheDocument();
+    expect(screen.getByText(/Client Secret/)).toBeInTheDocument();
     expect(
-      screen.getByText(/Bitbucket OAuth Client Secret/),
+      screen.getByText('Create a new Bitbucket OAuth Client.'),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', {
-        name: 'Bitbucket OAuth consumer instructions',
-      }),
-    ).toHaveAttribute(
-      'href',
-      'https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/',
-    );
-    expect(
-      screen.getByText('Create a new Bitbucket OAuth consumer.'),
+      screen.getByText(/Workspace settings.*OAuth clients/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        /Workspace settings.*Apps and features.*OAuth consumers.*Add consumer/,
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Create OAuth client/)).toBeInTheDocument();
     expect(
       screen.queryByRole('link', { name: /Open/ }),
     ).not.toBeInTheDocument();
+    expect(screen.getByText('In Authorization, add:')).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'In Authorization, add the OAuth 2.0 type, with this URL:',
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'From the app Settings → Authentication details, copy these values:',
-      ),
+      screen.getByText('Once created,, copy these values:'),
     ).toBeInTheDocument();
     expect(
       screen.getByText(

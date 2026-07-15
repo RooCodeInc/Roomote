@@ -387,13 +387,13 @@ function buildProviderFields(
         {
           envVarName: 'BITBUCKET_CLIENT_ID',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_ID'],
-          label: 'Bitbucket OAuth Client ID',
+          label: 'Client ID',
           required: true,
         },
         {
           envVarName: 'BITBUCKET_CLIENT_SECRET',
           acceptedEnvVarNames: ['BITBUCKET_CLIENT_SECRET'],
-          label: 'Bitbucket OAuth Client Secret',
+          label: 'Client Secret',
           secret: true,
           required: true,
         },

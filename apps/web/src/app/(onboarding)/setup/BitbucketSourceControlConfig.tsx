@@ -1,23 +1,15 @@
+import { Settings } from '@/components/system';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 export function BitbucketSourceControlCreation() {
   return (
     <>
-      <p className="font-semibold">Create a new Bitbucket OAuth consumer.</p>
+      <p className="font-semibold">Create a new Bitbucket OAuth Client.</p>
       <p className="text-sm text-muted-foreground">
-        As an admin, open the Bitbucket workspace you want Roomote to access,
-        then go to Workspace settings → Apps and features → OAuth consumers →
-        Add consumer. See the{' '}
-        <a
-          href="https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-foreground underline underline-offset-4 hover:text-foreground"
-        >
-          Bitbucket OAuth consumer instructions
-        </a>
-        . Grant account, repository:write, pullrequest:write, and webhook
-        scopes.
+        In the top right click the <Settings className="inline size-4 ml-0.5" />{' '}
+        → Workspace settings → Apps and features → OAuth clients → Create OAuth
+        client. In scopes, grant read + write for: account, repository,
+        pullrequests and webhooks.
       </p>
     </>
   );
@@ -31,11 +23,9 @@ export function BitbucketSourceControlInstructions({
   return (
     <div className="max-w-xl space-y-3 text-muted-foreground">
       <p className="font-semibold text-foreground">
-        Configure the Bitbucket OAuth consumer.
+        Configure the OAuth callback.
       </p>
-      <p className="text-sm">
-        In Authorization, add the OAuth 2.0 type, with this URL:
-      </p>
+      <p className="text-sm">In Authorization, add:</p>
       <InstructionUrl
         heading="Callback URL"
         url={`${publicOrigin}/api/source-control/bitbucket/oauth/callback`}

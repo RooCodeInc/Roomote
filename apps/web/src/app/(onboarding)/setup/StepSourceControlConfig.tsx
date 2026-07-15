@@ -453,7 +453,7 @@ export function StepSourceControlConfig({
               Enter the values below for your Bitbucket integration.
             </p>
             <p className="text-sm text-muted-foreground">
-              From the app Settings → Authentication details, copy these values:
+              Once created,, copy these values:
             </p>
           </>
         ) : (
