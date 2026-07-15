@@ -73,11 +73,9 @@ describe('buildSetupComputeStatus', () => {
   });
 
   it('satisfies Roomote Cloud from deployment-managed runtime env alone', () => {
-    // The token id is deliberately absent: it is optional because backend
-    // engines differ in credential shape (API-key engines use only the
-    // secret slot).
     const status = buildSetupComputeStatus({
       runtimeEnv: {
+        ROOMOTE_CLOUD_TOKEN_ID: 'rc-id',
         ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-secret',
         DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
       },
@@ -89,6 +87,23 @@ describe('buildSetupComputeStatus', () => {
     expect(status.setupSatisfiedByRuntimeEnv).toBe(true);
     expect(roomoteCloud?.configSatisfied).toBe(true);
     expect(roomoteCloud?.infrastructureSatisfied).toBe(true);
+  });
+
+  it('does not satisfy Roomote Cloud from the secret alone while Modal is the only backend', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        ROOMOTE_CLOUD_TOKEN_SECRET: 'rc-secret',
+        DOCKER_WORKER_IMAGE: 'ghcr.io/roomote/worker:test',
+      },
+    });
+    const roomoteSandbox = status.providers.find(
+      (provider) => provider.provider === 'roomote',
+    );
+
+    // The Modal backend rejects launches without the token id, so a
+    // secret-only deployment must not be offered as usable.
+    expect(roomoteSandbox?.configSatisfied).toBe(false);
+    expect(roomoteSandbox?.infrastructureSatisfied).toBe(false);
   });
 
   it('leaves Roomote Cloud unsatisfiable without deployment-managed credentials', () => {

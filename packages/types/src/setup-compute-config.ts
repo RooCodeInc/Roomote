@@ -245,14 +245,14 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
       {
         // Deployment-managed credentials: seeded into the process env by the
         // hosting operator, never collected from the setup/Settings UI. When
-        // the secret is absent the provider is not offered in the picker
-        // (infrastructureSatisfied is false). The id slot is optional because
-        // backend engines differ in credential shape (Modal uses id+secret;
-        // API-key engines use only the secret) — spawn-time validation is
-        // backend-specific.
+        // they are absent the provider is not offered in the picker
+        // (infrastructureSatisfied is false). The id stays required while
+        // Modal is the only backend — it rejects launches without it, so a
+        // secret-only deployment must not read as configured. Future API-key
+        // backends (which use only the secret slot) should make this
+        // requiredness backend-aware rather than dropping it outright.
         envVarName: 'ROOMOTE_CLOUD_TOKEN_ID',
         label: 'Roomote Cloud Token ID',
-        required: false,
         category: 'infrastructure',
       },
       {
