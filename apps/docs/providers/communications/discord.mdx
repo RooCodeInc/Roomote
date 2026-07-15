@@ -7,11 +7,11 @@ description: Configure a Discord bot so Roomote can start and continue tasks in 
 Discord is a deployment-owned communications provider. It is not a Roomote
 sign-in provider.
 
-Roomote can receive direct messages and server mentions, create a separate
-thread or forum post for each task, accept follow-ups in that conversation, and
-send onboarding work to the linked setup user's direct messages. Discord
-connects to Roomote through the Gateway, so it does not require an inbound
-webhook or public callback URL.
+Roomote can receive direct messages and server mentions, work each task in a
+thread on the message that requested it (or a forum post in forum channels),
+accept follow-ups in that conversation, and deliver onboarding suggestions to
+the default channel. Discord connects to Roomote through the Gateway, so it
+does not require an inbound webhook or public callback URL.
 
 ## Create the Discord bot
 
@@ -52,8 +52,10 @@ The generated invite uses permissions integer `309237763136`. You can use the
 same value when configuring a manual install link or Discord's default guild
 install settings.
 
-A task started from a normal text channel moves into a public thread; a task
-started in a forum gets its own forum post.
+A task started from a normal text or announcement channel runs in a public
+thread started on the message that requested it — like a threaded reply — so
+the conversation stays anchored where it began. A task started in a forum gets
+its own forum post, and `/new` starts a fresh, separate task thread.
 
 If Roomote cannot see the server or channel, confirm that the bot was added to
 the server and that its role and channel overrides grant the permissions above.
@@ -71,10 +73,12 @@ Settings** and enable **Direct Messages**. The command expires after ten
 minutes. Once linked, work you start from Discord is attributed to your Roomote
 account.
 
-During onboarding, Roomote sends the setup task and its suggestions to the
-linked setup user's direct messages. Discord can block those messages when the
-user's server-member DM privacy setting is disabled; the task remains available
-in the Roomote web app in that case.
+During onboarding, Roomote posts the setup suggestions to the default channel
+so the whole team can see and start them. When no default channel is
+configured yet, they are sent to the linked setup user's direct messages
+instead; Discord can block those messages when the user's server-member DM
+privacy setting is disabled, and the task remains available in the Roomote web
+app in that case.
 
 ## Default channel for proactive posts
 

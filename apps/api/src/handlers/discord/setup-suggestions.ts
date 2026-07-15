@@ -82,7 +82,13 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
     return false;
   }
 
+  // Slack model: onboarding suggestions belong in the shared channel where
+  // the team can see and start them. The setup user's DM is only a fallback
+  // for deployments that have not picked a default channel yet.
   let destination = params.destination ?? null;
+  if (!destination) {
+    destination = await findDiscordDefaultDestination();
+  }
   let directMessage: Awaited<
     ReturnType<typeof provider.createDirectMessage>
   > | null = null;
@@ -96,9 +102,6 @@ export async function postSetupTaskSuggestionsToDiscord(params: {
     } catch {
       return false;
     }
-  }
-  if (!destination && !directMessage) {
-    destination = await findDiscordDefaultDestination();
   }
   if (!destination && !directMessage) {
     return false;

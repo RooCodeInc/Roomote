@@ -142,8 +142,9 @@ describe('Discord setup suggestions', () => {
     });
 
     expect(delivered).toBe(true);
+    // The DM is only the fallback: the default channel is consulted first.
+    expect(findDestinationMock).toHaveBeenCalled();
     expect(createDirectMessageMock).toHaveBeenCalledWith('discord-user-1');
-    expect(findDestinationMock).not.toHaveBeenCalled();
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'dm-channel-1',
@@ -166,6 +167,10 @@ describe('Discord setup suggestions', () => {
   });
 
   it('posts one thread with launch buttons and tracks the thread channel', async () => {
+    // Even with a linked DM available, the default channel wins: onboarding
+    // suggestions go where the team can see them, matching Slack.
+    findUserMappingMock.mockResolvedValue({ discordUserId: 'discord-user-1' });
+
     const delivered = await postSetupTaskSuggestionsToDiscord({
       sourceTaskId: 'setup-task-1',
       createdByUserId: 'user-1',
@@ -175,6 +180,7 @@ describe('Discord setup suggestions', () => {
     });
 
     expect(delivered).toBe(true);
+    expect(createDirectMessageMock).not.toHaveBeenCalled();
     expect(createTaskThreadMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: 'channel-1',
