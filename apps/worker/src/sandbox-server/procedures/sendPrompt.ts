@@ -34,6 +34,13 @@ const sendPromptInputSchema = z
      * follow-ups (Slack, Teams, Telegram), which always steer.
      */
     autoSteerWhenQueued: z.boolean().optional(),
+    /**
+     * Hide this prompt from the user-facing transcript. For platform-injected
+     * machinery (e.g. spawned-task settle notifications) that the agent must
+     * see but the user should not. Callers hold a run-scoped token, so this
+     * is not reachable from arbitrary clients.
+     */
+    visibleInTranscript: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     const hasPrompt =
@@ -130,6 +137,7 @@ export const sendPrompt = publicProcedure
           clientMessageId: input.clientMessageId,
           userName: input.userName,
           userImageUrl: input.userImageUrl,
+          visibleInTranscript: input.visibleInTranscript,
         });
 
         if (!success) {
@@ -189,6 +197,7 @@ export const sendPrompt = publicProcedure
         userName: input.userName,
         userImageUrl: input.userImageUrl,
         clientMessageId: input.clientMessageId,
+        visibleInTranscript: input.visibleInTranscript,
       });
 
       if (!success) {

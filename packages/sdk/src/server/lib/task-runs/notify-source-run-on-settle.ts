@@ -153,6 +153,8 @@ export async function notifySourceRunOnSettle(
         client.commands.sendPrompt.mutate({
           prompt,
           source: 'task-settled',
+          // Platform machinery: the agent must see it, the user should not.
+          visibleInTranscript: false,
         }),
     });
 

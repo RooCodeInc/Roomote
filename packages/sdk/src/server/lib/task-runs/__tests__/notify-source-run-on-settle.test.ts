@@ -95,8 +95,10 @@ describe('notifySourceRunOnSettle', () => {
     const promptArg = sendPromptMutate.mock.calls[0]?.[0] as {
       prompt: string;
       source: string;
+      visibleInTranscript: boolean;
     };
     expect(promptArg.source).toBe('task-settled');
+    expect(promptArg.visibleInTranscript).toBe(false);
     expect(promptArg.prompt).toContain('Spawned task update');
     expect(promptArg.prompt).toContain('child-task');
     expect(promptArg.prompt).toContain('completed');

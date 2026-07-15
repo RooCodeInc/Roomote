@@ -84,6 +84,8 @@ export interface SandboxSendPromptInput {
   userName?: string;
   userImageUrl?: string;
   autoSteerWhenQueued?: boolean;
+  /** Hide the prompt from the user-facing transcript (platform machinery). */
+  visibleInTranscript?: boolean;
 }
 
 export interface SandboxSteerTaskInput {
