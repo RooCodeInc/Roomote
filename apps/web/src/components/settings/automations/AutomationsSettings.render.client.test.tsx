@@ -517,7 +517,7 @@ describe('AutomationsSettings', () => {
     );
 
     expect(
-      screen.getByLabelText('Post alerts to this Slack channel'),
+      screen.getByLabelText('Post alerts to this channel'),
     ).toBeInTheDocument();
     expect(
       screen.getByText('#automation-reports (Discord)'),

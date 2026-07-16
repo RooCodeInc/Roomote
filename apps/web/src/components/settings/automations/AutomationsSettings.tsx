@@ -2311,6 +2311,11 @@ export function AutomationsSettings() {
       const value = formState?.[field] ?? '';
       const discordValue = formState?.[discordField] ?? '';
       const showDiscordOptions = discordConnected || Boolean(discordValue);
+      // The historical labels say "Slack channel"; once Discord channels are
+      // offered in the same picker that wording reads as a bug.
+      const effectiveLabel = showDiscordOptions
+        ? label.replace(/ Slack channel$/u, ' channel')
+        : label;
       const options = [
         ...buildSlackDestinationOptions(value),
         ...(showDiscordOptions
@@ -2329,7 +2334,7 @@ export function AutomationsSettings() {
       return (
         <AutomationSlackDestinationInput
           inputId={inputId}
-          label={label}
+          label={effectiveLabel}
           helperText={helperText}
           value={selectedValue}
           options={options}
