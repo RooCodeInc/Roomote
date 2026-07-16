@@ -131,7 +131,7 @@ export function AdoSourceControlInstructions({
           <p className="text-sm">
             Then go to{' '}
             <a
-              href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+              href="https://entra.microsoft.com/#view/Microsoft_AAD_IAM/StartboardApplicationsMenuBlade/~/AppAppsPreview"
               target="_blank"
               rel="noopener noreferrer"
               className="font-semibold text-foreground underline"
