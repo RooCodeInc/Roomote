@@ -193,6 +193,18 @@ describe('StepComputeConfig', () => {
             hostedImageRef: null,
             hostedReady: false,
           },
+          // The base image ref derives from the worker image, so it cannot
+          // be default-satisfied when no hosted-ready image exists.
+          providers: [
+            {
+              ...buildHostedProvider(),
+              fields: buildHostedProvider().fields.map((field) =>
+                field.envVarName === 'MODAL_BASE_IMAGE_REF'
+                  ? { ...field, defaultSatisfied: false }
+                  : field,
+              ),
+            },
+          ],
         })}
         selectedProviderId="modal"
         onContinue={vi.fn()}
@@ -337,6 +349,10 @@ describe('StepComputeConfig', () => {
     expect(
       screen.getByRole('button', { name: /continue|save and continue/i }),
     ).toBeEnabled();
+    // The missing-image warning must not contradict the enabled Continue.
+    expect(
+      screen.queryByText(/registry-qualified worker image/i),
+    ).not.toBeInTheDocument();
   });
 
   it('continues onboarding while a Blaxel image build runs in the background', async () => {
