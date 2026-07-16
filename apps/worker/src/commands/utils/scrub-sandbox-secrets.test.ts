@@ -97,6 +97,33 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     );
   });
 
+  it('uses the task runtime home for OpenCode credentials', () => {
+    scrubSandboxSecretsBeforeSnapshot(undefined, {
+      homeDir: '/workspace/.roomote-runtime-home',
+      runtimeEnv: {},
+    });
+
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      '/workspace/.roomote-runtime-home/.local/share/opencode/auth.json',
+      { force: true },
+    );
+    expect(fs.rmSync).toHaveBeenCalledWith(
+      '/workspace/.roomote-runtime-home/.local/share/opencode/google-application-credentials.json',
+      { force: true },
+    );
+  });
+
+  it('uses task-specific XDG_DATA_HOME for OpenCode credentials', () => {
+    scrubSandboxSecretsBeforeSnapshot(undefined, {
+      homeDir: '/workspace/.roomote-runtime-home',
+      runtimeEnv: { XDG_DATA_HOME: '/task/data' },
+    });
+
+    expect(fs.rmSync).toHaveBeenCalledWith('/task/data/opencode/auth.json', {
+      force: true,
+    });
+  });
+
   it('continues scrubbing and warns instead of throwing when a step fails', () => {
     vi.mocked(fs.writeFileSync).mockImplementation(() => {
       throw new Error('disk full');

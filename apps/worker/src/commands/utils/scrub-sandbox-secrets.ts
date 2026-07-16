@@ -14,6 +14,11 @@ interface ScrubLogger {
   warn(message: string): void;
 }
 
+interface OpenCodeRuntime {
+  homeDir?: string;
+  runtimeEnv?: Record<string, string | undefined>;
+}
+
 function runScrubStep(
   step: string,
   logger: ScrubLogger,
@@ -50,6 +55,7 @@ function runScrubStep(
  */
 export function scrubSandboxSecretsBeforeSnapshot(
   logger: ScrubLogger = console,
+  openCodeRuntime: OpenCodeRuntime = {},
 ): void {
   logger.info(
     '[scrubSandboxSecrets] Removing credential material before filesystem snapshot',
@@ -68,8 +74,8 @@ export function scrubSandboxSecretsBeforeSnapshot(
 
   runScrubStep('remove OpenCode credential files', logger, () => {
     for (const filePath of resolveOpenCodeCredentialFilePaths(
-      homedir(),
-      process.env,
+      openCodeRuntime.homeDir ?? homedir(),
+      openCodeRuntime.runtimeEnv ?? process.env,
     )) {
       rmSync(filePath, { force: true });
     }

@@ -1870,7 +1870,7 @@ export const runTask = async ({
       // the handoff helper polls below. The harness has already shut down, so
       // drop on-disk credential material first; resume re-injects it from the
       // dequeue response.
-      scrubSandboxSecretsBeforeSnapshot(logger);
+      scrubSandboxSecretsBeforeSnapshot(logger, { homeDir, runtimeEnv });
 
       ({ claimed: sleepActionTriggered } = await waitForExternalSleepAction({
         taskRun,
