@@ -86,7 +86,16 @@ describe('inference gateway', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
-    mockResolveModelProviderEnvValue.mockResolvedValue('provider-secret-key');
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        // Region lookups resolve separately from API keys.
+        return nameList.includes('AWS_REGION')
+          ? undefined
+          : 'provider-secret-key';
+      },
+    );
   });
 
   it('rejects user auth tokens', async () => {
@@ -159,6 +168,133 @@ describe('inference gateway', () => {
 
     expect(anthropicResponse.status).toBe(403);
     expect(openRouterResponse.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('proxies OpenAI-compatible aggregator providers with bearer auth', async () => {
+    const app = createApp(createRunToken());
+
+    const cases: Array<[string, string]> = [
+      ['requesty', 'https://router.requesty.ai/v1/chat/completions'],
+      ['baseten', 'https://inference.baseten.co/v1/chat/completions'],
+      ['togetherai', 'https://api.together.xyz/v1/chat/completions'],
+      ['moonshotai', 'https://api.moonshot.ai/v1/chat/completions'],
+      ['opencode', 'https://opencode.ai/zen/v1/chat/completions'],
+      ['xai', 'https://api.x.ai/v1/chat/completions'],
+    ];
+
+    for (const [providerId, expectedUrl] of cases) {
+      // A Response body can only be consumed once, so re-stub per provider.
+      const fetchMock = stubUpstreamFetch();
+
+      const response = await postMessages(
+        app,
+        `/api/inference/${providerId}/v1/chat/completions`,
+      );
+
+      expect(response.status).toBe(200);
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe(expectedUrl);
+      expect(new Headers(init.headers).get('authorization')).toBe(
+        'Bearer provider-secret-key',
+      );
+    }
+  });
+
+  it('proxies MiniMax through its Anthropic-compatible endpoint', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/minimax/v1/messages',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.minimax.io/anthropic/v1/messages');
+    expect(new Headers(init.headers).get('x-api-key')).toBe(
+      'provider-secret-key',
+    );
+  });
+
+  it('allows nested paths under the Vercel AI Gateway protocol base', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/vercel/v1/ai/language-model',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe('https://ai-gateway.vercel.sh/v1/ai/language-model');
+  });
+
+  it('substitutes the default region for Bedrock upstreams', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/bedrock-mantle/v1/messages',
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'AWS_BEARER_TOKEN_BEDROCK',
+    ]);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://bedrock-mantle.us-east-1.api.aws/anthropic/v1/messages',
+    );
+    expect(new Headers(init.headers).get('x-api-key')).toBe(
+      'provider-secret-key',
+    );
+  });
+
+  it('substitutes a configured region for Bedrock upstreams', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'eu-west-1'
+          : 'provider-secret-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/bedrock-mantle/v1/messages',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe(
+      'https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages',
+    );
+  });
+
+  it('rejects invalid Bedrock regions before building the upstream URL', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('AWS_REGION')
+          ? 'https://evil.example.com/'
+          : 'provider-secret-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/bedrock-mantle/v1/messages',
+    );
+
+    expect(response.status).toBe(500);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

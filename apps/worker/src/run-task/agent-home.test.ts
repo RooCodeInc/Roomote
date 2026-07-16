@@ -173,6 +173,31 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases Bedrock Mantle onto the gateway while keeping its model config', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        AWS_REGION: 'us-west-2',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['bedrock-mantle']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      options: {
+        baseURL: 'https://api.example.com/api/inference/bedrock-mantle/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        'anthropic.claude-sonnet-5': {},
+      },
+    });
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

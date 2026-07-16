@@ -148,6 +148,8 @@ describe('buildBaseWorkerEnv', () => {
     process.env.ANTHROPIC_API_KEY = 'anthropic-key';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
     process.env.AWS_BEARER_TOKEN_BEDROCK = 'bedrock-key';
+    process.env.XAI_API_KEY = 'xai-key';
+    process.env.AWS_REGION = 'us-west-2';
 
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
@@ -158,7 +160,10 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_MODEL).toBe('anthropic/claude-sonnet-5');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
-    // The gateway cannot serve Bedrock yet, so its key still ships.
-    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe('bedrock-key');
+    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
+    expect(env.XAI_API_KEY).toBeUndefined();
+    // Region config is not a secret and Bedrock's Mantle merge still
+    // validates it sandbox-side.
+    expect(env.AWS_REGION).toBe('us-west-2');
   });
 });

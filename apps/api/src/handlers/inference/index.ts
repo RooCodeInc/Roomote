@@ -19,6 +19,7 @@ import {
   formatProviderAuthHeaderValue,
   getInferenceProvider,
   isInferencePathAllowed,
+  resolveProviderUpstreamBaseUrl,
 } from './registry';
 
 /**
@@ -145,12 +146,14 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   let apiKey: string | undefined;
+  let upstreamBaseUrl: string;
 
   try {
     apiKey = await resolveModelProviderEnvValue(provider.envVarNames);
+    upstreamBaseUrl = await resolveProviderUpstreamBaseUrl(provider);
   } catch (error) {
     console.error(
-      formatSingleLineLog(`${logPrefix} Failed to resolve provider key`, {
+      formatSingleLineLog(`${logPrefix} Failed to resolve provider config`, {
         requestId,
         method,
         runId: auth.runId,
@@ -159,7 +162,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     );
 
     return c.json(
-      { error: `Failed to resolve the ${provider.name} API key` },
+      { error: `Failed to resolve the ${provider.name} configuration` },
       500,
     );
   }
@@ -174,7 +177,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   const search = new URL(c.req.url).search;
-  const upstreamUrl = `${provider.upstreamBaseUrl}${upstreamPath}${search}`;
+  const upstreamUrl = `${upstreamBaseUrl}${upstreamPath}${search}`;
 
   try {
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(

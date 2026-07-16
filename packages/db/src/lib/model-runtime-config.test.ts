@@ -667,16 +667,23 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         inferenceGateway: true,
         runtimeEnv: {
           TRPC_URL: 'https://api.roomote.example.com',
-          R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
+          R_MODEL_ENV_KEYS:
+            'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS',
         },
         deploymentEnvVars: {
           ANTHROPIC_API_KEY: 'sk-anthropic',
           AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+          GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
         },
       });
 
       expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
-      expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe('bedrock-key');
+      expect(env).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+      // Vertex needs request signing, not header injection, so its
+      // credentials still flow until the gateway can serve it.
+      expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
+        '{"type":"service_account"}',
+      );
       expect(env.R_INFERENCE_GATEWAY_URL).toBe(
         'https://api.roomote.example.com/api/inference',
       );
