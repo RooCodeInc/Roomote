@@ -1626,24 +1626,18 @@ export async function saveSetupNewComputeProviderChoiceCommand(
     const hasCredentialFields = providerStatus.fields.some(
       isComputeCredentialField,
     );
-    // Credential-backed providers normally commit the runtime default when
-    // their config step is confirmed, so merely browsing a hosted provider
-    // must not switch the deployment onto it. When the chosen provider is
-    // already fully configured there is nothing left for the config step to
-    // collect (the wizard skips it), so the choice itself is the
-    // confirmation and commits the default — otherwise the wizard would
-    // advance while dispatch still targets the previous default.
-    // Credentialless providers such as Local Docker have no config step to
-    // confirm and commit immediately for the same reason.
-    const commitsRuntimeDefault =
-      !hasCredentialFields || providerStatus.configSatisfied;
-    const runtimeComputeConfig = commitsRuntimeDefault
-      ? normalizeDeploymentComputeConfig({
+    const runtimeComputeConfig = hasCredentialFields
+      ? persistedRuntimeComputeConfig
+      : normalizeDeploymentComputeConfig({
           ...persistedRuntimeComputeConfig,
           defaultProvider: input.provider,
-        })
-      : persistedRuntimeComputeConfig;
+        });
 
+    // Providers with credentials are only recorded as the wizard choice here.
+    // The runtime default commits when their config step is confirmed, so
+    // merely browsing a hosted provider must not switch the deployment onto it.
+    // Credentialless providers such as Local Docker have no config step to
+    // confirm, so choosing them commits the runtime default immediately.
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       computeProvider: input.provider,
@@ -1652,9 +1646,9 @@ export async function saveSetupNewComputeProviderChoiceCommand(
 
     await Promise.all([
       savePersistedSetupNewState(setupNewState, tx),
-      ...(commitsRuntimeDefault
-        ? [savePersistedRuntimeComputeConfig(runtimeComputeConfig, tx)]
-        : []),
+      ...(hasCredentialFields
+        ? []
+        : [savePersistedRuntimeComputeConfig(runtimeComputeConfig, tx)]),
     ]);
 
     return {
