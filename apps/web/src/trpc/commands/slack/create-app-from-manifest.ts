@@ -26,7 +26,7 @@ type SlackManifestCreateResponse = {
 };
 
 type CreateSlackAppFromManifestResult =
-  | { success: true; appId: string }
+  | { success: true; appId: string; appSettingsUrl: string }
   | { success: false; error: string };
 
 const CONFIG_TOKEN_ERRORS = new Set([
@@ -164,7 +164,11 @@ export async function createSlackAppFromManifest({
       });
     });
 
-    return { success: true, appId };
+    return {
+      success: true,
+      appId,
+      appSettingsUrl: `https://api.slack.com/apps/${encodeURIComponent(appId)}`,
+    };
   } catch (error) {
     console.error('[createSlackAppFromManifest] Unhandled error:', error);
 

@@ -295,6 +295,7 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  createdSlackAppSettingsUrl?: string | null;
   createSlackAppPending?: boolean;
   showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
@@ -334,6 +335,38 @@ function ProviderSetupTitle({
 
 function SlackSetupExperience(props: ProviderSetupExperienceProps) {
   const [configToken, setConfigToken] = useState('');
+  const createdSlackAppSettingsUrl = props.createdSlackAppSettingsUrl ?? null;
+
+  if (createdSlackAppSettingsUrl) {
+    return (
+      <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
+        <ProviderSetupTitle surface={props.surface} text="Finish Slack app" />
+
+        <div className="space-y-4 max-w-xl">
+          <p>
+            Your Slack app is ready. Adding a logo is optional: open{' '}
+            <a
+              href={createdSlackAppSettingsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline font-semibold"
+            >
+              the app
+            </a>
+            , scroll down to App icon, and upload{' '}
+            <a
+              href="/api/setup/roomote-logo"
+              download
+              className="text-foreground underline font-semibold"
+            >
+              the Roomote logo
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (
     !props.showManualSlackValues &&

@@ -513,8 +513,9 @@ export function CommsProviderSection({
           return;
         }
 
+        setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
         toast.success(
-          'Slack app created and credentials saved. Connect it to your workspace to finish.',
+          'Slack app created and credentials saved. Add the Roomote icon, then connect it to your workspace.',
         );
         await queryClient.invalidateQueries({
           queryKey: trpc.comms.status.queryKey(),
@@ -559,6 +560,9 @@ export function CommsProviderSection({
     Record<string, boolean>
   >({});
   const [showManualSlackValues, setShowManualSlackValues] = useState(false);
+  const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
+    string | null
+  >(null);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -566,6 +570,7 @@ export function CommsProviderSection({
     setEditingSavedValues({});
     setClearedSavedValues({});
     setShowManualSlackValues(false);
+    setCreatedSlackAppSettingsUrl(null);
     setRemoveDialogOpen(false);
     // nonSecretInitialValues is content-keyed to avoid identity-only resets.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
@@ -731,6 +736,7 @@ export function CommsProviderSection({
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
               showManualSlackValues={showManualSlackValues}
+              createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
               createSlackAppPending={createSlackApp.isPending}
               surface="settings"
               envVarsInfoNote={

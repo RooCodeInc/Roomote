@@ -128,6 +128,15 @@ vi.mock('@tanstack/react-query', () => ({
   }) => ({
     isPending: state.updateRouterDebugIsPending,
     mutate: (input: unknown) => {
+      if (input && typeof input === 'object' && 'configToken' in input) {
+        options.onSuccess?.({
+          success: true,
+          appId: 'A0NEWAPP',
+          appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+        });
+        return;
+      }
+
       mutations.updateRouterDebug(input);
       options.onSuccess?.({
         routerDebugSlackChannelId:
@@ -572,11 +581,11 @@ describe('CommsProviderSection', () => {
         screen.getByLabelText('App configuration token'),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('link', { name: /prefilled manifest/ }),
+        screen.getByRole('button', { name: /Create app manually/ }),
       ).toBeInTheDocument();
 
       fireEvent.click(
-        screen.getByRole('button', { name: /Enter values manually/ }),
+        screen.getByRole('button', { name: /Create app manually/ }),
       );
 
       expect(
@@ -588,6 +597,32 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText(/Create a new Slack app/)).toBeInTheDocument();
       expect(screen.getByText('Authorized redirect URLs')).toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+    });
+
+    it('shows logo actions after creating a Slack app from a config token', async () => {
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByLabelText('App configuration token'), {
+        target: { value: 'xoxe.xoxp-config-token' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Create Slack app' }));
+
+      expect(
+        await screen.findByRole('link', { name: /the Roomote logo/i }),
+      ).toHaveAttribute('href', '/api/setup/roomote-logo');
+      expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
+        'href',
+        'https://api.slack.com/apps/A0NEWAPP',
+      );
     });
 
     it('shows numbered Microsoft setup with the settings env-var note', () => {

@@ -105,7 +105,11 @@ describe('createSlackAppFromManifestCommand', () => {
       configToken: '  xoxe.xoxp-token  ',
     });
 
-    expect(result).toEqual({ success: true, appId: 'A0NEWAPP' });
+    expect(result).toEqual({
+      success: true,
+      appId: 'A0NEWAPP',
+      appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+    });
 
     expect(mockFetch).toHaveBeenCalledTimes(1);
     const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
