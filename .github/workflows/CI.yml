@@ -71,8 +71,15 @@ jobs:
           # only by its own Dockerfile/context inputs. The app image, by
           # contrast, copies apps/worker (and packages the worker release), so a
           # worker-only change still rebuilds the app image; the app rows stay
-          # gated on docs_only alone. Default true so any unrecognized path that
-          # could feed the worker context still triggers a build.
+          # gated on docs_only alone.
+          #
+          # This is a closed allowlist: worker_image_affected starts false and
+          # only the paths matched below flip it true, so an unrecognized path
+          # does NOT trigger a worker build. If the worker image ever consumes a
+          # new build-context input, add its path to the case below or the
+          # worker build will be skipped for changes to it. The build-everything
+          # fail-safe only covers the uncertain-diff cases handled by
+          # emit_build_all above (manual dispatch, gone base, empty diff).
           docs_only=true
           worker_image_affected=false
           while IFS= read -r path; do
