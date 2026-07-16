@@ -1236,150 +1236,213 @@ function matchOpenTag(
   return close + 1;
 }
 
-function consumeNewlineWrappedBlock(
+function findStructuralClose(
+  text: string,
+  searchFrom: number,
+  closeMarker: string,
+  accept: (closeIndex: number, afterClose: number) => boolean,
+): { closeIndex: number; afterClose: number } | null {
+  let from = searchFrom;
+  while (from <= text.length) {
+    const closeIndex = text.indexOf(closeMarker, from);
+    if (closeIndex === -1) {
+      return null;
+    }
+
+    const afterClose = skipAsciiWhitespace(
+      text,
+      closeIndex + closeMarker.length,
+    );
+    if (accept(closeIndex, afterClose)) {
+      return { closeIndex, afterClose };
+    }
+
+    from = closeIndex + 1;
+  }
+
+  return null;
+}
+
+function matchesThreadActivityOnlyFrom(text: string, index: number): boolean {
+  if (index === text.length) {
+    return true;
+  }
+
+  const openTag = '<thread_activity>';
+  if (!text.startsWith(openTag, index)) {
+    return false;
+  }
+
+  const afterOpen = index + openTag.length;
+  const closeTag = '</thread_activity>';
+  const found = findStructuralClose(
+    text,
+    afterOpen,
+    closeTag,
+    (_close, afterClose) => matchesThreadActivityOnlyFrom(text, afterClose),
+  );
+
+  return found !== null;
+}
+
+function isSlackThreadActivityOnlyBlock(text: string): boolean {
+  return text.length > 0 && matchesThreadActivityOnlyFrom(text, 0);
+}
+
+type SlackTranscriptParseStage =
+  | 'leading_activity'
+  | 'thread_context'
+  | 'trailing_activity'
+  | 'replying_to'
+  | 'slack_turn_policy'
+  | 'slack_message';
+
+function consumeNewlineWrappedBlockForStage(
   text: string,
   index: number,
   tagName: string,
   allowAttributes: boolean,
-): number | null {
+  continueFrom: (afterClose: number) => string | null,
+): string | null {
   const afterOpen = matchOpenTag(text, index, tagName, allowAttributes);
   if (afterOpen === null || text[afterOpen] !== '\n') {
     return null;
   }
 
-  const closeTag = `</${tagName}>`;
-  const closeMarker = `\n${closeTag}`;
-  const closeIndex = text.indexOf(closeMarker, afterOpen + 1);
-  if (closeIndex === -1) {
+  const closeMarker = `\n</${tagName}>`;
+  const found = findStructuralClose(
+    text,
+    afterOpen + 1,
+    closeMarker,
+    (_close, afterClose) => continueFrom(afterClose) !== null,
+  );
+  if (found === null) {
     return null;
   }
 
-  return skipAsciiWhitespace(text, closeIndex + closeMarker.length);
+  return continueFrom(found.afterClose);
 }
 
-function consumeThreadActivityBlockFlexible(
+function parseSlackTranscriptMessage(
   text: string,
   index: number,
-): number | null {
-  const openTag = '<thread_activity>';
-  if (!text.startsWith(openTag, index)) {
-    return null;
-  }
+  stage: SlackTranscriptParseStage,
+): string | null {
+  switch (stage) {
+    case 'leading_activity': {
+      const consumed = consumeNewlineWrappedBlockForStage(
+        text,
+        index,
+        'thread_activity',
+        false,
+        (afterClose) =>
+          parseSlackTranscriptMessage(text, afterClose, 'leading_activity'),
+      );
+      if (consumed !== null) {
+        return consumed;
+      }
 
-  const afterOpen = index + openTag.length;
-  const closeTag = '</thread_activity>';
-  const closeIndex = text.indexOf(closeTag, afterOpen);
-  if (closeIndex === -1) {
-    return null;
-  }
-
-  return skipAsciiWhitespace(text, closeIndex + closeTag.length);
-}
-
-function isSlackThreadActivityOnlyBlock(text: string): boolean {
-  let index = 0;
-  let matchedCount = 0;
-
-  while (index < text.length) {
-    const next = consumeThreadActivityBlockFlexible(text, index);
-    if (next === null || next === index) {
-      return false;
+      return parseSlackTranscriptMessage(text, index, 'thread_context');
     }
 
-    matchedCount += 1;
-    index = next;
-  }
+    case 'thread_context': {
+      const consumed = consumeNewlineWrappedBlockForStage(
+        text,
+        index,
+        'thread_context',
+        false,
+        (afterClose) =>
+          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
+      );
+      if (consumed !== null) {
+        return consumed;
+      }
 
-  return matchedCount > 0 && index === text.length;
+      return parseSlackTranscriptMessage(text, index, 'trailing_activity');
+    }
+
+    case 'trailing_activity': {
+      const consumed = consumeNewlineWrappedBlockForStage(
+        text,
+        index,
+        'thread_activity',
+        false,
+        (afterClose) =>
+          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
+      );
+      if (consumed !== null) {
+        return consumed;
+      }
+
+      return parseSlackTranscriptMessage(text, index, 'replying_to');
+    }
+
+    case 'replying_to': {
+      const consumed = consumeNewlineWrappedBlockForStage(
+        text,
+        index,
+        'replying_to',
+        true,
+        (afterClose) =>
+          parseSlackTranscriptMessage(text, afterClose, 'slack_turn_policy'),
+      );
+      if (consumed !== null) {
+        return consumed;
+      }
+
+      return parseSlackTranscriptMessage(text, index, 'slack_turn_policy');
+    }
+
+    case 'slack_turn_policy': {
+      const consumed = consumeNewlineWrappedBlockForStage(
+        text,
+        index,
+        'slack_turn_policy',
+        true,
+        (afterClose) =>
+          parseSlackTranscriptMessage(text, afterClose, 'slack_message'),
+      );
+      if (consumed !== null) {
+        return consumed;
+      }
+
+      return parseSlackTranscriptMessage(text, index, 'slack_message');
+    }
+
+    case 'slack_message': {
+      const afterOpen = matchOpenTag(text, index, 'slack_message', true);
+      if (afterOpen === null) {
+        return null;
+      }
+
+      let contentStart = afterOpen;
+      if (text[contentStart] === '\n') {
+        contentStart += 1;
+      }
+
+      const closeTag = '</slack_message>';
+      const found = findStructuralClose(
+        text,
+        contentStart,
+        closeTag,
+        (_close, afterClose) => afterClose === text.length,
+      );
+      if (found === null) {
+        return null;
+      }
+
+      let contentEnd = found.closeIndex;
+      if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
+        contentEnd -= 1;
+      }
+
+      return text.slice(contentStart, contentEnd);
+    }
+  }
 }
 
 function extractSlackTranscriptMessageContent(text: string): string | null {
-  let index = 0;
-
-  while (true) {
-    const next = consumeNewlineWrappedBlock(
-      text,
-      index,
-      'thread_activity',
-      false,
-    );
-    if (next === null) {
-      break;
-    }
-    index = next;
-  }
-
-  {
-    const next = consumeNewlineWrappedBlock(
-      text,
-      index,
-      'thread_context',
-      false,
-    );
-    if (next !== null) {
-      index = next;
-    }
-  }
-
-  while (true) {
-    const next = consumeNewlineWrappedBlock(
-      text,
-      index,
-      'thread_activity',
-      false,
-    );
-    if (next === null) {
-      break;
-    }
-    index = next;
-  }
-
-  {
-    const next = consumeNewlineWrappedBlock(text, index, 'replying_to', true);
-    if (next !== null) {
-      index = next;
-    }
-  }
-
-  {
-    const next = consumeNewlineWrappedBlock(
-      text,
-      index,
-      'slack_turn_policy',
-      true,
-    );
-    if (next !== null) {
-      index = next;
-    }
-  }
-
-  const afterOpen = matchOpenTag(text, index, 'slack_message', true);
-  if (afterOpen === null) {
-    return null;
-  }
-
-  let contentStart = afterOpen;
-  if (text[contentStart] === '\n') {
-    contentStart += 1;
-  }
-
-  const closeTag = '</slack_message>';
-  const closeIndex = text.indexOf(closeTag, contentStart);
-  if (closeIndex === -1) {
-    return null;
-  }
-
-  let contentEnd = closeIndex;
-  if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
-    contentEnd -= 1;
-  }
-
-  const afterClose = skipAsciiWhitespace(text, closeIndex + closeTag.length);
-  if (afterClose !== text.length) {
-    return null;
-  }
-
-  return text.slice(contentStart, contentEnd);
+  return parseSlackTranscriptMessage(text, 0, 'leading_activity');
 }
 
 const COMMUNICATION_TRANSCRIPT_MESSAGE_BLOCK_PATTERN =
