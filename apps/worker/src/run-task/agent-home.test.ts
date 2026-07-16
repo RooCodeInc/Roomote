@@ -125,6 +125,83 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toThrow('AWS_REGION must be a valid AWS region');
   });
 
+  it('rebases gateway-covered providers onto the inference gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        R_SMALL_MODEL: 'google/gemini-3.5-flash',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.anthropic).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/anthropic/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+    expect(config.provider.google).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/google/v1beta',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+  });
+
+  it('keeps OpenRouter attribution headers when rebasing onto the gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: {
+        openrouter: { options: Record<string, unknown> };
+      };
+    };
+
+    expect(config.provider.openrouter.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openrouter/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      headers: expect.objectContaining({}) as Record<string, string>,
+    });
+  });
+
+  it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai/gpt-5.4-codex',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth"}}',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.openai).toBeUndefined();
+  });
+
+  it('does not touch provider base URLs when no gateway URL is present', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(result.configContent).not.toContain('baseURL');
+    expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
+  });
+
   it('materializes inline Google Vertex credentials before OpenCode starts', () => {
     const homeDir = createHomeDir();
     const credentialsJson = JSON.stringify({

@@ -620,4 +620,89 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
   });
+
+  describe('inference gateway', () => {
+    beforeEach(() => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+      });
+    });
+
+    it('replaces gateway-covered keys with the gateway URL for sandbox env', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        target: 'sandbox',
+        runtimeEnv: {
+          R_INFERENCE_GATEWAY: '1',
+          TRPC_URL: 'https://api.roomote.example.com',
+        },
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_URL).toBe(
+        'https://api.roomote.example.com/api/inference',
+      );
+    });
+
+    it('honors the flag from persisted deployment env vars', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        target: 'sandbox',
+        runtimeEnv: { TRPC_URL: 'https://api.roomote.example.com' },
+        deploymentEnvVars: {
+          R_INFERENCE_GATEWAY: 'true',
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_URL).toBe(
+        'https://api.roomote.example.com/api/inference',
+      );
+    });
+
+    it('keeps raw keys for control-plane env even when the flag is on', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {
+          R_INFERENCE_GATEWAY: '1',
+          TRPC_URL: 'https://api.roomote.example.com',
+        },
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env.ANTHROPIC_API_KEY).toBe('sk-anthropic');
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_URL');
+    });
+
+    it('falls back to raw keys when no platform API URL is available', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        target: 'sandbox',
+        runtimeEnv: { R_INFERENCE_GATEWAY: '1' },
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env.ANTHROPIC_API_KEY).toBe('sk-anthropic');
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_URL');
+    });
+
+    it('keeps keys the gateway does not cover', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        target: 'sandbox',
+        runtimeEnv: {
+          R_INFERENCE_GATEWAY: '1',
+          TRPC_URL: 'https://api.roomote.example.com',
+          R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
+        },
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe('bedrock-key');
+      expect(env.R_INFERENCE_GATEWAY_URL).toBe(
+        'https://api.roomote.example.com/api/inference',
+      );
+    });
+  });
 });

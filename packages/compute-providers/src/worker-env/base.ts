@@ -1,6 +1,9 @@
 import { Env } from '@roomote/env';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  isInferenceGatewayEnabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -80,8 +83,21 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     env.R_MODEL_ENV_KEYS = process.env.R_MODEL_ENV_KEYS;
   }
 
+  // When the inference gateway is enabled, gateway-covered provider keys
+  // stay on the control plane: the per-task dequeue env routes the harness
+  // through the gateway instead. Keys the gateway cannot serve yet (Bedrock,
+  // Vertex) still ship with the worker daemon env.
+  const gatewayEnabled = isInferenceGatewayEnabled(
+    process.env[INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME],
+  );
+  const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
+
   for (const key of getOperatorModelProviderEnvKeys()) {
     if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+      continue;
+    }
+
+    if (gatewayEnabled && gatewayCoveredKeys.has(key)) {
       continue;
     }
 

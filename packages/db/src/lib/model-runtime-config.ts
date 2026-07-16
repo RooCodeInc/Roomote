@@ -1,10 +1,15 @@
 import { eq } from 'drizzle-orm';
 import {
+  buildInferenceGatewayUrl,
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   isConfiguredEnvValue,
+  isInferenceGatewayEnabled,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
@@ -154,6 +159,15 @@ export async function resolveEffectiveModelRuntimeEnv(
     runtimeEnv?: Partial<Record<string, string | undefined>>;
     deploymentEnvVars?: Record<string, string>;
     executor?: DatabaseOrTransaction;
+    /**
+     * Where the resolved env is consumed. `sandbox` env may route inference
+     * through the gateway (provider keys stay on the control plane and
+     * `R_INFERENCE_GATEWAY_URL` is emitted instead); `control-plane` env
+     * always carries raw provider keys because control-plane inference
+     * (routing, titles, summaries) holds no run token to present to the
+     * gateway.
+     */
+    target?: 'sandbox' | 'control-plane';
   } = {},
 ): Promise<Record<string, string>> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
@@ -266,8 +280,33 @@ export async function resolveEffectiveModelRuntimeEnv(
       resolvedRoomotePlanningModel,
     ],
   });
+  // Sandbox env may route inference through the gateway: provider keys the
+  // gateway covers stay on the control plane, and the sandbox gets the
+  // gateway URL instead. Keys the gateway cannot serve yet (Bedrock, Vertex)
+  // still flow through. Requires a sandbox-reachable platform API URL; when
+  // none is configured, fall back to direct keys rather than breaking
+  // inference.
+  const gatewayPlatformApiUrl = normalizeConfiguredValue(runtimeEnv.TRPC_URL);
+  const inferenceGatewayUrl =
+    options.target === 'sandbox' &&
+    isInferenceGatewayEnabled(
+      normalizeConfiguredValue(
+        runtimeEnv[INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME],
+      ) ?? persistedEnvVars[INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME],
+    ) &&
+    gatewayPlatformApiUrl
+      ? buildInferenceGatewayUrl(gatewayPlatformApiUrl)
+      : undefined;
+  const gatewayCoveredKeyNames = new Set(
+    INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  );
+
   const resolvedProviderKeyValues = Object.fromEntries(
     providerKeyNames.flatMap((envVarName) => {
+      if (inferenceGatewayUrl && gatewayCoveredKeyNames.has(envVarName)) {
+        return [];
+      }
+
       const value =
         normalizeConfiguredValue(runtimeEnv[envVarName]) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
@@ -347,6 +386,9 @@ export async function resolveEffectiveModelRuntimeEnv(
         R_MODEL_ENV_KEYS: providerKeyNames.join(','),
       }),
     ...resolvedProviderKeyValues,
+    ...(inferenceGatewayUrl && {
+      [INFERENCE_GATEWAY_URL_ENV_VAR_NAME]: inferenceGatewayUrl,
+    }),
     ...(injectedOpenCodeAuthContent && {
       OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,
     }),
