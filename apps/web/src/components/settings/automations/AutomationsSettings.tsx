@@ -1035,11 +1035,17 @@ export function buildManagerSlackChannelOptions(params: {
 export function buildAutomationDiscordDestinationOptions(params: {
   channels: Array<{ id: string; name: string; label: string }>;
   selectedChannelId: string | null | undefined;
+  /**
+   * The "(Discord)" suffix only disambiguates when Slack channels can appear
+   * in the same picker; on a Discord-only deployment it is noise.
+   */
+  includeProviderSuffix: boolean;
 }): SlackChannelOption[] {
+  const suffix = params.includeProviderSuffix ? ' (Discord)' : '';
   const options = params.channels.map((channel) => ({
     id: `${DISCORD_DESTINATION_OPTION_PREFIX}${channel.id}`,
     name: channel.name,
-    label: `${channel.label} (Discord)`,
+    label: `${channel.label}${suffix}`,
   }));
 
   const selectedChannelId = params.selectedChannelId?.trim();
@@ -1060,7 +1066,7 @@ export function buildAutomationDiscordDestinationOptions(params: {
     {
       id: selectedOptionId,
       name: selectedChannelId!,
-      label: `#${selectedChannelId} (Discord)`,
+      label: `#${selectedChannelId}${suffix}`,
     },
     ...options,
   ];
@@ -2289,6 +2295,7 @@ export function AutomationsSettings() {
     [slackChannelChoices],
   );
   const discordConnected = capabilities?.discordConnected === true;
+  const slackConnected = capabilities?.slackConnected === true;
   const renderSlackDestinationField = useCallback(
     ({
       field,
@@ -2322,6 +2329,7 @@ export function AutomationsSettings() {
           ? buildAutomationDiscordDestinationOptions({
               channels: discordChannelsQuery.data?.channels ?? [],
               selectedChannelId: discordValue || null,
+              includeProviderSuffix: slackConnected,
             })
           : []),
       ];
