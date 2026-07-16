@@ -890,11 +890,7 @@ export function ModelSettingsSection({
         highlightedIndex: nextHighlightedIndex >= 0 ? nextHighlightedIndex : 0,
       };
     });
-  }, [
-    activeNewModelProvider,
-    debouncedSuggestionQuery,
-    suggestionsQuery.data?.suggestions,
-  ]);
+  }, [activeNewModelProvider, debouncedSuggestionQuery, suggestionsQuery.data]);
 
   useEffect(() => {
     if (selectedSuggestionSlugRef.current !== normalizedNewModelId) {
