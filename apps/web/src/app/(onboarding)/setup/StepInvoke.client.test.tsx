@@ -12,6 +12,9 @@ const environmentState = vi.hoisted(() => ({
     setupSatisfied: boolean;
   }>,
 }));
+const userState = vi.hoisted(() => ({
+  user: null as { cloudEnabled: boolean } | null,
+}));
 const queryKeys = {
   setupStatus: ['setup.status'],
   onboardingStatus: ['onboarding.status'],
@@ -95,6 +98,10 @@ vi.mock('@/hooks/environments/useEnvironments', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => userState,
+}));
+
 vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
@@ -173,6 +180,7 @@ describe('Setup StepInvoke', () => {
     });
     environmentState.environments = [{ id: 'env-1' }];
     environmentState.commsProviders = [];
+    userState.user = null;
   });
 
   it('shows an actionable retry when sandbox provisioning fails', () => {
@@ -208,6 +216,7 @@ describe('Setup StepInvoke', () => {
     fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
 
     expect(onTryItOut).toHaveBeenCalledTimes(1);
+    expect(mutationOptionsMock).toHaveBeenCalled();
 
     await waitFor(() => {
       expect(setQueryDataMock).toHaveBeenCalledWith(
@@ -268,6 +277,16 @@ describe('Setup StepInvoke', () => {
     });
 
     expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-1');
+  });
+
+  it('hides the anonymous analytics opt-out for Roomote Cloud', () => {
+    userState.user = { cloudEnabled: true };
+
+    render(<StepInvoke />);
+
+    expect(
+      screen.queryByRole('checkbox', { name: 'Toggle anonymous analytics' }),
+    ).not.toBeInTheDocument();
   });
 
   it('routes to the first environment when multiple environments exist', async () => {

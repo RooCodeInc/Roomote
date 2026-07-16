@@ -107,6 +107,12 @@ const serverSchema = {
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  // Roomote Cloud-only analytics and support integrations. These values are
+  // intentionally not used by self-hosted deployments.
+  R_CLOUD_ENABLED: optInBoolean(),
+  R_INTERCOM_APP_ID: z.string().min(1).optional(),
+  R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
+  R_POSTHOG_HOST: z.string().url().optional(),
   // Force-enable telemetry in environments that would otherwise stay silent
   // (development / builds without RELEASE_VERSION). Testing escape hatch.
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
@@ -385,6 +391,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
   'R_PING_BASE_URL',
+  'R_INTERCOM_APP_ID',
+  'R_POSTHOG_PROJECT_KEY',
+  'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
   'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
@@ -486,6 +495,15 @@ export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 export function isEnvFlagEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+}
+
+/** Whether Roomote Cloud-only behavior is enabled for this deployment. */
+export function isRoomoteCloudEnabled(
+  value: string | boolean | undefined,
+): boolean {
+  return (
+    value === true || (typeof value === 'string' && isEnvFlagEnabled(value))
+  );
 }
 
 /**

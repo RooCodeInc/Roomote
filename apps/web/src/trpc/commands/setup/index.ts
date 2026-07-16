@@ -33,6 +33,7 @@ import {
   getSetupBaseStatus,
 } from './shared';
 import { ensureManagedReviewerEnabledByDefaultInTx } from '../automations';
+import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
 
 // --- Mutations ---
 
@@ -406,7 +407,10 @@ export async function completeSetupCommand(
     // completion when the wizard provided one (opt-out: default stays
     // enabled when the field is absent).
     let metadataUpdate: Record<string, unknown> | undefined;
-    if (input?.anonymousAnalyticsEnabled !== undefined) {
+    const anonymousAnalyticsEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)
+      ? true
+      : input?.anonymousAnalyticsEnabled;
+    if (anonymousAnalyticsEnabled !== undefined) {
       const existingSettings = await tx.query.deploymentSettings.findFirst({
         where: eq(deploymentSettings.id, 'default'),
         columns: { metadata: true },
@@ -419,7 +423,7 @@ export async function completeSetupCommand(
           : {};
       metadataUpdate = {
         ...existingMetadata,
-        [ANONYMOUS_ANALYTICS_METADATA_KEY]: input.anonymousAnalyticsEnabled,
+        [ANONYMOUS_ANALYTICS_METADATA_KEY]: anonymousAnalyticsEnabled,
       };
     }
 

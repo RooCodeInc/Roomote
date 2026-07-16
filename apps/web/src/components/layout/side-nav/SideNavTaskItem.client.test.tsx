@@ -283,21 +283,18 @@ describe('SideNavTaskItem', () => {
     expect(taskStatusIndicatorMock).not.toHaveBeenCalled();
     expect(spinnerMock).toHaveBeenCalledWith('size-4 shrink-0 animate-spin');
     expect(screen.getByRole('link', { name: longTitle }).className).toContain(
-      'px-4',
+      'px-0',
     );
     expect(
       screen.getByRole('link', { name: longTitle }).className,
     ).not.toContain('pr-10');
-    expect(screen.getByRole('link', { name: longTitle }).className).toContain(
-      'py-2',
-    );
     expect(screen.getByRole('link', { name: longTitle }).className).toContain(
       'min-h-10',
     );
     expect(screen.getByRole('link', { name: longTitle }).className).toContain(
       'gap-2',
     );
-    expect(screen.getAllByText(longTitle)[0]).toHaveClass('line-clamp-2');
+    expect(screen.getAllByText(longTitle)[0]).toHaveClass('line-clamp-1');
     expect(screen.getAllByText(longTitle)[0]).toHaveClass('wrap-break-word');
   });
 

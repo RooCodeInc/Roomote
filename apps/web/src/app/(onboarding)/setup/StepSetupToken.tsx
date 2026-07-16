@@ -49,11 +49,7 @@ export function StepSetupToken({
           placeholder="Setup token"
           data-1p-ignore
         />
-        <Button
-          type="submit"
-          className="w-full sm:w-auto"
-          disabled={trimmedValue.length === 0}
-        >
+        <Button type="submit" disabled={trimmedValue.length === 0}>
           Continue
           <ArrowRight />
         </Button>

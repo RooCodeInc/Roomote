@@ -337,7 +337,6 @@ export function StepSourceControlConnect({
               </p>
             ) : (
               <Button
-                className="w-full sm:w-auto"
                 onClick={() =>
                   authenticateAdoAccount.mutate(
                     `${window.location.pathname}?step=source-control-connect`,
@@ -360,7 +359,6 @@ export function StepSourceControlConnect({
           <p>{githubCopy}</p>
           <SetupFooter onBack={onBack}>
             <Button
-              className="w-full sm:w-auto"
               onClick={() =>
                 createInstallation.mutate(
                   `${window.location.pathname}?step=source-control-connect`,
@@ -384,7 +382,6 @@ export function StepSourceControlConnect({
           ) : null}
           <SetupFooter onBack={onBack}>
             <Button
-              className="w-full sm:w-auto"
               onClick={() => void handleSyncRepositories()}
               disabled={
                 syncRepositories.isPending || saveAdoLinkedAccount.isPending

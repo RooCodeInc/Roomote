@@ -8,7 +8,7 @@ import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import { useUser } from '@/hooks/useUser';
 import { DEFAULT_SETUP_REDIRECT_PATH, requiresSetup } from '@/lib/setup-status';
 import { useTRPC } from '@/trpc/client';
-import { FramedSurface, UserMenu } from '@/components/layout';
+import { FramedSurface, RoomoteWordmark, UserMenu } from '@/components/layout';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -86,13 +86,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="light text-foreground relative min-h-viewport w-full overflow-hidden bg-white md:h-viewport">
+      <RoomoteWordmark className="absolute top-8 left-8 h-8 hidden lg:block" />
       <div ref={setUserMenuPortalContainer} className="light text-foreground" />
       <FramedSurface
         variant="bold"
         frameClassName="m-0.5 md:m-2 h-[calc(var(--effective-viewport-height)-0.25rem)] w-[calc(100svw-0.25rem)] scroll-minimal overflow-hidden md:m-4 md:h-[calc(var(--effective-viewport-height)-2rem)] md:w-[calc(100vw-2rem)]"
         surfaceClassName="flex flex-col !overflow-y-auto !overflow-x-hidden md:items-center"
       >
-        <div className="z-50 flex w-full justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0">
+        <div className="z-50 flex w-full gap-2 justify-end px-4 pt-4 md:fixed md:right-9 md:top-9 md:w-auto md:px-0 md:pt-0 ">
+          <RoomoteWordmark className="h-8 hidden sm:block lg:hidden" />
           <UserMenu portalContainer={userMenuPortalContainer} />
         </div>
         <div className="relative flex w-full max-w-3xl flex-col md:min-h-full">

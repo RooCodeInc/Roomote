@@ -100,6 +100,7 @@ vi.mock('./env', () => ({
   Env: {
     R_ALLOWED_EMAILS: '',
   },
+  isRoomoteCloudEnabled: () => false,
 }));
 
 vi.mock('./sentry-context', () => ({
