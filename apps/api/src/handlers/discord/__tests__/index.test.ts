@@ -319,6 +319,8 @@ describe('Discord Gateway event handler', () => {
           communicationProvider: 'discord',
           communicationChannelId: 'dm-1',
           communicationMessageId: 'message-1',
+          // A real channel message carries an anchor for its task thread.
+          communicationAnchorMessageId: 'message-1',
         },
       }),
     );

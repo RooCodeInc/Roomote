@@ -230,3 +230,30 @@ describe('Discord Gateway event normalization', () => {
     expect(discordEventToQueuedCommunicationMessage(help)).toBeNull();
   });
 });
+
+describe('component interaction envelopes', () => {
+  it('accepts the numeric data.id Discord sends for real button clicks', () => {
+    const result = parseDiscordGatewayEvent({
+      eventId: 'interaction-1',
+      eventType: 'INTERACTION_CREATE',
+      payload: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        guild_id: 'guild-1',
+        channel_id: 'channel-1',
+        member: { user: { id: 'user-1', username: 'dan' } },
+        // Real component interactions carry the numeric layout id of the
+        // pressed component, not a snowflake string.
+        data: {
+          id: 2,
+          custom_id: 'discord:route:abcdefghijkl:0',
+          component_type: 2,
+        },
+      },
+      receivedAt: '2026-07-16T18:40:15.343Z',
+    });
+    expect(result.success).toBe(true);
+  });
+});
