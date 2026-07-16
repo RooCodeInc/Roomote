@@ -238,6 +238,7 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
   {
     provider: 'roomote',
     label: 'Roomote Sandbox',
+    comment: 'Works out of the box',
     description:
       'Managed sandboxes preconfigured by your deployment, with snapshot support. Nothing to set up.',
     supportsSnapshots: true,
