@@ -9,6 +9,7 @@ export {
   ArrowDownIcon,
   ArrowLeft,
   ArrowLeftFromLine,
+  ArrowLeftRight,
   ArrowRight,
   ArrowRightIcon,
   ArrowRightToLine,
