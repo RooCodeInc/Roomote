@@ -2,8 +2,18 @@ import { fireEvent, render, screen } from '@testing-library/react';
 
 import { CloudAnalyticsProvider } from './CloudAnalyticsProvider';
 
+let pathname = '/tasks';
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => pathname,
+}));
+
 describe('CloudAnalyticsProvider', () => {
   beforeEach(() => {
+    pathname = '/tasks';
+    document.head.querySelectorAll('script').forEach((script) => {
+      script.remove();
+    });
     window.posthog = undefined;
     window.Intercom = undefined;
   });
@@ -69,5 +79,119 @@ describe('CloudAnalyticsProvider', () => {
     );
 
     expect(posthog).toContainEqual(['identify', 'user-1']);
+  });
+
+  it('hides the default Intercom launcher on signed-in pages outside the allowlist', () => {
+    const intercom = vi.fn();
+    window.Intercom = intercom;
+
+    render(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        intercomAppId="intercom-app"
+        userId="user-1"
+      />,
+    );
+
+    fireEvent.load(
+      document.head.querySelector(
+        'script[src="https://widget.intercom.io/widget/intercom-app"]',
+      )!,
+    );
+
+    expect(intercom).toHaveBeenCalledWith('boot', {
+      app_id: 'intercom-app',
+      hide_default_launcher: true,
+    });
+  });
+
+  it.each(['/setup', '/onboarding', '/analytics', '/automations'])(
+    'keeps the default Intercom launcher visible on %s pages',
+    (allowedPathname) => {
+      const intercom = vi.fn();
+      window.Intercom = intercom;
+      pathname = allowedPathname;
+
+      render(
+        <CloudAnalyticsProvider
+          cloudEnabled
+          intercomAppId="intercom-app"
+          userId="user-1"
+        />,
+      );
+
+      fireEvent.load(
+        document.head.querySelector(
+          'script[src="https://widget.intercom.io/widget/intercom-app"]',
+        )!,
+      );
+
+      expect(intercom).toHaveBeenCalledWith('boot', {
+        app_id: 'intercom-app',
+        hide_default_launcher: false,
+      });
+    },
+  );
+
+  it('keeps the default Intercom launcher visible on settings pages', () => {
+    const intercom = vi.fn();
+    window.Intercom = intercom;
+    pathname = '/settings';
+
+    render(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        intercomAppId="intercom-app"
+        userId="user-1"
+      />,
+    );
+
+    fireEvent.load(
+      document.head.querySelector(
+        'script[src="https://widget.intercom.io/widget/intercom-app"]',
+      )!,
+    );
+
+    expect(intercom).toHaveBeenCalledWith('boot', {
+      app_id: 'intercom-app',
+      hide_default_launcher: false,
+    });
+  });
+
+  it('shows the default Intercom launcher again after navigating into settings', () => {
+    const intercom = vi.fn();
+    window.Intercom = intercom;
+
+    const { rerender } = render(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        intercomAppId="intercom-app"
+        userId="user-1"
+      />,
+    );
+
+    fireEvent.load(
+      document.head.querySelector(
+        'script[src="https://widget.intercom.io/widget/intercom-app"]',
+      )!,
+    );
+
+    expect(intercom).toHaveBeenCalledWith('boot', {
+      app_id: 'intercom-app',
+      hide_default_launcher: true,
+    });
+
+    pathname = '/settings/personal';
+    rerender(
+      <CloudAnalyticsProvider
+        cloudEnabled
+        intercomAppId="intercom-app"
+        userId="user-1"
+      />,
+    );
+
+    expect(intercom).toHaveBeenLastCalledWith('update', {
+      hide_default_launcher: false,
+    });
   });
 });

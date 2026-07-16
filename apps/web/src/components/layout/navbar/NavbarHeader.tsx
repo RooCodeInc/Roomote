@@ -8,6 +8,7 @@ import { Button, Search } from '@/components/system';
 import { useCommandPalette } from '@/components/layout/CommandPaletteContext';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
+import { ChatWidgetButton } from '../ChatWidgetButton';
 import { UserMenu } from '../UserMenu';
 
 import { NavbarDrawer } from './NavbarDrawer';
@@ -53,6 +54,7 @@ export const NavbarHeader = ({ className, ...props }: NavbarHeaderProps) => {
         >
           <Search className="size-5" />
         </Button>
+        <ChatWidgetButton />
         <UserMenu />
       </div>
     </div>

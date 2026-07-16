@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 
 const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
 
@@ -20,10 +21,22 @@ declare global {
   interface Window {
     posthog?: PostHog;
     Intercom?: (
-      command: 'boot' | 'shutdown',
-      settings?: { app_id: string },
+      command: 'boot' | 'shutdown' | 'show' | 'update',
+      settings?: { app_id?: string; hide_default_launcher?: boolean },
     ) => void;
   }
+}
+
+function shouldShowDefaultIntercomLauncher(pathname: string | null): boolean {
+  if (!pathname) return false;
+
+  return (
+    pathname.startsWith('/setup') ||
+    pathname.startsWith('/onboarding') ||
+    pathname.startsWith('/settings') ||
+    pathname.startsWith('/analytics') ||
+    pathname.startsWith('/automations')
+  );
 }
 
 export function CloudAnalyticsProvider({
@@ -39,11 +52,16 @@ export function CloudAnalyticsProvider({
   posthogHost?: string;
   userId?: string;
 }) {
+  const pathname = usePathname();
   const posthogLoaded = useRef(false);
   const intercomBooted = useRef(false);
   const userIdRef = useRef(userId);
+  const hideDefaultIntercomLauncherRef = useRef(false);
   const resolvedPosthogHost = posthogHost ?? DEFAULT_POSTHOG_HOST;
+  const hideDefaultIntercomLauncher =
+    Boolean(userId) && !shouldShowDefaultIntercomLauncher(pathname);
   userIdRef.current = userId;
+  hideDefaultIntercomLauncherRef.current = hideDefaultIntercomLauncher;
 
   useEffect(() => {
     if (!cloudEnabled) return;
@@ -72,7 +90,10 @@ export function CloudAnalyticsProvider({
       script.onload = () => {
         if (intercomBooted.current || !window.Intercom) return;
         intercomBooted.current = true;
-        window.Intercom('boot', { app_id: intercomAppId });
+        window.Intercom('boot', {
+          app_id: intercomAppId,
+          hide_default_launcher: hideDefaultIntercomLauncherRef.current,
+        });
       };
       document.head.append(script);
     }
@@ -89,6 +110,13 @@ export function CloudAnalyticsProvider({
     window.Intercom?.('shutdown');
     intercomBooted.current = false;
   }, [cloudEnabled, userId]);
+
+  useEffect(() => {
+    if (!cloudEnabled || !intercomBooted.current) return;
+    window.Intercom?.('update', {
+      hide_default_launcher: hideDefaultIntercomLauncher,
+    });
+  }, [cloudEnabled, hideDefaultIntercomLauncher]);
 
   if (!cloudEnabled) {
     return null;

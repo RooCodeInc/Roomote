@@ -51,13 +51,15 @@ export function RootProviders({
         <TRPCReactProvider>
           <UserAnalyticsContext />
           <TelemetryProvider />
-          <CloudAnalyticsProvider
-            cloudEnabled={cloudEnabled}
-            intercomAppId={intercomAppId}
-            posthogHost={posthogHost}
-            posthogProjectKey={posthogProjectKey}
-            userId={authUser?.userId}
-          />
+          {cloudEnabled ? (
+            <CloudAnalyticsProvider
+              cloudEnabled
+              intercomAppId={intercomAppId}
+              posthogHost={posthogHost}
+              posthogProjectKey={posthogProjectKey}
+              userId={authUser?.userId}
+            />
+          ) : null}
           <PersonalThemeSync />
           <DebugUiAttributeController />
           {children}
