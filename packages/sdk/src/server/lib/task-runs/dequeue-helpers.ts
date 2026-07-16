@@ -24,6 +24,11 @@ import {
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
+import {
+  FeatureFlag,
+  getFeatureFlagEvaluator,
+} from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
@@ -210,7 +215,7 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
   const resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv({
     deploymentEnvVars: envVars,
-    target: 'sandbox',
+    inferenceGateway: await isInferenceGatewayFlagEnabled(),
   });
 
   return redactControlPlaneEnvVars(
@@ -224,6 +229,28 @@ export async function fetchResolvedRuntimeEnvVars(
       options?.sourceControlProvider,
     ),
   );
+}
+
+/**
+ * Evaluate the deployment-level InferenceGateway feature flag. Fails closed
+ * (direct provider keys, the long-standing behavior) if flag evaluation is
+ * unavailable, so a Redis outage cannot break task inference.
+ */
+async function isInferenceGatewayFlagEnabled(): Promise<boolean> {
+  try {
+    return await getFeatureFlagEvaluator(getRedis()).evaluate(
+      FeatureFlag.InferenceGateway,
+      { isDeploymentContext: true },
+    );
+  } catch (error) {
+    console.warn(
+      `[fetchResolvedRuntimeEnvVars] InferenceGateway flag evaluation failed; using direct provider keys: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return false;
+  }
 }
 
 /**

@@ -64,6 +64,17 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
       'Enable background subagents so the Task tool can launch subagents asynchronously via its background flag, and standard-task delivery ships the PR before visual proof instead of blocking on it. Off by default: proof runs foreground, before delivery.',
   },
 
+  [FeatureFlag.InferenceGateway]: {
+    // Off by default: sandboxes receive raw provider API keys as before.
+    // When enabled, gateway-covered provider keys stay on the control plane
+    // and task sandboxes route inference through /api/inference with their
+    // run-scoped token.
+    defaultValue: false,
+    metadataKey: 'inference_gateway',
+    description:
+      'Route sandbox inference through the platform inference gateway so provider API keys for covered providers (OpenRouter, Anthropic, OpenAI, Google Gemini) stay on the control plane instead of entering task sandboxes',
+  },
+
   [FeatureFlag.CodeMode]: {
     // Off by default: keeps every MCP tool schema in the agent tool list. When
     // enabled, the worker injects OPENCODE_EXPERIMENTAL_CODE_MODE so OpenCode

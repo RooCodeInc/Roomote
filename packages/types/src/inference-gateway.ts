@@ -1,18 +1,10 @@
 import type { SetupModelProviderId } from './model-provider-config';
 
 /**
- * Deployment flag that routes sandbox inference through the platform's
- * inference gateway instead of shipping raw provider API keys into task
- * sandboxes. Read from the control-plane process env or the persisted
- * deployment environment variables.
- */
-export const INFERENCE_GATEWAY_FLAG_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY';
-
-/**
  * Sandbox-facing env var carrying the gateway base URL (e.g.
  * `https://api.example.com/api/inference`). Emitted by the control plane at
- * dequeue when the gateway flag is enabled; its presence is what switches the
- * worker's OpenCode config onto the gateway.
+ * dequeue when the InferenceGateway feature flag is enabled; its presence is
+ * what switches the worker's OpenCode config onto the gateway.
  */
 export const INFERENCE_GATEWAY_URL_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_URL';
 
@@ -112,14 +104,6 @@ export function getInferenceGatewayProvider(
   return INFERENCE_GATEWAY_PROVIDERS.find(
     (provider) => provider.id === providerId,
   );
-}
-
-export function isInferenceGatewayEnabled(
-  flagValue: string | undefined | null,
-): boolean {
-  const normalized = flagValue?.trim().toLowerCase();
-
-  return normalized === '1' || normalized === 'true';
 }
 
 /**

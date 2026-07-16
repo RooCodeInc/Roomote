@@ -6,6 +6,7 @@ export function buildBlaxelWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   image,
@@ -15,7 +16,12 @@ export function buildBlaxelWorkerEnv({
   image: string;
 }): Record<string, string> {
   return {
-    ...buildBaseWorkerEnv({ authToken, sandboxExpiresAtMs, extraEnv }),
+    ...buildBaseWorkerEnv({
+      authToken,
+      sandboxExpiresAtMs,
+      extraEnv,
+      inferenceGatewayEnabled,
+    }),
     ...buildWorkerContextEnv({
       provider: 'blaxel',
       fingerprint: image,

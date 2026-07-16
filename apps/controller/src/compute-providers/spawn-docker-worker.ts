@@ -23,6 +23,7 @@ import {
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
+import { isInferenceGatewayEnabledForWorkerEnv } from './inference-gateway-flag';
 
 import {
   getNamedPortsForTaskRun,
@@ -365,6 +366,7 @@ export async function spawnDockerWorker(
 
     const workerEnv = buildDockerWorkerEnv({
       authToken,
+      inferenceGatewayEnabled: await isInferenceGatewayEnabledForWorkerEnv(),
       sandboxExpiresAtMs: Date.now() + config.dockerTimeoutMs,
       deploymentSlug: config.deploymentSlug,
       environmentId: taskRun.payload.environmentId,

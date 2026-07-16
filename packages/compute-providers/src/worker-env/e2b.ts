@@ -7,6 +7,7 @@ export function buildE2bWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   templateId,
@@ -16,7 +17,12 @@ export function buildE2bWorkerEnv({
   templateId: string;
 }): Record<string, string> {
   return {
-    ...buildBaseWorkerEnv({ authToken, sandboxExpiresAtMs, extraEnv }),
+    ...buildBaseWorkerEnv({
+      authToken,
+      sandboxExpiresAtMs,
+      extraEnv,
+      inferenceGatewayEnabled,
+    }),
     ...buildWorkerContextEnv({
       provider: 'e2b',
       fingerprint: templateId,

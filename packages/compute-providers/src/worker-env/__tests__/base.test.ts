@@ -144,7 +144,6 @@ describe('buildBaseWorkerEnv', () => {
   });
 
   it('holds back gateway-covered provider keys when the inference gateway is enabled', () => {
-    process.env.R_INFERENCE_GATEWAY = '1';
     process.env.R_MODEL = 'anthropic/claude-sonnet-5';
     process.env.ANTHROPIC_API_KEY = 'anthropic-key';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
@@ -153,6 +152,7 @@ describe('buildBaseWorkerEnv', () => {
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
       extraEnv: {},
+      inferenceGatewayEnabled: true,
     });
 
     expect(env.R_MODEL).toBe('anthropic/claude-sonnet-5');
