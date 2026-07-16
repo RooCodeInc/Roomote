@@ -1145,6 +1145,26 @@ describe('ModelSettingsSection', () => {
     expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(6);
   });
 
+  it('previews inherited roles with the selected coding preset when it is not env-managed', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('default-model')).toHaveLength(6);
+  });
+
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
     settingsData.current = buildSettingsData({
       helperManagedByEnv: true,

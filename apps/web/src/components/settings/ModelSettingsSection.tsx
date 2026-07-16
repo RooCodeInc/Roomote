@@ -1666,9 +1666,10 @@ export function ModelSettingsSection({
               TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
             ];
           const managedByEnv = status?.managedByEnv ?? false;
-          const codingModelId =
-            settingsData?.runtimeModels.codingModel.effectiveModelId ??
-            recommendedRoleModelIds.coding;
+          const codingModelId = settingsData?.runtimeModels.codingModel
+            .managedByEnv
+            ? settingsData.runtimeModels.codingModel.effectiveModelId
+            : recommendedRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
             : (recommendedRoleModelIds[config.role] ?? codingModelId);
