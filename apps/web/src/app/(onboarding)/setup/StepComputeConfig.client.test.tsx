@@ -236,6 +236,15 @@ describe('StepComputeConfig', () => {
                   setupProvisionable: false,
                 },
                 {
+                  envVarName: 'E2B_TEMPLATE_ID',
+                  label: 'Worker Template',
+                  category: 'infrastructure',
+                  runtimeSatisfied: false,
+                  savedSatisfied: false,
+                  defaultSatisfied: false,
+                  setupProvisionable: true,
+                },
+                {
                   envVarName: 'E2B_DOMAIN',
                   label: 'E2B Domain',
                   required: false,
@@ -261,6 +270,73 @@ describe('StepComputeConfig', () => {
     expect(
       screen.getByRole('button', { name: /continue|save and continue/i }),
     ).toBeDisabled();
+  });
+
+  it('lets an already-provisioned provider continue despite a local worker image', () => {
+    // Recovery path: the config step re-confirms an already-configured
+    // provider to commit it as the dispatch default. Saving touches no
+    // managed artifacts (the template already exists), so a locked
+    // local-tag worker image must not dead-end the flow.
+    render(
+      <StepComputeConfig
+        computeSetup={buildComputeSetup({
+          workerImage: {
+            envVarName: 'DOCKER_WORKER_IMAGE',
+            label: 'Worker Image',
+            runtimeSatisfied: true,
+            savedSatisfied: false,
+            hostedImageRef: null,
+            hostedReady: false,
+          },
+          providers: [
+            {
+              ...buildHostedProvider('e2b'),
+              provider: 'e2b',
+              label: 'E2B',
+              configSatisfied: true,
+              fields: [
+                {
+                  envVarName: 'E2B_API_KEY',
+                  label: 'E2B API Key',
+                  secret: true,
+                  category: 'credential',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+                {
+                  envVarName: 'E2B_TEMPLATE_ID',
+                  label: 'Worker Template',
+                  category: 'infrastructure',
+                  runtimeSatisfied: false,
+                  savedSatisfied: true,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+                {
+                  envVarName: 'E2B_DOMAIN',
+                  label: 'E2B Domain',
+                  required: false,
+                  category: 'infrastructure',
+                  advanced: true,
+                  runtimeSatisfied: false,
+                  savedSatisfied: false,
+                  defaultSatisfied: false,
+                  setupProvisionable: false,
+                },
+              ],
+            },
+          ],
+        })}
+        selectedProviderId="e2b"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: /continue|save and continue/i }),
+    ).toBeEnabled();
   });
 
   it('continues onboarding while a Blaxel image build runs in the background', async () => {
