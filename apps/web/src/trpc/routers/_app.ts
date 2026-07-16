@@ -464,13 +464,34 @@ const automationsRouter = createRouter({
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        suggesterDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
         suggesterRoutingInstructions: z.string().max(10_000).nullable(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        announcerDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        platformIssueDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()

@@ -71,13 +71,16 @@ const baseFormState: FormState = {
   ciFailureTriageDiscordChannel: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
+  suggesterDiscordChannel: '',
   suggesterInstructions: '',
   suggesterRoutingMode: DEFAULT_SUGGESTER_ROUTING_MODE,
   suggesterRoutingInstructions: '',
   announcerFrequency: 'off' as const,
   announcerSlackChannel: '',
+  announcerDiscordChannel: '',
   announcerInstructions: '',
   platformIssueSlackChannel: '',
+  platformIssueDiscordChannel: '',
 };
 
 describe('Automations selection helpers', () => {
@@ -646,6 +649,7 @@ describe('Automations selection helpers', () => {
       buildAutomationDiscordDestinationOptions({
         channels: [{ id: '111', name: 'general', label: '#general' }],
         selectedChannelId: null,
+        includeProviderSuffix: true,
       }),
     ).toEqual([
       {
@@ -661,6 +665,7 @@ describe('Automations selection helpers', () => {
       buildAutomationDiscordDestinationOptions({
         channels: [{ id: '111', name: 'general', label: '#general' }],
         selectedChannelId: '222',
+        includeProviderSuffix: true,
       }),
     ).toEqual([
       {
@@ -676,11 +681,33 @@ describe('Automations selection helpers', () => {
     ]);
   });
 
+  it('drops the provider suffix when Discord is the only connected provider', () => {
+    expect(
+      buildAutomationDiscordDestinationOptions({
+        channels: [{ id: '111', name: 'general', label: '#general' }],
+        selectedChannelId: '222',
+        includeProviderSuffix: false,
+      }),
+    ).toEqual([
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}222`,
+        name: '222',
+        label: '#222',
+      },
+      {
+        id: `${DISCORD_DESTINATION_OPTION_PREFIX}111`,
+        name: 'general',
+        label: '#general',
+      },
+    ]);
+  });
+
   it('does not duplicate a Discord option for a selection the catalog already lists', () => {
     expect(
       buildAutomationDiscordDestinationOptions({
         channels: [{ id: '111', name: 'general', label: '#general' }],
         selectedChannelId: '111',
+        includeProviderSuffix: true,
       }),
     ).toEqual([
       {
@@ -754,15 +781,17 @@ describe('Automations selection helpers', () => {
     ).toBe(true);
   });
 
-  it('treats platform issue alerts as disabled without a selected Slack channel', () => {
+  it('treats platform issue alerts as disabled without a selected channel', () => {
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: '',
+        platformIssueDiscordChannel: '',
       }),
     ).toBe(false);
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: '   ',
+        platformIssueDiscordChannel: '   ',
       }),
     ).toBe(false);
   });
@@ -771,6 +800,16 @@ describe('Automations selection helpers', () => {
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: 'C123',
+        platformIssueDiscordChannel: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('treats platform issue alerts as enabled when a Discord channel is selected', () => {
+    expect(
+      isPlatformIssueAlertsEnabled({
+        platformIssueSlackChannel: '',
+        platformIssueDiscordChannel: '111222333444555666',
       }),
     ).toBe(true);
   });

@@ -82,13 +82,16 @@ const state = vi.hoisted(() => ({
         ciFailureTriageDiscordChannelId: null,
         suggesterFrequency: 'off' as const,
         suggesterSlackChannelId: null,
+        suggesterDiscordChannelId: null,
         suggesterInstructions: null,
         suggesterRoutingMode: 'manager_channel' as const,
         suggesterRoutingInstructions: null,
         announcerFrequency: 'off' as const,
         announcerSlackChannelId: null,
+        announcerDiscordChannelId: null,
         announcerInstructions: null,
         platformIssueSlackChannelId: null,
+        platformIssueDiscordChannelId: null,
       },
       slackChannelDisplayNames: {
         channelAutoStartSlackChannels: {
@@ -138,6 +141,7 @@ const state = vi.hoisted(() => ({
           'ci_failure_triage',
           'suggester',
           'announcer',
+          'platform_issue_alerts',
         ].map((key) => [
           key,
           {
@@ -373,6 +377,9 @@ describe('AutomationsSettings', () => {
     state.settingsQuery.data.capabilities.discordConnected = false;
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
+    state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
+    state.settingsQuery.data.settings.announcerDiscordChannelId = null;
+    state.settingsQuery.data.settings.platformIssueDiscordChannelId = null;
     state.settingsQuery.data.settings.managerSlackChannelId = 'C123MANAGER';
     state.settingsQuery.data.settings.managerStatsFrequency = 'off' as never;
     state.settingsQuery.data.settings.sentryTriageFrequency = 'off' as never;
@@ -486,6 +493,37 @@ describe('AutomationsSettings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('offers the platform issue alerts destination picker with a saved Discord channel selected', async () => {
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.discordChannelsQuery.data.channels = [
+      {
+        id: '111222333444555666',
+        name: 'automation-reports',
+        label: '#automation-reports',
+        guildId: 'guild-1',
+        guildName: 'Acme',
+      },
+    ];
+    (
+      state.settingsQuery.data.settings as Record<string, unknown>
+    ).platformIssueDiscordChannelId = '111222333444555666';
+
+    render(<AutomationsSettings />);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'Expand Alert on Config Errors',
+      }),
+    );
+
+    expect(
+      screen.getByLabelText('Post alerts to this channel'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('#automation-reports (Discord)'),
+    ).toBeInTheDocument();
+  });
+
   it('hides the launch mode picker when decision mode is disabled', async () => {
     render(<AutomationsSettings />);
 
@@ -518,9 +556,7 @@ describe('AutomationsSettings', () => {
 
     expect(await screen.findByText('Summarize Merged PRs')).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'Post a recurring digest of recently merged PRs to Slack.',
-      ),
+      screen.getByText('Post a recurring digest of recently merged PRs.'),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Summary of Roomote's activity during the week"),
@@ -533,9 +569,10 @@ describe('AutomationsSettings', () => {
     // Dependabot and CI failure triage stay GitHub-only; manager stats is
     // provider-neutral now and shows no source-control badge.
     expect((await screen.findAllByText('GitHub only')).length).toBe(2);
-    // Only the suggester is limited to Slack; CI failure triage posts to all
-    // configured communication providers after multi-comms support.
-    expect(screen.getAllByText('Slack only').length).toBe(1);
+    // The suggester supports Slack and Discord destinations; the other
+    // manager automations post to all configured communication providers.
+    expect(screen.queryByText('Slack only')).toBeNull();
+    expect(screen.getAllByText('Slack · Discord only').length).toBe(1);
     // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
     // Gitea/Bitbucket conflict signal).
     expect(

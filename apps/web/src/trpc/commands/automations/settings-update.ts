@@ -114,20 +114,6 @@ function buildSuggesterAutomationSettings(params: {
   };
 }
 
-function buildSlackChannelTargets(
-  channelId: string | null,
-): AutomationTarget[] {
-  return channelId
-    ? [
-        {
-          provider: 'slack',
-          targetKind: 'slack_channel',
-          externalRef: channelId,
-        },
-      ]
-    : [];
-}
-
 /**
  * Channel targets for automations whose destination picker offers a Slack OR
  * a Discord channel. Combined with
@@ -388,6 +374,31 @@ export async function updateBackgroundAgentSettingsCommand(
   const ciFailureTriageDiscordChannel = shouldUpdateCiFailureTriage
     ? normalizeOptionalText(input.ciFailureTriageDiscordChannel)
     : null;
+  // These three Discord fields are optional in the API for deploy
+  // compatibility: an older client that never sends them must preserve the
+  // persisted target, not clear it — UNLESS that client explicitly selected
+  // a Slack channel, which is a destination choice and must clear the
+  // Discord target it cannot see (otherwise both targets persist and a later
+  // current-client save would silently flip routing back to Discord). An
+  // empty Slack value expresses no choice and preserves the Discord target.
+  const suggesterDiscordProvided =
+    input.suggesterDiscordChannel !== undefined ||
+    normalizeOptionalText(input.suggesterSlackChannel) !== null;
+  const announcerDiscordProvided =
+    input.announcerDiscordChannel !== undefined ||
+    normalizeOptionalText(input.announcerSlackChannel) !== null;
+  const platformIssueDiscordProvided =
+    input.platformIssueDiscordChannel !== undefined ||
+    normalizeOptionalText(input.platformIssueSlackChannel) !== null;
+  const suggesterDiscordChannel = shouldUpdateSuggester
+    ? normalizeOptionalText(input.suggesterDiscordChannel)
+    : null;
+  const announcerDiscordChannel = shouldUpdateAnnouncer
+    ? normalizeOptionalText(input.announcerDiscordChannel)
+    : null;
+  const platformIssueDiscordChannel = shouldUpdatePlatformIssueAlerts
+    ? normalizeOptionalText(input.platformIssueDiscordChannel)
+    : null;
   const managerStatsSlackChannel =
     shouldUpdateManagerStats && !managerStatsDiscordChannel
       ? normalizeOptionalText(input.managerStatsSlackChannel)
@@ -400,15 +411,18 @@ export async function updateBackgroundAgentSettingsCommand(
     shouldUpdateDependabotTriage && !dependabotTriageDiscordChannel
       ? normalizeOptionalText(input.dependabotTriageSlackChannel)
       : null;
-  const suggesterSlackChannel = shouldUpdateSuggester
-    ? normalizeOptionalText(input.suggesterSlackChannel)
-    : null;
-  const announcerSlackChannel = shouldUpdateAnnouncer
-    ? normalizeOptionalText(input.announcerSlackChannel)
-    : null;
-  const platformIssueSlackChannel = shouldUpdatePlatformIssueAlerts
-    ? normalizeOptionalText(input.platformIssueSlackChannel)
-    : null;
+  const suggesterSlackChannel =
+    shouldUpdateSuggester && !suggesterDiscordChannel
+      ? normalizeOptionalText(input.suggesterSlackChannel)
+      : null;
+  const announcerSlackChannel =
+    shouldUpdateAnnouncer && !announcerDiscordChannel
+      ? normalizeOptionalText(input.announcerSlackChannel)
+      : null;
+  const platformIssueSlackChannel =
+    shouldUpdatePlatformIssueAlerts && !platformIssueDiscordChannel
+      ? normalizeOptionalText(input.platformIssueSlackChannel)
+      : null;
   const securityAuditorSlackChannel =
     shouldUpdateSecurityAuditor && !securityAuditorDiscordChannel
       ? normalizeOptionalText(input.securityAuditorSlackChannel)
@@ -593,6 +607,9 @@ export async function updateBackgroundAgentSettingsCommand(
     securityAuditorDiscordResult,
     codeQualityAuditorDiscordResult,
     ciFailureTriageDiscordResult,
+    suggesterDiscordResult,
+    announcerDiscordResult,
+    platformIssueDiscordResult,
   ] = await Promise.all([
     shouldUpdateManagerStats
       ? resolveDiscordChannelId({
@@ -642,6 +659,30 @@ export async function updateBackgroundAgentSettingsCommand(
       : keepPersistedDiscordChannel(
           existingSettings?.ciFailureTriageDiscordChannelId,
         ),
+    shouldUpdateSuggester && suggesterDiscordProvided
+      ? resolveDiscordChannelId({
+          field: 'suggesterDiscordChannel',
+          input: suggesterDiscordChannel,
+        })
+      : keepPersistedDiscordChannel(
+          existingSettings?.suggesterDiscordChannelId,
+        ),
+    shouldUpdateAnnouncer && announcerDiscordProvided
+      ? resolveDiscordChannelId({
+          field: 'announcerDiscordChannel',
+          input: announcerDiscordChannel,
+        })
+      : keepPersistedDiscordChannel(
+          existingSettings?.announcerDiscordChannelId,
+        ),
+    shouldUpdatePlatformIssueAlerts && platformIssueDiscordProvided
+      ? resolveDiscordChannelId({
+          field: 'platformIssueDiscordChannel',
+          input: platformIssueDiscordChannel,
+        })
+      : keepPersistedDiscordChannel(
+          existingSettings?.platformIssueDiscordChannelId,
+        ),
   ]);
 
   for (const result of [
@@ -651,6 +692,9 @@ export async function updateBackgroundAgentSettingsCommand(
     securityAuditorDiscordResult,
     codeQualityAuditorDiscordResult,
     ciFailureTriageDiscordResult,
+    suggesterDiscordResult,
+    announcerDiscordResult,
+    platformIssueDiscordResult,
   ]) {
     if (result.error) {
       fieldErrors[result.error.field] = result.error.message;
@@ -826,20 +870,22 @@ export async function updateBackgroundAgentSettingsCommand(
       | 'suggesterSlackChannel'
       | 'announcerSlackChannel';
   }> = [
+    // A per-automation Discord destination satisfies the channel requirement
+    // just like a per-automation Slack channel does.
     {
       key: 'suggester',
       frequency: effectiveSuggesterFrequency,
-      channelId: suggesterChannelResult.channelId,
+      channelId:
+        suggesterChannelResult.channelId ?? suggesterDiscordResult.channelId,
       field: 'suggesterSlackChannel',
     },
     {
       key: 'announcer',
       frequency: effectiveAnnouncerFrequency,
-      channelId: announcerChannelResult.channelId,
+      channelId:
+        announcerChannelResult.channelId ?? announcerDiscordResult.channelId,
       field: 'announcerSlackChannel',
     },
-    // A per-automation Discord destination satisfies the channel requirement
-    // just like a per-automation Slack channel does.
     {
       key: 'manager_stats',
       frequency: effectiveManagerStatsFrequency,
@@ -1127,8 +1173,11 @@ export async function updateBackgroundAgentSettingsCommand(
       },
       instructions: effectiveSuggesterInstructions,
       settings: suggesterAutomationSettings,
-      targets: buildSlackChannelTargets(suggesterChannelResult.channelId),
-      managedTargetKinds: ['slack_channel'],
+      targets: buildDestinationChannelTargets(
+        suggesterChannelResult.channelId,
+        suggesterDiscordResult.channelId,
+      ),
+      managedTargetKinds: ['slack_channel', 'discord_channel'],
       updatedAt: now,
     });
 
@@ -1139,16 +1188,24 @@ export async function updateBackgroundAgentSettingsCommand(
         mode: effectiveAnnouncerFrequency,
       },
       instructions: normalizeOptionalText(input.announcerInstructions),
-      targets: buildSlackChannelTargets(announcerChannelResult.channelId),
-      managedTargetKinds: ['slack_channel'],
+      targets: buildDestinationChannelTargets(
+        announcerChannelResult.channelId,
+        announcerDiscordResult.channelId,
+      ),
+      managedTargetKinds: ['slack_channel', 'discord_channel'],
       updatedAt: now,
     });
 
     await upsertAutomation(tx, {
       key: 'platform_issue_alerts',
-      enabled: platformIssueChannelResult.channelId != null,
-      targets: buildSlackChannelTargets(platformIssueChannelResult.channelId),
-      managedTargetKinds: ['slack_channel'],
+      enabled:
+        platformIssueChannelResult.channelId != null ||
+        platformIssueDiscordResult.channelId != null,
+      targets: buildDestinationChannelTargets(
+        platformIssueChannelResult.channelId,
+        platformIssueDiscordResult.channelId,
+      ),
+      managedTargetKinds: ['slack_channel', 'discord_channel'],
       updatedAt: now,
     });
   });

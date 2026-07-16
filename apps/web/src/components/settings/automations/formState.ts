@@ -73,13 +73,16 @@ export type FormState = {
   dependabotTriageDiscordChannel: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
+  suggesterDiscordChannel: string;
   suggesterInstructions: string;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannel: string;
+  announcerDiscordChannel: string;
   announcerInstructions: string;
   platformIssueSlackChannel: string;
+  platformIssueDiscordChannel: string;
   securityAuditorSlackChannel: string;
   securityAuditorDiscordChannel: string;
   codeQualityAuditorSlackChannel: string;
@@ -150,6 +153,7 @@ const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   'suggesterSlackChannel',
+  'suggesterDiscordChannel',
   'suggesterInstructions',
   'suggesterRoutingMode',
   'suggesterRoutingInstructions',
@@ -158,11 +162,13 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerFrequency',
   'announcerSlackChannel',
+  'announcerDiscordChannel',
   'announcerInstructions',
 ];
 
 const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   'platformIssueSlackChannel',
+  'platformIssueDiscordChannel',
 ];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
@@ -311,15 +317,19 @@ export function buildAutomationSettingsSaveInput(
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
+    suggesterDiscordChannel: stateToSave.suggesterDiscordChannel.trim() || null,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,
     announcerFrequency: stateToSave.announcerFrequency,
     announcerSlackChannel: stateToSave.announcerSlackChannel.trim() || null,
+    announcerDiscordChannel: stateToSave.announcerDiscordChannel.trim() || null,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     platformIssueSlackChannel:
       stateToSave.platformIssueSlackChannel.trim() || null,
+    platformIssueDiscordChannel:
+      stateToSave.platformIssueDiscordChannel.trim() || null,
     securityAuditorSlackChannel:
       stateToSave.securityAuditorSlackChannel.trim() || null,
     securityAuditorDiscordChannel:

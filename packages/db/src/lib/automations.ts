@@ -714,6 +714,7 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(SUGGESTER_FREQUENCIES),
     ),
     suggesterSlackChannelId: getAutomationSlackChannelTarget(suggester),
+    suggesterDiscordChannelId: getAutomationDiscordChannelTarget(suggester),
     suggesterInstructions: suggester?.instructions ?? null,
     suggesterRoutingMode: getSuggesterRoutingMode(suggester),
     suggesterRoutingInstructions: getAutomationSettingText(
@@ -727,6 +728,7 @@ export function normalizeBackgroundAgentSettings(
       isFrequencyOf(ANNOUNCER_FREQUENCIES),
     ),
     announcerSlackChannelId: getAutomationSlackChannelTarget(announcer),
+    announcerDiscordChannelId: getAutomationDiscordChannelTarget(announcer),
     announcerInstructions: announcer?.instructions ?? null,
     announcerLastRunAt: announcer?.lastRunAt ?? null,
 
@@ -741,6 +743,8 @@ export function normalizeBackgroundAgentSettings(
 
     platformIssueSlackChannelId:
       getAutomationSlackChannelTarget(platformIssueAlerts),
+    platformIssueDiscordChannelId:
+      getAutomationDiscordChannelTarget(platformIssueAlerts),
 
     managerStatsFrequency: getAutomationFrequency(
       managerStats,

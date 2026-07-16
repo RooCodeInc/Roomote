@@ -43,6 +43,9 @@ export type BackgroundAgentFieldErrorKey =
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | 'suggesterDiscordChannel'
+  | 'announcerDiscordChannel'
+  | 'platformIssueDiscordChannel'
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
@@ -75,6 +78,9 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | 'suggesterDiscordChannel'
+  | 'announcerDiscordChannel'
+  | 'platformIssueDiscordChannel'
 >;
 
 /** A Discord channel the automations destination picker can target. */
@@ -117,6 +123,9 @@ export interface SlackChannelDisplayNames {
 /**
  * Automations whose reports flow through the manager-channel destination
  * waterfall (own target -> Manager Channel -> primary conversation).
+ * platform_issue_alerts delivery only walks the first two levels (own
+ * target -> Manager Channel); it is included so the settings page can show
+ * its "Reports to" line.
  */
 export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'manager_stats',
@@ -127,6 +136,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'ci_failure_triage',
   'suggester',
   'announcer',
+  'platform_issue_alerts',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -221,13 +231,16 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   dependabotTriageDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
+  suggesterDiscordChannel?: string | null;
   suggesterInstructions: string | null;
   suggesterRoutingMode?: SuggesterRoutingMode;
   suggesterRoutingInstructions?: string | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannel: string | null;
+  announcerDiscordChannel?: string | null;
   announcerInstructions: string | null;
   platformIssueSlackChannel: string | null;
+  platformIssueDiscordChannel?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;
