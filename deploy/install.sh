@@ -497,7 +497,7 @@ if ! env_has_value SETUP_TOKEN; then
 fi
 
 # Dedicated Discord gateway↔API transport secret. Always generate one so
-# enabling Discord later does not fall back to ENCRYPTION_KEY.
+# enabling Discord later is ready without a separate operator step.
 if ! env_has_value R_DISCORD_GATEWAY_SECRET; then
   set_env_value R_DISCORD_GATEWAY_SECRET "$(openssl rand -base64 32 | tr -d '\n')"
 fi

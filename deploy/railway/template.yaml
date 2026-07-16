@@ -130,8 +130,7 @@ services:
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
       R_AUTO_GENERATE_KEYS: 'true'
       ENCRYPTION_KEY: ${{secret(32)}}
-      # Transport secret between BullMQ Discord Gateway and API. Distinct from
-      # ENCRYPTION_KEY so a leaked gateway header cannot unlock the vault.
+      # Transport secret between BullMQ Discord Gateway and API.
       R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
       R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}

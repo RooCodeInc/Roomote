@@ -353,10 +353,10 @@ Live previews need a wildcard domain, which requires a domain you control:
 - **One-time Discord gateway secret (existing Blueprints).** New deploys
   generate `R_DISCORD_GATEWAY_SECRET` in the `roomote-shared` env group.
   Blueprint sync on an older workspace may not invent a new generated secret
-  for an already-created group; if Discord was using `ENCRYPTION_KEY` before,
-  add `R_DISCORD_GATEWAY_SECRET` once to the shared group (Generate value or
-  a random string) so web/api/controller/bullmq all see the same value
-  before continuing Discord after this hardening ships.
+  for an already-created group; if the variable is missing, add
+  `R_DISCORD_GATEWAY_SECRET` once to the shared group (Generate value or a
+  random string) so web/api/controller/bullmq all see the same value before
+  continuing Discord.
 - **Back up** the Render Postgres database (Render's built-in backups or
   `pg_dump`) and the MinIO disk or external bucket. Everything else is
   reproducible from the Blueprint plus the generated environment group

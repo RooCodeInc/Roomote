@@ -484,7 +484,7 @@ base64 < preview-auth-private-pkcs8.pem | tr -d '\n' # PREVIEW_AUTH_PRIVATE_KEY
 base64 < preview-auth-public.pem | tr -d '\n'        # PREVIEW_AUTH_PUBLIC_KEY
 
 openssl rand -base64 32 # ENCRYPTION_KEY
-openssl rand -base64 32 # R_DISCORD_GATEWAY_SECRET (distinct from ENCRYPTION_KEY; required for Discord)
+openssl rand -base64 32 # R_DISCORD_GATEWAY_SECRET
 openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
 openssl rand -base64 24 # DASHBOARD_PASSWORD
 openssl rand -hex 16    # SETUP_TOKEN
@@ -499,8 +499,8 @@ the database, and reuses them on every later boot. Env-provided key values
 always take precedence. The random string secrets (`ENCRYPTION_KEY`,
 `R_DISCORD_GATEWAY_SECRET`, `ARTIFACT_SIGNING_KEY`, `DASHBOARD_PASSWORD`,
 `SETUP_TOKEN`) are still required and can come from the platform's secret
-generator. Keep `R_DISCORD_GATEWAY_SECRET` distinct from `ENCRYPTION_KEY`;
-API and BullMQ must share the same value when Discord is enabled.
+generator. API and BullMQ must share the same `R_DISCORD_GATEWAY_SECRET` value
+when Discord is enabled.
 
 ### Port exposure and the queue dashboard
 

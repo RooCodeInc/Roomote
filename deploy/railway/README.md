@@ -400,12 +400,11 @@ domain, which requires a domain you control:
   [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
 - **One-time Discord gateway secret (existing projects).** New template
   deploys generate `R_DISCORD_GATEWAY_SECRET` on the api service and share it
-  with the other app services. Older projects that relied on
-  `ENCRYPTION_KEY` must set a distinct random value once on **api**, then
-  reference the same value on **bullmq** (and any other service that already
-  copies `api.*` secrets) before enabling or continuing Discord after this
-  hardening ships. Template edits do not rewrite variables on existing
-  projects.
+  with the other app services. Older projects without that variable must set a
+  distinct random value once on **api**, then reference the same value on
+  **bullmq** (and any other service that already copies `api.*` secrets)
+  before enabling or continuing Discord. Template edits do not rewrite
+  variables on existing projects.
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.

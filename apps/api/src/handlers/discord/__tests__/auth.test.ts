@@ -37,20 +37,18 @@ describe('verifyDiscordGatewaySecret', () => {
     });
   });
 
-  it('does not accept ENCRYPTION_KEY as the gateway secret', async () => {
+  it('returns 503 when the dedicated secret is unset', async () => {
     mocks.resolveDiscordGatewaySecret.mockResolvedValue(null);
 
     await expect(
-      verifyDiscordGatewaySecret(
-        'production-encryption-key-that-is-long-enough',
-      ),
+      verifyDiscordGatewaySecret('unrelated-secret-value'),
     ).resolves.toEqual({
       error: 'discord_gateway_secret_not_configured',
       status: 503,
     });
   });
 
-  it('returns 503 when the dedicated secret is unset', async () => {
+  it('returns 503 when no header is provided either', async () => {
     mocks.resolveDiscordGatewaySecret.mockResolvedValue(null);
 
     await expect(verifyDiscordGatewaySecret(undefined)).resolves.toEqual({

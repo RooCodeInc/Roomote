@@ -55,7 +55,7 @@ export async function resolveDiscordGatewayCredentials(): Promise<DiscordGateway
 
 /**
  * Resolve the dedicated gateway↔API transport secret. Process env first, then
- * the encrypted deployment vault. Never falls back to ENCRYPTION_KEY.
+ * the encrypted deployment vault.
  */
 export async function resolveDiscordGatewayApiSecret(
   env: NodeJS.ProcessEnv = process.env,

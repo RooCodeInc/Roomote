@@ -406,8 +406,7 @@ export function invalidateDiscordRuntimeCredentialsCache(): void {
 
 /**
  * Resolve the Discord gateway↔API transport secret. Process env wins over the
- * encrypted deployment vault (same source order as the bot token). Never falls
- * back to ENCRYPTION_KEY.
+ * encrypted deployment vault (same source order as the bot token).
  */
 export async function resolveDiscordGatewaySecret(): Promise<string | null> {
   const nowMs = Date.now();
