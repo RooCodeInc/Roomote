@@ -69,6 +69,12 @@ export default function SandboxPage() {
   const hasArtifacts = session.artifacts.length > 0;
   const hasVisibleSessionPrompt =
     session.prompt?.visibleInTranscript !== false && session.prompt != null;
+  const startupPrompt = hasVisibleSessionPrompt
+    ? {
+        text: session.prompt?.text,
+        images: session.prompt?.images,
+      }
+    : null;
   const shouldRenderBootingTranscript =
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
@@ -262,7 +268,13 @@ export default function SandboxPage() {
         <HistoricalContent
           session={session}
           footer={
-            taskRun ? <SnapshotResumeFailureFooter taskRun={taskRun} /> : null
+            taskRun ? (
+              <SnapshotResumeFailureFooter
+                taskId={taskId}
+                taskRun={taskRun}
+                prompt={startupPrompt}
+              />
+            ) : null
           }
         />
       </HistoricalSandboxProvider>
@@ -275,7 +287,9 @@ export default function SandboxPage() {
         <Header session={session} />
         <Startup
           runId={taskRun.id}
+          taskId={taskId}
           initialTaskRun={taskRun}
+          prompt={startupPrompt}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -291,7 +305,9 @@ export default function SandboxPage() {
         <Header session={session} />
         <Startup
           runId={taskRun.id}
+          taskId={taskId}
           initialTaskRun={taskRun}
+          prompt={startupPrompt}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (

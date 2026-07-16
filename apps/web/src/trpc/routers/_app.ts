@@ -91,6 +91,7 @@ import {
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
+  retryFailedTaskStartCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -698,6 +699,17 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         cancelTaskRunCommand(auth, input),
+      ),
+
+    retryFailedStart: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          runId: z.number().int().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        retryFailedTaskStartCommand(auth, input),
       ),
   }),
 
