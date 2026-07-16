@@ -352,6 +352,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'suggester',
   'sentryTriage',
   'dependabotTriage',
+  'codeqlTriage',
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
@@ -458,6 +459,14 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable(),
         dependabotTriageDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        codeqlTriageFrequency: z.enum(['off', 'daily', 'weekly']),
+        codeqlTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        codeqlTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
@@ -2023,6 +2032,7 @@ export const appRouter = createRouter({
               'suggest_ideas',
               'sentry_triage',
               'dependabot_triage',
+              'codeql_triage',
               'security_auditor',
               'code_quality_auditor',
             ])

@@ -5,6 +5,7 @@ import type {
   CiFailureTriageFrequency,
   CodeQualityAuditorFrequency,
   ConflictResolverFrequency,
+  CodeqlTriageFrequency,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
   SecurityAuditorFrequency,
@@ -22,6 +23,7 @@ export const MANAGER_STATS_SETTINGS_HASH = 'weekly-manager-stats';
 export const SUGGEST_IDEAS_SETTINGS_HASH = 'suggest-ideas';
 export const SENTRY_TRIAGE_SETTINGS_HASH = 'sentry-triage';
 export const DEPENDABOT_TRIAGE_SETTINGS_HASH = 'dependabot-triage';
+export const CODEQL_TRIAGE_SETTINGS_HASH = 'codeql-triage';
 export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
 export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
@@ -34,6 +36,7 @@ export type BackgroundAutomationSettingsHash =
   | typeof SUGGEST_IDEAS_SETTINGS_HASH
   | typeof SENTRY_TRIAGE_SETTINGS_HASH
   | typeof DEPENDABOT_TRIAGE_SETTINGS_HASH
+  | typeof CODEQL_TRIAGE_SETTINGS_HASH
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
   | typeof CODE_QUALITY_AUDITOR_SETTINGS_HASH
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
@@ -94,6 +97,7 @@ const DAILY_WEEKLY_SCHEDULE_MODES = [
   | AnnouncerFrequency
   | SentryTriageFrequency
   | DependabotTriageFrequency
+  | CodeqlTriageFrequency
 )[];
 
 // CI failure triage is webhook-driven; 'daily' only means enabled.
@@ -190,6 +194,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
     supportedSourceControlProviders: ['github'],
     scheduledSuggestionSource: 'dependabot_triage',
+  },
+  {
+    automationKey: 'codeql_triage',
+    label: 'Triage CodeQL Alerts',
+    availability: 'stable',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: ['github'],
+    scheduledSuggestionSource: 'codeql_triage',
   },
   {
     automationKey: 'security_auditor',
@@ -293,6 +308,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: DEPENDABOT_TRIAGE_SETTINGS_HASH,
     automationKey: 'dependabot_triage',
+  },
+  {
+    hash: CODEQL_TRIAGE_SETTINGS_HASH,
+    automationKey: 'codeql_triage',
   },
   {
     hash: SECURITY_AUDITOR_SETTINGS_HASH,

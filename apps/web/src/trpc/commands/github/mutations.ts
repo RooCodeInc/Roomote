@@ -98,6 +98,7 @@ type GitHubAppManifest = {
     merge_queues: 'read';
     metadata: 'read';
     pull_requests: 'write';
+    security_events: 'read';
     statuses: 'read';
     vulnerability_alerts: 'read';
     workflows: 'write';
@@ -243,6 +244,7 @@ function buildGitHubAppManifest(): GitHubAppManifest {
       merge_queues: 'read',
       metadata: 'read',
       pull_requests: 'write',
+      security_events: 'read',
       statuses: 'read',
       vulnerability_alerts: 'read',
       workflows: 'write',

@@ -71,6 +71,9 @@ const state = vi.hoisted(() => ({
         dependabotTriageFrequency: 'off' as const,
         dependabotTriageSlackChannelId: null,
         dependabotTriageDiscordChannelId: null,
+        codeqlTriageFrequency: 'off' as const,
+        codeqlTriageSlackChannelId: null,
+        codeqlTriageDiscordChannelId: null,
         securityAuditorFrequency: 'off' as const,
         securityAuditorSlackChannelId: null,
         securityAuditorDiscordChannelId: null,
@@ -104,6 +107,7 @@ const state = vi.hoisted(() => ({
         platformIssueSlackChannel: null,
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
+        codeqlTriageSlackChannel: null,
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,
@@ -117,6 +121,7 @@ const state = vi.hoisted(() => ({
         platformIssueSlackChannel: null,
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
+        codeqlTriageSlackChannel: null,
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,
@@ -136,6 +141,7 @@ const state = vi.hoisted(() => ({
           'manager_stats',
           'sentry_triage',
           'dependabot_triage',
+          'codeql_triage',
           'security_auditor',
           'code_quality_auditor',
           'ci_failure_triage',
@@ -566,9 +572,9 @@ describe('AutomationsSettings', () => {
   it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot and CI failure triage stay GitHub-only; manager stats is
-    // provider-neutral now and shows no source-control badge.
-    expect((await screen.findAllByText('GitHub only')).length).toBe(2);
+    // Dependabot, CodeQL, and CI failure triage stay GitHub-only; manager
+    // stats is provider-neutral now and shows no source-control badge.
+    expect((await screen.findAllByText('GitHub only')).length).toBe(3);
     // The suggester supports Slack and Discord destinations; the other
     // manager automations post to all configured communication providers.
     expect(screen.queryByText('Slack only')).toBeNull();

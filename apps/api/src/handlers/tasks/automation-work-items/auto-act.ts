@@ -55,6 +55,12 @@ const AUTO_ACT_AUTOMATION_CONFIG: Record<
     executionTaskBootstrap: '$update-dependencies',
     enforceUniqueTargetEnvironments: true,
   },
+  codeql_triage: {
+    label: 'CodeQL triage',
+    maxActItems: 3,
+    executionTaskBootstrap: '$implement-changes',
+    enforceUniqueTargetEnvironments: true,
+  },
   security_auditor: {
     label: 'Security Auditor',
     maxActItems: 5,

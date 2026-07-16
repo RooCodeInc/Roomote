@@ -60,6 +60,9 @@ const baseFormState: FormState = {
   dependabotTriageFrequency: 'off' as const,
   dependabotTriageSlackChannel: '',
   dependabotTriageDiscordChannel: '',
+  codeqlTriageFrequency: 'off' as const,
+  codeqlTriageSlackChannel: '',
+  codeqlTriageDiscordChannel: '',
   securityAuditorFrequency: 'off' as const,
   securityAuditorSlackChannel: '',
   securityAuditorDiscordChannel: '',
@@ -551,6 +554,10 @@ describe('Automations selection helpers', () => {
     expect(resolveAutomationHashTarget('#dependabot-triage')).toBe(
       'dependabotTriage',
     );
+  });
+
+  it('maps #codeql-triage hash to the CodeQL triage section', () => {
+    expect(resolveAutomationHashTarget('#codeql-triage')).toBe('codeqlTriage');
   });
 
   it('maps #security-auditor hash to the security auditor section', () => {

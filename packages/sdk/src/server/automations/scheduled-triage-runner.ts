@@ -40,7 +40,11 @@ export type TriageScanBuild =
   | { kind: 'skip'; reason: string };
 
 type ScheduledTriageAutomationConfig = {
-  automationKey: 'sentry_triage' | 'dependabot_triage' | 'ci_failure_triage';
+  automationKey:
+    | 'sentry_triage'
+    | 'dependabot_triage'
+    | 'codeql_triage'
+    | 'ci_failure_triage';
   /**
    * Builds the scan task payload for the deployment, or skips with a logged
    * reason (missing credentials, no eligible repositories, ...).

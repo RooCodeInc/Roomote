@@ -18,6 +18,7 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
+export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
 export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 
@@ -71,6 +72,9 @@ export type FormState = {
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannel: string;
   dependabotTriageDiscordChannel: string;
+  codeqlTriageFrequency: CodeqlTriageFrequency;
+  codeqlTriageSlackChannel: string;
+  codeqlTriageDiscordChannel: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
   suggesterDiscordChannel: string;
@@ -97,6 +101,7 @@ export type AutomationId =
   | 'managerStats'
   | 'sentryTriage'
   | 'dependabotTriage'
+  | 'codeqlTriage'
   | ScheduleOnlyBackgroundAutomationId
   | 'reviewer'
   | 'conflictResolver'
@@ -150,6 +155,12 @@ const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageDiscordChannel',
 ];
 
+const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
+  'codeqlTriageFrequency',
+  'codeqlTriageSlackChannel',
+  'codeqlTriageDiscordChannel',
+];
+
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   'suggesterSlackChannel',
@@ -194,6 +205,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   managerStats: MANAGER_STATS_FIELDS,
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
+  codeqlTriage: CODEQL_TRIAGE_FIELDS,
   ...SCHEDULE_ONLY_AUTOMATION_FIELDS,
   reviewer: REVIEWER_FIELDS,
   conflictResolver: CONFLICT_RESOLVER_FIELDS,
@@ -314,6 +326,11 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.dependabotTriageSlackChannel.trim() || null,
     dependabotTriageDiscordChannel:
       stateToSave.dependabotTriageDiscordChannel.trim() || null,
+    codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
+    codeqlTriageSlackChannel:
+      stateToSave.codeqlTriageSlackChannel.trim() || null,
+    codeqlTriageDiscordChannel:
+      stateToSave.codeqlTriageDiscordChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
