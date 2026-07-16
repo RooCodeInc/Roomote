@@ -175,7 +175,6 @@ describe('buildAcpActivityRenderBlocks', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
-      messageBlock('todo-1', 3_000, 'todo_section'),
       toolGroupBlock({
         id: 'group-1',
         ts: 4_000,
@@ -195,7 +194,6 @@ describe('buildAcpActivityRenderBlocks', () => {
     }
 
     expect(entries[1].blocks.map((block) => block.kind)).toEqual([
-      'message',
       'message',
       'tool_group',
     ]);
@@ -302,6 +300,26 @@ describe('buildAcpActivityRenderBlocks', () => {
       'message',
       'message',
     ]);
+  });
+
+  it('collapses leading activity when an external session prompt provides the left text boundary', () => {
+    const entries = buildAcpActivityRenderBlocks(
+      [
+        messageBlock('reasoning-1', 2_000, 'reasoning'),
+        textBlock('text-1', 10_000),
+      ],
+      { hasLeadingTextBoundary: true },
+    );
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'activity_group',
+      'message',
+    ]);
+    expect(entries[0]).toMatchObject({
+      kind: 'activity_group',
+      ts: 2_000,
+      endTs: 10_000,
+    });
   });
 
   it('bypasses grouping in narration mode', () => {

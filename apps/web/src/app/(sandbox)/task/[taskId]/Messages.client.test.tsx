@@ -547,4 +547,49 @@ describe('Messages', () => {
     expect(screen.getByText('Worked for 17s')).toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
+
+  it('uses the rendered session prompt as the left boundary for initial activity', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 9_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: {
+              text: 'Initial prompt',
+              visibleInTranscript: true,
+            },
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
+    expect(screen.getByText('Worked for 7s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+  });
 });

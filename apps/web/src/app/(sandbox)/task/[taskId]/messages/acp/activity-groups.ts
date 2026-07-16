@@ -35,6 +35,7 @@ export type AcpConversationRenderBlock =
 interface BuildAcpActivityRenderBlocksOptions {
   artifacts?: readonly TaskArtifact[] | null;
   displayMode?: 'default' | 'narration';
+  hasLeadingTextBoundary?: boolean;
 }
 
 function isToolMessage(
@@ -108,19 +109,29 @@ export function buildAcpActivityRenderBlocks(
 
   const groupedBlocks: AcpConversationRenderBlock[] = [];
   let cursor = 0;
+  let hasLeftTextBoundary = options.hasLeadingTextBoundary === true;
 
   while (cursor < blocks.length) {
     const current = blocks[cursor]!;
 
-    if (!isTextBoundaryBlock(current)) {
+    if (isTextBoundaryBlock(current)) {
       groupedBlocks.push(current);
+      hasLeftTextBoundary = true;
       cursor += 1;
       continue;
     }
 
-    groupedBlocks.push(current);
+    if (
+      !hasLeftTextBoundary ||
+      !isActivityCollapsibleBlock(current, options.artifacts)
+    ) {
+      groupedBlocks.push(current);
+      hasLeftTextBoundary = false;
+      cursor += 1;
+      continue;
+    }
 
-    const activityStart = cursor + 1;
+    const activityStart = cursor;
     let activityEnd = activityStart;
 
     while (
@@ -148,6 +159,7 @@ export function buildAcpActivityRenderBlocks(
     }
 
     groupedBlocks.push(...activityBlocks);
+    hasLeftTextBoundary = false;
     cursor = activityEnd;
   }
 

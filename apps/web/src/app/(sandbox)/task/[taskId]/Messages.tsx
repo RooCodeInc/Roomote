@@ -239,6 +239,7 @@ const MessagesBase = ({
       return buildAcpActivityRenderBlocks(acpBlocks, {
         artifacts: session.artifacts,
         displayMode: resolvedMessageUiOptions.displayMode,
+        hasLeadingTextBoundary: shouldRenderSessionPrompt,
       });
     },
     [
@@ -247,6 +248,7 @@ const MessagesBase = ({
       resolvedMessageUiOptions.displayMode,
       session.artifacts,
       sessionPrompt,
+      shouldRenderSessionPrompt,
       showInternalMessages,
       suppressedMessageIds,
     ],
