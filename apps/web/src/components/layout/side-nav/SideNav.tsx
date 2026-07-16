@@ -18,7 +18,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   VectorSquare,
-  BookMarked,
   SquareDashed,
 } from '@/components/system';
 import { ChatWidgetSideNavItem } from '@/components/layout/ChatWidgetButton';
