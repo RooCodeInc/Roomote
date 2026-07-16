@@ -7,7 +7,7 @@ import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
-export type RetryFailedTaskStartResult =
+type RetryFailedTaskStartResult =
   | { success: true; runId: number; taskId: string }
   | { success: false; error: string };
 
