@@ -351,6 +351,13 @@ const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT = 5;
 const DISCORD_CHANNEL_TYPES_FORUM = new Set([15, 16]);
+/**
+ * SUPPRESS_EMBEDS. Discord unfurls every link it finds into a preview card,
+ * which turns a task link into a Roomote marketing embed under the message.
+ * Slack posts with `unfurl_links: false`; this is the same intent. It hides
+ * embeds we send too, so only set it on messages carrying none of their own.
+ */
+const DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS = 1 << 2;
 const DISCORD_ERROR_CODE_UNKNOWN_MESSAGE = 10008;
 const DISCORD_ERROR_CODE_MESSAGE_ALREADY_HAS_THREAD = 160004;
 
@@ -442,7 +449,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
                 image: { url: image.url },
               })),
             }
-          : {}),
+          : { flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS }),
         ...(index === 0 && input.attachments?.length
           ? { attachments: input.attachments }
           : {}),
@@ -498,6 +505,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         content: input.text,
         allowed_mentions: { parse: [] },
         components: buildDiscordComponents(input.buttons) ?? [],
+        flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS,
       },
       { retryNetworkErrors: true, retryServerErrors: true },
     );
@@ -630,6 +638,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           ...(input.buttons
             ? { components: buildDiscordComponents(input.buttons) }
             : {}),
+          ...(input.images?.length
+            ? {}
+            : { flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS }),
         },
       },
       // The message nonce does not make the containing thread creation
@@ -839,6 +850,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         content: input.text,
         allowed_mentions: { parse: [] },
         components: buildDiscordComponents(input.buttons) ?? [],
+        flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS,
       },
       {
         retryNetworkErrors: true,
