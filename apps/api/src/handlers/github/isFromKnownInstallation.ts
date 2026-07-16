@@ -1,12 +1,18 @@
-import { db, eq, githubInstallations } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  githubInstallations,
+  githubPendingInstallations,
+} from '@roomote/db/server';
 
 /**
  * A public GitHub App can be installed by any account, so a validly signed
  * webhook delivery is not proof of a relationship with this deployment.
  * Events must reference an installation this deployment has already synced
- * before they are recorded or handled. `installation` creation events pass
- * through so pending installations can complete; that handler is guarded by
- * its own pending-installation record match.
+ * before they are recorded or handled. `installation` creation events are
+ * instead matched against pending installations - the same check their
+ * handler enforces - so installs nobody requested through this deployment
+ * are dropped before they are persisted.
  */
 export async function isFromKnownInstallation(
   eventName: string,
@@ -14,6 +20,7 @@ export async function isFromKnownInstallation(
 ): Promise<boolean> {
   let action: string | undefined;
   let installationId: number | undefined;
+  let accountId: number | undefined;
 
   try {
     const parsed: unknown = JSON.parse(rawPayload);
@@ -24,7 +31,7 @@ export async function isFromKnownInstallation(
 
     const payload = parsed as {
       action?: unknown;
-      installation?: { id?: unknown } | null;
+      installation?: { id?: unknown; account?: { id?: unknown } | null } | null;
     };
 
     action = typeof payload.action === 'string' ? payload.action : undefined;
@@ -32,13 +39,29 @@ export async function isFromKnownInstallation(
       typeof payload.installation?.id === 'number'
         ? payload.installation.id
         : undefined;
+    accountId =
+      typeof payload.installation?.account?.id === 'number'
+        ? payload.installation.account.id
+        : undefined;
   } catch {
     // Defer malformed payloads to verifyAndReceive's own error handling.
     return true;
   }
 
   if (eventName === 'installation' && action === 'created') {
-    return true;
+    if (accountId === undefined) {
+      return false;
+    }
+
+    // The pending row's appId column stores the account id of the requested
+    // installation target; see finishCreateGitHubInstallationCommand.
+    const pendingInstallation =
+      await db.query.githubPendingInstallations.findFirst({
+        where: eq(githubPendingInstallations.appId, accountId),
+        columns: { id: true },
+      });
+
+    return pendingInstallation !== undefined;
   }
 
   if (installationId === undefined) {

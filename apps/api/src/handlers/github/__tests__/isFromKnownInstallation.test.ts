@@ -1,7 +1,8 @@
 // pnpm --filter @roomote/api test github/__tests__/isFromKnownInstallation.test.ts
 
-const { mockFindFirst } = vi.hoisted(() => ({
+const { mockFindFirst, mockFindPendingFirst } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
+  mockFindPendingFirst: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -10,10 +11,16 @@ vi.mock('@roomote/db/server', () => ({
       githubInstallations: {
         findFirst: mockFindFirst,
       },
+      githubPendingInstallations: {
+        findFirst: mockFindPendingFirst,
+      },
     },
   },
   githubInstallations: {
     installationId: 'githubInstallations.installationId',
+  },
+  githubPendingInstallations: {
+    appId: 'githubPendingInstallations.appId',
   },
   eq: vi.fn((left: unknown, right: unknown) => [left, right]),
 }));
@@ -25,7 +32,34 @@ describe('isFromKnownInstallation', () => {
     vi.clearAllMocks();
   });
 
-  it('allows installation.created without a lookup so pending installations can complete', async () => {
+  it('allows installation.created when the account has a pending installation', async () => {
+    mockFindPendingFirst.mockResolvedValue({ id: 'pending-row' });
+
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: { id: 123, account: { id: 555 } },
+    });
+
+    await expect(
+      isFromKnownInstallation('installation', payload),
+    ).resolves.toBe(true);
+    expect(mockFindFirst).not.toHaveBeenCalled();
+  });
+
+  it('rejects installation.created when no pending installation matches the account', async () => {
+    mockFindPendingFirst.mockResolvedValue(undefined);
+
+    const payload = JSON.stringify({
+      action: 'created',
+      installation: { id: 123, account: { id: 555 } },
+    });
+
+    await expect(
+      isFromKnownInstallation('installation', payload),
+    ).resolves.toBe(false);
+  });
+
+  it('rejects installation.created without an installation account', async () => {
     const payload = JSON.stringify({
       action: 'created',
       installation: { id: 123 },
@@ -33,8 +67,8 @@ describe('isFromKnownInstallation', () => {
 
     await expect(
       isFromKnownInstallation('installation', payload),
-    ).resolves.toBe(true);
-    expect(mockFindFirst).not.toHaveBeenCalled();
+    ).resolves.toBe(false);
+    expect(mockFindPendingFirst).not.toHaveBeenCalled();
   });
 
   it('allows events from a known installation', async () => {
@@ -74,6 +108,7 @@ describe('isFromKnownInstallation', () => {
     await expect(
       isFromKnownInstallation('installation', payload),
     ).resolves.toBe(false);
+    expect(mockFindPendingFirst).not.toHaveBeenCalled();
   });
 
   it('allows signed events without an installation reference', async () => {
@@ -88,5 +123,6 @@ describe('isFromKnownInstallation', () => {
       isFromKnownInstallation('pull_request', 'not-json'),
     ).resolves.toBe(true);
     expect(mockFindFirst).not.toHaveBeenCalled();
+    expect(mockFindPendingFirst).not.toHaveBeenCalled();
   });
 });
