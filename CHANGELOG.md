@@ -2,6 +2,30 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.6.0 (2026-07-16)
+
+### Minor changes
+
+- Promote Bitbucket OAuth to deployment scope so repository sync, webhooks, pull request operations, and worker Git credentials use encrypted deployment connections with token refresh and clearer setup guidance.
+- Add Discord as a communications provider with bot setup and account linking, Gateway-based messages and slash commands, per-task threads and forum posts, attachments, follow-ups, automations, and proactive notifications. Gateway sessions resume across service restarts and leader handoffs so Discord can replay events received during the transition.
+- Add cost analytics on `/analytics/costs` with generalized LLM usage tracking across task and non-task attribution, provider/model metadata, and durable pricing-aware usage events.
+- Environments now track a persisted verification state that is separate from "a definition exists". A new environment is Configured until a follow-up verification task confirms it works, then it becomes Verified; runtime-affecting edits reset it to Configured while name/description-only edits keep it verified. Onboarding can finish while verification runs, the Environments settings page shows the verification status with a Retry verification action and a link to the related task, and agents record the outcome through the new `manage_environments` `record_verification` action.
+- Inference providers now carry recommended per-role model defaults (helper, vision, code review, explore, planning). Connecting a provider in the setup wizard applies its recommended defaults automatically, and a "Use recommended" action on the Default Models card in Settings > Models re-applies them at any time. Google Vertex AI now defaults to Claude models (Sonnet 5 coding, Haiku 4.5 helper/explore, Opus 4.8 review/planning), and Google Gemini defaults to Gemini 3.1 Pro for coding with Flash for helper/explore. Requesty is no longer offered for new connections; existing Requesty connections keep working.
+- Add the Roomote deployment-managed compute provider: deployments that ship managed sandbox credentials get a zero-setup sandbox option in setup and Settings while bring-your-own Modal, E2B, Daytona, and Blaxel remain available.
+- Deliver spawned-task settle outcomes back to the launching run so follow-up work such as environment verification completion is pushed into the parent task instead of depending on agent-side polling that can go idle.
+
+### Patch changes
+
+- CI failure triage no longer no-ops when the manager destination is Teams or Telegram; manual Run now can launch the investigate-and-fix task against a non-Slack manager channel.
+- React with thumbsdown when a linked pull request is closed without merging, instead of a heavy multiplication mark, across Slack terminal-status notifications.
+- Allow the production Docker socket proxy to create and remove managed task workspace volumes so Compose-based deployments can provision workers without 403 volume API failures.
+- Stop Gitea pull requests from flooding with bot review threads when the bot username does not start with `roomote`, by correctly recognizing bot comments without re-entering mention intake.
+- Show provider headers in multi-provider model choosers and group ChatGPT subscription models under ChatGPT so long model lists are easier to scan in launch and Settings surfaces.
+- Tasks no longer hang forever when OpenCode session creation never returns; the run fails closed with diagnostics instead of waiting indefinitely.
+- Provider Cancel (Slack and Telegram) now fully stops the active run and shuts the sandbox down, instead of leaving a resumable standby machine after cancel.
+- Remove the customizable Vibes admin settings surface and deployment style or emoji overrides; agents use the fixed product defaults instead.
+- Setup no longer skips communication, source-control, or sandbox provider steps just because runtime env vars already satisfy a provider: the picker still appears with the matched option preselected so operators can confirm or change the choice, including the new Roomote compute path.
+
 ## 0.5.0 (2026-07-15)
 
 ### Minor changes
