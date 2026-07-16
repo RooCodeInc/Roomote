@@ -66,6 +66,12 @@ export async function resolveDiscordChannelContext(
 export function discordMetadataForChannel(input: {
   channel: DiscordChannelContext;
   messageId: string;
+  /**
+   * The real channel message that triggered the event — set only for
+   * message events. Interactions have no message a task thread could
+   * anchor to, so launches from them keep detached threads.
+   */
+  anchorMessageId?: string;
 }): DiscordEventCommunicationMetadata {
   return {
     communicationProvider: 'discord',
@@ -77,6 +83,9 @@ export function discordMetadataForChannel(input: {
     communicationMessageId: input.messageId,
     ...(input.channel.guildId
       ? { communicationGuildId: input.channel.guildId }
+      : {}),
+    ...(input.anchorMessageId
+      ? { communicationAnchorMessageId: input.anchorMessageId }
       : {}),
   };
 }

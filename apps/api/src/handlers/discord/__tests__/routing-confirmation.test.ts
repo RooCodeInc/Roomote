@@ -158,6 +158,57 @@ describe('Discord routing confirmation', () => {
     );
   });
 
+  it('carries the thread anchor through the pending route to the launch', async () => {
+    // A confirmation card defers the launch to a button interaction, which
+    // has no message of its own. The anchor from the original mention must
+    // survive the round trip or the task thread silently detaches.
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: {
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'likely',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.7,
+          },
+        },
+      },
+    });
+
+    const stored = mocks.redisSet.mock.calls[0]?.[1] as string;
+    expect(JSON.parse(stored).metadata).toMatchObject({
+      communicationAnchorMessageId: 'message-1',
+    });
+  });
+
   it('keeps every stored route visible within Discord action-row limits', async () => {
     mocks.getAvailableEnvironments.mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
