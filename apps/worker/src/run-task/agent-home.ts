@@ -48,6 +48,8 @@ const OPENCODE_CONFIG_DIR_NAME = 'opencode';
 const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
   'google-application-credentials.json';
 
+export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
+
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
 const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
@@ -1408,7 +1410,7 @@ export function generateOpenCodeConfig({
  */
 export function resolveOpenCodeDataDir(
   homeDir: string,
-  runtimeEnv: Record<string, string>,
+  runtimeEnv: Record<string, string | undefined>,
 ): string {
   const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
 
@@ -1416,6 +1418,24 @@ export function resolveOpenCodeDataDir(
     xdgDataHome || path.join(homeDir, '.local', 'share'),
     OPENCODE_CONFIG_DIR_NAME,
   );
+}
+
+/**
+ * Credential files materialized under the OpenCode data dir for a run: the
+ * ChatGPT subscription `auth.json` and the inline Google service-account
+ * JSON. Deleted before filesystem snapshots; both are re-materialized from
+ * the dequeue/resume env at the next run start.
+ */
+export function resolveOpenCodeCredentialFilePaths(
+  homeDir: string,
+  runtimeEnv: Record<string, string | undefined>,
+): string[] {
+  const dataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
+
+  return [
+    path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
+    path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
+  ];
 }
 
 /**
