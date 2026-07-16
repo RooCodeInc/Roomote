@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { AcpPlanTodo } from '@roomote/types';
 
 const {
@@ -43,7 +43,7 @@ describe('TodoList', () => {
     useSandboxTaskPhaseMock.mockReturnValue('running');
   });
 
-  it('opens populated todos by default', () => {
+  it('starts collapsed by default', () => {
     useSandboxTodosMock.mockReturnValue([
       { id: '1', content: 'Inspect layout', status: 'in_progress' },
       { id: '2', content: 'Move the todo block', status: 'pending' },
@@ -55,9 +55,17 @@ describe('TodoList', () => {
     expect(
       screen.getByRole('button', { name: /1 of 3 to-dos done/i }),
     ).toBeVisible();
+    expect(screen.queryByText('Inspect layout')).not.toBeInTheDocument();
+    expect(screen.queryByText('Move the todo block')).not.toBeInTheDocument();
+    expect(
+      screen.queryByText('Verify prompt alignment'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /1 of 3 to-dos done/i }),
+    );
+
     expect(screen.getByText('Inspect layout')).toBeVisible();
-    expect(screen.getByText('Move the todo block')).toBeVisible();
-    expect(screen.getByText('Verify prompt alignment')).toBeVisible();
   });
 
   it('starts collapsed on mobile task entry', () => {
@@ -93,7 +101,7 @@ describe('TodoList', () => {
       const { rerender } = render(<TodoList taskEntryKey="task-1" />);
 
       expect(
-        screen.getByRole('button', { name: /2 to-dos done/i }),
+        screen.getByRole('button', { name: /All 2 to-dos done/i }),
       ).toBeVisible();
       expect(screen.queryByText('Inspect layout')).not.toBeInTheDocument();
 
@@ -127,52 +135,29 @@ describe('TodoList', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('collapses when the last todo completes, then hides it after 10 seconds', () => {
-    vi.useFakeTimers();
+  it('collapses when the last todo completes and stays visible', () => {
+    useSandboxTodosMock.mockReturnValue([
+      { id: '1', content: 'Inspect layout', status: 'in_progress' },
+      { id: '2', content: 'Move the todo block', status: 'completed' },
+    ]);
 
-    try {
-      useSandboxTodosMock.mockReturnValue([
-        { id: '1', content: 'Inspect layout', status: 'in_progress' },
-        { id: '2', content: 'Move the todo block', status: 'completed' },
-      ]);
+    const { rerender } = render(<TodoList taskEntryKey="task-1" />);
 
-      const { rerender } = render(<TodoList taskEntryKey="task-1" />);
+    expect(
+      screen.getByRole('button', { name: /1 of 2 to-dos done/i }),
+    ).toBeVisible();
 
-      expect(
-        screen.getByRole('button', { name: /1 of 2 to-dos done/i }),
-      ).toBeVisible();
-      expect(screen.getByText('Inspect layout')).toBeVisible();
+    useSandboxTodosMock.mockReturnValue([
+      { id: '1', content: 'Inspect layout', status: 'completed' },
+      { id: '2', content: 'Move the todo block', status: 'completed' },
+    ]);
 
-      useSandboxTodosMock.mockReturnValue([
-        { id: '1', content: 'Inspect layout', status: 'completed' },
-        { id: '2', content: 'Move the todo block', status: 'completed' },
-      ]);
+    rerender(<TodoList taskEntryKey="task-1" />);
 
-      rerender(<TodoList taskEntryKey="task-1" />);
-
-      expect(
-        screen.getByRole('button', { name: /2 to-dos done/i }),
-      ).toBeVisible();
-      expect(screen.queryByText('Inspect layout')).not.toBeInTheDocument();
-
-      act(() => {
-        vi.advanceTimersByTime(9_000);
-      });
-
-      expect(
-        screen.getByRole('button', { name: /2 to-dos done/i }),
-      ).toBeVisible();
-
-      act(() => {
-        vi.advanceTimersByTime(1_000);
-      });
-
-      expect(
-        screen.queryByRole('button', { name: /2 to-dos done/i }),
-      ).not.toBeInTheDocument();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(
+      screen.getByRole('button', { name: /All 2 to-dos done/i }),
+    ).toBeVisible();
+    expect(screen.queryByText('Inspect layout')).not.toBeInTheDocument();
   });
 
   it('does not present stale unfinished todos as active when the task is idle', () => {
@@ -183,6 +168,10 @@ describe('TodoList', () => {
     ]);
 
     const { container } = render(<TodoList taskEntryKey="task-1" />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /0 of 2 to-dos done/i }),
+    );
 
     const items = Array.from(container.querySelectorAll('li'));
 
@@ -200,6 +189,10 @@ describe('TodoList', () => {
     ]);
 
     const { container } = render(<TodoList taskEntryKey="task-1" />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /1 of 3 to-dos done/i }),
+    );
 
     const items = Array.from(container.querySelectorAll('li'));
 

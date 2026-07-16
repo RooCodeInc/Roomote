@@ -259,20 +259,16 @@ function LiveContentInner({
                   }
                 />
                 <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
-                  <div className="max-w-4xl mx-auto">
-                    <PendingUserInputRequestStateProvider
-                      taskId={session.taskId}
-                    >
-                      <TaskInputStack
-                        session={session}
-                        promptInputRef={promptInputRef}
-                        onFileSearchOpen={handleFileSearchOpen}
-                        onCommandSearchOpen={handleCommandSearchOpen}
-                        onBootStatusChange={onBootStatusChange}
-                        scrollToBottom={scrollToBottom}
-                      />
-                    </PendingUserInputRequestStateProvider>
-                  </div>
+                  <PendingUserInputRequestStateProvider taskId={session.taskId}>
+                    <TaskInputStack
+                      session={session}
+                      promptInputRef={promptInputRef}
+                      onFileSearchOpen={handleFileSearchOpen}
+                      onCommandSearchOpen={handleCommandSearchOpen}
+                      onBootStatusChange={onBootStatusChange}
+                      scrollToBottom={scrollToBottom}
+                    />
+                  </PendingUserInputRequestStateProvider>
                 </div>
               </div>
             </ArtifactLinkProvider>

@@ -88,6 +88,20 @@ vi.mock('./messages/index', () => ({
 vi.mock('./messages/acp', () => ({
   AcpMessageItem: ({ msg }: { msg: { id: string } }) => <div>{msg.id}</div>,
   AcpGroupedToolMessage: () => null,
+  AcpActivityGroupMessage: ({
+    group,
+    children,
+  }: {
+    group: { ts: number; endTs: number };
+    children: ReactNode;
+  }) => (
+    <div>
+      <button type="button">
+        Worked for {Math.round((group.endTs - group.ts) / 1000)}s
+      </button>
+      <div>{children}</div>
+    </div>
+  ),
   AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
     <div>{msg.text}</div>
   ),
@@ -481,5 +495,209 @@ describe('Messages', () => {
         shouldHideFirstMessage: true,
       }),
     );
+  });
+
+  it('collapses eligible background activity between text messages', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 1_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-2',
+          ts: 19_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Worked for 17s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+  });
+
+  it('uses the rendered session prompt as the left boundary for initial activity', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 9_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: {
+              text: 'Initial prompt',
+              visibleInTranscript: true,
+            },
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Initial prompt')).toBeInTheDocument();
+    expect(screen.getByText('Worked for 7s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+  });
+
+  it('collapses initial eligible activity even when there is no visible starting text message', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 12_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Worked for 10s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+  });
+
+  it('keeps todo section markers visible while collapsing following activity', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'todo-1',
+          ts: 3_000,
+          role: 'assistant',
+          kind: 'todo_section',
+          partial: false,
+          data: {
+            todoId: 'todo-1',
+            content: 'Inspect repository guidance',
+          },
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-2',
+          ts: 4_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 12_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Worked for 8s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+    expect(screen.getByText('todo-1')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-2')).toBeInTheDocument();
   });
 });

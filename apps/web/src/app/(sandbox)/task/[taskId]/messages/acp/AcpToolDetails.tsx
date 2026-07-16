@@ -49,7 +49,7 @@ export function AcpToolDetails({
   if (isSubagent && subagentPrompt) {
     return (
       <div
-        className="rounded-xl border px-4 py-2 text-sm whitespace-pre-wrap text-foreground/80"
+        className="whitespace-pre-wrap text-sm font-light text-muted-foreground"
         style={{ maxHeight, overflow: 'auto' }}
       >
         {sanitizeSandboxPathString(subagentPrompt)}
@@ -58,7 +58,14 @@ export function AcpToolDetails({
   }
 
   return sanitizedText ? (
-    <CodeBlock code={sanitizedText} language="bash" maxHeight={maxHeight} />
+    <CodeBlock
+      code={sanitizedText}
+      language="bash"
+      maxHeight={maxHeight}
+      variant="compact"
+      highlight={false}
+      className="[&>div]:rounded-none [&>div]:bg-transparent [&_pre]:px-0 [&_pre]:py-0"
+    />
   ) : (
     <ToolInput
       input={sanitizedToolData}
