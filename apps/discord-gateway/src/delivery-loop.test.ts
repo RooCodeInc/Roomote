@@ -245,4 +245,60 @@ describe('Discord delivery worker', () => {
       }),
     );
   });
+
+  it('starts the restart backoff over after a long healthy run', async () => {
+    vi.useFakeTimers();
+    try {
+      const abort = new AbortController();
+      const update = vi.fn().mockResolvedValue(undefined);
+      const runLoop = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('blip 1'))
+        .mockRejectedValueOnce(new Error('blip 2'))
+        .mockImplementationOnce(async () => {
+          // A healthy stretch well past restartMaxBackoffMs * 2 before this
+          // fresh incident.
+          vi.setSystemTime(Date.now() + 900);
+          throw new Error('fresh incident');
+        })
+        .mockImplementationOnce(async () => {
+          abort.abort();
+        });
+
+      const runPromise = runSupervisedDeliveryLoop({
+        queue: {} as DiscordInboundQueue,
+        forwarder: {} as DiscordApiForwarder,
+        status: { update } as unknown as GatewayStatusStore,
+        signal: abort.signal,
+        pollMs: 100,
+        restartMaxBackoffMs: 400,
+        runLoop,
+      });
+
+      // First crash sleeps pollMs (100), then the backoff doubles to 200.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runLoop).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(99);
+      expect(runLoop).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runLoop).toHaveBeenCalledTimes(2);
+
+      // Second crash in quick succession waits the doubled 200.
+      await vi.advanceTimersByTimeAsync(199);
+      expect(runLoop).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runLoop).toHaveBeenCalledTimes(3);
+
+      // The third run was healthy for 900ms (> 2 * restartMaxBackoffMs), so
+      // its failure restarts the backoff at pollMs instead of ratcheting on.
+      await vi.advanceTimersByTimeAsync(99);
+      expect(runLoop).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(runLoop).toHaveBeenCalledTimes(4);
+
+      await runPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

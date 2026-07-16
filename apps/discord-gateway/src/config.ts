@@ -4,6 +4,8 @@ const DEFAULT_DELIVERY_MAX_ATTEMPTS = 8;
 const DEFAULT_DELIVERY_MAX_BACKOFF_MS = 30_000;
 const DEFAULT_LOGIN_RETRY_BASE_MS = 15_000;
 const DEFAULT_LOGIN_RETRY_MAX_MS = 5 * 60_000;
+const DEFAULT_INBOUND_MAX_ENTRIES = 50_000;
+const DEFAULT_DEAD_LETTER_MAX_ENTRIES = 1_000;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -33,6 +35,8 @@ export type DiscordGatewayConfig = {
   deliveryPollMs: number;
   deliveryMaxAttempts: number;
   deliveryMaxBackoffMs: number;
+  inboundMaxEntries: number;
+  deadLetterMaxEntries: number;
   loginRetryBaseMs: number;
   loginRetryMaxMs: number;
 };
@@ -64,6 +68,14 @@ export function resolveDiscordGatewayConfig(
     deliveryMaxBackoffMs: positiveInteger(
       env.DISCORD_GATEWAY_DELIVERY_MAX_BACKOFF_MS,
       DEFAULT_DELIVERY_MAX_BACKOFF_MS,
+    ),
+    inboundMaxEntries: positiveInteger(
+      env.DISCORD_GATEWAY_INBOUND_MAX_ENTRIES,
+      DEFAULT_INBOUND_MAX_ENTRIES,
+    ),
+    deadLetterMaxEntries: positiveInteger(
+      env.DISCORD_GATEWAY_DEAD_LETTER_MAX_ENTRIES,
+      DEFAULT_DEAD_LETTER_MAX_ENTRIES,
     ),
     loginRetryBaseMs: positiveInteger(
       env.DISCORD_GATEWAY_LOGIN_RETRY_BASE_MS,
