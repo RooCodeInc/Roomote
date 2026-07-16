@@ -188,15 +188,26 @@ export async function createSlackAppFromManifest({
     const signingSecret = data.credentials?.signing_secret?.trim() ?? '';
 
     const cleanupCreatedApp = async (reason: string) => {
-      const cleanupResult = await deleteSlackAppFromManifest({
-        configToken: normalizedConfigToken,
-        appId,
-      });
+      let cleanupResult: Awaited<
+        ReturnType<typeof deleteSlackAppFromManifest>
+      > | null = null;
 
-      if (!cleanupResult.success) {
+      try {
+        cleanupResult = await deleteSlackAppFromManifest({
+          configToken: normalizedConfigToken,
+          appId,
+        });
+      } catch (error) {
         console.error(
           '[createSlackAppFromManifest] Failed to delete created Slack app:',
-          cleanupResult.error,
+          error,
+        );
+      }
+
+      if (!cleanupResult?.success) {
+        console.error(
+          '[createSlackAppFromManifest] Failed to delete created Slack app:',
+          cleanupResult?.error ?? 'delete request failed',
         );
 
         return {

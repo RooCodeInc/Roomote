@@ -4,7 +4,7 @@ import type {
   ReactElement,
   ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CommsProviderSection } from './CommsProviderSection';
 
@@ -89,6 +89,7 @@ const state = vi.hoisted(() => ({
 const mutations = vi.hoisted(() => ({
   connectSlack: vi.fn(),
   disconnectSlack: vi.fn(),
+  invalidateQueries: vi.fn(),
   updateRouterDebug: vi.fn(),
   refetchSlackChannels: vi.fn(),
 }));
@@ -152,7 +153,7 @@ vi.mock('@tanstack/react-query', () => ({
   }),
   useQueryClient: () => ({
     setQueryData: vi.fn(),
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mutations.invalidateQueries,
   }),
 }));
 
@@ -567,6 +568,7 @@ describe('CommsProviderSection', () => {
     state.slackChannelsIsFetching = false;
     state.updateRouterDebugIsPending = false;
     state.createSlackAppIsPending = false;
+    mutations.invalidateQueries.mockReset();
   });
 
   describe('numbered setup instructions', () => {
@@ -635,6 +637,14 @@ describe('CommsProviderSection', () => {
         'href',
         'https://api.slack.com/apps/A0NEWAPP',
       );
+      await waitFor(() => {
+        expect(mutations.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ['comms', 'status'],
+        });
+        expect(mutations.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ['environmentVariables', 'list'],
+        });
+      });
 
       rerender(
         <CommsProviderSection
@@ -654,6 +664,20 @@ describe('CommsProviderSection', () => {
         'href',
         'https://api.slack.com/apps/A0NEWAPP',
       );
+
+      rerender(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.queryByRole('link', { name: /the app/i }),
+      ).not.toBeInTheDocument();
     });
 
     it('keeps alternate Slack setup actions disabled while app creation is pending', () => {

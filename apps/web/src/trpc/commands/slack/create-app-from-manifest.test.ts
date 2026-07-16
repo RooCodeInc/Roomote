@@ -226,6 +226,36 @@ describe('createSlackAppFromManifestCommand', () => {
     });
   });
 
+  it('returns a recovery path when cleanup rejects after persistence failure', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          app_id: 'A0NEWAPP',
+          credentials: {
+            client_id: 'new-client-id',
+            client_secret: 'new-client-secret',
+            verification_token: 'new-verification-token',
+            signing_secret: 'new-signing-secret',
+          },
+        }),
+      })
+      .mockRejectedValueOnce(new Error('network down'));
+    mockDbTransaction.mockRejectedValue(new Error('database is unavailable'));
+
+    const result = await createSlackAppFromManifestCommand(buildMockAuth(), {
+      configToken: 'xoxe.xoxp-token',
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        'Slack app credentials could not be saved. The Slack app A0NEWAPP was created but could not be deleted automatically; delete it from api.slack.com/apps before trying again.',
+    });
+  });
+
   it('maps configuration-token failures to an actionable error', async () => {
     mockSlackResponse({ ok: false, error: 'invalid_auth' });
 
