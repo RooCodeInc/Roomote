@@ -35,6 +35,10 @@ function mockTaskRun(
   } as unknown as TaskRun;
 }
 
+vi.mock('../inference-gateway-flag', () => ({
+  isInferenceGatewayEnabledForWorkerEnv: vi.fn(async () => false),
+}));
+
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/db/server')>();
 
