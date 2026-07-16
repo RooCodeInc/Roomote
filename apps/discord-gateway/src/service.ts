@@ -162,6 +162,11 @@ export class DiscordGatewayService {
     }, this.config.statusRefreshMs);
 
     const ensureDeliveryLoop = async (apiSecret: string | null) => {
+      // Leadership can be lost while we resolve secrets or wait for an old
+      // delivery worker to unwind. Never start a new forwarder unless we still
+      // own the lease.
+      const canLead = () => leaseValid && !this.stopped;
+
       if (apiSecret && apiSecret === delivery.secret && delivery.promise) {
         return;
       }
@@ -172,6 +177,11 @@ export class DiscordGatewayService {
         delivery.promise = null;
       }
 
+      if (!canLead()) {
+        delivery.secret = null;
+        return;
+      }
+
       if (!apiSecret) {
         delivery.secret = null;
         await this.status.update({
@@ -179,6 +189,11 @@ export class DiscordGatewayService {
           lastError:
             'R_DISCORD_GATEWAY_SECRET is required to forward Discord events',
         });
+        return;
+      }
+
+      if (!canLead()) {
+        delivery.secret = null;
         return;
       }
 
@@ -221,11 +236,18 @@ export class DiscordGatewayService {
           const apiSecret = await resolveDiscordGatewayApiSecret(
             this.config.processEnv,
           );
-          await ensureDeliveryLoop(apiSecret);
+          // Secret lookup is async; re-check leadership in ensureDeliveryLoop.
+          if (leaseValid && !this.stopped) {
+            await ensureDeliveryLoop(apiSecret);
+          }
         } catch (error) {
           await this.status.update({
             lastError: `Discord gateway secret lookup failed: ${error instanceof Error ? error.message : String(error)}`,
           });
+        }
+
+        if (!leaseValid || this.stopped) {
+          break;
         }
 
         let credentials: DiscordGatewayCredentials | null;
