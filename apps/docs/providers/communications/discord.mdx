@@ -123,7 +123,6 @@ environment variable instead, set:
 
 ```sh
 R_DISCORD_BOT_TOKEN=<discord-bot-token>
-# Use a dedicated random value — do not reuse ENCRYPTION_KEY or other secrets.
 R_DISCORD_GATEWAY_SECRET=<random-secret>
 ```
 
@@ -137,8 +136,7 @@ If Discord was already set up without one (for example after an upgrade),
 Roomote generates and persists the secret automatically the next time the
 gateway or API needs it, or when you use **Repair**. For env-var-only setups,
 set the same secret on the API and BullMQ processes yourself (installers and
-platform templates also generate one). That value must be unique to Discord
-transport — do not reuse `ENCRYPTION_KEY` or any other deployment secret.
+platform templates also generate one).
 
 Gateway session state is stored in the Roomote database. On a service restart
 or leader handoff, Roomote asks Discord to resume the previous session and
