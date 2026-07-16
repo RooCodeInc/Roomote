@@ -19,6 +19,9 @@ import {
   type SnapshotResumeTask,
   RunStatus,
   TaskPayloadKind,
+  TASK_KICKOFF_MESSAGE_SOURCE,
+  ACP_ENVELOPE_EVENT_TYPES,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
 import {
   db,
@@ -26,6 +29,7 @@ import {
   inArray,
   tasks,
   taskRuns,
+  taskMessages,
   taskPullRequests,
   taskRunEvents,
   users,
@@ -465,6 +469,52 @@ describe('enqueueTaskRelaunch failed start', () => {
         { enqueue: false },
       ),
     ).rejects.toThrow('Only failed task starts can be retried');
+  });
+
+  it('allows relaunch when only a provider kickoff message exists', async () => {
+    const userId = await createUser();
+
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace has exceeded its spend limit',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db.insert(taskMessages).values({
+      runId: failedRun.id,
+      taskId: failedRun.taskId,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Looking into it in Full Stack.' }],
+      metadata: { source: TASK_KICKOFF_MESSAGE_SOURCE },
+      payload: {
+        text: 'Looking into it in Full Stack.',
+        source: TASK_KICKOFF_MESSAGE_SOURCE,
+      },
+    });
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.sourceRunId).toBe(failedRun.id);
   });
 });
 

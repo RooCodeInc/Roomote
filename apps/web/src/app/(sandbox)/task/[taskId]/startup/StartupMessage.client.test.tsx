@@ -168,6 +168,20 @@ describe('StartupSequence', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
+  it('shows image attachments for failed starts without a displayable error string', () => {
+    render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Failed, completed: true }]}
+        prompt={{ images: ['https://example.com/shot.png'] }}
+      />,
+    );
+
+    expect(screen.getByText('Your prompt')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'View attachment' }),
+    ).toHaveAttribute('href', 'https://example.com/shot.png');
+  });
+
   it('uses a flex-bounded scroll container when startup content exceeds the available height', () => {
     const { container } = render(
       <StartupSequence

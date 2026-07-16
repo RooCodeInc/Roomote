@@ -18,6 +18,7 @@ import {
   type TaskPhase,
   RunStatus,
   TaskPayloadKind,
+  TASK_KICKOFF_MESSAGE_SOURCE,
   activeRunStatuses,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
@@ -1600,24 +1601,17 @@ export async function enqueueTaskRelaunch(
     );
   }
 
-  const activeRun = await db.query.taskRuns.findFirst({
+  // Provider kickoff/start rows (for example Slack “started”) are written
+  // before provisioning and must not block restart after a failed start.
+  const priorHarnessMessage = await db.query.taskMessages.findFirst({
     where: and(
-      eq(taskRuns.taskId, existingTask.id),
-      inArray(taskRuns.status, [...activeRunStatuses]),
+      eq(taskMessages.runId, sourceRun.id),
+      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
     ),
     columns: { id: true },
   });
 
-  if (activeRun) {
-    throw new Error('This task already has an active run.');
-  }
-
-  const priorMessage = await db.query.taskMessages.findFirst({
-    where: eq(taskMessages.runId, sourceRun.id),
-    columns: { id: true },
-  });
-
-  if (priorMessage) {
+  if (priorHarnessMessage) {
     throw new Error(
       'Only failed environment starts can be restarted. This run already has task messages.',
     );
@@ -1673,6 +1667,36 @@ export async function enqueueTaskRelaunch(
   );
 
   const taskRun = await db.transaction(async (tx) => {
+    // Serialize concurrent retries on the same task so two retries cannot both
+    // observe an empty active-run set and insert separate pending runs.
+    await tx.execute(
+      sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
+    );
+
+    const activeRun = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, existingTask.id),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+      columns: { id: true },
+    });
+
+    if (activeRun) {
+      throw new Error('This task already has an active run.');
+    }
+
+    const stillFailed = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.id, sourceRun.id),
+        eq(taskRuns.status, RunStatus.Failed),
+      ),
+      columns: { id: true },
+    });
+
+    if (!stillFailed) {
+      throw new Error('Only failed task starts can be retried.');
+    }
+
     const [insertedRun] = await tx
       .insert(taskRuns)
       .values({

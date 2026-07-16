@@ -218,6 +218,17 @@ export const StartupFailureMessage = ({
                       {promptText}
                     </div>
                   )}
+                  {promptImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {promptImages.map((image) => (
+                        <Button key={image} variant="outline" size="sm" asChild>
+                          <a href={image} target="_blank" rel="noreferrer">
+                            View attachment
+                          </a>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
               {retryAction && (
