@@ -175,7 +175,6 @@ describe('buildAcpActivityRenderBlocks', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
-      messageBlock('todo-1', 3_000, 'todo_section'),
       toolGroupBlock({
         id: 'group-1',
         ts: 4_000,
@@ -196,8 +195,32 @@ describe('buildAcpActivityRenderBlocks', () => {
 
     expect(entries[1].blocks.map((block) => block.kind)).toEqual([
       'message',
+      'tool_group',
+    ]);
+  });
+
+  it('keeps todo section markers visible and uses them as a boundary', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      messageBlock('reasoning-1', 2_000, 'reasoning'),
+      messageBlock('todo-1', 3_000, 'todo_section'),
+      toolGroupBlock({
+        id: 'group-1',
+        ts: 4_000,
+        items: [
+          buildToolResult({ id: 'tool-1', ts: 4_000 }),
+          buildToolResult({ id: 'tool-2', ts: 5_000 }),
+        ],
+      }),
+      textBlock('text-2', 10_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
       'message',
       'tool_group',
+      'message',
     ]);
   });
 
@@ -293,7 +316,6 @@ describe('buildAcpActivityRenderBlocks', () => {
   it('collapses leading eligible activity before the first text message', () => {
     const entries = buildAcpActivityRenderBlocks([
       messageBlock('leading', 1_000, 'reasoning'),
-      messageBlock('todo-1', 1_500, 'todo_section'),
       textBlock('text-1', 2_000),
       messageBlock('trailing', 3_000, 'reasoning'),
     ]);
@@ -309,6 +331,20 @@ describe('buildAcpActivityRenderBlocks', () => {
       ts: 1_000,
       endTs: 2_000,
     });
+  });
+
+  it('keeps leading todo section markers visible', () => {
+    const entries = buildAcpActivityRenderBlocks([
+      messageBlock('leading', 1_000, 'reasoning'),
+      messageBlock('todo-1', 1_500, 'todo_section'),
+      textBlock('text-1', 2_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+    ]);
   });
 
   it('collapses leading activity when an external session prompt provides the left text boundary', () => {

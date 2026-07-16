@@ -10,7 +10,6 @@ import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-resul
 
 export const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
   'reasoning',
-  'todo_section',
   'tool_call',
   'tool_result',
 ] as const;

@@ -593,7 +593,48 @@ describe('Messages', () => {
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
-  it('collapses initial activity even when there is no visible starting text message', () => {
+  it('collapses initial eligible activity even when there is no visible starting text message', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 12_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Worked for 10s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
+  });
+
+  it('keeps initial todo section markers visible instead of collapsing them', () => {
     mockBuildAcpRenderBlocks.mockReturnValue([
       {
         kind: 'message',
@@ -644,7 +685,7 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.getByText('Worked for 10s')).toBeInTheDocument();
+    expect(screen.queryByText(/^Worked for/)).not.toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
     expect(screen.getByText('todo-1')).toBeInTheDocument();
   });
