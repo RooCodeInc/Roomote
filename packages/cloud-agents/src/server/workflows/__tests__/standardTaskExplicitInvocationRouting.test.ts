@@ -135,6 +135,17 @@ describe('Standard Task explicit invocation routing', () => {
     expect(prompt.startsWith('$dependabot-triage\n<request>')).toBe(true);
   });
 
+  it('treats productized CodeQL triage invocations as packaged-skill entry in customer repos', () => {
+    const { prompt } = standardTask({
+      description:
+        '$codeql-triage\n\n<task_context><source>background-automation</source></task_context>',
+      repo: 'acme/widgets',
+      requestFormat: 'structured',
+    });
+
+    expect(prompt.startsWith('$codeql-triage\n<request>')).toBe(true);
+  });
+
   it('treats dependency update follow-up invocations as packaged-skill entry in customer repos', () => {
     const { prompt } = standardTask({
       description:
