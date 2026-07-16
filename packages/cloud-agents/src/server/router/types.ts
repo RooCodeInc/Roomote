@@ -8,7 +8,7 @@ import type {
  * Time in milliseconds to wait for the user to confirm or correct
  * the routing suggestion before auto-accepting it (Slack).
  */
-export const SLACK_AUTO_CONFIRM_TIMEOUT_MS = 30_000;
+export const ROUTING_AUTO_CONFIRM_TIMEOUT_MS = 30_000;
 
 /**
  * Time in milliseconds to wait for the user to confirm or correct

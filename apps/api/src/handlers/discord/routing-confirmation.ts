@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import {
   getAvailableEnvironments,
   getTaskUrl,
+  ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   type RoutingDecision,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -16,6 +17,7 @@ import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import type { QueuedCommunicationMessage } from '@roomote/types';
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
+import { apiLogger } from '../../logging.js';
 import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
@@ -53,7 +55,14 @@ type PendingDiscordRoute = {
    * using `channel`, so it still resolves the same thread parent.
    */
   cardChannel?: DiscordChannelContext;
+  /** The card itself, so an auto-confirm can turn it into the acknowledgement. */
+  cardMessageId?: string;
   options: PendingRouteOption[];
+  /**
+   * Which option the router actually suggested, or null when it had no opinion
+   * and the card is a plain menu. Only a suggestion may be auto-confirmed.
+   */
+  suggestedIndex: number | null;
   forceNewThread?: boolean;
 };
 
@@ -132,6 +141,31 @@ async function buildOptions(
     : [...environmentOptions, allRepositories];
 }
 
+function sameWorkspace(
+  left: RoutingWorkspace,
+  right: RoutingWorkspace,
+): boolean {
+  return left.type === 'environment' && right.type === 'environment'
+    ? left.id === right.id
+    : left.type === right.type;
+}
+
+/**
+ * The router's pick, located in the rendered options. A suggestion the router
+ * named can vanish before the card is built, so this never assumes it is the
+ * first option.
+ */
+function findSuggestedIndex(
+  options: PendingRouteOption[],
+  suggested: RoutingWorkspace | null,
+): number | null {
+  if (!suggested) return null;
+  const index = options.findIndex((option) =>
+    sameWorkspace(option.workspace, suggested),
+  );
+  return index < 0 ? null : index;
+}
+
 function routeButtons(id: string, options: PendingRouteOption[]) {
   return [
     ...options.map((option, index) => [
@@ -162,6 +196,81 @@ function taskThreadChannelContext(input: {
   };
 }
 
+/**
+ * Launches the option the router suggested when nobody answers the card, so a
+ * request cannot die of inattention. Slack and Telegram both do this; without
+ * it a Discord card just expires with its TTL and the request is silently lost.
+ */
+async function autoConfirmDiscordRouting(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  pendingRouteId: string;
+}): Promise<void> {
+  // Claiming is atomic, so a click landing at the same moment wins one of the
+  // two paths and the other finds nothing.
+  const pending = await claimPendingRoute(input.pendingRouteId);
+  if (!pending || pending.suggestedIndex === null) return;
+  const option = pending.options[pending.suggestedIndex];
+  if (!option) return;
+  const existingRun = await findCommunicationTaskRunBySourceEvent({
+    provider: 'discord',
+    sourceEventId: pending.queuedMessage.ts,
+  });
+  if (existingRun) return;
+  const workspace = await resolveDiscordWorkspace(option.workspace);
+  if (!workspace) {
+    await input.provider
+      .postMessage({
+        channelId:
+          pending.cardChannel?.parentChannelId ?? pending.channel.channelId,
+        ...(pending.cardChannel
+          ? { threadId: pending.cardChannel.channelId }
+          : {}),
+        text: 'Could not start the task — the suggested workspace is no longer available. Send the request again.',
+      })
+      .catch(() => undefined);
+    return;
+  }
+  await launchDiscordTask({
+    provider: input.provider,
+    launchOwnerUserId: pending.launchOwnerUserId,
+    queuedMessage: pending.queuedMessage,
+    metadata: pending.metadata,
+    channel: pending.channel,
+    workspace,
+    ...(pending.forceNewThread ? { forceNewThread: true } : {}),
+    // No interaction here — nobody clicked. The card is edited by id.
+    ...(pending.cardChannel && pending.cardMessageId
+      ? {
+          replaceMessage: {
+            channel: pending.cardChannel,
+            messageId: pending.cardMessageId,
+          },
+        }
+      : {}),
+  });
+}
+
+function scheduleDiscordRoutingAutoConfirm(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  pendingRouteId: string;
+}): void {
+  const timer = setTimeout(() => {
+    autoConfirmDiscordRouting(input).catch((error) => {
+      apiLogger.warn(
+        `[discord] Routing auto-confirm failed for ${input.pendingRouteId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+  }, ROUTING_AUTO_CONFIRM_TIMEOUT_MS);
+
+  // Like Slack's and Telegram's, the timer is in-process: a restart loses it
+  // and the pending route simply expires with its Redis TTL.
+  timer.unref?.();
+}
+
 export function shouldAutoConfirmDiscordRoute(
   decision: RoutingDecision,
 ): boolean {
@@ -189,11 +298,12 @@ export async function requestDiscordRoutingConfirmation(input: {
   forceNewThread?: boolean;
 }): Promise<{ pendingRouteId: string }> {
   const pendingRouteId = randomBytes(9).toString('base64url');
-  const options = await buildOptions(
+  const suggestedWorkspace =
     input.routingDecision.status === 'routed'
       ? input.routingDecision.result.workspace
-      : null,
-  );
+      : null;
+  const options = await buildOptions(suggestedWorkspace);
+  const suggestedIndex = findSuggestedIndex(options, suggestedWorkspace);
   // Slack asks this question inside the thread on the requesting message, so
   // the channel only ever shows the request itself. Start that thread now and
   // put the card in it; the launch reuses this exact thread. An interaction
@@ -218,7 +328,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   const cardChannel = thread
     ? taskThreadChannelContext({ channel: input.channel, thread })
     : null;
-  await storePendingRoute(pendingRouteId, {
+  const pending: PendingDiscordRoute = {
     requesterDiscordUserId: input.requesterDiscordUserId,
     launchOwnerUserId: input.launchOwnerUserId,
     queuedMessage: input.queuedMessage,
@@ -226,18 +336,38 @@ export async function requestDiscordRoutingConfirmation(input: {
     channel: input.channel,
     ...(cardChannel ? { cardChannel } : {}),
     options,
+    suggestedIndex,
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
-  });
-  const suggested = options[0]?.label;
-  await replyToDiscordEvent({
+  };
+  await storePendingRoute(pendingRouteId, pending);
+  // Only name a best match when the router actually picked one. Without a
+  // suggestion the card is a plain menu, and nothing gets auto-confirmed.
+  const suggested =
+    suggestedIndex === null ? undefined : options[suggestedIndex]?.label;
+  const card = await replyToDiscordEvent({
     provider: input.provider,
     applicationId: input.applicationId,
     channel: cardChannel ?? input.channel,
     ...(input.interaction ? { interaction: input.interaction } : {}),
     text: suggested
-      ? `Where should I run this? The best match is **${suggested}**.`
+      ? `Where should I run this? The best match is **${suggested}** — starting in ~${Math.round(ROUTING_AUTO_CONFIRM_TIMEOUT_MS / 1_000)}s.`
       : 'Where should I run this?',
     buttons: routeButtons(pendingRouteId, options),
+  });
+  if (suggestedIndex === null) {
+    return { pendingRouteId };
+  }
+  // Re-store so the timer can turn the card itself into the acknowledgement.
+  // The route is stored before the card is posted so a fast click cannot miss
+  // it, which leaves the card id as the one thing learned afterwards.
+  await storePendingRoute(pendingRouteId, {
+    ...pending,
+    ...(card.messageId ? { cardMessageId: card.messageId } : {}),
+  });
+  scheduleDiscordRoutingAutoConfirm({
+    provider: input.provider,
+    applicationId: input.applicationId,
+    pendingRouteId,
   });
   return { pendingRouteId };
 }
@@ -411,10 +541,12 @@ export async function handleDiscordRoutingCallback(input: {
       ...(pending.cardChannel
         ? {
             replaceMessage: {
-              applicationId: input.applicationId,
-              interaction: input.interaction,
-              interactionDeferred: input.interactionDeferred,
               channel: pending.cardChannel,
+              interaction: {
+                applicationId: input.applicationId,
+                interaction: input.interaction,
+                interactionDeferred: input.interactionDeferred,
+              },
             },
           }
         : {}),

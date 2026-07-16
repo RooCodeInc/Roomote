@@ -15,7 +15,7 @@ vi.mock('@roomote/env', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  SLACK_AUTO_CONFIRM_TIMEOUT_MS: 0,
+  ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({

@@ -8,7 +8,7 @@ import {
 } from '@roomote/redis';
 import { FeatureFlag } from '@roomote/feature-flags';
 import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
-import { SLACK_AUTO_CONFIRM_TIMEOUT_MS } from '@roomote/cloud-agents/server';
+import { ROUTING_AUTO_CONFIRM_TIMEOUT_MS } from '@roomote/cloud-agents/server';
 import {
   autoConfirmRouting,
   collectAndExtractThreadAttachmentTexts,
@@ -96,7 +96,7 @@ import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
 async function runSlackAutoConfirm({
   threadId,
   confirmNonce,
-  delayMs = SLACK_AUTO_CONFIRM_TIMEOUT_MS,
+  delayMs = ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   logContext,
 }: {
   threadId: string;
