@@ -7,6 +7,7 @@ import {
   llmUsageEvents,
   and,
   eq,
+  inArray,
   isNull,
   sql,
 } from '@roomote/db/server';
@@ -61,7 +62,9 @@ export async function getCostAnalyticsRows(
       eventUserEmail: usageUsers.email,
       taskUserName: taskInitiatorUsers.name,
       taskUserEmail: taskInitiatorUsers.email,
-      runPayload: taskRuns.payload,
+      runEnvironmentId: sql<
+        string | null
+      >`${taskRuns.payload} ->> 'environmentId'`,
     })
     .from(llmUsageEvents)
     .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
@@ -74,31 +77,49 @@ export async function getCostAnalyticsRows(
     .leftJoin(environments, eq(environments.id, llmUsageEvents.environmentId))
     .where(and(isNull(tasks.deletedAt), usageCutoffCondition));
 
-  const environmentRows = await db
-    .select({ id: environments.id, name: environments.name })
-    .from(environments)
-    .where(eq(environments.isEval, false));
+  const fallbackEnvironmentIds = [
+    ...new Set(
+      usageRows
+        .filter((row) => !row.environmentName)
+        .map((row) => row.runEnvironmentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const environmentRows =
+    fallbackEnvironmentIds.length === 0
+      ? []
+      : await db
+          .select({ id: environments.id, name: environments.name })
+          .from(environments)
+          .where(
+            and(
+              eq(environments.isEval, false),
+              inArray(environments.id, fallbackEnvironmentIds),
+            ),
+          );
   const environmentNameById = new Map(
     environmentRows.map((environment) => [environment.id, environment.name]),
   );
-  // Fetch PR attribution with a relational join instead of expanding one bind
-  // parameter per usage event. A task can have many usage rows, so an inArray
-  // built from usageRows eventually exceeds PostgreSQL's parameter limit.
-  const pullRequestRows = await db
-    .selectDistinct({
-      taskId: taskPullRequests.taskId,
-      repository: taskPullRequests.repository,
-      prNumber: taskPullRequests.prNumber,
-      sourceControlProvider: taskPullRequests.sourceControlProvider,
-      host: taskPullRequests.host,
-    })
-    .from(taskPullRequests)
-    .innerJoin(
-      llmUsageEvents,
-      eq(llmUsageEvents.taskId, taskPullRequests.taskId),
-    )
-    .leftJoin(tasks, eq(tasks.id, llmUsageEvents.taskId))
-    .where(and(isNull(tasks.deletedAt), usageCutoffCondition));
+  const taskIds = [
+    ...new Set(
+      usageRows
+        .map((row) => row.taskId)
+        .filter((taskId): taskId is string => Boolean(taskId)),
+    ),
+  ];
+  const pullRequestRows =
+    taskIds.length === 0
+      ? []
+      : await db
+          .select({
+            taskId: taskPullRequests.taskId,
+            repository: taskPullRequests.repository,
+            prNumber: taskPullRequests.prNumber,
+            sourceControlProvider: taskPullRequests.sourceControlProvider,
+            host: taskPullRequests.host,
+          })
+          .from(taskPullRequests)
+          .where(inArray(taskPullRequests.taskId, taskIds));
   const prKeysByTaskId = new Map<string, Set<string>>();
   for (const pullRequest of pullRequestRows) {
     if (pullRequest.prNumber === null || !pullRequest.repository) {
@@ -140,17 +161,10 @@ export async function getCostAnalyticsRows(
     const cost = Number(row.costMicroUsd ?? 0) / 1_000_000;
     const provider = row.providerId ?? 'Unknown provider';
     const model = row.modelId ?? 'Unknown model';
-    const runEnvironmentId =
-      row.runPayload &&
-      typeof row.runPayload === 'object' &&
-      'environmentId' in row.runPayload &&
-      typeof row.runPayload.environmentId === 'string'
-        ? row.runPayload.environmentId
-        : null;
     const project =
       row.environmentName ??
-      (runEnvironmentId
-        ? (environmentNameById.get(runEnvironmentId) ?? NO_PROJECT_LABEL)
+      (row.runEnvironmentId
+        ? (environmentNameById.get(row.runEnvironmentId) ?? NO_PROJECT_LABEL)
         : NO_PROJECT_LABEL);
 
     return {

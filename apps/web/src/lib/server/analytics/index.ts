@@ -9,6 +9,7 @@ import {
   type AnalyticsGranularity,
   type AnalyticsMetric,
   type AnalyticsObject,
+  type AnalyticsOverviewResponse,
   type PullRequestAnalyticsOverviewResponse,
   type TimePeriodFilter,
   getDefaultAnalyticsMetric,
@@ -128,6 +129,47 @@ export async function getAnalyticsChartData(
     granularity,
     now,
   );
+}
+
+export async function getAnalyticsOverview(
+  auth: UserAuthSuccess,
+  input: {
+    object: AnalyticsObject;
+    viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
+    filters?: AnalyticsFilters;
+    timePeriod?: TimePeriodFilter;
+    granularity?: AnalyticsGranularity;
+  },
+  now: Date = new Date(),
+): Promise<AnalyticsOverviewResponse> {
+  const metric = resolveAnalyticsMetric(input.object, input.metric);
+  const rows = await getAnalyticsRows(
+    auth,
+    input.object,
+    input.timePeriod,
+    now,
+    metric,
+  );
+  const filters = input.filters ?? {};
+  const filteredRows = applyDimensionFilters(rows, filters);
+  const granularity = getResolvedGranularity(
+    input.timePeriod,
+    input.granularity,
+  );
+
+  return {
+    chart: buildChartData(
+      filteredRows,
+      input.object,
+      input.viewBy,
+      metric,
+      input.timePeriod,
+      granularity,
+      now,
+    ),
+    filterOptions: buildFilterOptions(rows, input.object, filters),
+  };
 }
 
 export async function getPullRequestAnalyticsOverview(

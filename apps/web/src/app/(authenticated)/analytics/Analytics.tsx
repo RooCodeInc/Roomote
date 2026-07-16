@@ -25,9 +25,8 @@ import {
   parseTimePeriodParam,
 } from '@/types';
 import {
-  useAnalyticsChart,
   useAnalyticsDetails,
-  useAnalyticsFilters,
+  useAnalyticsOverview,
   usePullRequestAnalyticsOverview,
 } from '@/hooks/analytics';
 import { useDelayedRefetchLoading } from '@/hooks/useDelayedRefetchLoading';
@@ -128,7 +127,7 @@ export function Analytics({
   const availableGranularities = getAvailableAnalyticsGranularities(timePeriod);
   const analyticsReloadKey = String(reloadRequestId);
 
-  const chartQuery = useAnalyticsChart(
+  const overviewQuery = useAnalyticsOverview(
     {
       object,
       viewBy,
@@ -136,14 +135,6 @@ export function Analytics({
       filters,
       timePeriod,
       granularity,
-    },
-    { enabled: object !== 'pullRequests' },
-  );
-  const filtersQuery = useAnalyticsFilters(
-    {
-      object,
-      filters,
-      timePeriod,
     },
     { enabled: object !== 'pullRequests' },
   );
@@ -176,13 +167,13 @@ export function Analytics({
   const chart =
     object === 'pullRequests'
       ? pullRequestOverviewQuery.data?.chart
-      : chartQuery.data;
+      : overviewQuery.data?.chart;
   const filterOptions =
     object === 'pullRequests'
       ? (pullRequestOverviewQuery.data?.filterOptions.filters ?? {})
-      : (filtersQuery.data?.filters ?? {});
+      : (overviewQuery.data?.filterOptions.filters ?? {});
   const activeChartQuery =
-    object === 'pullRequests' ? pullRequestOverviewQuery : chartQuery;
+    object === 'pullRequests' ? pullRequestOverviewQuery : overviewQuery;
   const showChartReloadLoading = useDelayedRefetchLoading({
     loadingKey: analyticsReloadKey,
     isFetching: isParamsTransitionPending || activeChartQuery.isFetching,

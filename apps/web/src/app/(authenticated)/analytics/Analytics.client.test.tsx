@@ -6,6 +6,9 @@ const state = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
 }));
+const hooks = vi.hoisted(() => ({
+  useAnalyticsOverview: vi.fn(),
+}));
 
 const EMPTY_CHART = {
   object: 'pullRequests' as const,
@@ -45,23 +48,12 @@ vi.mock('@/hooks/useDelayedRefetchLoading', () => ({
 }));
 
 vi.mock('@/hooks/analytics', () => ({
-  useAnalyticsChart: () => ({
-    data: EMPTY_CHART,
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-  }),
   useAnalyticsDetails: () => ({
     data: null,
     isLoading: false,
     isError: false,
   }),
-  useAnalyticsFilters: () => ({
-    data: { filters: {} },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-  }),
+  useAnalyticsOverview: hooks.useAnalyticsOverview,
   usePullRequestAnalyticsOverview: () => ({
     data: {
       summary: null,
@@ -136,6 +128,16 @@ describe('Analytics', () => {
     state.searchParams = new URLSearchParams();
     state.push.mockReset();
     state.replace.mockReset();
+    hooks.useAnalyticsOverview.mockReset();
+    hooks.useAnalyticsOverview.mockReturnValue({
+      data: {
+        chart: EMPTY_CHART,
+        filterOptions: { filters: {} },
+      },
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+    });
   });
 
   it('treats unknown analytics objects as invalid on the generic /analytics page', () => {
@@ -154,5 +156,17 @@ describe('Analytics', () => {
 
     expect(state.push).toHaveBeenCalledWith('/analytics/costs');
     expect(state.replace).not.toHaveBeenCalled();
+  });
+
+  it('loads costs through the combined analytics overview query', () => {
+    render(<Analytics fixedObject="costs" />);
+
+    expect(hooks.useAnalyticsOverview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        object: 'costs',
+        timePeriod: 7,
+      }),
+      { enabled: true },
+    );
   });
 });
