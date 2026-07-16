@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { useEnvironments } from '@/hooks/environments';
 import { useGitHubInstallations } from '@/hooks/github';
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
+import { useAuthorizedUser } from '@/hooks/useUser';
 import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import {
   type WorkspaceSelection,
@@ -102,6 +103,7 @@ export function Home({
   const router = useRouter();
   const githubInstallations = useGitHubInstallations();
   const environments = useEnvironments();
+  const { cloudEnabled } = useAuthorizedUser();
 
   const { isDebugUIVisible } = useShowDebugUI();
   const canSelectBranch = isDebugUIVisible;
@@ -603,7 +605,7 @@ export function Home({
                 onValueChange={setSelectedModelOverrideId}
               />
 
-              {computeProviderDescriptors.length > 1 && (
+              {!cloudEnabled && computeProviderDescriptors.length > 1 && (
                 <Select
                   value={selectedComputeProvider}
                   onValueChange={(value) =>
