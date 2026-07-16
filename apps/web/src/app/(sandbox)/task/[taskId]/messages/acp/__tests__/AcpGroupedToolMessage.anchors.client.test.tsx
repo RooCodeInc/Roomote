@@ -40,9 +40,13 @@ function buildGroup(): GroupedToolCallRenderBlock {
     ts: 100,
     action: 'Exploring',
     objectSummary: '3 files',
+    groupKey: 'mcp:roomote:read_file',
+    displayKind: 'read',
     items: [
       {
         objectLabel: 'file_a.txt',
+        groupKey: 'mcp:roomote:read_file',
+        displayKind: 'read',
         stepKind: 'read',
         msg: {
           id: 'tool-1',
@@ -72,6 +76,8 @@ function buildGroup(): GroupedToolCallRenderBlock {
       },
       {
         objectLabel: 'file_b.txt',
+        groupKey: 'mcp:roomote:read_file',
+        displayKind: 'read',
         stepKind: 'read',
         msg: {
           id: 'tool-2',
@@ -101,6 +107,8 @@ function buildGroup(): GroupedToolCallRenderBlock {
       },
       {
         objectLabel: 'file_c.txt',
+        groupKey: 'mcp:roomote:read_file',
+        displayKind: 'read',
         stepKind: 'read',
         msg: {
           id: 'tool-3',

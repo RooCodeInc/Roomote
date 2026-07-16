@@ -35,6 +35,7 @@ import { handlePushConflictCheck } from './handlePushConflictCheck';
 import { handleWorkflowRunCompleted } from './handleWorkflowRunCompleted';
 
 // Utilities:
+import { isFromKnownInstallation } from './isFromKnownInstallation';
 import { recordWebhook } from './recordWebhook';
 
 /**
@@ -486,6 +487,23 @@ github.post('/', async (c) => {
     );
 
     const payload = await c.req.text();
+
+    // Verify the signature before the installation lookup so unsigned junk
+    // cannot trigger database reads.
+    if (!(await webhooks.verify(payload, signature))) {
+      return c.json({ error: 'invalid_signature' }, { status: 401 });
+    }
+
+    // The app is public, so any account can install it and produce validly
+    // signed deliveries; drop events from installations this deployment does
+    // not know before they are recorded or handled.
+    if (!(await isFromKnownInstallation(name, payload))) {
+      apiLogger.debug(
+        `[GitHub] ignoring webhook ${id} (${name}) from unknown installation`,
+      );
+
+      return c.json({ message: 'unknown_installation' });
+    }
 
     // The event handlers classify logins synchronously (mention detection,
     // bot-identity checks); refresh the configured app slug first so an app

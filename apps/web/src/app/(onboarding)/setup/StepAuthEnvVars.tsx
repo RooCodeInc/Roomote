@@ -69,6 +69,32 @@ export function StepAuthEnvVars({
   >({});
   const [showMicrosoftAdvancedConfig, setShowMicrosoftAdvancedConfig] =
     useState(false);
+  const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
+    string | null
+  >(null);
+  const createSlackApp = useMutation(
+    (bootstrapMode
+      ? trpc.setupBootstrap.createSlackAppFromManifest
+      : trpc.slack.createAppFromManifest
+    ).mutationOptions({
+      onSuccess: async (result) => {
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+
+        await queryClient.invalidateQueries({
+          queryKey: bootstrapMode
+            ? trpc.setupBootstrap.status.queryKey()
+            : trpc.setupNew.status.queryKey(),
+        });
+        setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
   const saveAuthConfig = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.saveAuthConfig
@@ -126,6 +152,7 @@ export function StepAuthEnvVars({
     setEditingSavedValues({});
     setClearedSavedValues({});
     setShowMicrosoftAdvancedConfig(false);
+    setCreatedSlackAppSettingsUrl(null);
   }, [effectiveSelectedProviderId]);
 
   const selectedProvider = useMemo(
@@ -240,6 +267,7 @@ export function StepAuthEnvVars({
 
   useEffect(() => {
     setShowManualSlackValues(false);
+    setCreatedSlackAppSettingsUrl(null);
   }, [effectiveSelectedProviderId]);
 
   const selectedProviderRuntimeConfigured =
@@ -248,6 +276,8 @@ export function StepAuthEnvVars({
     selectedProvider.runtimeSatisfied;
   const selectedProviderHasEditableFields =
     visibleFields.some((field) => !field.runtimeSatisfied) ?? false;
+  const showingCreatedSlackAppStep =
+    selectedProvider?.id === 'slack' && createdSlackAppSettingsUrl !== null;
   // Slack "owns" the step actions only while its intro screen is shown, which
   // is the same condition SlackSetupExperience uses to render that intro. If a
   // saved (or runtime) config is being edited instead, the intro is hidden and
@@ -256,8 +286,12 @@ export function StepAuthEnvVars({
   const providerOwnsActions =
     selectedProvider?.id === 'slack' &&
     !showManualSlackValues &&
+    !showingCreatedSlackAppStep &&
     !selectedProvider.runtimeSatisfied &&
     !selectedProvider.savedSatisfied;
+  const continueDisabled = showingCreatedSlackAppStep
+    ? saveAuthConfig.isPending
+    : isActionDisabled;
 
   if (bootstrapMode && selectedProviderRuntimeConfigured) {
     return (
@@ -301,7 +335,17 @@ export function StepAuthEnvVars({
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
           showManualSlackValues={showManualSlackValues}
+          createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
+          createSlackAppPending={
+            createSlackApp.isPending || saveAuthConfig.isPending
+          }
           showMicrosoftAdvancedConfig={showMicrosoftAdvancedConfig}
+          onCreateSlackApp={(configToken) =>
+            createSlackApp.mutate({
+              configToken,
+              ...(bootstrapMode && setupToken ? { setupToken } : {}),
+            })
+          }
           onShowManualSlackValues={() => setShowManualSlackValues(true)}
           onToggleMicrosoftAdvancedConfig={() =>
             setShowMicrosoftAdvancedConfig((current) => !current)
@@ -334,11 +378,11 @@ export function StepAuthEnvVars({
           <Button
             type="button"
             onClick={() => void handleContinue()}
-            disabled={isActionDisabled}
+            disabled={continueDisabled}
           >
             {saveAuthConfig.isPending
               ? 'Saving...'
-              : !selectedProviderHasEditableFields
+              : showingCreatedSlackAppStep || !selectedProviderHasEditableFields
                 ? 'Continue'
                 : bootstrapMode
                   ? 'Save and sign in'

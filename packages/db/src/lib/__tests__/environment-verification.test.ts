@@ -49,6 +49,14 @@ async function createUnverifiedEnvironment(configOverrides?: {
 }
 
 describe('environment verification state', () => {
+  it('defaults newly inserted environments to configured, not verified', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+
+    expect(environment.isVerified).toBe(false);
+  });
+
   it('records a successful verification when the task id matches', async () => {
     const environment = await createUnverifiedEnvironment();
     await beginEnvironmentVerification(db, {
@@ -166,12 +174,20 @@ describe('environment verification state', () => {
       verificationError: null,
     });
 
-    const { verificationCleared } = await updateEnvironmentDefinition(db, {
+    const nextConfig = buildConfig({
+      name: environment.name,
+      description: 'after (metadata only)',
+    });
+    const result = await updateEnvironmentDefinition(db, {
       environmentId: environment.id,
-      fields: { description: 'after (metadata only)' },
+      fields: {
+        description: 'after (metadata only)',
+        config: nextConfig,
+      },
     });
 
-    expect(verificationCleared).toBe(false);
+    expect(result.verificationCleared).toBe(false);
+    expect(result.snapshotsInvalidated).toBe(false);
 
     const updated = await db.query.environments.findFirst({
       where: eq(environments.id, environment.id),
@@ -179,6 +195,7 @@ describe('environment verification state', () => {
 
     expect(updated?.isVerified).toBe(true);
     expect(updated?.verificationTaskId).toBe('task-keep');
+    expect(updated?.config.description).toBe('after (metadata only)');
   });
 
   it('atomically registers a new verification task when a runtime-affecting edit clears verification', async () => {

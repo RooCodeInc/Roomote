@@ -110,6 +110,7 @@ const auth = {
   isAdmin: true,
   featureFlags,
   anonymousAnalyticsEnabled: false,
+  cloudEnabled: false,
   resource: {
     username: null,
     fullName: null,

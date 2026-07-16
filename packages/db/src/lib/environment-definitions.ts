@@ -43,8 +43,9 @@ type UpdateEnvironmentDefinitionResult = {
   snapshotsInvalidated: boolean;
   /**
    * True when the update was a runtime-affecting edit that cleared verification
-   * (config or repository-mapping change, and `preserveVerification` was not
-   * set). Callers can use this to re-register a fresh verification attempt.
+   * (runtime config or repository-mapping change, and `preserveVerification`
+   * was not set). Callers can use this to re-register a fresh verification
+   * attempt.
    */
   verificationCleared: boolean;
 };
@@ -96,6 +97,13 @@ function configsMatch(left: unknown, right: unknown): boolean {
   );
 }
 
+function runtimeConfig(
+  config: EnvironmentConfig,
+): Omit<EnvironmentConfig, 'name' | 'description'> {
+  const { name: _name, description: _description, ...runtimeFields } = config;
+  return runtimeFields;
+}
+
 function stringSetsMatch(left: string[], right: string[]): boolean {
   if (left.length !== right.length) {
     return false;
@@ -141,6 +149,7 @@ async function updateEnvironmentDefinitionLocked(
   }
 
   const changedFields: EnvironmentDefinitionFields = {};
+  let runtimeConfigChanged = false;
 
   if (
     hasOwnKey(input.fields, 'name') &&
@@ -165,6 +174,10 @@ async function updateEnvironmentDefinitionLocked(
     !configsMatch(input.fields.config, currentEnvironment.config)
   ) {
     changedFields.config = input.fields.config;
+    runtimeConfigChanged = !configsMatch(
+      runtimeConfig(input.fields.config),
+      runtimeConfig(currentEnvironment.config),
+    );
   }
 
   let repositoryIdsChanged = false;
@@ -201,8 +214,7 @@ async function updateEnvironmentDefinitionLocked(
   // handled through `changedFields` without a config change) must preserve
   // verification. Centralizing this here keeps the API, Settings, agent, and
   // declarative write paths from drifting.
-  const isRuntimeAffectingEdit =
-    changedFields.config !== undefined || repositoryIdsChanged;
+  const isRuntimeAffectingEdit = runtimeConfigChanged || repositoryIdsChanged;
   const verificationCleared =
     isRuntimeAffectingEdit && !input.preserveVerification;
 
@@ -225,10 +237,12 @@ async function updateEnvironmentDefinitionLocked(
     })
     .where(eq(environments.id, input.environmentId));
 
-  await softDeleteEnvironmentSnapshots(dbOrTx, {
-    environmentId: input.environmentId,
-    updatedAt: now,
-  });
+  if (isRuntimeAffectingEdit) {
+    await softDeleteEnvironmentSnapshots(dbOrTx, {
+      environmentId: input.environmentId,
+      updatedAt: now,
+    });
+  }
 
   if (input.configVersion) {
     await createEnvironmentConfigVersionSnapshot(dbOrTx, {
@@ -254,7 +268,11 @@ async function updateEnvironmentDefinitionLocked(
     }
   }
 
-  return { updated: true, snapshotsInvalidated: true, verificationCleared };
+  return {
+    updated: true,
+    snapshotsInvalidated: isRuntimeAffectingEdit,
+    verificationCleared,
+  };
 }
 
 type RecordEnvironmentVerificationInput = {

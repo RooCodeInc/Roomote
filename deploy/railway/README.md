@@ -146,6 +146,7 @@ R_APP_ENV=production
 ROOMOTE_DOCKER_LOAD_ENV_FILE=false
 R_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=${{secret(32)}}
+R_DISCORD_GATEWAY_SECRET=${{secret(32)}}
 ARTIFACT_SIGNING_KEY=${{secret(32)}}
 DASHBOARD_PASSWORD=${{secret(24)}}
 S3_SECRET_ACCESS_KEY=${{secret(32)}}
@@ -175,6 +176,7 @@ R_APP_ENV=${{api.R_APP_ENV}}
 ROOMOTE_DOCKER_LOAD_ENV_FILE=${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
 R_AUTO_GENERATE_KEYS=${{api.R_AUTO_GENERATE_KEYS}}
 ENCRYPTION_KEY=${{api.ENCRYPTION_KEY}}
+R_DISCORD_GATEWAY_SECRET=${{api.R_DISCORD_GATEWAY_SECRET}}
 ARTIFACT_SIGNING_KEY=${{api.ARTIFACT_SIGNING_KEY}}
 DASHBOARD_PASSWORD=${{api.DASHBOARD_PASSWORD}}
 S3_SECRET_ACCESS_KEY=${{api.S3_SECRET_ACCESS_KEY}}
@@ -396,6 +398,13 @@ domain, which requires a domain you control:
   preview tokens survive redeploys. These redeploys can be automated against
   Railway's GraphQL API — see
   [Auto-deploying every develop build](#auto-deploying-every-develop-build-optional).
+- **One-time Discord gateway secret (existing projects).** New template
+  deploys generate `R_DISCORD_GATEWAY_SECRET` on the api service and share it
+  with the other app services. Older projects without that variable must set a
+  distinct random value once on **api**, then reference the same value on
+  **bullmq** (and any other service that already copies `api.*` secrets)
+  before enabling or continuing Discord. Template edits do not rewrite
+  variables on existing projects.
 - **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
   and the MinIO volume or external bucket. Everything else is reproducible
   from config.

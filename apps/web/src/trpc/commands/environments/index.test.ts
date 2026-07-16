@@ -113,6 +113,7 @@ function buildMockAuth(): UserAuthSuccess {
     isAdmin: true,
     featureFlags: {} as UserAuthSuccess['featureFlags'],
     anonymousAnalyticsEnabled: false,
+    cloudEnabled: false,
     resource: {
       username: null,
       fullName: 'Admin',

@@ -11,20 +11,30 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 - Add cost analytics on `/analytics/costs` with generalized LLM usage tracking across task and non-task attribution, provider/model metadata, and durable pricing-aware usage events.
 - Environments now track a persisted verification state that is separate from "a definition exists". A new environment is Configured until a follow-up verification task confirms it works, then it becomes Verified; runtime-affecting edits reset it to Configured while name/description-only edits keep it verified. Onboarding can finish while verification runs, the Environments settings page shows the verification status with a Retry verification action and a link to the related task, and agents record the outcome through the new `manage_environments` `record_verification` action.
 - Inference providers now carry recommended per-role model defaults (helper, vision, code review, explore, planning). Connecting a provider in the setup wizard applies its recommended defaults automatically, and a "Use recommended" action on the Default Models card in Settings > Models re-applies them at any time. Google Vertex AI now defaults to Claude models (Sonnet 5 coding, Haiku 4.5 helper/explore, Opus 4.8 review/planning), and Google Gemini defaults to Gemini 3.1 Pro for coding with Flash for helper/explore. Requesty is no longer offered for new connections; existing Requesty connections keep working.
+- GitHub App setup now creates public GitHub Apps so the install step can pick the target organization, instead of forcing private apps that can only install on the creating account.
+- Failed environment starts show the original prompt with a retry control so operators can relaunch without retyping the kickoff.
+- Add Roomote Cloud analytics and support integrations behind deployment flags so hosted deployments can enable cloud analytics, the in-app support chat widget, and related remote telemetry wiring without requiring operators to build those surfaces themselves.
 - Add the Roomote deployment-managed compute provider: deployments that ship managed sandbox credentials get a zero-setup sandbox option in setup and Settings while bring-your-own Modal, E2B, Daytona, and Blaxel remain available.
+- Slack setup can now create the Slack app for you: paste an app configuration token and Roomote creates the app through Slack's `apps.manifest.create` API, saves the client ID, client secret, and signing secret automatically, and advances straight to the Connect to Slack install step. Entering values manually and the prefilled-manifest path remain available as fallbacks, and the mock Slack harness now covers `apps.manifest.create` so the flow is testable without a real workspace.
 - Deliver spawned-task settle outcomes back to the launching run so follow-up work such as environment verification completion is pushed into the parent task instead of depending on agent-side polling that can go idle.
+- Refine task conversation activity presentation with clearer activity grouping, condensed tool-call streams, and improved transcript density for long multi-step turns.
 
 ### Patch changes
 
 - CI failure triage no longer no-ops when the manager destination is Teams or Telegram; manual Run now can launch the investigate-and-fix task against a non-Slack manager channel.
 - React with thumbsdown when a linked pull request is closed without merging, instead of a heavy multiplication mark, across Slack terminal-status notifications.
+- Give Discord its own gateway secret (Telegram-style) instead of reusing the shared public webhooks secret, reducing blast radius if one channel's secret is rotated or leaked.
 - Allow the production Docker socket proxy to create and remove managed task workspace volumes so Compose-based deployments can provision workers without 403 volume API failures.
 - Stop Gitea pull requests from flooding with bot review threads when the bot username does not start with `roomote`, by correctly recognizing bot comments without re-entering mention intake.
+- Hide Sandboxes settings when Roomote Cloud is enabled: remove the nav entry and redirect direct visits so cloud deployments do not expose byo-sandbox configuration.
 - Show provider headers in multi-provider model choosers and group ChatGPT subscription models under ChatGPT so long model lists are easier to scan in launch and Settings surfaces.
+- Default models is now Model mapping with a preset chooser and confirmation dialog before applying recommended provider defaults, so operators can review the mapping instead of it overwriting immediately.
 - Tasks no longer hang forever when OpenCode session creation never returns; the run fails closed with diagnostics instead of waiting indefinitely.
 - Provider Cancel (Slack and Telegram) now fully stops the active run and shuts the sandbox down, instead of leaving a resumable standby machine after cancel.
 - Remove the customizable Vibes admin settings surface and deployment style or emoji overrides; agents use the fixed product defaults instead.
-- Setup no longer skips communication, source-control, or sandbox provider steps just because runtime env vars already satisfy a provider: the picker still appears with the matched option preselected so operators can confirm or change the choice, including the new Roomote compute path.
+- Rename the managed compute provider label from "Roomote Sandbox" to "Roomote" across setup and Settings.
+- Setup no longer skips communication or source-control provider steps just because runtime env vars already satisfy a provider: the picker still appears with the matched option preselected so operators can confirm or change the choice.
+- Address v0.6 release feedback: keep the prior physical database contract for the v0.5→v0.6 rollback window, harden upgrade-CI schema checks, and tighten preview auto-resume detection and parent-run settle notifications.
 
 ## 0.5.0 (2026-07-15)
 

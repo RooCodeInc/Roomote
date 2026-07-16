@@ -9,7 +9,7 @@
  *   setting to be enabled.
  */
 
-import { Env } from '@roomote/env';
+import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   db,
   deploymentSettings,
@@ -91,7 +91,9 @@ function getPingBaseUrl(): string {
  * telemetry AND the admin-controlled deployment setting is enabled
  * (opt-out: absent means enabled).
  */
-export async function isAnonymousAnalyticsEnabled(): Promise<boolean> {
+export async function isAnonymousAnalyticsEnabled(
+  cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+): Promise<boolean> {
   if (!isTelemetryEnvAllowed()) {
     return false;
   }
@@ -102,7 +104,10 @@ export async function isAnonymousAnalyticsEnabled(): Promise<boolean> {
       columns: { metadata: true },
     });
 
-    return isAnonymousAnalyticsEnabledFromMetadata(settings?.metadata);
+    return isAnonymousAnalyticsEnabledFromMetadata(
+      settings?.metadata,
+      cloudEnabled,
+    );
   } catch {
     return false;
   }
@@ -197,6 +202,7 @@ export interface CaptureEventOptions {
   properties?: TelemetryEventProperties;
   /** ISO-8601 override; defaults to now. */
   timestamp?: string;
+  cloudEnabled?: boolean;
 }
 
 /**
@@ -213,7 +219,7 @@ export async function captureEvent(
       return;
     }
 
-    if (!(await isAnonymousAnalyticsEnabled())) {
+    if (!(await isAnonymousAnalyticsEnabled(options.cloudEnabled))) {
       return;
     }
 

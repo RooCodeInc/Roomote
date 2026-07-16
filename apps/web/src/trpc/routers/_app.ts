@@ -91,10 +91,12 @@ import {
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
+  retryFailedTaskStartCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
+  createSlackAppFromManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -217,6 +219,7 @@ import {
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
+  createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
@@ -699,6 +702,17 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         cancelTaskRunCommand(auth, input),
       ),
+
+    retryFailedStart: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          runId: z.number().int().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        retryFailedTaskStartCommand(auth, input),
+      ),
   }),
 
   github: createRouter({
@@ -872,6 +886,12 @@ export const appRouter = createRouter({
       .input(z.object({ redirectPath: z.string().optional() }).optional())
       .mutation(({ ctx: { auth }, input }) =>
         connectSlackAppCommand(auth, input),
+      ),
+
+    createAppFromManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createSlackAppFromManifestCommand(auth, input),
       ),
 
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1922,6 +1942,17 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ input }) => saveSetupBootstrapAuthConfigCommand(input)),
+
+    createSlackAppFromManifest: publicProcedure
+      .input(
+        z.object({
+          configToken: z.string().trim().min(1),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) =>
+        createSetupBootstrapSlackAppFromManifestCommand(input),
+      ),
   }),
 
   deployment: createRouter({

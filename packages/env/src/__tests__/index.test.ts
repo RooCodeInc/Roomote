@@ -11,6 +11,7 @@ import {
   getWebBundledEnvFilePaths,
   isAutoGenerateKeysEnabled,
   isExposedBindHost,
+  isRoomoteCloudEnabled,
   rehydrateEnv,
   resolveAppEnv,
   shouldAutoGenerateAuthKeypairs,
@@ -164,6 +165,26 @@ describe('Env', () => {
     expect(
       createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
+  });
+
+  it('parses Roomote Cloud analytics configuration', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      R_CLOUD_ENABLED: '1',
+      R_INTERCOM_APP_ID: 'intercom-app',
+      R_POSTHOG_PROJECT_KEY: 'posthog-project',
+      R_POSTHOG_HOST: 'https://eu.i.posthog.com',
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    const env = createRoomoteEnv(runtimeEnv);
+
+    expect(env.R_CLOUD_ENABLED).toBe(true);
+    expect(env.R_INTERCOM_APP_ID).toBe('intercom-app');
+    expect(env.R_POSTHOG_PROJECT_KEY).toBe('posthog-project');
+    expect(env.R_POSTHOG_HOST).toBe('https://eu.i.posthog.com');
+    expect(isRoomoteCloudEnabled('true')).toBe(true);
+    expect(isRoomoteCloudEnabled('1')).toBe(true);
+    expect(isRoomoteCloudEnabled('false')).toBe(false);
   });
 
   it('allows the Modal VM memory allocation to be overridden', () => {

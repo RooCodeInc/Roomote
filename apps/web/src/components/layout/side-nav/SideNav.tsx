@@ -18,7 +18,9 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   VectorSquare,
+  SquareDashed,
 } from '@/components/system';
+import { ChatWidgetSideNavItem } from '@/components/layout/ChatWidgetButton';
 import { RoomoteWordmark, UserMenu } from '@/components/layout';
 import { useCommandPalette } from '@/components/layout/CommandPaletteContext';
 import {
@@ -45,7 +47,7 @@ const SIDE_NAV_MAX_VISIBLE_TASKS = 20;
 const SIDE_NAV_INCLUDE_IDS_LIMIT = 20;
 const SIDEBAR_LOGO_SRC = '/logos/r.svg';
 const NO_ENVIRONMENT_GROUP_KEY = '__no_environment__';
-const NO_ENVIRONMENT_GROUP_LABEL = 'Other';
+const NO_ENVIRONMENT_GROUP_LABEL = 'No Environment';
 type SideNavQuickAccessTask = ComponentProps<typeof SideNavTaskItem>['task'];
 
 type SideNavTaskGroup = {
@@ -269,7 +271,7 @@ export const SideNav = () => {
       )}
 
       {/* Nav items — pinned to top */}
-      <div className="mt-6 flex w-full shrink-0 flex-col gap-1">
+      <div className="mt-4 flex w-full shrink-0 flex-col gap-1">
         {visibleNavItems.map(
           ({ icon, href, label, description, matchExact, matchPaths }) => (
             <SideNavItem
@@ -323,9 +325,7 @@ export const SideNav = () => {
 
       <div className="min-h-0 flex-1">
         {isSideNavExpanded && quickAccessTasks.length > 0 && (
-          <div className="flex h-full min-h-0 flex-col w-(--sidebar-width) ">
-            <hr className="mt-4 mb-3 w-full shrink-0 border-input/50" />
-
+          <div className="flex h-full min-h-0 mt-4 flex-col w-(--sidebar-width) ">
             <div className="min-h-0 flex-1 overflow-x-clip overflow-y-auto scroll-thin pr-1 space-y-4">
               {pinnedQuickAccessTasks.length > 0 && (
                 <div className="flex flex-col gap-1">
@@ -352,16 +352,20 @@ export const SideNav = () => {
               )}
 
               {groupedRecentQuickAccessTasks.length > 0 && (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col">
                   <h3 className="text-sm font-semibold pl-2 py-1">
                     Recent tasks
                   </h3>
                   {groupedRecentQuickAccessTasks.map((group) => (
                     <Collapsible key={group.key} defaultOpen className="group">
-                      <CollapsibleTrigger className="flex h-8 w-full cursor-pointer items-center rounded-lg px-2 mt-1 text-left text-foreground/50 transition-colors hover:text-accent-foreground">
+                      <CollapsibleTrigger className="flex h-6 w-full cursor-pointer items-center rounded-lg px-2 mt-1 text-left text-foreground/50 transition-colors hover:text-accent-foreground">
                         <span className="flex min-w-0 items-center gap-2 w-full">
                           <CollapsibleIconTrigger
-                            icon={VectorSquare}
+                            icon={
+                              group.key === NO_ENVIRONMENT_GROUP_KEY
+                                ? SquareDashed
+                                : VectorSquare
+                            }
                             className="size-3.5"
                             iconClassName="size-3.5"
                           />
@@ -371,7 +375,7 @@ export const SideNav = () => {
                         </span>
                       </CollapsibleTrigger>
 
-                      <CollapsibleContent className="mt-1 space-y-1">
+                      <CollapsibleContent className="mx-2">
                         {group.tasks.map((task) => (
                           <SideNavTaskItem
                             key={task.id}
@@ -400,15 +404,9 @@ export const SideNav = () => {
         )}
       </div>
 
-      {/* Bottom section — pinned to bottom */}
-      {isSideNavExpanded && (
-        <hr
-          className={`mt-4 mb-3 w-full shrink-0 border-input/50 transition-opacity opacity-${isSideNavExpanded ? '100' : '0'}`}
-        />
-      )}
-
       <div className="w-full shrink-0">
-        <div className={cn('mt-2 flex w-full px-1')}>
+        <div className={cn('mt-2 flex w-full flex-col gap-1 px-1')}>
+          <ChatWidgetSideNavItem expanded={isSideNavExpanded} />
           <UserMenu expanded={isSideNavExpanded} />
         </div>
       </div>

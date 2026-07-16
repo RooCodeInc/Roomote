@@ -34,6 +34,8 @@ import {
 } from '@/lib/server/slack-oauth-state';
 import { encodeRecord } from '@/lib/url-coder';
 
+export { createSlackAppFromManifestCommand } from './create-app-from-manifest';
+
 interface SlackOAuthResponse {
   ok: boolean;
   access_token?: string;

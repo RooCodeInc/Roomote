@@ -128,14 +128,14 @@ describe('StartupSequence', () => {
     expect(screen.getByText('Warming up my GPUs')).toBeInTheDocument();
   });
 
-  it('shows a retry resume button for startup failures when a retry action is provided', () => {
+  it('shows a retry button for startup failures when a retry action is provided', () => {
     const onClick = vi.fn();
 
     render(
       <StartupSequence
         steps={[{ status: RunStatus.Failed, completed: true }]}
         error="resume failed"
-        retryAction={{ onClick }}
+        retryAction={{ onClick, label: 'Retry resume' }}
       />,
     );
 
@@ -144,6 +144,42 @@ describe('StartupSequence', () => {
 
     fireEvent.click(button);
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the stored prompt and default Retry label for failed environment starts', () => {
+    const onClick = vi.fn();
+
+    render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Failed, completed: true }]}
+        error="Workspace has exceeded its spend limit"
+        prompt={{ text: 'Add multi-camera clip switching' }}
+        retryAction={{ onClick }}
+      />,
+    );
+
+    expect(screen.getByText('Your prompt')).toBeInTheDocument();
+    expect(
+      screen.getByText('Add multi-camera clip switching'),
+    ).toBeInTheDocument();
+
+    const button = screen.getByRole('button', { name: 'Retry' });
+    fireEvent.click(button);
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows image attachments for failed starts without a displayable error string', () => {
+    render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Failed, completed: true }]}
+        prompt={{ images: ['https://example.com/shot.png'] }}
+      />,
+    );
+
+    expect(screen.getByText('Your prompt')).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'View attachment' }),
+    ).toHaveAttribute('href', 'https://example.com/shot.png');
   });
 
   it('uses a flex-bounded scroll container when startup content exceeds the available height', () => {

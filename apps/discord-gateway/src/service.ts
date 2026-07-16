@@ -7,6 +7,7 @@ import {
 import { DiscordApiForwarder } from './api-forwarder';
 import type { DiscordGatewayConfig } from './config';
 import {
+  resolveDiscordGatewayApiSecret,
   resolveDiscordGatewayCredentials,
   type DiscordGatewayCredentials,
 } from './credentials';
@@ -119,17 +120,29 @@ export class DiscordGatewayService {
       deadLetterMaxEntries: this.config.deadLetterMaxEntries,
     });
     const session = new DiscordGatewaySession(queue, this.status);
-    const deliveryAbort = new AbortController();
     this.activeSession = session;
-    this.activeDeliveryAbort = deliveryAbort;
 
     let leaseValid = true;
     let activeFingerprint: string | null = null;
-    let deliveryPromise: Promise<void> | null = null;
+    const delivery: {
+      promise: Promise<void> | null;
+      abort: AbortController;
+      secret: string | null;
+    } = {
+      promise: null,
+      abort: new AbortController(),
+      secret: null,
+    };
+    this.activeDeliveryAbort = delivery.abort;
     const loginBackoff = new DiscordLoginBackoff(
       this.config.loginRetryBaseMs,
       this.config.loginRetryMaxMs,
     );
+    const abortDelivery = () => {
+      delivery.abort.abort();
+      this.activeDeliveryAbort = delivery.abort;
+    };
+
     // The lease TTL (30s) leaves room for two renew intervals (10s), so a
     // single transient Redis error must not tear down a healthy Gateway
     // connection; only a definitive ownership loss or a second consecutive
@@ -137,7 +150,7 @@ export class DiscordGatewayService {
     let renewErrorStreak = 0;
     const abandonLeadership = () => {
       leaseValid = false;
-      deliveryAbort.abort();
+      abortDelivery();
       void session.disconnect();
     };
     const leaseTimer = setInterval(() => {
@@ -182,6 +195,65 @@ export class DiscordGatewayService {
         );
     }, this.config.statusRefreshMs);
 
+    const ensureDeliveryLoop = async (apiSecret: string | null) => {
+      // Leadership can be lost while we resolve secrets or wait for an old
+      // delivery worker to unwind. Never start a new forwarder unless we still
+      // own the lease.
+      const canLead = () => leaseValid && !this.stopped;
+
+      if (apiSecret && apiSecret === delivery.secret && delivery.promise) {
+        return;
+      }
+
+      if (delivery.promise) {
+        abortDelivery();
+        await delivery.promise.catch(() => undefined);
+        delivery.promise = null;
+      }
+
+      if (!canLead()) {
+        delivery.secret = null;
+        return;
+      }
+
+      if (!apiSecret) {
+        delivery.secret = null;
+        await this.status.update({
+          forwardingReady: false,
+          lastError:
+            'R_DISCORD_GATEWAY_SECRET is required to forward Discord events',
+        });
+        return;
+      }
+
+      if (!canLead()) {
+        delivery.secret = null;
+        return;
+      }
+
+      delivery.abort = new AbortController();
+      this.activeDeliveryAbort = delivery.abort;
+      const forwarder = new DiscordApiForwarder(
+        this.config.apiEventsUrl,
+        apiSecret,
+        this.config.apiTimeoutMs,
+      );
+      delivery.promise = runSupervisedDeliveryLoop({
+        queue,
+        forwarder,
+        status: this.status,
+        signal: delivery.abort.signal,
+        pollMs: this.config.deliveryPollMs,
+        maxAttempts: this.config.deliveryMaxAttempts,
+        maxBackoffMs: this.config.deliveryMaxBackoffMs,
+        restartMaxBackoffMs: this.config.deliveryMaxBackoffMs,
+      });
+      delivery.secret = apiSecret;
+      await this.status.update({
+        forwardingReady: true,
+      });
+    };
+
     try {
       await this.status.update({
         phase: 'awaiting_configuration',
@@ -193,32 +265,25 @@ export class DiscordGatewayService {
         forwardingReady: false,
       });
 
-      if (this.config.apiSecret) {
-        const forwarder = new DiscordApiForwarder(
-          this.config.apiEventsUrl,
-          this.config.apiSecret,
-          this.config.apiTimeoutMs,
-        );
-        deliveryPromise = runSupervisedDeliveryLoop({
-          queue,
-          forwarder,
-          status: this.status,
-          signal: deliveryAbort.signal,
-          pollMs: this.config.deliveryPollMs,
-          maxAttempts: this.config.deliveryMaxAttempts,
-          maxBackoffMs: this.config.deliveryMaxBackoffMs,
-          restartMaxBackoffMs: this.config.deliveryMaxBackoffMs,
-        });
-      } else {
-        await this.status.update({
-          phase: 'error',
-          forwardingReady: false,
-          lastError:
-            'R_DISCORD_GATEWAY_SECRET or ENCRYPTION_KEY is required to forward Discord events',
-        });
-      }
-
       while (!this.stopped && leaseValid) {
+        try {
+          const apiSecret = await resolveDiscordGatewayApiSecret(
+            this.config.processEnv,
+          );
+          // Secret lookup is async; re-check leadership in ensureDeliveryLoop.
+          if (leaseValid && !this.stopped) {
+            await ensureDeliveryLoop(apiSecret);
+          }
+        } catch (error) {
+          await this.status.update({
+            lastError: `Discord gateway secret lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+
+        if (!leaseValid || this.stopped) {
+          break;
+        }
+
         let credentials: DiscordGatewayCredentials | null;
         try {
           credentials = await resolveDiscordGatewayCredentials();
@@ -286,8 +351,10 @@ export class DiscordGatewayService {
     } finally {
       clearInterval(leaseTimer);
       clearInterval(statusTimer);
-      deliveryAbort.abort();
-      await deliveryPromise?.catch(() => undefined);
+      abortDelivery();
+      if (delivery.promise) {
+        await delivery.promise.catch(() => undefined);
+      }
       await session.disconnect();
       this.activeSession = null;
       this.activeDeliveryAbort = null;

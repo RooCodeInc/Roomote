@@ -25,6 +25,7 @@ type NodeEnv = 'test' | 'development' | 'production';
 
 const LOCAL_ENCRYPTION_KEY = 'local-roomote-encryption-key-0001';
 const LOCAL_ARTIFACT_SIGNING_KEY = 'local-roomote-artifact-signing-key-1';
+const LOCAL_DISCORD_GATEWAY_SECRET = 'local-roomote-discord-gateway-secret-01';
 const LOCAL_DASHBOARD_PASSWORD = 'roomote-local-admin';
 const LOCAL_PREVIEW_DOMAINS = 'localhost,127.0.0.1,roomotepreview.localhost';
 const LOCAL_S3_ENDPOINT = 'http://localhost:19000';
@@ -106,6 +107,12 @@ const serverSchema = {
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  // Roomote Cloud-only analytics and support integrations. These values are
+  // intentionally not used by self-hosted deployments.
+  R_CLOUD_ENABLED: optInBoolean(),
+  R_INTERCOM_APP_ID: z.string().min(1).optional(),
+  R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
+  R_POSTHOG_HOST: z.string().url().optional(),
   // Force-enable telemetry in environments that would otherwise stay silent
   // (development / builds without RELEASE_VERSION). Testing escape hatch.
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
@@ -384,6 +391,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
   'R_PING_BASE_URL',
+  'R_INTERCOM_APP_ID',
+  'R_POSTHOG_PROJECT_KEY',
+  'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
   'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
@@ -485,6 +495,15 @@ export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 export function isEnvFlagEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+}
+
+/** Whether Roomote Cloud-only behavior is enabled for this deployment. */
+export function isRoomoteCloudEnabled(
+  value: string | boolean | undefined,
+): boolean {
+  return (
+    value === true || (typeof value === 'string' && isEnvFlagEnabled(value))
+  );
 }
 
 /**
@@ -711,6 +730,12 @@ function buildRoomoteRuntimeEnv(
     env.DASHBOARD_PASSWORD ??= LOCAL_DASHBOARD_PASSWORD;
     env.ENCRYPTION_KEY ??= LOCAL_ENCRYPTION_KEY;
     env.ARTIFACT_SIGNING_KEY ??= LOCAL_ARTIFACT_SIGNING_KEY;
+    env.R_DISCORD_GATEWAY_SECRET ??= LOCAL_DISCORD_GATEWAY_SECRET;
+    // Keep process.env aligned so API auth, BullMQ, and the gateway share the
+    // same local default instead of only one process reading Env.*.
+    if (!processEnv.R_DISCORD_GATEWAY_SECRET?.trim()) {
+      processEnv.R_DISCORD_GATEWAY_SECRET = env.R_DISCORD_GATEWAY_SECRET;
+    }
     env.PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
     env.PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
     env.S3_ENDPOINT ??= LOCAL_S3_ENDPOINT;

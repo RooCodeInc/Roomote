@@ -209,7 +209,7 @@ export const QueuedMessagesContent = ({
   }
 
   return (
-    <div className="2xl:max-w-5xl mx-auto w-full">
+    <div className="mx-auto w-full max-w-4xl">
       <QueuedMessagesList>
         <QueuedMessagesSectionLabel />
         <QueuedMessagesItems>

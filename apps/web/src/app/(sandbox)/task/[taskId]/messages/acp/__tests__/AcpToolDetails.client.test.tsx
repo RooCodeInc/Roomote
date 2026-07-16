@@ -8,7 +8,12 @@ const codeBlockSpy = vi.fn();
 const toolInputSpy = vi.fn();
 
 vi.mock('@/components/ai-elements', () => ({
-  CodeBlock: (props: { code: string }) => {
+  CodeBlock: (props: {
+    code: string;
+    variant?: string;
+    highlight?: boolean;
+    className?: string;
+  }) => {
     codeBlockSpy(props);
     return <div>{props.code}</div>;
   },
@@ -136,7 +141,7 @@ describe('AcpToolDetails', () => {
     expect(codeBlockSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps using a code block for non-subagent tool output text', () => {
+  it('uses a light compact code block for non-subagent tool output text', () => {
     render(
       <AcpToolDetails
         msg={buildMessage({
@@ -149,7 +154,12 @@ describe('AcpToolDetails', () => {
 
     expect(screen.getByText('Spawning subagent')).toBeInTheDocument();
     expect(codeBlockSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'Spawning subagent' }),
+      expect.objectContaining({
+        code: 'Spawning subagent',
+        variant: 'compact',
+        highlight: false,
+        className: expect.stringContaining('bg-transparent'),
+      }),
     );
   });
 

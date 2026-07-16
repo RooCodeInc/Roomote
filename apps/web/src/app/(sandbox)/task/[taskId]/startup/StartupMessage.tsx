@@ -119,23 +119,36 @@ const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
   );
 };
 
+export type StartupRetryAction = {
+  onClick: () => void;
+  pending?: boolean;
+  label?: string;
+};
+
+export type StartupPromptPreview = {
+  text?: string;
+  images?: string[];
+};
+
 interface StartupErrorMessageProps {
   status: RunStatus;
   error?: string;
-  retryAction?: {
-    onClick: () => void;
-    pending?: boolean;
-  };
+  prompt?: StartupPromptPreview | null;
+  retryAction?: StartupRetryAction;
 }
 
 export const StartupFailureMessage = ({
   status,
   error,
+  prompt,
   retryAction,
 }: StartupErrorMessageProps) => {
   const isFailed = status === RunStatus.Failed;
   const isCanceled = status === RunStatus.Canceled;
   const displayError = getTaskRunErrorDisplayMessage(error);
+  const promptText = prompt?.text?.trim() || undefined;
+  const promptImages = prompt?.images?.filter(Boolean) ?? [];
+  const hasPrompt = Boolean(promptText) || promptImages.length > 0;
 
   if ((isFailed || (isCanceled && displayError)) && displayError) {
     return (
@@ -143,13 +156,34 @@ export const StartupFailureMessage = ({
         <MessageContent>
           <div className="flex items-start gap-2 text-sm text-destructive animate-in fade-in duration-300">
             <MessageSquareWarning className="size-4 mt-0.5 shrink-0" />
-            <div className="space-y-1">
+            <div className="min-w-0 space-y-2">
               <div>There was an error starting this environment:</div>
               <div className="text-foreground whitespace-pre-wrap wrap-break-word">
                 {displayError}
               </div>
+              {hasPrompt && (
+                <div className="space-y-1 pt-1 text-foreground">
+                  <div className="text-muted-foreground">Your prompt</div>
+                  {promptText && (
+                    <div className="whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                      {promptText}
+                    </div>
+                  )}
+                  {promptImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {promptImages.map((image) => (
+                        <Button key={image} variant="outline" size="sm" asChild>
+                          <a href={image} target="_blank" rel="noreferrer">
+                            View attachment
+                          </a>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {retryAction && (
-                <div className="pt-2">
+                <div className="pt-1">
                   <Button
                     variant="outline"
                     size="sm"
@@ -157,7 +191,7 @@ export const StartupFailureMessage = ({
                     disabled={retryAction.pending}
                   >
                     <RotateCcw className="size-4" />
-                    Retry resume
+                    {retryAction.label ?? 'Retry'}
                   </Button>
                 </div>
               )}
@@ -174,7 +208,43 @@ export const StartupFailureMessage = ({
         <MessageContent>
           <div className="flex items-start gap-2 text-sm text-destructive animate-in fade-in duration-300">
             <MessageSquareWarning className="size-4 mt-0.5 shrink-0" />
-            <div>There was an error starting this environment:</div>
+            <div className="min-w-0 space-y-2">
+              <div>There was an error starting this environment:</div>
+              {hasPrompt && (
+                <div className="space-y-1 pt-1 text-foreground">
+                  <div className="text-muted-foreground">Your prompt</div>
+                  {promptText && (
+                    <div className="whitespace-pre-wrap wrap-break-word rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                      {promptText}
+                    </div>
+                  )}
+                  {promptImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {promptImages.map((image) => (
+                        <Button key={image} variant="outline" size="sm" asChild>
+                          <a href={image} target="_blank" rel="noreferrer">
+                            View attachment
+                          </a>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {retryAction && (
+                <div className="pt-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={retryAction.onClick}
+                    disabled={retryAction.pending}
+                  >
+                    <RotateCcw className="size-4" />
+                    {retryAction.label ?? 'Retry'}
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
         </MessageContent>
       </Message>
@@ -206,10 +276,8 @@ interface StartupSequenceProps {
   logs?: SandboxLogEntry[];
   logsConnected?: boolean;
   logsError?: string | null;
-  retryAction?: {
-    onClick: () => void;
-    pending?: boolean;
-  };
+  prompt?: StartupPromptPreview | null;
+  retryAction?: StartupRetryAction;
 }
 
 export const StartupSequence = ({
@@ -218,6 +286,7 @@ export const StartupSequence = ({
   logs,
   logsConnected = true,
   logsError = null,
+  prompt,
   retryAction,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
@@ -270,6 +339,7 @@ export const StartupSequence = ({
         <StartupFailureMessage
           status={status}
           error={error}
+          prompt={prompt}
           retryAction={retryAction}
         />
       </div>

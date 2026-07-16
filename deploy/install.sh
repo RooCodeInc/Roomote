@@ -496,6 +496,12 @@ if ! env_has_value SETUP_TOKEN; then
   set_env_value SETUP_TOKEN "$(openssl rand -hex 16)"
 fi
 
+# Dedicated Discord gateway↔API transport secret. Always generate one so
+# enabling Discord later is ready without a separate operator step.
+if ! env_has_value R_DISCORD_GATEWAY_SECRET; then
+  set_env_value R_DISCORD_GATEWAY_SECRET "$(openssl rand -base64 32 | tr -d '\n')"
+fi
+
 worker_image="$image_registry/$image_namespace/roomote-worker:$roomote_version"
 
 # The published worker image doubles as the Modal worker base image. Keep
