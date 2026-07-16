@@ -497,7 +497,8 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     // automation without ever sending platformIssueDiscordChannel. Omission
     // must preserve the target, not clear it and disable the automation.
     const input = buildInput({ savingAutomation: 'platformIssueAlerts' });
-    delete (input as Record<string, unknown>).platformIssueDiscordChannel;
+    delete (input as unknown as Record<string, unknown>)
+      .platformIssueDiscordChannel;
     const second = await updateBackgroundAgentSettingsCommand(adminAuth, input);
 
     expect(second.success).toBe(true);
