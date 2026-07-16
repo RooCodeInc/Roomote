@@ -168,15 +168,17 @@ describe('Env', () => {
   });
 
   it('parses Roomote Cloud analytics configuration', () => {
-    const env = createRoomoteEnv({
+    const runtimeEnv = {
       ...process.env,
       R_CLOUD_ENABLED: '1',
       R_INTERCOM_APP_ID: 'intercom-app',
       R_POSTHOG_PROJECT_KEY: 'posthog-project',
       R_POSTHOG_HOST: 'https://eu.i.posthog.com',
-    });
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    const env = createRoomoteEnv(runtimeEnv);
 
-    expect(env.R_CLOUD_ENABLED).toBe('1');
+    expect(env.R_CLOUD_ENABLED).toBe(true);
     expect(env.R_INTERCOM_APP_ID).toBe('intercom-app');
     expect(env.R_POSTHOG_PROJECT_KEY).toBe('posthog-project');
     expect(env.R_POSTHOG_HOST).toBe('https://eu.i.posthog.com');

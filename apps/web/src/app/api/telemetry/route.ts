@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
 
   for (const event of parsed.data.events) {
     void captureEvent(event.event, {
+      cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
       userId: authResult.userId,
       properties: event.properties,
       timestamp: event.timestamp,

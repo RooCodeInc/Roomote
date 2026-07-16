@@ -55,6 +55,8 @@ export function CloudAnalyticsProvider({
   const pathname = usePathname();
   const posthogLoaded = useRef(false);
   const intercomBooted = useRef(false);
+  const previousUserId = useRef(userId);
+  const previousIntercomUserId = useRef(userId);
   const userIdRef = useRef(userId);
   const hideDefaultIntercomLauncherRef = useRef(false);
   const resolvedPosthogHost = posthogHost ?? DEFAULT_POSTHOG_HOST;
@@ -74,6 +76,7 @@ export function CloudAnalyticsProvider({
       ]);
       posthog.identify ??= (id) => posthog.push(['identify', id]);
       posthog.reset ??= () => posthog.push(['reset']);
+      if (!userIdRef.current) posthog.reset();
       const script = document.createElement('script');
       script.async = true;
       script.src = `${resolvedPosthogHost.replace(/\/$/, '')}/static/array.js`;
@@ -84,6 +87,7 @@ export function CloudAnalyticsProvider({
       document.head.append(script);
     }
     if (intercomAppId) {
+      window.Intercom?.('shutdown');
       const script = document.createElement('script');
       script.async = true;
       script.src = `https://widget.intercom.io/widget/${intercomAppId}`;
@@ -101,14 +105,17 @@ export function CloudAnalyticsProvider({
 
   useEffect(() => {
     if (!cloudEnabled || !posthogLoaded.current) return;
+    if (previousUserId.current !== userId) window.posthog?.reset?.();
     if (userId) window.posthog?.identify?.(userId);
     else window.posthog?.reset?.();
+    previousUserId.current = userId;
   }, [cloudEnabled, userId]);
 
   useEffect(() => {
-    if (!cloudEnabled || userId || !intercomBooted.current) return;
+    if (!cloudEnabled || previousIntercomUserId.current === userId) return;
     window.Intercom?.('shutdown');
     intercomBooted.current = false;
+    previousIntercomUserId.current = userId;
   }, [cloudEnabled, userId]);
 
   useEffect(() => {

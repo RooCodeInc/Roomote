@@ -202,6 +202,7 @@ export interface CaptureEventOptions {
   properties?: TelemetryEventProperties;
   /** ISO-8601 override; defaults to now. */
   timestamp?: string;
+  cloudEnabled?: boolean;
 }
 
 /**
@@ -218,7 +219,7 @@ export async function captureEvent(
       return;
     }
 
-    if (!(await isAnonymousAnalyticsEnabled())) {
+    if (!(await isAnonymousAnalyticsEnabled(options.cloudEnabled))) {
       return;
     }
 
