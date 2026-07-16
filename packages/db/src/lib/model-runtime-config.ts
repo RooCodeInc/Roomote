@@ -123,6 +123,32 @@ function resolveProviderKeyNames({
   ];
 }
 
+/**
+ * Resolve a single model-provider env value with the same precedence the task
+ * runtime uses: the runtime process env first, then the persisted (encrypted)
+ * deployment environment variables.
+ */
+export async function resolveModelProviderEnvValue(
+  envVarName: string,
+  options: {
+    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    executor?: DatabaseOrTransaction;
+  } = {},
+): Promise<string | undefined> {
+  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
+
+  if (runtimeValue) {
+    return runtimeValue;
+  }
+
+  const persistedEnvVars = await loadPersistedDeploymentEnvVars(
+    options.executor ?? db,
+  );
+
+  return normalizeConfiguredValue(persistedEnvVars[envVarName]);
+}
+
 export async function resolveEffectiveModelRuntimeEnv(
   options: {
     runtimeEnv?: Partial<Record<string, string | undefined>>;

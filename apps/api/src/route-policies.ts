@@ -214,6 +214,15 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
 
+  // Inference gateway: task sandboxes call model providers through this
+  // proxy with their run-scoped token; the provider key is injected
+  // server-side and never enters the sandbox.
+  {
+    name: 'inference',
+    match: { type: 'prefix', path: '/api/inference' },
+    policy: 'task-token',
+  },
+
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
   // gathering context before a run exists) and task run tokens.
   {
