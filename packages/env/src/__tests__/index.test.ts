@@ -168,7 +168,7 @@ describe('Env', () => {
   });
 
   it('parses Roomote Cloud analytics configuration', () => {
-    const runtimeEnv = {
+    const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
       R_CLOUD_ENABLED: '1',
       R_INTERCOM_APP_ID: 'intercom-app',
