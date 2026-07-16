@@ -71,13 +71,16 @@ const baseFormState: FormState = {
   ciFailureTriageDiscordChannel: '',
   suggesterFrequency: 'off',
   suggesterSlackChannel: '',
+  suggesterDiscordChannel: '',
   suggesterInstructions: '',
   suggesterRoutingMode: DEFAULT_SUGGESTER_ROUTING_MODE,
   suggesterRoutingInstructions: '',
   announcerFrequency: 'off' as const,
   announcerSlackChannel: '',
+  announcerDiscordChannel: '',
   announcerInstructions: '',
   platformIssueSlackChannel: '',
+  platformIssueDiscordChannel: '',
 };
 
 describe('Automations selection helpers', () => {
@@ -754,15 +757,17 @@ describe('Automations selection helpers', () => {
     ).toBe(true);
   });
 
-  it('treats platform issue alerts as disabled without a selected Slack channel', () => {
+  it('treats platform issue alerts as disabled without a selected channel', () => {
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: '',
+        platformIssueDiscordChannel: '',
       }),
     ).toBe(false);
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: '   ',
+        platformIssueDiscordChannel: '   ',
       }),
     ).toBe(false);
   });
@@ -771,6 +776,16 @@ describe('Automations selection helpers', () => {
     expect(
       isPlatformIssueAlertsEnabled({
         platformIssueSlackChannel: 'C123',
+        platformIssueDiscordChannel: '',
+      }),
+    ).toBe(true);
+  });
+
+  it('treats platform issue alerts as enabled when a Discord channel is selected', () => {
+    expect(
+      isPlatformIssueAlertsEnabled({
+        platformIssueSlackChannel: '',
+        platformIssueDiscordChannel: '111222333444555666',
       }),
     ).toBe(true);
   });

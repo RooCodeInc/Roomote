@@ -142,6 +142,9 @@ type FieldErrors = Partial<
     | 'securityAuditorDiscordChannel'
     | 'codeQualityAuditorDiscordChannel'
     | 'ciFailureTriageDiscordChannel'
+    | 'suggesterDiscordChannel'
+    | 'announcerDiscordChannel'
+    | 'platformIssueDiscordChannel'
     | 'sentryTriageProjectSlugs'
     | 'suggesterInstructions'
     | 'suggesterRoutingInstructions'
@@ -176,7 +179,10 @@ type AutomationSlackDestinationField =
   | 'dependabotTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
-  | 'ciFailureTriageSlackChannel';
+  | 'ciFailureTriageSlackChannel'
+  | 'suggesterSlackChannel'
+  | 'announcerSlackChannel'
+  | 'platformIssueSlackChannel';
 
 const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
   managerStatsSlackChannel: 'manager_stats',
@@ -185,10 +191,25 @@ const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
   securityAuditorSlackChannel: 'security_auditor',
   codeQualityAuditorSlackChannel: 'code_quality_auditor',
   ciFailureTriageSlackChannel: 'ci_failure_triage',
+  suggesterSlackChannel: 'suggester',
+  announcerSlackChannel: 'announcer',
+  platformIssueSlackChannel: 'platform_issue_alerts',
 } as const satisfies Record<
   AutomationSlackDestinationField,
   BackgroundAutomationKey
 >;
+
+const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = {
+  managerStatsSlackChannel: 'managerStats',
+  sentryTriageSlackChannel: 'sentryTriage',
+  dependabotTriageSlackChannel: 'dependabotTriage',
+  securityAuditorSlackChannel: 'securityAuditor',
+  codeQualityAuditorSlackChannel: 'codeQualityAuditor',
+  ciFailureTriageSlackChannel: 'ciFailureTriage',
+  suggesterSlackChannel: 'suggester',
+  announcerSlackChannel: 'announcer',
+  platformIssueSlackChannel: 'platformIssueAlerts',
+} as const satisfies Record<AutomationSlackDestinationField, AutomationId>;
 
 type AutomationDiscordDestinationField =
   | 'managerStatsDiscordChannel'
@@ -196,7 +217,10 @@ type AutomationDiscordDestinationField =
   | 'dependabotTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
-  | 'ciFailureTriageDiscordChannel';
+  | 'ciFailureTriageDiscordChannel'
+  | 'suggesterDiscordChannel'
+  | 'announcerDiscordChannel'
+  | 'platformIssueDiscordChannel';
 
 // The form field holding the same automation's Discord destination; the
 // destination picker is one-of, so selecting one provider clears the other.
@@ -207,6 +231,9 @@ const SLACK_TO_DISCORD_DESTINATION_FIELDS = {
   securityAuditorSlackChannel: 'securityAuditorDiscordChannel',
   codeQualityAuditorSlackChannel: 'codeQualityAuditorDiscordChannel',
   ciFailureTriageSlackChannel: 'ciFailureTriageDiscordChannel',
+  suggesterSlackChannel: 'suggesterDiscordChannel',
+  announcerSlackChannel: 'announcerDiscordChannel',
+  platformIssueSlackChannel: 'platformIssueDiscordChannel',
 } as const satisfies Record<
   AutomationSlackDestinationField,
   AutomationDiscordDestinationField
@@ -522,7 +549,8 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   platformIssueAlerts: {
     id: 'platformIssueAlerts',
     label: 'Alert on Config Errors',
-    description: 'Alert on Slack when a task runs into admin-fixable issues.',
+    description:
+      'Alert on Slack or Discord when a task runs into admin-fixable issues.',
     icon: BellElectric,
   },
 };
@@ -689,15 +717,18 @@ function mapSettingsToFormState(
     suggesterFrequency: SuggesterFrequency;
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
+    suggesterDiscordChannelId: string | null;
     suggesterInstructions: string | null;
     suggesterRoutingMode: SuggesterRoutingMode;
     suggesterRoutingInstructions: string | null;
     announcerFrequency: AnnouncerFrequency;
     announcerSlackChannelId: string | null;
     announcerSlackChannelName?: string | null;
+    announcerDiscordChannelId: string | null;
     announcerInstructions: string | null;
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
+    platformIssueDiscordChannelId: string | null;
     securityAuditorSlackChannelId: string | null;
     securityAuditorSlackChannelName?: string | null;
     securityAuditorDiscordChannelId: string | null;
@@ -771,6 +802,7 @@ function mapSettingsToFormState(
       settings.suggesterSlackChannelName ??
       settings.suggesterSlackChannelId ??
       '',
+    suggesterDiscordChannel: settings.suggesterDiscordChannelId ?? '',
     suggesterInstructions: settings.suggesterInstructions ?? '',
     suggesterRoutingMode:
       settings.suggesterRoutingMode ?? DEFAULT_SUGGESTER_ROUTING_MODE,
@@ -780,11 +812,13 @@ function mapSettingsToFormState(
       settings.announcerSlackChannelName ??
       settings.announcerSlackChannelId ??
       '',
+    announcerDiscordChannel: settings.announcerDiscordChannelId ?? '',
     announcerInstructions: settings.announcerInstructions ?? '',
     platformIssueSlackChannel:
       settings.platformIssueSlackChannelName ??
       settings.platformIssueSlackChannelId ??
       '',
+    platformIssueDiscordChannel: settings.platformIssueDiscordChannelId ?? '',
     securityAuditorSlackChannel:
       settings.securityAuditorSlackChannelName ??
       settings.securityAuditorSlackChannelId ??
@@ -831,9 +865,18 @@ export function buildSlackWorkflowLaunchUrl(
 }
 
 export function isPlatformIssueAlertsEnabled(
-  formState: Pick<FormState, 'platformIssueSlackChannel'> | null | undefined,
+  formState:
+    | Pick<
+        FormState,
+        'platformIssueSlackChannel' | 'platformIssueDiscordChannel'
+      >
+    | null
+    | undefined,
 ): boolean {
-  return Boolean(formState?.platformIssueSlackChannel.trim());
+  return Boolean(
+    formState?.platformIssueSlackChannel.trim() ||
+    formState?.platformIssueDiscordChannel.trim(),
+  );
 }
 
 export function canSelectSentryTriageFrequency({
@@ -2312,20 +2355,7 @@ export function AutomationsSettings() {
               formValue: value,
               savedChannelId,
               warningChannelId,
-              isDirty:
-                isDirty[
-                  field === 'managerStatsSlackChannel'
-                    ? 'managerStats'
-                    : field === 'sentryTriageSlackChannel'
-                      ? 'sentryTriage'
-                      : field === 'dependabotTriageSlackChannel'
-                        ? 'dependabotTriage'
-                        : field === 'securityAuditorSlackChannel'
-                          ? 'securityAuditor'
-                          : field === 'codeQualityAuditorSlackChannel'
-                            ? 'codeQualityAuditor'
-                            : 'ciFailureTriage'
-                ],
+              isDirty: isDirty[SLACK_DESTINATION_FIELD_AUTOMATION_IDS[field]],
             })
           }
           error={fieldErrors[field] ?? fieldErrors[discordField]}
@@ -3322,11 +3352,21 @@ export function AutomationsSettings() {
                 <div className="space-y-5">
                   {!suggestionRoutingEnabled ? (
                     <>
-                      <AutomationReportsToLine
-                        destination={
-                          settingsQuery.data?.resolvedDestinations.suggester
-                        }
-                      />
+                      {renderSlackDestinationField({
+                        field: 'suggesterSlackChannel',
+                        inputId: 'suggester-slack-channel',
+                        label: 'Post suggestions to this Slack channel',
+                        helperText:
+                          'Choose where Roomote should post its suggestion digests.',
+                        savedChannelId:
+                          settingsQuery.data?.settings
+                            .suggesterSlackChannelId ?? null,
+                        savedDiscordChannelId:
+                          settingsQuery.data?.settings
+                            .suggesterDiscordChannelId ?? null,
+                        warningChannelId:
+                          slackChannelAccessWarnings.suggesterSlackChannel,
+                      })}
 
                       <div className="space-y-2">
                         <Label htmlFor="suggester-instructions">
@@ -3598,11 +3638,21 @@ If unclear, send to manager channel.`}
 
               {announcerIsEnabled ? (
                 <div className="space-y-5">
-                  <AutomationReportsToLine
-                    destination={
-                      settingsQuery.data?.resolvedDestinations.announcer
-                    }
-                  />
+                  {renderSlackDestinationField({
+                    field: 'announcerSlackChannel',
+                    inputId: 'announcer-slack-channel',
+                    label: 'Post summaries to this Slack channel',
+                    helperText:
+                      'Choose where Roomote should post merged-PR summaries.',
+                    savedChannelId:
+                      settingsQuery.data?.settings.announcerSlackChannelId ??
+                      null,
+                    savedDiscordChannelId:
+                      settingsQuery.data?.settings.announcerDiscordChannelId ??
+                      null,
+                    warningChannelId:
+                      slackChannelAccessWarnings.announcerSlackChannel,
+                  })}
 
                   <div className="space-y-2">
                     <Label htmlFor="announcer-instructions">
@@ -3964,6 +4014,44 @@ If unclear, send to manager channel.`}
                   </div>
                 </div>
               ) : null}
+            </div>
+          </AutomationCard>
+
+          <AutomationCard
+            automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
+            isOpen={openAutomationIds.has('platformIssueAlerts')}
+            onOpenChange={(open) =>
+              setAutomationOpen('platformIssueAlerts', open)
+            }
+            iconEnabled={iconEnabled.platformIssueAlerts}
+            footer={
+              <AutomationFooter
+                isDirty={isDirty.platformIssueAlerts}
+                isPending={
+                  updateMutation.isPending &&
+                  savingAutomation === 'platformIssueAlerts'
+                }
+                onSave={() => saveAgent('platformIssueAlerts')}
+                onReset={() => resetAgent('platformIssueAlerts')}
+              />
+            }
+          >
+            <div className="space-y-5">
+              {renderSlackDestinationField({
+                field: 'platformIssueSlackChannel',
+                inputId: 'platform-issue-slack-channel',
+                label: 'Post alerts to this Slack channel',
+                helperText:
+                  'Choose where Roomote should post configuration issues that need an admin. Leave empty to use the Manager Channel.',
+                savedChannelId:
+                  settingsQuery.data?.settings.platformIssueSlackChannelId ??
+                  null,
+                savedDiscordChannelId:
+                  settingsQuery.data?.settings.platformIssueDiscordChannelId ??
+                  null,
+                warningChannelId:
+                  slackChannelAccessWarnings.platformIssueSlackChannel,
+              })}
             </div>
           </AutomationCard>
 
