@@ -2,6 +2,13 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.7.1 (2026-07-16)
+
+### Patch changes
+
+- On cloud-enabled deployments, the homepage launcher no longer shows the sandbox (compute provider) chooser, matching Settings and keeping provider selection managed by the deployment default.
+- Model settings autocomplete is more responsive: suggestions update sooner, stay visible while new results load, support fuzzy matches from the first character, and no longer show model-resolution errors behind an open suggestion list.
+
 ## 0.7.0 (2026-07-16)
 
 ### Minor changes
