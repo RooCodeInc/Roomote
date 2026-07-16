@@ -14,6 +14,10 @@ const settingsData = vi.hoisted(() => ({
 const providerSetupData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const suggestionData = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | null | undefined,
+}));
+const suggestionQueryError = vi.hoisted(() => ({ current: false }));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
@@ -23,13 +27,18 @@ vi.mock('@tanstack/react-query', () => ({
     const isProviderSetup =
       Array.isArray(options?.queryKey) &&
       options.queryKey[1] === 'providerSetup';
+    const isSuggestions =
+      Array.isArray(options?.queryKey) && options.queryKey[1] === 'suggest';
     const data = isProviderSetup
       ? providerSetupData.current
-      : settingsData.current;
+      : isSuggestions && suggestionData.current !== undefined
+        ? suggestionData.current
+        : settingsData.current;
 
     return {
       data,
       isPending: data === null,
+      isError: isSuggestions && suggestionQueryError.current,
     };
   },
   useMutation: (options?: { mutationKey?: unknown[] }) => {
@@ -334,6 +343,8 @@ describe('ModelSettingsSection', () => {
     refreshMutateAsyncMock.mockReset();
     settingsData.current = null;
     providerSetupData.current = buildProviderSetupData();
+    suggestionData.current = undefined;
+    suggestionQueryError.current = false;
     // cmdk scrolls the highlighted command item into view; jsdom does not
     // implement scrollIntoView.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -597,7 +608,7 @@ describe('ModelSettingsSection', () => {
     ).toHaveTextContent('Anthropic');
   });
 
-  it('shows provider-scoped suggestions after two characters and lets keyboard selection fill the slug', async () => {
+  it('shows provider-scoped suggestions after one character and lets keyboard selection fill the slug', async () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -609,7 +620,7 @@ describe('ModelSettingsSection', () => {
 
     try {
       const input = screen.getByLabelText('New model slug');
-      fireEvent.change(input, { target: { value: 'cl' } });
+      fireEvent.change(input, { target: { value: 'c' } });
 
       await act(async () => {
         vi.advanceTimersByTime(500);
@@ -622,7 +633,112 @@ describe('ModelSettingsSection', () => {
     }
   });
 
-  it('does not show suggestions before two characters', () => {
+  it('keeps suggestions visible while a replacement query is loading', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears suggestions when a replacement query fails', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      suggestionQueryError.current = true;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
+      expect(screen.queryByText('Claude Sonnet 4')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides lookup errors while matching suggestions are open', async () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    lookupMutateAsyncMock.mockRejectedValue(new Error('Not found'));
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      fireEvent.change(screen.getByLabelText('New model slug'), {
+        target: { value: 'cl' },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          'Could not resolve this model from the provider. Check the slug.',
+        ),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show suggestions before a character is entered', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -631,7 +747,7 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     fireEvent.change(screen.getByLabelText('New model slug'), {
-      target: { value: 'c' },
+      target: { value: '' },
     });
 
     expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();

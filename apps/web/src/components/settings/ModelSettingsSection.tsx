@@ -749,6 +749,7 @@ export function ModelSettingsSection({
   );
   const lookupRequestRef = useRef(0);
   const suggestionRequestRef = useRef(0);
+  const suggestionProviderRef = useRef<SetupModelProviderId | null>(null);
   const selectedSuggestionSlugRef = useRef<string | null>(null);
   const lookupMutateAsyncRef = useRef(lookupMutation.mutateAsync);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -803,9 +804,9 @@ export function ModelSettingsSection({
     [sortedConnectedProviders, newModelProvider],
   );
   const normalizedNewModelId = newModelId.trim();
-  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 500);
+  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 150);
   const shouldShowSuggestions =
-    suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 2;
+    suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 1;
   const suggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
@@ -815,7 +816,7 @@ export function ModelSettingsSection({
       {
         enabled:
           activeNewModelProvider !== null &&
-          debouncedSuggestionQuery.length >= 2,
+          debouncedSuggestionQuery.length >= 1,
       },
     ),
   );
@@ -836,9 +837,32 @@ export function ModelSettingsSection({
   }, [lookupMutation.mutateAsync]);
 
   useEffect(() => {
-    if (!activeNewModelProvider || debouncedSuggestionQuery.length < 2) {
+    const providerId = activeNewModelProvider?.id ?? null;
+
+    if (
+      suggestionProviderRef.current !== null &&
+      suggestionProviderRef.current !== providerId
+    ) {
+      setSuggestionState(EMPTY_SUGGESTION_STATE);
+    }
+
+    suggestionProviderRef.current = providerId;
+  }, [activeNewModelProvider]);
+
+  useEffect(() => {
+    if (!activeNewModelProvider || debouncedSuggestionQuery.length < 1) {
       suggestionRequestRef.current += 1;
       setSuggestionState(EMPTY_SUGGESTION_STATE);
+      return;
+    }
+
+    if (suggestionsQuery.isError) {
+      suggestionRequestRef.current += 1;
+      setSuggestionState(EMPTY_SUGGESTION_STATE);
+      return;
+    }
+
+    if (!suggestionsQuery.data) {
       return;
     }
 
@@ -875,7 +899,8 @@ export function ModelSettingsSection({
   }, [
     activeNewModelProvider,
     debouncedSuggestionQuery,
-    suggestionsQuery.data?.suggestions,
+    suggestionsQuery.data,
+    suggestionsQuery.isError,
   ]);
 
   useEffect(() => {
@@ -1944,11 +1969,13 @@ export function ModelSettingsSection({
                     </div>
                   )}
                 </div>
-                {pendingLookup.message && pendingLookup.status === 'error' && (
-                  <p className="text-xs text-destructive">
-                    {pendingLookup.message}
-                  </p>
-                )}
+                {pendingLookup.message &&
+                  pendingLookup.status === 'error' &&
+                  !shouldShowSuggestions && (
+                    <p className="text-xs text-destructive">
+                      {pendingLookup.message}
+                    </p>
+                  )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">
