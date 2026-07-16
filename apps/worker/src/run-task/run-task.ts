@@ -1663,6 +1663,7 @@ export const runTask = async ({
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
       codingHarness: harnessType,
       workerEnv,
+      taskRuntime: { homeDir, runtimeEnv },
       allowTerminal: runtimeEnv.ROOMOTE_TASK_TERMINAL === 'true',
       prepareActorScopedTurn,
       validateToken,
@@ -1870,7 +1871,7 @@ export const runTask = async ({
       // the handoff helper polls below. The harness has already shut down, so
       // drop on-disk credential material first; resume re-injects it from the
       // dequeue response.
-      scrubSandboxSecretsBeforeSnapshot(logger, { homeDir, runtimeEnv });
+      await scrubSandboxSecretsBeforeSnapshot(logger, { homeDir, runtimeEnv });
 
       ({ claimed: sleepActionTriggered } = await waitForExternalSleepAction({
         taskRun,

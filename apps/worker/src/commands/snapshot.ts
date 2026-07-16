@@ -113,7 +113,7 @@ export async function snapshot({
     // material (env.sh exports, git tokens, OpenCode auth files) now that
     // setup is done. Task runs launched from the snapshot re-inject env vars
     // and tokens at startup.
-    scrubSandboxSecretsBeforeSnapshot();
+    await scrubSandboxSecretsBeforeSnapshot();
 
     // Enqueue snapshot request via SDK.
     const { enqueued } = await sdk.taskRuns.createSnapshot({
