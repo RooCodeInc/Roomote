@@ -227,6 +227,38 @@ awk \
 cat "$tmp_env" > .env
 rm -f "$tmp_env"
 chmod 600 .env
+
+# Production no longer accepts ENCRYPTION_KEY as Discord gateway auth.
+# Generate a dedicated transport secret on first upgrade when missing so
+# Discord-enabled deployments keep forwarding after the rollout.
+if [ -z "$(read_env_value R_DISCORD_GATEWAY_SECRET | tr -d '[:space:]')" ]; then
+  secret="$(openssl rand -base64 32 | tr -d '\n')"
+  tmp_env="$(mktemp)"
+  awk -v secret="$secret" '
+    BEGIN {
+      seen = 0
+      pattern = "^[[:space:]]*(export[[:space:]]+)?R_DISCORD_GATEWAY_SECRET="
+    }
+    $0 ~ pattern {
+      if (!seen) {
+        print "R_DISCORD_GATEWAY_SECRET=" secret
+        seen = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!seen) {
+        print "R_DISCORD_GATEWAY_SECRET=" secret
+      }
+    }
+  ' .env > "$tmp_env"
+  cat "$tmp_env" > .env
+  rm -f "$tmp_env"
+  chmod 600 .env
+  echo "Generated R_DISCORD_GATEWAY_SECRET for Discord gateway↔API auth"
+fi
+
 docker compose --env-file .env -f docker-compose.prod.yml config >/dev/null
 docker pull "$worker_image"
 docker compose --env-file .env -f docker-compose.prod.yml pull

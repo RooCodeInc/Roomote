@@ -319,6 +319,13 @@ previews.<your-domain>` and `fly certs add -a <app>-previews
   a deployment that wants every main build can run `fly deploy` from its
   own CI with a [deploy token](https://fly.io/docs/security/tokens/)
   (`fly tokens create deploy`) and the edited `fly.toml`.
+- **One-time Discord gateway secret (existing apps).** New installs set
+  `R_DISCORD_GATEWAY_SECRET` alongside the other random secrets. Older apps
+  that previously reused `ENCRYPTION_KEY` for Discord gateway↔API auth need
+  a one-time:
+  `fly secrets set --app "$APP" R_DISCORD_GATEWAY_SECRET="$(openssl rand -base64 32)"`
+  before continuing Discord after this hardening ships (all process groups
+  share Fly secrets).
 - **Back up** the Managed Postgres cluster (Fly's MPG backups or `pg_dump`
   via `fly mpg connect`) and the Tigris bucket. Everything else is
   reproducible from `fly.toml` plus the secrets.
