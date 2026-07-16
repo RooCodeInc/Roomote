@@ -52,3 +52,25 @@ export async function resolveDiscordGatewayCredentials(): Promise<DiscordGateway
       .digest('hex'),
   };
 }
+
+/**
+ * Resolve the dedicated gateway↔API transport secret. Process env first, then
+ * the encrypted deployment vault. Never falls back to ENCRYPTION_KEY.
+ */
+export async function resolveDiscordGatewayApiSecret(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  const fromEnv = env.R_DISCORD_GATEWAY_SECRET?.trim() || null;
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const dbServer = (await import('@roomote/db/server')) as unknown as {
+    resolveDiscordGatewaySecret?: () => Promise<string | null>;
+  };
+  if (dbServer.resolveDiscordGatewaySecret) {
+    return dbServer.resolveDiscordGatewaySecret();
+  }
+
+  return null;
+}

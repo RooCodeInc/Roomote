@@ -119,15 +119,7 @@ function substitute(value: unknown): unknown {
   return value;
 }
 
-const appEnv = (
-  process.env.R_APP_ENV ||
-  process.env.APP_ENV ||
-  process.env.NODE_ENV
-)?.trim();
-const gatewaySecret =
-  process.env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-  (appEnv === 'development' ? process.env.ENCRYPTION_KEY?.trim() : undefined) ||
-  '';
+const gatewaySecret = process.env.R_DISCORD_GATEWAY_SECRET?.trim() || '';
 
 const server = new MockDiscordServer({
   ...(scenario.state.botToken ? { botToken: scenario.state.botToken } : {}),

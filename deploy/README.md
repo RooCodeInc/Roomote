@@ -115,7 +115,7 @@ The file must include the required production values from
 - `PREVIEW_AUTH_PRIVATE_KEY`
 - `PREVIEW_AUTH_PUBLIC_KEY`
 - `ENCRYPTION_KEY`
-- `R_DISCORD_GATEWAY_SECRET` (required outside local development when Discord is enabled)
+- `R_DISCORD_GATEWAY_SECRET` (Discord gateway↔API secret; generated on Discord save / install / upgrade when missing)
 - `ARTIFACT_SIGNING_KEY`
 - `DASHBOARD_PASSWORD`
 - `R_GITHUB_APP_SLUG`

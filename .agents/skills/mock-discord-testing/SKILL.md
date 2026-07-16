@@ -22,7 +22,7 @@ Discord continuity is inferred from **task thread → active cloud job**: root-c
 | Mock state endpoint             | `http://127.0.0.1:3014/mock/state`                           |
 | Mock event injection endpoint   | `http://127.0.0.1:3014/mock/events`                          |
 | Example scenario                | `packages/communication/scripts/mock-discord.example.json`   |
-| Gateway secret source           | `R_DISCORD_GATEWAY_SECRET` (local-dev-only fallback: `ENCRYPTION_KEY`) |
+| Gateway secret source           | `R_DISCORD_GATEWAY_SECRET` (auto-generated on Discord save; local-dev env default also available) |
 | Mock bot identity               | `RoomoteBot` (id `100000000000000001`)                       |
 | Mock application id             | `200000000000000001`                                         |
 | Mock guild id                   | `300000000000000001`                                         |
@@ -57,7 +57,7 @@ The API resolves Discord credentials from real env vars first (`resolveDiscordRu
 ```bash
 R_DISCORD_BOT_TOKEN=mock-discord-token                       # must match the harness botToken (default: mock-discord-token)
 DISCORD_API_BASE_URL=http://127.0.0.1:3014/api/v10           # reroutes ALL outbound Discord REST calls to the harness
-# Prefer R_DISCORD_GATEWAY_SECRET. Local-dev only may fall back to ENCRYPTION_KEY.
+# R_DISCORD_GATEWAY_SECRET is required; development injects a local default when unset.
 ```
 
 The harness reads the same gateway secret via dotenvx, so the `x-roomote-discord-gateway-secret` header matches automatically. Without any secret configured the events endpoint returns 503; with a mismatched secret it returns 401.

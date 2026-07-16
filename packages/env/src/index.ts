@@ -25,6 +25,7 @@ type NodeEnv = 'test' | 'development' | 'production';
 
 const LOCAL_ENCRYPTION_KEY = 'local-roomote-encryption-key-0001';
 const LOCAL_ARTIFACT_SIGNING_KEY = 'local-roomote-artifact-signing-key-1';
+const LOCAL_DISCORD_GATEWAY_SECRET = 'local-roomote-discord-gateway-secret-01';
 const LOCAL_DASHBOARD_PASSWORD = 'roomote-local-admin';
 const LOCAL_PREVIEW_DOMAINS = 'localhost,127.0.0.1,roomotepreview.localhost';
 const LOCAL_S3_ENDPOINT = 'http://localhost:19000';
@@ -711,6 +712,7 @@ function buildRoomoteRuntimeEnv(
     env.DASHBOARD_PASSWORD ??= LOCAL_DASHBOARD_PASSWORD;
     env.ENCRYPTION_KEY ??= LOCAL_ENCRYPTION_KEY;
     env.ARTIFACT_SIGNING_KEY ??= LOCAL_ARTIFACT_SIGNING_KEY;
+    env.R_DISCORD_GATEWAY_SECRET ??= LOCAL_DISCORD_GATEWAY_SECRET;
     env.PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
     env.PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
     env.S3_ENDPOINT ??= LOCAL_S3_ENDPOINT;

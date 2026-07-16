@@ -3,6 +3,7 @@ import { acquireRedisLock, type Redis } from '@roomote/redis';
 import { DiscordApiForwarder } from './api-forwarder';
 import type { DiscordGatewayConfig } from './config';
 import {
+  resolveDiscordGatewayApiSecret,
   resolveDiscordGatewayCredentials,
   type DiscordGatewayCredentials,
 } from './credentials';
@@ -158,10 +159,13 @@ export class DiscordGatewayService {
         forwardingReady: false,
       });
 
-      if (this.config.apiSecret) {
+      const apiSecret = await resolveDiscordGatewayApiSecret(
+        this.config.processEnv,
+      );
+      if (apiSecret) {
         const forwarder = new DiscordApiForwarder(
           this.config.apiEventsUrl,
-          this.config.apiSecret,
+          apiSecret,
           this.config.apiTimeoutMs,
         );
         deliveryPromise = runSupervisedDeliveryLoop({
