@@ -172,12 +172,11 @@ export const StartupFailureMessage = ({
                   {promptImages.length > 0 && (
                     <div className="flex flex-wrap gap-2">
                       {promptImages.map((image) => (
-                        <img
-                          key={image}
-                          src={image}
-                          alt=""
-                          className="max-h-32 max-w-xs rounded-md border border-border object-contain"
-                        />
+                        <Button key={image} variant="outline" size="sm" asChild>
+                          <a href={image} target="_blank" rel="noreferrer">
+                            View attachment
+                          </a>
+                        </Button>
                       ))}
                     </div>
                   )}
