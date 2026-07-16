@@ -93,6 +93,8 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'REDIS_URL',
   'S3_ACCESS_KEY_ID',
   'S3_SECRET_ACCESS_KEY',
+  // Operator-owned license key; never inject into agent sandboxes.
+  'R_LICENSE_KEY',
 ]);
 
 /**

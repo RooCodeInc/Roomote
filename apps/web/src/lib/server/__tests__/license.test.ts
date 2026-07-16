@@ -4,13 +4,24 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn(),
 }));
 
+vi.mock('../env', () => ({
+  Env: {
+    R_LICENSE_KEY: undefined as string | undefined,
+  },
+}));
+
 import { generateKeyPairSync, sign } from 'node:crypto';
 
+import { Env } from '../env';
 import {
   FREE_SEAT_LIMIT,
+  getEnvLicenseKey,
+  resolveConfiguredLicenseKey,
   resolveLicenseState,
   verifyLicenseKey,
 } from '../license';
+
+const envMock = Env as { R_LICENSE_KEY: string | undefined };
 
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const publicKeySpkiB64 = publicKey
@@ -172,5 +183,28 @@ describe('resolveLicenseState', () => {
         publicKeySpkiB64,
       ),
     ).toMatchObject({ status: 'expired', seatLimit: FREE_SEAT_LIMIT });
+  });
+});
+
+describe('resolveConfiguredLicenseKey', () => {
+  beforeEach(() => {
+    envMock.R_LICENSE_KEY = undefined;
+  });
+
+  it('prefers R_LICENSE_KEY when set', () => {
+    envMock.R_LICENSE_KEY = `  ${issueKey(validPayload)}  `;
+
+    expect(getEnvLicenseKey()).toBe(issueKey(validPayload));
+    expect(resolveConfiguredLicenseKey('RMLK1.db-key.signature')).toBe(
+      issueKey(validPayload),
+    );
+  });
+
+  it('falls back to the stored key when the env var is unset', () => {
+    expect(getEnvLicenseKey()).toBeNull();
+    expect(resolveConfiguredLicenseKey('RMLK1.db-key.signature')).toBe(
+      'RMLK1.db-key.signature',
+    );
+    expect(resolveConfiguredLicenseKey('  ')).toBeNull();
   });
 });

@@ -790,8 +790,14 @@ registered user account counts toward the limit, whichever sign-in path or
 surface it uses. Removing a user frees their seat.
 
 To go beyond 10 users, obtain a license key from the Roomote maintainers and
-enter it in **Settings → Users → License** as an admin. Keys are verified
-offline; your deployment never phones home.
+apply it in either of these ways:
+
+- Enter it in **Settings → Users → License** as an admin, or
+- Set `R_LICENSE_KEY` in the deployment environment (for example
+  `.env.production` / Compose). When set, the env var takes precedence over
+  any key stored in Settings.
+
+Keys are verified offline; your deployment never phones home.
 
 When a deployment is at its seat limit, existing users are unaffected — only
 new sign-ups are blocked until a seat is freed (Settings → Users → remove a

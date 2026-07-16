@@ -26,6 +26,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'DASHBOARD_PASSWORD',
       'DATABASE_URL',
       'S3_SECRET_ACCESS_KEY',
+      'R_LICENSE_KEY',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }
