@@ -464,14 +464,21 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
-        codeqlTriageFrequency: z.enum(['off', 'daily', 'weekly']),
-        codeqlTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        codeqlTriageFrequency: z.enum(['off', 'daily', 'weekly']).optional(),
+        codeqlTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         codeqlTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
-          .nullable(),
+          .nullable()
+          .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),

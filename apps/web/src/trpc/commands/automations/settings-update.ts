@@ -880,7 +880,8 @@ export async function updateBackgroundAgentSettingsCommand(
   });
   const sentryTriageFrequency = input.sentryTriageFrequency ?? 'off';
   const dependabotTriageFrequency = input.dependabotTriageFrequency ?? 'off';
-  const codeqlTriageFrequency = input.codeqlTriageFrequency ?? 'off';
+  const codeqlTriageFrequency =
+    input.codeqlTriageFrequency ?? existingSettings.codeqlTriageFrequency;
   const securityAuditorFrequency = input.securityAuditorFrequency ?? 'off';
   const codeQualityAuditorFrequency =
     input.codeQualityAuditorFrequency ?? 'off';
