@@ -2,6 +2,26 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.7.0 (2026-07-16)
+
+### Minor changes
+
+- Add a scheduled CodeQL triage automation that can report prioritized code-scanning alerts to Slack or Discord and launch focused remediation tasks.
+- Suggested-task summaries, announcer reports, and platform-issue alerts can now report to a Discord channel: their destination pickers offer Slack or Discord channels the same way the triage and auditor automations do, and platform-issue alerts deliver to the selected Discord channel.
+- Operators can set a deterministic Ping instance ID through supported deployment manifests while existing generated identities continue to work unchanged.
+
+### Patch changes
+
+- Analytics overview and cost views now avoid redundant queries and unnecessary data loading while preserving their existing filters and attribution.
+- Anthropic and Bedrock Mantle tasks using newer Claude models now use compatible adaptive thinking settings instead of failing on their first model call.
+- New and retried Roomote Cloud tasks now use the deployment-managed compute provider consistently while existing snapshots remain resumable on their source provider.
+- Cost analytics time filters now load correctly instead of failing for finite periods such as the default seven-day view.
+- Discord channel permission diagnostics now identify the connected bot correctly, so settings validation works against the live Discord API.
+- Managed Roomote compute now keeps its app naming separate from bring-your-own Modal configuration, preventing deployment-managed sandbox attribution conflicts.
+- Tasks launched with a model override now apply the configured reasoning effort, and API-provided per-task reasoning effort is honored by the worker.
+- Harden the Discord gateway: quarantined (undeliverable) events now surface in the Discord settings diagnostics instead of accumulating invisibly, the durable inbound and dead-letter streams are bounded with capacity pressure reported before shedding, a single transient Redis blip no longer drops a healthy Gateway connection or ratchets delivery restarts to the maximum backoff forever, and a dead gateway supervisor reports to error tracking instead of only logging.
+- Task Info now retains the inference provider used at launch, so historical tasks keep the correct provider label after deployment credentials change.
+
 ## 0.6.0 (2026-07-16)
 
 ### Minor changes
