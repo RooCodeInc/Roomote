@@ -5,13 +5,11 @@ import { TaskPayloadKind } from '@roomote/types';
 const {
   useSandboxMessagesMock,
   useTaskSummaryMock,
-  useLaunchTaskModelsMock,
   userState,
   showDebugUiState,
 } = vi.hoisted(() => ({
   useSandboxMessagesMock: vi.fn(),
   useTaskSummaryMock: vi.fn(),
-  useLaunchTaskModelsMock: vi.fn(),
   userState: {
     isSignedIn: true,
     user: {
@@ -37,10 +35,6 @@ vi.mock('@/hooks/useShowDebugUI', () => ({
     isUpdating: false,
     setDebugUIVisible: vi.fn(),
   }),
-}));
-
-vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
-  useLaunchTaskModels: useLaunchTaskModelsMock,
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -135,9 +129,6 @@ describe('TaskInfoPanel', () => {
       isSummaryStale: false,
       regenerateSummary: vi.fn(),
     });
-    useLaunchTaskModelsMock.mockReturnValue({
-      data: { chatgptConnected: false },
-    });
   });
 
   it('hides the runtime row by default', () => {
@@ -171,15 +162,17 @@ describe('TaskInfoPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows ChatGPT for OpenAI models when a subscription is connected', () => {
-    useLaunchTaskModelsMock.mockReturnValue({
-      data: { chatgptConnected: true },
-    });
-
+  it('shows ChatGPT for tasks that used the subscription provider', () => {
     render(
       <TaskInfoPanel
         active={true}
-        task={{ ...baseTask, model: 'openai/gpt-5.6-sol' } as never}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'chatgpt',
+          } as never
+        }
         taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
@@ -191,11 +184,39 @@ describe('TaskInfoPanel', () => {
     ).toBeInTheDocument();
   });
 
-  it('shows OpenAI for OpenAI models without a subscription', () => {
+  it('shows OpenAI for tasks that used the OpenAI provider', () => {
     render(
       <TaskInfoPanel
         active={true}
-        task={{ ...baseTask, model: 'openai/gpt-5.6-sol' } as never}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'openai',
+          } as never
+        }
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via OpenAI'),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to the model prefix for legacy OpenCode tasks', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'opencode',
+          } as never
+        }
         taskRun={baseTaskRun as never}
         harness="opencode-server"
         onClose={vi.fn()}
