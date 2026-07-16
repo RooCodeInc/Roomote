@@ -662,7 +662,21 @@ export async function getSandboxSessionByTaskIdCommand(
 
   const hasMessages = !!bootFailureMessage;
   const hasHarnessMessages = !!firstHarnessMessage;
-  const prompt = getTaskRunVisiblePrompt(taskRun);
+  const payloadPrompt = getTaskRunVisiblePrompt(taskRun);
+  // Fall back to durable task-level prompt when the run payload has no visible
+  // prompt, so failure UIs can still show the original request.
+  const prompt: {
+    text?: string;
+    images?: string[];
+    visibleInTranscript: boolean;
+  } | null =
+    payloadPrompt ??
+    (typeof task.prompt === 'string' && task.prompt.trim().length > 0
+      ? {
+          text: task.prompt,
+          visibleInTranscript: true,
+        }
+      : null);
   const hasInitialPrompt =
     Boolean(prompt?.text?.trim()) || Boolean(prompt?.images?.length);
 
