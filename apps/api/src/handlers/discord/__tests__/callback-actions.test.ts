@@ -108,6 +108,7 @@ describe('Discord component callbacks', () => {
       run,
       authUserId: 'user-1',
       allowDirectCancelWithoutSandbox: true,
+      terminate: true,
       cancelledBy: { name: 'Matt', source: 'discord' },
     });
     expect(mocks.reply).toHaveBeenCalledWith(

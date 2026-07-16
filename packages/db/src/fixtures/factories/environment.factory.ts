@@ -37,6 +37,7 @@ export const environmentFactory = Factory.define<
       ],
     },
     isEval: params.isEval ?? false,
+    isVerified: params.isVerified ?? false,
     snapshotId: params.snapshotId,
     snapshotStatus: params.snapshotStatus,
     snapshotExpiresAt: params.snapshotExpiresAt,

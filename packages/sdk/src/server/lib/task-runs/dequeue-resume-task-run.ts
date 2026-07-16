@@ -29,6 +29,7 @@ import {
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
   cancelTaskRun,
+  notifyCanceledTaskRunOnSettle,
   reportBootstrapFailure,
   resolveGitAuthor,
 } from './dequeue-helpers';
@@ -367,6 +368,8 @@ export const dequeueResumeTaskRun = async (
             }`,
           );
         }
+
+        await notifyCanceledTaskRunOnSettle(taskRun);
       }
 
       return undefined;

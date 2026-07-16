@@ -16,6 +16,7 @@ const {
   mockFetchEnvVars,
   mockFetchResolvedRuntimeEnvVars,
   mockCancelAndReleaseTaskRun,
+  mockNotifyCanceledTaskRunOnSettle,
   mockCreateSourceControlTokenForTaskRun,
   mockCancelTaskRun,
   mockReportBootstrapFailure,
@@ -39,6 +40,7 @@ const {
   mockFetchEnvVars: vi.fn(),
   mockFetchResolvedRuntimeEnvVars: vi.fn(),
   mockCancelAndReleaseTaskRun: vi.fn(),
+  mockNotifyCanceledTaskRunOnSettle: vi.fn(),
   mockCreateSourceControlTokenForTaskRun: vi.fn(),
   mockCancelTaskRun: vi.fn(),
   mockReportBootstrapFailure: vi.fn(),
@@ -78,6 +80,8 @@ vi.mock('../dequeue-helpers', () => ({
     mockFetchResolvedRuntimeEnvVars(...args),
   cancelAndReleaseTaskRun: (...args: unknown[]) =>
     mockCancelAndReleaseTaskRun(...args),
+  notifyCanceledTaskRunOnSettle: (...args: unknown[]) =>
+    mockNotifyCanceledTaskRunOnSettle(...args),
   createSourceControlTokenForTaskRun: (...args: unknown[]) =>
     mockCreateSourceControlTokenForTaskRun(...args),
   cancelTaskRun: (...args: unknown[]) => mockCancelTaskRun(...args),
@@ -467,6 +471,7 @@ describe('dequeueResumeTaskRun', () => {
         existingArtifacts: invalidRun.artifacts,
       }),
     );
+    expect(mockNotifyCanceledTaskRunOnSettle).toHaveBeenCalledWith(invalidRun);
   });
 
   it('uses the same error message for a missing source run id in the callback and canceled task run row', async () => {

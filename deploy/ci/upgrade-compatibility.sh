@@ -192,6 +192,122 @@ verify_marker() {
   }
 }
 
+snapshot_previous_schema_contract() {
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d roomote <<'SQL'
+DROP SCHEMA IF EXISTS upgrade_ci_contract CASCADE;
+CREATE SCHEMA upgrade_ci_contract;
+
+CREATE TABLE upgrade_ci_contract.previous_tables AS
+SELECT table_name, table_type
+FROM information_schema.tables
+WHERE table_schema = 'public';
+
+CREATE TABLE upgrade_ci_contract.previous_columns AS
+SELECT
+  table_name,
+  column_name,
+  udt_name,
+  is_nullable,
+  column_default
+FROM information_schema.columns
+WHERE table_schema = 'public';
+SQL
+}
+
+verify_previous_schema_contract() {
+  local violations
+  violations="$(
+    compose exec -T postgres psql -At -v ON_ERROR_STOP=1 -U postgres -d roomote <<'SQL'
+SELECT format('missing previous table: %I', previous.table_name)
+FROM upgrade_ci_contract.previous_tables AS previous
+LEFT JOIN information_schema.tables AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+WHERE current.table_name IS NULL
+
+UNION ALL
+
+SELECT format(
+  'previous base table is no longer a base table: %I (%s)',
+  previous.table_name,
+  current.table_type
+)
+FROM upgrade_ci_contract.previous_tables AS previous
+JOIN information_schema.tables AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+WHERE previous.table_type = 'BASE TABLE'
+  AND current.table_type <> 'BASE TABLE'
+
+UNION ALL
+
+SELECT format(
+  'missing previous column: %I.%I',
+  previous.table_name,
+  previous.column_name
+)
+FROM upgrade_ci_contract.previous_columns AS previous
+LEFT JOIN information_schema.columns AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+ AND current.column_name = previous.column_name
+WHERE current.column_name IS NULL
+
+UNION ALL
+
+SELECT format(
+  'previous column type changed: %I.%I (%s -> %s)',
+  previous.table_name,
+  previous.column_name,
+  previous.udt_name,
+  current.udt_name
+)
+FROM upgrade_ci_contract.previous_columns AS previous
+JOIN information_schema.columns AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+ AND current.column_name = previous.column_name
+WHERE current.udt_name <> previous.udt_name
+
+UNION ALL
+
+SELECT format(
+  'previous nullable column was tightened: %I.%I',
+  previous.table_name,
+  previous.column_name
+)
+FROM upgrade_ci_contract.previous_columns AS previous
+JOIN information_schema.columns AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+ AND current.column_name = previous.column_name
+WHERE previous.is_nullable = 'YES'
+  AND current.is_nullable = 'NO'
+
+UNION ALL
+
+SELECT format(
+  'previous column default was removed: %I.%I',
+  previous.table_name,
+  previous.column_name
+)
+FROM upgrade_ci_contract.previous_columns AS previous
+JOIN information_schema.columns AS current
+  ON current.table_schema = 'public'
+ AND current.table_name = previous.table_name
+ AND current.column_name = previous.column_name
+WHERE previous.column_default IS NOT NULL
+  AND current.column_default IS NULL
+ORDER BY 1;
+SQL
+  )"
+
+  if [ -n "$violations" ]; then
+    printf 'Candidate migrations violate the previous release schema contract:\n%s\n' "$violations" >&2
+    return 1
+  fi
+}
+
 cd "$repo_root"
 
 printf 'Pulling previous release images (%s)\n' "$baseline_channel"
@@ -217,6 +333,7 @@ migration_exit="$(docker inspect --format '{{.State.ExitCode}}' "$migration_cont
   exit 1
 }
 verify_endpoints
+snapshot_previous_schema_contract
 write_marker
 baseline_migrations="$(applied_migration_count)"
 
@@ -232,6 +349,7 @@ candidate_migrations="$(applied_migration_count)"
 printf 'Applied migrations: %s baseline -> %s candidate\n' "$baseline_migrations" "$candidate_migrations"
 
 printf 'Verifying the previous release on the candidate schema\n'
+verify_previous_schema_contract
 verify_endpoints
 verify_marker
 

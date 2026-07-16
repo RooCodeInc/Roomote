@@ -140,6 +140,7 @@ describe('declarative environments', () => {
     expect(environment?.createdByUserId).toBeNull();
     expect(environment?.userId).toBeNull();
     expect(environment?.description).toBe('From file');
+    expect(environment?.isVerified).toBe(false);
 
     const versions = await db.query.environmentConfigVersions.findMany({
       where: eq(environmentConfigVersions.environmentId, environment!.id),

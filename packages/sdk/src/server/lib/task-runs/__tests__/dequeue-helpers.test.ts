@@ -9,6 +9,8 @@ const {
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
   mockResolveEffectiveModelRuntimeEnv,
+  mockTaskRunsFindFirst,
+  mockNotifySourceRunOnSettle,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -17,6 +19,8 @@ const {
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  mockTaskRunsFindFirst: vi.fn(),
+  mockNotifySourceRunOnSettle: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -29,6 +33,9 @@ vi.mock('@roomote/db/server', () => ({
       environmentVariables: {
         findMany: (...args: unknown[]) =>
           mockEnvironmentVariablesFindMany(...args),
+      },
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
     },
     select: () => ({
@@ -81,11 +88,17 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
 }));
 
+vi.mock('../notify-source-run-on-settle', () => ({
+  notifySourceRunOnSettle: (...args: unknown[]) =>
+    mockNotifySourceRunOnSettle(...args),
+}));
+
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
   createSourceControlTokenForTaskRun,
   fetchResolvedRuntimeEnvVars,
+  notifyCanceledTaskRunOnSettle,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
 } from '../dequeue-helpers';
@@ -396,6 +409,34 @@ describe('createSourceControlTokenForTaskRun', () => {
     } finally {
       consoleErrorSpy.mockRestore();
     }
+  });
+});
+
+describe('notifyCanceledTaskRunOnSettle', () => {
+  it('loads the finalized bootstrap error and notifies the launching run', async () => {
+    const taskRun = {
+      ...makeTaskRun({
+        repo: 'owner/repo',
+        description: 'Verify an environment',
+        notifySourceRunOnSettle: true,
+      }),
+      sourceRunId: 99,
+      task: { title: 'Verify environment' },
+    } as TaskRun & { task: { title: string } };
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
+      error: 'Failed to create source control token.',
+    });
+
+    await notifyCanceledTaskRunOnSettle(taskRun);
+
+    expect(mockNotifySourceRunOnSettle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: taskRun.id,
+        error: 'Failed to create source control token.',
+      }),
+      RunStatus.Canceled,
+      'Verify environment',
+    );
   });
 });
 
