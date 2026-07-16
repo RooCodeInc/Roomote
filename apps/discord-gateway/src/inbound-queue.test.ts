@@ -39,7 +39,12 @@ describe('DiscordInboundQueue', () => {
       DISCORD_INBOUND_STREAM_KEY,
       '86400',
       JSON.stringify(envelope),
+      '50000',
     );
+    const enqueueScript = vi.mocked(redis.eval).mock.calls[0]?.[0] as string;
+    // The durable stream is approximately bounded so a long delivery outage
+    // cannot grow Redis without limit.
+    expect(enqueueScript).toContain("'MAXLEN', '~', ARGV[3]");
     const script = vi.mocked(redis.eval).mock.calls[0]?.[0] as string;
     expect(script.indexOf("redis.call('XADD'")).toBeLessThan(
       script.indexOf("redis.call('SET'"),
@@ -143,6 +148,26 @@ describe('DiscordInboundQueue', () => {
       'Permanent API rejection',
       '3',
       '2026-07-12T13:00:00.000Z',
+      '1000',
     );
+  });
+
+  it('applies configured stream bounds and reports dead-letter depth', async () => {
+    const redis = mockRedis({
+      eval: vi.fn().mockResolvedValue('1-0'),
+      xlen: vi.fn().mockResolvedValueOnce(42).mockResolvedValueOnce(7),
+    });
+    const queue = new DiscordInboundQueue(redis, {
+      maxEntries: 500,
+      deadLetterMaxEntries: 50,
+    });
+
+    expect(queue.capacity).toBe(500);
+    await queue.enqueue(envelope);
+    expect(vi.mocked(redis.eval).mock.calls[0]?.at(-1)).toBe('500');
+
+    await expect(queue.depth()).resolves.toBe(42);
+    await expect(queue.deadLetterDepth()).resolves.toBe(7);
+    expect(redis.xlen).toHaveBeenLastCalledWith(DISCORD_DEAD_LETTER_STREAM_KEY);
   });
 });

@@ -176,6 +176,7 @@ export type DiscordGatewayStatus = {
   forwardingReady: boolean;
   sessionResumed: boolean;
   queueDepth: number;
+  deadLetterDepth?: number;
   botUserId?: string;
   botUsername?: string;
   lastEventAt?: string;

@@ -155,6 +155,7 @@ export async function runSupervisedDeliveryLoop(
   let restartDelayMs = params.pollMs;
 
   while (!params.signal.aborted) {
+    const startedAt = Date.now();
     try {
       // This flag represents a running delivery worker, not simply the
       // presence of an API secret. Any unexpected exit clears it first.
@@ -164,6 +165,12 @@ export async function runSupervisedDeliveryLoop(
       throw new Error('Discord delivery loop exited unexpectedly');
     } catch (error) {
       if (params.signal.aborted) break;
+      // A long healthy run means this failure is a fresh incident, not part
+      // of the previous one — start the backoff over instead of ratcheting
+      // toward the lifetime maximum.
+      if (Date.now() - startedAt > restartMaxBackoffMs * 2) {
+        restartDelayMs = params.pollMs;
+      }
       await params.status
         .update({
           forwardingReady: false,

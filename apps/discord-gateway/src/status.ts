@@ -24,6 +24,7 @@ type DiscordGatewayStatus = {
   forwardingReady: boolean;
   sessionResumed: boolean;
   queueDepth: number;
+  deadLetterDepth: number;
   botUserId?: string;
   botUsername?: string;
   lastEventAt?: string;
@@ -43,6 +44,7 @@ export class GatewayStatusStore {
     forwardingReady: false,
     sessionResumed: false,
     queueDepth: 0,
+    deadLetterDepth: 0,
     updatedAt: new Date().toISOString(),
   };
 

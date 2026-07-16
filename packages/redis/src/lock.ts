@@ -37,8 +37,16 @@ async function safeRenew(
 
 export type LockResult<T> = { acquired: true; value: T } | { acquired: false };
 
+/**
+ * Outcome of a lease renewal that distinguishes definitive ownership loss
+ * from a transient Redis failure, so holders of long-lived leases can
+ * tolerate a blip without tearing down still-valid work.
+ */
+export type RedisLockRenewResult = 'renewed' | 'lost' | 'error';
+
 export type RedisLockHandle = (() => Promise<void>) & {
   renew: (ttlSeconds?: number) => Promise<boolean>;
+  renewDetailed: (ttlSeconds?: number) => Promise<RedisLockRenewResult>;
 };
 
 export type ContentionResult<T> =
@@ -104,6 +112,21 @@ export async function acquireRedisLock(
 
   release.renew = async (ttlSeconds = ttl) =>
     safeRenew(redis, key, ownerId, ttlSeconds);
+
+  release.renewDetailed = async (ttlSeconds = ttl) => {
+    try {
+      const renewed = await redis.eval(
+        RENEW_SCRIPT,
+        1,
+        key,
+        ownerId,
+        ttlSeconds.toString(),
+      );
+      return renewed === 1 ? 'renewed' : 'lost';
+    } catch {
+      return 'error';
+    }
+  };
 
   return release;
 }

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   resolveConfig: vi.fn(),
   run: vi.fn<() => Promise<void>>(),
   stop: vi.fn<() => Promise<void>>(),
+  statusUpdate: vi.fn<() => Promise<void>>(),
   serviceConstructor: vi.fn(),
 }));
 
@@ -20,6 +21,7 @@ vi.mock('./service', () => ({
 
     run = mocks.run;
     stop = mocks.stop;
+    status = { update: mocks.statusUpdate };
   },
 }));
 
@@ -29,6 +31,7 @@ describe('startDiscordGatewaySupervisor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveConfig.mockReturnValue(mocks.config);
+    mocks.statusUpdate.mockResolvedValue(undefined);
   });
 
   it('starts inside the host process and waits for shutdown to finish', async () => {
@@ -60,12 +63,24 @@ describe('startDiscordGatewaySupervisor', () => {
       .mockImplementation(() => undefined);
     mocks.run.mockRejectedValue(error);
     mocks.stop.mockResolvedValue();
+    const onFatal = vi.fn();
 
-    const supervisor = startDiscordGatewaySupervisor({} as never);
+    const supervisor = startDiscordGatewaySupervisor({} as never, undefined, {
+      onFatal,
+    });
     await supervisor.stop();
 
     expect(consoleError).toHaveBeenCalledWith(
       '[discord-gateway] supervisor stopped unexpectedly: gateway unavailable',
+    );
+    // The host is told (so it can page) and the shared status reflects that
+    // Discord ingestion has stopped, instead of only a console line.
+    expect(onFatal).toHaveBeenCalledWith(error);
+    expect(mocks.statusUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        phase: 'error',
+        lastError: expect.stringContaining('supervisor stopped'),
+      }),
     );
     consoleError.mockRestore();
   });
