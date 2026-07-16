@@ -1048,11 +1048,13 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     guildId: string;
     channelId: string;
   }): Promise<DiscordChannelPermissionDiagnostics> {
-    const [bot, member, roles, channel] = await Promise.all([
-      this.getBotInfo(),
+    // The guild-members endpoint takes a real user id — Discord rejects the
+    // literal `@me` there with 400 Invalid Form Body (unlike /users/@me).
+    const bot = await this.getBotInfo();
+    const [member, roles, channel] = await Promise.all([
       this.request<{ roles?: string[] }>(
         'GET',
-        `/guilds/${input.guildId}/members/@me`,
+        `/guilds/${input.guildId}/members/${bot.id}`,
         undefined,
         { retryNetworkErrors: true, retryServerErrors: true },
       ),
