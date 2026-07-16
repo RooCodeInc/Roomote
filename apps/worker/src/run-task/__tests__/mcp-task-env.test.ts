@@ -72,6 +72,22 @@ describe('getCommunicationReplyContext', () => {
       threadId: '7',
     });
   });
+
+  it('returns Discord communication context from provider-neutral payload metadata', () => {
+    expect(
+      getCommunicationReplyContext({
+        payload: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'thread-1',
+        },
+      }),
+    ).toEqual({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+  });
 });
 
 describe('buildMcpTaskEnv', () => {
@@ -223,6 +239,32 @@ describe('buildMcpTaskEnv', () => {
       ROOMOTE_COMMUNICATION_THREAD_ID: '7',
       // Telegram uses the same ack/closeout and current-turn reaction
       // machinery as Slack.
+      ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
+        '/home/worker/.config/opencode/roomote-slack-reply-satisfaction.json',
+    });
+  });
+
+  it('registers Discord chat reply env with the turn-satisfaction state file', () => {
+    const result = buildMcpTaskEnv({
+      runtimeEnv: {
+        HOME: '/home/worker',
+        ROOMOTE_TASK_ID: 'task-1',
+      },
+      unsanitizedEnv: {},
+      slackReplyContext: null,
+      communicationReplyContext: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+    });
+
+    expect(result).toEqual({
+      HOME: '/home/worker',
+      ROOMOTE_TASK_ID: 'task-1',
+      ROOMOTE_COMMUNICATION_PROVIDER: 'discord',
+      ROOMOTE_COMMUNICATION_CHANNEL_ID: 'channel-1',
+      ROOMOTE_COMMUNICATION_THREAD_ID: 'thread-1',
       ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
         '/home/worker/.config/opencode/roomote-slack-reply-satisfaction.json',
     });

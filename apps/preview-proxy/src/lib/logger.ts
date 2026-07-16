@@ -1,25 +1,28 @@
 import pino from 'pino';
+import pinoPretty from 'pino-pretty';
 import { config } from '../config';
 import { getRequestContext } from './request-context';
 
-export const logger = pino({
+const loggerOptions: pino.LoggerOptions = {
   level:
     config.LOG_LEVEL || (config.NODE_ENV === 'production' ? 'info' : 'debug'),
-  transport:
-    config.NODE_ENV === 'development'
-      ? {
-          target: 'pino-pretty',
-          options: {
-            colorize: true,
-            translateTime: 'HH:MM:ss',
-            ignore: 'pid,hostname',
-          },
-        }
-      : undefined,
   mixin() {
     return getRequestContext() || {};
   },
-});
+};
+
+const developmentPrettyStream =
+  config.NODE_ENV === 'development'
+    ? pinoPretty({
+        colorize: true,
+        translateTime: 'HH:MM:ss',
+        ignore: 'pid,hostname',
+      })
+    : undefined;
+
+export const logger = developmentPrettyStream
+  ? pino(loggerOptions, developmentPrettyStream)
+  : pino(loggerOptions);
 
 export function escapeForLog(input: string): string {
   return (

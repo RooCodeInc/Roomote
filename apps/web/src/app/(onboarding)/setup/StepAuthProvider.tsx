@@ -13,25 +13,38 @@ import { SetupFooter } from './SetupFooter';
 import { getSetupStepDefinition } from './types';
 
 const AUTH_PROVIDER_STEP = getSetupStepDefinition('auth-provider');
-export type CommunicationProviderChoice = SetupAuthProviderId | 'telegram';
+export type AdditionalCommunicationProviderChoice = 'telegram' | 'discord';
+export type CommunicationProviderChoice =
+  | SetupAuthProviderId
+  | AdditionalCommunicationProviderChoice;
+
+const ADDITIONAL_COMMUNICATION_PROVIDERS: Record<
+  AdditionalCommunicationProviderChoice,
+  { id: AdditionalCommunicationProviderChoice; label: string }
+> = {
+  telegram: { id: 'telegram', label: 'Telegram' },
+  discord: { id: 'discord', label: 'Discord' },
+};
 
 export function StepAuthProvider({
   onContinue,
   onBack,
   onSkip,
-  includeTelegram = false,
+  additionalProviders = [],
+  disabled = false,
 }: {
   onContinue: (provider: CommunicationProviderChoice) => void;
   onBack?: () => void;
   onSkip?: () => void;
-  includeTelegram?: boolean;
+  additionalProviders?: readonly AdditionalCommunicationProviderChoice[];
+  disabled?: boolean;
 }) {
-  const providers = includeTelegram
-    ? [
-        ...SETUP_AUTH_PROVIDER_CATALOG,
-        { id: 'telegram' as const, label: 'Telegram' },
-      ]
-    : SETUP_AUTH_PROVIDER_CATALOG;
+  const providers = [
+    ...SETUP_AUTH_PROVIDER_CATALOG,
+    ...additionalProviders.map(
+      (provider) => ADDITIONAL_COMMUNICATION_PROVIDERS[provider],
+    ),
+  ];
   return (
     <div className="relative w-full max-w-2xl space-y-6 py-2 md:py-0">
       <StepTitle text={AUTH_PROVIDER_STEP.title} />
@@ -49,6 +62,7 @@ export function StepAuthProvider({
                 key={provider.id}
                 type="button"
                 onClick={() => onContinue(provider.id)}
+                disabled={disabled}
                 className={cn(
                   'group flex w-full py-5',
                   'hover:text-accent-foreground hover:bg-foreground',
@@ -68,12 +82,13 @@ export function StepAuthProvider({
           })}
         </div>
 
-        <SetupFooter onBack={onBack}>
+        <SetupFooter onBack={onBack} backDisabled={disabled}>
           {onSkip ? (
             <button
               type="button"
-              className="cursor-pointer text-sm text-muted-foreground underline"
+              className="cursor-pointer text-sm text-muted-foreground underline disabled:cursor-not-allowed disabled:opacity-50"
               onClick={onSkip}
+              disabled={disabled}
             >
               Do this later
             </button>

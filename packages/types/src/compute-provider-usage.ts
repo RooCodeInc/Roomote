@@ -55,7 +55,9 @@ export function resolveConfiguredComputeProviderResources(input: {
   configuredMemoryMiB?: number | null;
 }): ComputeProviderConfiguredResources {
   switch (input.provider) {
-    case 'modal': {
+    // Roomote Cloud sandboxes run on Modal, so they share its resource model.
+    case 'modal':
+    case 'roomote': {
       const configuredCpuCores =
         clampNonNegativeNumber(input.configuredCpuCores) ||
         MODAL_DEFAULT_CPU_CORES;

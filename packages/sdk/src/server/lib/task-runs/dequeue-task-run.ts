@@ -28,6 +28,7 @@ import {
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
   cancelTaskRun,
+  notifyCanceledTaskRunOnSettle,
   reportBootstrapFailure,
   resolveGitAuthor,
   claimJobById,
@@ -82,7 +83,6 @@ type DequeueResult =
       sourceControlToken: SourceControlRuntimeToken;
       envVars: Record<string, string>;
       orgAgentInstructions?: string;
-      styleGuidance?: string;
       setupOnboardingTask: boolean;
       gitAuthor: GitAuthor;
       prompt: string;
@@ -274,7 +274,6 @@ export const dequeueTaskRun = async (
           taskSpec: TaskSpec;
           envVars: Record<string, string>;
           orgAgentInstructions?: string;
-          styleGuidance?: string;
           gitAuthor: GitAuthor;
         };
 
@@ -312,7 +311,6 @@ export const dequeueTaskRun = async (
       const settings = await tx.query.deploymentSettings.findFirst({
         columns: {
           globalAgentInstructions: true,
-          styleGuidance: true,
         },
       });
 
@@ -379,7 +377,6 @@ export const dequeueTaskRun = async (
         taskSpec: parsed.data,
         envVars,
         orgAgentInstructions: settings?.globalAgentInstructions ?? undefined,
-        styleGuidance: settings?.styleGuidance ?? undefined,
         gitAuthor,
       };
     });
@@ -397,6 +394,8 @@ export const dequeueTaskRun = async (
             }`,
           );
         }
+
+        await notifyCanceledTaskRunOnSettle(taskRun);
       }
 
       return undefined;
@@ -558,7 +557,6 @@ export const dequeueTaskRun = async (
         ...sourceControlToken.envVars,
       },
       orgAgentInstructions: txResult.orgAgentInstructions,
-      styleGuidance: txResult.styleGuidance,
       setupOnboardingTask:
         slackTaskRunRouting.route.kind === 'setup-onboarding',
       gitAuthor: txResult.gitAuthor,

@@ -26,3 +26,7 @@ export * from './useUnlinkMicrosoftTeamsLinkedAccount';
 export * from './useTelegramLinkedAccount';
 export * from './useUnlinkTelegramLinkedAccount';
 export * from './useCreateTelegramLinkCode';
+
+export * from './useDiscordLinkedAccount';
+export * from './useUnlinkDiscordLinkedAccount';
+export * from './useCreateDiscordLinkCode';

@@ -117,17 +117,23 @@ describe('PM2Service.stopServices', () => {
           pm_id: 4,
           pm2_env: { pm_cwd: rootDir },
         },
+        {
+          name: 'roomote-discord-gateway',
+          pm_id: 5,
+          pm2_env: { pm_cwd: rootDir },
+        },
       ]),
     } as Awaited<ReturnType<typeof execa>>);
     vi.mocked(execa).mockResolvedValue({} as Awaited<ReturnType<typeof execa>>);
 
     await PM2Service.stopServices();
 
-    expect(execa).toHaveBeenCalledTimes(4);
+    expect(execa).toHaveBeenCalledTimes(5);
     expect(execa).toHaveBeenNthCalledWith(1, 'pm2', ['--silent', 'jlist']);
     expect(execa).toHaveBeenNthCalledWith(2, 'pm2', ['delete', '1']);
     expect(execa).toHaveBeenNthCalledWith(3, 'pm2', ['delete', '2']);
     expect(execa).toHaveBeenNthCalledWith(4, 'pm2', ['delete', '4']);
+    expect(execa).toHaveBeenNthCalledWith(5, 'pm2', ['delete', '5']);
   });
 
   it('can preserve the auto web ngrok process while stopping local services', async () => {

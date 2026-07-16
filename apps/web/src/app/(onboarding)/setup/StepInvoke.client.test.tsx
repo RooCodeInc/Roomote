@@ -7,6 +7,13 @@ const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
+  commsProviders: [] as Array<{
+    id: 'telegram' | 'discord';
+    setupSatisfied: boolean;
+  }>,
+}));
+const userState = vi.hoisted(() => ({
+  user: null as { cloudEnabled: boolean } | null,
 }));
 const queryKeys = {
   setupStatus: ['setup.status'],
@@ -33,6 +40,7 @@ vi.mock('@tanstack/react-query', async () => {
     }),
     useQuery: () => ({
       data: {
+        providers: environmentState.commsProviders,
         invocationIdentities: [
           {
             provider: 'github',
@@ -90,6 +98,10 @@ vi.mock('@/hooks/environments/useEnvironments', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useUser', () => ({
+  useUser: () => userState,
+}));
+
 vi.mock('./StepTitle', () => ({
   StepTitle: ({ text }: { text: string }) => <div>{text}</div>,
 }));
@@ -137,7 +149,6 @@ vi.mock('@/components/system', () => ({
     />
   ),
   Loader2: () => <span>Loader2</span>,
-  CornerDownRight: () => <span>CornerDownRight</span>,
   LinearLogo: () => <span>LinearLogo</span>,
   ArrowRight: () => <span>ArrowRight</span>,
   Zap: () => <span>Zap</span>,
@@ -168,6 +179,8 @@ describe('Setup StepInvoke', () => {
       setupNewState: { onboardingTaskId: null },
     });
     environmentState.environments = [{ id: 'env-1' }];
+    environmentState.commsProviders = [];
+    userState.user = null;
   });
 
   it('shows an actionable retry when sandbox provisioning fails', () => {
@@ -203,6 +216,7 @@ describe('Setup StepInvoke', () => {
     fireEvent.click(screen.getByRole('button', { name: /let'?s go/i }));
 
     expect(onTryItOut).toHaveBeenCalledTimes(1);
+    expect(mutationOptionsMock).toHaveBeenCalled();
 
     await waitFor(() => {
       expect(setQueryDataMock).toHaveBeenCalledWith(
@@ -265,6 +279,16 @@ describe('Setup StepInvoke', () => {
     expect(replaceMock).toHaveBeenCalledWith('/?environmentId=env-1');
   });
 
+  it('hides the anonymous analytics opt-out for Roomote Cloud', () => {
+    userState.user = { cloudEnabled: true };
+
+    render(<StepInvoke />);
+
+    expect(
+      screen.queryByRole('checkbox', { name: 'Toggle anonymous analytics' }),
+    ).not.toBeInTheDocument();
+  });
+
   it('routes to the first environment when multiple environments exist', async () => {
     environmentState.environments = [{ id: 'env-newer' }, { id: 'env-older' }];
 
@@ -294,7 +318,7 @@ describe('Setup StepInvoke', () => {
 
     expect(
       screen.getByText(
-        /once your environment is ready, you can work with roomote in these ways/i,
+        /once your environment is configured, you can work with roomote in these ways/i,
       ),
     ).toBeInTheDocument();
     fireEvent.click(
@@ -347,6 +371,14 @@ describe('Setup StepInvoke', () => {
     ).toBeInTheDocument();
   });
 
+  it('clarifies that Bitbucket Cloud mentions work on any pull request', () => {
+    render(<StepInvoke sourceControlProviders={['bitbucket']} />);
+
+    expect(
+      screen.getByText('Mention @roomote in a comment on any pull request.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows configured providers with automations before the web UI', () => {
     render(
       <StepInvoke
@@ -370,6 +402,19 @@ describe('Setup StepInvoke', () => {
       'Automations',
       'Web UI',
     ]);
+  });
+
+  it('discovers configured Discord and explains task threads', () => {
+    environmentState.commsProviders = [{ id: 'discord', setupSatisfied: true }];
+
+    render(<StepInvoke />);
+
+    expect(screen.getByText(/^Discord:/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'mention it in a server channel, use /new, or continue work in a task thread.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('includes the link_suggested param when selected suggested tasks were started', async () => {

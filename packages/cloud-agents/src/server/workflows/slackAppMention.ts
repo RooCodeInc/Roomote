@@ -142,7 +142,7 @@ export function buildSlackMessageInstructions({
 `.trim();
 }
 
-type NonSlackChatProvider = 'teams' | 'telegram';
+type NonSlackChatProvider = 'teams' | 'telegram' | 'discord';
 
 function getNonSlackChatProviderDisplay(provider: NonSlackChatProvider): {
   tag: string;
@@ -151,6 +151,10 @@ function getNonSlackChatProviderDisplay(provider: NonSlackChatProvider): {
 } {
   if (provider === 'telegram') {
     return { tag: 'telegram', name: 'Telegram', label: 'Telegram' };
+  }
+
+  if (provider === 'discord') {
+    return { tag: 'discord', name: 'Discord', label: 'Discord' };
   }
 
   return { tag: 'teams', name: 'Microsoft Teams', label: 'Teams' };

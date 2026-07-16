@@ -110,17 +110,17 @@ export const SideNavTaskItem = ({
               href={`/task/${task.id}`}
               aria-label={taskTitle}
               className={cn(
-                'flex min-h-10 w-full items-center rounded-lg px-4 py-2 transition-colors',
+                'flex min-h-10 w-full items-center rounded-lg transition-all',
                 showsExpandedSpinner && 'gap-2',
                 isActive
-                  ? 'bg-foreground text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
-                  : 'text-muted-foreground hover:text-accent-foreground',
+                  ? 'px-2 bg-foreground text-accent-bright-foreground dark:bg-accent-foreground dark:text-card'
+                  : 'px-0 text-muted-foreground hover:text-accent-foreground',
               )}
             >
               {showsExpandedSpinner ? (
                 <Spinner className="size-4 shrink-0 animate-spin" />
               ) : null}
-              <span className="min-w-0 flex-1 line-clamp-2 text-sm font-medium leading-5 wrap-break-word">
+              <span className="min-w-0 flex-1 line-clamp-1 text-sm font-medium leading-5 wrap-break-word">
                 {taskTitle}
               </span>
             </Link>
@@ -173,10 +173,12 @@ export const SideNavTaskItem = ({
           side="right"
           align="start"
           sideOffset={8}
-          className="-ml-1 w-fit max-w-72 rounded-xl px-2.5 py-2"
+          className="-ml-1 w-fit max-w-md rounded-xl p-3"
         >
           <div className="space-y-2">
-            <p className="text-sm font-medium wrap-break-word">{taskTitle}</p>
+            <p className="text-sm font-medium wrap-break-word line-clamp-4">
+              {taskTitle}
+            </p>
 
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
               {environmentId ? (
@@ -236,7 +238,7 @@ export const SideNavTaskItem = ({
                 lastErrorMessage={
                   hasLiveStatus ? liveStatus?.lastErrorMessage : undefined
                 }
-                className="pointer-events-none absolute right-[6px] bottom-[6px] z-10"
+                className="pointer-events-none absolute right-1.5 bottom-1.5 z-10"
               />
             )}
           </span>

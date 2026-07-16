@@ -5,9 +5,6 @@ const config: KnipConfig = {
     // ── Root ──────────────────────────────────────────────
     '.': {
       project: ['scripts/**/*.ts'],
-      // Used from package.json `changeset` / `version` scripts, not imported.
-      ignoreDependencies: ['@changesets/cli'],
-      ignoreBinaries: ['changeset'],
     },
 
     // ── Apps ──────────────────────────────────────────────
@@ -43,8 +40,6 @@ const config: KnipConfig = {
     },
     'apps/preview-proxy': {
       project: ['src/**/*.ts'],
-      // Loaded by Pino transport resolution from the target string in logger.ts.
-      ignoreDependencies: ['pino-pretty'],
     },
     'apps/web': {
       entry: [

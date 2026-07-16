@@ -142,12 +142,34 @@ let cachedGiteaDeploymentUser: {
 } | null = null;
 
 export async function resolveGiteaBaseUrl(): Promise<string | null> {
-  const baseUrl = await resolveDeploymentEnvVar('GITEA_BASE_URL');
-  return baseUrl ? normalizeGiteaBaseUrl(baseUrl) : null;
+  const fromEnv = await resolveDeploymentEnvVar('GITEA_BASE_URL');
+  if (fromEnv) {
+    return normalizeGiteaBaseUrl(fromEnv);
+  }
+
+  const fromConnection = (await getGiteaOAuthConnection())?.baseUrl;
+  return fromConnection ? normalizeGiteaBaseUrl(fromConnection) : null;
 }
 
 export async function resolveGiteaUsername(): Promise<string | null> {
   return (await getGiteaOAuthConnection())?.username || null;
+}
+
+function giteaUserFromOAuthConnection(
+  connection: Awaited<ReturnType<typeof getGiteaOAuthConnection>>,
+): GiteaCurrentUser | null {
+  if (!connection?.username?.trim()) {
+    return null;
+  }
+
+  const parsedId = connection.accountId.trim()
+    ? Number(connection.accountId)
+    : Number.NaN;
+
+  return {
+    login: connection.username,
+    ...(Number.isSafeInteger(parsedId) ? { id: parsedId } : {}),
+  };
 }
 
 export function buildGiteaApiBaseUrl(baseUrl: string): string {
@@ -542,7 +564,7 @@ export async function getGiteaAuthenticatedUser({
   baseUrl?: string;
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
-} = {}): Promise<{ login: string }> {
+} = {}): Promise<GiteaCurrentUser> {
   const giteaToken = token ?? (await resolveGiteaToken());
 
   if (!giteaToken?.trim()) {
@@ -575,16 +597,18 @@ export async function getGiteaDeploymentUser(options?: {
   apiBaseUrl?: string;
   fetchImpl?: typeof fetch;
 }): Promise<GiteaCurrentUser | null> {
+  const connection = await getGiteaOAuthConnection();
+  const connectionUser = giteaUserFromOAuthConnection(connection);
   const token = await resolveGiteaToken();
 
   if (!token?.trim()) {
-    return null;
+    return connectionUser;
   }
 
   const baseUrl = await resolveGiteaBaseUrl();
 
   if (!baseUrl?.trim() && !options?.apiBaseUrl?.trim()) {
-    return null;
+    return connectionUser;
   }
 
   const cacheBaseUrl = options?.apiBaseUrl ?? baseUrl ?? '';
@@ -596,20 +620,29 @@ export async function getGiteaDeploymentUser(options?: {
     return cachedGiteaDeploymentUser.user;
   }
 
-  const user = await getGiteaAuthenticatedUser({
-    token,
-    baseUrl: baseUrl ?? undefined,
-    apiBaseUrl: options?.apiBaseUrl,
-    fetchImpl: options?.fetchImpl,
-  });
+  try {
+    const user = await getGiteaAuthenticatedUser({
+      token,
+      baseUrl: baseUrl ?? undefined,
+      apiBaseUrl: options?.apiBaseUrl,
+      fetchImpl: options?.fetchImpl,
+    });
 
-  cachedGiteaDeploymentUser = {
-    token,
-    baseUrl: cacheBaseUrl,
-    user,
-  };
+    const resolvedUser: GiteaCurrentUser = {
+      login: user.login,
+      id: user.id ?? connectionUser?.id,
+    };
 
-  return user;
+    cachedGiteaDeploymentUser = {
+      token,
+      baseUrl: cacheBaseUrl,
+      user: resolvedUser,
+    };
+
+    return resolvedUser;
+  } catch {
+    return connectionUser;
+  }
 }
 
 export function clearGiteaDeploymentUserCache(): void {

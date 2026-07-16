@@ -531,6 +531,52 @@ describe('sleepCheckJob', () => {
     });
   });
 
+  it('destroys due resumable jobs when a terminal stop was requested', async () => {
+    const mockJob = {
+      id: 6623,
+      machineId: 'sb-cancel',
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      status: RunStatus.Running,
+      taskPhase: 'shutting_down',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    mockDbQueryTaskRunsFindFirst.mockResolvedValue({
+      cancelRequestedAt: new Date(),
+    });
+
+    await sleepCheckJob();
+
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(mockDestroyInstance).toHaveBeenCalledWith({
+      instanceId: 'sb-cancel',
+    });
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 6623,
+      status: RunStatus.Canceled,
+      error: expect.stringContaining('after a terminal stop request'),
+    });
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 6623,
+        eventType: 'decision',
+        source: 'sleep_check',
+        details: expect.objectContaining({
+          decision: 'destroy_and_cancel_after_stop_request',
+        }),
+      }),
+    );
+  });
+
   it('snapshots resumable jobs near the provider hard timeout even when sleepAt is still in the future', async () => {
     const mockJob = {
       id: 6624,

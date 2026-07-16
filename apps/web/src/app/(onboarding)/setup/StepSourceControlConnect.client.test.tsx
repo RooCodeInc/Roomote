@@ -223,9 +223,7 @@ describe('StepSourceControlConnect', () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Since GitHub is already configured/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Connect to continue/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Connect to GitHub/i }));
 
@@ -242,13 +240,43 @@ describe('StepSourceControlConnect', () => {
       />,
     );
 
-    expect(
-      screen.getByText(/Since GitLab is already configured/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Connect to continue/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Sync repositories/i }));
 
     expect(syncRepositoriesMutateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the selected provider copy when a different provider is runtime-configured', () => {
+    // GitHub is configured by env vars, but the user chose the unconfigured
+    // Gitea. The connect copy must describe Gitea, not claim it is already
+    // configured.
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('gitea', {
+          selectedProvider: 'gitea',
+          preselectedProvider: 'gitea',
+          runtimeConfiguredProvider: 'github',
+          runtimeConfiguredProviders: ['github'],
+          lockReason: 'runtime_env',
+          providers: [
+            {
+              ...buildSourceControlSetup('gitea').providers[0]!,
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: true,
+              configSatisfied: true,
+              configSatisfiedByRuntimeEnv: false,
+            },
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Sync your Gitea repositories/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Connect to continue/i)).not.toBeInTheDocument();
   });
 
   it('describes Gitea webhook setup during token-backed onboarding', () => {
@@ -258,6 +286,14 @@ describe('StepSourceControlConnect', () => {
           lockReason: null,
           runtimeConfiguredProvider: null,
           runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('gitea').providers[0]!,
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: true,
+              configSatisfiedByRuntimeEnv: false,
+            },
+          ],
         })}
         onContinue={vi.fn()}
       />,
@@ -280,6 +316,14 @@ describe('StepSourceControlConnect', () => {
           lockReason: null,
           runtimeConfiguredProvider: null,
           runtimeConfiguredProviders: [],
+          providers: [
+            {
+              ...buildSourceControlSetup('ado').providers[0]!,
+              runtimeConfigSatisfied: false,
+              savedConfigSatisfied: true,
+              configSatisfiedByRuntimeEnv: false,
+            },
+          ],
         })}
         onContinue={vi.fn()}
       />,
@@ -451,6 +495,35 @@ describe('StepSourceControlConnect', () => {
     );
 
     expect(syncRepositoriesMutateMock).toHaveBeenCalledOnce();
+  });
+
+  it('continues after Bitbucket OAuth callback sync already connected repositories', () => {
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      value: { ...window.location, pathname: '/setup', search: '?sync=1' },
+    });
+    const onContinue = vi.fn();
+
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('bitbucket', {
+          lockReason: null,
+          runtimeConfiguredProvider: null,
+          runtimeConfiguredProviders: [],
+          connectedProvider: 'bitbucket',
+          providers: [
+            {
+              ...buildSourceControlSetup('bitbucket').providers[0]!,
+              connected: true,
+              repositoryCount: 1,
+            },
+          ],
+        })}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(onContinue).toHaveBeenCalledOnce();
   });
 
   it('reports Gitea webhook setup failures as repositories', async () => {

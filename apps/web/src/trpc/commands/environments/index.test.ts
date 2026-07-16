@@ -4,6 +4,8 @@ const {
   mockEnqueueTask,
   mockGetBranches,
   mockGetRepositories,
+  mockBeginEnvironmentVerification,
+  mockActiveVerificationRuns,
 } = vi.hoisted(() => ({
   mockCheckRepoAccess: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -24,6 +26,10 @@ const {
       installationId: 'installation-1',
     },
   ]),
+  mockBeginEnvironmentVerification: vi.fn(),
+  // Active verification run seen inside the retry critical section. Each entry
+  // is returned by the locked transaction's active-run lookup.
+  mockActiveVerificationRuns: [] as Array<{ taskId: string }>,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -37,6 +43,7 @@ vi.mock('@roomote/github', () => ({
 vi.mock('@roomote/db/server', () => ({
   activeRunStatuses: [],
   and: vi.fn(),
+  beginEnvironmentVerification: mockBeginEnvironmentVerification,
   cancelTaskRunDirect: vi.fn(),
   createEnvironmentConfigVersionSnapshot: vi.fn(),
   db: {
@@ -51,12 +58,34 @@ vi.mock('@roomote/db/server', () => ({
   isNull: vi.fn(),
   loadEnvironmentSnapshots: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  or: vi.fn(),
   repositories: {},
   sql: vi.fn(),
   taskRuns: {},
   tasks: {},
   updateEnvironmentDefinition: vi.fn(),
   users: {},
+  withEnvironmentVerificationRetryLock: async (
+    _environmentId: string,
+    mutation: (tx: unknown) => Promise<unknown>,
+  ) => {
+    // Provide a transaction whose active-run lookup returns the seeded rows.
+    const activeRunQuery = {
+      innerJoin: () => ({
+        where: () => ({
+          orderBy: () => ({
+            limit: async () => mockActiveVerificationRuns,
+          }),
+        }),
+      }),
+    };
+    const tx = {
+      select: () => ({
+        from: () => activeRunQuery,
+      }),
+    };
+    return mutation(tx);
+  },
 }));
 
 vi.mock('@/lib/server', () => ({
@@ -68,6 +97,7 @@ import { TaskPayloadKind } from '@roomote/types';
 import type { UserAuthSuccess } from '@/types';
 import {
   createEnvironmentCommand,
+  retryEnvironmentVerificationCommand,
   startEnvironmentDefinitionTaskCommand,
   updateEnvironmentCommand,
   validateConfigCommand,
@@ -83,6 +113,7 @@ function buildMockAuth(): UserAuthSuccess {
     isAdmin: true,
     featureFlags: {} as UserAuthSuccess['featureFlags'],
     anonymousAnalyticsEnabled: false,
+    cloudEnabled: false,
     resource: {
       username: null,
       fullName: 'Admin',
@@ -133,6 +164,146 @@ describe('startEnvironmentDefinitionTaskCommand', () => {
         trigger: 'manual',
       }),
     );
+  });
+});
+
+describe('retryEnvironmentVerificationCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockActiveVerificationRuns.length = 0;
+    // The command registers the attempt through enqueueTask's
+    // afterCreateInTransaction hook, so the mock must invoke it (with a stub
+    // transaction) to exercise registration.
+    mockEnqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options?: {
+          afterCreateInTransaction?: (
+            tx: unknown,
+            taskRun: unknown,
+          ) => Promise<void>;
+        },
+      ) => {
+        const taskRun = { taskId: 'task-verify-1', id: 'run-verify-1' };
+        await options?.afterCreateInTransaction?.({}, taskRun);
+        return taskRun;
+      },
+    );
+  });
+
+  function mockEnvironmentLookup() {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({
+          limit: async () => [{ id: 'env-1', name: 'My Env' }],
+        }),
+      }),
+    });
+  }
+
+  it('enqueues a verification task and registers the new attempt', async () => {
+    mockEnvironmentLookup();
+
+    const result = await retryEnvironmentVerificationCommand(buildMockAuth(), {
+      environmentId: 'env-1',
+    });
+
+    expect(result).toEqual({ taskId: 'task-verify-1' });
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          type: TaskPayloadKind.StandardTask,
+          payload: expect.objectContaining({
+            environmentId: 'env-1',
+            verifiesEnvironmentId: 'env-1',
+          }),
+        }),
+        workflow: 'standard',
+      }),
+      expect.objectContaining({
+        afterCreateInTransaction: expect.any(Function),
+      }),
+    );
+    expect(mockBeginEnvironmentVerification).toHaveBeenCalledWith(
+      expect.anything(),
+      { environmentId: 'env-1', verificationTaskId: 'task-verify-1' },
+    );
+  });
+
+  it('rejects when a verification task is already active', async () => {
+    mockEnvironmentLookup();
+    // A verification run is already active inside the locked critical section.
+    mockActiveVerificationRuns.push({ taskId: 'task-active' });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-1',
+      }),
+    ).rejects.toThrow('already being verified');
+
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(mockBeginEnvironmentVerification).not.toHaveBeenCalled();
+  });
+
+  it('serializes concurrent retries so only one verification task is enqueued', async () => {
+    mockEnvironmentLookup();
+    mockEnvironmentLookup();
+
+    // Model the advisory lock's serialization: the first retry through the
+    // critical section sees no active run and enqueues, and its registration
+    // (via afterCreateInTransaction) makes the attempt active for the second
+    // retry.
+    let attempt = 0;
+    mockEnqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options?: {
+          afterCreateInTransaction?: (
+            tx: unknown,
+            taskRun: unknown,
+          ) => Promise<void>;
+        },
+      ) => {
+        attempt += 1;
+        const taskRun = {
+          taskId: `task-verify-${attempt}`,
+          id: `run-verify-${attempt}`,
+        };
+        await options?.afterCreateInTransaction?.({}, taskRun);
+        // After the first enqueue+register, a subsequent critical section sees
+        // the active run and must reject before enqueueing again.
+        mockActiveVerificationRuns.push({ taskId: `task-verify-${attempt}` });
+        return taskRun;
+      },
+    );
+
+    const first = await retryEnvironmentVerificationCommand(buildMockAuth(), {
+      environmentId: 'env-1',
+    });
+    expect(first).toEqual({ taskId: 'task-verify-1' });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-1',
+      }),
+    ).rejects.toThrow('already being verified');
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+    expect(mockBeginEnvironmentVerification).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects when the environment does not exist', async () => {
+    mockDbSelect.mockReturnValueOnce({
+      from: () => ({
+        where: () => ({ limit: async () => [] }),
+      }),
+    });
+
+    await expect(
+      retryEnvironmentVerificationCommand(buildMockAuth(), {
+        environmentId: 'env-missing',
+      }),
+    ).rejects.toThrow('Environment not found');
   });
 });
 

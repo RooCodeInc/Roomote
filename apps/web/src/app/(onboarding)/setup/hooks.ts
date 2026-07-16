@@ -343,12 +343,14 @@ export function useSetupFlow(
       const replayEntryVisit = isInitialReplayVisit(status);
       const activeQualificationBlock =
         status.setupQualification.activeBlock ?? null;
+      // A communication provider that the user actually chose (either pending
+      // in the current session or already saved). Runtime env vars alone must
+      // not count as a choice so the chooser still renders and lets the user
+      // pick — even when a provider is fully configured by env vars.
+      const chosenAuthProvider =
+        pendingAuthProvider ?? status.setupNewState.authProvider;
       const effectiveAuthProvider =
-        pendingAuthProvider ??
-        status.setupNewState.authProvider ??
-        status.authSetup.runtimeConfiguredProvider;
-      const sourceControlLockedByRuntime =
-        status.sourceControlSetup.lockReason === 'runtime_env';
+        chosenAuthProvider ?? status.authSetup.runtimeConfiguredProvider;
       const effectiveSourceControlProvider =
         status.setupNewState.sourceControlProvider ??
         status.sourceControlSetup.runtimeConfiguredProvider;
@@ -372,7 +374,7 @@ export function useSetupFlow(
               (hasSeenSetupWelcome() || hasRealProgress(status)))
           );
         case 'auth-provider':
-          return communicationStepResolved || effectiveAuthProvider !== null;
+          return communicationStepResolved || chosenAuthProvider !== null;
         case 'auth-env-vars':
           return (
             effectiveAuthProvider === null ||
@@ -386,7 +388,6 @@ export function useSetupFlow(
         case 'source-control-provider':
           return (
             status.sourceControlSetup.setupSatisfied ||
-            sourceControlLockedByRuntime ||
             status.setupNewState.sourceControlProvider != null
           );
         case 'source-control-config': {

@@ -1,6 +1,10 @@
 'use client';
 
-import type { ComputeProvider, SetupComputeStatus } from '@roomote/types';
+import {
+  isComputeOperatorEditableField,
+  type ComputeProvider,
+  type SetupComputeStatus,
+} from '@roomote/types';
 
 import { ArrowRight, BrandIcon, Button } from '@/components/system';
 import { cn } from '@/lib/utils';
@@ -17,6 +21,7 @@ const BRAND_ICON_BY_PROVIDER = {
   daytona: 'daytona',
   e2b: 'e2b',
   blaxel: 'blaxel',
+  roomote: 'roomote',
 } satisfies Record<ComputeProvider, string>;
 
 export function StepComputeProvider({
@@ -33,9 +38,15 @@ export function StepComputeProvider({
   // Hosted providers whose worker image is not yet available remain selectable:
   // their config step can collect or provision the missing infrastructure.
   // Explicit deployment exclusions are stronger and must not be offered.
+  // Deployment-managed providers (no operator-editable fields, e.g. Roomote
+  // Cloud) cannot be configured from the wizard, so they are only offered
+  // when the deployment already satisfies them.
   const excludedProviders = new Set(computeSetup.excludedProviders ?? []);
   const availableProviders = computeSetup.providers.filter(
-    (provider) => !excludedProviders.has(provider.provider),
+    (provider) =>
+      !excludedProviders.has(provider.provider) &&
+      (provider.fields.some(isComputeOperatorEditableField) ||
+        provider.configSatisfied),
   );
 
   return (

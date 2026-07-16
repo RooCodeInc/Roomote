@@ -11,6 +11,7 @@ import {
   ensureAutomationRows,
 } from '@roomote/db/server';
 import {
+  DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   SLACK_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   TEAMS_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
   TELEGRAM_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
@@ -24,6 +25,7 @@ import {
   buildRoomoteDeployMarker,
   formatRoomoteDeployMarker,
 } from '@roomote/types';
+import { startDiscordGatewaySupervisor } from '@roomote/discord-gateway';
 
 import {
   createAdminDashboardMiddleware,
@@ -35,6 +37,7 @@ import { startScheduler } from './scheduler';
 import { startSandboxOidcRefreshQueue } from './sandbox-oidc-refresh-queue';
 import { startSlackAccountLinkEducationQueue } from './slack-account-link-education-queue';
 import { startSuggestedTasksOnboardingFollowupQueue } from './suggested-tasks-onboarding-followup-queue';
+import { discordSuggestedTasksOnboardingFollowupJob } from './jobs/discord-suggested-tasks-onboarding-followup';
 import { slackSuggestedTasksOnboardingFollowupJob } from './jobs/slack-suggested-tasks-onboarding-followup';
 import { telegramSuggestedTasksOnboardingFollowupJob } from './jobs/telegram-suggested-tasks-onboarding-followup';
 import { teamsSuggestedTasksOnboardingFollowupJob } from './jobs/teams-suggested-tasks-onboarding-followup';
@@ -66,6 +69,13 @@ const redis = getRedis();
 
 initBullMqSentry();
 
+const discordGatewaySupervisor = startDiscordGatewaySupervisor(redis, {
+  ...process.env,
+  ENCRYPTION_KEY: Env.ENCRYPTION_KEY,
+  R_DISCORD_GATEWAY_SECRET: Env.R_DISCORD_GATEWAY_SECRET,
+  TRPC_URL: Env.TRPC_URL,
+});
+
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   startScheduler();
 const {
@@ -86,6 +96,14 @@ const {
   slackAccountLinkEducationWorker,
   slackAccountLinkEducationQueueEvents,
 } = startSlackAccountLinkEducationQueue();
+const {
+  queue: discordSuggestedTasksOnboardingFollowupQueue,
+  worker: discordSuggestedTasksOnboardingFollowupWorker,
+} = startSuggestedTasksOnboardingFollowupQueue({
+  queueName: DISCORD_SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_QUEUE_NAME,
+  label: 'DiscordSuggestedTasksOnboardingFollowupQueue',
+  jobHandler: discordSuggestedTasksOnboardingFollowupJob,
+});
 const {
   queue: slackSuggestedTasksOnboardingFollowupQueue,
   worker: slackSuggestedTasksOnboardingFollowupWorker,
@@ -132,6 +150,9 @@ createBullBoard({
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
     new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
+    new BullMQAdapter(discordSuggestedTasksOnboardingFollowupQueue, {
+      readOnlyMode: false,
+    }),
     new BullMQAdapter(slackSuggestedTasksOnboardingFollowupQueue, {
       readOnlyMode: false,
     }),
@@ -281,6 +302,8 @@ async function gracefulShutdown() {
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();
+    await discordSuggestedTasksOnboardingFollowupWorker.close();
+    await discordSuggestedTasksOnboardingFollowupQueue.close();
     await slackSuggestedTasksOnboardingFollowupWorker.close();
     await slackSuggestedTasksOnboardingFollowupQueueEvents?.close();
     await slackSuggestedTasksOnboardingFollowupQueue.close();
@@ -294,6 +317,7 @@ async function gracefulShutdown() {
     await prReviewNotificationWorker.close();
     await prReviewNotificationQueueEvents.close();
     await prReviewNotificationQueue.close();
+    await discordGatewaySupervisor.stop();
     await closeRedis();
   } catch (error) {
     console.error('[Shutdown] Error during shutdown:', error);

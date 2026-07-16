@@ -1,4 +1,12 @@
+import { createHash } from 'node:crypto';
+
 import {
+  DiscordBotTokenValidationError,
+  discordGatewaySessions,
+  invalidateDiscordRuntimeCredentialsCache,
+  normalizeDiscordBotToken,
+  resolveDiscordRuntimeCredentials,
+  validateDiscordBotToken,
   resolveTelegramRuntimeCredentials,
   invalidateTelegramRuntimeCredentialsCache,
   invalidateTeamsBotRuntimeCredentialsCache,
@@ -8,13 +16,29 @@ import {
   db,
   environmentVariables,
   and,
+  desc,
   inArray,
   isNull,
+  like,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
-import { createTelegramCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
+import {
+  discordChannelRequiresTag,
+  DiscordCommunicationProvider,
+  DISCORD_REQUIRED_TAG_FORUM_ERROR,
+  type DiscordChannelPermissionDiagnostics,
+} from '@roomote/communication/discord-provider';
+import { getRedis } from '@roomote/redis';
+import {
+  captureDiscordDefaultDestination,
+  createTelegramCommunicationProviderFromRuntimeCredentials,
+  listDiscordInstallations,
+  reconcileDiscordInstallations,
+  syncDiscordInstallationChannels,
+} from '@roomote/sdk/server';
 
 import { Env } from '@/lib/server/env';
+import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import {
   buildSetupAuthStatus,
   getSetupAuthProvider,
@@ -35,13 +59,80 @@ import {
   upsertDeploymentEnvironmentVariables,
 } from '../environment-variables';
 
-type CommsProviderId = SetupAuthProviderId | 'telegram';
+type AdditionalCommsProviderId = 'telegram' | 'discord';
+type CommsProviderId = SetupAuthProviderId | AdditionalCommsProviderId;
 export const COMMS_PROVIDER_IDS = [
   ...SETUP_AUTH_PROVIDER_IDS,
   'telegram',
+  'discord',
 ] as const;
 
+type AdditionalCommsProviderDefinition = {
+  id: AdditionalCommsProviderId;
+  label: string;
+  fields: Array<{
+    envVarName: string;
+    acceptedEnvVarNames: string[];
+    label: string;
+    secret?: boolean;
+    required?: false;
+  }>;
+};
+
+const ADDITIONAL_COMMS_PROVIDERS: Record<
+  AdditionalCommsProviderId,
+  AdditionalCommsProviderDefinition
+> = {
+  telegram: {
+    id: 'telegram',
+    label: 'Telegram',
+    fields: [
+      {
+        envVarName: 'R_TELEGRAM_BOT_TOKEN',
+        acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
+        label: 'Telegram Bot Token',
+        secret: true,
+      },
+      {
+        envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
+        acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
+        label: 'Telegram Webhook Secret',
+        secret: true,
+        required: false,
+      },
+    ],
+  },
+  discord: {
+    id: 'discord',
+    label: 'Discord',
+    fields: [
+      {
+        envVarName: 'R_DISCORD_BOT_TOKEN',
+        acceptedEnvVarNames: ['R_DISCORD_BOT_TOKEN'],
+        label: 'Discord Bot Token',
+        secret: true,
+      },
+    ],
+  },
+};
+
+function isAdditionalCommsProviderId(
+  provider: CommsProviderId,
+): provider is AdditionalCommsProviderId {
+  return provider === 'telegram' || provider === 'discord';
+}
+
+function getCommsProviderDefinition(provider: CommsProviderId) {
+  return isAdditionalCommsProviderId(provider)
+    ? ADDITIONAL_COMMS_PROVIDERS[provider]
+    : getSetupAuthProvider(provider);
+}
+
 function createTelegramWebhookSecret() {
+  return crypto.randomUUID();
+}
+
+function createDiscordGatewaySecret() {
   return crypto.randomUUID();
 }
 
@@ -52,6 +143,7 @@ export type CommsProviderStatus = Omit<
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
+  discord?: DiscordCommsStatus | null;
 };
 
 export type CommsStatus = Omit<SetupAuthStatus, 'providers'> & {
@@ -67,6 +159,230 @@ type TelegramWebhookStatus = {
   pendingUpdateCount: number;
   lastErrorAtMs: number | null;
 };
+
+type DiscordGatewayPhase =
+  | 'starting'
+  | 'standby'
+  | 'awaiting_configuration'
+  | 'connecting'
+  | 'ready'
+  | 'reconnecting'
+  | 'stopping'
+  | 'error';
+
+export type DiscordGatewayStatus = {
+  phase: DiscordGatewayPhase;
+  live: boolean;
+  ready: boolean;
+  leader: boolean;
+  configured: boolean;
+  connected: boolean;
+  forwardingReady: boolean;
+  sessionResumed: boolean;
+  queueDepth: number;
+  botUserId?: string;
+  botUsername?: string;
+  lastEventAt?: string;
+  lastForwardedAt?: string;
+  lastError?: string;
+  updatedAt: string;
+};
+
+export type DiscordCommsStatus = {
+  bot: {
+    applicationId: string | null;
+    applicationName: string | null;
+    userId: string | null;
+    username: string | null;
+    displayName: string | null;
+    identitySource: 'live' | 'persistent_cache' | null;
+    errorCode: string | null;
+  };
+  inviteUrl: string | null;
+  gateway: DiscordGatewayStatus | null;
+  gatewaySession: {
+    lastConnectedAt: Date | null;
+    lastHeartbeatAckAt: Date | null;
+    disconnectedAt: Date | null;
+    lastError: string | null;
+  } | null;
+  messageContentIntent: 'enabled' | 'disabled' | 'unknown';
+  commands: {
+    status: 'registered' | 'missing' | 'unknown';
+    names: string[];
+  };
+  installations: Array<{
+    guildId: string;
+    guildName: string | null;
+    defaultChannelId: string | null;
+    defaultChannelName: string | null;
+    defaultChannelType: number | null;
+  }>;
+};
+
+const DISCORD_GATEWAY_STATUS_KEY = 'discord:gateway:status';
+const DISCORD_REQUIRED_COMMANDS = ['help', 'link', 'new'] as const;
+const DISCORD_APPLICATION_MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
+const DISCORD_API_TIMEOUT_MS = 5_000;
+
+function createDiscordProvider(input: {
+  botToken: string;
+  applicationId?: string | null;
+}) {
+  return new DiscordCommunicationProvider({
+    botToken: input.botToken,
+    ...(input.applicationId ? { applicationId: input.applicationId } : {}),
+    ...(process.env.DISCORD_API_BASE_URL
+      ? { apiBaseUrl: process.env.DISCORD_API_BASE_URL }
+      : {}),
+    timeoutMs: DISCORD_API_TIMEOUT_MS,
+  });
+}
+
+function buildDiscordInviteUrl(applicationId: string | null): string | null {
+  if (!applicationId) return null;
+  const query = new URLSearchParams({
+    client_id: applicationId,
+    permissions: DISCORD_INSTALL_PERMISSIONS,
+    scope: 'bot applications.commands',
+  });
+  return `https://discord.com/oauth2/authorize?${query.toString()}`;
+}
+
+function isDiscordGatewayStatus(value: unknown): value is DiscordGatewayStatus {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<DiscordGatewayStatus>;
+  return (
+    typeof candidate.phase === 'string' &&
+    typeof candidate.ready === 'boolean' &&
+    typeof candidate.connected === 'boolean' &&
+    typeof candidate.updatedAt === 'string'
+  );
+}
+
+async function getDiscordGatewayStatus(): Promise<DiscordGatewayStatus | null> {
+  try {
+    const raw = await getRedis().get(DISCORD_GATEWAY_STATUS_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isDiscordGatewayStatus(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getDiscordApplicationDiagnostics(input: {
+  botToken: string;
+  applicationId: string;
+}): Promise<{
+  messageContentIntent: DiscordCommsStatus['messageContentIntent'];
+  commands: DiscordCommsStatus['commands'];
+}> {
+  const baseUrl = (
+    process.env.DISCORD_API_BASE_URL ?? 'https://discord.com/api/v10'
+  ).replace(/\/$/u, '');
+  const headers = { authorization: `Bot ${input.botToken}` };
+  try {
+    const [applicationResponse, commandsResponse] = await Promise.all([
+      fetch(`${baseUrl}/oauth2/applications/@me`, {
+        headers,
+        signal: AbortSignal.timeout(DISCORD_API_TIMEOUT_MS),
+      }),
+      fetch(`${baseUrl}/applications/${input.applicationId}/commands`, {
+        headers,
+        signal: AbortSignal.timeout(DISCORD_API_TIMEOUT_MS),
+      }),
+    ]);
+    const application = applicationResponse.ok
+      ? ((await applicationResponse.json()) as { flags?: number })
+      : null;
+    const commands = commandsResponse.ok
+      ? ((await commandsResponse.json()) as Array<{ name?: string }>)
+      : null;
+    const names = (commands ?? [])
+      .flatMap((command) =>
+        typeof command.name === 'string' ? [command.name] : [],
+      )
+      .sort();
+    const hasRequiredCommands = DISCORD_REQUIRED_COMMANDS.every((command) =>
+      names.includes(command),
+    );
+    return {
+      messageContentIntent:
+        typeof application?.flags === 'number'
+          ? (application.flags & DISCORD_APPLICATION_MESSAGE_CONTENT_FLAGS) !==
+            0
+            ? 'enabled'
+            : 'disabled'
+          : 'unknown',
+      commands: commands
+        ? { status: hasRequiredCommands ? 'registered' : 'missing', names }
+        : { status: 'unknown', names: [] },
+    };
+  } catch {
+    return {
+      messageContentIntent: 'unknown',
+      commands: { status: 'unknown', names: [] },
+    };
+  }
+}
+
+async function getDiscordCommsStatus(): Promise<DiscordCommsStatus | null> {
+  const credentials = await resolveDiscordRuntimeCredentials();
+  if (!credentials.botToken) return null;
+  const tokenFingerprint = createHash('sha256')
+    .update(credentials.botToken)
+    .digest('hex');
+
+  const [gateway, gatewaySession, installations, applicationDiagnostics] =
+    await Promise.all([
+      getDiscordGatewayStatus(),
+      db.query.discordGatewaySessions.findFirst({
+        where: like(discordGatewaySessions.id, `${tokenFingerprint}:%`),
+        orderBy: [desc(discordGatewaySessions.updatedAt)],
+        columns: {
+          lastConnectedAt: true,
+          lastHeartbeatAckAt: true,
+          disconnectedAt: true,
+          lastError: true,
+        },
+      }),
+      listDiscordInstallations(),
+      credentials.applicationId
+        ? getDiscordApplicationDiagnostics({
+            botToken: credentials.botToken,
+            applicationId: credentials.applicationId,
+          })
+        : Promise.resolve({
+            messageContentIntent: 'unknown' as const,
+            commands: { status: 'unknown' as const, names: [] },
+          }),
+    ]);
+
+  return {
+    bot: {
+      applicationId: credentials.applicationId,
+      applicationName: credentials.applicationName,
+      userId: credentials.botUserId,
+      username: credentials.botUsername,
+      displayName: credentials.botDisplayName,
+      identitySource: credentials.identitySource,
+      errorCode: credentials.identityErrorCode,
+    },
+    inviteUrl: buildDiscordInviteUrl(credentials.applicationId),
+    gateway,
+    gatewaySession: gatewaySession ?? null,
+    messageContentIntent: applicationDiagnostics.messageContentIntent,
+    commands: applicationDiagnostics.commands,
+    installations: installations.map((installation) => ({
+      guildId: installation.guildId,
+      guildName: installation.guildName,
+      defaultChannelId: installation.defaultChannelId,
+      defaultChannelName: installation.defaultChannelName,
+      defaultChannelType: installation.defaultChannelType,
+    })),
+  };
+}
 
 const TELEGRAM_WEBHOOK_REQUIRED_UPDATES = ['message', 'callback_query'];
 const TELEGRAM_BOT_API_TIMEOUT_MS = 5_000;
@@ -256,69 +572,276 @@ export async function repairTelegramWebhookCommand(auth: UserAuthSuccess) {
   return { repaired: true };
 }
 
-function withTelegramProvider(
+type DiscordRegistrationResult = {
+  registered: boolean;
+  guildCount: number;
+  error: string | null;
+};
+
+function classifyDiscordSetupError(error: unknown): string {
+  if (error instanceof DiscordBotTokenValidationError) {
+    return error.message;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  if (/401|unauthorized|invalid token/iu.test(message)) {
+    return 'Discord rejected the bot token. Copy a fresh token from the Discord Developer Portal and save again.';
+  }
+  if (/403|missing permissions/iu.test(message)) {
+    return 'Discord rejected the request because Roomote is missing permissions in that server.';
+  }
+  return message.trim() || 'Could not connect to Discord.';
+}
+
+async function requireDiscordProvider() {
+  const credentials = await resolveDiscordRuntimeCredentials();
+  if (
+    !credentials.botToken ||
+    !credentials.applicationId ||
+    !credentials.botUserId
+  ) {
+    throw new Error(
+      credentials.identityErrorCode
+        ? 'Discord could not validate the saved bot token.'
+        : 'Discord is not configured. Save a bot token first.',
+    );
+  }
+  return {
+    credentials,
+    provider: createDiscordProvider({
+      botToken: credentials.botToken,
+      applicationId: credentials.applicationId,
+    }),
+  };
+}
+
+async function syncDiscordGuilds(installedByUserId: string) {
+  const { provider, credentials } = await requireDiscordProvider();
+  const guilds = await provider.listGuilds();
+  await reconcileDiscordInstallations({
+    applicationId: credentials.applicationId!,
+    botUserId: credentials.botUserId!,
+    installedByUserId,
+    guilds: guilds.map((guild) => ({
+      guildId: guild.id,
+      guildName: guild.name,
+    })),
+  });
+  return guilds;
+}
+
+async function registerDiscordCommandsBestEffort(
+  installedByUserId: string,
+): Promise<DiscordRegistrationResult> {
+  invalidateDiscordRuntimeCredentialsCache();
+  try {
+    const { provider, credentials } = await requireDiscordProvider();
+    await provider.registerCommands({
+      applicationId: credentials.applicationId!,
+    });
+    const guilds = await syncDiscordGuilds(installedByUserId);
+    return { registered: true, guildCount: guilds.length, error: null };
+  } catch (error) {
+    return {
+      registered: false,
+      guildCount: 0,
+      error: classifyDiscordSetupError(error),
+    };
+  }
+}
+
+export async function registerDiscordCommandsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const result = await registerDiscordCommandsBestEffort(auth.userId);
+  if (!result.registered) {
+    throw new Error(result.error ?? 'Could not register Discord commands.');
+  }
+  return result;
+}
+
+export async function repairDiscordCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const result = await registerDiscordCommandsBestEffort(auth.userId);
+  if (!result.registered) {
+    throw new Error(result.error ?? 'Could not repair the Discord connection.');
+  }
+  return { repaired: true, guildCount: result.guildCount };
+}
+
+export async function listDiscordGuildsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  try {
+    const guilds = await syncDiscordGuilds(auth.userId);
+    const installations = await listDiscordInstallations();
+    const installationByGuildId = new Map(
+      installations.map((installation) => [installation.guildId, installation]),
+    );
+    return {
+      guilds: guilds.map((guild) => {
+        const installation = installationByGuildId.get(guild.id);
+        return {
+          id: guild.id,
+          name: guild.name,
+          icon: guild.icon,
+          defaultChannelId: installation?.defaultChannelId ?? null,
+          defaultChannelName: installation?.defaultChannelName ?? null,
+          defaultChannelType: installation?.defaultChannelType ?? null,
+        };
+      }),
+    };
+  } catch (error) {
+    throw new Error(classifyDiscordSetupError(error));
+  }
+}
+
+const DISCORD_DESTINATION_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
+
+export async function listDiscordChannelsCommand(
+  auth: UserAuthSuccess,
+  input: { guildId: string },
+) {
+  assertAdmin(auth);
+  try {
+    const { provider } = await requireDiscordProvider();
+    const channels = (await provider.listGuildChannels(input.guildId)).filter(
+      (channel) => DISCORD_DESTINATION_CHANNEL_TYPES.has(channel.type),
+    );
+    await syncDiscordInstallationChannels({
+      guildId: input.guildId,
+      channels: channels.map((channel) => ({
+        channelId: channel.id,
+        channelName: channel.name,
+        channelType: channel.type,
+        parentId: channel.parentId ?? null,
+        position: channel.position ?? null,
+      })),
+    });
+    return {
+      channels: channels.map((channel) => {
+        const requiresTag = discordChannelRequiresTag(channel);
+        return {
+          id: channel.id,
+          name: channel.name,
+          type: channel.type,
+          kind: channel.type === 15 || channel.type === 16 ? 'forum' : 'text',
+          parentId: channel.parentId ?? null,
+          position: channel.position ?? null,
+          flags: channel.flags ?? 0,
+          availableTags: channel.availableTags ?? [],
+          requiresTag,
+          supported: !requiresTag,
+        };
+      }),
+    };
+  } catch (error) {
+    throw new Error(classifyDiscordSetupError(error));
+  }
+}
+
+export async function selectDiscordDestinationCommand(
+  auth: UserAuthSuccess,
+  input: { guildId: string; channelId: string },
+) {
+  assertAdmin(auth);
+  const { channels } = await listDiscordChannelsCommand(auth, {
+    guildId: input.guildId,
+  });
+  const channel = channels.find(
+    (candidate) => candidate.id === input.channelId,
+  );
+  if (!channel) {
+    throw new Error('Choose a text or forum channel visible to the bot.');
+  }
+  if (!channel.supported) {
+    throw new Error(DISCORD_REQUIRED_TAG_FORUM_ERROR);
+  }
+  const permissions = await diagnoseDiscordPermissionsCommand(auth, input);
+  if (!permissions.canUseChannel) {
+    throw new Error(
+      `Roomote is missing required permissions in #${channel.name}: ${permissions.missingPermissions.join(', ')}.`,
+    );
+  }
+  return captureDiscordDefaultDestination({
+    guildId: input.guildId,
+    channelId: channel.id,
+    channelName: channel.name,
+    channelType: channel.type,
+  });
+}
+
+export async function diagnoseDiscordPermissionsCommand(
+  auth: UserAuthSuccess,
+  input: { guildId: string; channelId: string },
+): Promise<DiscordChannelPermissionDiagnostics> {
+  assertAdmin(auth);
+  try {
+    const { provider } = await requireDiscordProvider();
+    return await provider.diagnoseChannelPermissions(input);
+  } catch (error) {
+    throw new Error(classifyDiscordSetupError(error));
+  }
+}
+
+function withAdditionalCommsProviders(
   status: SetupAuthStatus,
   options: {
     persistedEnvVarNames: string[];
     telegramWebhook: TelegramWebhookStatus | null;
+    discord: DiscordCommsStatus | null;
     invocationIdentities: InvocationIdentity[];
   },
 ): CommsStatus {
-  const { persistedEnvVarNames, telegramWebhook, invocationIdentities } =
-    options;
+  const {
+    persistedEnvVarNames,
+    telegramWebhook,
+    discord,
+    invocationIdentities,
+  } = options;
   const telegramBotUsername =
     invocationIdentities.find((identity) => identity.provider === 'telegram')
       ?.displayName ?? null;
   const isSaved = (name: string) => persistedEnvVarNames.includes(name);
   const isRuntime = (name: string) => Boolean(process.env[name]?.trim());
   const isSatisfied = (name: string) => isRuntime(name) || isSaved(name);
-  const buildField = (input: {
-    envVarName: string;
-    label: string;
-    secret?: boolean;
-    required?: boolean;
-    savedValue?: string | null;
-  }) => ({
-    envVarName: input.envVarName,
-    acceptedEnvVarNames: [input.envVarName],
-    label: input.label,
-    ...(input.secret ? { secret: true } : {}),
-    ...(input.required === false ? { required: false as const } : {}),
-    runtimeSatisfied: isRuntime(input.envVarName),
-    savedSatisfied: isSaved(input.envVarName),
-    savedValue: input.secret ? null : (input.savedValue ?? null),
-    satisfiedByEnvVarName: isSatisfied(input.envVarName)
-      ? input.envVarName
-      : null,
-  });
+  const buildProviderStatus = (
+    definition: AdditionalCommsProviderDefinition,
+  ): CommsProviderStatus => {
+    const fields = definition.fields.map((field) => ({
+      ...field,
+      runtimeSatisfied: isRuntime(field.envVarName),
+      savedSatisfied: isSaved(field.envVarName),
+      savedValue: null,
+      satisfiedByEnvVarName: isSatisfied(field.envVarName)
+        ? field.envVarName
+        : null,
+    }));
+    const requiredFields = fields.filter((field) => field.required !== false);
+    return {
+      id: definition.id,
+      label: definition.label,
+      fields,
+      runtimeSatisfied: requiredFields.every((field) =>
+        isRuntime(field.envVarName),
+      ),
+      savedSatisfied: requiredFields.every((field) =>
+        isSaved(field.envVarName),
+      ),
+      setupSatisfied: requiredFields.every((field) =>
+        isSatisfied(field.envVarName),
+      ),
+      ...(definition.id === 'telegram'
+        ? { telegramWebhook, telegramBotUsername }
+        : {}),
+      ...(definition.id === 'discord' ? { discord } : {}),
+    };
+  };
 
   return {
     ...status,
     invocationIdentities,
     providers: [
       ...status.providers,
-      {
-        id: 'telegram',
-        label: 'Telegram',
-        fields: [
-          buildField({
-            envVarName: 'R_TELEGRAM_BOT_TOKEN',
-            label: 'Telegram Bot Token',
-            secret: true,
-          }),
-          buildField({
-            envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
-            label: 'Telegram Webhook Secret',
-            secret: true,
-            required: false,
-          }),
-        ],
-        runtimeSatisfied: isRuntime('R_TELEGRAM_BOT_TOKEN'),
-        savedSatisfied: isSaved('R_TELEGRAM_BOT_TOKEN'),
-        setupSatisfied: isSatisfied('R_TELEGRAM_BOT_TOKEN'),
-        telegramWebhook,
-        telegramBotUsername,
-      },
+      buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.telegram),
+      buildProviderStatus(ADDITIONAL_COMMS_PROVIDERS.discord),
     ],
   };
 }
@@ -332,15 +855,17 @@ export async function getCommsStatusCommand(
     persistedEnvVarNames,
     nonSecretAuthEnvValues,
     telegramWebhook,
+    discord,
     invocationIdentities,
   ] = await Promise.all([
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
     getTelegramWebhookStatus(),
+    getDiscordCommsStatus(),
     resolveInvocationIdentities(),
   ]);
 
-  return withTelegramProvider(
+  return withAdditionalCommsProviders(
     buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
@@ -349,6 +874,7 @@ export async function getCommsStatusCommand(
     {
       persistedEnvVarNames,
       telegramWebhook,
+      discord,
       invocationIdentities,
     },
   );
@@ -364,84 +890,76 @@ export async function saveCommsAuthConfigCommand(
   assertAdmin(auth);
 
   const { userId } = auth;
-  const provider =
-    input.provider === 'telegram'
-      ? {
-          id: 'telegram' as const,
-          label: 'Telegram',
-          fields: [
-            {
-              envVarName: 'R_TELEGRAM_BOT_TOKEN',
-              acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'],
-              label: 'Telegram Bot Token',
-              secret: true,
-            },
-            {
-              envVarName: 'R_TELEGRAM_WEBHOOK_SECRET',
-              acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'],
-              label: 'Telegram Webhook Secret',
-              secret: true,
-              required: false,
-            },
-          ],
-        }
-      : getSetupAuthProvider(input.provider);
+  const provider = getCommsProviderDefinition(input.provider);
+  const enteredDiscordToken = normalizeDiscordBotToken(
+    input.values?.R_DISCORD_BOT_TOKEN,
+  );
+  if (input.provider === 'discord' && enteredDiscordToken) {
+    try {
+      await validateDiscordBotToken(enteredDiscordToken);
+    } catch (error) {
+      if (error instanceof DiscordBotTokenValidationError) {
+        throw new Error(error.message);
+      }
+      throw error;
+    }
+  }
 
   await db.transaction(async (tx) => {
     const persistedEnvVarNames = await getPersistedEnvironmentVariableNames(tx);
     const authSetup = buildSetupAuthStatus({
       runtimeEnv: process.env,
       persistedEnvVarNames,
-      selectedProvider:
-        input.provider === 'telegram' ? undefined : input.provider,
+      selectedProvider: isAdditionalCommsProviderId(input.provider)
+        ? undefined
+        : input.provider,
     });
-    const providerStatus =
-      input.provider === 'telegram'
-        ? ({
-            ...provider,
-            fields: provider.fields.map((field) => ({
-              ...field,
-              runtimeSatisfied: field.acceptedEnvVarNames.some((envVarName) =>
-                Boolean(process.env[envVarName]?.trim()),
-              ),
-              savedSatisfied: field.acceptedEnvVarNames.some((envVarName) =>
-                persistedEnvVarNames.includes(envVarName),
-              ),
-              satisfiedByEnvVarName:
-                field.acceptedEnvVarNames.find((envVarName) =>
-                  Boolean(process.env[envVarName]?.trim()),
-                ) ??
-                field.acceptedEnvVarNames.find((envVarName) =>
-                  persistedEnvVarNames.includes(envVarName),
-                ) ??
-                null,
-            })),
-            runtimeSatisfied: provider.fields.every((field) =>
-              field.acceptedEnvVarNames.some((envVarName) =>
-                Boolean(process.env[envVarName]?.trim()),
-              ),
+    const providerStatus = isAdditionalCommsProviderId(input.provider)
+      ? ({
+          ...provider,
+          fields: provider.fields.map((field) => ({
+            ...field,
+            runtimeSatisfied: field.acceptedEnvVarNames.some((envVarName) =>
+              Boolean(process.env[envVarName]?.trim()),
             ),
-            savedSatisfied: provider.fields.every((field) =>
-              field.acceptedEnvVarNames.some((envVarName) =>
-                persistedEnvVarNames.includes(envVarName),
-              ),
+            savedSatisfied: field.acceptedEnvVarNames.some((envVarName) =>
+              persistedEnvVarNames.includes(envVarName),
             ),
-            setupSatisfied: provider.fields.every((field) => {
-              const runtimeSatisfied = field.acceptedEnvVarNames.some(
-                (envVarName) => Boolean(process.env[envVarName]?.trim()),
-              );
-              const savedSatisfied = field.acceptedEnvVarNames.some(
-                (envVarName) => persistedEnvVarNames.includes(envVarName),
-              );
+            satisfiedByEnvVarName:
+              field.acceptedEnvVarNames.find((envVarName) =>
+                Boolean(process.env[envVarName]?.trim()),
+              ) ??
+              field.acceptedEnvVarNames.find((envVarName) =>
+                persistedEnvVarNames.includes(envVarName),
+              ) ??
+              null,
+          })),
+          runtimeSatisfied: provider.fields.every((field) =>
+            field.acceptedEnvVarNames.some((envVarName) =>
+              Boolean(process.env[envVarName]?.trim()),
+            ),
+          ),
+          savedSatisfied: provider.fields.every((field) =>
+            field.acceptedEnvVarNames.some((envVarName) =>
+              persistedEnvVarNames.includes(envVarName),
+            ),
+          ),
+          setupSatisfied: provider.fields.every((field) => {
+            const runtimeSatisfied = field.acceptedEnvVarNames.some(
+              (envVarName) => Boolean(process.env[envVarName]?.trim()),
+            );
+            const savedSatisfied = field.acceptedEnvVarNames.some(
+              (envVarName) => persistedEnvVarNames.includes(envVarName),
+            );
 
-              return (
-                field.required === false || runtimeSatisfied || savedSatisfied
-              );
-            }),
-          } satisfies CommsProviderStatus)
-        : authSetup.providers.find(
-            (candidate) => candidate.id === input.provider,
-          );
+            return (
+              field.required === false || runtimeSatisfied || savedSatisfied
+            );
+          }),
+        } satisfies CommsProviderStatus)
+      : authSetup.providers.find(
+          (candidate) => candidate.id === input.provider,
+        );
 
     if (!providerStatus) {
       throw new Error('Selected auth provider is unavailable.');
@@ -452,7 +970,9 @@ export async function saveCommsAuthConfigCommand(
       const nextValue =
         field.envVarName === 'R_TELEGRAM_BOT_TOKEN'
           ? (normalizeTelegramBotToken(rawValue) ?? '')
-          : rawValue.trim();
+          : field.envVarName === 'R_DISCORD_BOT_TOKEN'
+            ? (normalizeDiscordBotToken(rawValue) ?? '')
+            : rawValue.trim();
 
       if (!nextValue) {
         return [];
@@ -478,6 +998,22 @@ export async function saveCommsAuthConfigCommand(
         valuesToSave.push({
           name: 'R_TELEGRAM_WEBHOOK_SECRET',
           value: telegramWebhookSecret,
+        });
+      }
+    }
+
+    if (input.provider === 'discord') {
+      const hasDiscordGatewaySecret =
+        Boolean(process.env.R_DISCORD_GATEWAY_SECRET?.trim()) ||
+        persistedEnvVarNames.includes('R_DISCORD_GATEWAY_SECRET') ||
+        Boolean(input.values?.R_DISCORD_GATEWAY_SECRET?.trim());
+      const discordGatewaySecret =
+        input.values?.R_DISCORD_GATEWAY_SECRET?.trim() ??
+        (hasDiscordGatewaySecret ? undefined : createDiscordGatewaySecret());
+      if (discordGatewaySecret) {
+        valuesToSave.push({
+          name: 'R_DISCORD_GATEWAY_SECRET',
+          value: discordGatewaySecret,
         });
       }
     }
@@ -542,6 +1078,10 @@ export async function saveCommsAuthConfigCommand(
     invalidateTeamsBotRuntimeCredentialsCache();
   }
 
+  if (input.provider === 'discord') {
+    invalidateDiscordRuntimeCredentialsCache();
+  }
+
   // Registration talks to the Telegram Bot API, so it runs after the
   // transaction commits; a registration failure must not roll back the
   // saved configuration.
@@ -550,7 +1090,15 @@ export async function saveCommsAuthConfigCommand(
       ? await registerTelegramWebhookBestEffort()
       : null;
 
-  return { telegramWebhook };
+  const discord =
+    input.provider === 'discord'
+      ? await registerDiscordCommandsBestEffort(auth.userId)
+      : null;
+
+  return {
+    telegramWebhook,
+    ...(discord ? { discord } : {}),
+  };
 }
 
 export async function clearCommsAuthConfigCommand(
@@ -559,20 +1107,14 @@ export async function clearCommsAuthConfigCommand(
 ) {
   assertAdmin(auth);
 
-  const provider =
-    input.provider === 'telegram'
-      ? {
-          fields: [
-            { acceptedEnvVarNames: ['R_TELEGRAM_BOT_TOKEN'] },
-            { acceptedEnvVarNames: ['R_TELEGRAM_WEBHOOK_SECRET'] },
-            // Clean up the retired field for existing installations.
-            { acceptedEnvVarNames: ['R_TELEGRAM_BOT_USERNAME'] },
-          ],
-        }
-      : getSetupAuthProvider(input.provider);
+  const provider = getCommsProviderDefinition(input.provider);
   const fieldEnvVarNames = provider.fields.flatMap((field) => [
     ...field.acceptedEnvVarNames,
   ]);
+  if (input.provider === 'telegram') {
+    // Clean up the retired field for existing installations.
+    fieldEnvVarNames.push('R_TELEGRAM_BOT_USERNAME');
+  }
 
   if (fieldEnvVarNames.length === 0) {
     return;
@@ -592,6 +1134,10 @@ export async function clearCommsAuthConfigCommand(
 
   if (input.provider === 'microsoft') {
     invalidateTeamsBotRuntimeCredentialsCache();
+  }
+
+  if (input.provider === 'discord') {
+    invalidateDiscordRuntimeCredentialsCache();
   }
 }
 

@@ -46,6 +46,7 @@ export interface TaskSummaryResponse {
   taskRunStatus: string | null;
   taskPhase: string | null;
   taskRunError: string | null;
+  environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
 }
@@ -107,6 +108,12 @@ export interface UpdateEnvironmentResponse {
   success: boolean;
   environmentId: string;
   name: string;
+}
+
+export interface RecordVerificationResponse {
+  success: boolean;
+  environmentId: string;
+  isVerified: boolean;
 }
 
 export interface SlackThreadReplyResponse {

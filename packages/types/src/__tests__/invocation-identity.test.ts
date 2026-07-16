@@ -1,4 +1,5 @@
 import {
+  buildDiscordInvocationIdentity,
   buildGitHubInvocationIdentity,
   buildSlackInvocationIdentity,
   buildTeamsInvocationIdentity,
@@ -6,6 +7,23 @@ import {
 } from '../invocation-identity';
 
 describe('invocation identity formatting', () => {
+  it('formats the Discord bot identity as a mention and profile link', () => {
+    expect(
+      buildDiscordInvocationIdentity({
+        botUserId: '123456789',
+        username: 'roomote-bot',
+        displayName: 'Roomote',
+      }),
+    ).toMatchObject({
+      provider: 'discord',
+      configured: true,
+      displayName: 'Roomote',
+      mentionText: '@roomote-bot',
+      nativeMention: '<@123456789>',
+      deepLinkUrl: 'https://discord.com/users/123456789',
+    });
+  });
+
   it('formats a custom GitHub app slug as a mention', () => {
     expect(buildGitHubInvocationIdentity('custom-slug')).toMatchObject({
       provider: 'github',

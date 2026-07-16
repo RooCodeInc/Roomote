@@ -36,6 +36,7 @@ import {
   type CommunicationProviderChoice,
 } from './StepAuthProvider';
 import { StepTelegramSetup } from './StepTelegramSetup';
+import { StepDiscordSetup } from './StepDiscordSetup';
 import { StepInferenceProvider } from './StepInferenceProvider';
 import { StepComputeProvider } from './StepComputeProvider';
 import { StepComputeConfig } from './StepComputeConfig';
@@ -136,6 +137,10 @@ export default function SetupPage() {
   );
   const [pendingAuthProvider, setPendingAuthProvider] =
     useState<CommunicationProviderChoice | null>(null);
+  const pendingSetupAuthProvider =
+    pendingAuthProvider === 'telegram' || pendingAuthProvider === 'discord'
+      ? null
+      : pendingAuthProvider;
   const [pendingSourceControlProvider, setPendingSourceControlProvider] =
     useState<SourceControlProvider | null>(null);
   const [pendingComputeProvider, setPendingComputeProvider] =
@@ -187,8 +192,7 @@ export default function SetupPage() {
     isError,
   } = useSetupFlow({
     enabled: isSignedIn && isAdmin,
-    pendingAuthProvider:
-      pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
+    pendingAuthProvider: pendingSetupAuthProvider,
   });
   const saveSourceControlProviderChoice = useMutation(
     trpc.setupNew.saveSourceControlProviderChoice.mutationOptions({
@@ -198,6 +202,23 @@ export default function SetupPage() {
         });
         setPendingSourceControlProvider(variables.provider);
         goToStep('source-control-config');
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
+  const saveAuthProviderChoice = useMutation(
+    trpc.setupNew.saveAuthProviderChoice.mutationOptions({
+      onSuccess: async (_data, variables) => {
+        await queryClient.invalidateQueries({
+          queryKey: trpc.setupNew.status.queryKey(),
+        });
+        // Only expose the choice as pending once the save has succeeded, so a
+        // failed request can never prematurely skip the chooser with an
+        // unsaved selection.
+        setPendingAuthProvider(variables.provider);
+        goToStep('auth-env-vars');
       },
       onError: (error) => {
         toast.error(error.message);
@@ -239,7 +260,7 @@ export default function SetupPage() {
   ).some((task) => task.suggestionId !== null);
   const bootstrapAuthProvider = getBootstrapAuthProvider(
     bootstrapStatus?.authSetup,
-    pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
+    pendingSetupAuthProvider,
   );
   const setupRetryReason = status ? getSetupRetryReason(status) : null;
   const selectedComputeProvider = status?.setupNewState.computeProvider;
@@ -334,7 +355,7 @@ export default function SetupPage() {
       } else {
         nextStep = getNextBootstrapStep(
           bootstrapStatus.authSetup,
-          pendingAuthProvider === 'telegram' ? null : pendingAuthProvider,
+          pendingSetupAuthProvider,
         );
       }
     }
@@ -345,7 +366,7 @@ export default function SetupPage() {
   }, [
     bootstrapStatus,
     isSignedIn,
-    pendingAuthProvider,
+    pendingSetupAuthProvider,
     router,
     setBootstrapStepWithTransition,
   ]);
@@ -450,7 +471,9 @@ export default function SetupPage() {
             {bootstrapStep === 'auth-provider' && (
               <StepAuthProvider
                 onContinue={(provider) => {
-                  if (provider === 'telegram') return;
+                  if (provider === 'telegram' || provider === 'discord') {
+                    return;
+                  }
                   setPendingAuthProvider(provider);
                   setBootstrapStepWithTransition('auth-env-vars');
                 }}
@@ -527,21 +550,50 @@ export default function SetupPage() {
           {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
           {step === 'auth-provider' && (
             <StepAuthProvider
-              includeTelegram
+              additionalProviders={['telegram', 'discord']}
               onContinue={(provider) => {
-                setPendingAuthProvider(provider);
-                goToStep('auth-env-vars');
+                // Telegram and Discord are UI-only choices with no persisted
+                // auth provider and their own setup steps, so keep them on
+                // the pending-only path.
+                if (provider === 'telegram' || provider === 'discord') {
+                  setPendingAuthProvider(provider);
+                  goToStep('auth-env-vars');
+                  return;
+                }
+
+                // Persist the chosen provider first; the choice only becomes
+                // pending and navigates on a successful save, so it survives a
+                // reload and a failed save never skips the chooser with an
+                // unsaved selection.
+                saveAuthProviderChoice.mutate({ provider });
               }}
               onSkip={() => {
                 setupSession.setCommunicationStepState('skipped');
                 goToNextStep();
               }}
               onBack={canGoBack ? goToPreviousStep : undefined}
+              disabled={saveAuthProviderChoice.isPending}
             />
           )}
           {step === 'auth-env-vars' &&
             (pendingAuthProvider === 'telegram' ? (
               <StepTelegramSetup
+                onContinue={() => {
+                  setupSession.setCommunicationStepState('completed');
+                  setPendingAuthProvider(null);
+                  goToNextStep();
+                }}
+                onBack={
+                  canGoBack
+                    ? () => {
+                        setPendingAuthProvider(null);
+                        goToPreviousStep();
+                      }
+                    : undefined
+                }
+              />
+            ) : pendingAuthProvider === 'discord' ? (
+              <StepDiscordSetup
                 onContinue={() => {
                   setupSession.setCommunicationStepState('completed');
                   setPendingAuthProvider(null);

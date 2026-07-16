@@ -28,6 +28,7 @@ type PageNavigationShellProps<T extends string = string> = {
   description?: string;
   mobileLabel: string;
   headerAction?: ReactNode;
+  showHeaderActionOnMobile?: boolean;
   onItemSelect: (id: T) => void;
   children: ReactNode;
 };
@@ -39,6 +40,7 @@ export function PageNavigationShell<T extends string = string>({
   description,
   mobileLabel,
   headerAction,
+  showHeaderActionOnMobile = false,
   onItemSelect,
   children,
 }: PageNavigationShellProps<T>) {
@@ -81,7 +83,7 @@ export function PageNavigationShell<T extends string = string>({
         </nav>
       </aside>
 
-      <div className="min-w-0 flex-1 space-y-6 lg:ml-68">
+      <div className="min-w-0 flex-1 space-y-6 lg:ml-68 max-w-6xl">
         <div className="space-y-4 lg:hidden">
           <Select
             value={activeItemId}
@@ -111,8 +113,15 @@ export function PageNavigationShell<T extends string = string>({
           </Select>
         </div>
 
-        <header className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
+        <header
+          className={cn(
+            'flex gap-4 md:flex-row md:items-start md:justify-between',
+            showHeaderActionOnMobile
+              ? 'flex-row items-start justify-between'
+              : 'flex-col',
+          )}
+        >
+          <div className="min-w-0 space-y-1">
             <h1 className="text-2xl font-semibold">{title}</h1>
             {description ? (
               <p className="max-w-3xl text-sm text-muted-foreground">
@@ -121,11 +130,18 @@ export function PageNavigationShell<T extends string = string>({
             ) : null}
           </div>
           {headerAction ? (
-            <div className="hidden shrink-0 md:block">{headerAction}</div>
+            <div
+              className={cn(
+                'shrink-0',
+                showHeaderActionOnMobile ? 'block' : 'hidden md:block',
+              )}
+            >
+              {headerAction}
+            </div>
           ) : null}
         </header>
 
-        <div className="space-y-6 max-w-6xl">{children}</div>
+        <div className="space-y-6">{children}</div>
       </div>
     </div>
   );

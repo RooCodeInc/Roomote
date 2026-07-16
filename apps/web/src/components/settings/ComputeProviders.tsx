@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  isComputeOperatorEditableField,
   isSetupProvisionableComputeProvider,
   type ComputeProvider,
   type SetupComputeStatus,
@@ -29,6 +30,12 @@ type ComputeProviderStatus = SetupComputeStatus['providers'][number];
 function getDefaultProviderDisabledLabel(provider: ComputeProviderStatus) {
   if (provider.configSatisfied) {
     return '';
+  }
+
+  // Deployment-managed providers have no operator-editable fields; when
+  // unsatisfied there is nothing to configure from here.
+  if (!provider.fields.some(isComputeOperatorEditableField)) {
+    return ' (unavailable)';
   }
 
   if (!provider.infrastructureSatisfied) {
@@ -113,14 +120,34 @@ export function ComputeProviders() {
     }),
   );
 
-  const providers: ComputeProviderStatus[] = status.data?.providers ?? [];
+  // Deployment-managed providers (no operator-editable fields, e.g. Roomote
+  // Cloud) have nothing to configure here, so they are only listed when the
+  // deployment already satisfies them.
+  const allProviders: ComputeProviderStatus[] = status.data?.providers ?? [];
+  const providers: ComputeProviderStatus[] = allProviders.filter(
+    (provider) =>
+      provider.fields.some(isComputeOperatorEditableField) ||
+      provider.configSatisfied,
+  );
   const effectiveDefaultProvider: ComputeProvider =
     status.data?.persistedDefaultProvider ??
     status.data?.runtimeDefaultProvider ??
     'docker';
-  const defaultProviderStatus = providers.find(
+  // Resolved against the unfiltered list: the effective default may be a
+  // deployment-managed provider whose credentials were removed, and hiding
+  // it here would silently drop the missing-configuration alert while task
+  // dispatch keeps targeting it.
+  const defaultProviderStatus = allProviders.find(
     (provider) => provider.provider === effectiveDefaultProvider,
   );
+  // Keep the effective default selectable-but-disabled in the dropdown even
+  // when its section is hidden, so the select reflects the real state
+  // instead of rendering an empty value.
+  const defaultSelectProviders =
+    !defaultProviderStatus ||
+    providers.some((provider) => provider.provider === effectiveDefaultProvider)
+      ? providers
+      : [...providers, defaultProviderStatus];
   const localDockerEnabled =
     !status.data?.excludedProviders?.includes('docker');
 
@@ -180,7 +207,7 @@ export function ComputeProviders() {
               <SelectValue placeholder="Select a sandbox provider" />
             </SelectTrigger>
             <SelectContent>
-              {providers
+              {defaultSelectProviders
                 .filter(
                   (provider) =>
                     localDockerEnabled || provider.provider !== 'docker',

@@ -215,40 +215,45 @@ async function recordModalUsageSample(
   });
 }
 
+const modalUsagePolicy: ComputeProviderUsagePolicy = {
+  async deriveUsage(context) {
+    await recordModalUsageSample(context);
+
+    const sampleSummary = await summarizeComputeProviderUsageSamples({
+      provider: 'modal',
+      providerUsageId: context.providerUsageId,
+      startedAt: context.startedAt,
+      completedAt: context.completedAt,
+    });
+
+    return {
+      activeCpuDurationMs:
+        sampleSummary.activeCpuDurationMs ?? context.inputActiveCpuDurationMs,
+      observedMemoryMibMilliseconds:
+        sampleSummary.observedMemoryMibMilliseconds ??
+        context.inputObservedMemoryMibMilliseconds,
+      detailPatch: {
+        modalUsageSampleCount: sampleSummary.sampleCount,
+        modalUsageLastSampledAt:
+          sampleSummary.lastSampledAt?.toISOString() ?? null,
+        modalPeakMemoryUsageBytes: sampleSummary.peakMemoryUsageBytes,
+      },
+      preferredMeasurementSource:
+        sampleSummary.sampleCount > 0
+          ? 'modal_cgroup_samples'
+          : 'modal_requested_resources',
+    };
+  },
+};
+
 const computeProviderUsagePolicies: Record<
   ComputeProvider,
   ComputeProviderUsagePolicy
 > = {
-  modal: {
-    async deriveUsage(context) {
-      await recordModalUsageSample(context);
-
-      const sampleSummary = await summarizeComputeProviderUsageSamples({
-        provider: 'modal',
-        providerUsageId: context.providerUsageId,
-        startedAt: context.startedAt,
-        completedAt: context.completedAt,
-      });
-
-      return {
-        activeCpuDurationMs:
-          sampleSummary.activeCpuDurationMs ?? context.inputActiveCpuDurationMs,
-        observedMemoryMibMilliseconds:
-          sampleSummary.observedMemoryMibMilliseconds ??
-          context.inputObservedMemoryMibMilliseconds,
-        detailPatch: {
-          modalUsageSampleCount: sampleSummary.sampleCount,
-          modalUsageLastSampledAt:
-            sampleSummary.lastSampledAt?.toISOString() ?? null,
-          modalPeakMemoryUsageBytes: sampleSummary.peakMemoryUsageBytes,
-        },
-        preferredMeasurementSource:
-          sampleSummary.sampleCount > 0
-            ? 'modal_cgroup_samples'
-            : 'modal_requested_resources',
-      };
-    },
-  },
+  modal: modalUsagePolicy,
+  // Roomote Cloud sandboxes run on Modal (workers record their cgroup samples
+  // under the modal label), so usage derivation is identical.
+  roomote: modalUsagePolicy,
   docker: {
     async deriveUsage(context) {
       await recordComputeProviderUsageSampleIfPresent({

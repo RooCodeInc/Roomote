@@ -26,6 +26,7 @@
     "@roomote/communication": "workspace:^",
     "@roomote/compute-providers": "workspace:^",
     "@roomote/db": "workspace:^",
+    "@roomote/discord-gateway": "workspace:^",
     "@roomote/env": "workspace:^",
     "@roomote/linear": "workspace:^",
     "@roomote/sdk": "workspace:^",

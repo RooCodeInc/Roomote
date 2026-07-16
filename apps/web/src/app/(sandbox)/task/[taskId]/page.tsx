@@ -9,7 +9,7 @@ import {
 } from 'react';
 import { useParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { CircleSlash } from '@/components/system';
+import { CircleSlash, TriangleAlert } from '@/components/system';
 
 import {
   TaskPayloadKind,
@@ -69,6 +69,12 @@ export default function SandboxPage() {
   const hasArtifacts = session.artifacts.length > 0;
   const hasVisibleSessionPrompt =
     session.prompt?.visibleInTranscript !== false && session.prompt != null;
+  const startupPrompt = hasVisibleSessionPrompt
+    ? {
+        text: session.prompt?.text,
+        images: session.prompt?.images,
+      }
+    : null;
   const shouldRenderBootingTranscript =
     sessionState === 'booting' &&
     (hasTranscriptHistory || hasVisibleSessionPrompt);
@@ -185,6 +191,19 @@ export default function SandboxPage() {
     );
   }
 
+  if (sessionState === 'error') {
+    return (
+      <FramedSurface surfaceClassName="flex items-center justify-center">
+        <EmptyState
+          icon={<TriangleAlert className="size-6" />}
+          iconClassName="text-amber-500 pt-0"
+          containerClassName="[&>div]:items-center"
+          description="This task could not be loaded. Refresh the page or try again in a moment."
+        />
+      </FramedSurface>
+    );
+  }
+
   if (sessionState === 'not-found') {
     return (
       <FramedSurface surfaceClassName="flex items-center justify-center">
@@ -193,6 +212,19 @@ export default function SandboxPage() {
           iconClassName="text-rose-500 pt-0"
           containerClassName="[&>div]:items-center"
           description="This task does not exist or you do not have permission to view it."
+        />
+      </FramedSurface>
+    );
+  }
+
+  if (!taskRun) {
+    return (
+      <FramedSurface surfaceClassName="flex items-center justify-center">
+        <EmptyState
+          icon={<TriangleAlert className="size-6" />}
+          iconClassName="text-amber-500 pt-0"
+          containerClassName="[&>div]:items-center"
+          description="This task session is still preparing. Refresh the page or try again in a moment."
         />
       </FramedSurface>
     );
@@ -236,7 +268,13 @@ export default function SandboxPage() {
         <HistoricalContent
           session={session}
           footer={
-            taskRun ? <SnapshotResumeFailureFooter taskRun={taskRun} /> : null
+            taskRun ? (
+              <SnapshotResumeFailureFooter
+                taskId={taskId}
+                taskRun={taskRun}
+                prompt={startupPrompt}
+              />
+            ) : null
           }
         />
       </HistoricalSandboxProvider>
@@ -248,8 +286,10 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          runId={taskRun!.id}
-          initialTaskRun={taskRun!}
+          runId={taskRun.id}
+          taskId={taskId}
+          initialTaskRun={taskRun}
+          prompt={startupPrompt}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -264,8 +304,10 @@ export default function SandboxPage() {
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <Header session={session} />
         <Startup
-          runId={taskRun!.id}
-          initialTaskRun={taskRun!}
+          runId={taskRun.id}
+          taskId={taskId}
+          initialTaskRun={taskRun}
+          prompt={startupPrompt}
           onStatusChange={handleBootStatusChange}
         />
         {session.draftPrompt && (
@@ -278,7 +320,7 @@ export default function SandboxPage() {
   return (
     <SandboxProvider
       taskId={taskId}
-      url={taskRun!.sandboxServerUrl}
+      url={taskRun.sandboxServerUrl}
       token={token}
       refreshConnection={session.refreshConnection}
       history={historyEnvelopesQuery}

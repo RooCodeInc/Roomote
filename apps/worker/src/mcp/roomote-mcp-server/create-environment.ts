@@ -5,7 +5,11 @@ import {
   environmentConfigSchema,
 } from '@roomote/types';
 
-import { createEnvironment, updateEnvironment } from './tasks-api-client.js';
+import {
+  createEnvironment,
+  recordEnvironmentVerification,
+  updateEnvironment,
+} from './tasks-api-client.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
@@ -200,6 +204,38 @@ export async function handleUpdateEnvironment(
       environmentId: result.environmentId,
       name: result.name,
       message: `Environment "${result.name}" updated successfully.`,
+    });
+  } catch (error) {
+    return catchError(error);
+  }
+}
+
+export async function handleRecordVerification(
+  params: {
+    environmentId: string;
+    success: boolean;
+    error?: string;
+  },
+  config: RoomoteConfig,
+): Promise<ToolResult> {
+  try {
+    const environmentId = params.environmentId.trim();
+    if (!environmentId) {
+      return errorResult('environmentId is required for record_verification');
+    }
+
+    const result = await recordEnvironmentVerification(config, {
+      environmentId,
+      success: params.success,
+      error: params.error,
+    });
+
+    return successResult({
+      environmentId: result.environmentId,
+      isVerified: result.isVerified,
+      message: result.isVerified
+        ? 'Environment verification recorded as successful.'
+        : 'Environment verification recorded as failed.',
     });
   } catch (error) {
     return catchError(error);

@@ -4,7 +4,7 @@ import type {
   ReactElement,
   ReactNode,
 } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 import { CommsProviderSection } from './CommsProviderSection';
 
@@ -83,11 +83,13 @@ const state = vi.hoisted(() => ({
   slackChannelsIsError: false,
   slackChannelsIsFetching: false,
   updateRouterDebugIsPending: false,
+  createSlackAppIsPending: false,
 }));
 
 const mutations = vi.hoisted(() => ({
   connectSlack: vi.fn(),
   disconnectSlack: vi.fn(),
+  invalidateQueries: vi.fn(),
   updateRouterDebug: vi.fn(),
   refetchSlackChannels: vi.fn(),
 }));
@@ -123,11 +125,24 @@ vi.mock('@tanstack/react-query', () => ({
     };
   },
   useMutation: (options: {
+    mutationName?: string;
     onSuccess?: (settings: unknown) => void;
     onError?: (error: Error) => void;
   }) => ({
-    isPending: state.updateRouterDebugIsPending,
+    isPending:
+      options.mutationName === 'createSlackApp'
+        ? state.createSlackAppIsPending
+        : state.updateRouterDebugIsPending,
     mutate: (input: unknown) => {
+      if (input && typeof input === 'object' && 'configToken' in input) {
+        options.onSuccess?.({
+          success: true,
+          appId: 'A0NEWAPP',
+          appSettingsUrl: 'https://api.slack.com/apps/A0NEWAPP',
+        });
+        return;
+      }
+
       mutations.updateRouterDebug(input);
       options.onSuccess?.({
         routerDebugSlackChannelId:
@@ -138,7 +153,7 @@ vi.mock('@tanstack/react-query', () => ({
   }),
   useQueryClient: () => ({
     setQueryData: vi.fn(),
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mutations.invalidateQueries,
   }),
 }));
 
@@ -184,12 +199,21 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       installation: { queryKey: () => ['slack', 'installation'] },
+      createAppFromManifest: {
+        mutationOptions: (options: unknown) => ({
+          ...(options as Record<string, unknown>),
+          mutationName: 'createSlackApp',
+        }),
+      },
     },
     comms: {
       status: { queryKey: () => ['comms', 'status'] },
       repairTelegram: {
         mutationOptions: (options: unknown) => options,
       },
+    },
+    environmentVariables: {
+      list: { queryKey: () => ['environmentVariables', 'list'] },
     },
     routerDebug: {
       getSettings: {
@@ -543,6 +567,8 @@ describe('CommsProviderSection', () => {
     state.slackChannelsIsError = false;
     state.slackChannelsIsFetching = false;
     state.updateRouterDebugIsPending = false;
+    state.createSlackAppIsPending = false;
+    mutations.invalidateQueries.mockReset();
   });
 
   describe('numbered setup instructions', () => {
@@ -563,11 +589,17 @@ describe('CommsProviderSection', () => {
         screen.queryByRole('heading', { name: 'Create Slack app' }),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByRole('link', { name: 'Create Slack app' }),
+        screen.getByRole('button', { name: 'Create Slack app' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('App configuration token'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Create app manually/ }),
       ).toBeInTheDocument();
 
       fireEvent.click(
-        screen.getByRole('button', { name: /Enter values manually/ }),
+        screen.getByRole('button', { name: /Create app manually/ }),
       );
 
       expect(
@@ -579,6 +611,97 @@ describe('CommsProviderSection', () => {
       expect(screen.getByText(/Create a new Slack app/)).toBeInTheDocument();
       expect(screen.getByText('Authorized redirect URLs')).toBeInTheDocument();
       expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+    });
+
+    it('shows logo actions after creating a Slack app from a config token', async () => {
+      const { rerender } = render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+      fireEvent.change(screen.getByLabelText('App configuration token'), {
+        target: { value: 'xoxe.xoxp-config-token' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Create Slack app' }));
+
+      expect(
+        await screen.findByRole('link', { name: /the Roomote logo/i }),
+      ).toHaveAttribute('href', '/api/setup/roomote-logo');
+      expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
+        'href',
+        'https://api.slack.com/apps/A0NEWAPP',
+      );
+      await waitFor(() => {
+        expect(mutations.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ['comms', 'status'],
+        });
+        expect(mutations.invalidateQueries).toHaveBeenCalledWith({
+          queryKey: ['environmentVariables', 'list'],
+        });
+      });
+
+      rerender(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            runtimeSatisfied: false,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
+        'href',
+        'https://api.slack.com/apps/A0NEWAPP',
+      );
+
+      rerender(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(
+        screen.queryByRole('link', { name: /the app/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it('keeps alternate Slack setup actions disabled while app creation is pending', () => {
+      state.createSlackAppIsPending = true;
+
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(screen.getByLabelText('App configuration token')).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /Create Slack app/ }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /Create app manually/ }),
+      ).toBeDisabled();
     });
 
     it('shows numbered Microsoft setup with the settings env-var note', () => {
@@ -648,6 +771,12 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
       expect(
         screen.queryByPlaceholderText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: /prefilled manifest/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Create the app in Slack/i),
       ).not.toBeInTheDocument();
       expect(screen.getByText('Telegram Bot Token')).toBeInTheDocument();
       expect(

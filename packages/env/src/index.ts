@@ -2,6 +2,7 @@ import { createEnv } from '@t3-oss/env-nextjs';
 import {
   DEFAULT_LOCAL_DOCKER_WORKER_IMAGE,
   resolveEffectiveDockerWorkerImage,
+  ROOMOTE_CLOUD_BACKENDS,
   TASK_SANDBOX_DOCKER_MEMORY_MIB,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -24,6 +25,7 @@ type NodeEnv = 'test' | 'development' | 'production';
 
 const LOCAL_ENCRYPTION_KEY = 'local-roomote-encryption-key-0001';
 const LOCAL_ARTIFACT_SIGNING_KEY = 'local-roomote-artifact-signing-key-1';
+const LOCAL_DISCORD_GATEWAY_SECRET = 'local-roomote-discord-gateway-secret-01';
 const LOCAL_DASHBOARD_PASSWORD = 'roomote-local-admin';
 const LOCAL_PREVIEW_DOMAINS = 'localhost,127.0.0.1,roomotepreview.localhost';
 const LOCAL_S3_ENDPOINT = 'http://localhost:19000';
@@ -63,7 +65,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b'])
+    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z
@@ -105,6 +107,12 @@ const serverSchema = {
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  // Roomote Cloud-only analytics and support integrations. These values are
+  // intentionally not used by self-hosted deployments.
+  R_CLOUD_ENABLED: optInBoolean(),
+  R_INTERCOM_APP_ID: z.string().min(1).optional(),
+  R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
+  R_POSTHOG_HOST: z.string().url().optional(),
   // Force-enable telemetry in environments that would otherwise stay silent
   // (development / builds without RELEASE_VERSION). Testing escape hatch.
   ROOMOTE_FORCE_TELEMETRY: z.string().optional(),
@@ -167,6 +175,9 @@ const serverSchema = {
   R_TELEGRAM_BOT_TOKEN: z.string().min(1).optional(),
   R_TELEGRAM_WEBHOOK_SECRET: z.string().min(1).optional(),
   TELEGRAM_API_BASE_URL: z.string().url().default('https://api.telegram.org'),
+  R_DISCORD_BOT_TOKEN: z.string().min(1).optional(),
+  R_DISCORD_GATEWAY_SECRET: z.string().min(1).optional(),
+  DISCORD_API_BASE_URL: z.string().url().default('https://discord.com/api/v10'),
   R_MICROSOFT_CLIENT_ID: z.string().min(1).optional(),
   R_MICROSOFT_CLIENT_SECRET: z.string().min(1).optional(),
   R_MICROSOFT_TENANT_ID: z.string().min(1).optional(),
@@ -198,6 +209,12 @@ const serverSchema = {
   WEB_DEV_LOGIN_ENABLED: z.string().optional(),
   MODAL_TOKEN_ID: z.string().optional(),
   MODAL_TOKEN_SECRET: z.string().optional(),
+  // Deployment-managed Roomote Cloud credentials (Modal machinery, seeded by
+  // the hosting operator's provisioning rather than the setup flow).
+  ROOMOTE_CLOUD_TOKEN_ID: z.string().optional(),
+  ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
+  ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
+  ROOMOTE_CLOUD_SLUG: z.string().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -374,6 +391,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
   'R_PING_BASE_URL',
+  'R_INTERCOM_APP_ID',
+  'R_POSTHOG_PROJECT_KEY',
+  'R_POSTHOG_HOST',
   'SLACK_UNFURL_ALLOWED_DOMAINS',
   'ROUTER_DEBUG_CHANNEL_ID',
   'R_TEAMS_BOT_APP_ID',
@@ -384,6 +404,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_TEAMS_BOT_OAUTH_SCOPE',
   'R_TELEGRAM_BOT_TOKEN',
   'R_TELEGRAM_WEBHOOK_SECRET',
+  'R_DISCORD_BOT_TOKEN',
+  'R_DISCORD_GATEWAY_SECRET',
+  'DISCORD_API_BASE_URL',
   'R_SLACK_CLIENT_ID',
   'R_SLACK_CLIENT_SECRET',
   'R_SLACK_SIGNING_SECRET',
@@ -408,6 +431,10 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WEB_DEV_LOGIN_ENABLED',
   'MODAL_TOKEN_ID',
   'MODAL_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_TOKEN_ID',
+  'ROOMOTE_CLOUD_TOKEN_SECRET',
+  'ROOMOTE_CLOUD_BACKEND',
+  'ROOMOTE_CLOUD_SLUG',
   'MODAL_ENDPOINT',
   'MODAL_ENVIRONMENT',
   'MODAL_APP_NAME',
@@ -468,6 +495,15 @@ export type AuthKeypairEnvKey = (typeof AUTH_KEYPAIR_ENV_KEYS)[number];
 export function isEnvFlagEnabled(value: string | undefined): boolean {
   const normalized = value?.trim().toLowerCase();
   return normalized === 'true' || normalized === '1';
+}
+
+/** Whether Roomote Cloud-only behavior is enabled for this deployment. */
+export function isRoomoteCloudEnabled(
+  value: string | boolean | undefined,
+): boolean {
+  return (
+    value === true || (typeof value === 'string' && isEnvFlagEnabled(value))
+  );
 }
 
 /**
@@ -694,6 +730,12 @@ function buildRoomoteRuntimeEnv(
     env.DASHBOARD_PASSWORD ??= LOCAL_DASHBOARD_PASSWORD;
     env.ENCRYPTION_KEY ??= LOCAL_ENCRYPTION_KEY;
     env.ARTIFACT_SIGNING_KEY ??= LOCAL_ARTIFACT_SIGNING_KEY;
+    env.R_DISCORD_GATEWAY_SECRET ??= LOCAL_DISCORD_GATEWAY_SECRET;
+    // Keep process.env aligned so API auth, BullMQ, and the gateway share the
+    // same local default instead of only one process reading Env.*.
+    if (!processEnv.R_DISCORD_GATEWAY_SECRET?.trim()) {
+      processEnv.R_DISCORD_GATEWAY_SECRET = env.R_DISCORD_GATEWAY_SECRET;
+    }
     env.PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
     env.PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
     env.S3_ENDPOINT ??= LOCAL_S3_ENDPOINT;

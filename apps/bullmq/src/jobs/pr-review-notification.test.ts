@@ -12,6 +12,7 @@ const {
   mockPostMessage,
   mockTeamsPostMessage,
   mockTelegramPostMessage,
+  mockDiscordPostMessage,
   mockStickyFooterPost,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
@@ -25,6 +26,7 @@ const {
   mockPostMessage: vi.fn(),
   mockTeamsPostMessage: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
+  mockDiscordPostMessage: vi.fn(),
   mockStickyFooterPost: vi.fn(),
 }));
 
@@ -77,11 +79,12 @@ vi.mock('@roomote/sdk/server', () => ({
   requeuePendingPrReviewActivity: mockRequeuePending,
   schedulePrReviewNotificationJob: mockSchedule,
   getCommunicationProviderAdapter: vi.fn(
-    async (provider: 'slack' | 'teams' | 'telegram') =>
+    async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
       ({
         slack: { postMessage: mockPostMessage },
         teams: { postMessage: mockTeamsPostMessage },
         telegram: { postMessage: mockTelegramPostMessage },
+        discord: { postMessage: mockDiscordPostMessage },
       })[provider],
   ),
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
@@ -246,6 +249,28 @@ describe('prReviewNotificationJob', () => {
       channelId: '12345',
       threadId: '77',
       text: 'formatted-message',
+    });
+    expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts to Discord task threads with markdown formatting', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'formatted-message',
+      textFormat: 'markdown',
     });
     expect(mockPostMessage).not.toHaveBeenCalled();
   });

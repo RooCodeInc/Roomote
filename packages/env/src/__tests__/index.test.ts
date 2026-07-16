@@ -11,6 +11,7 @@ import {
   getWebBundledEnvFilePaths,
   isAutoGenerateKeysEnabled,
   isExposedBindHost,
+  isRoomoteCloudEnabled,
   rehydrateEnv,
   resolveAppEnv,
   shouldAutoGenerateAuthKeypairs,
@@ -80,6 +81,23 @@ describe('Env', () => {
     delete runtimeEnv.SANDBOX_OIDC_PUBLIC_KEY_SECONDARY;
     delete runtimeEnv.PREVIEW_TOKEN_TTL_SECONDS;
     delete runtimeEnv.SKIP_ENV_VALIDATION;
+    for (const key of [
+      'R_MODEL',
+      'R_SMALL_MODEL',
+      'R_VISION_MODEL',
+      'R_CODE_REVIEW_MODEL',
+      'R_EXPLORE_MODEL',
+      'R_PLANNING_MODEL',
+      'R_MODEL_REASONING_EFFORT',
+      'R_SMALL_MODEL_REASONING_EFFORT',
+      'R_VISION_MODEL_REASONING_EFFORT',
+      'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+      'R_EXPLORE_MODEL_REASONING_EFFORT',
+      'R_PLANNING_MODEL_REASONING_EFFORT',
+      'R_MODEL_ENV_KEYS',
+    ]) {
+      delete runtimeEnv[key];
+    }
 
     try {
       const env = createRoomoteEnv(runtimeEnv);
@@ -149,13 +167,43 @@ describe('Env', () => {
     ).toBe(true);
   });
 
-  it('allows the Modal VM memory allocation to be overridden', () => {
-    const env = createRoomoteEnv({
+  it('parses Roomote Cloud analytics configuration', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
       ...process.env,
-      MODAL_VM_MEMORY_MIB: '12288',
-    });
+      R_CLOUD_ENABLED: '1',
+      R_INTERCOM_APP_ID: 'intercom-app',
+      R_POSTHOG_PROJECT_KEY: 'posthog-project',
+      R_POSTHOG_HOST: 'https://eu.i.posthog.com',
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    const env = createRoomoteEnv(runtimeEnv);
 
-    expect(env.MODAL_VM_MEMORY_MIB).toBe(12_288);
+    expect(env.R_CLOUD_ENABLED).toBe(true);
+    expect(env.R_INTERCOM_APP_ID).toBe('intercom-app');
+    expect(env.R_POSTHOG_PROJECT_KEY).toBe('posthog-project');
+    expect(env.R_POSTHOG_HOST).toBe('https://eu.i.posthog.com');
+    expect(isRoomoteCloudEnabled('true')).toBe(true);
+    expect(isRoomoteCloudEnabled('1')).toBe(true);
+    expect(isRoomoteCloudEnabled('false')).toBe(false);
+  });
+
+  it('allows the Modal VM memory allocation to be overridden', () => {
+    const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
+    try {
+      delete process.env.SKIP_ENV_VALIDATION;
+      const env = createRoomoteEnv({
+        ...process.env,
+        MODAL_VM_MEMORY_MIB: '12288',
+      });
+
+      expect(env.MODAL_VM_MEMORY_MIB).toBe(12_288);
+    } finally {
+      if (previousSkipEnvValidation === undefined) {
+        delete process.env.SKIP_ENV_VALIDATION;
+      } else {
+        process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
+      }
+    }
   });
 
   it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {
@@ -577,6 +625,8 @@ describe('Env', () => {
       R_TEAMS_BOT_OAUTH_SCOPE: '',
       R_TELEGRAM_BOT_TOKEN: '',
       R_TELEGRAM_WEBHOOK_SECRET: '',
+      R_DISCORD_BOT_TOKEN: '',
+      R_DISCORD_GATEWAY_SECRET: '',
       R_SLACK_CLIENT_ID: '',
       R_SLACK_CLIENT_SECRET: '',
       R_SLACK_SIGNING_SECRET: '',
@@ -599,6 +649,8 @@ describe('Env', () => {
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
       expect(env.R_TELEGRAM_WEBHOOK_SECRET).toBeUndefined();
+      expect(env.R_DISCORD_BOT_TOKEN).toBeUndefined();
+      expect(env.R_DISCORD_GATEWAY_SECRET).toBeUndefined();
       expect(env.R_SLACK_CLIENT_ID).toBeUndefined();
       expect(env.R_SLACK_SIGNING_SECRET).toBeUndefined();
       expect(env.R_MICROSOFT_CLIENT_ID).toBeUndefined();
@@ -612,6 +664,21 @@ describe('Env', () => {
         process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
       }
     }
+  });
+
+  it('exposes Discord runtime configuration to control-plane services', () => {
+    const env = createRoomoteEnv({
+      ...productionCoreEnv,
+      R_DISCORD_BOT_TOKEN: 'discord-bot-token',
+      R_DISCORD_GATEWAY_SECRET: 'discord-gateway-secret',
+      DISCORD_API_BASE_URL: 'https://discord.example.test/api/v10',
+    });
+
+    expect(env.R_DISCORD_BOT_TOKEN).toBe('discord-bot-token');
+    expect(env.R_DISCORD_GATEWAY_SECRET).toBe('discord-gateway-secret');
+    expect(env.DISCORD_API_BASE_URL).toBe(
+      'https://discord.example.test/api/v10',
+    );
   });
 
   it('requires a tenant when Microsoft auth credentials are configured', () => {

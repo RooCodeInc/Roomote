@@ -169,9 +169,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   >(),
   // Deployment-wide Roomote agent settings (folded in from the former
   // background_agent_settings table): manager channel, global/authorship
-  // instructions, compiled authorship rules, style guidance, and Slack emoji
-  // preferences. The flat settings view consumed across the product layers a
-  // per-automation projection (built from the automations table) on top.
+  // instructions, and compiled authorship rules. The flat settings view
+  // consumed across the product layers a per-automation projection (built
+  // from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   globalAgentInstructions: text('global_agent_instructions'),
   authorshipInstructions: text('authorship_instructions'),
@@ -184,6 +184,10 @@ export const deploymentSettings = pgTable('deployment_settings', {
     .notNull()
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipAt: timestamp('compiled_authorship_at'),
+  // N-1 rollback compatibility for v0.5. The v0.6 product no longer reads or
+  // writes these settings, but the previous release still selects them while
+  // candidate migrations are applied and after a rollback. Remove these
+  // physical columns only after v0.6 becomes the supported rollback target.
   styleGuidance: text('style_guidance'),
   slackSummonEmoji: text('slack_summon_emoji'),
   slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
@@ -625,7 +629,7 @@ export const tasks = pgTable(
     ),
     check(
       'tasks_surface_check',
-      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
+      sql`${table.surface} in ('web', 'api', 'slack', 'teams', 'telegram', 'discord', 'linear', 'github', 'gitlab', 'gitea', 'ado', 'bitbucket', 'system')`,
     ),
     check(
       'tasks_trigger_check',
@@ -668,7 +672,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   }),
   taskPins: many(taskPins),
   runs: many(taskRuns),
-  inferenceUsageEvents: many(taskInferenceUsageEvents),
+  inferenceUsageEvents: many(llmUsageEvents),
   workItemsAsSource: many(workItems, {
     relationName: 'workItemSourceTask',
   }),
@@ -1038,20 +1042,25 @@ export const taskRuns = pgTable(
     index('task_runs_sleep_check_due_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
       ),
     index('task_runs_sleep_check_stale_worker_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
       ),
     index('task_runs_sleep_check_active_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote')`,
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
+    uniqueIndex('task_runs_discord_source_event_unique')
+      .on(sql`(${table.payload}->>'communicationSourceEventId')`)
+      .where(
+        sql`${table.payload}->>'communicationProvider' = 'discord' AND ${table.payload}->>'communicationSourceEventId' IS NOT NULL AND ${table.canceledAt} IS NULL`,
+      ),
     index('task_runs_first_assistant_output_at_idx').on(
       table.firstAssistantOutputAt,
     ),
@@ -1235,22 +1244,38 @@ export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
 }));
 
 /**
- * task_inference_usage_events
+ * llm_usage_events
  */
 
-export const taskInferenceUsageEvents = pgTable(
+export const llmUsageEvents = pgTable(
+  // Keep the v0.5 physical table name for N-1 rollback compatibility. The
+  // generalized v0.6 API name is intentionally only a TypeScript-level rename.
   'task_inference_usage_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     source: text('source').notNull().default('opencode'),
-    taskId: text('task_id')
+    usageType: text('usage_type')
       .notNull()
-      .references(() => tasks.id, { onDelete: 'cascade' }),
+      .default('inference')
+      .$type<'inference' | 'embedding' | 'rerank' | 'other'>(),
+    taskId: text('task_id').references(() => tasks.id, {
+      onDelete: 'cascade',
+    }),
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
-    harnessSessionId: text('harness_session_id').notNull(),
-    messageId: text('message_id').notNull(),
+    userId: text('user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    environmentId: uuid('environment_id').references(() => environments.id, {
+      onDelete: 'set null',
+    }),
+    // Non-task producers use eventKey for idempotency. Task harness events use
+    // the session/message pair below because a message may be retried with
+    // progressively richer usage data.
+    eventKey: text('event_key'),
+    harnessSessionId: text('harness_session_id'),
+    messageId: text('message_id'),
     providerId: text('provider_id'),
     modelId: text('model_id'),
     /**
@@ -1285,6 +1310,10 @@ export const taskInferenceUsageEvents = pgTable(
     costSource: text('cost_source')
       .notNull()
       .$type<'opencode_message' | 'missing'>(),
+    pricingMetadata: jsonb('pricing_metadata')
+      .notNull()
+      .default({})
+      .$type<Record<string, unknown>>(),
     messageCreatedAt: timestamp('message_created_at'),
     messageCompletedAt: timestamp('message_completed_at'),
     details: jsonb('details')
@@ -1299,25 +1328,41 @@ export const taskInferenceUsageEvents = pgTable(
       table.harnessSessionId,
       table.messageId,
     ),
+    uniqueIndex('task_inference_usage_events_event_key_unique').on(
+      table.eventKey,
+    ),
     index('task_inference_usage_events_task_id_idx').on(table.taskId),
     index('task_inference_usage_events_run_id_idx').on(table.runId),
+    index('task_inference_usage_events_user_id_idx').on(table.userId),
+    index('task_inference_usage_events_environment_id_idx').on(
+      table.environmentId,
+    ),
+    index('task_inference_usage_events_provider_model_idx').on(
+      table.providerId,
+      table.modelId,
+    ),
     index('task_inference_usage_events_created_at_idx').on(table.createdAt),
   ],
 );
 
-export const taskInferenceUsageEventsRelations = relations(
-  taskInferenceUsageEvents,
-  ({ one }) => ({
-    task: one(tasks, {
-      fields: [taskInferenceUsageEvents.taskId],
-      references: [tasks.id],
-    }),
-    run: one(taskRuns, {
-      fields: [taskInferenceUsageEvents.runId],
-      references: [taskRuns.id],
-    }),
+export const llmUsageEventsRelations = relations(llmUsageEvents, ({ one }) => ({
+  task: one(tasks, {
+    fields: [llmUsageEvents.taskId],
+    references: [tasks.id],
   }),
-);
+  run: one(taskRuns, {
+    fields: [llmUsageEvents.runId],
+    references: [taskRuns.id],
+  }),
+  user: one(users, {
+    fields: [llmUsageEvents.userId],
+    references: [users.id],
+  }),
+  environment: one(environments, {
+    fields: [llmUsageEvents.environmentId],
+    references: [environments.id],
+  }),
+}));
 
 export const taskSlackReplyDetails = pgTable(
   'task_slack_reply_details',
@@ -1427,7 +1472,7 @@ export const taskRunsRelations = relations(taskRuns, ({ one, many }) => ({
   }),
   events: many(taskRunEvents),
   messages: many(taskMessages),
-  inferenceUsageEvents: many(taskInferenceUsageEvents),
+  inferenceUsageEvents: many(llmUsageEvents),
   platformIssueReports: many(taskPlatformIssueReports),
 }));
 
@@ -2098,6 +2143,165 @@ export const telegramUserMappingsRelations = relations(
 );
 
 /**
+ * discord_installations
+ *
+ * One row per Discord guild where the deployment's bot is installed. The
+ * default destination is the channel Roomote uses for proactive work; task
+ * conversations still create their own thread or forum post from there.
+ */
+
+export const discordInstallations = pgTable(
+  'discord_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    guildId: text('guild_id').notNull(),
+    guildName: text('guild_name'),
+    applicationId: text('application_id').notNull(),
+    botUserId: text('bot_user_id').notNull(),
+    installedByUserId: text('installed_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    defaultChannelId: text('default_channel_id'),
+    defaultChannelName: text('default_channel_name'),
+    defaultChannelType: integer('default_channel_type'),
+    isActive: boolean('is_active').notNull().default(true),
+    lastSeenAt: timestamp('last_seen_at'),
+    lastUsedAt: timestamp('last_used_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('discord_installations_guild_id_unique').on(table.guildId),
+    index('discord_installations_active_idx').on(table.isActive),
+    index('discord_installations_default_channel_idx').on(
+      table.defaultChannelId,
+    ),
+  ],
+);
+
+export const discordInstallationsRelations = relations(
+  discordInstallations,
+  ({ one, many }) => ({
+    installedByUser: one(users, {
+      fields: [discordInstallations.installedByUserId],
+      references: [users.id],
+    }),
+    channels: many(discordInstallationChannels),
+  }),
+);
+
+/**
+ * discord_installation_channels
+ *
+ * A best-effort catalog of channels visible to Roomote. Discord channel type
+ * is stored as its numeric API value so new upstream channel kinds do not
+ * require a schema migration.
+ */
+
+export const discordInstallationChannels = pgTable(
+  'discord_installation_channels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discordInstallationId: uuid('discord_installation_id')
+      .notNull()
+      .references(() => discordInstallations.id, { onDelete: 'cascade' }),
+    channelId: text('channel_id').notNull(),
+    channelName: text('channel_name'),
+    channelType: integer('channel_type').notNull(),
+    parentId: text('parent_id'),
+    position: integer('position'),
+    permissions: text('permissions'),
+    isAvailable: boolean('is_available').notNull().default(true),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('discord_installation_channels_installation_id_idx').on(
+      table.discordInstallationId,
+    ),
+    uniqueIndex('discord_installation_channels_unique').on(
+      table.discordInstallationId,
+      table.channelId,
+    ),
+  ],
+);
+
+export const discordInstallationChannelsRelations = relations(
+  discordInstallationChannels,
+  ({ one }) => ({
+    installation: one(discordInstallations, {
+      fields: [discordInstallationChannels.discordInstallationId],
+      references: [discordInstallations.id],
+    }),
+  }),
+);
+
+/**
+ * discord_user_mappings
+ *
+ * Discord user snowflakes are global, so attribution is deployment-wide and
+ * does not need to be duplicated per guild. The last DM channel is retained
+ * as the safe destination for user-specific proactive messages.
+ */
+
+export const discordUserMappings = pgTable(
+  'discord_user_mappings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    discordUserId: text('discord_user_id').notNull(),
+    discordUsername: text('discord_username'),
+    discordGlobalName: text('discord_global_name'),
+    discordDmChannelId: text('discord_dm_channel_id'),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('discord_user_mappings_user_id_idx').on(table.userId),
+    uniqueIndex('discord_user_mappings_discord_user_id_unique').on(
+      table.discordUserId,
+    ),
+  ],
+);
+
+export const discordUserMappingsRelations = relations(
+  discordUserMappings,
+  ({ one }) => ({
+    user: one(users, {
+      fields: [discordUserMappings.userId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * discord_gateway_sessions
+ *
+ * Discord Gateway sessions can be resumed after a process restart when the
+ * session id, resume URL, and last sequence number survive the process. This
+ * table stores one row per token fingerprint and shard. It contains only
+ * resumability metadata; the bot token remains in encrypted deployment
+ * configuration.
+ */
+
+export const discordGatewaySessions = pgTable('discord_gateway_sessions', {
+  id: text('id').notNull().primaryKey(),
+  sessionId: text('session_id'),
+  resumeGatewayUrl: text('resume_gateway_url'),
+  sequence: bigint('sequence', { mode: 'number' }),
+  shardCount: integer('shard_count'),
+  lastConnectedAt: timestamp('last_connected_at'),
+  lastHeartbeatAckAt: timestamp('last_heartbeat_ack_at'),
+  disconnectedAt: timestamp('disconnected_at'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
  * teams_installations
  */
 
@@ -2645,6 +2849,23 @@ export const environments = pgTable(
     // environments; cleared when the definition disappears from the
     // declarative set.
     declarativeSource: text('declarative_source'),
+
+    // Verification state. "Configured" means the environment definition exists
+    // but its current runtime configuration has not been confirmed to work by a
+    // follow-up verification task. "Verified" means a verification task
+    // explicitly reported success. Migration 0013 preserved existing rows as
+    // verified; new environments start unverified. Any
+    // runtime-affecting edit clears verification through
+    // updateEnvironmentDefinition, so these fields cannot drift across the API,
+    // Settings, agent, and declarative write paths.
+    isVerified: boolean('is_verified').notNull().default(false),
+    // Roomote task id of the verification task that most recently ran (or is
+    // running) for the current configuration. Not a task-run id.
+    verificationTaskId: text('verification_task_id'),
+    verifiedAt: timestamp('verified_at'),
+    // Latest user-safe verification failure message. Never stores secrets or
+    // full environment YAML.
+    verificationError: text('verification_error'),
 
     snapshotId: text('snapshot_id'),
     snapshotCreatedAt: timestamp('snapshot_created_at'),

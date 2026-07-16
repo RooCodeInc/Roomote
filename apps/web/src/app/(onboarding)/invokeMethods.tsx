@@ -16,10 +16,9 @@ type InvokeMethod = {
   icon: MethodIcon;
   title: string;
   description: string;
-  example?: string;
 };
 
-type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
 const communicationProviderCopy: Record<
   CommunicationProviderId,
@@ -44,6 +43,12 @@ const communicationProviderCopy: Record<
     title: 'Telegram',
     description: `start work from any connected chats.`,
   },
+  discord: {
+    icon: 'discord',
+    title: 'Discord',
+    description:
+      'mention it in a server channel, use /new, or continue work in a task thread.',
+  },
 };
 
 const sourceControlProviderCopy: Record<
@@ -67,7 +72,7 @@ const sourceControlProviderCopy: Record<
   },
   bitbucket: {
     icon: 'bitbucket',
-    description: `Start work from connected Bitbucket pull requests and repositories.`,
+    description: `Mention @roomote in a comment on any pull request.`,
   },
   ado: {
     icon: 'ado',
@@ -124,13 +129,11 @@ export function buildInvokeMethods({
   return [
     ...uniqueValues(communicationProviders).map((provider) => {
       const copy = communicationProviderCopy[provider];
-      const identity = getIdentity(invocationIdentities, provider);
 
       return {
         icon: createBrandIcon(copy.icon, copy.title),
         title: copy.title,
         description: copy.description,
-        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...uniqueValues(sourceControlProviders).map((provider) => {
@@ -148,7 +151,6 @@ export function buildInvokeMethods({
         icon: createBrandIcon(copy.icon, title),
         title,
         description,
-        ...(identity?.examplePrompt ? { example: identity.examplePrompt } : {}),
       };
     }),
     ...(includeLinear

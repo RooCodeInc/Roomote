@@ -25,6 +25,7 @@ import type {
   ListEnvironmentsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
+  RecordVerificationResponse,
   SubmitAutomationWorkItemsResponse,
   SubmitTaskSuggestionsResponse,
   SourceControlPullRequestReadResponse,
@@ -476,5 +477,31 @@ export async function updateEnvironment(
       }),
     },
     'Failed to update environment',
+  );
+}
+
+/**
+ * Record the terminal result of an environment verification task.
+ */
+export async function recordEnvironmentVerification(
+  config: RoomoteConfig,
+  params: {
+    environmentId: string;
+    success: boolean;
+    error?: string;
+  },
+): Promise<RecordVerificationResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/environments/${encodeURIComponent(params.environmentId)}/verification`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        success: params.success,
+        ...(params.error !== undefined ? { error: params.error } : {}),
+      }),
+    },
+    'Failed to record environment verification',
   );
 }

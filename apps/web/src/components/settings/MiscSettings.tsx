@@ -101,25 +101,27 @@ export function MiscSettings() {
         </div>
       </Section>
 
-      <Section icon={EarOff} title="Privacy">
-        <div className="flex gap-3">
-          <Switch
-            aria-label="Toggle anonymous analytics"
-            checked={settingsQuery.data.anonymousAnalyticsEnabled}
-            disabled={updateMutation.isPending}
-            onCheckedChange={(checked) => void handleToggle(checked === true)}
-          />
-          <div className="space-y-1">
-            <p className="text-sm font-semibold">Anonymous analytics</p>
-            <p className="text-sm text-muted-foreground">
-              Share anonymous usage analytics with the Roomote team to help
-              improve the product. Activity is identified only by random IDs
-              that are never linked to your company, users, or repositories. No
-              prompts, conversations or code is ever shared.
-            </p>
+      {!settingsQuery.data.cloudEnabled && (
+        <Section icon={EarOff} title="Privacy">
+          <div className="flex gap-3">
+            <Switch
+              aria-label="Toggle anonymous analytics"
+              checked={settingsQuery.data.anonymousAnalyticsEnabled}
+              disabled={updateMutation.isPending}
+              onCheckedChange={(checked) => void handleToggle(checked === true)}
+            />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold">Anonymous analytics</p>
+              <p className="text-sm text-muted-foreground">
+                Share anonymous usage analytics with the Roomote team to help
+                improve the product. Activity is identified only by random IDs
+                that are never linked to your company, users, or repositories.
+                No prompts, conversations or code is ever shared.
+              </p>
+            </div>
           </div>
-        </div>
-      </Section>
+        </Section>
+      )}
 
       <Section icon={Stethoscope} title="Diagnostics">
         <div className="space-y-3">

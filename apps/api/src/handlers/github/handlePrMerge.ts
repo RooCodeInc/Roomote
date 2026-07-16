@@ -14,7 +14,7 @@ export const handlePrMerge = async ({
     ? ('merged' as const)
     : ('closed' as const);
 
-  // Notify Slack, Teams, Telegram, and Linear threads/sessions associated
+  // Notify Slack, Teams, Telegram, Discord, and Linear threads/sessions associated
   // with this PR when it becomes terminal (merged or closed). Fire-and-forget.
   if (installation?.id) {
     scheduleNotifyPullRequestTerminalStatus(

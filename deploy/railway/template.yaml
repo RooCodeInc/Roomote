@@ -130,6 +130,9 @@ services:
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
       R_AUTO_GENERATE_KEYS: 'true'
       ENCRYPTION_KEY: ${{secret(32)}}
+      # Transport secret between BullMQ Discord Gateway and API.
+      R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
+      R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
       S3_SECRET_ACCESS_KEY: ${{secret(32)}}
@@ -183,6 +186,8 @@ services:
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
+      R_DISCORD_GATEWAY_SECRET: ${{api.R_DISCORD_GATEWAY_SECRET}}
+      R_DISCORD_BOT_TOKEN: ${{api.R_DISCORD_BOT_TOKEN}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
       S3_SECRET_ACCESS_KEY: ${{api.S3_SECRET_ACCESS_KEY}}

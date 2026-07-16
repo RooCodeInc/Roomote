@@ -3,6 +3,7 @@ import { db, eq, slackInstallations } from '@roomote/db/server';
 import { SlackCommunicationProvider, SlackNotifier } from '@roomote/slack';
 import type { CommunicationProvider } from '@roomote/types';
 
+import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 
@@ -40,5 +41,7 @@ export async function getCommunicationProviderAdapter(
       return createTeamsCommunicationProviderFromRuntimeCredentials();
     case 'telegram':
       return createTelegramCommunicationProviderFromRuntimeCredentials();
+    case 'discord':
+      return createDiscordCommunicationProviderFromRuntimeCredentials();
   }
 }

@@ -60,9 +60,7 @@ export const AcpCommandOutputMessage = ({
         : `exit ${cmd.exitCode}`
       : status === 'failed'
         ? 'failed'
-        : status === 'completed'
-          ? 'completed'
-          : null;
+        : null;
 
   return (
     <Message from="assistant" className={cn('chat-command-output-message')}>

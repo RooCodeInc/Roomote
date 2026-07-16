@@ -1,0 +1,38 @@
+{
+  "name": "@roomote/discord-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/embedded.ts"
+  },
+  "scripts": {
+    "format": "oxfmt \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "format:check": "oxfmt --check \"**/*.{js,jsx,ts,tsx,json,css}\"",
+    "lint": "eslint src --ext=ts --max-warnings=0",
+    "check-types": "tsc --noEmit",
+    "check-types:fast": "tsgo --noEmit",
+    "test": "vitest",
+    "dev": "bash ./scripts/watchman.sh",
+    "dev:prepare": "rimraf dist",
+    "build": "tsup --clean",
+    "start": "node dist/index.js",
+    "clean": "rimraf dist .turbo",
+    "internal-deps": "pnpm list --filter @roomote/discord-gateway --depth Infinity 2>/dev/null | grep -E '@roomote/' | grep 'link:' | sed 's/.*@roomote/@roomote/' | sed 's/ link:.*//' | sort -u"
+  },
+  "dependencies": {
+    "@discordjs/ws": "^1.2.3",
+    "@roomote/db": "workspace:^",
+    "@roomote/redis": "workspace:^",
+    "@roomote/sdk": "workspace:^",
+    "discord.js": "^14.22.1"
+  },
+  "devDependencies": {
+    "@roomote/config-eslint": "workspace:^",
+    "@roomote/config-typescript": "workspace:^",
+    "@types/node": "^24.10.13",
+    "rimraf": "^6.1.2",
+    "tsup": "^8.5.1",
+    "vitest": "^4.1.1"
+  }
+}

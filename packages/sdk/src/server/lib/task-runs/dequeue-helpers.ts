@@ -33,6 +33,7 @@ import {
 } from '@roomote/cloud-agents/server';
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
+import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -85,7 +86,7 @@ export function redactSourceControlProviderEnvVars(
       : sourceControlProvider === 'gitea'
         ? ['GITEA_TOKEN']
         : sourceControlProvider === 'bitbucket'
-          ? ['BITBUCKET_TOKEN']
+          ? []
           : sourceControlProvider === 'ado'
             ? ['ADO_TOKEN']
             : [];
@@ -286,6 +287,43 @@ export async function cancelAndReleaseTaskRun(
       }`,
     );
   }
+
+  await notifyCanceledTaskRunOnSettle(taskRun, errorMessage);
+}
+
+/**
+ * Dequeue/bootstrap cancellations bypass finishRun, so they must explicitly
+ * deliver notify-on-settle feedback after their transaction commits.
+ */
+export async function notifyCanceledTaskRunOnSettle(
+  taskRun: TaskRun,
+  errorMessage?: string,
+): Promise<void> {
+  try {
+    const persistedRun = errorMessage
+      ? null
+      : await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, taskRun.id),
+          columns: { error: true },
+        });
+    const taskTitle = (taskRun as TaskRun & { task?: { title: string | null } })
+      .task?.title;
+
+    await notifySourceRunOnSettle(
+      {
+        ...taskRun,
+        error: errorMessage ?? persistedRun?.error ?? taskRun.error,
+      },
+      RunStatus.Canceled,
+      taskTitle,
+    );
+  } catch (error) {
+    console.error(
+      `[notifyCanceledTaskRunOnSettle] Failed for run ${taskRun.id}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 const SOURCE_CONTROL_TOKEN_MAX_RETRIES = 3;
@@ -390,7 +428,7 @@ async function createProviderToken(
       return {
         provider,
         token: '',
-        envVar: 'BITBUCKET_TOKEN',
+        envVar: 'BITBUCKET_OAUTH',
         envVars: {},
         gitProxyCredentials: credentials.credentials.map((credential) => ({
           ...credential,

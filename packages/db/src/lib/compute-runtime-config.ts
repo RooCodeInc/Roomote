@@ -212,8 +212,9 @@ export async function resolveComputeProviderEnvValues(
 
   const effectiveRuntimeWorkerImage =
     resolveEffectiveDockerWorkerImage(runtimeEnv) ?? undefined;
+  const usesModalBaseImage = provider === 'modal' || provider === 'roomote';
   const runtimeManagedModalBaseImage =
-    provider === 'modal' && !runtimeEnv.MODAL_BASE_IMAGE_REF
+    usesModalBaseImage && !runtimeEnv.MODAL_BASE_IMAGE_REF
       ? deriveModalBaseImageRefDefault(effectiveRuntimeWorkerImage)
       : null;
 
@@ -268,7 +269,7 @@ export async function resolveComputeProviderEnvValues(
   // intentionally ignored so a sticky saved value cannot pin release-derived
   // workers back to a stale image. Development falls back to the public
   // latest image when no hosted image is derivable.
-  if (provider === 'modal' && !resolvedValues.MODAL_BASE_IMAGE_REF) {
+  if (usesModalBaseImage && !resolvedValues.MODAL_BASE_IMAGE_REF) {
     const derivedBaseImageRef = resolveDerivedModalBaseImageRef({
       ...runtimeEnv,
       DOCKER_WORKER_IMAGE: effectiveRuntimeWorkerImage,

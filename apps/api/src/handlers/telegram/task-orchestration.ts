@@ -3,16 +3,9 @@ import type {
   TelegramUpdateCommunicationMetadata,
 } from '@roomote/communication/telegram-update';
 import { Env } from '@roomote/env';
-import {
-  ALL_REPOSITORIES,
-  TaskPayloadKind,
-  type TaskPayload,
-  populateSnapshotResumeCommunicationMetadata,
-  restoreSnapshotResumeVisiblePromptFields,
-} from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 import {
   buildTelegramRoutingContext,
-  enqueueTask,
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
@@ -32,6 +25,7 @@ import type {
   QueuedTelegramCommunicationMessage,
   TelegramConversationRef,
 } from './types.js';
+import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
 
 function cleanOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -44,61 +38,15 @@ export async function resumeTelegramTaskFromSnapshot(input: {
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
 }) {
-  const sourceSnapshotId = input.completedRun.snapshotId;
-
-  if (!sourceSnapshotId) {
-    throw new Error('Telegram snapshot resume requires a source snapshot.');
-  }
-
-  const completedPayload = input.completedRun.payload as Record<
-    string,
-    unknown
-  >;
-  const repo =
-    typeof completedPayload.repo === 'string'
-      ? completedPayload.repo
-      : ALL_REPOSITORIES;
-  const environmentId =
-    typeof completedPayload.environmentId === 'string'
-      ? completedPayload.environmentId
-      : undefined;
-  const resumePayload: TaskPayload<typeof TaskPayloadKind.SnapshotResume> = {
-    repo,
-    ...(environmentId ? { environmentId } : {}),
-    ...(input.completedRun.port ? { port: input.completedRun.port } : {}),
-    sourceSnapshotId,
-    sourceRunId: input.completedRun.id,
-    queuedCommunicationMessages: [input.queuedMessage],
-  };
-
-  populateSnapshotResumeCommunicationMetadata(resumePayload, {
+  return resumeCommunicationTaskFromSnapshot({
     provider: 'telegram',
-    sourcePayload: completedPayload,
+    completedRun: input.completedRun,
+    queuedMessage: input.queuedMessage,
     channelId: input.metadata.communicationChannelId,
     threadId: input.metadata.communicationThreadId,
     messageId: input.metadata.communicationMessageId,
+    preservePayloadFlags: ['telegramTaskTopic'],
   });
-  if (completedPayload.telegramTaskTopic === true) {
-    resumePayload.telegramTaskTopic = true;
-  }
-  restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
-
-  // Resumes never create tasks and never re-attribute; the resuming human
-  // becomes the new run's acting user.
-  return enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId,
-        sourceRunId: input.completedRun.id,
-        payload: resumePayload,
-      },
-      actingUserId: input.queuedMessage.userId ?? null,
-    },
-    {
-      launchClass: 'human',
-    },
-  );
 }
 
 export async function replyToTelegramSnapshotResume(input: {

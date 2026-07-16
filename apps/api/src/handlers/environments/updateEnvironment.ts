@@ -23,6 +23,7 @@ import {
   attachEnvironmentIdToTaskRun,
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
+  resolveCallingVerificationTaskId,
   resolveEnvironmentWriteUserId,
 } from './createEnvironment';
 
@@ -155,6 +156,8 @@ export async function updateEnvironment(
       .map((name) => repoMap.get(name))
       .filter((repositoryId): repositoryId is string => Boolean(repositoryId));
 
+    const verificationTaskId = await resolveCallingVerificationTaskId(auth);
+
     await db.transaction(async (tx) => {
       const now = new Date();
 
@@ -167,6 +170,11 @@ export async function updateEnvironment(
         },
         updatedAt: now,
         repositoryIds,
+        // When this runtime-affecting update resets verification, register the
+        // calling setup task as the current attempt atomically under the same
+        // row lock, so a concurrent edit cannot associate an older task with
+        // this newer configuration.
+        registerVerificationTaskId: verificationTaskId,
         configVersion: {
           config: environment.config,
           name: environment.name,

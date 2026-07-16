@@ -71,7 +71,7 @@ const MODAL_DETACHED_EXIT_GRACE_PERIOD_MS = 1_000;
 const MODAL_SNAPSHOT_TIMEOUT_MS = 20 * 60_000;
 
 export class ModalClient implements ComputeProviderClient {
-  public readonly vendor: ComputeProvider = 'modal';
+  public readonly vendor: ComputeProvider;
 
   private static readonly sandboxCache = new LRUCache<string, Sandbox>({
     max: 100,
@@ -92,6 +92,7 @@ export class ModalClient implements ComputeProviderClient {
 
   public constructor(config: ModalConfig) {
     this.config = { ...config };
+    this.vendor = config.vendor ?? 'modal';
 
     const hasAnyEcrConfig = !!(
       this.config.ecrOidcRoleArn || this.config.ecrRegion

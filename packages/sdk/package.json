@@ -28,6 +28,10 @@
       "import": "./src/server/lib/telegram-primary-chat.ts",
       "require": "./src/server/lib/telegram-primary-chat.ts"
     },
+    "./server/discord-persistence": {
+      "import": "./src/server/lib/discord-persistence.ts",
+      "require": "./src/server/lib/discord-persistence.ts"
+    },
     "./server/teams-primary-conversation": {
       "import": "./src/server/lib/teams-primary-conversation.ts",
       "require": "./src/server/lib/teams-primary-conversation.ts"

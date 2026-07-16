@@ -682,8 +682,8 @@ describe('opencode-server bootstrap', () => {
       mode: 'subagent',
       model: 'openrouter/anthropic/claude-opus-4.7',
       options: { reasoning: { effort: 'high' } },
-      prompt: expect.stringContaining(
-        'user contradicts or challenges its approach',
+      prompt: expect.stringMatching(
+        /user contradicts or challenges its approach[\s\S]*Exit contract: always end with a non-empty final assistant message[\s\S]*reasoning-only completion is a failed consultation/,
       ),
       permission: {
         read: 'allow',
@@ -718,6 +718,12 @@ describe('opencode-server bootstrap', () => {
     expect(advisorModelInstructions).toContain(
       'repeated or insurmountable failures',
     );
+    expect(advisorModelInstructions).toContain(
+      'short final-text answer; only that final assistant text is returned',
+    );
+    expect(advisorModelInstructions).toContain(
+      'empty or whitespace-only output, treat that as a failed consultation',
+    );
   });
 
   it('configures a hidden advisor subagent with the coding model at the advisor reasoning level when no planning model is configured', async () => {
@@ -749,9 +755,19 @@ describe('opencode-server bootstrap', () => {
       mode: 'subagent',
       model: 'test-provider/main-model',
       options: { reasoningEffort: 'high' },
+      prompt: expect.stringContaining(
+        'never finish a turn with only reasoning, tool calls, or whitespace',
+      ),
     });
-    expect(fs.readFileSync(advisorModelInstructionsPath, 'utf8')).toContain(
+    const advisorModelInstructions = fs.readFileSync(
+      advisorModelInstructionsPath,
+      'utf8',
+    );
+    expect(advisorModelInstructions).toContain(
       'falls back to the active coding model',
+    );
+    expect(advisorModelInstructions).toContain(
+      'Retry at most once with a tighter brief',
     );
   });
 

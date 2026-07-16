@@ -703,12 +703,16 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
-  const settings = await getDeploymentTaskModelSettings();
+  const [settings, chatgptConnected] = await Promise.all([
+    getDeploymentTaskModelSettings(),
+    isChatGptSubscriptionConnected(),
+  ]);
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
 
   return {
     defaultModelId: defaultModel.id,
+    chatgptConnected,
     models: enabledModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,

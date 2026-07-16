@@ -9,14 +9,12 @@ import {
   IdCard,
   MessagesSquare,
   PlugIcon,
-  Rainbow,
   ScrollText,
   ServerCog,
   Users,
   VectorSquare,
 } from '@/components/system';
 import { SETTINGS_PATHS } from '@/lib/settings';
-import { PRODUCT_NAME } from '@roomote/types';
 
 export type SettingsPageId =
   | 'personal'
@@ -31,7 +29,6 @@ export type SettingsPageId =
   | 'source-control'
   | 'models'
   | 'skills'
-  | 'vibes'
   | 'experimental'
   | 'misc';
 
@@ -43,6 +40,7 @@ type SettingsNavigationItem = {
   href: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  hiddenWhenCloud?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
 };
@@ -90,6 +88,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     href: SETTINGS_PATHS.compute,
     icon: Cpu,
     adminOnly: true,
+    hiddenWhenCloud: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.compute),
   },
   {
@@ -169,16 +168,6 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.users),
   },
   {
-    id: 'vibes',
-    label: 'Vibes',
-    title: 'Vibes',
-    description: `Help ${PRODUCT_NAME} fit in with your team.`,
-    href: SETTINGS_PATHS.vibes,
-    icon: Rainbow,
-    adminOnly: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.vibes),
-  },
-  {
     id: 'experimental',
     label: 'Experimental',
     title: 'Experimental',
@@ -201,9 +190,15 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
   },
 ];
 
-export function getAccessibleSettingsNavigation(opts: { isAdmin: boolean }) {
+export function getAccessibleSettingsNavigation(opts: {
+  isAdmin: boolean;
+  cloudEnabled: boolean;
+}) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
+      return false;
+    }
+    if (item.hiddenWhenCloud && opts.cloudEnabled) {
       return false;
     }
     return true;

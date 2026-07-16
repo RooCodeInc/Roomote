@@ -651,7 +651,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     );
 
     return (
-      <div className="2xl:max-w-5xl mx-auto w-full">
+      <div className="mx-auto w-full max-w-4xl">
         <PromptInputRoot
           onSubmit={handleSubmit}
           accept={ROOMOTE_FILE_ATTACHMENT_ACCEPT}

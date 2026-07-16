@@ -15,6 +15,7 @@ import {
   TASK_RUNTIME_FAILURE_TEXT,
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
+import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import {
   type TaskRun,
@@ -34,6 +35,7 @@ import {
   and,
   isNotNull,
   tasks,
+  resolveDiscordRuntimeCredentials,
 } from '@roomote/db/server';
 import {
   buildTerminalReviewStatus,
@@ -57,6 +59,7 @@ import {
   readConflictResolutionSummary,
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
+import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -226,6 +229,17 @@ export const finishRun = async ({
     });
   });
 
+  // Deterministic spawned-task feedback: when this run was launched by
+  // another task's run with notify-on-settle requested, deliver the outcome
+  // into that launching run's session (waking it if idle) so the parent
+  // never has to poll for it. Never throws. `run` was read before the
+  // transaction, so splice in the error that was just finalized.
+  await notifySourceRunOnSettle(
+    { ...run, error: sanitizedError ?? run.error },
+    status,
+    run.task.title,
+  );
+
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
   if (status === RunStatus.Completed) {
@@ -322,6 +336,24 @@ export const finishRun = async ({
     } catch (err) {
       console.error(
         `[finishRun] Failed to send Teams failure notification for run ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  // Discord failure notification: keep failures inside the originating task
+  // thread/forum post using the provider-neutral payload coordinates.
+  if (
+    status === RunStatus.Failed &&
+    !task.slackThreadTs &&
+    getCommunicationProviderFromTaskPayload(run.payload) === 'discord'
+  ) {
+    try {
+      await sendDiscordFailureNotification(run);
+    } catch (err) {
+      console.error(
+        `[finishRun] Failed to send Discord failure notification for run ${id}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
@@ -617,6 +649,59 @@ async function sendTeamsFailureNotification(run: FinishedRun): Promise<void> {
   });
 
   console.log(`[finishRun] Sent Teams failure notification for run ${run.id}`);
+}
+
+async function createDiscordCommunicationProviderFromRuntimeCredentials(): Promise<DiscordCommunicationProvider | null> {
+  const { botToken, applicationId } = await resolveDiscordRuntimeCredentials();
+  if (!botToken) {
+    return null;
+  }
+  return new DiscordCommunicationProvider({
+    botToken,
+    ...(applicationId ? { applicationId } : {}),
+  });
+}
+
+async function sendDiscordFailureNotification(run: FinishedRun): Promise<void> {
+  const provider =
+    await createDiscordCommunicationProviderFromRuntimeCredentials();
+  if (!provider) {
+    console.warn(
+      `[finishRun] Discord bot credentials are not configured, skipping Discord failure notification for run ${run.id}`,
+    );
+    return;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(run.payload);
+  if (!channelId) {
+    console.warn(
+      `[finishRun] Missing Discord channel metadata for run ${run.id}, skipping Discord failure notification`,
+    );
+    return;
+  }
+
+  const threadId = getCommunicationThreadIdFromTaskPayload(run.payload);
+  const failureText = hasReachedTaskRuntime(run)
+    ? TASK_RUNTIME_FAILURE_TEXT
+    : TASK_STARTUP_FAILURE_TEXT;
+  const taskUrl = getTaskUrl({
+    taskId: run.taskId,
+    utm: { campaign: run.payloadKind, source: 'discord' },
+  });
+  const text = taskUrl
+    ? `${failureText}\n\n${formatMarkdownLink('Open the task', taskUrl)}`
+    : failureText;
+
+  await provider.postMessage({
+    channelId,
+    ...(threadId ? { threadId } : {}),
+    text,
+    textFormat: 'markdown',
+  });
+
+  console.log(
+    `[finishRun] Sent Discord failure notification for run ${run.id}`,
+  );
 }
 
 /**
@@ -1054,12 +1139,20 @@ async function resolveSetupCompletionEnvironmentDefinitionId(
 }
 
 function buildSlackWebPathUrl(webPath: string, campaign: string): string {
+  return buildCommunicationWebPathUrl(webPath, 'slack', campaign);
+}
+
+function buildCommunicationWebPathUrl(
+  webPath: string,
+  source: 'slack' | 'discord',
+  campaign: string,
+): string {
   const url = new URL(
     webPath,
     process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
   );
 
-  url.searchParams.set('utm_source', 'slack');
+  url.searchParams.set('utm_source', source);
   url.searchParams.set('utm_medium', 'link');
   url.searchParams.set('utm_campaign', campaign);
 

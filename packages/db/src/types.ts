@@ -26,7 +26,7 @@ import type {
   taskStartParallelCounts,
   workItems,
   taskMessages,
-  taskInferenceUsageEvents,
+  llmUsageEvents,
   taskSlackReplyDetails,
   taskPlatformIssueReports,
   githubPendingInstallations,
@@ -38,6 +38,10 @@ import type {
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
+  discordInstallations,
+  discordInstallationChannels,
+  discordUserMappings,
+  discordGatewaySessions,
   teamsInstallations,
   teamsUserMappings,
   slackQuickAnswers,
@@ -129,16 +133,20 @@ export type CreateTaskStartParallelCount = Omit<
 >;
 
 /**
- * task_inference_usage_events
+ * llm_usage_events
  */
 
-export type TaskInferenceUsageEvent =
-  typeof taskInferenceUsageEvents.$inferSelect;
+export type LlmUsageEvent = typeof llmUsageEvents.$inferSelect;
 
-export type CreateTaskInferenceUsageEvent = Omit<
-  typeof taskInferenceUsageEvents.$inferInsert,
+export type CreateLlmUsageEvent = Omit<
+  typeof llmUsageEvents.$inferInsert,
   Generated
 >;
+
+/** @deprecated Use LlmUsageEvent. */
+export type TaskInferenceUsageEvent = LlmUsageEvent;
+/** @deprecated Use CreateLlmUsageEvent. */
+export type CreateTaskInferenceUsageEvent = CreateLlmUsageEvent;
 
 /**
  * workItems (Stage 4 merge of task_suggestions + automation_work_items +
@@ -296,6 +304,35 @@ export type CreateSlackUserMapping = Omit<
 >;
 
 /**
+ * Discord communication state
+ */
+
+export type DiscordInstallation = typeof discordInstallations.$inferSelect;
+export type CreateDiscordInstallation = Omit<
+  typeof discordInstallations.$inferInsert,
+  Generated
+>;
+
+export type DiscordInstallationChannel =
+  typeof discordInstallationChannels.$inferSelect;
+export type CreateDiscordInstallationChannel = Omit<
+  typeof discordInstallationChannels.$inferInsert,
+  Generated
+>;
+
+export type DiscordUserMapping = typeof discordUserMappings.$inferSelect;
+export type CreateDiscordUserMapping = Omit<
+  typeof discordUserMappings.$inferInsert,
+  Generated
+>;
+
+export type DiscordGatewaySession = typeof discordGatewaySessions.$inferSelect;
+export type CreateDiscordGatewaySession = Omit<
+  typeof discordGatewaySessions.$inferInsert,
+  Timestamp
+>;
+
+/**
  * teamsInstallations
  */
 
@@ -387,10 +424,9 @@ export type CreateLinearPendingSelection = Omit<
  * backgroundAgentSettings
  *
  * The stored columns live on deployment_settings and hold deployment-wide
- * agent settings (manager channel, global instructions, style guidance,
- * authorship rules, Slack emoji preferences). The flat settings view consumed
- * across the product adds a per-automation projection built from the
- * automations table.
+ * agent settings (manager channel, global instructions, authorship rules).
+ * The flat settings view consumed across the product adds a per-automation
+ * projection built from the automations table.
  */
 
 type StoredBackgroundAgentSettings = Pick<
@@ -402,10 +438,6 @@ type StoredBackgroundAgentSettings = Pick<
   | 'compiledAuthorshipRules'
   | 'compiledAuthorshipIssues'
   | 'compiledAuthorshipAt'
-  | 'styleGuidance'
-  | 'slackSummonEmoji'
-  | 'slackAckEmoji'
-  | 'slackCompletionEmoji'
   | 'createdAt'
   | 'updatedAt'
 >;
@@ -439,24 +471,30 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   platformIssueSlackChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannelId: string | null;
+  managerStatsDiscordChannelId: string | null;
   managerStatsLastRunAt: Date | null;
   sentryTriageFrequency: SentryTriageFrequency;
   sentryTriageSlackChannelId: string | null;
+  sentryTriageDiscordChannelId: string | null;
   sentryTriageProjectSlugs: string | null;
   sentryTriageLastRunAt: Date | null;
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannelId: string | null;
+  dependabotTriageDiscordChannelId: string | null;
   dependabotTriageLastRunAt: Date | null;
   securityAuditorFrequency: SecurityAuditorFrequency;
   securityAuditorSlackChannelId: string | null;
+  securityAuditorDiscordChannelId: string | null;
   securityAuditorLastRunAt: Date | null;
   securityAuditorScanCursor?: SecurityAuditorScanCursor | null;
   codeQualityAuditorFrequency: CodeQualityAuditorFrequency;
   codeQualityAuditorSlackChannelId: string | null;
+  codeQualityAuditorDiscordChannelId: string | null;
   codeQualityAuditorLastRunAt: Date | null;
   codeQualityAuditorScanCursor?: CodeQualityAuditorScanCursor | null;
   ciFailureTriageFrequency: CiFailureTriageFrequency;
   ciFailureTriageSlackChannelId: string | null;
+  ciFailureTriageDiscordChannelId: string | null;
   ciFailureTriageLastRunAt: Date | null;
   ciFailureTriageScanCursor?: CiFailureTriageScanCursor | null;
 };

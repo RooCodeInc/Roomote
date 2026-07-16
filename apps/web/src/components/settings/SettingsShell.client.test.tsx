@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 const state = vi.hoisted(() => ({
   isAdmin: true,
+  cloudEnabled: false,
   pushMock: vi.fn(),
 }));
 
@@ -32,6 +33,7 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/hooks/useUser', () => ({
   useAuthorizedUser: () => ({
     isAdmin: state.isAdmin,
+    cloudEnabled: state.cloudEnabled,
     featureFlags: {},
   }),
 }));
@@ -54,7 +56,6 @@ vi.mock('@/components/system', async () => {
     Label: ({ children }: { children: ReactNode }) => <label>{children}</label>,
     PlugIcon: Icon,
     GraduationCap: Icon,
-    Rainbow: Icon,
     ScrollText: Icon,
     Select: ({ children }: { children: ReactNode }) => <div>{children}</div>,
     SelectContent: ({ children }: { children: ReactNode }) => (
@@ -76,6 +77,7 @@ import { SettingsShell } from './SettingsShell';
 describe('SettingsShell', () => {
   beforeEach(() => {
     state.isAdmin = true;
+    state.cloudEnabled = false;
     state.pushMock.mockReset();
   });
 
@@ -101,13 +103,33 @@ describe('SettingsShell', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /users/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /skills/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /vibes/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /sandboxes/i }),
+    ).toBeInTheDocument();
     expect(
       screen.getByText(
         'Enable deployment integrations. Individual users can optionally link their own accounts when an integration supports it.',
       ),
     ).toBeInTheDocument();
     expect(screen.getByText('content')).toBeInTheDocument();
+  });
+
+  it('hides sandboxes from the settings rail when cloud mode is enabled', () => {
+    state.cloudEnabled = true;
+
+    render(
+      <SettingsShell pageId="integrations" adminOnly={true}>
+        <div>content</div>
+      </SettingsShell>,
+    );
+
+    expect(
+      screen.queryByRole('link', { name: /sandboxes/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /personal/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /integrations/i }),
+    ).toBeInTheDocument();
   });
 
   it('places agent guidance before skills in the admin settings rail', () => {

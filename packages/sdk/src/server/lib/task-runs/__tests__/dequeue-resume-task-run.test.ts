@@ -16,6 +16,7 @@ const {
   mockFetchEnvVars,
   mockFetchResolvedRuntimeEnvVars,
   mockCancelAndReleaseTaskRun,
+  mockNotifyCanceledTaskRunOnSettle,
   mockCreateSourceControlTokenForTaskRun,
   mockCancelTaskRun,
   mockReportBootstrapFailure,
@@ -39,6 +40,7 @@ const {
   mockFetchEnvVars: vi.fn(),
   mockFetchResolvedRuntimeEnvVars: vi.fn(),
   mockCancelAndReleaseTaskRun: vi.fn(),
+  mockNotifyCanceledTaskRunOnSettle: vi.fn(),
   mockCreateSourceControlTokenForTaskRun: vi.fn(),
   mockCancelTaskRun: vi.fn(),
   mockReportBootstrapFailure: vi.fn(),
@@ -78,6 +80,8 @@ vi.mock('../dequeue-helpers', () => ({
     mockFetchResolvedRuntimeEnvVars(...args),
   cancelAndReleaseTaskRun: (...args: unknown[]) =>
     mockCancelAndReleaseTaskRun(...args),
+  notifyCanceledTaskRunOnSettle: (...args: unknown[]) =>
+    mockNotifyCanceledTaskRunOnSettle(...args),
   createSourceControlTokenForTaskRun: (...args: unknown[]) =>
     mockCreateSourceControlTokenForTaskRun(...args),
   cancelTaskRun: (...args: unknown[]) => mockCancelTaskRun(...args),
@@ -267,23 +271,6 @@ describe('dequeueResumeTaskRun', () => {
         }),
       }),
     );
-  });
-
-  it('returns style guidance for resume task runs', async () => {
-    const resumeRun = makeSnapshotResumeRun();
-
-    mockTxExecute.mockResolvedValue([{ id: resumeRun.id }]);
-    mockTxFindFirstTaskRuns.mockResolvedValueOnce(resumeRun);
-    mockTxFindFirstBackgroundAgentSettings.mockResolvedValue({
-      globalAgentInstructions: 'Org guidance',
-      styleGuidance: 'Be direct and calm.',
-    });
-
-    const result = await dequeueResumeTaskRun({ orgId: 'org-1' } as never, {
-      runId: resumeRun.id,
-    });
-
-    expect(result?.styleGuidance).toBe('Be direct and calm.');
   });
 
   it('marks resumed setup onboarding jobs when routing resolves /setup', async () => {
@@ -484,6 +471,7 @@ describe('dequeueResumeTaskRun', () => {
         existingArtifacts: invalidRun.artifacts,
       }),
     );
+    expect(mockNotifyCanceledTaskRunOnSettle).toHaveBeenCalledWith(invalidRun);
   });
 
   it('uses the same error message for a missing source run id in the callback and canceled task run row', async () => {

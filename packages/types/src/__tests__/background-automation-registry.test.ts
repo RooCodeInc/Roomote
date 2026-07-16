@@ -77,4 +77,17 @@ describe('background automation registry', () => {
       label: 'Manager Channel',
     });
   });
+
+  it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');
+
+    expect(descriptor?.supportedCommunicationProviders).toEqual([
+      'slack',
+      'teams',
+      'telegram',
+      'discord',
+    ]);
+    expect(descriptor?.supportedSourceControlProviders).toEqual(['github']);
+  });
 });

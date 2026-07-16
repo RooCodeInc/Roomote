@@ -111,10 +111,12 @@ export function buildMcpTaskEnv(input: {
     }
     if (
       input.communicationReplyContext.provider === 'telegram' ||
-      input.communicationReplyContext.provider === 'teams'
+      input.communicationReplyContext.provider === 'teams' ||
+      input.communicationReplyContext.provider === 'discord'
     ) {
-      // Telegram and Teams tasks use the same turn-satisfaction machinery as
-      // Slack (ack/closeout enforcement and current-turn emoji reactions).
+      // Telegram, Teams, and Discord tasks use the same turn-satisfaction
+      // machinery as Slack (ack/closeout enforcement and current-turn emoji
+      // reactions).
       mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
         input.runtimeEnv.HOME ?? '/tmp',
         '.config',

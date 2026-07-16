@@ -3,25 +3,32 @@ import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote
 
 const {
   buildThreadReplyImagesMock,
+  discordAddReactionMock,
+  discordPostMessageMock,
   envMock,
   getLatestInboundMessageIdMock,
   postMessageMock,
   sendChatActionMock,
   resolveTelegramRuntimeCredentialsMock,
+  resolveDiscordRuntimeCredentialsMock,
   withThreadReplyFooterLockMock,
 } = vi.hoisted(() => ({
   buildThreadReplyImagesMock: vi.fn(),
+  discordAddReactionMock: vi.fn(),
+  discordPostMessageMock: vi.fn(),
   envMock: { R_APP_URL: 'https://app.example.com' },
   getLatestInboundMessageIdMock: vi.fn(),
   postMessageMock: vi.fn(),
   sendChatActionMock: vi.fn(),
   resolveTelegramRuntimeCredentialsMock: vi.fn(),
+  resolveDiscordRuntimeCredentialsMock: vi.fn(),
   withThreadReplyFooterLockMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({ Env: envMock }));
 
 vi.mock('@roomote/db/server', () => ({
+  resolveDiscordRuntimeCredentials: resolveDiscordRuntimeCredentialsMock,
   resolveTelegramRuntimeCredentials: resolveTelegramRuntimeCredentialsMock,
 }));
 
@@ -33,6 +40,12 @@ vi.mock('@roomote/communication', () => ({
     return { postMessage: postMessageMock, sendChatAction: sendChatActionMock };
   }),
   TeamsCommunicationProvider: vi.fn(),
+  DiscordCommunicationProvider: vi.fn().mockImplementation(function () {
+    return {
+      postMessage: discordPostMessageMock,
+      addReaction: discordAddReactionMock,
+    };
+  }),
   UnsupportedCommunicationOperationError: class UnsupportedCommunicationOperationError extends Error {},
   getLatestInboundMessageId: getLatestInboundMessageIdMock,
   resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
@@ -61,6 +74,17 @@ vi.mock('@roomote/sdk/server', () => ({
       ? { postMessage: postMessageMock, sendChatAction: sendChatActionMock }
       : null;
   }),
+  createDiscordCommunicationProviderFromRuntimeCredentials: vi.fn(async () => {
+    const { botToken } = await resolveDiscordRuntimeCredentialsMock();
+
+    return botToken
+      ? {
+          postMessage: discordPostMessageMock,
+          addReaction: discordAddReactionMock,
+          triggerTyping: vi.fn(async () => undefined),
+        }
+      : null;
+  }),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -80,7 +104,10 @@ import {
   getThreadReplyFooterRecord,
   setThreadReplyFooterRecord,
 } from '@roomote/communication';
-import { maybeSendCommunicationThreadReply } from '../communication-thread-replies';
+import {
+  maybeAddCommunicationReaction,
+  maybeSendCommunicationThreadReply,
+} from '../communication-thread-replies';
 
 const telegramTaskRun = {
   id: 42,
@@ -107,6 +134,74 @@ const teamsTaskRun = {
     communicationMessageId: 'activity-root',
   },
 };
+
+const discordTaskRun = {
+  id: 44,
+  taskId: 'task-3',
+  prRepo: null,
+  prNumber: null,
+  payload: {
+    communicationProvider: 'discord',
+    communicationGuildId: 'guild-1',
+    communicationChannelId: 'channel-1',
+    communicationThreadId: 'thread-1',
+    communicationMessageId: 'message-1',
+  },
+};
+
+describe('maybeSendCommunicationThreadReply (Discord)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolveDiscordRuntimeCredentialsMock.mockResolvedValue({
+      botToken: 'discord-token',
+      applicationId: 'application-1',
+    });
+    buildThreadReplyImagesMock.mockResolvedValue([]);
+    discordPostMessageMock.mockResolvedValue({ messageId: 'reply-1' });
+    discordAddReactionMock.mockResolvedValue({
+      channelId: 'thread-1',
+      messageId: 'message-2',
+      name: '👀',
+    });
+  });
+
+  it('posts directly into the task thread without quoting a message', async () => {
+    const response = await maybeSendCommunicationThreadReply({
+      taskRun: discordTaskRun,
+      parsedBody: { text: 'done', images: [] },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'done',
+      textFormat: 'markdown',
+      images: [],
+    });
+    expect(discordPostMessageMock.mock.calls[0]?.[0]).not.toHaveProperty(
+      'replyToMessageId',
+    );
+  });
+
+  it('adds reactions in the task thread', async () => {
+    const response = await maybeAddCommunicationReaction({
+      taskRun: discordTaskRun,
+      parsedBody: {
+        channel: 'channel-1',
+        messageTs: 'message-2',
+        name: '👀',
+      },
+    });
+
+    expect(response).not.toBeNull();
+    expect(discordAddReactionMock).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      messageId: 'message-2',
+      name: '👀',
+    });
+  });
+});
 
 describe('maybeSendCommunicationThreadReply (Teams)', () => {
   beforeEach(() => {

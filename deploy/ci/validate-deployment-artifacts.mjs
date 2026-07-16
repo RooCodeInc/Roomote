@@ -29,6 +29,16 @@ function commandText(command) {
   return String(command ?? '');
 }
 
+function normalizedEnvironment(environment) {
+  return JSON.stringify(
+    Object.fromEntries(
+      Object.entries(environment ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right),
+      ),
+    ),
+  );
+}
+
 const composeEnv = {
   ...process.env,
   R_APP_ENV: 'production',
@@ -46,6 +56,8 @@ const composeEnv = {
   JOB_AUTH_PRIVATE_KEY: 'deployment-ci-job-private-key',
   JOB_AUTH_PUBLIC_KEY: 'deployment-ci-job-public-key',
   R_GITHUB_APP_SLUG: 'deployment-ci',
+  R_DISCORD_BOT_TOKEN: 'deployment-ci-discord-bot-token',
+  R_DISCORD_GATEWAY_SECRET: 'deployment-ci-discord-gateway-secret',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
   REDIS_URL: 'redis://redis:6379',
@@ -119,6 +131,26 @@ function validateComposeShape(shape) {
       }
     }
 
+    if (config.services.bullmq) {
+      assert(
+        config.services.bullmq.environment?.R_DISCORD_BOT_TOKEN ===
+          composeEnv.R_DISCORD_BOT_TOKEN,
+        `${shape.name}: bullmq must receive R_DISCORD_BOT_TOKEN`,
+      );
+      // Coolify uses platform magic vars that compose does not interpolate here.
+      if (
+        !shape.coolify &&
+        'R_DISCORD_GATEWAY_SECRET' in
+          (config.services.bullmq.environment ?? {})
+      ) {
+        assert(
+          config.services.bullmq.environment?.R_DISCORD_GATEWAY_SECRET ===
+            composeEnv.R_DISCORD_GATEWAY_SECRET,
+          `${shape.name}: bullmq must receive R_DISCORD_GATEWAY_SECRET`,
+        );
+      }
+    }
+
     console.log(`validated compose shape: ${shape.name}`);
   } finally {
     rmSync(temporaryDirectory, { recursive: true, force: true });
@@ -148,6 +180,18 @@ for (const key of catalog.sharedPlatformEnvironment) {
     `railway: api is missing shared ${key}`,
   );
 }
+assert(
+  'R_DISCORD_BOT_TOKEN' in railway.services.bullmq.env,
+  'railway: bullmq must receive R_DISCORD_BOT_TOKEN',
+);
+assert(
+  'R_DISCORD_GATEWAY_SECRET' in railway.services.api.env,
+  'railway: api must define R_DISCORD_GATEWAY_SECRET',
+);
+assert(
+  'R_DISCORD_GATEWAY_SECRET' in railway.services.bullmq.env,
+  'railway: bullmq must receive R_DISCORD_GATEWAY_SECRET',
+);
 
 const render = YAML.parse(read('render.yaml'));
 const renderServices = new Map(
@@ -176,8 +220,32 @@ assert(
   renderServices.get('api')?.preDeployCommand?.endsWith(' db-migrate'),
   'render: api must run migrations before deploy',
 );
+const renderSharedEnvironment = render.envVarGroups.find(
+  (group) => group.name === 'roomote-shared',
+);
+assert(
+  renderSharedEnvironment?.envVars?.some(
+    (entry) => entry.key === 'R_DISCORD_BOT_TOKEN',
+  ),
+  'render: shared app environment must include R_DISCORD_BOT_TOKEN',
+);
+assert(
+  renderSharedEnvironment?.envVars?.some(
+    (entry) => entry.key === 'R_DISCORD_GATEWAY_SECRET',
+  ),
+  'render: shared app environment must include R_DISCORD_GATEWAY_SECRET',
+);
 
+const productionCompose = YAML.parse(
+  read('deploy/compose/docker-compose.prod.yml'),
+);
 const coolify = YAML.parse(read('deploy/coolify/docker-compose.yaml'));
+assert(
+  read('deploy/coolify/docker-compose.yaml').includes(
+    'R_DISCORD_GATEWAY_SECRET',
+  ),
+  'coolify: shared env must define R_DISCORD_GATEWAY_SECRET',
+);
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
   const service = coolify.services?.[name];
   assert(service, `coolify: missing ${name}`);
@@ -192,6 +260,17 @@ for (const [name, contract] of Object.entries(catalog.runtimeServices)) {
     );
   }
 }
+assert(
+  coolify.services?.['docker-proxy']?.environment?.VOLUMES === '1',
+  'coolify: Docker proxy must allow managed workspace volume operations',
+);
+assert(
+  normalizedEnvironment(coolify.services?.['docker-proxy']?.environment) ===
+    normalizedEnvironment(
+      productionCompose.services?.['docker-proxy']?.environment,
+    ),
+  'coolify: Docker proxy environment must match production Compose',
+);
 
 const fly = parseToml(read('deploy/fly/fly.toml'));
 for (const [name, contract] of Object.entries(catalog.runtimeServices)) {

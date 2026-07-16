@@ -8,6 +8,8 @@ import {
 import {
   db,
   desc,
+  discordInstallations,
+  eq,
   getAutomationRuntime,
   getBackgroundAgentSettingsForDeployment,
   inArray,
@@ -15,6 +17,7 @@ import {
   tasks,
 } from '@roomote/db/server';
 import {
+  findDiscordDestinationByChannelId,
   findTeamsConversationDisplayName,
   resolveAutomationRuntimeDestination,
   type ResolvedAutomationDestination,
@@ -176,6 +179,17 @@ async function resolveDestinationDisplayName(
     return findTeamsConversationDisplayName(destination.channelId);
   }
 
+  if (destination.provider === 'discord') {
+    const discordDestination = await findDiscordDestinationByChannelId(
+      destination.channelId,
+    );
+
+    // Null falls back to showing the raw channel id in the UI.
+    return discordDestination?.channelName
+      ? `#${discordDestination.channelName}`
+      : null;
+  }
+
   // Telegram chats have no reliable display name; the UI shows the chat id.
   return null;
 }
@@ -240,6 +254,7 @@ export async function getBackgroundAgentSettingsCommand(
   };
   capabilities: {
     slackConnected: boolean;
+    discordConnected: boolean;
     sentryConnected: boolean;
     missingScopes: readonly string[];
     requiredScopes: string[];
@@ -269,14 +284,24 @@ export async function getBackgroundAgentSettingsCommand(
 }> {
   assertAdmin(auth);
 
-  const [settings, slackInstallation, sentryConnected, recentRuns, status] =
-    await Promise.all([
-      getBackgroundAgentSettingsForDeployment(),
-      findActiveSlackInstallationForOrg(),
-      hasActiveSentryIntegration(),
-      listRecentAutomationTasks(),
-      buildAutomationStatus(),
-    ]);
+  const [
+    settings,
+    slackInstallation,
+    discordInstallation,
+    sentryConnected,
+    recentRuns,
+    status,
+  ] = await Promise.all([
+    getBackgroundAgentSettingsForDeployment(),
+    findActiveSlackInstallationForOrg(),
+    db.query.discordInstallations.findFirst({
+      where: eq(discordInstallations.isActive, true),
+      columns: { id: true },
+    }),
+    hasActiveSentryIntegration(),
+    listRecentAutomationTasks(),
+    buildAutomationStatus(),
+  ]);
   const relayUsers = await listReviewerRelayUserRecords(
     auth,
     getRelayEligibleCreatorIds(settings.reviewCodeSettings),
@@ -356,6 +381,7 @@ export async function getBackgroundAgentSettingsCommand(
       : buildDefaultReviewerSettings(relayUsers),
     capabilities: {
       slackConnected: Boolean(slackInstallation?.isActive),
+      discordConnected: Boolean(discordInstallation),
       sentryConnected,
       missingScopes,
       requiredScopes: [...REQUIRED_BACKGROUND_AGENT_SCOPES],

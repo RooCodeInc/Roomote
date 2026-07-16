@@ -19,13 +19,14 @@ import {
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
+import { useUser } from '@/hooks/useUser';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
 
 const INVOKE_STEP = getSetupStepDefinition('invoke');
 
-type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram';
+type CommunicationProviderId = 'slack' | 'microsoft' | 'telegram' | 'discord';
 
 export function StepInvoke({
   onTryItOut,
@@ -48,16 +49,18 @@ export function StepInvoke({
 } = {}) {
   const router = useRouter();
   const trpc = useTRPC();
+  const { user } = useUser();
   const queryClient = useQueryClient();
   const environments = useEnvironments({ enabled: !onboardingTaskId });
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
   const effectiveCommunicationProviders = [
     ...communicationProviders,
-    ...(commsStatus.data?.providers?.some(
-      (provider) => provider.id === 'telegram' && provider.setupSatisfied,
-    ) && !communicationProviders.includes('telegram')
-      ? (['telegram'] as const)
-      : []),
+    ...(['telegram', 'discord'] as const).filter(
+      (providerId) =>
+        commsStatus.data?.providers?.some(
+          (provider) => provider.id === providerId && provider.setupSatisfied,
+        ) && !communicationProviders.includes(providerId),
+    ),
   ];
   const [anonymousAnalyticsEnabled, setAnonymousAnalyticsEnabled] =
     useState(true);
@@ -149,7 +152,7 @@ export function StepInvoke({
       <StepTitle text={INVOKE_STEP.title} />
       <p className="mb-4">
         {onboardingTaskId
-          ? `Once your environment is ready, you can work with ${PRODUCT_NAME} in these ways:`
+          ? `Once your environment is configured, you can work with ${PRODUCT_NAME} in these ways (verification may still be in progress):`
           : `How to work with ${PRODUCT_NAME}:`}
       </p>
       {computeProvisioning?.status === 'building' ? (
@@ -188,43 +191,41 @@ export function StepInvoke({
                 <span className="font-semibold">{method.title}: </span>
                 {method.description}
               </p>
-              {method.example ? (
-                <p className="text-sm text-muted-foreground">
-                  Example: <span className="font-mono">{method.example}</span>
-                </p>
-              ) : null}
             </div>
           </div>
         ))}
       </div>
 
-      <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
-        <Checkbox
-          aria-label="Toggle anonymous analytics"
-          className="mt-0.5"
-          checked={anonymousAnalyticsEnabled}
-          onCheckedChange={(checked) =>
-            setAnonymousAnalyticsEnabled(checked === true)
-          }
-        />
-        <div className="space-y-0.5">
-          <p className="text-sm font-semibold">Anonymous analytics</p>
-          <p className="text-sm text-muted-foreground">
-            Share usage stats with the {PRODUCT_NAME} team for product
-            improvements.
-            <br />
-            No PII, code or conversation content is ever shared. Accrues good
-            karma.
-          </p>
+      {!user?.cloudEnabled && (
+        <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
+          <Checkbox
+            aria-label="Toggle anonymous analytics"
+            className="mt-0.5"
+            checked={anonymousAnalyticsEnabled}
+            onCheckedChange={(checked) =>
+              setAnonymousAnalyticsEnabled(checked === true)
+            }
+          />
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold">Anonymous analytics</p>
+            <p className="text-sm text-muted-foreground">
+              Share usage stats with the {PRODUCT_NAME} team for product
+              improvements.
+              <br />
+              No PII, code or conversation content is ever shared. Accrues good
+              karma.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-3 flex">
         <Button
-          className="w-full sm:w-auto"
           onClick={() => {
             onTryItOut?.();
-            completeSetup.mutate({ anonymousAnalyticsEnabled });
+            completeSetup.mutate(
+              user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled },
+            );
           }}
           disabled={completeSetup.isPending}
         >

@@ -111,9 +111,10 @@ fly secrets set --app "$APP" \
   ENCRYPTION_KEY="$(openssl rand -base64 32)" \
   ARTIFACT_SIGNING_KEY="$(openssl rand -base64 32)" \
   DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
-  SETUP_TOKEN="$(openssl rand -hex 16)"
+  SETUP_TOKEN="$(openssl rand -hex 16)" \
+  R_DISCORD_GATEWAY_SECRET="$(openssl rand -base64 32)"
 
-# One Machine per process group (web, api, controller, bullmq). The
+# One Machine per process group (web, api, controller, and bullmq). The
 # db-migrate release command runs schema migrations first.
 fly deploy --ha=false
 ```
@@ -157,6 +158,7 @@ Everything sensitive is a Fly secret, set once for the app:
 | `REDIS_URL`                                | printed by `fly redis create`           |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`         |
 | `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`               |
+| `R_DISCORD_GATEWAY_SECRET`                 | `openssl rand -base64 32` (API + BullMQ Discord Gateway) |
 | `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`               |
 | `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`) |
 
@@ -317,6 +319,11 @@ previews.<your-domain>` and `fly certs add -a <app>-previews
   a deployment that wants every main build can run `fly deploy` from its
   own CI with a [deploy token](https://fly.io/docs/security/tokens/)
   (`fly tokens create deploy`) and the edited `fly.toml`.
+- **One-time Discord gateway secret (existing apps).** New installs set
+  `R_DISCORD_GATEWAY_SECRET` alongside the other random secrets. Older apps
+  that are missing it need a one-time:
+  `fly secrets set --app "$APP" R_DISCORD_GATEWAY_SECRET="$(openssl rand -base64 32)"`
+  before continuing Discord (all process groups share Fly secrets).
 - **Back up** the Managed Postgres cluster (Fly's MPG backups or `pg_dump`
   via `fly mpg connect`) and the Tigris bucket. Everything else is
   reproducible from `fly.toml` plus the secrets.

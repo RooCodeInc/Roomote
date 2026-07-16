@@ -70,11 +70,17 @@ vi.mock('@roomote/communication/telegram-provider', () => ({
   TelegramCommunicationProvider: vi.fn(),
 }));
 
+vi.mock('@roomote/communication/discord-provider', () => ({
+  DiscordCommunicationProvider: vi.fn(),
+}));
+
 vi.mock('@roomote/sdk/server', () => ({
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
   ),
   findTelegramPrimaryChatId: vi.fn(async () => null),
+  findDiscordDefaultDestination: vi.fn(async () => null),
+  findDiscordUserMappingByRoomoteUserId: vi.fn(async () => null),
   findTeamsPrimaryConversation: vi.fn(async () => null),
   recordSlackConversationMessageBestEffort: vi.fn(),
 }));

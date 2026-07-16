@@ -11,17 +11,21 @@ import { mcpAuthMiddleware } from '../../mcp/middleware';
 import { submitAutomationWorkItems } from '../submitAutomationWorkItems';
 
 const {
+  mockGetAutomationRuntime,
   mockTaskRunFindFirst,
   mockLaunchActWorkItems,
   mockPersistAutomationWorkItems,
+  mockResolveAutomationDiscordTarget,
   mockResolveAutomationSlackTarget,
   mockResolvePreparedAutomationWorkItems,
   mockResolveRepositoryIdsForSuggestedTask,
   mockTaskFindFirst,
 } = vi.hoisted(() => ({
+  mockGetAutomationRuntime: vi.fn(),
   mockTaskRunFindFirst: vi.fn(),
   mockLaunchActWorkItems: vi.fn(),
   mockPersistAutomationWorkItems: vi.fn(),
+  mockResolveAutomationDiscordTarget: vi.fn(),
   mockResolveAutomationSlackTarget: vi.fn(),
   mockResolvePreparedAutomationWorkItems: vi.fn(),
   mockResolveRepositoryIdsForSuggestedTask: vi.fn(),
@@ -38,12 +42,20 @@ vi.mock('../automation-work-items/teams.js', () => ({
   postLateBoundWorkItemFailureToTeams: vi.fn(async () => undefined),
 }));
 
+vi.mock('../automation-work-items/discord.js', () => ({
+  resolveAutomationDiscordTarget: (...args: unknown[]) =>
+    mockResolveAutomationDiscordTarget(...args),
+  postLateBoundWorkItemFailureToDiscord: vi.fn(async () => undefined),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   resolveTelegramRuntimeCredentials: vi.fn(async () => ({
     botToken: null,
     webhookSecret: null,
     botUsername: null,
   })),
+  getAutomationRuntime: (...args: unknown[]) =>
+    mockGetAutomationRuntime(...args),
   and: vi.fn((...args) => ({ type: 'and', args })),
   taskRuns: {
     taskId: 'taskRuns.taskId',
@@ -71,6 +83,7 @@ vi.mock('../automation-work-items/launch.js', () => ({
 vi.mock('../automation-work-items/persistence.js', () => ({
   persistAutomationWorkItems: (...args: unknown[]) =>
     mockPersistAutomationWorkItems(...args),
+  loadRelaunchableDuplicateWorkItems: vi.fn(async () => []),
 }));
 
 vi.mock('../automation-work-items/prepare.js', () => ({
@@ -142,6 +155,7 @@ describe('submitAutomationWorkItems lifecycle', () => {
   };
 
   beforeEach(() => {
+    mockGetAutomationRuntime.mockReset();
     mockTaskFindFirst.mockReset();
     mockTaskRunFindFirst.mockReset();
     mockLaunchActWorkItems.mockReset();
@@ -149,6 +163,13 @@ describe('submitAutomationWorkItems lifecycle', () => {
     mockResolveAutomationSlackTarget.mockReset();
     mockResolvePreparedAutomationWorkItems.mockReset();
     mockResolveRepositoryIdsForSuggestedTask.mockReset();
+
+    mockGetAutomationRuntime.mockResolvedValue({
+      slackChannelId: 'C123',
+      destination: null,
+    });
+    mockResolveAutomationDiscordTarget.mockReset();
+    mockResolveAutomationDiscordTarget.mockResolvedValue(null);
 
     mockTaskRunFindFirst.mockResolvedValue({
       payloadKind: TaskPayloadKind.Scan,
@@ -235,6 +256,70 @@ describe('submitAutomationWorkItems lifecycle', () => {
         channelId: 'C123',
       }),
     });
+  });
+
+  it("reports to the automation's Discord channel target instead of Slack", async () => {
+    const environmentId = '11111111-1111-1111-1111-111111111111';
+    const actWorkItem = buildActWorkItem({
+      targetEnvironmentId: environmentId,
+      workspaceReadiness: 'environment_backed',
+      readinessMessage: null,
+    });
+    mockPersistAutomationWorkItems.mockResolvedValueOnce({
+      created: true,
+      duplicateCount: 0,
+      duplicateWorkItemRefs: [],
+      workItems: [actWorkItem],
+    });
+    // The automation's own destination target is a Discord channel: Slack is
+    // skipped even though its manager channel would resolve.
+    mockGetAutomationRuntime.mockResolvedValue({
+      slackChannelId: 'C123',
+      destination: {
+        provider: 'discord',
+        channelId: 'discord-channel-1',
+        source: 'automation_target',
+      },
+    });
+    const discordTarget = {
+      provider: 'discord' as const,
+      discord: {},
+      guildId: 'guild-1',
+      channelId: 'discord-channel-1',
+      channelType: 0,
+    };
+    mockResolveAutomationDiscordTarget.mockResolvedValue(discordTarget);
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/automation_work_items', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          workItems: [
+            {
+              title: 'Fix parser nil access',
+              brief: 'Nil access is driving a production Sentry issue.',
+              actionKind: 'code_change_pr',
+              disposition: 'act',
+              executionPrompt:
+                'Reproduce the nil access, fix it, add regression coverage, and open a PR.',
+              targetRepositoryFullName: 'acme/app',
+              targetEnvironmentId: environmentId,
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockResolveAutomationSlackTarget).not.toHaveBeenCalled();
+    expect(mockResolveAutomationDiscordTarget).toHaveBeenCalledWith(
+      'sentry_triage',
+    );
+    expect(mockLaunchActWorkItems).toHaveBeenCalledWith(
+      expect.objectContaining({ chatTarget: discordTarget }),
+    );
   });
 
   it('relaunches launchable act items when a persisted batch is resubmitted', async () => {

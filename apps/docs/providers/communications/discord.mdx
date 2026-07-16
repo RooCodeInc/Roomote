@@ -1,0 +1,162 @@
+---
+title: Discord
+icon: 'https://api.iconify.design/simple-icons:discord.svg?color=currentColor'
+description: Configure a Discord bot so Roomote can start and continue tasks in DMs, channels, threads, and forums.
+---
+
+Discord is a deployment-owned communications provider. It is not a Roomote
+sign-in provider.
+
+Roomote can receive direct messages and server mentions, work each task in a
+thread on the message that requested it (or a forum post in forum channels),
+accept follow-ups in that conversation, and deliver onboarding suggestions to
+the default channel. Discord connects to Roomote through the Gateway, so it
+does not require an inbound webhook or public callback URL.
+
+## Create the Discord bot
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications)
+   and create an application.
+2. Open **Bot**, create the bot if needed, and copy or reset its token.
+3. Under **Privileged Gateway Intents**, enable **Message Content Intent**.
+   Roomote needs this to understand natural-language messages and follow-ups.
+4. In Roomote, open **Settings > Communications > Discord**, paste the bot
+   token, and save.
+
+Roomote reads the bot and application identity from the token and registers
+the `/new`, `/link`, and `/help` commands automatically. You do not need to
+copy an application ID or bot name into Roomote.
+
+<Warning>
+  Treat the bot token like a password. Do not put it in a repository, task
+  prompt, or Discord message.
+</Warning>
+
+## Add Roomote to a server
+
+After saving the token, select **Add to Discord** in Roomote and choose the
+server. The generated installation link requests the permissions Roomote needs;
+administrator access is not required.
+
+For tasks started in a server, the bot needs permission to:
+
+- view the channel and read message history
+- send messages and links
+- create public threads and send messages in threads
+- attach files
+
+Roomote also uses reactions for lightweight acknowledgements when the bot has
+permission to add them, but reactions are not required to run tasks.
+
+The generated invite uses permissions integer `309237763136`. You can use the
+same value when configuring a manual install link or Discord's default guild
+install settings.
+
+A task started from a normal text or announcement channel runs in a public
+thread started on the message that requested it — like a threaded reply — so
+the conversation stays anchored where it began. A task started in a forum gets
+its own forum post, and `/new` starts a fresh, separate task thread.
+
+<Warning>
+  Unlike a Slack workspace, a Discord server can be public or shared with
+  people outside your team. Task threads are visible to everyone who can see
+  the channel, including repository names, task descriptions, and PR links.
+  Only add Roomote to servers whose members you trust with that context, and
+  use private channels for sensitive work.
+</Warning>
+
+If Roomote cannot see the server or channel, confirm that the bot was added to
+the server and that its role and channel overrides grant the permissions above.
+Use **Repair** to register commands again and refresh server discovery.
+
+## Link your account
+
+Discord tasks are attributed only to people who have linked their Discord
+account to a Roomote user.
+
+Generate a link command under **Settings > Personal > Linked Accounts** and run
+it in a direct message with the bot. This verifies that Roomote can reach you
+for onboarding work. If Discord blocks the DM, open the server's **Privacy
+Settings** and enable **Direct Messages**. The command expires after ten
+minutes. Once linked, work you start from Discord is attributed to your Roomote
+account.
+
+During onboarding, Roomote posts the setup suggestions to the default channel
+so the whole team can see and start them. When no default channel is
+configured yet, they are sent to the linked setup user's direct messages
+instead; Discord can block those messages when the user's server-member DM
+privacy setting is disabled, and the task remains available in the Roomote web
+app in that case.
+
+## Default channel for proactive posts
+
+Roomote posts proactive updates (automation suggestions, reports, and other
+messages that are not replies to an existing conversation) to a default
+channel you pick. Choose it in the Discord section of Roomote's comms settings:
+select a server and a text or forum channel where the bot has permission to
+post and create threads. Replies always stay in the conversation they started
+in. Forum channels that require a tag are not supported as the default channel.
+
+Individual automations can also report to their own Discord channel instead of
+the default: pick a Discord channel in that automation's destination selector
+under **Settings > Automations**, the same way you would pick a Slack channel.
+
+## Start and continue tasks
+
+- mention the bot with a request in a server channel
+- send the bot a direct message
+- use `/new request:<request>` to force a fresh task instead of continuing the
+  current one
+- reply naturally inside a task thread, forum post, or DM to continue it
+- use `/help` to see the available commands
+
+Roomote does not quote every message it answers. In a task thread, the
+conversation itself supplies the context. Image attachments are passed to the
+task as image input, and supported documents are downloaded and added to the
+request. Attachment downloads are size-limited and restricted to Discord's
+media hosts.
+
+## Self-hosted configuration
+
+The setup UI stores the token for the deployment. To configure it with an
+environment variable instead, set:
+
+```sh
+R_DISCORD_BOT_TOKEN=<discord-bot-token>
+# Use a dedicated random value — do not reuse ENCRYPTION_KEY or other secrets.
+R_DISCORD_GATEWAY_SECRET=<random-secret>
+```
+
+The Discord Gateway runs as an opt-in subsystem inside Roomote's existing
+BullMQ process, so enabling Discord does not add another container, process, or
+port. It stays dormant until a token is saved, uses Redis to elect a single
+active replica, and disconnects if Discord is removed. Durable event delivery
+uses Redis and a dedicated internal shared secret. Saving Discord credentials in
+settings generates `R_DISCORD_GATEWAY_SECRET` when it is not already configured.
+For env-var-only setups, set the same secret on the API and BullMQ processes
+yourself (installers and platform templates also generate one). That value must
+be unique to Discord transport — do not reuse `ENCRYPTION_KEY` or any other
+deployment secret.
+
+Gateway session state is stored in the Roomote database. On a service restart
+or leader handoff, Roomote asks Discord to resume the previous session and
+replay any missed events; Discord can fall back to a fresh session when the old
+one has expired.
+
+Restart BullMQ after changing either environment variable. Tokens saved in the
+setup UI are detected automatically without a restart.
+
+## Verify setup
+
+1. confirm the Discord settings page shows the bot identity and a connected
+   Gateway
+2. confirm **Message Content intent** and **Slash commands** pass their checks
+3. link your personal Discord account
+4. mention the bot with a small request and confirm Roomote creates a task
+   thread or forum post
+5. reply in that conversation and confirm the same task continues
+
+If the Gateway remains disconnected, verify BullMQ is running and has access to
+the same Redis, database, token, and internal secret as the API. If natural
+messages are ignored but slash commands work, enable Message Content Intent in
+the Developer Portal and restart BullMQ.

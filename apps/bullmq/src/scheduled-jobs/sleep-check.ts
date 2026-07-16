@@ -143,6 +143,11 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         provider: 'modal',
         envFallback: await resolveComputeProviderEnvValues('modal'),
       });
+    case 'roomote':
+      return createComputeProviderClient({
+        provider: 'roomote',
+        envFallback: await resolveComputeProviderEnvValues('roomote'),
+      });
     case 'daytona':
       return createComputeProviderClient({
         provider: 'daytona',
@@ -984,6 +989,46 @@ async function handleTimedSleepCandidate(params: {
   }
 
   if (isResumable) {
+    // Terminal cancels stamp cancelRequestedAt. They must destroy/finalize
+    // rather than snapshot or enter standby, even on resume-capable providers.
+    const stopRequestedStatus = await resolveSweptJobFinalStatus(job.id);
+    if (stopRequestedStatus === RunStatus.Canceled) {
+      await destroyInstanceWithAudit(
+        job,
+        client,
+        {
+          path,
+          phase: 'destroy_and_cancel_after_stop_request',
+          reason:
+            path === 'hard_limit'
+              ? 'provider_timeout_backstop'
+              : 'due_sleep_shutdown',
+        },
+        'sleepCheck',
+      );
+
+      await finishRun({
+        id: job.id,
+        status: RunStatus.Canceled,
+        error: `${describeSleepCheckPath(path)} destroyed instance ${job.machineId} after a terminal stop request`,
+      });
+
+      await recordSleepCheckEvent(
+        job,
+        'decision',
+        `Destroyed instance ${job.machineId} and canceled task run #${job.id} after its stop request.`,
+        {
+          path,
+          decision: 'destroy_and_cancel_after_stop_request',
+          ...buildSleepCheckDetails(job),
+        },
+      );
+      console.warn(
+        `[sleepCheck] Destroyed instance and canceled task run #${job.id} after stop request`,
+      );
+      return { snapshotted: 0, shutDown: 1, failed: 0 };
+    }
+
     const preserved = await claimResumableSleep(job, client, path);
 
     if (preserved) {
@@ -1258,6 +1303,42 @@ async function handleHeartbeatRecoveryCandidate(params: {
   }
 
   if (isResumable) {
+    // Terminal cancels stamp cancelRequestedAt. Never snapshot or standby them.
+    const stopRequestedStatus = await resolveSweptJobFinalStatus(job.id);
+    if (stopRequestedStatus === RunStatus.Canceled) {
+      await destroyInstanceWithAudit(
+        job,
+        client,
+        {
+          path: config.path,
+          phase: 'destroy_and_cancel_after_stop_request',
+          reason: config.destroyReason,
+        },
+        'sleepCheck',
+      );
+
+      await finishRun({
+        id: job.id,
+        status: RunStatus.Canceled,
+        error: config.destroyAndFail.failureError(job.machineId),
+      });
+
+      await recordSleepCheckEvent(
+        job,
+        'decision',
+        `Destroyed instance ${job.machineId} and canceled task run #${job.id} after its stop request.`,
+        {
+          path: config.path,
+          decision: 'destroy_and_cancel_after_stop_request',
+          ...buildSleepCheckDetails(job),
+        },
+      );
+      console.warn(
+        `[sleepCheck] Destroyed instance and canceled task run #${job.id} after stop request`,
+      );
+      return { snapshotted: 0, failed: 0 };
+    }
+
     const preserved = await claimResumableSleep(job, client, config.path);
     if (preserved) {
       console.warn(

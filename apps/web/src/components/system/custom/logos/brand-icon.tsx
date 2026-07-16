@@ -6,6 +6,7 @@ import {
   siBraintrust,
   siDependabot,
   siDatadog,
+  siDiscord,
   siDocker,
   siGrafana,
   siBitbucket,
@@ -40,6 +41,7 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   braintrust: siBraintrust,
   dependabot: siDependabot,
   datadog: siDatadog,
+  discord: siDiscord,
   docker: siDocker,
   grafana: siGrafana,
   bitbucket: siBitbucket,
@@ -380,9 +382,54 @@ function SlackIcon({
   );
 }
 
+/**
+ * The Roomote "R" mark. The source SVG is a large traced file with hardcoded
+ * fills, so it renders as a CSS mask over `bg-current` (the same technique as
+ * RoomoteWordmark) to inherit the surrounding text color like every other
+ * brand icon.
+ */
+function RoomoteIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <span
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      className={`inline-block bg-current ${className ?? ''}`}
+      style={{
+        maskImage: 'url(/logos/r.svg)',
+        maskRepeat: 'no-repeat',
+        maskPosition: 'center',
+        maskSize: 'contain',
+        WebkitMaskImage: 'url(/logos/r.svg)',
+        WebkitMaskRepeat: 'no-repeat',
+        WebkitMaskPosition: 'center',
+        WebkitMaskSize: 'contain',
+      }}
+    />
+  );
+}
+
 export function BrandIcon({ icon, name, className }: BrandIconProps) {
   const simpleIcon = SIMPLE_ICONS[icon];
   const isDecorative = name.length === 0;
+
+  if (icon === 'roomote') {
+    return (
+      <RoomoteIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
 
   if (icon === 'neon') {
     return (

@@ -93,6 +93,43 @@ describe('createModalMachine', () => {
     );
   });
 
+  it('emits mutation events with the roomote vendor for managed-provider launches', async () => {
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.2.3',
+      version: '1.2.3',
+    });
+
+    const onMutation = vi.fn();
+    const writeFiles = vi.fn().mockResolvedValue(undefined);
+    const runCommand = vi.fn().mockResolvedValue({ exitCode: 0 });
+
+    await createModalMachine({
+      modalTokenId: 'token-id',
+      modalTokenSecret: 'token-secret',
+      modalBaseImageRef: MODAL_IMAGE_REF,
+      launchMode: 'fresh',
+      onMutation,
+      computeClient: {
+        vendor: 'roomote',
+        createInstance: vi.fn().mockResolvedValue({
+          instanceId: 'modal-123',
+          domains: {},
+        }),
+        resumeFromSnapshot: vi.fn(),
+        writeFiles,
+        runCommand,
+        destroyInstance: vi.fn(),
+      },
+    });
+
+    expect(onMutation).toHaveBeenCalled();
+    // Every emitted event carries the logical vendor, not the literal engine.
+    for (const [event] of onMutation.mock.calls) {
+      expect(event.provider).toBe('roomote');
+    }
+  });
+
   it('forwards sandbox tags during fresh Modal launches', async () => {
     mockGetWorkerRelease.mockResolvedValue({
       archive: Buffer.from('worker-release'),

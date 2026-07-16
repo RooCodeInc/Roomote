@@ -14,6 +14,7 @@ import * as environments from '../environments';
 import * as featureFlags from '../feature-flags';
 import * as mcpConnections from '../mcp-connections';
 import * as userApiKeys from '../user-api-keys';
+import * as llmUsage from '../llm-usage';
 import type { AppRouter, AppRouterInput, AppRouterOutput } from '../types';
 
 export type { AppRouter, AppRouterInput, AppRouterOutput };
@@ -52,6 +53,7 @@ export const sdk = {
   featureFlags,
   mcpConnections,
   userApiKeys,
+  llmUsage,
 };
 
 export interface CreateClientOptions {

@@ -1,6 +1,6 @@
 import type { SetupAuthProviderId } from '@roomote/types';
 
-type ProviderSetupCopyId = SetupAuthProviderId | 'telegram';
+type ProviderSetupCopyId = SetupAuthProviderId | 'telegram' | 'discord';
 
 type ProviderSetupCopy = {
   creationHref: string;
@@ -20,6 +20,10 @@ const PROVIDER_SETUP_COPY: Record<ProviderSetupCopyId, ProviderSetupCopy> = {
   telegram: {
     creationHref: 'https://t.me/BotFather',
     setupLabel: 'Telegram bot',
+  },
+  discord: {
+    creationHref: 'https://discord.com/developers/applications',
+    setupLabel: 'Discord bot',
   },
 };
 

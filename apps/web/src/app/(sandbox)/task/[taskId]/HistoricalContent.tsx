@@ -36,7 +36,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
   const draftPrompt = session.draftPrompt;
   const isAsleep = isTaskRunAsleep(session.taskRun);
   const taskRun = session.taskRun;
-  const onboardingEnvironmentName = session.onboardingEnvironment?.name;
+  const onboardingEnvironment = session.onboardingEnvironment;
   const shouldShowWakeTaskInput = isAsleep && Boolean(taskRun?.snapshotId);
   const [messagesInitialScrollBehavior, setMessagesInitialScrollBehavior] =
     useState<'smooth' | 'instant'>('smooth');
@@ -55,10 +55,8 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
     return <TaskFailureMessage error={displayError} />;
   }, [taskRun]);
   const messagesFooter = useMemo(() => {
-    const onboardingCompletionFooter = onboardingEnvironmentName ? (
-      <OnboardingCompletionMessage
-        environmentName={onboardingEnvironmentName}
-      />
+    const onboardingCompletionFooter = onboardingEnvironment ? (
+      <OnboardingCompletionMessage environment={onboardingEnvironment} />
     ) : null;
 
     return (
@@ -67,7 +65,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         {footer ?? taskFailureFooter ?? onboardingCompletionFooter}
       </>
     );
-  }, [footer, isResuming, onboardingEnvironmentName, taskFailureFooter]);
+  }, [footer, isResuming, onboardingEnvironment, taskFailureFooter]);
 
   useEffect(() => {
     setMessagesInitialScrollBehavior('instant');
@@ -81,7 +79,7 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
       <PreviewPaneProvider>
         <ClosePreviewOnSleepEffect asleep={isAsleep} />
         <div className="flex h-full min-h-0 min-w-0 flex-1">
-          <FramedSurface surfaceClassName="flex flex-col bg-transparent">
+          <FramedSurface surfaceClassName="flex flex-col bg-transparent @container">
             <PreviewPaneLayout session={session}>
               <ArtifactLinkProvider session={session}>
                 <PreviewCommand
@@ -96,16 +94,18 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
                     footer={messagesFooter}
                   />
                   {shouldShowWakeTaskInput && taskRun ? (
-                    <WakeTaskInput
-                      taskRun={taskRun}
-                      initialPrompt={draftPrompt ?? ''}
-                    />
-                  ) : (
-                    isResuming &&
-                    draftPrompt && (
-                      <DraftPromptBanner draftPrompt={draftPrompt} />
-                    )
-                  )}
+                    <HistoricalInputTray>
+                      <WakeTaskInput
+                        taskRun={taskRun}
+                        initialPrompt={draftPrompt ?? ''}
+                        embedded
+                      />
+                    </HistoricalInputTray>
+                  ) : isResuming && draftPrompt ? (
+                    <HistoricalInputTray>
+                      <DraftPromptBanner draftPrompt={draftPrompt} embedded />
+                    </HistoricalInputTray>
+                  ) : null}
                 </div>
               </ArtifactLinkProvider>
             </PreviewPaneLayout>
@@ -114,6 +114,14 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
         </div>
       </PreviewPaneProvider>
     </TaskSidePanelProvider>
+  );
+}
+
+function HistoricalInputTray({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto w-full overflow-clip rounded-t-md bg-card @[56rem]:rounded-t-lg transition-colors border-2 border-background rounded-b-3xl">
+      {children}
+    </div>
   );
 }
 

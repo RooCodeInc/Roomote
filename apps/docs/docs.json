@@ -50,6 +50,7 @@
             "root": "communications",
             "expanded": true,
             "pages": [
+              "providers/communications/discord",
               "providers/communications/slack",
               "providers/communications/microsoft-teams",
               "providers/communications/telegram"
@@ -112,8 +113,8 @@
           "agent-guidance",
           "skills",
           "automations",
+          "cost-analytics",
           "users",
-          "vibes",
           "anonymous-analytics",
           "personal-settings"
         ]

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 const state = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
@@ -78,20 +78,35 @@ vi.mock('./AnalyticsShell', () => ({
   AnalyticsShell: ({
     activeItemId,
     title,
+    onItemSelect,
     children,
   }: {
     activeItemId: string;
     title: string;
+    onItemSelect: (value: 'tasks' | 'pullRequests' | 'costs') => void;
     children: ReactNode;
   }) => (
     <div>
       <div data-testid="active-item">{activeItemId}</div>
       <h1>{title}</h1>
+      <button type="button" onClick={() => onItemSelect('costs')}>
+        Costs
+      </button>
       {children}
     </div>
   ),
   AnalyticsShellDownloadAction: () => null,
-  getAnalyticsHref: () => '/analytics',
+  getAnalyticsHref: (object: 'tasks' | 'pullRequests' | 'costs') => {
+    if (object === 'costs') {
+      return '/analytics/costs';
+    }
+
+    if (object === 'pullRequests') {
+      return '/analytics?object=pullRequests';
+    }
+
+    return '/analytics';
+  },
 }));
 
 vi.mock('./AnalyticsFilterBar', () => ({
@@ -130,5 +145,14 @@ describe('Analytics', () => {
 
     expect(screen.getByTestId('active-item')).toHaveTextContent('tasks');
     expect(screen.getByRole('heading', { name: 'Tasks' })).toBeInTheDocument();
+  });
+
+  it('opens Costs on its dedicated analytics page from generic analytics', () => {
+    render(<Analytics />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Costs' }));
+
+    expect(state.push).toHaveBeenCalledWith('/analytics/costs');
+    expect(state.replace).not.toHaveBeenCalled();
   });
 });

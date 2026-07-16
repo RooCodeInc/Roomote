@@ -19,6 +19,8 @@ const {
   mockUpdateTaskPrStatus,
   mockUpsertGitHubPullRequestFactFromWebhook,
   mockRecordPrStatusChangeInTaskHistory,
+  mockIsFromKnownInstallation,
+  mockVerify,
   mockVerifyAndReceive,
   webhooksConstructorParams,
 } = vi.hoisted(() => ({
@@ -47,6 +49,8 @@ const {
   mockUpdateTaskPrStatus: vi.fn(),
   mockUpsertGitHubPullRequestFactFromWebhook: vi.fn(),
   mockRecordPrStatusChangeInTaskHistory: vi.fn(),
+  mockIsFromKnownInstallation: vi.fn(),
+  mockVerify: vi.fn(),
   mockVerifyAndReceive: vi.fn(),
   webhooksConstructorParams: [] as unknown[],
 }));
@@ -69,6 +73,10 @@ vi.mock('@octokit/webhooks', () => ({
     }
 
     onError() {}
+
+    verify(payload: string, signature: string) {
+      return mockVerify(payload, signature);
+    }
 
     verifyAndReceive({
       id,
@@ -110,6 +118,10 @@ vi.mock('../../logging', () => ({
 
 vi.mock('../handleInstallationCreated', () => ({
   handleInstallationCreated: mockHandleInstallationCreated,
+}));
+
+vi.mock('../isFromKnownInstallation', () => ({
+  isFromKnownInstallation: mockIsFromKnownInstallation,
 }));
 
 vi.mock('../handlePrComment', () => ({
@@ -177,11 +189,15 @@ describe('github webhook router', () => {
     mockResolveDeploymentEnvVar.mockReset();
     mockUpdateTaskPrStatus.mockReset();
     mockUpsertGitHubPullRequestFactFromWebhook.mockReset();
+    mockIsFromKnownInstallation.mockReset();
+    mockVerify.mockReset();
     mockVerifyAndReceive.mockReset();
 
     mockIsRepoSkipped.mockReturnValue(false);
     mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
     mockResolveDeploymentEnvVar.mockResolvedValue('test-secret');
+    mockIsFromKnownInstallation.mockResolvedValue(true);
+    mockVerify.mockResolvedValue(true);
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
@@ -338,6 +354,51 @@ describe('github webhook router', () => {
     expect(
       mockResolveConfiguredGitHubAppSlug.mock.invocationCallOrder[0],
     ).toBeLessThan(mockVerifyAndReceive.mock.invocationCallOrder[0]!);
+  });
+
+  it('returns 401 without an installation lookup when the signature is invalid', async () => {
+    mockVerify.mockResolvedValue(false);
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-bad-signature',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=forged',
+      },
+      body: JSON.stringify({ ref: 'refs/heads/main' }),
+    });
+
+    expect(response.status).toBe(401);
+    expect(mockIsFromKnownInstallation).not.toHaveBeenCalled();
+    expect(mockVerifyAndReceive).not.toHaveBeenCalled();
+    expect(mockRecordWebhook).not.toHaveBeenCalled();
+  });
+
+  it('drops deliveries from unknown installations before recording or handling', async () => {
+    mockIsFromKnownInstallation.mockResolvedValue(false);
+
+    const payload = JSON.stringify({
+      ref: 'refs/heads/main',
+      installation: { id: 999 },
+    });
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-unknown-installation',
+        'x-github-event': 'push',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: payload,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ message: 'unknown_installation' });
+    expect(mockIsFromKnownInstallation).toHaveBeenCalledWith('push', payload);
+    expect(mockVerifyAndReceive).not.toHaveBeenCalled();
+    expect(mockRecordWebhook).not.toHaveBeenCalled();
+    expect(mockResolveConfiguredGitHubAppSlug).not.toHaveBeenCalled();
   });
 
   it('returns 401 without processing when no webhook secret is configured', async () => {

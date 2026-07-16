@@ -21,7 +21,6 @@ import {
 } from './hooks/SandboxProvider';
 import { getDisplayedTodoStatus } from './todo-status';
 
-const HIDE_COMPLETED_TODOS_DELAY_MS = 10_000;
 const TODO_INACTIVE_TASK_PHASES: ReadonlySet<string> = new Set([
   'idle',
   'waiting_for_prompt',
@@ -35,20 +34,26 @@ const TODO_INACTIVE_TASK_PHASES: ReadonlySet<string> = new Set([
  * before the provider is available.
  */
 interface TodoListProps {
+  autoCollapseKey?: string | null;
   taskEntryKey?: string;
 }
 
-export const TodoList = ({ taskEntryKey }: TodoListProps) => {
+export const TodoList = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
   const isInsideProvider = useIsInsideSandboxProvider();
 
   if (!isInsideProvider) {
     return null;
   }
 
-  return <TodoListContent taskEntryKey={taskEntryKey} />;
+  return (
+    <TodoListContent
+      autoCollapseKey={autoCollapseKey}
+      taskEntryKey={taskEntryKey}
+    />
+  );
 };
 
-const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
+const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
   const todos = useSandboxTodos();
   const taskPhase = useSandboxTaskPhase();
   const shouldSuppressActiveStatus =
@@ -61,14 +66,16 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
 
   const completedCount = todos.filter((t) => t.status === 'completed').length;
   const allDone = todos.length > 0 && completedCount === todos.length;
-  const [isHiddenAfterCompletion, setIsHiddenAfterCompletion] = useState(false);
-  const [isOpen, setIsOpen] = useState(() => !allDone);
+  const [isOpen, setIsOpen] = useState(false);
+  const autoCollapsedKeysRef = useRef(new Set<string>());
   const wasAllDoneRef = useRef(allDone);
 
   useLayoutEffect(() => {
     if (!taskEntryKey) {
       return;
     }
+
+    autoCollapsedKeysRef.current.clear();
 
     const mobileQuery = window.matchMedia?.('(max-width: 767px)');
 
@@ -81,8 +88,20 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
   }, [taskEntryKey]);
 
   useEffect(() => {
+    if (!autoCollapseKey) {
+      return;
+    }
+
+    if (autoCollapsedKeysRef.current.has(autoCollapseKey)) {
+      return;
+    }
+
+    autoCollapsedKeysRef.current.add(autoCollapseKey);
+    setIsOpen(false);
+  }, [autoCollapseKey]);
+
+  useEffect(() => {
     if (!allDone) {
-      setIsHiddenAfterCompletion(false);
       if (wasAllDoneRef.current) {
         setIsOpen(true);
       }
@@ -92,22 +111,15 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
 
     wasAllDoneRef.current = true;
     setIsOpen(false);
-    setIsHiddenAfterCompletion(false);
-
-    const hideTimer = window.setTimeout(() => {
-      setIsHiddenAfterCompletion(true);
-    }, HIDE_COMPLETED_TODOS_DELAY_MS);
-
-    return () => window.clearTimeout(hideTimer);
   }, [allDone, todoStatusSignature]);
 
-  if (todos.length === 0 || isHiddenAfterCompletion) {
+  if (todos.length === 0) {
     return null;
   }
 
   return (
     <div className="overflow-hidden border-b border-background">
-      <TodoListPrimitive>
+      <TodoListPrimitive className="mx-auto w-full max-w-4xl">
         <TodoListSection
           allCompleted={allDone}
           onOpenChange={setIsOpen}
@@ -117,7 +129,7 @@ const TodoListContent = ({ taskEntryKey }: TodoListProps) => {
             <TodoListSectionLabel
               label={
                 allDone
-                  ? `${completedCount} to-dos done`
+                  ? `All ${completedCount} to-dos done`
                   : `${completedCount} of ${todos.length} to-dos done`
               }
             />

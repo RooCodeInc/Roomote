@@ -3,6 +3,11 @@ import { TaskRunQueueEnqueueError } from '@roomote/cloud-agents/server';
 import { launchActWorkItems } from '../launch.js';
 import { postLateBoundWorkItemFailureMessage } from '../slack.js';
 import { postLateBoundWorkItemFailureToTelegram } from '../telegram.js';
+import {
+  createAutomationDiscordTaskThread,
+  DiscordAutomationTargetPreparationError,
+  postLateBoundWorkItemFailureToDiscord,
+} from '../discord.js';
 import type { PersistedAutomationWorkItem } from '../types.js';
 
 const {
@@ -143,6 +148,19 @@ vi.mock('../teams.js', () => ({
   postLateBoundWorkItemFailureToTeams: vi.fn(async () => undefined),
 }));
 
+vi.mock('../discord.js', () => ({
+  resolveAutomationDiscordTarget: vi.fn(async () => null),
+  createAutomationDiscordTaskThread: vi.fn(
+    async ({ target }: { target: Record<string, unknown> }) => ({
+      ...target,
+      threadId: 'discord-thread-1',
+      messageId: 'discord-message-1',
+    }),
+  ),
+  DiscordAutomationTargetPreparationError: class DiscordAutomationTargetPreparationError extends Error {},
+  postLateBoundWorkItemFailureToDiscord: vi.fn(async () => undefined),
+}));
+
 vi.mock('../slack.js', () => ({
   postLateBoundWorkItemFailureMessage: vi.fn(),
 }));
@@ -174,6 +192,14 @@ const slackTarget = {
   provider: 'slack' as const,
   slack: { postMessage: vi.fn() } as never,
   channelId: 'C456',
+};
+
+const discordTarget = {
+  provider: 'discord' as const,
+  discord: { postMessage: vi.fn(), createTaskThread: vi.fn() } as never,
+  guildId: 'guild-1',
+  channelId: 'channel-1',
+  channelType: 0,
 };
 
 // Where-predicates captured by setupDbUpdateMock, in db.update call order
@@ -230,6 +256,8 @@ describe('launchActWorkItems', () => {
     mockUpdateBackgroundAutomationSlackThreadMetadata.mockResolvedValue(true);
     vi.mocked(postLateBoundWorkItemFailureMessage).mockReset();
     vi.mocked(postLateBoundWorkItemFailureMessage).mockResolvedValue(undefined);
+    vi.mocked(createAutomationDiscordTaskThread).mockClear();
+    vi.mocked(postLateBoundWorkItemFailureToDiscord).mockClear();
     mockDbUpdate.mockReset();
   });
 
@@ -693,6 +721,88 @@ describe('launchActWorkItems', () => {
     );
   });
 
+  it('creates a Discord task thread and stamps provider-neutral routing metadata', async () => {
+    setupDbUpdateMock();
+    mockSuccessfulTaskEnqueue('task-discord-1');
+
+    const result = await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: discordTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 1, failedCount: 0 });
+    expect(createAutomationDiscordTaskThread).toHaveBeenCalledWith({
+      target: discordTarget,
+      workItem,
+    });
+
+    const enqueueInput = mockEnqueueTask.mock.calls[0]?.[0];
+    const enqueuePayload = enqueueInput.task.payload as Record<string, unknown>;
+    expect(enqueueInput.surface).toBe('discord');
+    expect(enqueuePayload).toMatchObject({
+      automationWorkItemId: workItem.id,
+      communicationProvider: 'discord',
+      communicationGuildId: 'guild-1',
+      communicationChannelId: 'channel-1',
+      communicationThreadId: 'discord-thread-1',
+      communicationMessageId: 'discord-message-1',
+      discordTaskThread: true,
+    });
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'Do not send Discord progress updates, elapsed-time updates, validation-started updates, or partial findings',
+      ),
+    );
+  });
+
+  it('posts terminal Discord launch failures into the created task thread', async () => {
+    setupDbUpdateMock();
+    mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
+
+    const result = await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: discordTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    expect(postLateBoundWorkItemFailureToDiscord).toHaveBeenCalledWith({
+      target: expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'discord-thread-1',
+      }),
+      workItem,
+      reason: 'enqueue failed',
+    });
+  });
+
+  it('reopens the work item when Discord thread creation fails transiently', async () => {
+    const updateSets = setupDbUpdateMock();
+    vi.mocked(createAutomationDiscordTaskThread).mockRejectedValueOnce(
+      new DiscordAutomationTargetPreparationError('discord unavailable'),
+    );
+
+    const result = await launchActWorkItems({
+      automationKey: 'sentry_triage',
+      workItems: [workItem],
+      executionTaskBootstrap: '$implement-changes',
+      chatTarget: discordTarget,
+    });
+
+    expect(result).toEqual({ launchedCount: 0, failedCount: 1 });
+    // Transient chat-target failures reopen the claim instead of terminally
+    // failing: the persisted thread coordinate lets the retry resume there.
+    expect(updateSets.map((values) => values.status)).toEqual([
+      'launching',
+      'open',
+    ]);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+    expect(postLateBoundWorkItemFailureToDiscord).not.toHaveBeenCalled();
+  });
+
   it('stays silent on terminal launch failures when no Slack target resolves', async () => {
     const updateSets = setupDbUpdateMock();
     mockEnqueueTask.mockRejectedValueOnce(new Error('enqueue failed'));
@@ -769,6 +879,58 @@ describe('launchActWorkItems', () => {
     ]);
     // Retryable failures stay quiet; a later resubmission relaunches them.
     expect(postLateBoundWorkItemFailureMessage).not.toHaveBeenCalled();
+  });
+
+  it('re-enters Discord thread recovery with the stable work-item id after an enqueue retry', async () => {
+    setupDbUpdateMock();
+    mockEnqueueTask.mockImplementationOnce(async (_task, options) => {
+      await options.beforeEnqueue?.({
+        id: 123,
+        taskId: 'task-discord-retry-1',
+      });
+      throw new TaskRunQueueEnqueueError({
+        runId: 123,
+        taskId: 'task-discord-retry-1',
+        originalError: new Error('redis unavailable'),
+      });
+    });
+
+    await expect(
+      launchActWorkItems({
+        automationKey: 'sentry_triage',
+        workItems: [workItem],
+        executionTaskBootstrap: '$implement-changes',
+        chatTarget: discordTarget,
+      }),
+    ).resolves.toEqual({ launchedCount: 0, failedCount: 1 });
+
+    mockSuccessfulTaskEnqueue('task-discord-retry-2');
+    await expect(
+      launchActWorkItems({
+        automationKey: 'sentry_triage',
+        workItems: [workItem],
+        executionTaskBootstrap: '$implement-changes',
+        chatTarget: discordTarget,
+      }),
+    ).resolves.toEqual({ launchedCount: 1, failedCount: 0 });
+
+    expect(createAutomationDiscordTaskThread).toHaveBeenCalledTimes(2);
+    expect(createAutomationDiscordTaskThread).toHaveBeenNthCalledWith(1, {
+      target: discordTarget,
+      workItem: expect.objectContaining({ id: workItem.id }),
+    });
+    expect(createAutomationDiscordTaskThread).toHaveBeenNthCalledWith(2, {
+      target: discordTarget,
+      workItem: expect.objectContaining({ id: workItem.id }),
+    });
+    expect(
+      (
+        mockEnqueueTask.mock.calls[1]?.[0].task.payload as Record<
+          string,
+          unknown
+        >
+      ).communicationThreadId,
+    ).toBe('discord-thread-1');
   });
 
   it('fences the terminal failure write on the launching status and the claim token', async () => {

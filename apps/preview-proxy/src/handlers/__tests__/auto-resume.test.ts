@@ -24,6 +24,17 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
 }));
 
+vi.mock('@roomote/db/server', () => ({
+  taskRuns: {
+    sourceRunId: 'taskRuns.sourceRunId',
+    taskId: 'taskRuns.taskId',
+    status: 'taskRuns.status',
+  },
+  and: (...conditions: unknown[]) => conditions,
+  eq: (column: unknown, value: unknown) => ['eq', column, value],
+  inArray: (column: unknown, values: unknown[]) => ['inArray', column, values],
+}));
+
 vi.mock('../../lib/logger', () => ({
   logger: {
     info: vi.fn(),
@@ -67,6 +78,15 @@ describe('triggerAutoResume', () => {
       tokenType: 'pt',
       version: 1,
     });
+
+    expect(mockFindExistingResume).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.arrayContaining([
+          ['eq', 'taskRuns.sourceRunId', 42],
+          ['eq', 'taskRuns.taskId', resolution.taskRun?.taskId],
+        ]),
+      }),
+    );
 
     expect(mockEnqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({

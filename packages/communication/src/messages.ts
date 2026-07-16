@@ -7,7 +7,18 @@ import {
 } from '@roomote/types';
 
 const COMMUNICATION_MESSAGE_TTL_SECONDS = 60 * 60;
+const COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS = 24 * 60 * 60;
 const LATEST_INBOUND_MESSAGE_ID_TTL_SECONDS = 60 * 60 * 24;
+
+const QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT = `
+if redis.call('EXISTS', KEYS[2]) == 1 then
+  return 0
+end
+local queueLength = redis.call('RPUSH', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[3])
+return queueLength
+`;
 
 function getCommunicationMessagesKey(
   provider: CommunicationProvider,
@@ -21,6 +32,14 @@ function getLatestInboundMessageIdKey(
   runId: number,
 ): string {
   return `${provider}:latest_inbound_message_id:${runId}`;
+}
+
+function getCommunicationMessageDedupeKey(
+  provider: CommunicationProvider,
+  runId: number,
+  messageId: string,
+): string {
+  return `${provider}:messages:dedupe:${runId}:${messageId}`;
 }
 
 function getRedisExecCommandError(
@@ -80,6 +99,29 @@ export async function queueCommunicationMessage(
 
   await redis.rpush(key, JSON.stringify(message));
   await redis.expire(key, COMMUNICATION_MESSAGE_TTL_SECONDS);
+}
+
+/**
+ * Queue a provider event at most once for its stable upstream message id.
+ * This closes the retry window where delivery succeeded but the API's final
+ * event-completion marker could not be written.
+ */
+export async function queueCommunicationMessageOnce(
+  provider: CommunicationProvider,
+  runId: number,
+  message: QueuedCommunicationMessage,
+): Promise<boolean> {
+  const redis = getRedis();
+  const result = await redis.eval(
+    QUEUE_COMMUNICATION_MESSAGE_ONCE_SCRIPT,
+    2,
+    getCommunicationMessagesKey(provider, runId),
+    getCommunicationMessageDedupeKey(provider, runId, message.ts),
+    JSON.stringify(message),
+    COMMUNICATION_MESSAGE_TTL_SECONDS.toString(),
+    COMMUNICATION_MESSAGE_DEDUPE_TTL_SECONDS.toString(),
+  );
+  return typeof result === 'number' && result > 0;
 }
 
 export async function prependCommunicationMessages(

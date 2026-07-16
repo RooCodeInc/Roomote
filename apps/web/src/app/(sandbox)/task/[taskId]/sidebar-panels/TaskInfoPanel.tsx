@@ -71,6 +71,7 @@ const SANDBOX_PROVIDER_LABELS = {
   daytona: 'Daytona',
   e2b: 'E2B',
   blaxel: 'Blaxel',
+  roomote: 'Roomote',
 } satisfies Record<ComputeProvider, string>;
 
 const SANDBOX_PROVIDER_ICONS = {
@@ -79,6 +80,7 @@ const SANDBOX_PROVIDER_ICONS = {
   daytona: CloudIcon,
   e2b: CloudIcon,
   blaxel: CloudIcon,
+  roomote: CloudIcon,
 } satisfies Record<ComputeProvider, typeof CloudIcon>;
 
 function formatStartedAt(startedAt: Date | null): string {
@@ -101,6 +103,7 @@ type StartedFromBrandIcon =
   | 'bitbucket'
   | 'ado'
   | 'telegram'
+  | 'discord'
   | 'teams';
 
 const SOURCE_CONTROL_BRAND_ICONS: Record<
@@ -156,6 +159,10 @@ function getStartedFrom(
 
   if (task.surface === 'telegram' || communicationProvider === 'telegram') {
     return { label: 'Telegram', brandIcon: 'telegram' };
+  }
+
+  if (task.surface === 'discord' || communicationProvider === 'discord') {
+    return { label: 'Discord', brandIcon: 'discord' };
   }
 
   if (task.surface === 'teams' || communicationProvider === 'teams') {

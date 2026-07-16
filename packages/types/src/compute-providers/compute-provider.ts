@@ -12,6 +12,7 @@ export const computeProviders = [
   'daytona',
   'e2b',
   'blaxel',
+  'roomote',
 ] as const;
 
 export type ComputeProvider = (typeof computeProviders)[number];
@@ -24,6 +25,7 @@ export const snapshotCapableComputeProviders = [
   'modal',
   'e2b',
   'daytona',
+  'roomote',
 ] as const satisfies readonly ComputeProvider[];
 
 /**
@@ -154,6 +156,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   daytona: DAYTONA_WORKER_RUNTIME_PATHS,
   e2b: E2B_WORKER_RUNTIME_PATHS,
   blaxel: BLAXEL_WORKER_RUNTIME_PATHS,
+  roomote: MODAL_WORKER_RUNTIME_PATHS,
   local: LOCAL_WORKER_RUNTIME_PATHS,
 };
 

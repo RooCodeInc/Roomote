@@ -17,11 +17,17 @@ const cancelTaskInputSchema = z
         source: z.string().trim().min(1).max(50).optional(),
       })
       .optional(),
+    /**
+     * When true, cancel is terminal and the sandbox shuts down. Soft stops (web
+     * stop control) omit this and leave the sandbox resumable.
+     */
+    terminate: z.boolean().optional(),
   })
   .optional();
 
 /**
- * Cancel the current task and leave the sandbox ready to resume.
+ * Cancel the current task. Soft cancel stays resumable; `terminate: true` shuts
+ * the sandbox down so provider Cancel buttons actually end the run.
  */
 export const cancelTask = publicProcedure
   .input(cancelTaskInputSchema)
@@ -33,9 +39,10 @@ export const cancelTask = publicProcedure
       });
     }
 
-    ctx.harnessManager.cancelTask(
-      input?.cancelledBy ? { cancelledBy: input.cancelledBy } : undefined,
-    );
+    ctx.harnessManager.cancelTask({
+      ...(input?.cancelledBy ? { cancelledBy: input.cancelledBy } : {}),
+      ...(input?.terminate ? { terminate: true } : {}),
+    });
 
     return { success: true };
   });

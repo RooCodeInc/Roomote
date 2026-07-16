@@ -396,6 +396,8 @@ async function createDeclarativeEnvironment(
         description: config.description,
         config,
         declarativeSource: source,
+        isVerified: false,
+        verificationError: null,
       })
       .returning({ id: environments.id });
 
@@ -441,6 +443,7 @@ async function updateDeclarativeEnvironment(
         config,
       },
       repositoryIds,
+      preserveVerification: true,
       configVersion: {
         config,
         name: config.name,

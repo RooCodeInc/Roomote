@@ -2,6 +2,7 @@
 
 import type { AnalyticsGranularity } from '@/types';
 import { ANALYTICS_GRANULARITY_LABELS } from '@/types';
+import { cn } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -14,22 +15,26 @@ type AnalyticsGranularitySelectorProps = {
   value: AnalyticsGranularity;
   availableGranularities: AnalyticsGranularity[];
   onChange: (value: AnalyticsGranularity) => void;
+  className?: string;
+  triggerClassName?: string;
 };
 
 export function AnalyticsGranularitySelector({
   value,
   availableGranularities,
   onChange,
+  className,
+  triggerClassName,
 }: AnalyticsGranularitySelectorProps) {
   return (
-    <div className="flex justify-center">
+    <div className={cn('flex', className)}>
       <Select
         value={value}
         onValueChange={(next) => onChange(next as AnalyticsGranularity)}
       >
         <SelectTrigger
           aria-label="Chart granularity"
-          className="justify-center text-center"
+          className={triggerClassName}
         >
           <SelectValue placeholder="Chart granularity" />
         </SelectTrigger>

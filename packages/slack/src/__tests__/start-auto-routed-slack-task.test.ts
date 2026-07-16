@@ -1016,8 +1016,6 @@ describe('startAutoRoutedSlackTask', () => {
     expect(startSlackAppMentionTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         agentPromptText: 'Use the saved suggestion prompt.',
-        ackEmoji: 'eyes',
-        completionEmoji: 'white_check_mark',
         webPath: '/setup',
       }),
     );

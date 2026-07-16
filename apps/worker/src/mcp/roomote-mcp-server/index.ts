@@ -37,6 +37,7 @@ import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
 import {
   handleCreateEnvironment,
+  handleRecordVerification,
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
@@ -357,7 +358,19 @@ function hasTeamsChatContext(): boolean {
   );
 }
 
-function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
+function hasDiscordChatContext(): boolean {
+  return (
+    process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim() === 'discord' &&
+    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  );
+}
+
+function getChatReplySurfaceLabel():
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'chat' {
   const provider = process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim();
 
   if (provider === 'teams') {
@@ -366,6 +379,10 @@ function getChatReplySurfaceLabel(): 'Slack' | 'Teams' | 'Telegram' | 'chat' {
 
   if (provider === 'telegram') {
     return 'Telegram';
+  }
+
+  if (provider === 'discord') {
+    return 'Discord';
   }
 
   return process.env.ROOMOTE_SLACK_CHANNEL?.trim() ? 'Slack' : 'chat';
@@ -471,6 +488,12 @@ const manageTasksInputSchema = {
         'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
     ),
   branch: z.string().optional().describe('Branch to use (for launch)'),
+  notifyOnSettle: z
+    .boolean()
+    .optional()
+    .describe(
+      'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
+    ),
 } satisfies Record<string, z.ZodTypeAny>;
 
 roomoteMcpServer.registerTool(
@@ -556,6 +579,7 @@ roomoteMcpServer.registerTool(
             prompt: params.prompt,
             branch: params.branch,
             environmentId,
+            notifyOnSettle: params.notifyOnSettle,
           },
           config,
         );
@@ -756,21 +780,22 @@ roomoteMcpServer.registerTool(
   'manage_environments',
   {
     title: 'Manage Environments',
-    description: `Create or update ${PRODUCT_NAME} environments.`,
+    description: `Create or update ${PRODUCT_NAME} environments, or record an environment verification result.`,
     inputSchema: {
       action: z
-        .enum(['create', 'update'])
+        .enum(['create', 'update', 'record_verification'])
         .describe('The environment action to perform'),
       definition: z
         .string()
+        .optional()
         .describe(
-          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories).',
+          'Environment definition as a YAML or JSON string. Must satisfy EnvironmentConfig (e.g., include name and repositories). Required for "create" and "update".',
         ),
       environmentId: z
         .string()
         .optional()
         .describe(
-          'Existing environment ID to update. Required for action "update".',
+          'Existing environment ID. Required for "update" and "record_verification".',
         ),
       format: z
         .enum(['auto', 'json', 'yaml'])
@@ -788,6 +813,18 @@ roomoteMcpServer.registerTool(
         .describe(
           'Optional description override applied after parsing definition.',
         ),
+      success: z
+        .boolean()
+        .optional()
+        .describe(
+          'For "record_verification": whether the environment verification succeeded.',
+        ),
+      error: z
+        .string()
+        .optional()
+        .describe(
+          'For "record_verification" with success=false: a short, user-safe failure message. Never include secrets or full environment YAML.',
+        ),
     },
     annotations: {
       readOnlyHint: false,
@@ -800,6 +837,29 @@ roomoteMcpServer.registerTool(
     const config = getRoomoteConfig();
     if (!config) {
       return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    if (params.action === 'record_verification') {
+      if (typeof params.success !== 'boolean') {
+        return errorResult(
+          'success (boolean) is required for record_verification',
+        );
+      }
+
+      return handleRecordVerification(
+        {
+          environmentId: params.environmentId ?? '',
+          success: params.success,
+          error: params.error,
+        },
+        config,
+      );
+    }
+
+    if (params.definition === undefined) {
+      return errorResult(
+        `definition is required for action "${params.action}"`,
+      );
     }
 
     if (params.action === 'update') {
@@ -1235,7 +1295,11 @@ function recordSuccessfulSlackTurnSatisfactionResult(
 }
 
 if (shouldRegisterSlackChannelPostTool()) {
-  if (hasTelegramChatContext() || hasTeamsChatContext()) {
+  if (
+    hasTelegramChatContext() ||
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
+  ) {
     const postSurface = getChatReplySurfaceLabel();
 
     roomoteMcpServer.registerTool(
@@ -1317,7 +1381,8 @@ if (shouldRegisterSlackChannelPostTool()) {
   if (
     hasSlackChatContext() ||
     hasTelegramChatContext() ||
-    hasTeamsChatContext()
+    hasTeamsChatContext() ||
+    hasDiscordChatContext()
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 
@@ -1440,10 +1505,15 @@ if (shouldRegisterSlackChannelPostTool()) {
     },
   );
 
-  // Teams/Telegram tasks get the surface-generic post_to_channel instead;
-  // exposing the Slack-labeled tool there invites opaque conversation ids
-  // into Slack channel-name normalization, which mangles them.
-  if (!hasTeamsChatContext() && !hasTelegramChatContext()) {
+  // Teams/Telegram/Discord tasks get the surface-generic post_to_channel
+  // instead; exposing the Slack-labeled tool there invites opaque
+  // conversation ids into Slack channel-name normalization, which mangles
+  // them.
+  if (
+    !hasTeamsChatContext() &&
+    !hasTelegramChatContext() &&
+    !hasDiscordChatContext()
+  ) {
     roomoteMcpServer.registerTool(
       'post_to_slack_channel',
       {

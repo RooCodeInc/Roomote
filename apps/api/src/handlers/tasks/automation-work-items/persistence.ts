@@ -1,4 +1,13 @@
-import { and, asc, db, eq, inArray, sql, workItems } from '@roomote/db/server';
+import {
+  and,
+  asc,
+  db,
+  eq,
+  inArray,
+  isNull,
+  sql,
+  workItems,
+} from '@roomote/db/server';
 import { WORK_ITEM_ACTIVE_STATUSES } from '@roomote/types';
 
 import {
@@ -14,6 +23,37 @@ import type {
   PersistedDuplicateWorkItemRef,
   PreparedAutomationWorkItem,
 } from './types.js';
+
+/**
+ * Loads fingerprint-duplicate work items that are still waiting for a launch:
+ * `open` (or `launching`, whose staleness the launch claim CAS arbitrates)
+ * with no linked task. A transient launch failure reopens its work item, and
+ * the reopened row blocks re-insertion as an active fingerprint duplicate —
+ * so the scan that reported the same finding must relaunch it, or the item
+ * strands indefinitely.
+ */
+export async function loadRelaunchableDuplicateWorkItems(
+  ids: string[],
+): Promise<PersistedAutomationWorkItemsResult['workItems']> {
+  if (ids.length === 0) {
+    return [];
+  }
+
+  const rows = await db
+    .select(persistedAutomationWorkItemProjection)
+    .from(workItems)
+    .where(
+      and(
+        inArray(workItems.id, ids),
+        eq(workItems.kind, 'auto_fix'),
+        inArray(workItems.status, ['open', 'launching']),
+        isNull(workItems.launchedTaskId),
+      ),
+    )
+    .orderBy(asc(workItems.sortOrder));
+
+  return rows.map(toPersistedAutomationWorkItem);
+}
 
 export async function persistAutomationWorkItems(params: {
   sourceTaskId: string;

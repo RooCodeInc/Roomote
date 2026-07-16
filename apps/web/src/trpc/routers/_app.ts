@@ -91,10 +91,12 @@ import {
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
+  retryFailedTaskStartCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
+  createSlackAppFromManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -120,6 +122,9 @@ import {
   getLinkedTelegramAccountCommand,
   createTelegramLinkCodeCommand,
   unlinkLinkedTelegramAccountCommand,
+  getLinkedDiscordAccountCommand,
+  createDiscordLinkCodeCommand,
+  unlinkLinkedDiscordAccountCommand,
   getLinkedMicrosoftTeamsAccountCommand,
 } from '../commands/linked-accounts';
 import {
@@ -138,6 +143,7 @@ import {
   updateEnvironmentCommand,
   startEnvironmentDefinitionTaskCommand,
   cancelEnvironmentDefinitionTaskCommand,
+  retryEnvironmentVerificationCommand,
   deleteEnvironmentCommand,
   duplicateEnvironmentCommand,
   validateConfigCommand,
@@ -194,6 +200,8 @@ import {
 import {
   fulfillTaskEnvVarRequestCommand,
   fulfillTaskEnvVarRequestSchema,
+  markTaskEnvVarRequestFulfilledCommand,
+  markTaskEnvVarRequestFulfilledSchema,
 } from '../commands/task-env-var-requests';
 import {
   getUsersOnlyForFilterCommand,
@@ -211,6 +219,7 @@ import {
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
+  createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
@@ -237,7 +246,13 @@ import {
   getCommsStatusCommand,
   saveCommsAuthConfigCommand,
   clearCommsAuthConfigCommand,
+  diagnoseDiscordPermissionsCommand,
+  listDiscordChannelsCommand,
+  listDiscordGuildsCommand,
+  registerDiscordCommandsCommand,
+  repairDiscordCommand,
   repairTelegramWebhookCommand,
+  selectDiscordDestinationCommand,
 } from '../commands/comms';
 import {
   getComputeStatusCommand,
@@ -256,6 +271,7 @@ import {
 } from '../commands/task-suggestions';
 import {
   getBackgroundAgentSettingsCommand,
+  listAutomationDiscordChannelsCommand,
   listSlackChannelsCommand,
   updateBackgroundAgentSettingsCommand,
   triggerAutomationCommand,
@@ -264,10 +280,6 @@ import {
   getAgentBehaviorSettingsCommand,
   updateAgentBehaviorSettingsCommand,
 } from '../commands/agent-behavior';
-import {
-  getVibesSettingsCommand,
-  updateVibesSettingsCommand,
-} from '../commands/vibes';
 import {
   createPasswordResetLinkCommand,
   createInviteCommand,
@@ -376,6 +388,10 @@ const automationsRouter = createRouter({
     listSlackChannelsCommand(auth),
   ),
 
+  listDiscordChannels: protectedProcedure.query(({ ctx: { auth } }) =>
+    listAutomationDiscordChannelsCommand(auth),
+  ),
+
   updateSettings: protectedProcedure
     .input(
       z.object({
@@ -417,11 +433,29 @@ const automationsRouter = createRouter({
         managerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        managerStatsDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         sentryTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         sentryTriageSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        sentryTriageDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         sentryTriageProjectSlugs: z.string().max(4_000).nullable(),
         dependabotTriageFrequency: z.enum(['off', 'daily', 'weekly']),
         dependabotTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        dependabotTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
@@ -443,13 +477,31 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        securityAuditorDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         codeQualityAuditorSlackChannel: z
           .string()
           .trim()
           .min(1)
           .max(160)
           .nullable(),
+        codeQualityAuditorDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
         ciFailureTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable(),
+        ciFailureTriageDiscordChannel: z
           .string()
           .trim()
           .min(1)
@@ -650,6 +702,17 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         cancelTaskRunCommand(auth, input),
       ),
+
+    retryFailedStart: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          runId: z.number().int().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        retryFailedTaskStartCommand(auth, input),
+      ),
   }),
 
   github: createRouter({
@@ -825,6 +888,12 @@ export const appRouter = createRouter({
         connectSlackAppCommand(auth, input),
       ),
 
+    createAppFromManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createSlackAppFromManifestCommand(auth, input),
+      ),
+
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectSlackAppCommand(auth),
     ),
@@ -925,6 +994,18 @@ export const appRouter = createRouter({
 
     unlinkTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       unlinkLinkedTelegramAccountCommand(auth),
+    ),
+
+    discord: protectedProcedure.query(({ ctx: { auth } }) =>
+      getLinkedDiscordAccountCommand(auth),
+    ),
+
+    createDiscordLinkCode: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      createDiscordLinkCodeCommand(auth),
+    ),
+
+    unlinkDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      unlinkLinkedDiscordAccountCommand(auth),
     ),
   }),
 
@@ -1051,6 +1132,12 @@ export const appRouter = createRouter({
       .input(z.object({ taskId: z.string() }))
       .mutation(({ ctx: { auth }, input }) =>
         cancelEnvironmentDefinitionTaskCommand(auth, input),
+      ),
+
+    retryVerification: protectedProcedure
+      .input(z.object({ environmentId: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        retryEnvironmentVerificationCommand(auth, input),
       ),
 
     delete: protectedProcedure
@@ -1316,6 +1403,46 @@ export const appRouter = createRouter({
     repairTelegram: protectedProcedure.mutation(({ ctx: { auth } }) =>
       repairTelegramWebhookCommand(auth),
     ),
+
+    listDiscordGuilds: protectedProcedure.query(({ ctx: { auth } }) =>
+      listDiscordGuildsCommand(auth),
+    ),
+
+    listDiscordChannels: protectedProcedure
+      .input(z.object({ guildId: z.string().trim().min(1).max(32) }))
+      .query(({ ctx: { auth }, input }) =>
+        listDiscordChannelsCommand(auth, input),
+      ),
+
+    selectDiscordDestination: protectedProcedure
+      .input(
+        z.object({
+          guildId: z.string().trim().min(1).max(32),
+          channelId: z.string().trim().min(1).max(32),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        selectDiscordDestinationCommand(auth, input),
+      ),
+
+    diagnoseDiscordPermissions: protectedProcedure
+      .input(
+        z.object({
+          guildId: z.string().trim().min(1).max(32),
+          channelId: z.string().trim().min(1).max(32),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) =>
+        diagnoseDiscordPermissionsCommand(auth, input),
+      ),
+
+    registerDiscordCommands: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      registerDiscordCommandsCommand(auth),
+    ),
+
+    repairDiscord: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      repairDiscordCommand(auth),
+    ),
   }),
 
   compute: createRouter({
@@ -1358,6 +1485,12 @@ export const appRouter = createRouter({
       .input(fulfillTaskEnvVarRequestSchema)
       .mutation(({ ctx: { auth }, input }) =>
         fulfillTaskEnvVarRequestCommand(auth, input),
+      ),
+
+    markFulfilled: protectedProcedure
+      .input(markTaskEnvVarRequestFulfilledSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        markTaskEnvVarRequestFulfilledCommand(auth, input),
       ),
   }),
 
@@ -1809,6 +1942,17 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ input }) => saveSetupBootstrapAuthConfigCommand(input)),
+
+    createSlackAppFromManifest: publicProcedure
+      .input(
+        z.object({
+          configToken: z.string().trim().min(1),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) =>
+        createSetupBootstrapSlackAppFromManifestCommand(input),
+      ),
   }),
 
   deployment: createRouter({
@@ -1974,27 +2118,6 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setLicenseKeyCommand(auth, input),
-      ),
-  }),
-
-  vibes: createRouter({
-    get: protectedProcedure.query(({ ctx: { auth } }) =>
-      getVibesSettingsCommand(auth),
-    ),
-
-    update: protectedProcedure
-      .input(
-        z
-          .object({
-            slackSummonEmoji: z.string().max(255).nullable(),
-            slackAckEmoji: z.string().max(255),
-            slackCompletionEmoji: z.string().max(255),
-            styleGuidance: z.string().max(400).nullable(),
-          })
-          .partial(),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        updateVibesSettingsCommand(auth, input),
       ),
   }),
 

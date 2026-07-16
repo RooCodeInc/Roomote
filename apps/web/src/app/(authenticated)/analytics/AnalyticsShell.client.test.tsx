@@ -32,8 +32,10 @@ vi.mock('@/components/settings/PageNavigationShell', () => ({
 
 vi.mock('@/components/system', () => ({
   ChartColumnIncreasing: Icon,
+  CircleDollarSign: Icon,
   Download: Icon,
   GitPullRequest: Icon,
+  Spinner: Icon,
   Button: ({
     children,
     ...props
@@ -46,7 +48,11 @@ vi.mock('@/components/system', () => ({
   ),
 }));
 
-import { AnalyticsShell, getAnalyticsHref } from './AnalyticsShell';
+import {
+  AnalyticsShell,
+  AnalyticsShellDownloadAction,
+  getAnalyticsHref,
+} from './AnalyticsShell';
 
 describe('AnalyticsShell', () => {
   it('renders Tasks before PRs in the navigation', () => {
@@ -61,16 +67,47 @@ describe('AnalyticsShell', () => {
     );
 
     const nav = screen.getByRole('navigation');
-    const navItems = within(nav).getAllByText(/^(Tasks|PRs)$/);
+    const navItems = within(nav).getAllByText(/^(Tasks|PRs|Costs)$/);
 
     expect(screen.getByRole('heading', { name: 'PRs' })).toBeInTheDocument();
-    expect(navItems.map((item) => item.textContent)).toEqual(['Tasks', 'PRs']);
+    expect(navItems.map((item) => item.textContent)).toEqual([
+      'Tasks',
+      'PRs',
+      'Costs',
+    ]);
   });
 
-  it('uses Tasks as the default analytics URL and keeps PRs addressable', () => {
+  it('uses Tasks as the default analytics URL and keeps PRs and Costs addressable', () => {
     expect(getAnalyticsHref('tasks')).toBe('/analytics');
     expect(getAnalyticsHref('pullRequests')).toBe(
       '/analytics?object=pullRequests',
     );
+    expect(getAnalyticsHref('costs')).toBe('/analytics/costs');
+  });
+
+  it('names the export action in each state', () => {
+    const { rerender } = render(
+      <AnalyticsShellDownloadAction
+        isDisabled={false}
+        isExporting={false}
+        onDownload={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Download data' }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <AnalyticsShellDownloadAction
+        isDisabled
+        isExporting
+        onDownload={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Preparing download' }),
+    ).toHaveAttribute('aria-busy', 'true');
   });
 });

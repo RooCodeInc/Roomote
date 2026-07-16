@@ -24,6 +24,13 @@ describe('getProviderSetupCopy', () => {
         setupLabel: 'Telegram bot',
       },
     ],
+    [
+      'discord',
+      {
+        creationHref: 'https://discord.com/developers/applications',
+        setupLabel: 'Discord bot',
+      },
+    ],
   ] as const)('returns setup copy for %s', (providerId, expected) => {
     expect(getProviderSetupCopy(providerId)).toEqual(expected);
   });

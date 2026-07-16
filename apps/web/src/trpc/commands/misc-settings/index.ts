@@ -3,6 +3,7 @@ import {
   db,
   deploymentMcpEnablements,
   deploymentSettings,
+  discordInstallations,
   eq,
   max,
   mcpConnections,
@@ -23,10 +24,15 @@ import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env, getWebRuntimeEnvDiagnostics } from '@/lib/server/env';
+import {
+  Env,
+  getWebRuntimeEnvDiagnostics,
+  isRoomoteCloudEnabled,
+} from '@/lib/server/env';
 import { getS3Client } from '@/lib/server/s3-client';
 
 import { assertAdmin } from '../setup/shared';
+import { buildConfiguredCommunicationProviders } from './provider-diagnostics';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const CONTROLLER_STALE_THRESHOLD_MS = 90_000;
@@ -48,6 +54,7 @@ export type DeploymentDiagnostics = {
 export type MiscSettings = {
   /** The admin-controlled opt-out setting (default: enabled). */
   anonymousAnalyticsEnabled: boolean;
+  cloudEnabled: boolean;
   /**
    * Whether this environment can send telemetry at all. False in
    * development or when no release version is baked in; the setting is
@@ -298,6 +305,7 @@ async function getProviderDiagnostics() {
     slackActive,
     teamsActive,
     telegramMappings,
+    discordActive,
     sourceControlProviders,
     deploymentMcps,
     userMcps,
@@ -316,6 +324,10 @@ async function getProviderDiagnostics() {
       .where(eq(teamsInstallations.isActive, true)),
     db.select({ total: count() }).from(telegramUserMappings),
     db
+      .select({ total: count() })
+      .from(discordInstallations)
+      .where(eq(discordInstallations.isActive, true)),
+    db
       .selectDistinct({ provider: repositories.sourceControlProvider })
       .from(repositories)
       .where(eq(repositories.isActive, true)),
@@ -329,19 +341,16 @@ async function getProviderDiagnostics() {
       .where(eq(mcpConnections.enabled, true)),
   ]);
 
-  const comms: string[] = [];
-  if ((slackActive[0]?.total ?? 0) > 0 || present(Env.SLACK_APP_ID)) {
-    comms.push('slack');
-  }
-  if ((teamsActive[0]?.total ?? 0) > 0 || present(Env.R_TEAMS_BOT_APP_ID)) {
-    comms.push('teams');
-  }
-  if (
-    (telegramMappings[0]?.total ?? 0) > 0 ||
-    present(Env.R_TELEGRAM_BOT_TOKEN)
-  ) {
-    comms.push('telegram');
-  }
+  const comms = buildConfiguredCommunicationProviders({
+    slackActiveCount: slackActive[0]?.total ?? 0,
+    teamsActiveCount: teamsActive[0]?.total ?? 0,
+    telegramMappingCount: telegramMappings[0]?.total ?? 0,
+    discordActiveCount: discordActive[0]?.total ?? 0,
+    slackRuntimeConfigured: present(Env.SLACK_APP_ID),
+    teamsRuntimeConfigured: present(Env.R_TEAMS_BOT_APP_ID),
+    telegramRuntimeConfigured: present(Env.R_TELEGRAM_BOT_TOKEN),
+    discordRuntimeConfigured: present(Env.R_DISCORD_BOT_TOKEN),
+  });
 
   return {
     comms,
@@ -550,8 +559,11 @@ export async function getMiscSettingsCommand(
   const diagnostics = await collectDeploymentDiagnostics();
 
   return {
-    anonymousAnalyticsEnabled:
-      isAnonymousAnalyticsEnabledFromMetadata(metadata),
+    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
+      metadata,
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    ),
+    cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics,
   };
@@ -568,9 +580,10 @@ export async function setAnonymousAnalyticsCommand(
     columns: { metadata: true },
   });
 
+  const cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED);
   const nextMetadata: Record<string, unknown> = {
     ...normalizeMetadata(existingSettings?.metadata),
-    [ANONYMOUS_ANALYTICS_METADATA_KEY]: input.enabled,
+    [ANONYMOUS_ANALYTICS_METADATA_KEY]: cloudEnabled ? true : input.enabled,
   };
 
   if (!existingSettings) {
@@ -591,8 +604,11 @@ export async function setAnonymousAnalyticsCommand(
   await getFeatureFlagEvaluator(getRedis()).invalidateDeploymentCache();
 
   return {
-    anonymousAnalyticsEnabled:
-      isAnonymousAnalyticsEnabledFromMetadata(nextMetadata),
+    anonymousAnalyticsEnabled: isAnonymousAnalyticsEnabledFromMetadata(
+      nextMetadata,
+      cloudEnabled,
+    ),
+    cloudEnabled,
     telemetryEnvAllowed: isTelemetryEnvAllowed(),
     diagnostics: await collectDeploymentDiagnostics(),
   };

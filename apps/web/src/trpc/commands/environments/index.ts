@@ -8,26 +8,32 @@ import {
   taskRuns,
   tasks,
   and,
+  beginEnvironmentVerification,
   desc,
   eq,
   inArray,
   isNull,
   loadEnvironmentSnapshots,
   markTaskStartParallelCountEndedAt,
+  or,
   repositories,
   sql,
   updateEnvironmentDefinition,
   users,
+  withEnvironmentVerificationRetryLock,
+  type DatabaseOrTransaction,
   type SQL,
   type EnvironmentConfigVersionSource,
 } from '@roomote/db/server';
 import {
   activeRunStatuses,
+  ALL_REPOSITORIES,
   RunStatus,
   TaskPayloadKind,
   appendEnvironmentDefinitionGuidance,
   buildCreateEnvironmentDefinitionPrompt,
   buildEnvironmentDefinitionWorkspacePayload,
+  buildEnvironmentVerificationPrompt,
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
@@ -73,6 +79,19 @@ export interface EnvironmentWithMeta {
   createdAt: Date;
   updatedAt: Date;
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>;
+  /**
+   * Verification state. `isVerified` is true once a verification task reported
+   * success for the current configuration. `verificationTaskId` links to the
+   * Roomote task that most recently ran (or is running) verification.
+   * `verificationTaskActive` is true only while that task still has an active
+   * run, so the UI can distinguish "verification in progress" from a stale
+   * task id left by a crashed or unreported attempt.
+   */
+  isVerified: boolean;
+  verificationTaskId: string | null;
+  verificationTaskActive: boolean;
+  verifiedAt: Date | null;
+  verificationError: string | null;
 }
 
 export interface EnvironmentConfigVersionDetail {
@@ -202,6 +221,7 @@ function toEnvironmentWithMeta(
   env: typeof environments.$inferSelect,
   snapshots: Partial<Record<ComputeProvider, EnvironmentSnapshotWithMeta>>,
   repositoryMappings: Array<{ repositoryId: string }>,
+  activeVerificationTaskIds: Set<string>,
 ): EnvironmentWithMeta {
   return {
     id: env.id,
@@ -215,7 +235,47 @@ function toEnvironmentWithMeta(
     createdAt: env.createdAt,
     updatedAt: env.updatedAt,
     snapshots,
+    isVerified: env.isVerified,
+    verificationTaskId: env.verificationTaskId,
+    verificationTaskActive:
+      env.verificationTaskId !== null &&
+      activeVerificationTaskIds.has(env.verificationTaskId),
+    verifiedAt: env.verifiedAt,
+    verificationError: env.verificationError,
   };
+}
+
+/**
+ * Given a set of environments, return the subset of their `verificationTaskId`
+ * values that still have an active task run. Used to distinguish an in-progress
+ * verification from a stale task id left by a crashed or unreported attempt.
+ */
+async function getActiveVerificationTaskIds(
+  envs: Array<{ verificationTaskId: string | null }>,
+): Promise<Set<string>> {
+  const taskIds = [
+    ...new Set(
+      envs
+        .map((env) => env.verificationTaskId)
+        .filter((taskId): taskId is string => taskId !== null),
+    ),
+  ];
+
+  if (taskIds.length === 0) {
+    return new Set();
+  }
+
+  const activeRuns = await db
+    .selectDistinct({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .where(
+      and(
+        inArray(taskRuns.taskId, taskIds),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+    );
+
+  return new Set(activeRuns.map((run) => run.taskId));
 }
 
 async function getRepositoryMappingsByEnvironmentId(environmentIds: string[]) {
@@ -266,12 +326,14 @@ export async function getEnvironmentsCommand(
     await getRepositoryMappingsByEnvironmentId(
       envs.map((environment) => environment.id),
     );
+  const activeVerificationTaskIds = await getActiveVerificationTaskIds(envs);
 
   return envs.map((env) =>
     toEnvironmentWithMeta(
       env,
       snapshotsByEnvironment.get(env.id) ?? {},
       repositoryMappingsByEnvironmentId.get(env.id) ?? [],
+      activeVerificationTaskIds,
     ),
   );
 }
@@ -329,11 +391,13 @@ export async function getEnvironmentByIdCommand(
   const snapshotsByEnvironment = await loadEnvironmentSnapshots([env]);
   const repositoryMappingsByEnvironmentId =
     await getRepositoryMappingsByEnvironmentId([env.id]);
+  const activeVerificationTaskIds = await getActiveVerificationTaskIds([env]);
 
   return toEnvironmentWithMeta(
     env,
     snapshotsByEnvironment.get(env.id) ?? {},
     repositoryMappingsByEnvironmentId.get(env.id) ?? [],
+    activeVerificationTaskIds,
   );
 }
 
@@ -402,6 +466,9 @@ export async function createEnvironmentCommand(
         description: input.description,
         config: parseResult.data,
         createdByUserId: userId,
+        // New environments start configured but not yet verified.
+        isVerified: false,
+        verificationError: null,
       })
       .returning({ id: environments.id });
 
@@ -775,6 +842,149 @@ export async function startEnvironmentDefinitionTaskCommand(
     runId: launchResult.id,
     startedAt,
   };
+}
+
+/**
+ * Find an active verification task for the given environment, if any. This
+ * covers both retry-launched verification tasks (marked with
+ * `verifiesEnvironmentId`) and the initial onboarding setup task (workflow
+ * `setup_onboarding`, marked with `environmentDefinitionId`) that performs and
+ * records the first verification. Both are explicitly authorized to record a
+ * result for the environment, so both must block a concurrent retry from
+ * superseding an in-flight attempt. Accepts a transaction so the check can run
+ * inside the retry critical section.
+ */
+async function getActiveVerificationTaskId(
+  dbOrTx: DatabaseOrTransaction,
+  environmentId: string,
+): Promise<string | null> {
+  const [job] = await dbOrTx
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        or(
+          sql`${taskRuns.payload} ->> 'verifiesEnvironmentId' = ${environmentId}`,
+          and(
+            eq(tasks.workflow, 'setup_onboarding'),
+            sql`${taskRuns.payload} ->> 'environmentDefinitionId' = ${environmentId}`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
+    .limit(1);
+
+  return job?.taskId ?? null;
+}
+
+/**
+ * Test-only export of the active-verification-attempt guard so its
+ * environment-marker matching (retry `verifiesEnvironmentId` and onboarding
+ * `setup_onboarding` + `environmentDefinitionId`) can be verified against a
+ * real database.
+ */
+export async function getActiveVerificationTaskIdForTest(
+  dbOrTx: DatabaseOrTransaction,
+  environmentId: string,
+): Promise<string | null> {
+  return getActiveVerificationTaskId(dbOrTx, environmentId);
+}
+
+/**
+ * Re-run environment verification: enqueue a standard task that runs inside the
+ * target environment, verifies it, and records the result through the
+ * `record_verification` MCP action. Resets the environment to the unverified
+ * state and stores the new verification task id.
+ *
+ * The active-run check, task enqueue, and attempt registration are serialized
+ * per environment by a `withEnvironmentVerificationRetryLock` advisory lock, so
+ * two concurrent retries cannot both pass the check and enqueue duplicate
+ * verification runs; the second waits for the first to commit and then sees the
+ * active attempt and is rejected. The attempt is registered in `enqueueTask`'s
+ * `afterCreateInTransaction` hook, so the environment's `verificationTaskId`
+ * commits atomically with the run row and before the run is queued — avoiding a
+ * race where the run's `record_verification` is rejected as a mismatched
+ * attempt because the claim had not committed yet.
+ */
+export async function retryEnvironmentVerificationCommand(
+  auth: UserAuthSuccess,
+  input: { environmentId: string },
+): Promise<{ taskId: string }> {
+  assertAdmin(auth);
+
+  const { userId } = auth;
+
+  const [environment] = await db
+    .select({
+      id: environments.id,
+      name: environments.name,
+    })
+    .from(environments)
+    .where(
+      and(eq(environments.id, input.environmentId), buildOwnershipFilter()),
+    )
+    .limit(1);
+
+  if (!environment) {
+    throw new Error('Environment not found');
+  }
+
+  const prompt = buildEnvironmentVerificationPrompt({
+    environmentId: environment.id,
+    environmentName: environment.name,
+  });
+
+  return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
+    const activeVerificationTaskId = await getActiveVerificationTaskId(
+      tx,
+      environment.id,
+    );
+
+    if (activeVerificationTaskId) {
+      throw new Error('This environment is already being verified.');
+    }
+
+    const launchResult = await enqueueTask(
+      {
+        title: `Verify environment: ${environment.name}`,
+        task: {
+          type: TaskPayloadKind.StandardTask,
+          payload: {
+            repo: ALL_REPOSITORIES,
+            environmentId: environment.id,
+            verifiesEnvironmentId: environment.id,
+            description: prompt,
+          },
+        },
+        initiator: { kind: 'user', userId },
+        workflow: 'standard',
+        surface: 'web',
+        trigger: 'manual',
+      },
+      {
+        // Claim this verification attempt inside enqueue's own run-creation
+        // transaction, so the task id and the environment's verificationTaskId
+        // commit atomically with the run row and before the run is pushed onto
+        // the controller queue. `beforeEnqueue` (or writing through the outer
+        // advisory-lock transaction) is not sufficient here: the run row is
+        // committed by enqueue's transaction before the outer transaction
+        // commits, so the controller could start the run and call
+        // record_verification before the claim is visible, yielding a
+        // mismatched-attempt rejection.
+        afterCreateInTransaction: async (enqueueTx, taskRun) => {
+          await beginEnvironmentVerification(enqueueTx, {
+            environmentId: environment.id,
+            verificationTaskId: taskRun.taskId,
+          });
+        },
+      },
+    );
+
+    return { taskId: launchResult.taskId };
+  });
 }
 
 export async function cancelEnvironmentDefinitionTaskCommand(

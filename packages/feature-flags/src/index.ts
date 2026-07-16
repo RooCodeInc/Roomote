@@ -188,7 +188,12 @@ export const ANONYMOUS_ANALYTICS_METADATA_KEY =
  */
 export function isAnonymousAnalyticsEnabledFromMetadata(
   metadata: unknown,
+  cloudEnabled = false,
 ): boolean {
+  if (cloudEnabled) {
+    return true;
+  }
+
   const normalizedMetadata = normalizeMetadataRecord(metadata);
 
   if (!(ANONYMOUS_ANALYTICS_METADATA_KEY in normalizedMetadata)) {

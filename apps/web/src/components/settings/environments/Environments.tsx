@@ -12,6 +12,7 @@ import {
   ChevronDown,
   BookMarked,
   Camera,
+  SearchCheck,
   X,
   VectorSquare,
   TriangleAlert,
@@ -24,11 +25,13 @@ import {
   useEnvironments,
   useDeleteEnvironment,
   useDuplicateEnvironment,
+  useRetryEnvironmentVerification,
 } from '@/hooks/environments';
 import {
   useCreateEnvironmentSnapshot,
   useClearEnvironmentSnapshot,
 } from '@/hooks/snapshots';
+import { useComputeProviderConfigured } from '@/hooks/compute';
 import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
@@ -49,16 +52,16 @@ import { Section } from '@/components/settings';
 
 import { DuplicateEnvironmentDialog } from './DuplicateEnvironmentDialog';
 import { SnapshotStatusBadge } from './SnapshotStatusBadge';
+import {
+  EnvironmentVerificationBadge,
+  getEnvironmentVerificationState,
+} from './EnvironmentVerificationStatus';
 
 function getEnvironmentSnapshot(
   environment: EnvironmentWithMeta,
   provider: ComputeProvider,
 ) {
   return environment.snapshots[provider];
-}
-
-function getEnvironmentDescription(environment: EnvironmentWithMeta) {
-  return environment.description || environment.config.description || '';
 }
 
 export function Environments() {
@@ -69,9 +72,19 @@ export function Environments() {
   const repositories = useRepositories();
   const deleteEnvironment = useDeleteEnvironment();
   const duplicateEnvironment = useDuplicateEnvironment();
+  const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  const allSnapshotProviders: ComputeProvider[] = ['modal', 'e2b'];
+  // Modal and E2B stay unconditional (existing behavior). The
+  // deployment-managed 'roomote' provider is offered only when configured,
+  // so deployments without it never see roomote snapshot controls;
+  // environments that already hold a roomote snapshot keep its controls
+  // regardless (see visibleSnapshotProviders) so stale snapshots stay
+  // manageable.
+  const roomoteConfigured = useComputeProviderConfigured('roomote');
+  const allSnapshotProviders: ComputeProvider[] = roomoteConfigured
+    ? ['modal', 'e2b', 'roomote']
+    : ['modal', 'e2b'];
 
   if (environments.isPending || repositories.isPending) {
     return (
@@ -123,15 +136,25 @@ export function Environments() {
         ) : (
           <div className="space-y-4 divide-y -mb-2">
             {environments.data.map((env) => {
-              const description = getEnvironmentDescription(env);
+              // An existing roomote snapshot stays visible and manageable
+              // (refresh/clear) even when the provider is no longer
+              // configured.
+              const roomoteSnapshot = getEnvironmentSnapshot(env, 'roomote');
               const visibleSnapshotProviders: ComputeProvider[] =
-                allSnapshotProviders;
+                !roomoteConfigured &&
+                (roomoteSnapshot?.snapshotId || roomoteSnapshot?.snapshotStatus)
+                  ? [...allSnapshotProviders, 'roomote']
+                  : allSnapshotProviders;
+              const verificationState = getEnvironmentVerificationState(env);
+              const isRetryingVerification =
+                retryVerification.isPending &&
+                retryVerification.variables?.environmentId === env.id;
 
               return (
                 <div key={env.id} className="space-y-4">
                   <Collapsible className="space-y-2">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                      <div className="min-w-0 flex-1 space-y-1">
+                      <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex items-center gap-2">
                           <p className="font-medium leading-5">{env.name}</p>
                           {env.declarativeSource ? (
@@ -142,11 +165,20 @@ export function Environments() {
                             </BasicTooltip>
                           ) : null}
                         </div>
-                        {description ? (
-                          <p className="text-sm text-muted-foreground">
-                            {description}
-                          </p>
-                        ) : null}
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          <EnvironmentVerificationBadge env={env} />
+                          {env.config.repositories?.map((repo, idx) => (
+                            <div
+                              key={`${repo.repository}-${idx}`}
+                              className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                            >
+                              <BookMarked className="size-3 shrink-0" />
+                              <span className="ph-no-capture">
+                                {repo.repository}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       <div className="flex shrink-0 items-center gap-2 self-start sm:items-start">
@@ -165,6 +197,26 @@ export function Environments() {
                                 <Pencil className="size-4" />
                               </Link>
                             </Button>
+                            {verificationState !== 'in_progress' ? (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                disabled={isRetryingVerification}
+                                onClick={() =>
+                                  retryVerification.mutate({
+                                    environmentId: env.id,
+                                  })
+                                }
+                                title="Re-verify environment config"
+                                aria-label="Re-verify environment config"
+                              >
+                                {isRetryingVerification ? (
+                                  <Loading className="text-muted-foreground" />
+                                ) : (
+                                  <SearchCheck className="size-4" />
+                                )}
+                              </Button>
+                            ) : null}
                             <Button
                               variant="ghost"
                               size="icon"
@@ -236,20 +288,6 @@ export function Environments() {
                     </div>
 
                     <CollapsibleContent className="space-y-2 pt-1 border-l-2 mb-2 pl-3">
-                      <div className="flex flex-wrap gap-2">
-                        {env.config.repositories?.map((repo, idx) => (
-                          <div
-                            key={`${repo.repository}-${idx}`}
-                            className="flex items-center gap-1.5 text-xs text-muted-foreground"
-                          >
-                            <BookMarked className="size-3 shrink-0" />
-                            <span className="ph-no-capture">
-                              {repo.repository}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-
                       <div className="space-y-2 pb-2">
                         <div className="space-y-0">
                           {visibleSnapshotProviders.map((provider) => {

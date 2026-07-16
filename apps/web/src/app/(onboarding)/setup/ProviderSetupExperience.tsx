@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import Link from 'next/link';
 import {
   MICROSOFT_SINGLE_APP_TEAMS_BOT_FIELD_SOURCES,
@@ -19,6 +20,7 @@ import {
   Button,
   Pencil,
   Sparkles,
+  Spinner,
 } from '@/components/system';
 
 import { StepTitle } from './StepTitle';
@@ -29,7 +31,7 @@ import { getProviderSetupCopy } from './providerSetupCopy';
 type ProviderSetupExperienceProvider =
   | SetupAuthStatus['providers'][number]
   | {
-      id: SetupAuthStatus['providers'][number]['id'] | 'telegram';
+      id: SetupAuthStatus['providers'][number]['id'] | 'telegram' | 'discord';
       label: string;
       fields: SetupAuthStatus['providers'][number]['fields'];
       runtimeSatisfied: boolean;
@@ -293,9 +295,12 @@ type ProviderSetupExperienceProps = {
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
   showManualSlackValues: boolean;
+  createdSlackAppSettingsUrl?: string | null;
+  createSlackAppPending?: boolean;
   showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
   envVarsInfoNote?: React.ReactNode;
+  onCreateSlackApp?: (configToken: string) => void;
   onShowManualSlackValues: () => void;
   onToggleMicrosoftAdvancedConfig?: () => void;
   onValueChange: (envVarName: string, value: string) => void;
@@ -329,55 +334,143 @@ function ProviderSetupTitle({
 }
 
 function SlackSetupExperience(props: ProviderSetupExperienceProps) {
-  const slackManifestPrefillUrl = buildSlackManifestPrefillUrl({
-    publicOrigin: props.publicOrigin,
-  });
+  const [configToken, setConfigToken] = useState('');
+  const createdSlackAppSettingsUrl = props.createdSlackAppSettingsUrl ?? null;
+
+  if (createdSlackAppSettingsUrl) {
+    return (
+      <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
+        <ProviderSetupTitle surface={props.surface} text="Finish Slack app" />
+
+        <div className="space-y-4 max-w-xl">
+          <p>
+            Your Slack app is ready. Adding a logo is optional: open{' '}
+            <a
+              href={createdSlackAppSettingsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-foreground underline font-semibold"
+            >
+              the app
+            </a>
+            , scroll down to App icon, and upload{' '}
+            <a
+              href="/api/setup/roomote-logo"
+              download
+              className="text-foreground underline font-semibold"
+            >
+              the Roomote logo
+            </a>
+            .
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (
     !props.showManualSlackValues &&
     !props.provider.runtimeSatisfied &&
     !props.provider.savedSatisfied
   ) {
+    const createSlackAppPending = props.createSlackAppPending === true;
+    const createSlackAppDisabled =
+      !props.onCreateSlackApp || props.disabled || createSlackAppPending;
+    const submitConfigToken = () => {
+      const normalizedConfigToken = configToken.trim();
+
+      if (createSlackAppDisabled || !normalizedConfigToken) {
+        return;
+      }
+
+      props.onCreateSlackApp?.(normalizedConfigToken);
+    };
+
     return (
       <div className="relative w-full max-w-2xl space-y-4 py-2 md:py-0">
         <ProviderSetupTitle surface={props.surface} text="Create Slack app" />
 
-        <div className="space-y-3 max-w-xl">
+        <div className="space-y-4 max-w-xl">
           <p>
             Because Roomote is self-hosted, we can&apos;t offer you an
-            out-of-the-box Slack app – you need to create your own.
+            out-of-the-box Slack app – you need your own. But with just an app
+            configuration token, we&apos;ll create it for you.
           </p>
-          <p>
-            Roomote can create it for you automatically, and then you can enter
-            the config values manually.
-          </p>
+          <NumberedStep number={1}>
+            <p className="font-semibold">Get an app token.</p>
+            <div className="space-y-3 max-w-xl">
+              <p className="text-sm text-muted-foreground">
+                Go to the{' '}
+                <a
+                  href="https://api.slack.com/apps"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-foreground underline font-semibold"
+                >
+                  Slack Apps portal
+                  <ExternalLink className="inline size-3 -mt-1 ml-1" />
+                </a>{' '}
+                → Your App Configuration Tokens →{' '}
+                <span className="font-semibold">Generate Token</span>, picking
+                the workspace you want to connect.
+              </p>
+            </div>
+          </NumberedStep>
+          <NumberedStep number={2}>
+            <p className="font-semibold">Copy it....</p>
+            <p className="text-sm text-muted-foreground">
+              ...and paste it here:
+            </p>
+            <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)] md:items-center max-w-xl">
+              <div className="text-sm font-medium">Access token</div>
+              <Input
+                secret
+                className="font-mono"
+                aria-label="App configuration token"
+                value={configToken}
+                onChange={(event) => setConfigToken(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitConfigToken();
+                  }
+                }}
+                placeholder="xoxe.xoxp-..."
+                disabled={props.disabled || createSlackAppPending}
+                data-1p-ignore
+              />
+            </div>
+          </NumberedStep>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
           {props.onBack ? (
-            <Button type="button" variant="outline" onClick={props.onBack}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={props.onBack}
+              disabled={createSlackAppPending}
+            >
               <ArrowLeft />
               Back
             </Button>
           ) : null}
-          <Button asChild>
-            <a
-              href={slackManifestPrefillUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={props.onShowManualSlackValues}
-            >
-              <Sparkles />
-              Create Slack app
-            </a>
+          <Button
+            type="button"
+            onClick={submitConfigToken}
+            disabled={createSlackAppDisabled || configToken.trim().length === 0}
+          >
+            {createSlackAppPending ? <Spinner /> : <Sparkles />}
+            Create Slack app
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={props.onShowManualSlackValues}
+            disabled={createSlackAppPending}
           >
             <Pencil />
-            Enter values manually
+            Create app manually
           </Button>
         </div>
       </div>
@@ -558,6 +651,12 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
   const providerSetupLabel =
     providerSetupCopy?.setupLabel ?? `${props.provider.label} app`;
   const fields = getSetupVisibleFields(props.provider);
+  const slackManifestPrefillUrl =
+    props.provider.id === 'slack'
+      ? buildSlackManifestPrefillUrl({
+          publicOrigin: props.publicOrigin,
+        })
+      : null;
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
@@ -565,6 +664,23 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
         surface={props.surface}
         text={`Configure ${providerSetupLabel}`}
       />
+
+      {slackManifestPrefillUrl ? (
+        <p className="text-sm text-muted-foreground max-w-xl">
+          Prefer not to use a configuration token? Create the app in
+          Slack&apos;s UI from a{' '}
+          <a
+            href={slackManifestPrefillUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline"
+            onClick={props.onShowManualSlackValues}
+          >
+            prefilled manifest
+          </a>{' '}
+          and enter its credentials manually.
+        </p>
+      ) : null}
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">

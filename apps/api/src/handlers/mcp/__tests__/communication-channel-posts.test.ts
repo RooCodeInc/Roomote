@@ -1,18 +1,24 @@
 const {
+  createDiscordProviderMock,
   createTeamsProviderMock,
   createTelegramProviderMock,
+  discordPostMessageMock,
   getReplyImagesMock,
   teamsPostMessageMock,
   telegramPostMessageMock,
 } = vi.hoisted(() => ({
+  createDiscordProviderMock: vi.fn(),
   createTeamsProviderMock: vi.fn(),
   createTelegramProviderMock: vi.fn(),
+  discordPostMessageMock: vi.fn(),
   getReplyImagesMock: vi.fn(),
   teamsPostMessageMock: vi.fn(),
   telegramPostMessageMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    createDiscordProviderMock,
   createTeamsCommunicationProviderFromRuntimeCredentials:
     createTeamsProviderMock,
   createTelegramCommunicationProviderFromRuntimeCredentials:
@@ -45,6 +51,16 @@ const teamsTaskRun = {
   },
 };
 
+const discordTaskRun = {
+  id: 44,
+  taskId: 'task-3',
+  payload: {
+    communicationProvider: 'discord',
+    communicationChannelId: 'channel-1',
+    communicationThreadId: 'thread-1',
+  },
+};
+
 async function jsonBody(response: Response): Promise<unknown> {
   return JSON.parse(await response.text());
 }
@@ -68,6 +84,14 @@ describe('maybeSendCommunicationChannelPost', () => {
       provider: 'teams',
       channelId: '19:MEETING_MjJkYWJj@thread.v2',
       messageId: 'activity-1',
+    });
+    createDiscordProviderMock.mockResolvedValue({
+      postMessage: discordPostMessageMock,
+    });
+    discordPostMessageMock.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'thread-1',
+      messageId: 'message-1',
     });
   });
 
@@ -180,5 +204,66 @@ describe('maybeSendCommunicationChannelPost', () => {
 
     expect(response!.status).toBe(400);
     expect(telegramPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('posts to the Discord channel the task was launched from, in its own thread', async () => {
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: discordTaskRun,
+      parsedBody: { channel: 'channel-1', text: 'update', images: [] },
+    });
+
+    expect(discordPostMessageMock).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'update',
+      textFormat: 'markdown',
+      images: [],
+    });
+    await expect(jsonBody(response!)).resolves.toEqual({
+      messageTs: 'message-1',
+      channelId: 'channel-1',
+    });
+  });
+
+  it('rejects Discord posts targeting a different channel', async () => {
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: discordTaskRun,
+      parsedBody: { channel: 'channel-other', text: 'update', images: [] },
+    });
+
+    expect(response!.status).toBe(403);
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects Discord posts targeting a thread the task does not own', async () => {
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: discordTaskRun,
+      parsedBody: {
+        channel: 'channel-1',
+        threadTs: 'someone-elses-thread',
+        text: 'update',
+        images: [],
+      },
+    });
+
+    expect(response!.status).toBe(403);
+    expect(discordPostMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a Discord threadTs that names the task's own thread", async () => {
+    const response = await maybeSendCommunicationChannelPost({
+      taskRun: discordTaskRun,
+      parsedBody: {
+        channel: 'channel-1',
+        threadTs: 'thread-1',
+        text: 'update',
+        images: [],
+      },
+    });
+
+    expect(discordPostMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'channel-1', threadId: 'thread-1' }),
+    );
+    expect(response!.status).toBe(200);
   });
 });

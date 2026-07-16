@@ -45,7 +45,22 @@ type BitbucketAutomationTarget = {
 export function getBitbucketUsername(
   user: BitbucketWebhookUser | undefined,
 ): string | undefined {
-  return user?.username ?? user?.nickname ?? user?.display_name;
+  const username = user?.username?.trim();
+  if (username) {
+    return username;
+  }
+
+  const nickname = user?.nickname?.trim();
+  if (nickname) {
+    return nickname;
+  }
+
+  const displayName = user?.display_name?.trim();
+  if (displayName) {
+    return displayName;
+  }
+
+  return undefined;
 }
 
 export function isRoomoteBitbucketUsername(username: string): boolean {

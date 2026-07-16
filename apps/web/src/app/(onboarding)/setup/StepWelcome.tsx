@@ -18,7 +18,6 @@ export function StepWelcome({ onContinue }: { onContinue: () => void }) {
       </p>
       <Button
         size="default"
-        className="w-full sm:w-auto"
         onClick={() => {
           markSetupWelcomeSeen();
           onContinue();

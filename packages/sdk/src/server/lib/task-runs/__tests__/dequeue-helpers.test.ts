@@ -9,6 +9,8 @@ const {
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
   mockResolveEffectiveModelRuntimeEnv,
+  mockTaskRunsFindFirst,
+  mockNotifySourceRunOnSettle,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -17,6 +19,8 @@ const {
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  mockTaskRunsFindFirst: vi.fn(),
+  mockNotifySourceRunOnSettle: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -29,6 +33,9 @@ vi.mock('@roomote/db/server', () => ({
       environmentVariables: {
         findMany: (...args: unknown[]) =>
           mockEnvironmentVariablesFindMany(...args),
+      },
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
     },
     select: () => ({
@@ -81,11 +88,17 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
 }));
 
+vi.mock('../notify-source-run-on-settle', () => ({
+  notifySourceRunOnSettle: (...args: unknown[]) =>
+    mockNotifySourceRunOnSettle(...args),
+}));
+
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
   createSourceControlTokenForTaskRun,
   fetchResolvedRuntimeEnvVars,
+  notifyCanceledTaskRunOnSettle,
   redactControlPlaneEnvVars,
   redactSourceControlProviderEnvVars,
 } from '../dequeue-helpers';
@@ -399,6 +412,34 @@ describe('createSourceControlTokenForTaskRun', () => {
   });
 });
 
+describe('notifyCanceledTaskRunOnSettle', () => {
+  it('loads the finalized bootstrap error and notifies the launching run', async () => {
+    const taskRun = {
+      ...makeTaskRun({
+        repo: 'owner/repo',
+        description: 'Verify an environment',
+        notifySourceRunOnSettle: true,
+      }),
+      sourceRunId: 99,
+      task: { title: 'Verify environment' },
+    } as TaskRun & { task: { title: string } };
+    mockTaskRunsFindFirst.mockResolvedValueOnce({
+      error: 'Failed to create source control token.',
+    });
+
+    await notifyCanceledTaskRunOnSettle(taskRun);
+
+    expect(mockNotifySourceRunOnSettle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: taskRun.id,
+        error: 'Failed to create source control token.',
+      }),
+      RunStatus.Canceled,
+      'Verify environment',
+    );
+  });
+});
+
 describe('redactSourceControlProviderEnvVars', () => {
   it('removes the deployment GitLab token for GitLab jobs', () => {
     expect(
@@ -467,6 +508,8 @@ describe('redactControlPlaneEnvVars', () => {
         DAYTONA_API_KEY: 'daytona',
         R_SLACK_SIGNING_SECRET: 'slack',
         R_TELEGRAM_BOT_TOKEN: 'tg',
+        R_DISCORD_BOT_TOKEN: 'discord',
+        R_DISCORD_GATEWAY_SECRET: 'discord-gateway',
         DASHBOARD_PASSWORD: 'dash',
         DATABASE_URL: 'postgres://x',
         S3_SECRET_ACCESS_KEY: 's3',

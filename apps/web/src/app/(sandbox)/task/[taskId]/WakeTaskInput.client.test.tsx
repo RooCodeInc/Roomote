@@ -24,6 +24,8 @@ const {
 let capturedPlaceholder: string | undefined;
 let capturedSuggestion: unknown;
 let capturedSubmitWithMetaKey: boolean | undefined;
+let capturedSubmitIcon: unknown;
+let capturedSurface: string | undefined;
 const submittedFilesRef: {
   current: Array<{
     url?: string;
@@ -83,6 +85,8 @@ vi.mock('@/components/tasks', () => ({
     placeholder,
     suggestion,
     submitWithMetaKey,
+    submitIcon,
+    surface,
   }: {
     isBusy: boolean;
     promptText: string;
@@ -98,10 +102,14 @@ vi.mock('@/components/tasks', () => ({
     placeholder?: string;
     suggestion?: unknown;
     submitWithMetaKey?: boolean;
+    submitIcon?: unknown;
+    surface?: string;
   }) => {
     capturedPlaceholder = placeholder;
     capturedSuggestion = suggestion;
     capturedSubmitWithMetaKey = submitWithMetaKey;
+    capturedSubmitIcon = submitIcon;
+    capturedSurface = surface;
 
     return (
       <div>
@@ -140,6 +148,8 @@ describe('WakeTaskInput', () => {
     capturedPlaceholder = undefined;
     capturedSuggestion = undefined;
     capturedSubmitWithMetaKey = undefined;
+    capturedSubmitIcon = undefined;
+    capturedSurface = undefined;
     submittedFilesRef.current = [];
     preparePromptAttachmentsMock.mockResolvedValue({
       text: 'Wake up and keep going',
@@ -150,6 +160,47 @@ describe('WakeTaskInput', () => {
       taskId: 'task-42',
     });
     useSandboxCurrentUserInfoMock.mockReturnValue(null);
+  });
+
+  it('shows a wake icon until the user types a message', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+      />,
+      queryClient,
+    );
+
+    expect(capturedSubmitIcon).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText('Wake prompt'), {
+      target: { value: 'keep going' },
+    });
+
+    expect(capturedSubmitIcon).toBeUndefined();
+  });
+
+  it('uses an embedded prompt surface when rendered inside a tray', () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    });
+
+    renderWithQueryClient(
+      <WakeTaskInput
+        taskRun={{ id: 42, snapshotId: 'snap-42', taskId: 'task-42' }}
+        embedded
+      />,
+      queryClient,
+    );
+
+    expect(capturedSurface).toBe('embedded');
   });
 
   it('prefills the sleeping draft, appends an optimistic transcript row, and resumes the task with a deferred prompt', async () => {
@@ -209,7 +260,7 @@ describe('WakeTaskInput', () => {
       }),
     ]);
     expect(toastErrorMock).not.toHaveBeenCalled();
-    expect(capturedPlaceholder).toBe('Wake up Roomote with this message');
+    expect(capturedPlaceholder).toBe('Wake up Roomote with a message...');
     expect(capturedSuggestion).toBeUndefined();
     expect(capturedSubmitWithMetaKey).toBe(false);
   });

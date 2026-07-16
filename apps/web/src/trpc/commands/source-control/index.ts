@@ -414,6 +414,7 @@ async function configureBitbucketWebhooks(
     actorUserId,
     logPrefix: '[configureBitbucketWebhooks]',
     removalDescription: 'remove webhooks from unmapped repositories',
+    scopeToEnvironmentMappings: false,
   });
 }
 
@@ -679,6 +680,17 @@ export async function saveSourceControlConfigValues(params: {
     );
   }
 
+  if (params.provider === 'bitbucket') {
+    // Bitbucket deployments used to store API-token credentials under these
+    // names. OAuth is now the only supported deployment credential, so remove
+    // stale values even when the current OAuth client values come from runtime
+    // environment variables rather than this save request.
+    await deleteDeploymentEnvironmentVariables(params.executor, [
+      'BITBUCKET_TOKEN',
+      'BITBUCKET_USERNAME',
+    ]);
+  }
+
   if (valuesToSave.length > 0) {
     if (params.provider === 'ado') {
       const authMode =
@@ -746,9 +758,15 @@ export async function assertValidSourceControlConfigInput(params: {
       ? (params.values?.['GITEA_CLIENT_SECRET']?.trim() ??
         (await resolveDeploymentEnvVar('GITEA_CLIENT_SECRET')))
       : undefined;
-  const nextBitbucketToken =
+  const nextBitbucketClientId =
     params.provider === 'bitbucket'
-      ? params.values?.['BITBUCKET_TOKEN']?.trim()
+      ? params.values?.['BITBUCKET_CLIENT_ID']?.trim() ||
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_ID'))
+      : undefined;
+  const nextBitbucketClientSecret =
+    params.provider === 'bitbucket'
+      ? params.values?.['BITBUCKET_CLIENT_SECRET']?.trim() ||
+        (await resolveDeploymentEnvVar('BITBUCKET_CLIENT_SECRET'))
       : undefined;
   const nextAdoToken =
     params.provider === 'ado'
@@ -815,26 +833,11 @@ export async function assertValidSourceControlConfigInput(params: {
     );
   }
 
-  if (nextBitbucketToken) {
-    const nextBitbucketUsername =
-      params.values?.['BITBUCKET_USERNAME']?.trim() ??
-      (await Bitbucket.resolveBitbucketUsername());
-
-    if (!nextBitbucketUsername) {
-      throw new Error(
-        'BITBUCKET_USERNAME is required with BITBUCKET_TOKEN. Set it to the Atlassian account email that owns the API token.',
-      );
-    }
-
-    const validation = await Bitbucket.validateBitbucketToken({
-      token: nextBitbucketToken,
-      username: nextBitbucketUsername,
-      baseUrl: params.values?.['BITBUCKET_BASE_URL']?.trim() || undefined,
-    });
-
-    if (validation.status === 'invalid') {
-      throw new Error(validation.error);
-    }
+  if (
+    params.provider === 'bitbucket' &&
+    !(nextBitbucketClientId && nextBitbucketClientSecret)
+  ) {
+    throw new Error('Configure the Bitbucket OAuth consumer ID and secret.');
   }
 
   if (nextAdoToken) {

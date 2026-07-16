@@ -311,6 +311,35 @@ describe('router helpers', () => {
     ]);
   });
 
+  it('includes Discord server, thread, and image context', () => {
+    const context = createContext({
+      source: {
+        type: 'discord',
+        guildName: 'Roomote Builders',
+        channelName: 'fix-login-race',
+        threadMessages: [{ user: 'Ada', text: 'The screenshot shows a 500.' }],
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    });
+
+    const sourceContext = buildSourceContext(context.source);
+    expect(sourceContext).toContain('**Source**: Discord');
+    expect(sourceContext).toContain('**Server**: Roomote Builders');
+    expect(sourceContext).toContain('**Channel**: fix-login-race');
+    expect(sourceContext).toContain('**Image Attachments**: 1 attached');
+    expect(sourceContext).toContain('- Ada: The screenshot shows a 500.');
+
+    const [message] = buildContextMessages(context);
+    expect(message?.content).toEqual([
+      expect.objectContaining({ type: 'text' }),
+      expect.objectContaining({
+        type: 'image',
+        image: 'aGVsbG8=',
+        mediaType: 'image/png',
+      }),
+    ]);
+  });
+
   it('renders Slack video attachment descriptions in the routing prompt', () => {
     const context = createContext({
       source: {

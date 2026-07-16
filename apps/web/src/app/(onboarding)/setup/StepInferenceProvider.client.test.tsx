@@ -258,6 +258,36 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
     setupQueryMocks({ chatgptConnected: false });
   });
 
+  it('renders provider credential help below the API key field', () => {
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          providers: [
+            {
+              ...openrouterProviderStatus(),
+              credentialHelp: {
+                text: 'Enable Claude in Model Garden first.',
+                href: 'https://example.com/model-garden',
+                linkLabel: 'Open Model Garden',
+              },
+            },
+            chatgptProviderStatus(false),
+          ],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('Enable Claude in Model Garden first.', {
+        exact: false,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Open Model Garden' }),
+    ).toHaveAttribute('href', 'https://example.com/model-garden');
+  });
+
   it('renders the ChatGPT connect UI instead of an API key field', () => {
     render(
       <StepInferenceProvider

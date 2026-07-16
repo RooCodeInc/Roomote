@@ -207,6 +207,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'webhook',
     rateLimits: WEBHOOK_RATE_LIMITS,
   },
+  {
+    name: 'internal-discord-events',
+    match: { type: 'exact', path: '/api/internal/discord/events' },
+    policy: 'webhook',
+    rateLimits: WEBHOOK_RATE_LIMITS,
+  },
 
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
   // gathering context before a run exists) and task run tokens.

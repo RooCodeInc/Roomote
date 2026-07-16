@@ -69,7 +69,6 @@ describe('run', () => {
           prompt: 'keep this local task open',
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
         },
         workspace: {
           environmentConfig: {
@@ -113,7 +112,6 @@ describe('run', () => {
           prompt: 'proof me',
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
         },
         workspace: {
           environmentConfig: {
@@ -153,7 +151,6 @@ describe('run', () => {
           prompt: 'fix the bug',
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
           requestedWorkKind: 'unknown',
           task: {
             id: 'task-101',
@@ -205,7 +202,6 @@ describe('run', () => {
           prompt: 'inspect the repo',
           harnessInstructions: undefined,
           orgAgentInstructions: undefined,
-          styleGuidance: undefined,
         },
         workspace: {
           environmentConfig: {

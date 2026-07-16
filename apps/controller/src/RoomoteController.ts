@@ -1,4 +1,8 @@
-import { type ComputeProvider } from '@roomote/types';
+import {
+  resolveRoomoteCloudBackend,
+  resolveRoomoteCloudModalAppName,
+  type ComputeProvider,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   type TaskRun,
@@ -74,14 +78,34 @@ export class RoomoteController extends BaseController {
     });
 
     switch (provider) {
-      case 'modal': {
-        const modalTokenId = resolvedEnv.MODAL_TOKEN_ID;
-        const modalTokenSecret = resolvedEnv.MODAL_TOKEN_SECRET;
+      // Roomote spawns with deployment-managed credentials, persisting its
+      // own vendor on the task run. ROOMOTE_CLOUD_BACKEND selects the engine
+      // backing it; only the Modal backend exists today, so both providers
+      // share the Modal spawn path below — a new backend dispatches to its
+      // own spawn function here after the backend resolution.
+      case 'modal':
+      case 'roomote': {
+        if (provider === 'roomote') {
+          // Throws on an unsupported backend; the resolved value is 'modal'
+          // until more ROOMOTE_CLOUD_BACKENDS exist.
+          resolveRoomoteCloudBackend(resolvedEnv);
+        }
+
+        const modalTokenId =
+          provider === 'roomote'
+            ? resolvedEnv.ROOMOTE_CLOUD_TOKEN_ID
+            : resolvedEnv.MODAL_TOKEN_ID;
+        const modalTokenSecret =
+          provider === 'roomote'
+            ? resolvedEnv.ROOMOTE_CLOUD_TOKEN_SECRET
+            : resolvedEnv.MODAL_TOKEN_SECRET;
         const modalBaseImageRef = resolvedEnv.MODAL_BASE_IMAGE_REF;
 
         if (!modalTokenId || !modalTokenSecret) {
           throw new Error(
-            'MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required to spawn Modal workers',
+            provider === 'roomote'
+              ? 'ROOMOTE_CLOUD_TOKEN_ID and ROOMOTE_CLOUD_TOKEN_SECRET are required to spawn Roomote Cloud workers'
+              : 'MODAL_TOKEN_ID and MODAL_TOKEN_SECRET are required to spawn Modal workers',
           );
         }
 
@@ -92,13 +116,20 @@ export class RoomoteController extends BaseController {
         }
 
         await spawnModalWorker(taskRun, authToken, {
+          vendor: provider,
           deploymentSlug: deploymentSlug,
           modalTags: this.buildSandboxTags(),
           modalTokenId,
           modalTokenSecret,
           modalEndpoint: Env.MODAL_ENDPOINT,
           modalEnvironment: Env.MODAL_ENVIRONMENT,
-          modalAppName: Env.MODAL_APP_NAME,
+          modalAppName:
+            provider === 'roomote'
+              ? resolveRoomoteCloudModalAppName({
+                  MODAL_APP_NAME: Env.MODAL_APP_NAME,
+                  ROOMOTE_CLOUD_SLUG: resolvedEnv.ROOMOTE_CLOUD_SLUG,
+                })
+              : Env.MODAL_APP_NAME,
           modalBaseImageRef,
           modalRegistryUsername: Env.MODAL_REGISTRY_USERNAME,
           modalRegistryPassword: Env.MODAL_REGISTRY_PASSWORD,

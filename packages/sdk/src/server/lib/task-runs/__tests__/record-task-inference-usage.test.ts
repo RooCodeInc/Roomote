@@ -3,13 +3,16 @@ import {
   runFactory,
   db,
   eq,
+  llmUsageEvents,
   taskFactory,
-  taskInferenceUsageEvents,
   userFactory,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
-import { recordTaskInferenceUsage } from '../record-task-inference-usage';
+import {
+  recordLlmUsage,
+  recordTaskInferenceUsage,
+} from '../record-task-inference-usage';
 
 describe('recordTaskInferenceUsage', () => {
   it('inserts an OpenCode message usage event', async () => {
@@ -48,8 +51,8 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id));
 
     expect(eventRows).toHaveLength(1);
     expect(eventRows[0]).toMatchObject({
@@ -116,8 +119,8 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id));
 
     expect(eventRows).toHaveLength(1);
     expect(eventRows[0]).toMatchObject({
@@ -165,9 +168,9 @@ describe('recordTaskInferenceUsage', () => {
 
     const eventRows = await db
       .select()
-      .from(taskInferenceUsageEvents)
-      .where(eq(taskInferenceUsageEvents.taskId, task.id))
-      .orderBy(asc(taskInferenceUsageEvents.messageId));
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.taskId, task.id))
+      .orderBy(asc(llmUsageEvents.messageId));
 
     expect(eventRows).toHaveLength(2);
     expect(eventRows.map((event) => event.messageId)).toEqual([
@@ -191,5 +194,63 @@ describe('recordTaskInferenceUsage', () => {
       contextTokens: 23,
       costMicroUsd: 75,
     });
+  });
+
+  it('upserts non-task usage by event key and keeps model rows separate', async () => {
+    await recordLlmUsage({
+      source: 'router',
+      usageType: 'inference',
+      eventKey: 'router-call-1',
+      providerId: 'openai',
+      modelId: 'gpt-5.4',
+      inputTokens: 10,
+      outputTokens: 2,
+      costMicroUsd: 100,
+    });
+    await recordLlmUsage({
+      source: 'router',
+      usageType: 'inference',
+      eventKey: 'router-call-1',
+      providerId: 'openai',
+      modelId: 'gpt-5.4',
+      inputTokens: 20,
+      outputTokens: 4,
+      costMicroUsd: 200,
+    });
+    await recordLlmUsage({
+      source: 'router',
+      usageType: 'inference',
+      eventKey: 'router-call-2',
+      providerId: 'anthropic',
+      modelId: 'claude-sonnet',
+      inputTokens: 30,
+      outputTokens: 6,
+      costMicroUsd: 300,
+    });
+
+    const rows = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.source, 'router'));
+
+    expect(rows).toHaveLength(2);
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventKey: 'router-call-1',
+          modelId: 'gpt-5.4',
+          inputTokens: 20,
+          outputTokens: 4,
+          costMicroUsd: 200,
+        }),
+        expect.objectContaining({
+          eventKey: 'router-call-2',
+          modelId: 'claude-sonnet',
+          inputTokens: 30,
+          outputTokens: 6,
+          costMicroUsd: 300,
+        }),
+      ]),
+    );
   });
 });

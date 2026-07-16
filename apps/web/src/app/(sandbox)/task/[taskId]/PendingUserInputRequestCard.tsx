@@ -241,7 +241,7 @@ export function PendingUserInputRequestCard({
   }
 
   return (
-    <div className="w-full px-4 pt-3 pb-3.5 text-foreground">
+    <div className="mx-auto w-full max-w-4xl px-4 pt-3 pb-3.5 text-foreground">
       <div className="space-y-3.5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-1.5 text-xs leading-5 text-foreground">

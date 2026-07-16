@@ -5,6 +5,7 @@ import {
   DEFAULT_CODING_HARNESS,
   DEFAULT_LAUNCH_CODING_HARNESS,
   getCommunicationChannelFromTaskPayload,
+  getCommunicationGuildIdFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
@@ -823,7 +824,7 @@ describe('taskSpecSchema', () => {
     ).toBe('333.444');
   });
 
-  it('reads provider-neutral communication metadata from Slack, Teams, and Telegram payloads', () => {
+  it('reads provider-neutral communication metadata from chat payloads', () => {
     expect(
       getCommunicationProviderFromTaskPayload({
         channel: 'C123',
@@ -853,6 +854,20 @@ describe('taskSpecSchema', () => {
         communicationChannelId: '-100456',
       }),
     ).toBe('telegram');
+    expect(
+      getCommunicationProviderFromTaskPayload({
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+      }),
+    ).toBe('discord');
+    expect(
+      getCommunicationGuildIdFromTaskPayload({
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+      }),
+    ).toBe('guild-1');
     expect(
       getCommunicationChannelFromTaskPayload({
         communicationProvider: 'teams',
@@ -912,18 +927,20 @@ describe('taskSpecSchema', () => {
 
     populateSnapshotResumeCommunicationMetadata(payload, {
       sourcePayload: {
-        communicationProvider: 'telegram',
-        communicationChannelId: '-100456',
-        communicationThreadId: '7',
-        communicationMessageId: '42',
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+        communicationMessageId: 'message-1',
       },
     });
 
     expect(payload).toMatchObject({
-      communicationProvider: 'telegram',
-      communicationChannelId: '-100456',
-      communicationThreadId: '7',
-      communicationMessageId: '42',
+      communicationProvider: 'discord',
+      communicationGuildId: 'guild-1',
+      communicationChannelId: 'channel-1',
+      communicationThreadId: 'thread-1',
+      communicationMessageId: 'message-1',
     });
   });
 

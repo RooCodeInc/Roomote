@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -21,7 +21,7 @@ import {
   ProviderSetupExperience,
 } from '@/app/(onboarding)/setup/ProviderSetupExperience';
 
-type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram';
+type CommsProviderId = SetupAuthProviderStatus['id'] | 'telegram' | 'discord';
 type TelegramWebhookStatus = {
   status: 'connected' | 'mismatch' | 'stale_updates' | 'unregistered' | 'error';
   registeredUrl: string | null;
@@ -30,10 +30,11 @@ type TelegramWebhookStatus = {
   pendingUpdateCount?: number;
   lastErrorAtMs?: number | null;
 };
-type TelegramCommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
+type CommsProviderStatus = Omit<SetupAuthProviderStatus, 'id'> & {
   id: CommsProviderId;
   telegramWebhook?: TelegramWebhookStatus | null;
   telegramBotUsername?: string | null;
+  discord?: import('@/trpc/commands/comms').DiscordCommsStatus | null;
 };
 
 const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
@@ -87,6 +88,7 @@ import {
 } from '@/components/system';
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
+import { DiscordSetupStatus } from './DiscordSetupStatus';
 
 const MICROSOFT_APP_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -476,7 +478,7 @@ function TeamsBotStatus() {
 }
 
 type CommsProviderSectionProps = {
-  provider: TelegramCommsProviderStatus;
+  provider: CommsProviderStatus;
   onSave: (provider: CommsProviderId, values: Record<string, string>) => void;
   onClear: (provider: CommsProviderId) => void;
   savePending: boolean;
@@ -498,6 +500,28 @@ export function CommsProviderSection({
         toast.success('Telegram connection repaired');
         await queryClient.invalidateQueries({
           queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+  const createSlackApp = useMutation(
+    trpc.slack.createAppFromManifest.mutationOptions({
+      onSuccess: async (result) => {
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+
+        setCreatedSlackAppSettingsUrl(result.appSettingsUrl);
+        toast.success(
+          'Slack app created and credentials saved. Add the Roomote icon, then connect it to your workspace.',
+        );
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.environmentVariables.list.queryKey(),
         });
       },
       onError: (error) => toast.error(error.message),
@@ -539,6 +563,13 @@ export function CommsProviderSection({
     Record<string, boolean>
   >({});
   const [showManualSlackValues, setShowManualSlackValues] = useState(false);
+  const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
+    string | null
+  >(null);
+  const previousConfiguredValues = useRef<{
+    providerId: CommsProviderId;
+    hasConfiguredValues: boolean;
+  } | null>(null);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
 
   useEffect(() => {
@@ -612,6 +643,25 @@ export function CommsProviderSection({
 
   const hasConfiguredValues =
     provider.runtimeSatisfied || provider.savedSatisfied;
+
+  useEffect(() => {
+    const previous = previousConfiguredValues.current;
+
+    if (
+      previous?.providerId !== provider.id ||
+      (provider.id === 'slack' &&
+        previous.hasConfiguredValues &&
+        !hasConfiguredValues)
+    ) {
+      setCreatedSlackAppSettingsUrl(null);
+    }
+
+    previousConfiguredValues.current = {
+      providerId: provider.id,
+      hasConfiguredValues,
+    };
+  }, [provider.id, hasConfiguredValues]);
+
   const hasEditableFields = visibleFields.some(
     (field) => !field.runtimeSatisfied,
   );
@@ -711,11 +761,18 @@ export function CommsProviderSection({
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
               showManualSlackValues={showManualSlackValues}
+              createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
+              createSlackAppPending={createSlackApp.isPending}
               surface="settings"
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
                   ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
-                  : undefined
+                  : !provider.runtimeSatisfied && provider.id === 'discord'
+                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
+                    : undefined
+              }
+              onCreateSlackApp={(configToken) =>
+                createSlackApp.mutate({ configToken })
               }
               onShowManualSlackValues={() => setShowManualSlackValues(true)}
               onValueChange={(envVarName, value) =>
@@ -778,6 +835,9 @@ export function CommsProviderSection({
               )}
               {provider.id === 'telegram' && hasConfiguredValues && (
                 <TelegramLinkAccountStep />
+              )}
+              {provider.id === 'discord' && provider.discord && (
+                <DiscordSetupStatus status={provider.discord} />
               )}
               {provider.id === 'microsoft' &&
                 (hasConfiguredValues || teamsBotConfigured) && (

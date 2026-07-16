@@ -78,6 +78,48 @@
       "when": 1784053149565,
       "tag": "0010_complete_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784108492065,
+      "tag": "0011_generalized_llm_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784140607771,
+      "tag": "0012_motionless_mauler",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784140607772,
+      "tag": "0013_melodic_wraith",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784145492648,
+      "tag": "0014_discord_communication_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1784151922303,
+      "tag": "0015_slimy_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1784169977755,
+      "tag": "0016_restore_rollback_compatibility",
+      "breakpoints": true
     }
   ]
 }

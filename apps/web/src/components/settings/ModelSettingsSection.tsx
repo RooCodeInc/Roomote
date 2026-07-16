@@ -7,12 +7,14 @@ import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
 
 import {
+  ArrowLeftRight,
   ArrowRight,
   Badge,
   BasicTooltip,
   Brain,
   Button,
   Check,
+  ChevronDown,
   Command,
   CommandEmpty,
   CommandGroup,
@@ -55,17 +57,18 @@ import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
-  SETUP_MODEL_PROVIDER_CATALOG,
-  getModelProviderLabel,
+  buildRecommendedDeploymentModelConfig,
+  groupModelsByDisplayProvider,
   getSetupModelProvider,
-  getTaskModelProviderId,
   normalizeOptionalReasoningEffort,
 } from '@roomote/types';
 import type {
+  DisplayModelProviderGroup,
   ReasoningEffort,
   SetupModelProviderId,
   SetupModelProviderStatus,
   TaskModelMetadata,
+  TaskModelRole,
 } from '@roomote/types';
 
 type EditableTaskModel = {
@@ -80,8 +83,6 @@ type EditableRuntimeModelOption = {
   displayName: string;
   family?: string;
 };
-
-type TaskModelRole = keyof typeof DEFAULT_MODEL_ROLE_REASONING_EFFORTS;
 
 type TaskModelRoleDraft = {
   modelId: string | null;
@@ -301,7 +302,7 @@ function TaskModelRoleEditor({
   managedByEnv: boolean;
   reasoningManagedByEnv: boolean;
   selectValue: string;
-  optionGroups: ProviderModelGroup<EditableRuntimeModelOption>[];
+  optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
   supportsReasoning: boolean;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
@@ -320,6 +321,7 @@ function TaskModelRoleEditor({
       : managedByEnv
         ? `Set by ${config.modelEnvVarName}, not changeable in the UI.`
         : `Set by ${config.reasoningEnvVarName}, not changeable in the UI.`;
+  const showProviderHeaders = optionGroups.length > 1;
 
   return (
     <div className="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
@@ -356,16 +358,24 @@ function TaskModelRoleEditor({
                   Same as coding model
                 </SelectItem>
               )}
-              {optionGroups.map((group) => (
-                <SelectGroup key={group.providerId}>
-                  <SelectLabel>{group.label}</SelectLabel>
-                  {group.items.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              ))}
+              {showProviderHeaders
+                ? optionGroups.map((group) => (
+                    <SelectGroup key={group.providerId}>
+                      <SelectLabel>{group.label}</SelectLabel>
+                      {group.items.map((option) => (
+                        <SelectItem key={option.id} value={option.id}>
+                          {option.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))
+                : optionGroups.flatMap((group) =>
+                    group.items.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.displayName}
+                      </SelectItem>
+                    )),
+                  )}
             </SelectContent>
           </Select>
           {supportsReasoning && (
@@ -383,44 +393,52 @@ function TaskModelRoleEditor({
   );
 }
 
-type ProviderModelGroup<T extends { id: string }> = {
-  providerId: string;
-  label: string;
-  items: T[];
-};
+/**
+ * Opens the preset picker for the model mapping section.
+ */
+function UseRecommendedDefaultsAction({
+  providers,
+  onSelect,
+}: {
+  providers: SetupModelProviderStatus[];
+  onSelect: (provider: SetupModelProviderStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
 
-const KNOWN_MODEL_PROVIDER_ORDER = SETUP_MODEL_PROVIDER_CATALOG.map(
-  (provider) => provider.id as string,
-);
-
-function groupByModelProvider<T extends { id: string }>(
-  items: T[],
-): ProviderModelGroup<T>[] {
-  const groups = new Map<string, T[]>();
-
-  for (const item of items) {
-    const providerId = getTaskModelProviderId(item.id) ?? 'other';
-    const groupItems = groups.get(providerId) ?? [];
-    groupItems.push(item);
-    groups.set(providerId, groupItems);
+  if (providers.length === 0) {
+    return null;
   }
 
-  return [...groups.entries()]
-    .sort(([left], [right]) => {
-      const leftIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(left);
-      const rightIndex = KNOWN_MODEL_PROVIDER_ORDER.indexOf(right);
-      const leftOrder =
-        leftIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : leftIndex;
-      const rightOrder =
-        rightIndex === -1 ? KNOWN_MODEL_PROVIDER_ORDER.length : rightIndex;
-
-      return leftOrder - rightOrder || left.localeCompare(right);
-    })
-    .map(([providerId, groupItems]) => ({
-      providerId,
-      label: getModelProviderLabel(providerId),
-      items: groupItems,
-    }));
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm">
+          Use a mapping preset
+          <ChevronDown />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-0">
+        <Command>
+          <CommandList>
+            <CommandGroup>
+              {providers.map((provider) => (
+                <CommandItem
+                  key={provider.id}
+                  value={provider.label}
+                  onSelect={() => {
+                    setOpen(false);
+                    onSelect(provider);
+                  }}
+                >
+                  {provider.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 // The ChatGPT subscription provider has no model-id prefix of its own: its
@@ -457,6 +475,21 @@ function getNewModelPlaceholder(provider: SetupModelProviderId): string {
     : defaultModel;
 
   return `Eg: ${exampleSlug}`;
+}
+
+function getRecommendedRoleModelIds(
+  provider: SetupModelProviderStatus,
+): Record<TaskModelRole, string | null> {
+  const recommended = buildRecommendedDeploymentModelConfig(provider);
+
+  return {
+    coding: recommended.roomoteModel,
+    helper: recommended.roomoteSmallModel,
+    vision: recommended.roomoteVisionModel,
+    codeReview: recommended.roomoteCodeReviewModel,
+    explore: recommended.roomoteExploreModel,
+    planning: recommended.roomotePlanningModel,
+  };
 }
 
 type PendingLookupState =
@@ -739,6 +772,8 @@ export function ModelSettingsSection({
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<
     string | null
   >(null);
+  const [selectedPresetProvider, setSelectedPresetProvider] =
+    useState<SetupModelProviderStatus | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingLookup, setPendingLookup] =
     useState<PendingLookupState>(IDLE_PENDING_LOOKUP);
@@ -752,6 +787,11 @@ export function ModelSettingsSection({
         left.label.localeCompare(right.label),
       ),
     [connectedProviders],
+  );
+  const chatgptConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
+      provider.savedApiKeySatisfied,
   );
   const activeNewModelProvider = useMemo(
     () =>
@@ -1001,17 +1041,22 @@ export function ModelSettingsSection({
     return options;
   }, [settingsData]);
   const codingModelGroups = useMemo(
-    () => groupByModelProvider(codingModelOptions),
-    [codingModelOptions],
+    () =>
+      groupModelsByDisplayProvider(codingModelOptions, { chatgptConnected }),
+    [codingModelOptions, chatgptConnected],
   );
   const helperModelGroups = useMemo(
-    () => groupByModelProvider(helperModelOptions),
-    [helperModelOptions],
+    () =>
+      groupModelsByDisplayProvider(helperModelOptions, { chatgptConnected }),
+    [helperModelOptions, chatgptConnected],
   );
-  const modelGroups = useMemo(() => groupByModelProvider(models), [models]);
+  const modelGroups = useMemo(
+    () => groupModelsByDisplayProvider(models, { chatgptConnected }),
+    [models, chatgptConnected],
+  );
   const roleOptionGroups: Record<
     TaskModelRole,
-    ProviderModelGroup<EditableRuntimeModelOption>[]
+    DisplayModelProviderGroup<EditableRuntimeModelOption>[]
   > = {
     coding: codingModelGroups,
     helper: helperModelGroups,
@@ -1453,6 +1498,106 @@ export function ModelSettingsSection({
     toast.success('Task model removed.');
   };
 
+  // A mapping preset resets the default-model
+  // roles to the provider's recommended defaults (adding and enabling any
+  // recommended models that are missing) through the normal draft/save flow.
+  const applyRecommendedDefaults = (provider: SetupModelProviderStatus) => {
+    const recommendedRoleModelIds = getRecommendedRoleModelIds(provider);
+    const suggestionsById = new Map(
+      provider.suggestedTaskModels.map((suggestion) => [
+        suggestion.id,
+        suggestion,
+      ]),
+    );
+    const nextModels = [...models];
+    const nextEnabledModelIds = [...enabledModelIds];
+
+    for (const modelId of Object.values(recommendedRoleModelIds)) {
+      if (!modelId) {
+        continue;
+      }
+
+      if (!nextModels.some((model) => model.id === modelId)) {
+        const suggestion = suggestionsById.get(modelId);
+        nextModels.push({
+          id: modelId,
+          displayName:
+            suggestion?.displayName || (modelId.split('/').at(-1) ?? modelId),
+          family: suggestion?.family,
+          metadata: null,
+        });
+      }
+
+      if (!nextEnabledModelIds.includes(modelId)) {
+        nextEnabledModelIds.push(modelId);
+      }
+    }
+
+    const nextRoles = cloneTaskModelRoleDrafts(roleDrafts);
+
+    for (const role of TASK_MODEL_ROLE_ORDER) {
+      const status =
+        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+
+      // Env-managed selections are not editable from the UI, so the macro
+      // leaves them untouched.
+      if (status?.managedByEnv) {
+        continue;
+      }
+
+      nextRoles[role] = {
+        modelId:
+          role === 'coding'
+            ? (recommendedRoleModelIds.coding ?? roleDrafts.coding.modelId)
+            : recommendedRoleModelIds[role],
+        reasoningEffort: status?.reasoningManagedByEnv
+          ? roleDrafts[role].reasoningEffort
+          : null,
+      };
+    }
+
+    suppressNextSaveSuccessToast();
+    applyDraftUpdates(
+      {
+        models: nextModels,
+        enabledModelIds: nextEnabledModelIds,
+        roles: nextRoles,
+      },
+      0,
+    );
+    toast.success(`Applied the ${provider.label} mapping preset.`);
+  };
+
+  const selectedPresetMappings = selectedPresetProvider
+    ? (() => {
+        const recommendedRoleModelIds = getRecommendedRoleModelIds(
+          selectedPresetProvider,
+        );
+
+        return TASK_MODEL_ROLE_CONFIGS.map((config) => {
+          const status =
+            settingsData?.runtimeModels[
+              TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
+            ];
+          const managedByEnv = status?.managedByEnv ?? false;
+          const modelId = managedByEnv
+            ? status?.effectiveModelId
+            : (recommendedRoleModelIds[config.role] ??
+              recommendedRoleModelIds.coding);
+          const displayName = modelId
+            ? (models.find((model) => model.id === modelId)?.displayName ??
+              selectedPresetProvider.suggestedTaskModels.find(
+                (model) => model.id === modelId,
+              )?.displayName ??
+              modelId.split('/').at(-1) ??
+              modelId)
+            : 'Not set';
+
+          return { config, displayName, managedByEnv };
+        });
+      })()
+    : [];
+
   const handleRefreshMetadata = async () => {
     const result = await refreshMetadataMutation.mutateAsync();
     if (!result.success) {
@@ -1492,7 +1637,16 @@ export function ModelSettingsSection({
 
   return (
     <div className="space-y-6">
-      <Section icon={Brain} title="Default Models">
+      <Section
+        icon={ArrowLeftRight}
+        title="Model mapping"
+        action={
+          <UseRecommendedDefaultsAction
+            providers={sortedConnectedProviders}
+            onSelect={setSelectedPresetProvider}
+          />
+        }
+      >
         <div className="divide-y divide-background">
           {TASK_MODEL_ROLE_CONFIGS.map((config) => {
             const status =
@@ -1527,6 +1681,73 @@ export function ModelSettingsSection({
           })}
         </div>
       </Section>
+
+      <Dialog
+        open={selectedPresetProvider !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedPresetProvider(null);
+          }
+        }}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>
+              Apply {selectedPresetProvider?.label} preset
+            </DialogTitle>
+            <DialogDescription>Set this model mapping</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-y-3 text-sm">
+            {selectedPresetMappings.map(
+              ({ config, displayName, managedByEnv }) => {
+                const Icon = config.icon;
+
+                return (
+                  <div
+                    key={config.role}
+                    className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3"
+                  >
+                    <Icon className="size-4 text-muted-foreground" />
+                    <span className="font-medium">{config.label}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                      <span className="truncate">{displayName}</span>
+                      {managedByEnv && (
+                        <BasicTooltip
+                          content={`Managed by ${config.modelEnvVarName}; this preset will leave it unchanged.`}
+                        >
+                          <Lock
+                            aria-label={`${config.label} is managed by ${config.modelEnvVarName}`}
+                            className="size-3.5 shrink-0"
+                          />
+                        </BasicTooltip>
+                      )}
+                    </span>
+                  </div>
+                );
+              },
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedPresetProvider(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedPresetProvider) {
+                  applyRecommendedDefaults(selectedPresetProvider);
+                  setSelectedPresetProvider(null);
+                }
+              }}
+            >
+              <Check />
+              Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Section
         icon={Brain}

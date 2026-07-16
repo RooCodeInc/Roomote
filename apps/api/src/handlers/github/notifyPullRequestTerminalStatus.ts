@@ -37,7 +37,7 @@ import {
 } from '@roomote/types';
 
 /** Fixed Slack reaction for closed (not merged) PRs on the originating message. */
-export const SLACK_PR_CLOSED_REACTION_EMOJI = 'heavy_multiplication_x';
+export const SLACK_PR_CLOSED_REACTION_EMOJI = '-1';
 
 const LINEAR_MCP_URL = 'https://mcp.linear.app/mcp';
 
@@ -105,6 +105,11 @@ type TelegramTarget = {
   replyToMessageId?: string;
 };
 
+type DiscordTarget = {
+  channelId: string;
+  threadId?: string;
+};
+
 function getTeamsTarget(payload: unknown): TeamsTarget | null {
   if (
     !payload ||
@@ -152,6 +157,29 @@ function getTelegramTarget(payload: unknown): TelegramTarget | null {
     chatId,
     ...(threadId ? { threadId } : {}),
     ...(replyToMessageId ? { replyToMessageId } : {}),
+  };
+}
+
+function getDiscordTarget(payload: unknown): DiscordTarget | null {
+  if (
+    !payload ||
+    typeof payload !== 'object' ||
+    getCommunicationProviderFromTaskPayload(payload) !== 'discord'
+  ) {
+    return null;
+  }
+
+  const channelId = getCommunicationChannelFromTaskPayload(payload);
+
+  if (!channelId) {
+    return null;
+  }
+
+  const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+
+  return {
+    channelId,
+    ...(threadId ? { threadId } : {}),
   };
 }
 
@@ -428,6 +456,77 @@ async function deliverTelegramTerminalStatus({
   }
 }
 
+async function deliverDiscordTerminalStatus({
+  discordTargets,
+  prTitle,
+  prUrl,
+  status,
+  resolvedActorLogin,
+  repository,
+  prNumber,
+}: {
+  discordTargets: DiscordTarget[];
+  prTitle: string;
+  prUrl: string;
+  status: 'merged' | 'closed';
+  resolvedActorLogin: string;
+  repository: string;
+  prNumber: number;
+}): Promise<void> {
+  if (discordTargets.length === 0) {
+    return;
+  }
+
+  const provider = await getCommunicationProviderAdapter('discord');
+
+  if (!provider) {
+    console.warn(
+      '[notifyPullRequestTerminalStatus] Discord bot credentials are not configured, skipping Discord PR-status notification',
+    );
+    return;
+  }
+
+  const statusNotification = buildPullRequestStatusNotificationText({
+    prTitle,
+    prUrl,
+    status,
+    actorLogin: resolvedActorLogin,
+    formatLink: formatMarkdownLink,
+    formatStatus: (value) => `**${value}**`,
+  });
+
+  const notifiedConversations = new Set<string>();
+
+  for (const target of discordTargets) {
+    const conversationKey = `${target.channelId}:${target.threadId ?? ''}`;
+
+    if (notifiedConversations.has(conversationKey)) {
+      continue;
+    }
+
+    try {
+      await provider.postMessage({
+        channelId: target.channelId,
+        ...(target.threadId ? { threadId: target.threadId } : {}),
+        text: statusNotification.bodyText,
+        textFormat: 'markdown',
+      });
+
+      notifiedConversations.add(conversationKey);
+
+      console.log(
+        `[notifyPullRequestTerminalStatus] Sent ${status} notification to Discord conversation ${conversationKey} for PR ${repository}#${prNumber}`,
+      );
+    } catch (error) {
+      console.error(
+        `[notifyPullRequestTerminalStatus] Failed to send Discord notification for conversation ${conversationKey}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+}
+
 async function deliverLinearTerminalStatus({
   linearSessionIds,
   prTitle,
@@ -502,12 +601,12 @@ async function deliverLinearTerminalStatus({
 }
 
 /**
- * Notifies Slack, Teams, Telegram, and Linear conversations linked to a PR
+ * Notifies Slack, Teams, Telegram, Discord, and Linear conversations linked to a PR
  * when that PR becomes terminal (merged or closed).
  *
  * Resolves the GitHub installation gate (when provided) and provider-scoped
  * task-PR links once, then fans out delivery per surface: Slack sticky-footer
- * posts plus reactions, Teams/Telegram via the shared communication adapter,
+ * posts plus reactions, Teams/Telegram/Discord via the shared communication adapter,
  * and Linear session responses as their own path.
  *
  * Fire-and-forget and best-effort; individual surface failures do not throw.
@@ -631,10 +730,15 @@ export async function notifyPullRequestTerminalStatus({
       .map((run) => getTelegramTarget(run.payload))
       .filter((target): target is TelegramTarget => target !== null);
 
+    const discordTargets = linkedRuns
+      .map((run) => getDiscordTarget(run.payload))
+      .filter((target): target is DiscordTarget => target !== null);
+
     if (
       slackTargets.length === 0 &&
       teamsTargets.length === 0 &&
       telegramTargets.length === 0 &&
+      discordTargets.length === 0 &&
       linearSessionIds.length === 0
     ) {
       console.log(
@@ -670,6 +774,15 @@ export async function notifyPullRequestTerminalStatus({
       }),
       deliverTelegramTerminalStatus({
         telegramTargets,
+        prTitle,
+        prUrl,
+        status,
+        resolvedActorLogin,
+        repository,
+        prNumber,
+      }),
+      deliverDiscordTerminalStatus({
+        discordTargets,
         prTitle,
         prUrl,
         status,

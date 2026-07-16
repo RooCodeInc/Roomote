@@ -56,6 +56,19 @@ export type MockSlackTeam = {
   timezone?: string;
 };
 
+export type MockSlackManifestCredentials = {
+  appId?: string;
+  clientId?: string;
+  clientSecret?: string;
+  signingSecret?: string;
+  verificationToken?: string;
+};
+
+export type MockSlackCreatedManifest = {
+  appId: string;
+  manifest: Record<string, unknown>;
+};
+
 export type MockSlackState = {
   team: MockSlackTeam;
   acceptedBotTokens?: string[];
@@ -70,6 +83,17 @@ export type MockSlackState = {
   channels: MockSlackChannel[];
   users: MockSlackUser[];
   messages?: MockSlackStoredMessage[];
+  /**
+   * Bearer tokens accepted by app-config endpoints (`apps.manifest.create`).
+   * Slack app configuration tokens live in a different token space than bot
+   * tokens, so they get their own allowlist. Undefined accepts any token,
+   * mirroring `acceptedBotTokens`.
+   */
+  acceptedConfigTokens?: string[];
+  /** Credential overrides returned by `apps.manifest.create`. */
+  manifestCredentials?: MockSlackManifestCredentials;
+  /** Apps created through `apps.manifest.create`, oldest first. */
+  createdManifests?: MockSlackCreatedManifest[];
 };
 
 export type MockSlackRoomoteTarget = {
@@ -423,7 +447,12 @@ export class MockSlackServer {
       return;
     }
 
-    if (!this.isAuthorized(request)) {
+    // App-config endpoints authenticate with configuration tokens instead of
+    // bot tokens, so they skip the bot check and validate in their handler.
+    if (
+      url.pathname !== '/api/apps.manifest.create' &&
+      !this.isAuthorized(request)
+    ) {
       json(response, 401, { ok: false, error: 'invalid_auth' });
       return;
     }
@@ -433,6 +462,21 @@ export class MockSlackServer {
 
   private isAuthorized(request: IncomingMessage): boolean {
     const allowedTokens = this.state.acceptedBotTokens;
+    if (!allowedTokens?.length) {
+      return true;
+    }
+
+    const authorization = request.headers.authorization;
+    if (!authorization?.startsWith('Bearer ')) {
+      return false;
+    }
+
+    const token = authorization.slice('Bearer '.length).trim();
+    return allowedTokens.includes(token);
+  }
+
+  private isConfigTokenAuthorized(request: IncomingMessage): boolean {
+    const allowedTokens = this.state.acceptedConfigTokens;
     if (!allowedTokens?.length) {
       return true;
     }
@@ -586,6 +630,104 @@ export class MockSlackServer {
           members: paginatedMembers,
           response_metadata: { next_cursor: nextCursor },
         });
+        return;
+      }
+
+      case 'POST apps.manifest.create': {
+        // Real Slack reports Web API failures as HTTP 200 with `ok: false`.
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const manifestValue = jsonBody.manifest;
+        let manifest: JsonRecord | null = null;
+
+        if (typeof manifestValue === 'string') {
+          try {
+            const parsedManifest = JSON.parse(manifestValue);
+
+            if (
+              parsedManifest &&
+              typeof parsedManifest === 'object' &&
+              !Array.isArray(parsedManifest)
+            ) {
+              manifest = parsedManifest as JsonRecord;
+            }
+          } catch {
+            manifest = null;
+          }
+        } else if (
+          manifestValue &&
+          typeof manifestValue === 'object' &&
+          !Array.isArray(manifestValue)
+        ) {
+          manifest = manifestValue as JsonRecord;
+        }
+
+        if (!manifest) {
+          json(response, 200, {
+            ok: false,
+            error: 'invalid_manifest',
+            errors: [
+              {
+                message: 'manifest must be a JSON object',
+                pointer: '/manifest',
+              },
+            ],
+          });
+          return;
+        }
+
+        const credentials = this.state.manifestCredentials ?? {};
+        const appId = credentials.appId ?? 'AMOCKMANIFEST';
+        const clientId = credentials.clientId ?? 'mock-manifest-client-id';
+
+        this.state.createdManifests = [
+          ...(this.state.createdManifests ?? []),
+          { appId, manifest },
+        ];
+
+        json(response, 200, {
+          ok: true,
+          app_id: appId,
+          credentials: {
+            client_id: clientId,
+            client_secret:
+              credentials.clientSecret ?? 'mock-manifest-client-secret',
+            verification_token:
+              credentials.verificationToken ??
+              'mock-manifest-verification-token',
+            signing_secret:
+              credentials.signingSecret ?? 'mock-manifest-signing-secret',
+          },
+          oauth_authorize_url: `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(clientId)}`,
+        });
+        return;
+      }
+
+      case 'POST apps.manifest.delete': {
+        // Real Slack reports Web API failures as HTTP 200 with `ok: false`.
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const createdManifests = this.state.createdManifests ?? [];
+        const nextCreatedManifests = createdManifests.filter(
+          (createdManifest) => createdManifest.appId !== appId,
+        );
+
+        if (!appId || nextCreatedManifests.length === createdManifests.length) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        this.state.createdManifests = nextCreatedManifests;
+
+        json(response, 200, { ok: true });
         return;
       }
 

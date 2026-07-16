@@ -92,8 +92,8 @@ Deployment env var names follow three rules:
 - **`R_*`** — configuration Roomote itself defines and operators set:
   URLs and model roles (`R_APP_URL`, `R_MODEL`), Roomote's registered
   integration-app credentials (`R_GITHUB_*`, `R_SLACK_*`, `R_MICROSOFT_*`,
-  `R_TEAMS_BOT_*`, `R_TELEGRAM_*`, `R_LINEAR_*`), and boot knobs such as
-  `R_AUTO_GENERATE_KEYS`.
+  `R_TEAMS_BOT_*`, `R_TELEGRAM_*`, `R_DISCORD_*`, `R_LINEAR_*`), and boot knobs
+  such as `R_AUTO_GENERATE_KEYS`.
 - **Conventional infrastructure names** stay unchanged: `DATABASE_URL`,
   `REDIS_URL`, `S3_*`, `NODE_ENV`, `HOST`, `PORT`.
 - **Third-party provider credentials** keep the provider's standard names:
@@ -120,6 +120,7 @@ as per-task auth tokens or workspace paths.
 | `R_PUBLIC_URL`          | Local callbacks      | Stable public HTTPS origin used by local development for OAuth and webhook callbacks.                                                                                                                                                                                                                                                                                                                                                   |
 | `R_APP_URL`             | Production           | Public web app origin. Workers and integrations use it for links back to Roomote.                                                                                                                                                                                                                                                                                                                                                       |
 | `TRPC_URL`              | Production           | API/tRPC origin used by workers and services. In single-origin production, this is often the app URL plus `/_roomote-api`.                                                                                                                                                                                                                                                                                                              |
+| `R_CLOUD_ENABLED`       | Roomote Cloud only   | Deployment-managed switch for Roomote Cloud behavior, including required anonymous analytics and Cloud support integrations. Do not set this for self-hosted deployments.                                                                                                                                                                                                                                                                |
 | `R_GITHUB_APP_SLUG`     | GitHub setup         | GitHub App slug used by server-rendered setup and GitHub integration flows.                                                                                                                                                                                                                                                                                                                                                             |
 | `SETUP_TOKEN`           | Required (non-local) | One-time bootstrap token that admits the first admin at `/setup`. Required on every non-local deployment — tokenless bootstrap is allowed only when `NODE_ENV` is not `production` and `R_APP_ENV` is `development`, so anything running with `NODE_ENV=production` needs it. Without it, first-admin bootstrap stays closed so nobody can claim the founding-admin slot by reaching the URL first. Optional only in local development. |
 | `DASHBOARD_PASSWORD`    | Production           | Local fallback/admin password value used by the deployment. Generate a strong secret.                                                                                                                                                                                                                                                                                                                                                   |
@@ -258,11 +259,9 @@ as per-task auth tokens or workspace paths.
 | `GITEA_CLIENT_ID`              | Gitea        | Gitea OAuth application client ID for deployment and personal account-linking grants.       |
 | `GITEA_CLIENT_SECRET`          | Gitea        | Gitea OAuth application client secret.                                                      |
 | `GITEA_WEBHOOK_SECRET`         | Optional     | Gitea webhook secret.                                                                       |
-| `BITBUCKET_TOKEN`              | Bitbucket    | Atlassian API token with Bitbucket scopes.                                                  |
-| `BITBUCKET_USERNAME`           | Bitbucket    | Atlassian account email that owns the API token.                                            |
 | `BITBUCKET_BASE_URL`           | Optional     | Bitbucket base URL. Defaults to `https://bitbucket.org` (Cloud only).                       |
-| `BITBUCKET_CLIENT_ID`          | Optional     | Bitbucket OAuth client ID for personal account linking.                                     |
-| `BITBUCKET_CLIENT_SECRET`      | Optional     | Bitbucket OAuth client secret for personal account linking.                                 |
+| `BITBUCKET_CLIENT_ID`          | Bitbucket    | Bitbucket OAuth consumer client ID for deployment authorization and personal account linking. |
+| `BITBUCKET_CLIENT_SECRET`      | Bitbucket    | Bitbucket OAuth consumer client secret.                                                      |
 | `BITBUCKET_WEBHOOK_SECRET`     | Optional     | Bitbucket webhook secret.                                                                   |
 | `ADO_ORGANIZATION`             | Azure DevOps | Azure DevOps organization.                                                                  |
 | `ADO_TOKEN`                    | Azure DevOps | Azure DevOps access token.                                                                  |
@@ -298,6 +297,9 @@ as per-task auth tokens or workspace paths.
 | `R_TEAMS_BOT_OAUTH_SCOPE`      | Optional          | Teams bot OAuth scope override.                                                  |
 | `R_TELEGRAM_BOT_TOKEN`         | Telegram          | Telegram bot token.                                                              |
 | `R_TELEGRAM_WEBHOOK_SECRET`    | Telegram          | Optional. Telegram webhook secret; generated automatically when unset in the UI. |
+| `R_DISCORD_BOT_TOKEN`          | Discord           | Discord bot token. The bot and application identity are read from this token.    |
+| `R_DISCORD_GATEWAY_SECRET`     | Discord           | Shared internal secret for Discord event delivery between BullMQ and API. Auto-generated when Discord is saved in the UI if unset. Dedicated value — do not reuse `ENCRYPTION_KEY`. |
+| `DISCORD_API_BASE_URL`         | Optional          | Discord REST API base URL override, primarily for testing.                       |
 | `R_SLACK_CLIENT_ID`            | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                   |
 | `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.           |
 | `R_MICROSOFT_CLIENT_ID`        | Microsoft sign-in | Microsoft OAuth client ID.                                                       |
