@@ -1575,9 +1575,15 @@ export function ModelSettingsSection({
         );
 
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
-          const modelId =
-            recommendedRoleModelIds[config.role] ??
-            recommendedRoleModelIds.coding;
+          const status =
+            settingsData?.runtimeModels[
+              TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
+            ];
+          const managedByEnv = status?.managedByEnv ?? false;
+          const modelId = managedByEnv
+            ? status?.effectiveModelId
+            : (recommendedRoleModelIds[config.role] ??
+              recommendedRoleModelIds.coding);
           const displayName = modelId
             ? (models.find((model) => model.id === modelId)?.displayName ??
               selectedPresetProvider.suggestedTaskModels.find(
@@ -1587,7 +1593,7 @@ export function ModelSettingsSection({
               modelId)
             : 'Not set';
 
-          return { config, displayName };
+          return { config, displayName, managedByEnv };
         });
       })()
     : [];
@@ -1692,22 +1698,34 @@ export function ModelSettingsSection({
             <DialogDescription>Set this model mapping</DialogDescription>
           </DialogHeader>
           <div className="grid gap-y-3 text-sm">
-            {selectedPresetMappings.map(({ config, displayName }) => {
-              const Icon = config.icon;
+            {selectedPresetMappings.map(
+              ({ config, displayName, managedByEnv }) => {
+                const Icon = config.icon;
 
-              return (
-                <div
-                  key={config.role}
-                  className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3"
-                >
-                  <Icon className="size-4 text-muted-foreground" />
-                  <span className="font-medium">{config.label}</span>
-                  <span className="truncate text-muted-foreground">
-                    {displayName}
-                  </span>
-                </div>
-              );
-            })}
+                return (
+                  <div
+                    key={config.role}
+                    className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3"
+                  >
+                    <Icon className="size-4 text-muted-foreground" />
+                    <span className="font-medium">{config.label}</span>
+                    <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                      <span className="truncate">{displayName}</span>
+                      {managedByEnv && (
+                        <BasicTooltip
+                          content={`Managed by ${config.modelEnvVarName}; this preset will leave it unchanged.`}
+                        >
+                          <Lock
+                            aria-label={`${config.label} is managed by ${config.modelEnvVarName}`}
+                            className="size-3.5 shrink-0"
+                          />
+                        </BasicTooltip>
+                      )}
+                    </span>
+                  </div>
+                );
+              },
+            )}
           </div>
           <DialogFooter>
             <Button

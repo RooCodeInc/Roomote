@@ -814,7 +814,10 @@ describe('ModelSettingsSection', () => {
   });
 
   it('previews a preset mapping and does not apply it when cancelled', async () => {
-    settingsData.current = buildSettingsData();
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
       suggestedTaskModelsByProvider: {
@@ -844,7 +847,10 @@ describe('ModelSettingsSection', () => {
     expect(
       within(dialog).getByText('Default coding model'),
     ).toBeInTheDocument();
-    expect(within(dialog).getByText('Claude Haiku 4.5')).toBeInTheDocument();
+    expect(within(dialog).getByText('GLM 5.2')).toBeInTheDocument();
+    expect(
+      within(dialog).getByLabelText('Helper model is managed by R_SMALL_MODEL'),
+    ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
