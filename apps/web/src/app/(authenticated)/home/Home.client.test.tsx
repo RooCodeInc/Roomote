@@ -14,6 +14,7 @@ import { AUTO_WORKSPACE_VALUE } from '@/components/tasks/constants';
 
 let currentSearchParams = '';
 let currentFeatureFlags: Record<string, boolean> = {};
+let currentCloudEnabled = false;
 let currentShowDebugUI = false;
 let currentShowDebugUILoading = false;
 let currentGitHubInstallations = [{ id: 'installation-1' }];
@@ -67,6 +68,7 @@ vi.mock('@/hooks/useUser', () => ({
     isAdmin: true,
     name: 'Test User',
     primaryEmail: 'test@example.com',
+    cloudEnabled: currentCloudEnabled,
     featureFlags: currentFeatureFlags,
     resource: {
       username: 'tester',
@@ -332,6 +334,7 @@ describe('Home', () => {
   beforeEach(() => {
     currentSearchParams = '';
     currentFeatureFlags = {};
+    currentCloudEnabled = false;
     currentShowDebugUI = false;
     currentShowDebugUILoading = false;
     currentGitHubInstallations = [{ id: 'installation-1' }];
@@ -800,10 +803,45 @@ describe('Home', () => {
     );
   });
 
-  it('always shows the compute provider selector', () => {
+  it('shows the compute provider selector outside cloud mode', () => {
     render(<Home initialPlaceholderIndex={0} />);
 
     expect(screen.getByLabelText('Sandbox provider')).toBeInTheDocument();
+  });
+
+  it('hides the compute provider selector when cloud mode is enabled', () => {
+    currentCloudEnabled = true;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
+  });
+
+  it('uses the default compute provider for launches when cloud mode hides selection', async () => {
+    currentCloudEnabled = true;
+
+    render(
+      <Home
+        initialPlaceholderIndex={0}
+        defaultComputeProvider="modal"
+        availableComputeProviders={['modal', 'docker']}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Sandbox provider')).not.toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use single-repo environment' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          computeProvider: 'modal',
+        }),
+      );
+    });
   });
 
   it('uses only configured sandbox providers for selection and launch', async () => {
