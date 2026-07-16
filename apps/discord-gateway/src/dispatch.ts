@@ -17,7 +17,8 @@ type RawMessage = {
   guild_id?: string;
   content?: string;
   author?: { bot?: boolean };
-  mentions?: Array<{ id?: string }>;
+  mentions?: Array<{ id?: string; username?: string; bot?: boolean }>;
+  mention_roles?: string[];
 };
 
 type RawInteraction = {
@@ -34,6 +35,9 @@ type DispatchDependencies = {
   getCachedChannel?: (
     channelId: string,
   ) => DiscordCachedMessageChannel | undefined;
+  /** The bot's managed role id for a guild, when known. */
+  getBotRoleId?: (guildId: string) => string | null | undefined;
+  getBotUsername?: () => string | undefined;
   /**
    * Forward an unmentioned guild message when Gateway channel metadata could
    * not be resolved. The durable API consumer performs its own authoritative
@@ -52,6 +56,30 @@ export type DiscordCachedMessageChannel = {
   name?: string;
   isThread: boolean;
 };
+
+function isBotRoleMentioned(message: RawMessage, botRoleId: string): boolean {
+  return (
+    message.mention_roles?.includes(botRoleId) === true ||
+    message.content?.includes(`<@&${botRoleId}>`) === true
+  );
+}
+
+function normalizeBotRoleMention(
+  message: RawMessage,
+  botRoleId: string,
+  bot: { id: string; username: string },
+): RawMessage {
+  const mentions = message.mentions ?? [];
+  return {
+    ...message,
+    content: message.content?.replaceAll(`<@&${botRoleId}>`, `<@${bot.id}>`),
+    // The injected entry must satisfy the API's full user schema, not just
+    // carry an id.
+    mentions: mentions.some((mention) => mention.id === bot.id)
+      ? mentions
+      : [...mentions, { id: bot.id, username: bot.username, bot: true }],
+  };
+}
 
 function isBotMentioned(
   message: RawMessage,
@@ -162,7 +190,7 @@ export async function handleGatewayDispatch(
   }
 
   if (eventType === 'MESSAGE_CREATE') {
-    const message = packet.d as RawMessage;
+    let message = packet.d as RawMessage;
     if (!message.id || message.author?.bot) {
       return 'ignored';
     }
@@ -171,6 +199,26 @@ export async function handleGatewayDispatch(
       ? dependencies.getCachedChannel?.(message.channel_id)
       : undefined;
     const botUserId = dependencies.getBotUserId?.();
+    // Discord's mention autocomplete often resolves a bot by its managed
+    // role (same name as the bot), which arrives as mention_roles +
+    // <@&role> content with an empty user-mention list. Normalize that form
+    // to a canonical user mention so every downstream consumer (entry
+    // gating, mention stripping) sees one shape.
+    const botRoleId = message.guild_id
+      ? dependencies.getBotRoleId?.(message.guild_id)
+      : undefined;
+    const botUsername = dependencies.getBotUsername?.();
+    if (
+      botUserId &&
+      botUsername &&
+      botRoleId &&
+      isBotRoleMentioned(message, botRoleId)
+    ) {
+      message = normalizeBotRoleMention(message, botRoleId, {
+        id: botUserId,
+        username: botUsername,
+      });
+    }
     // Discord sends every message from subscribed guild channels. Root
     // channels only start Roomote work when the bot is mentioned, while DMs
     // and task threads retain natural follow-ups without an extra mention.

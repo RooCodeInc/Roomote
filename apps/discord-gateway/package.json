@@ -28,6 +28,7 @@
     "discord.js": "^14.22.1"
   },
   "devDependencies": {
+    "@roomote/communication": "workspace:*",
     "@roomote/config-eslint": "workspace:^",
     "@roomote/config-typescript": "workspace:^",
     "@types/node": "^24.10.13",
