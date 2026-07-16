@@ -1122,6 +1122,29 @@ describe('ModelSettingsSection', () => {
     expect(updateMutateAsyncMock).not.toHaveBeenCalled();
   });
 
+  it('previews inherited roles with the effective env-managed coding model', async () => {
+    settingsData.current = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(6);
+  });
+
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
     settingsData.current = buildSettingsData({
       helperManagedByEnv: true,

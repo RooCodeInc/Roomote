@@ -18,10 +18,6 @@ function deriveDisplayNameFromModelId(modelId: string): string {
   return modelId.split('/').at(-1) || modelId;
 }
 
-function deriveFamilyFromModelId(modelId: string): string | undefined {
-  return modelId.split('/').at(-2);
-}
-
 /**
  * Model-id prefixes of the providers currently connected (saved or runtime
  * env). A connected ChatGPT subscription serves `openai/` model ids, so it
@@ -192,7 +188,7 @@ export function buildAutoAddedTaskModelSettings(options: {
       id: modelId,
       displayName:
         candidate.displayName || deriveDisplayNameFromModelId(modelId),
-      family: candidate.family ?? deriveFamilyFromModelId(modelId),
+      family: candidate.family,
     });
 
     modelsById.set(model.id, model);

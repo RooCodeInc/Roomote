@@ -486,10 +486,6 @@ function getNewModelPlaceholder(provider: SetupModelProviderId): string {
   return `Eg: ${exampleSlug}`;
 }
 
-function deriveModelFamily(modelId: string): string | undefined {
-  return modelId.split('/').at(-2);
-}
-
 function getRecommendedRoleModelIds(
   provider: SetupModelProviderStatus,
   preset: RecommendedModelPreset,
@@ -1617,10 +1613,7 @@ export function ModelSettingsSection({
             suggestion?.displayName ??
             modelId.split('/').at(-1) ??
             modelId,
-          family:
-            presetModel?.family ??
-            suggestion?.family ??
-            deriveModelFamily(modelId),
+          family: presetModel?.family ?? suggestion?.family,
           metadata: null,
         });
       }
@@ -1673,10 +1666,12 @@ export function ModelSettingsSection({
               TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
             ];
           const managedByEnv = status?.managedByEnv ?? false;
+          const codingModelId =
+            settingsData?.runtimeModels.codingModel.effectiveModelId ??
+            recommendedRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
-            : (recommendedRoleModelIds[config.role] ??
-              recommendedRoleModelIds.coding);
+            : (recommendedRoleModelIds[config.role] ?? codingModelId);
           const displayName = modelId
             ? (models.find((model) => model.id === modelId)?.displayName ??
               selectedPreset.preset.roles[config.role]?.displayName ??

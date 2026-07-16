@@ -192,6 +192,37 @@ describe('buildAutoAddedTaskModelSettings', () => {
       'anthropic/experimental-reviewer',
     );
   });
+
+  it('uses the model display name for a preset model family fallback', () => {
+    const provider = {
+      ...ANTHROPIC,
+      recommendedPresets: [
+        {
+          id: 'experimental',
+          label: 'Experimental',
+          default: true,
+          roles: {
+            coding: {
+              modelId: 'anthropic/experimental-reviewer',
+              displayName: 'Experimental reviewer',
+            },
+          },
+        },
+      ],
+    };
+
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['anthropic']),
+    });
+
+    expect(
+      result?.addedModels.find(
+        (model) => model.id === 'anthropic/experimental-reviewer',
+      ),
+    ).toMatchObject({ family: 'Experimental' });
+  });
 });
 
 describe('appendRecommendedTaskModels', () => {
