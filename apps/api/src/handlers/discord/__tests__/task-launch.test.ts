@@ -649,4 +649,172 @@ describe('launchDiscordTask', () => {
     expect(mocks.redisDel).not.toHaveBeenCalled();
     expect(provider.postMessage).not.toHaveBeenCalled();
   });
+
+  it('turns a caller-supplied message into the acknowledgement', async () => {
+    const anchoredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix tests',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(anchoredThread),
+      completeTaskThread: vi.fn().mockResolvedValue(anchoredThread),
+      editInteractionResponse: vi
+        .fn()
+        .mockResolvedValue({ messageId: 'card-1' }),
+      postMessage: vi.fn(),
+      editChannel: vi.fn(),
+    };
+
+    const launched = await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: { repoForPayload: 'acme/repo', workspaceDisplayName: 'Acme' },
+      replaceMessage: {
+        applicationId: 'app-1',
+        interaction: {
+          id: 'interaction-1',
+          application_id: 'app-1',
+          type: 3,
+          token: 'token-1',
+          channel_id: 'message-1',
+        } as never,
+        interactionDeferred: true,
+        channel: {
+          channelId: 'message-1',
+          channelName: 'Fix tests',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isDirectMessage: false,
+          isThread: true,
+        },
+      },
+    });
+
+    expect(provider.postMessage).not.toHaveBeenCalled();
+    expect(provider.editInteractionResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interactionToken: 'token-1',
+        text: 'Started a task in Acme.',
+        buttons: [
+          [
+            {
+              text: 'Follow Task',
+              url: 'https://roomote.example/tasks/task-41',
+            },
+          ],
+          [{ text: '✖️ Cancel task', callbackData: 'discord:cancel:41' }],
+        ],
+      }),
+    );
+    expect(launched.acknowledgement).toEqual({ messageId: 'card-1' });
+  });
+
+  it('posts the acknowledgement when the message it should replace is gone', async () => {
+    // A card that cannot be edited must not take the acknowledgement down with
+    // it; the task is already running and still needs its cancel control.
+    const anchoredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix tests',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(anchoredThread),
+      completeTaskThread: vi.fn().mockResolvedValue(anchoredThread),
+      editInteractionResponse: vi.fn().mockRejectedValue(
+        new DiscordApiError({
+          method: 'PATCH',
+          path: '/webhooks/app-1/token-1/messages/@original',
+          status: 404,
+          message: 'Unknown Message',
+          code: 10008,
+        }),
+      ),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn(),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: { repoForPayload: 'acme/repo', workspaceDisplayName: 'Acme' },
+      replaceMessage: {
+        applicationId: 'app-1',
+        interaction: {
+          id: 'interaction-1',
+          application_id: 'app-1',
+          type: 3,
+          token: 'token-1',
+          channel_id: 'message-1',
+        } as never,
+        interactionDeferred: true,
+        channel: {
+          channelId: 'message-1',
+          channelName: 'Fix tests',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isDirectMessage: false,
+          isThread: true,
+        },
+      },
+    });
+
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'message-1',
+        text: 'Started a task in Acme.',
+      }),
+    );
+  });
 });
