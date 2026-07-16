@@ -14,6 +14,7 @@ export { answerUserInputRequest } from './answerUserInputRequest';
 export { touchKeepalive } from './touchKeepalive';
 export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
 export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';
+export { restoreScrubbedCredentials } from './restoreScrubbedCredentials';
 
 // Queries
 export { getRuntimeState } from './getRuntimeState';

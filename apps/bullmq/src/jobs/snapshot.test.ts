@@ -950,6 +950,103 @@ describe('snapshotJob', () => {
     );
   });
 
+  it('asks the sandbox to restore credentials when a terminal failure leaves it running', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    // First RPC scrubs before the attempt, second restores after the
+    // terminal failure.
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledTimes(2);
+    const restoreMutate = vi.fn().mockResolvedValue({ success: true });
+    await mockWithSandboxServerRpcClient.mock.calls[1]?.[0].call({
+      commands: { restoreScrubbedCredentials: { mutate: restoreMutate } },
+    });
+    expect(restoreMutate).toHaveBeenCalledTimes(1);
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'post_failure_credential_restore_completed',
+        }),
+      }),
+    );
+  });
+
+  it('records an unavailable credential restore without changing the failure outcome', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+    // Scrub RPC succeeds, restore RPC fails.
+    mockWithSandboxServerRpcClient
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('sandbox server unreachable'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore-down' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'post_failure_credential_restore_unavailable',
+          error: 'sandbox server unreachable',
+        }),
+      }),
+    );
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotRequestedAt: null,
+        sleepRequestedAt: null,
+        snapshotFailedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('does not request a credential restore when the run has no sandbox server URL', async () => {
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore-no-url' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+  });
+
   it('does not retry permanent createSnapshot failures when attempts remain', async () => {
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(

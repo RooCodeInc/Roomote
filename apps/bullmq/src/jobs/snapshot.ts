@@ -52,7 +52,7 @@ export interface SnapshotJobData {
 type SnapshotJob = Job<SnapshotJobData, void, string>;
 
 const SNAPSHOT_RECONCILE_TIMEOUT_MS = 60_000;
-const PRE_SNAPSHOT_SCRUB_RPC_TIMEOUT_MS = 10_000;
+const SANDBOX_CREDENTIAL_RPC_TIMEOUT_MS = 10_000;
 const SNAPSHOT_RECONCILE_INTERVAL_MS = 2_000;
 const SNAPSHOT_RECONCILE_SINCE_SKEW_MS = 10_000;
 const TRANSIENT_SNAPSHOT_FAILURE_STATUSES = new Set([408, 409, 425, 429]);
@@ -477,6 +477,19 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           },
         });
 
+        // The pre-snapshot scrub removed on-disk credentials and quiesced
+        // credential writers, but this snapshot attempt is being abandoned
+        // and the sandbox may still be running. Ask it to restore credential
+        // state so a surviving task can keep working.
+        await requestPostFailureCredentialRestore({
+          taskRun,
+          instanceId,
+          queueAttempt,
+          queueJobId,
+          snapshotIntentId,
+          triggerPath,
+        });
+
         // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
         if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
           const environmentId = taskRun.payload.environmentId;
@@ -789,7 +802,7 @@ async function requestPreSnapshotScrub(input: {
       // Platform automation with no human actor.
       userId: null,
       sandboxServerUrl: taskRun.sandboxServerUrl,
-      timeoutMs: PRE_SNAPSHOT_SCRUB_RPC_TIMEOUT_MS,
+      timeoutMs: SANDBOX_CREDENTIAL_RPC_TIMEOUT_MS,
       call: (client) => client.commands.scrubSnapshotSecrets.mutate(),
     });
 
@@ -813,6 +826,70 @@ async function requestPreSnapshotScrub(input: {
       details: {
         ...baseDetails,
         decision: 'pre_snapshot_scrub_unavailable',
+        error: errorMessage,
+      },
+    });
+  }
+}
+
+/**
+ * After a terminal snapshot failure leaves the sandbox running, ask the
+ * sandbox server to restore the credential state the pre-snapshot scrub
+ * removed (release the credential write barrier, rewrite token files and
+ * env vars) so the surviving task can keep working. Best-effort only:
+ * failures are recorded as run events and never affect the failure handling.
+ */
+async function requestPostFailureCredentialRestore(input: {
+  taskRun: TaskRun;
+  instanceId: string;
+  queueAttempt: number;
+  queueJobId: string | null;
+  snapshotIntentId: string;
+  triggerPath: string | null;
+}): Promise<void> {
+  const { taskRun, instanceId } = input;
+  const baseDetails = {
+    queueJobId: input.queueJobId,
+    queueAttempt: input.queueAttempt,
+    snapshotIntentId: input.snapshotIntentId,
+    triggerPath: input.triggerPath,
+    sandboxId: instanceId,
+  };
+
+  if (!taskRun.sandboxServerUrl) {
+    return;
+  }
+
+  try {
+    await withSandboxServerRpcClient({
+      runId: taskRun.id,
+      // Platform automation with no human actor.
+      userId: null,
+      sandboxServerUrl: taskRun.sandboxServerUrl,
+      timeoutMs: SANDBOX_CREDENTIAL_RPC_TIMEOUT_MS,
+      call: (client) => client.commands.restoreScrubbedCredentials.mutate(),
+    });
+
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Sandbox ${instanceId} restored credential state after the abandoned snapshot.`,
+      details: {
+        ...baseDetails,
+        decision: 'post_failure_credential_restore_completed',
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    console.warn(
+      `[SnapshotQueue] Post-failure credential restore unavailable for task run #${taskRun.id}: ${errorMessage}`,
+    );
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Credential restore was unavailable for sandbox ${instanceId} after the abandoned snapshot.`,
+      details: {
+        ...baseDetails,
+        decision: 'post_failure_credential_restore_unavailable',
         error: errorMessage,
       },
     });

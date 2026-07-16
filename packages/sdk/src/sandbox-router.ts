@@ -254,6 +254,10 @@ export interface SandboxServerRpcClient {
     touchKeepalive: SandboxMutation<undefined, SandboxSuccessResult>;
     reloadDeploymentEnvVars: SandboxMutation<undefined, SandboxSuccessResult>;
     scrubSnapshotSecrets: SandboxMutation<undefined, SandboxSuccessResult>;
+    restoreScrubbedCredentials: SandboxMutation<
+      undefined,
+      SandboxSuccessResult
+    >;
   };
 }
 

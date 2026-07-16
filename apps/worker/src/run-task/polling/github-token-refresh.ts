@@ -13,10 +13,10 @@ const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
 interface GitHubTokenRefreshOptions {
   runId: number;
-  logger: HarnessLogger;
+  logger: Pick<HarnessLogger, 'info' | 'error'>;
 }
 
-async function refreshGitHubToken({
+export async function refreshGitHubToken({
   runId,
   logger,
 }: GitHubTokenRefreshOptions): Promise<

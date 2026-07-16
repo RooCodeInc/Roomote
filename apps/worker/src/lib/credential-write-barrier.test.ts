@@ -1,6 +1,7 @@
 import {
   engageCredentialWriteBarrier,
   isCredentialWriteBarrierEngaged,
+  releaseCredentialWriteBarrier,
   resetCredentialWriteBarrierForTesting,
   runUnlessCredentialWriteBarrier,
 } from './credential-write-barrier';
@@ -58,6 +59,18 @@ describe('credential write barrier', () => {
 
     expect(engaged).toBe(true);
     expect(writeSettled).toBe(true);
+  });
+
+  it('allows writes again after the barrier is released', async () => {
+    await engageCredentialWriteBarrier();
+    releaseCredentialWriteBarrier();
+
+    const work = vi.fn(async () => 'written');
+    const result = await runUnlessCredentialWriteBarrier(work);
+
+    expect(result).toBe('written');
+    expect(work).toHaveBeenCalledTimes(1);
+    expect(isCredentialWriteBarrierEngaged()).toBe(false);
   });
 
   it('drains failed writes without rejecting the engagement', async () => {

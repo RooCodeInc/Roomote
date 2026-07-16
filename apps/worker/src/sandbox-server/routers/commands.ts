@@ -18,6 +18,7 @@ import {
   touchKeepalive,
   reloadDeploymentEnvVars,
   scrubSnapshotSecrets,
+  restoreScrubbedCredentials,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -38,4 +39,5 @@ export const commandsRouter = router({
   touchKeepalive,
   reloadDeploymentEnvVars,
   scrubSnapshotSecrets,
+  restoreScrubbedCredentials,
 });

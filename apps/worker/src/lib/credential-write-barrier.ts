@@ -1,14 +1,15 @@
 /**
- * One-way latch that quiesces credential-file writers before a filesystem
- * snapshot. The pre-snapshot scrub engages the barrier and waits for in-flight
- * writes to drain; once engaged, later writers (the source-control token
- * refresh loop, deployment env reloads) skip their file writes so they cannot
+ * Latch that quiesces credential-file writers before a filesystem snapshot.
+ * The pre-snapshot scrub engages the barrier and waits for in-flight writes
+ * to drain; while engaged, writers (the source-control token refresh loop,
+ * deployment env reloads) skip their file writes so they cannot
  * re-materialize credentials between the scrub and the provider snapshot.
  *
- * The latch never releases: after a snapshot request the sandbox is either
- * completed and torn down or resumed from the snapshot with credentials
- * re-injected at run start, so no writer has a legitimate reason to run again
- * in this process.
+ * The barrier stays engaged for the normal snapshot lifecycle — the sandbox
+ * is completed and torn down, or resumed from the snapshot with credentials
+ * re-injected at run start. When a snapshot terminally fails and the sandbox
+ * keeps running, the credential restore path releases the barrier so the
+ * surviving task can refresh tokens and reload its environment again.
  */
 
 let engaged = false;
@@ -29,6 +30,14 @@ export async function engageCredentialWriteBarrier(): Promise<void> {
   while (inFlightWrites.size > 0) {
     await Promise.allSettled([...inFlightWrites]);
   }
+}
+
+/**
+ * Re-enable credential writes after a snapshot attempt is abandoned with the
+ * sandbox still running.
+ */
+export function releaseCredentialWriteBarrier(): void {
+  engaged = false;
 }
 
 /**

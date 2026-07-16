@@ -3,8 +3,10 @@ import { TRPCError } from '@trpc/server';
 import { sdk } from '@roomote/sdk/client';
 
 import { injectEnvVars } from '../../commands/utils/env-vars';
+import type { WorkerEnv } from '../../env';
 import { runUnlessCredentialWriteBarrier } from '../../lib';
 
+import type { Harness } from '../lib/harness';
 import { publicProcedure } from '../trpc';
 
 function omitKeys(
@@ -18,6 +20,60 @@ function omitKeys(
   }
 
   return nextEnv;
+}
+
+/**
+ * Fetch the deployment's current env vars and rewrite the sandbox env
+ * (env.sh, runtime env, harness command env) from them. Shared by the live
+ * reload mutation and the post-snapshot-failure credential restore.
+ */
+export async function applyDeploymentEnvVarsReload(input: {
+  runId: number;
+  workerEnv: WorkerEnv;
+  harness: Harness;
+}): Promise<{ success: true; names: string[] }> {
+  const { runId, workerEnv, harness } = input;
+
+  const [freshEnvVars, taskRun] = await Promise.all([
+    sdk.taskRuns.getResolvedRuntimeEnvVars({ runId }),
+    sdk.taskRuns.findFirstById(runId),
+  ]);
+
+  if (!taskRun) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Task run not found',
+    });
+  }
+
+  const currentRuntimeEnv = workerEnv.getRuntimeEnv();
+  const nextRuntimeEnv: Record<string, string> = { ...freshEnvVars };
+
+  await injectEnvVars(nextRuntimeEnv, taskRun, {
+    previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
+    previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
+    syncSourceControlTokenFiles: false,
+  });
+
+  workerEnv.setRuntimeEnv(nextRuntimeEnv);
+
+  const currentCommandEnv = harness.getCommandEnv?.() ?? {};
+  const baseCommandEnv = omitKeys(
+    currentCommandEnv,
+    Object.keys(currentRuntimeEnv),
+  );
+
+  harness.setCommandEnv?.({
+    ...baseCommandEnv,
+    ...nextRuntimeEnv,
+  });
+
+  return {
+    success: true,
+    names: Object.keys(freshEnvVars).sort((left, right) =>
+      left.localeCompare(right),
+    ),
+  };
 }
 
 export const reloadDeploymentEnvVars = publicProcedure.mutation(
@@ -41,48 +97,9 @@ export const reloadDeploymentEnvVars = publicProcedure.mutation(
     // Wrapped in the credential write barrier: the reload rewrites env.sh,
     // which must not happen between the pre-snapshot scrub and the provider
     // filesystem snapshot.
-    const reloadResult = await runUnlessCredentialWriteBarrier(async () => {
-      const [freshEnvVars, taskRun] = await Promise.all([
-        sdk.taskRuns.getResolvedRuntimeEnvVars({ runId }),
-        sdk.taskRuns.findFirstById(runId),
-      ]);
-
-      if (!taskRun) {
-        throw new TRPCError({
-          code: 'NOT_FOUND',
-          message: 'Task run not found',
-        });
-      }
-
-      const currentRuntimeEnv = workerEnv.getRuntimeEnv();
-      const nextRuntimeEnv: Record<string, string> = { ...freshEnvVars };
-
-      await injectEnvVars(nextRuntimeEnv, taskRun, {
-        previewProxyBaseUrl: workerEnv.previewProxyBaseUrl,
-        previewProxySubdomainSuffix: workerEnv.previewProxySubdomainSuffix,
-        syncSourceControlTokenFiles: false,
-      });
-
-      workerEnv.setRuntimeEnv(nextRuntimeEnv);
-
-      const currentCommandEnv = harness.getCommandEnv?.() ?? {};
-      const baseCommandEnv = omitKeys(
-        currentCommandEnv,
-        Object.keys(currentRuntimeEnv),
-      );
-
-      harness.setCommandEnv?.({
-        ...baseCommandEnv,
-        ...nextRuntimeEnv,
-      });
-
-      return {
-        success: true,
-        names: Object.keys(freshEnvVars).sort((left, right) =>
-          left.localeCompare(right),
-        ),
-      };
-    });
+    const reloadResult = await runUnlessCredentialWriteBarrier(() =>
+      applyDeploymentEnvVarsReload({ runId, workerEnv, harness }),
+    );
 
     if (!reloadResult) {
       throw new TRPCError({
