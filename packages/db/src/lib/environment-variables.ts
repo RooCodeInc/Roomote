@@ -13,8 +13,9 @@ export function stringifyDecryptedEnvVarValue(value: unknown): string {
 export async function resolveDeploymentEnvVar(
   name: string,
   executor: DatabaseOrTransaction = db,
+  runtimeEnv: Partial<Record<string, string | undefined>> = process.env,
 ): Promise<string | null> {
-  const processValue = process.env[name]?.trim();
+  const processValue = runtimeEnv[name]?.trim();
 
   if (processValue) {
     return processValue;

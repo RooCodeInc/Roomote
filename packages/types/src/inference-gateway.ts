@@ -20,17 +20,22 @@ export interface InferenceGatewayProvider {
    */
   id: SetupModelProviderId;
   name: string;
-  /** Deployment env var holding the provider API key the gateway injects. */
-  envVarName: string;
+  /**
+   * Deployment env vars holding the provider API key the gateway injects,
+   * in precedence order.
+   */
+  envVarNames: readonly string[];
   upstreamBaseUrl: string;
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader: InferenceGatewayAuthHeader;
   /**
-   * Upstream path prefixes the gateway forwards. Everything else is rejected
-   * so a run token can only reach inference endpoints, never the provider's
+   * Upstream inference endpoints the gateway forwards, matched exactly
+   * (Google model routes additionally match nested paths because the model
+   * ID and action live below `/models`). Everything else is rejected so a
+   * run token can only reach inference endpoints, never the provider's
    * account, billing, or admin surface.
    */
-  allowedPathPrefixes: readonly string[];
+  allowedPaths: readonly string[];
   /**
    * Base-path suffix the provider's SDK expects on a baseURL override,
    * mirroring the upstream default base path (the SDK appends endpoint paths
@@ -50,28 +55,33 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
     {
       id: 'openrouter',
       name: 'OpenRouter',
-      envVarName: 'OPENROUTER_API_KEY',
+      envVarNames: ['OPENROUTER_API_KEY'],
       upstreamBaseUrl: 'https://openrouter.ai/api',
       authHeader: { name: 'authorization', scheme: 'bearer' },
-      allowedPathPrefixes: ['/v1'],
+      allowedPaths: [
+        '/v1/chat/completions',
+        '/v1/completions',
+        '/v1/embeddings',
+        '/v1/models',
+      ],
       openCodeBaseUrlSuffix: '/v1',
     },
     {
       id: 'anthropic',
       name: 'Anthropic',
-      envVarName: 'ANTHROPIC_API_KEY',
+      envVarNames: ['ANTHROPIC_API_KEY'],
       upstreamBaseUrl: 'https://api.anthropic.com',
       authHeader: { name: 'x-api-key' },
-      allowedPathPrefixes: ['/v1/messages', '/v1/models'],
+      allowedPaths: ['/v1/messages', '/v1/messages/count_tokens', '/v1/models'],
       openCodeBaseUrlSuffix: '/v1',
     },
     {
       id: 'openai',
       name: 'OpenAI',
-      envVarName: 'OPENAI_API_KEY',
+      envVarNames: ['OPENAI_API_KEY'],
       upstreamBaseUrl: 'https://api.openai.com',
       authHeader: { name: 'authorization', scheme: 'bearer' },
-      allowedPathPrefixes: [
+      allowedPaths: [
         '/v1/chat/completions',
         '/v1/responses',
         '/v1/embeddings',
@@ -82,10 +92,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
     {
       id: 'google',
       name: 'Google Gemini',
-      envVarName: 'GEMINI_API_KEY',
+      envVarNames: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
       upstreamBaseUrl: 'https://generativelanguage.googleapis.com',
       authHeader: { name: 'x-goog-api-key' },
-      allowedPathPrefixes: ['/v1beta/models', '/v1/models'],
+      allowedPaths: ['/v1beta/models', '/v1/models'],
       openCodeBaseUrlSuffix: '/v1beta',
     },
   ];
@@ -96,7 +106,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
  * env vars.
  */
 export const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES: readonly string[] =
-  INFERENCE_GATEWAY_PROVIDERS.map((provider) => provider.envVarName);
+  INFERENCE_GATEWAY_PROVIDERS.flatMap((provider) => provider.envVarNames);
 
 export function getInferenceGatewayProvider(
   providerId: string,

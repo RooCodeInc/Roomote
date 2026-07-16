@@ -20,7 +20,10 @@ import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
-import { stringifyDecryptedEnvVarValue } from './environment-variables';
+import {
+  resolveDeploymentEnvVar,
+  stringifyDecryptedEnvVarValue,
+} from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
@@ -132,24 +135,38 @@ function resolveProviderKeyNames({
  * deployment environment variables.
  */
 export async function resolveModelProviderEnvValue(
-  envVarName: string,
+  envVarNames: string | readonly string[],
   options: {
     runtimeEnv?: Partial<Record<string, string | undefined>>;
     executor?: DatabaseOrTransaction;
   } = {},
 ): Promise<string | undefined> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
-  const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
+  const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
 
-  if (runtimeValue) {
-    return runtimeValue;
+  for (const envVarName of names) {
+    const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
+
+    if (runtimeValue) {
+      return runtimeValue;
+    }
   }
 
-  const persistedEnvVars = await loadPersistedDeploymentEnvVars(
-    options.executor ?? db,
-  );
+  for (const envVarName of names) {
+    const persistedValue = await resolveDeploymentEnvVar(
+      envVarName,
+      options.executor ?? db,
+      {},
+    );
 
-  return normalizeConfiguredValue(persistedEnvVars[envVarName]);
+    const normalizedValue = normalizeConfiguredValue(persistedValue);
+
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+
+  return undefined;
 }
 
 export async function resolveEffectiveModelRuntimeEnv(

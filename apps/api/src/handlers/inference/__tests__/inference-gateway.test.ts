@@ -148,6 +148,20 @@ describe('inference gateway', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects provider account paths nested below former inference prefixes', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const app = createApp(createRunToken());
+
+    const [anthropicResponse, openRouterResponse] = await Promise.all([
+      postMessages(app, '/api/inference/anthropic/v1/messages/batches'),
+      postMessages(app, '/api/inference/openrouter/v1/key'),
+    ]);
+
+    expect(anthropicResponse.status).toBe(403);
+    expect(openRouterResponse.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns 404 when the provider key is not configured', async () => {
     const fetchMock = stubUpstreamFetch();
     mockResolveModelProviderEnvValue.mockResolvedValue(undefined);
@@ -169,9 +183,9 @@ describe('inference gateway', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
       'ANTHROPIC_API_KEY',
-    );
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -197,9 +211,9 @@ describe('inference gateway', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith(
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
       'OPENROUTER_API_KEY',
-    );
+    ]);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
@@ -233,6 +247,10 @@ describe('inference gateway', () => {
 
     const headers = new Headers(init.headers);
     expect(headers.get('x-goog-api-key')).toBe('provider-secret-key');
+    expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
+      'GEMINI_API_KEY',
+      'GOOGLE_GENERATIVE_AI_API_KEY',
+    ]);
   });
 
   it('streams the upstream response body and status through', async () => {
