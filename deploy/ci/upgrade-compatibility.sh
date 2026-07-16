@@ -197,10 +197,31 @@ snapshot_previous_schema_contract() {
 DROP SCHEMA IF EXISTS upgrade_ci_contract CASCADE;
 CREATE SCHEMA upgrade_ci_contract;
 
+-- Feature PRs use the published develop image as their CI baseline even though
+-- develop is not a supported rollback target. That image briefly shipped the
+-- v0.6 usage-table rename before this contract check existed. Allow only that
+-- one-time repair; once the legacy table exists, the exception self-disables.
+CREATE TABLE upgrade_ci_contract.previous_table_exceptions (
+  table_name text PRIMARY KEY,
+  reason text NOT NULL
+);
+
+INSERT INTO upgrade_ci_contract.previous_table_exceptions (table_name, reason)
+SELECT
+  'llm_usage_events',
+  'unsupported interim develop schema repaired to the v0.5-compatible table name'
+WHERE to_regclass('public.llm_usage_events') IS NOT NULL
+  AND to_regclass('public.task_inference_usage_events') IS NULL;
+
 CREATE TABLE upgrade_ci_contract.previous_tables AS
 SELECT table_name, table_type
-FROM information_schema.tables
-WHERE table_schema = 'public';
+FROM information_schema.tables AS previous
+WHERE table_schema = 'public'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM upgrade_ci_contract.previous_table_exceptions AS exception
+    WHERE exception.table_name = previous.table_name
+  );
 
 CREATE TABLE upgrade_ci_contract.previous_columns AS
 SELECT
@@ -209,8 +230,13 @@ SELECT
   udt_name,
   is_nullable,
   column_default
-FROM information_schema.columns
-WHERE table_schema = 'public';
+FROM information_schema.columns AS previous
+WHERE table_schema = 'public'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM upgrade_ci_contract.previous_table_exceptions AS exception
+    WHERE exception.table_name = previous.table_name
+  );
 SQL
 }
 
