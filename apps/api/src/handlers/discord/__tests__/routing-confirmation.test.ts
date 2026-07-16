@@ -438,6 +438,155 @@ describe('Discord routing confirmation', () => {
     }
   });
 
+  it('finalizes an auto-confirmed routing card outside the task thread', async () => {
+    vi.useFakeTimers();
+    try {
+      const editMessage = vi.fn().mockResolvedValue(undefined);
+      const provider = { editMessage } as never;
+      mocks.reserveAnchoredThread.mockResolvedValue(null);
+      mocks.reply.mockResolvedValue({ messageId: 'card-1' });
+      mocks.launchTask.mockResolvedValue({
+        createdThread: null,
+        taskUrl: 'https://roomote.example/task/task-1',
+        launchResult: { id: 42, taskId: 'task-1' },
+      });
+
+      await requestDiscordRoutingConfirmation({
+        provider,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'dm-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'dm-1',
+          channelName: 'Direct message',
+          channelType: 1,
+          isDirectMessage: true,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      const stored = JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string);
+      mocks.redisGetdel.mockResolvedValue(JSON.stringify(stored));
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mocks.launchTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ replaceMessage: expect.anything() }),
+      );
+      expect(editMessage).toHaveBeenCalledWith({
+        channelId: 'dm-1',
+        messageId: 'card-1',
+        text: 'Started in **Sunny Acres**.',
+        buttons: [
+          [
+            {
+              text: 'Follow Task',
+              url: 'https://roomote.example/task/task-1',
+            },
+          ],
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores the route when an auto-confirm launch fails', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.reserveAnchoredThread.mockResolvedValue(null);
+      mocks.reply.mockResolvedValue({ messageId: 'card-1' });
+
+      await requestDiscordRoutingConfirmation({
+        provider: {} as never,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      const routeKey = mocks.redisSet.mock.lastCall?.[0] as string;
+      const stored = JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string);
+      mocks.redisGetdel.mockResolvedValue(JSON.stringify(stored));
+      mocks.launchTask.mockRejectedValueOnce(new Error('queue unavailable'));
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mocks.redisSet.mock.lastCall).toEqual([
+        routeKey,
+        JSON.stringify(stored),
+        'EX',
+        900,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not resurrect a route claimed while the card was still posting', async () => {
     // The card id is only knowable after posting, so the route is written a
     // second time. A Nevermind landing in that window has already claimed the

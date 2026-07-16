@@ -216,43 +216,88 @@ async function autoConfirmDiscordRouting(input: {
   if (!pending || pending.suggestedIndex === null) return;
   const option = pending.options[pending.suggestedIndex];
   if (!option) return;
-  const existingRun = await findCommunicationTaskRunBySourceEvent({
-    provider: 'discord',
-    sourceEventId: pending.queuedMessage.ts,
-  });
-  if (existingRun) return;
-  const workspace = await resolveDiscordWorkspace(option.workspace);
-  if (!workspace) {
-    await input.provider
-      .postMessage({
-        channelId:
-          pending.cardChannel?.parentChannelId ?? pending.channel.channelId,
-        ...(pending.cardChannel
-          ? { threadId: pending.cardChannel.channelId }
-          : {}),
-        text: 'Could not start the task — the suggested workspace is no longer available. Send the request again.',
-      })
-      .catch(() => undefined);
-    return;
+  try {
+    const existingRun = await findCommunicationTaskRunBySourceEvent({
+      provider: 'discord',
+      sourceEventId: pending.queuedMessage.ts,
+    });
+    if (existingRun) return;
+    const workspace = await resolveDiscordWorkspace(option.workspace);
+    if (!workspace) {
+      await input.provider
+        .postMessage({
+          channelId:
+            pending.cardChannel?.parentChannelId ?? pending.channel.channelId,
+          ...(pending.cardChannel
+            ? { threadId: pending.cardChannel.channelId }
+            : {}),
+          text: 'Could not start the task — the suggested workspace is no longer available. Send the request again.',
+        })
+        .catch(() => undefined);
+      return;
+    }
+    const launched = await launchDiscordTask({
+      provider: input.provider,
+      launchOwnerUserId: pending.launchOwnerUserId,
+      queuedMessage: pending.queuedMessage,
+      metadata: pending.metadata,
+      channel: pending.channel,
+      workspace,
+      ...(pending.forceNewThread ? { forceNewThread: true } : {}),
+      // No interaction here — nobody clicked. A card that already lives in
+      // the task thread becomes the launch acknowledgement itself.
+      ...(pending.cardChannel && pending.cardMessageId
+        ? {
+            replaceMessage: {
+              channel: pending.cardChannel,
+              messageId: pending.cardMessageId,
+            },
+          }
+        : {}),
+    });
+
+    if (!pending.cardChannel && pending.cardMessageId) {
+      // DMs, interaction cards, and thread-reservation fallbacks keep their
+      // routing card outside the task conversation. The launch has already
+      // posted its acknowledgement and controls in the right destination;
+      // turn the original card into a terminal receipt so stale route buttons
+      // do not remain visible.
+      await input.provider
+        .editMessage({
+          channelId: pending.channel.channelId,
+          messageId: pending.cardMessageId,
+          text: launched.createdThread
+            ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
+            : `Started in **${workspace.workspaceDisplayName}**.`,
+          buttons: launched.taskUrl
+            ? [[{ text: 'Follow Task', url: launched.taskUrl }]]
+            : [],
+        })
+        .catch((error) => {
+          apiLogger.warn(
+            `[discord] Could not finalize routing card ${pending.cardMessageId}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        });
+    }
+  } catch (error) {
+    // The click path restores its claim when lookup, workspace resolution, or
+    // launch fails. Auto-confirm must do the same so a transient failure does
+    // not consume the route and leave its buttons permanently dead.
+    await restorePendingRoute(input.pendingRouteId, pending).catch(
+      (restoreError) => {
+        apiLogger.warn(
+          `[discord] Could not restore routing choice ${input.pendingRouteId}: ${
+            restoreError instanceof Error
+              ? restoreError.message
+              : String(restoreError)
+          }`,
+        );
+      },
+    );
+    throw error;
   }
-  await launchDiscordTask({
-    provider: input.provider,
-    launchOwnerUserId: pending.launchOwnerUserId,
-    queuedMessage: pending.queuedMessage,
-    metadata: pending.metadata,
-    channel: pending.channel,
-    workspace,
-    ...(pending.forceNewThread ? { forceNewThread: true } : {}),
-    // No interaction here — nobody clicked. The card is edited by id.
-    ...(pending.cardChannel && pending.cardMessageId
-      ? {
-          replaceMessage: {
-            channel: pending.cardChannel,
-            messageId: pending.cardMessageId,
-          },
-        }
-      : {}),
-  });
 }
 
 function scheduleDiscordRoutingAutoConfirm(input: {
