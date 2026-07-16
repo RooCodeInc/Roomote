@@ -297,7 +297,7 @@ as per-task auth tokens or workspace paths.
 | `R_TELEGRAM_BOT_TOKEN`         | Telegram          | Telegram bot token.                                                              |
 | `R_TELEGRAM_WEBHOOK_SECRET`    | Telegram          | Optional. Telegram webhook secret; generated automatically when unset in the UI. |
 | `R_DISCORD_BOT_TOKEN`          | Discord           | Discord bot token. The bot and application identity are read from this token.    |
-| `R_DISCORD_GATEWAY_SECRET`     | Optional          | Advanced shared internal secret for Discord delivery between BullMQ and API.     |
+| `R_DISCORD_GATEWAY_SECRET`     | Discord           | Shared internal secret for Discord event delivery between BullMQ and API. Auto-generated when Discord is saved in the UI if unset. Dedicated value — do not reuse `ENCRYPTION_KEY`. |
 | `DISCORD_API_BASE_URL`         | Optional          | Discord REST API base URL override, primarily for testing.                       |
 | `R_SLACK_CLIENT_ID`            | Slack sign-in     | Slack sign-in client ID. `R_SLACK_CLIENT_ID` is also accepted.                   |
 | `R_SLACK_CLIENT_SECRET`        | Slack sign-in     | Slack sign-in client secret. `R_SLACK_CLIENT_SECRET` is also accepted.           |

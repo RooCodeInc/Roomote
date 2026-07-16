@@ -78,11 +78,11 @@ function resolveRoomoteTarget(
     ? 'config'
     : process.env.R_DISCORD_GATEWAY_SECRET?.trim()
       ? 'Env.R_DISCORD_GATEWAY_SECRET'
-      : 'Env.ENCRYPTION_KEY';
+      : 'missing';
   const gatewaySecret =
     roomoteTarget.gatewaySecret ??
     process.env.R_DISCORD_GATEWAY_SECRET?.trim() ??
-    Env.ENCRYPTION_KEY ??
+    Env.R_DISCORD_GATEWAY_SECRET ??
     '';
 
   console.info(`Using Discord gateway secret from ${secretSource}.`);

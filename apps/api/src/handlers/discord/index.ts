@@ -431,7 +431,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
 export const discord = new Hono();
 
 discord.post('/events', async (c) => {
-  const authError = verifyDiscordGatewaySecret(
+  const authError = await verifyDiscordGatewaySecret(
     c.req.header(DISCORD_GATEWAY_SECRET_HEADER),
   );
   if (authError) {

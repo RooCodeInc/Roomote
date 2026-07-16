@@ -40,7 +40,7 @@ describe('startDiscordGatewaySupervisor', () => {
     );
     mocks.stop.mockImplementation(async () => finishRun?.());
     const redis = { status: 'ready' };
-    const env = { ENCRYPTION_KEY: 'shared-secret' };
+    const env = { R_DISCORD_GATEWAY_SECRET: 'gateway-secret' };
 
     const supervisor = startDiscordGatewaySupervisor(redis as never, env);
 

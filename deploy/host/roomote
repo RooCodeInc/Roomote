@@ -568,6 +568,14 @@ cmd_upgrade() {
     set_env_value MODAL_BASE_IMAGE_REF "$worker_image"
   fi
 
+  # Dedicated Discord gateway↔API transport secret for forwarding events.
+  # Generate on first upgrade when missing so Discord-enabled deployments
+  # keep working after rollouts that require this var.
+  if [ -z "$(read_env_value R_DISCORD_GATEWAY_SECRET | tr -d '[:space:]')" ]; then
+    set_env_value R_DISCORD_GATEWAY_SECRET "$(openssl rand -base64 32 | tr -d '\n')"
+    log "Generated R_DISCORD_GATEWAY_SECRET for Discord gateway↔API auth"
+  fi
+
   compose config >/dev/null
   log "Stopping the controller so new tasks stay queued during the rollout"
   compose stop controller || true

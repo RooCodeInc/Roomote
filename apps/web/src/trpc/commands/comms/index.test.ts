@@ -489,12 +489,58 @@ describe('comms commands', () => {
       expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
-          values: [{ name: 'R_DISCORD_BOT_TOKEN', value: 'discord-token' }],
+          values: expect.arrayContaining([
+            { name: 'R_DISCORD_BOT_TOKEN', value: 'discord-token' },
+            expect.objectContaining({
+              name: 'R_DISCORD_GATEWAY_SECRET',
+              value: expect.any(String),
+            }),
+          ]),
         }),
       );
       expect(mockDiscordRegisterCommands).toHaveBeenCalledWith({
         applicationId: 'app-1',
       });
+    });
+
+    it('auto-generates a Discord gateway secret when omitted on save', async () => {
+      mockDbTransaction.mockImplementation(async (callback) => {
+        return callback({} as never);
+      });
+      mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
+      mockValidateDiscordBotToken.mockResolvedValue({
+        applicationId: 'app-1',
+        applicationName: 'Roomote',
+        botUserId: 'bot-1',
+        botUsername: 'roomote',
+        botDisplayName: 'Roomote',
+      });
+      mockResolveDiscordRuntimeCredentials.mockResolvedValue({
+        botToken: 'discord-token',
+        applicationId: 'app-1',
+        applicationName: 'Roomote',
+        botUserId: 'bot-1',
+        botUsername: 'roomote',
+        botDisplayName: 'Roomote',
+        identitySource: 'live',
+        identityErrorCode: null,
+      });
+
+      await saveCommsAuthConfigCommand(buildMockAuth(), {
+        provider: 'discord',
+        values: { R_DISCORD_BOT_TOKEN: 'discord-token' },
+      });
+
+      const savedValues =
+        mockUpsertDeploymentEnvironmentVariables.mock.calls[0]?.[1]?.values ??
+        [];
+      const generatedSecret = savedValues.find(
+        (value: { name: string; value: string }) =>
+          value.name === 'R_DISCORD_GATEWAY_SECRET',
+      )?.value;
+      expect(generatedSecret).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
     });
 
     it('upserts only non-empty submitted values', async () => {

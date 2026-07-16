@@ -21,7 +21,8 @@ function withoutTrailingSlashes(value: string): string {
 export type DiscordGatewayConfig = {
   port: number;
   apiEventsUrl: string;
-  apiSecret: string | null;
+  /** Snapshot used for secret/credential env resolution when embedded. */
+  processEnv: NodeJS.ProcessEnv;
   apiTimeoutMs: number;
   leaderLeaseTtlSeconds: number;
   leaderLeaseRenewMs: number;
@@ -44,13 +45,7 @@ export function resolveDiscordGatewayConfig(
   return {
     port: positiveInteger(env.PORT, DEFAULT_PORT),
     apiEventsUrl: `${withoutTrailingSlashes(apiBaseUrl)}/api/internal/discord/events`,
-    // ENCRYPTION_KEY is already shared between API/control-plane processes.
-    // A dedicated secret is preferred, while this fallback keeps existing
-    // self-hosted and local deployments bootable during the rollout.
-    apiSecret:
-      env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-      env.ENCRYPTION_KEY?.trim() ||
-      null,
+    processEnv: env,
     apiTimeoutMs: positiveInteger(
       env.DISCORD_GATEWAY_API_TIMEOUT_MS,
       DEFAULT_API_TIMEOUT_MS,

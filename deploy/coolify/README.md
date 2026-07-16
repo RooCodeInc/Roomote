@@ -227,6 +227,13 @@ wildcard-capable TLS setup on the Coolify proxy:
   in Postgres, so sessions, job tokens, and preview tokens survive
   redeploys. On an immutable pin, bump the tag in the `x-roomote-app-image`
   anchor first.
+- **One-time Discord gateway secret (existing resources).** New template
+  resources generate `R_DISCORD_GATEWAY_SECRET` via
+  `${SERVICE_PASSWORD_DISCORDGATEWAY}` in the shared env block. Older
+  resources deployed from a pre-hardening compose file must add that variable
+  (or an equivalent shared secret) once to the resource environment so API
+  and BullMQ receive the same value before Discord forwarding will work
+  again. Redeploys do not invent missing secrets from template diffs.
 - **Back up** the Postgres volume (or run `pg_dump` against the `postgres`
   container) and the MinIO volume. Everything else is reproducible from
   config plus the generated environment values on the resource.
