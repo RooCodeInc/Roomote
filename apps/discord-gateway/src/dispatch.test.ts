@@ -1,5 +1,7 @@
 import { Routes } from 'discord.js';
 
+import { parseDiscordGatewayEvent } from '@roomote/communication/discord-event';
+
 import { handleGatewayDispatch } from './dispatch';
 import type { DiscordInboundEnvelope } from './inbound-queue';
 
@@ -46,6 +48,131 @@ describe('handleGatewayDispatch', () => {
       payload,
       receivedAt: '2026-07-12T12:00:00.000Z',
     });
+  });
+
+  it('normalizes a managed-role mention into a canonical bot mention', async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const rest = { post: vi.fn() };
+    // Discord's autocomplete resolved the bot by its managed role: user
+    // mentions are empty and only mention_roles carries the reference.
+    const payload = {
+      id: 'message-role-1',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      content: '<@&bot-role-1> are you there?',
+      author: { id: 'user-1', username: 'dan', bot: false },
+      mentions: [],
+      mention_roles: ['bot-role-1'],
+    };
+
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_CREATE', d: payload },
+        {
+          enqueue,
+          rest,
+          now,
+          getBotUserId: () => 'bot-1',
+          getBotUsername: () => 'RoomoteBot',
+          getBotRoleId: (guildId) =>
+            guildId === 'guild-1' ? 'bot-role-1' : undefined,
+        },
+      ),
+    ).resolves.toBe('enqueued');
+
+    const envelope = enqueue.mock.calls[0]?.[0] as DiscordInboundEnvelope;
+    const normalized = envelope.payload as {
+      content?: string;
+      mentions?: Array<{ id?: string; username?: string; bot?: boolean }>;
+    };
+    expect(normalized.content).toBe('<@bot-1> are you there?');
+    expect(normalized.mentions).toEqual([
+      { id: 'bot-1', username: 'RoomoteBot', bot: true },
+    ]);
+
+    // The normalized envelope must satisfy the API's real event schema —
+    // this is the contract that quarantined events when the injected
+    // mention was a bare id.
+    const parsed = parseDiscordGatewayEvent({
+      eventId: envelope.eventId,
+      eventType: envelope.eventType,
+      payload: envelope.payload,
+      receivedAt: envelope.receivedAt,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it('ignores mentions of roles that are not the bot managed role', async () => {
+    const enqueue = vi.fn();
+    const rest = { post: vi.fn() };
+
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-role-2',
+            channel_id: 'channel-1',
+            guild_id: 'guild-1',
+            content: '<@&some-team-role> morning everyone',
+            author: { id: 'user-1', username: 'dan', bot: false },
+            mentions: [],
+            mention_roles: ['some-team-role'],
+          },
+        },
+        {
+          enqueue,
+          rest,
+          now,
+          getBotUserId: () => 'bot-1',
+          getBotUsername: () => 'RoomoteBot',
+          getBotRoleId: () => 'bot-role-1',
+          getCachedChannel: () => ({
+            id: 'channel-1',
+            type: 0,
+            isThread: false,
+          }),
+        },
+      ),
+    ).resolves.toBe('ignored');
+
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it('keeps the user-mention-only behavior when the bot role is unknown', async () => {
+    const enqueue = vi.fn();
+    const rest = { post: vi.fn() };
+
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-role-3',
+            channel_id: 'channel-1',
+            guild_id: 'guild-1',
+            content: '<@&bot-role-1> hello',
+            author: { id: 'user-1', username: 'dan', bot: false },
+            mentions: [],
+            mention_roles: ['bot-role-1'],
+          },
+        },
+        {
+          enqueue,
+          rest,
+          now,
+          getBotUserId: () => 'bot-1',
+          getBotUsername: () => 'RoomoteBot',
+          getCachedChannel: () => ({
+            id: 'channel-1',
+            type: 0,
+            isThread: false,
+          }),
+        },
+      ),
+    ).resolves.toBe('ignored');
+
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it('drops unmentioned guild root messages before they reach the queue', async () => {
