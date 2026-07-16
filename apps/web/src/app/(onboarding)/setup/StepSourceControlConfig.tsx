@@ -473,9 +473,9 @@ export function StepSourceControlConfig({
           )}
           {isAdo && adoAuthMode === 'entra' && (
             <p className="text-sm text-muted-foreground">
-              Create a client secret, add the application to the Azure DevOps
-              organization, and grant it access to the projects and repositories
-              Roomote should use.
+              Create a client secret, add the service principal to the Azure
+              DevOps organization, and grant it access to the projects and
+              repositories Roomote should use.
             </p>
           )}
 

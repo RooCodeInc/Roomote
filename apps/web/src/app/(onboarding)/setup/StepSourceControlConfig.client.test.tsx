@@ -384,7 +384,7 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
+    expect(screen.getByText('ADO Organization (URL slug)')).toBeInTheDocument();
     expect(screen.getByText(/Microsoft Entra Client ID/)).toBeInTheDocument();
     expect(
       screen.queryByText(/Azure DevOps Access Token/),
