@@ -215,6 +215,111 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe(false);
   });
 
+  it('rejects thread_activity-only crafted non-matches without hanging', () => {
+    const crafted = `${'<thread_activity>'.repeat(2000)}crafted`;
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: crafted }],
+      }),
+    ).toBe(true);
+
+    expect(normalizeTranscriptUserText(crafted)).toBe(crafted);
+  });
+
+  it('rejects incomplete slack transcript wrappers without hanging', () => {
+    const crafted = `${'<thread_activity>\npartial\n'.repeat(500)}<slack_message>\nopen\n`;
+
+    expect(normalizeTranscriptUserText(crafted)).toBe(crafted);
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: crafted }],
+      }),
+    ).toBe(true);
+  });
+
+  it('strips thread_activity that appears after thread_context', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<thread_context>\nAlice Example: Earlier detail\n</thread_context>',
+          '<thread_activity>\nBob Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
+          '<slack_message>\nlatest question\n</slack_message>',
+        ].join('\n\n'),
+      ),
+    ).toBe('latest question');
+  });
+
+  it('hides activity-only prompts when decoded content includes a lookalike closer', () => {
+    const text = [
+      '<thread_activity>',
+      'Alice Example: mentioned </thread_activity> mid sentence',
+      '</thread_activity>',
+    ].join('\n');
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text }],
+      }),
+    ).toBe(false);
+  });
+
+  it('hides escaped activity-only prompts when content includes an encoded lookalike closer', () => {
+    const encodeEntities = (value: string) =>
+      value
+        .replaceAll('&', `&${'amp;'}`)
+        .replaceAll('<', `&${'lt;'}`)
+        .replaceAll('>', `&${'gt;'}`);
+    const text = encodeEntities(
+      [
+        '<thread_activity>',
+        'Alice Example: mentioned </thread_activity> mid sentence',
+        '</thread_activity>',
+      ].join('\n'),
+    );
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text }],
+      }),
+    ).toBe(false);
+  });
+
+  it('extracts slack_message content when the message mentions a lookalike closer', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<slack_message>',
+          'please ignore embed </slack_message> markers in this text',
+          '</slack_message>',
+        ].join('\n'),
+      ),
+    ).toBe('please ignore embed </slack_message> markers in this text');
+  });
+
+  it('extracts escaped slack_message content when the message mentions an encoded lookalike closer', () => {
+    const encodeEntities = (value: string) =>
+      value
+        .replaceAll('&', `&${'amp;'}`)
+        .replaceAll('<', `&${'lt;'}`)
+        .replaceAll('>', `&${'gt;'}`);
+    const text = encodeEntities(
+      [
+        '<slack_message>',
+        'please ignore embed </slack_message> markers in this text',
+        '</slack_message>',
+      ].join('\n'),
+    );
+
+    expect(normalizeTranscriptUserText(text)).toBe(
+      'please ignore embed </slack_message> markers in this text',
+    );
+  });
+
   it('extracts slack_message content when only the slack_message block is present', () => {
     expect(
       normalizeTranscriptUserText(
