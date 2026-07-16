@@ -2615,6 +2615,7 @@ export type SuggestionType =
   | 'suggested_tasks'
   | 'sentry_triage'
   | 'dependabot_triage'
+  | 'codeql_triage'
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage'

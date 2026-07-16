@@ -8,6 +8,7 @@ import {
   type BackgroundAutomationProvider,
   type BackgroundAutomationTargetKind,
   type CodeQualityAuditorFrequency,
+  type CodeqlTriageFrequency,
   type ConflictResolverFrequency,
   type ConflictResolverMaxPrAgeDays,
   type DependabotTriageFrequency,
@@ -72,6 +73,9 @@ export const SENTRY_TRIAGE_FREQUENCIES =
 
 export const DEPENDABOT_TRIAGE_FREQUENCIES =
   getScheduleModes<DependabotTriageFrequency>('dependabot_triage');
+
+export const CODEQL_TRIAGE_FREQUENCIES =
+  getScheduleModes<CodeqlTriageFrequency>('codeql_triage');
 
 export const SECURITY_AUDITOR_FREQUENCIES =
   getScheduleModes<SecurityAuditorFrequency>('security_auditor');
@@ -672,6 +676,7 @@ export function normalizeBackgroundAgentSettings(
   const platformIssueAlerts = automationMap.get('platform_issue_alerts');
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
+  const codeqlTriage = automationMap.get('codeql_triage');
   const securityAuditor = automationMap.get('security_auditor');
   const codeQualityAuditor = automationMap.get('code_quality_auditor');
   const ciFailureTriage = automationMap.get('ci_failure_triage');
@@ -779,6 +784,18 @@ export function normalizeBackgroundAgentSettings(
     dependabotTriageDiscordChannelId:
       getAutomationDiscordChannelTarget(dependabotTriage),
     dependabotTriageLastRunAt: dependabotTriage?.lastRunAt ?? null,
+
+    codeqlTriageFrequency: getAutomationFrequency(
+      codeqlTriage,
+      isFrequencyOf(CODEQL_TRIAGE_FREQUENCIES),
+    ),
+    codeqlTriageSlackChannelId: resolveAutomationSlackChannelId(
+      codeqlTriage,
+      managerSlackChannelId,
+    ),
+    codeqlTriageDiscordChannelId:
+      getAutomationDiscordChannelTarget(codeqlTriage),
+    codeqlTriageLastRunAt: codeqlTriage?.lastRunAt ?? null,
 
     securityAuditorFrequency: getAutomationFrequency(
       securityAuditor,

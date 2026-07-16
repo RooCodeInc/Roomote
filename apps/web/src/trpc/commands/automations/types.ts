@@ -6,6 +6,7 @@ import type {
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
   DependabotTriageFrequency,
+  CodeqlTriageFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
@@ -34,12 +35,14 @@ export type BackgroundAgentFieldErrorKey =
   | 'platformIssueSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
+  | 'codeqlTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
   | 'managerStatsDiscordChannel'
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
+  | 'codeqlTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
@@ -62,6 +65,7 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'platformIssueSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
+  | 'codeqlTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
@@ -72,6 +76,7 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'managerStatsDiscordChannel'
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
+  | 'codeqlTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
@@ -95,6 +100,7 @@ export interface SlackChannelAccessWarnings {
   platformIssueSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
+  codeqlTriageSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -109,6 +115,7 @@ export interface SlackChannelDisplayNames {
   platformIssueSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
+  codeqlTriageSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -122,6 +129,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'manager_stats',
   'sentry_triage',
   'dependabot_triage',
+  'codeql_triage',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
@@ -186,6 +194,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'suggester'
     | 'sentryTriage'
     | 'dependabotTriage'
+    | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
     | 'platformIssueAlerts';
@@ -219,6 +228,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   dependabotTriageFrequency?: DependabotTriageFrequency;
   dependabotTriageSlackChannel?: string | null;
   dependabotTriageDiscordChannel?: string | null;
+  codeqlTriageFrequency?: CodeqlTriageFrequency;
+  codeqlTriageSlackChannel?: string | null;
+  codeqlTriageDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterInstructions: string | null;

@@ -109,6 +109,14 @@ export function buildSuggestionTaskPromptText(params: {
     });
   }
 
+  if (params.suggestionType === 'codeql_triage') {
+    return buildCodeqlTriageSuggestionTaskPromptText({
+      ...params,
+      baseText,
+      investigationContext,
+    });
+  }
+
   return appendOptionalSections(baseText, [
     {
       heading: 'Workspace readiness',
@@ -192,6 +200,49 @@ Re-verify the exact open Dependabot alert or alert bundle before changing depend
 Prefer narrow manifest and lockfile changes over broad upgrade sweeps. If the cited alert is already closed, dismissed, or no longer relevant, report that and stop unless the request still names another open alert that clearly belongs in the same update.
 
 Use the repository's native package manager and run the validation required by the dependency-update workflow before delivery. Do not ship dependency changes that fail the required validation gate.`,
+    [
+      {
+        heading: 'Workspace readiness',
+        body: params.readinessMessage,
+      },
+      {
+        heading: 'Investigation context from the scheduled triage run',
+        body: investigationContext,
+      },
+    ],
+  );
+}
+
+function buildCodeqlTriageSuggestionTaskPromptText(params: {
+  title: string;
+  brief: string;
+  baseText: string;
+  investigationContext: string | null | undefined;
+  readinessMessage?: string | null;
+  targetRepositoryFullName?: string | null;
+}): string {
+  const repositoryScope = params.targetRepositoryFullName?.trim() || 'unknown';
+  const investigationContext = params.investigationContext?.trim();
+
+  return appendOptionalSections(
+    `$implement-changes
+
+<task_context>
+  <source>codeql_triage_suggestion</source>
+  <run_mode>alert_follow_up</run_mode>
+  <repository_scope>${repositoryScope}</repository_scope>
+  <requested_action_title>${params.title}</requested_action_title>
+</task_context>
+
+A user chose to implement this CodeQL triage follow-up suggestion:
+
+${params.baseText}
+
+Re-verify the exact open CodeQL or code-scanning alert before changing source code. Confirm the alert is still open, capture the rule ID, severity, category, affected path, and line range when available, and then choose the smallest secure remediation that clears the named alert or tightly related alert family.
+
+Prefer narrow security fixes over broad rewrites. If the cited alert is already closed, dismissed, or no longer relevant, report that and stop unless the request still names another open alert that clearly belongs in the same remediation.
+
+Run the repository's normal validation before delivery. Do not ship changes that fail the required validation gate.`,
     [
       {
         heading: 'Workspace readiness',

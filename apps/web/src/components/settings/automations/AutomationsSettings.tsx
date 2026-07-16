@@ -47,6 +47,7 @@ import {
   type ChannelAutoStartFormRow,
   type ConflictResolverFrequency,
   type DependabotTriageFrequency,
+  type CodeqlTriageFrequency,
   type FormState,
   isAutomationDirty,
   type ManagerStatsFrequency,
@@ -133,12 +134,14 @@ type FieldErrors = Partial<
     | 'platformIssueSlackChannel'
     | 'sentryTriageSlackChannel'
     | 'dependabotTriageSlackChannel'
+    | 'codeqlTriageSlackChannel'
     | 'securityAuditorSlackChannel'
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
     | 'managerStatsDiscordChannel'
     | 'sentryTriageDiscordChannel'
     | 'dependabotTriageDiscordChannel'
+    | 'codeqlTriageDiscordChannel'
     | 'securityAuditorDiscordChannel'
     | 'codeQualityAuditorDiscordChannel'
     | 'ciFailureTriageDiscordChannel'
@@ -165,6 +168,7 @@ type SlackChannelAccessWarnings = {
   platformIssueSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
+  codeqlTriageSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -174,6 +178,7 @@ type AutomationSlackDestinationField =
   | 'managerStatsSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
+  | 'codeqlTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel';
@@ -182,6 +187,7 @@ const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
   managerStatsSlackChannel: 'manager_stats',
   sentryTriageSlackChannel: 'sentry_triage',
   dependabotTriageSlackChannel: 'dependabot_triage',
+  codeqlTriageSlackChannel: 'codeql_triage',
   securityAuditorSlackChannel: 'security_auditor',
   codeQualityAuditorSlackChannel: 'code_quality_auditor',
   ciFailureTriageSlackChannel: 'ci_failure_triage',
@@ -194,6 +200,7 @@ type AutomationDiscordDestinationField =
   | 'managerStatsDiscordChannel'
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
+  | 'codeqlTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel';
@@ -204,6 +211,7 @@ const SLACK_TO_DISCORD_DESTINATION_FIELDS = {
   managerStatsSlackChannel: 'managerStatsDiscordChannel',
   sentryTriageSlackChannel: 'sentryTriageDiscordChannel',
   dependabotTriageSlackChannel: 'dependabotTriageDiscordChannel',
+  codeqlTriageSlackChannel: 'codeqlTriageDiscordChannel',
   securityAuditorSlackChannel: 'securityAuditorDiscordChannel',
   codeQualityAuditorSlackChannel: 'codeQualityAuditorDiscordChannel',
   ciFailureTriageSlackChannel: 'ciFailureTriageDiscordChannel',
@@ -286,6 +294,7 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   platformIssueSlackChannel: null,
   sentryTriageSlackChannel: null,
   dependabotTriageSlackChannel: null,
+  codeqlTriageSlackChannel: null,
   securityAuditorSlackChannel: null,
   codeQualityAuditorSlackChannel: null,
   ciFailureTriageSlackChannel: null,
@@ -314,6 +323,8 @@ const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
   sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
   dependabot_triage:
     'Scan open Dependabot alerts and suggest the safest updates.',
+  codeql_triage:
+    'Scan open CodeQL/code-scanning alerts and launch focused remediation tasks.',
   security_auditor:
     'Review recently merged PRs for concrete security issues and secure-by-default gaps.',
   code_quality_auditor:
@@ -396,6 +407,10 @@ function DependabotIcon({ className }: { className?: string }) {
   return (
     <BrandIcon icon="dependabot" name="Dependabot" className={className} />
   );
+}
+
+function CodeqlIcon({ className }: { className?: string }) {
+  return <BrandIcon icon="github" name="CodeQL" className={className} />;
 }
 
 function SentryIcon({ className }: { className?: string }) {
@@ -499,6 +514,9 @@ const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
       DependabotIcon,
     ),
   },
+  codeqlTriage: {
+    ...getAutomationDefinition('codeqlTriage', 'codeql_triage', CodeqlIcon),
+  },
   ...SCHEDULE_ONLY_AUTOMATION_DEFINITIONS,
   reviewer: {
     id: 'reviewer',
@@ -544,6 +562,9 @@ const HASH_ALIAS_TO_AUTOMATION_ID: Record<string, AutomationId> = {
   'triage-dependabot-alerts': 'dependabotTriage',
   'dependabot-triage': 'dependabotTriage',
   dependabottriage: 'dependabotTriage',
+  'triage-codeql-alerts': 'codeqlTriage',
+  'codeql-triage': 'codeqlTriage',
+  codeqltriage: 'codeqlTriage',
   ...Object.fromEntries(
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.flatMap((automation) =>
       automation.hashAliases.map((hashAlias) => [hashAlias, automation.id]),
@@ -571,6 +592,7 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
   managerStats: 'manager_stats',
   sentryTriage: 'sentry_triage',
   dependabotTriage: 'dependabot_triage',
+  codeqlTriage: 'codeql_triage',
   ...Object.fromEntries(
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
       automation.id,
@@ -686,6 +708,10 @@ function mapSettingsToFormState(
     dependabotTriageSlackChannelId: string | null;
     dependabotTriageSlackChannelName?: string | null;
     dependabotTriageDiscordChannelId: string | null;
+    codeqlTriageFrequency: CodeqlTriageFrequency;
+    codeqlTriageSlackChannelId: string | null;
+    codeqlTriageSlackChannelName?: string | null;
+    codeqlTriageDiscordChannelId: string | null;
     suggesterFrequency: SuggesterFrequency;
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
@@ -765,6 +791,12 @@ function mapSettingsToFormState(
       '',
     dependabotTriageDiscordChannel:
       settings.dependabotTriageDiscordChannelId ?? '',
+    codeqlTriageFrequency: settings.codeqlTriageFrequency,
+    codeqlTriageSlackChannel:
+      settings.codeqlTriageSlackChannelName ??
+      settings.codeqlTriageSlackChannelId ??
+      '',
+    codeqlTriageDiscordChannel: settings.codeqlTriageDiscordChannelId ?? '',
     ...mapScheduleOnlyAutomationFormState(settings),
     suggesterFrequency: settings.suggesterFrequency,
     suggesterSlackChannel:
@@ -1712,6 +1744,8 @@ export function AutomationsSettings() {
       dependabotTriageSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames
           .dependabotTriageSlackChannel,
+      codeqlTriageSlackChannelName:
+        settingsQuery.data.slackChannelDisplayNames.codeqlTriageSlackChannel,
       suggesterSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.suggesterSlackChannel,
       announcerSlackChannelName:
@@ -1829,6 +1863,8 @@ export function AutomationsSettings() {
             result.slackChannelDisplayNames.sentryTriageSlackChannel,
           dependabotTriageSlackChannelName:
             result.slackChannelDisplayNames.dependabotTriageSlackChannel,
+          codeqlTriageSlackChannelName:
+            result.slackChannelDisplayNames.codeqlTriageSlackChannel,
           suggesterSlackChannelName:
             result.slackChannelDisplayNames.suggesterSlackChannel,
           announcerSlackChannelName:
@@ -1938,6 +1974,7 @@ export function AutomationsSettings() {
         managerStats: false,
         sentryTriage: false,
         dependabotTriage: false,
+        codeqlTriage: false,
         ...scheduleOnlyAutomationDirtyState,
         reviewer: false,
         conflictResolver: false,
@@ -1965,6 +2002,7 @@ export function AutomationsSettings() {
         savedState,
         'dependabotTriage',
       ),
+      codeqlTriage: isAutomationDirty(formState, savedState, 'codeqlTriage'),
       ...scheduleOnlyAutomationDirtyState,
       reviewer: isAutomationDirty(formState, savedState, 'reviewer'),
       conflictResolver: isAutomationDirty(
@@ -2200,6 +2238,7 @@ export function AutomationsSettings() {
   const sentryTriageIsEnabled = formState?.sentryTriageFrequency !== 'off';
   const dependabotTriageIsEnabled =
     formState?.dependabotTriageFrequency !== 'off';
+  const codeqlTriageIsEnabled = formState?.codeqlTriageFrequency !== 'off';
   const scheduleOnlyAutomationEnabledState =
     buildScheduleOnlyAutomationEnabledState(formState);
   const sentryTriageSaveDisabled = !canSaveSentryTriageSettings({
@@ -2320,11 +2359,13 @@ export function AutomationsSettings() {
                       ? 'sentryTriage'
                       : field === 'dependabotTriageSlackChannel'
                         ? 'dependabotTriage'
-                        : field === 'securityAuditorSlackChannel'
-                          ? 'securityAuditor'
-                          : field === 'codeQualityAuditorSlackChannel'
-                            ? 'codeQualityAuditor'
-                            : 'ciFailureTriage'
+                        : field === 'codeqlTriageSlackChannel'
+                          ? 'codeqlTriage'
+                          : field === 'securityAuditorSlackChannel'
+                            ? 'securityAuditor'
+                            : field === 'codeQualityAuditorSlackChannel'
+                              ? 'codeQualityAuditor'
+                              : 'ciFailureTriage'
                 ],
             })
           }
@@ -2376,6 +2417,7 @@ export function AutomationsSettings() {
     managerStats: managerStatsIsEnabled,
     sentryTriage: sentryTriageIsEnabled,
     dependabotTriage: dependabotTriageIsEnabled,
+    codeqlTriage: codeqlTriageIsEnabled,
     ...scheduleOnlyAutomationEnabledState,
     reviewer: reviewerIsEnabled,
     conflictResolver: conflictResolverIsEnabled,
@@ -2416,6 +2458,7 @@ export function AutomationsSettings() {
     ? 'Connect Sentry first'
     : null;
   const dependabotTriageBlockedReason = null;
+  const codeqlTriageBlockedReason = null;
   const scheduleOnlyAutomationBlockedReasons = Object.fromEntries(
     SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
       automation.id,
@@ -3124,6 +3167,78 @@ export function AutomationsSettings() {
                   Scans current open Dependabot alerts across active
                   repositories and suggests tightly scoped dependency update
                   tasks instead of opening PRs directly.
+                </p>
+              </div>
+            </ScheduledAutomationCard>
+
+            <ScheduledAutomationCard
+              automation={AUTOMATION_DEFINITIONS.codeqlTriage}
+              isOpen={openAutomationIds.has('codeqlTriage')}
+              onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
+              iconEnabled={iconEnabled.codeqlTriage}
+              debugSection={renderDebugRunsSection('codeqlTriage')}
+              runTooltip={getRunTooltip(
+                'codeqlTriage',
+                codeqlTriageIsEnabled,
+                codeqlTriageBlockedReason,
+              )}
+              runDisabled={isRunDisabled(
+                'codeqlTriage',
+                codeqlTriageIsEnabled,
+                codeqlTriageBlockedReason != null,
+              )}
+              onRun={() =>
+                triggerMutation.mutate({ automationKey: 'codeql_triage' })
+              }
+              isDirty={isDirty.codeqlTriage}
+              isPending={
+                updateMutation.isPending && savingAutomation === 'codeqlTriage'
+              }
+              onSave={() => saveAgent('codeqlTriage')}
+              onReset={() => resetAgent('codeqlTriage')}
+              frequency={formState.codeqlTriageFrequency}
+              onFrequencyChange={(frequency) =>
+                setFormState((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        codeqlTriageFrequency: frequency,
+                      }
+                    : prev,
+                )
+              }
+              scheduleOptions={
+                SENTRY_TRIAGE_FREQUENCY_OPTIONS as Array<{
+                  value: CodeqlTriageFrequency;
+                  label: string;
+                }>
+              }
+              selectId="codeql-triage-frequency"
+              selectAriaLabel="Triage CodeQL Alerts schedule"
+            >
+              <div className="space-y-5">
+                {codeqlTriageIsEnabled
+                  ? renderSlackDestinationField({
+                      field: 'codeqlTriageSlackChannel',
+                      inputId: 'codeql-triage-slack-channel',
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post actionable CodeQL follow-up work.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .codeqlTriageSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .codeqlTriageDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.codeqlTriageSlackChannel,
+                    })
+                  : null}
+
+                <p className="text-xs text-muted-foreground md:max-w-160">
+                  Scans current open code-scanning/CodeQL alerts across active
+                  repositories and launches implement-changes follow-up tasks
+                  instead of opening PRs in the scan itself.
                 </p>
               </div>
             </ScheduledAutomationCard>
