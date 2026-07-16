@@ -556,9 +556,7 @@ describe('AutomationsSettings', () => {
 
     expect(await screen.findByText('Summarize Merged PRs')).toBeInTheDocument();
     expect(
-      screen.getByText(
-        'Post a recurring digest of recently merged PRs to Slack.',
-      ),
+      screen.getByText('Post a recurring digest of recently merged PRs.'),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Summary of Roomote's activity during the week"),

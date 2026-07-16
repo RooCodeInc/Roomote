@@ -336,7 +336,7 @@ const CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS: ChannelAutoStartLaunchModeOption[]
 const TRIGGERABLE_AUTOMATION_DESCRIPTIONS = {
   conflict_resolver: 'Fix merge conflicts in open PRs.',
   suggester: 'Suggest valuable coding work to do.',
-  announcer: 'Post a recurring digest of recently merged PRs to Slack.',
+  announcer: 'Post a recurring digest of recently merged PRs.',
   manager_stats: "Summary of Roomote's activity during the week",
   sentry_triage: 'Scan Sentry issues and post a prioritized triage report.',
   dependabot_triage:
