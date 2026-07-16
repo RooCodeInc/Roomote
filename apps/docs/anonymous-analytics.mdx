@@ -47,6 +47,10 @@ The setting applies to everyone in the deployment. When disabled, no
 analytics code runs in the browser and no usage events or daily reports
 leave your servers.
 
+Roomote Cloud deployments keep anonymous analytics enabled and do not show
+this switch. `R_CLOUD_ENABLED` is deployment-managed Cloud configuration; do
+not set it for a self-hosted deployment.
+
 ## Version checks
 
 Separately from analytics, your deployment checks once a day whether a newer
