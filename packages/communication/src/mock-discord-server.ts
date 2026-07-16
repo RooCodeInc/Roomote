@@ -409,7 +409,17 @@ export class MockDiscordServer {
         ),
       );
     }
-    if (method === 'GET' && path === `/guilds/${this.guildId}/members/@me`) {
+    const guildMember = /^\/guilds\/([^/]+)\/members\/([^/?]+)$/u.exec(path);
+    if (method === 'GET' && guildMember && guildMember[1] === this.guildId) {
+      // Real Discord rejects the literal `@me` on this route (unlike
+      // /users/@me); keep the mock as strict so provider code cannot pass
+      // against the mock while failing in production.
+      if (guildMember[2] === '@me') {
+        return jsonResponse({ message: 'Invalid Form Body', code: 50035 }, 400);
+      }
+      if (guildMember[2] !== this.bot.id) {
+        return jsonResponse({ message: 'Unknown Member', code: 10007 }, 404);
+      }
       return jsonResponse({ user: this.bot, roles: ['role-roomote'] });
     }
     if (method === 'GET' && path === `/guilds/${this.guildId}/roles`) {
