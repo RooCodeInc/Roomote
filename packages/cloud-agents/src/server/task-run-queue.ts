@@ -7,6 +7,7 @@ import {
   type BackgroundAutomationKey,
   type TaskSpec,
   type CodingHarness,
+  type ComputeProvider,
   type SnapshotResumeTask,
   type RunLaunchClass,
   type SourceControlProvider,
@@ -33,7 +34,7 @@ import {
   resolveComputeProviderTarget,
   TASK_TIMEOUT_MS,
 } from '@roomote/types';
-import { Env } from '@roomote/env';
+import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   type TaskRun,
   type DatabaseTransaction,
@@ -85,6 +86,18 @@ enum TaskRunQueueKeys {
   Entries = 'queue:cloud-jobs:v2:entries',
   EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
   Scopes = 'queue:cloud-jobs:v2:scopes',
+}
+
+export function resolveFreshTaskComputeProvider(
+  provider: string | null | undefined,
+  fallback: ComputeProvider,
+  cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+): ComputeProvider {
+  // Managed deployments own the sandbox lifecycle, so fresh work must not
+  // escape to a previously configured bring-your-own provider.
+  return cloudEnabled
+    ? 'roomote'
+    : resolveComputeProviderTarget(provider, fallback);
 }
 
 const ATOMIC_ENQUEUE_SCRIPT = `
@@ -1288,7 +1301,7 @@ async function enqueueFreshLaunch(
   const titleIsLocked =
     explicitTitle !== null ||
     hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type);
-  const targetComputeProvider = resolveComputeProviderTarget(
+  const targetComputeProvider = resolveFreshTaskComputeProvider(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
   );
@@ -1661,7 +1674,7 @@ export async function enqueueTaskRelaunch(
     sandboxTimeoutMs: TASK_TIMEOUT_MS,
   });
 
-  const targetComputeProvider = resolveComputeProviderTarget(
+  const targetComputeProvider = resolveFreshTaskComputeProvider(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
   );

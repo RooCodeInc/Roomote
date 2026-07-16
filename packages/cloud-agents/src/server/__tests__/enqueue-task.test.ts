@@ -45,6 +45,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  resolveFreshTaskComputeProvider,
   resolveQueueScope,
   type FreshTaskLaunch,
 } from '../task-run-queue';
@@ -58,6 +59,20 @@ const explicitWorkKind = {
   source: 'explicit_bootstrap',
   confidence: null,
 } as const;
+
+describe('resolveFreshTaskComputeProvider', () => {
+  it('forces fresh launches onto Roomote in cloud-managed deployments', () => {
+    expect(resolveFreshTaskComputeProvider('modal', 'docker', true)).toBe(
+      'roomote',
+    );
+  });
+
+  it('keeps the requested provider outside cloud-managed deployments', () => {
+    expect(resolveFreshTaskComputeProvider('modal', 'docker', false)).toBe(
+      'modal',
+    );
+  });
+});
 
 function standardTaskInput(
   overrides: Partial<Extract<TaskSpec, { type: 'standard' }>> = {},
@@ -334,6 +349,7 @@ describe('enqueueTask snapshot resume', () => {
     const resumerUserId = await createUser();
 
     const freshRun = await launchFresh({
+      task: standardTaskInput({ computeProvider: 'modal' }),
       initiator: { kind: 'user', userId: initiatorUserId },
       workflow: 'standard',
       surface: 'web',
@@ -367,6 +383,7 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumeRun.payloadKind).toBe('snapshot_resume');
     expect(resumeRun.actingUserId).toBe(resumerUserId);
     expect(resumeRun.sourceSnapshotId).toBe('snap-123');
+    expect(resumeRun.vendor).toBe(freshRun.vendor);
 
     // No task mutation, no attribution recomputation: the initiator stamp
     // and commit-author block are byte-identical to the fresh launch.
