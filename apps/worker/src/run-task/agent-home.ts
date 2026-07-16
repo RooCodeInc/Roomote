@@ -426,6 +426,7 @@ interface GenerateOpenCodeConfigOptions {
   developerInstructionsContent?: string;
   mcpServers?: OpenCodeConfigMcpServer[];
   model?: string;
+  reasoningEffortOverride?: ReasoningEffort;
 }
 
 interface GenerateOpenCodeConfigResult {
@@ -898,6 +899,7 @@ function createExploreAgentConfig(options: {
 function resolveModelBackedOpenCodeConfig(
   runtimeEnv: Record<string, string>,
   modelOverride?: string,
+  reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
   const rawModel = runtimeEnv.R_MODEL?.trim();
 
@@ -1089,13 +1091,16 @@ function resolveModelBackedOpenCodeConfig(
   // applied when the model in play is the one the role was configured with.
   // Role precedence for a shared model: effective coding model first, then the
   // persisted coding model, then a distinct helper model. The vision level is
-  // scoped to the visual subagent via agent-level options above.
+  // scoped to the visual subagent via agent-level options above. A per-task
+  // reasoning effort (stamped at launch for model overrides, or set
+  // explicitly via the public API) wins over the role-configured levels.
   const effectiveCodingModelReasoningEffort: ReasoningEffort | null =
-    effectiveCodingModel === model
+    reasoningEffortOverride ??
+    (effectiveCodingModel === model
       ? modelReasoningEffort
       : codeReviewModel && effectiveCodingModel === codeReviewModel
         ? codeReviewModelReasoningEffort
-        : null;
+        : null);
   let providerReasoningConfig: Record<string, unknown> = {};
 
   if (effectiveCodingModelReasoningEffort) {
@@ -1155,14 +1160,17 @@ function loadOperatorOpenCodeConfig({
   runtimeEnv,
   openCodeConfigDir,
   modelOverride,
+  reasoningEffortOverride,
 }: {
   runtimeEnv: Record<string, string>;
   openCodeConfigDir: string;
   modelOverride?: string;
+  reasoningEffortOverride?: ReasoningEffort;
 }): Record<string, unknown> {
   const modelConfig = resolveModelBackedOpenCodeConfig(
     runtimeEnv,
     modelOverride,
+    reasoningEffortOverride,
   );
 
   if (modelConfig) {
@@ -1232,6 +1240,7 @@ export function generateOpenCodeConfig({
   developerInstructionsContent,
   mcpServers,
   model,
+  reasoningEffortOverride,
 }: GenerateOpenCodeConfigOptions): GenerateOpenCodeConfigResult {
   const openCodeConfigDir = path.join(
     homeDir,
@@ -1252,6 +1261,7 @@ export function generateOpenCodeConfig({
     runtimeEnv,
     openCodeConfigDir,
     modelOverride: resolvedModel,
+    reasoningEffortOverride,
   });
   const instructions: string[] = [];
 

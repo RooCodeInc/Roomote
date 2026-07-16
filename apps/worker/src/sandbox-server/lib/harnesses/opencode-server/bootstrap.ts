@@ -12,6 +12,7 @@ import type { HarnessLogger } from '../../../../logging';
 import {
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import {
@@ -158,6 +159,7 @@ export async function prepareOpenCodeCommandEnv(options: {
   workspacePath: string;
   mcpServers?: Record<string, unknown>;
   model?: string;
+  reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
   logger: HarnessLogger;
 }): Promise<{ commandEnv: Record<string, string>; model?: string }> {
@@ -188,6 +190,7 @@ export async function prepareOpenCodeCommandEnv(options: {
     developerInstructionsContent: options.developerInstructionsContent,
     mcpServers: normalizeOpenCodeMcpServers(parsedMcpServers, commandEnv),
     model: options.model,
+    reasoningEffortOverride: options.reasoningEffortOverride,
   });
   commandEnv.OPENCODE_CONFIG_CONTENT = configContent;
   commandEnv.ROOMOTE_NODE_EXECUTABLE = process.execPath;

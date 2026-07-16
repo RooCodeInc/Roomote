@@ -19,6 +19,53 @@ describe('generateOpenCodeConfig provider support', () => {
     return homeDir;
   }
 
+  it('applies the per-task reasoning effort to a launch-time model override', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+      model: 'openrouter/z-ai/glm-5.2',
+      reasoningEffortOverride: 'high',
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.openrouter).toMatchObject({
+      models: {
+        'z-ai/glm-5.2': {
+          options: { reasoning: { effort: 'high' } },
+        },
+        'openai/gpt-5.6-terra': {
+          options: { reasoning: { effort: 'medium' } },
+        },
+      },
+    });
+  });
+
+  it('leaves a model override without reasoning options when no per-task effort is set', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+      model: 'openrouter/z-ai/glm-5.2',
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+    const openrouter = config.provider.openrouter as {
+      models?: Record<string, unknown>;
+    };
+
+    expect(openrouter.models?.['z-ai/glm-5.2']).toBeUndefined();
+  });
+
   it('routes Bedrock models through the Mantle Anthropic endpoint', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

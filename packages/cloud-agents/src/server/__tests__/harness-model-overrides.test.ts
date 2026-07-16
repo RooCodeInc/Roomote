@@ -105,4 +105,94 @@ describe('resolveEffectiveHarnessModelState', () => {
 
     expect(model).toBe('openrouter/openai/gpt-5.6-terra');
   });
+
+  it('stamps the default coding reasoning effort for a model override', () => {
+    const { task } = resolveEffectiveHarnessModelState({
+      task: makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' }),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+    });
+
+    expect(task.payload.reasoningEffort).toBe('medium');
+  });
+
+  it('inherits the deployment coding reasoning effort for a model override', () => {
+    const { task } = resolveEffectiveHarnessModelState({
+      task: makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' }),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+      deploymentCodingReasoningEffort: 'xhigh',
+    });
+
+    expect(task.payload.reasoningEffort).toBe('xhigh');
+  });
+
+  it('keeps an explicit per-task reasoning effort over the deployment level', () => {
+    const task = makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' });
+    task.payload.reasoningEffort = 'low';
+
+    const { task: nextTask } = resolveEffectiveHarnessModelState({
+      task,
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+      deploymentCodingReasoningEffort: 'xhigh',
+    });
+
+    expect(nextTask.payload.reasoningEffort).toBe('low');
+  });
+
+  it('does not stamp a reasoning effort for models without reasoning support', () => {
+    const { task } = resolveEffectiveHarnessModelState({
+      task: makeTask({
+        'opencode-server': 'openrouter/custom/no-reasoning-model',
+      }),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+      deploymentTaskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/custom/no-reasoning-model',
+            displayName: 'No Reasoning Model',
+            family: 'Custom',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+              supportsReasoning: false,
+            },
+          },
+        ],
+        allowedModelIds: ['openrouter/custom/no-reasoning-model'],
+        defaultModelId: 'openrouter/custom/no-reasoning-model',
+      },
+    });
+
+    expect(task.payload.reasoningEffort).toBeUndefined();
+  });
+
+  it('does not stamp a reasoning effort when the deployment default model is applied', () => {
+    const { task } = resolveEffectiveHarnessModelState({
+      task: makeTask(),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: false,
+    });
+
+    expect(task.payload.reasoningEffort).toBeUndefined();
+  });
+
+  it('stamps a reasoning effort when reusing snapshot-resume model overrides', () => {
+    const { task } = resolveEffectiveHarnessModelState({
+      task: makeTask(),
+      targetHarness: 'opencode-server',
+      isSnapshotResume: true,
+      sourceRunHarnessModelOverrides: {
+        'opencode-server': 'openrouter/z-ai/glm-5.2',
+      },
+      deploymentCodingReasoningEffort: 'high',
+    });
+
+    expect(task.payload.reasoningEffort).toBe('high');
+  });
 });
