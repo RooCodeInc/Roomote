@@ -768,6 +768,7 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
+    const allowLateBoundSlackRoot = hasAutomationWorkItemId(taskRun);
     if (slackReplyContext?.threadTs) {
       // Slack proof auto-post resolves its thread destination from these env
       // vars when visual-proof artifacts are uploaded through the Roomote MCP
@@ -780,6 +781,7 @@ export const runTask = async ({
       unsanitizedEnv,
       slackReplyContext,
       communicationReplyContext,
+      allowLateBoundSlackRoot,
     });
     if (mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE) {
       runtimeEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE =

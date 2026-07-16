@@ -67,6 +67,13 @@ export function buildMcpTaskEnv(input: {
   unsanitizedEnv: Record<string, string | undefined>;
   slackReplyContext: SlackReplyContext | null;
   communicationReplyContext?: CommunicationReplyContext | null;
+  /**
+   * When true, channel-only Slack jobs may open a top-level root on first
+   * closeout (automation execution late-bind). Satisfaction enforcement is only
+   * safe when a thread already exists or late-bind is authorized; otherwise the
+   * agent is forced to call send_chat_reply that the API will 403.
+   */
+  allowLateBoundSlackRoot?: boolean;
 }): Record<string, string> {
   const mcpTaskEnv: Record<string, string> = { ...input.runtimeEnv };
 
@@ -92,12 +99,21 @@ export function buildMcpTaskEnv(input: {
     if (input.slackReplyContext.threadTs) {
       mcpTaskEnv.ROOMOTE_SLACK_THREAD_TS = input.slackReplyContext.threadTs;
     }
-    mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = [
-      input.runtimeEnv.HOME ?? '/tmp',
-      '.config',
-      'opencode',
-      'roomote-slack-reply-satisfaction.json',
-    ].join('/');
+    // Channel alone is enough for post_to_slack_channel destination lookups
+    // (for example CodeQL scan blockers). Reply-satisfaction only applies when
+    // the job can actually answer with send_chat_reply: an existing thread, or a
+    // late-bound automation work-item root.
+    if (
+      input.slackReplyContext.threadTs ||
+      input.allowLateBoundSlackRoot === true
+    ) {
+      mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE = [
+        input.runtimeEnv.HOME ?? '/tmp',
+        '.config',
+        'opencode',
+        'roomote-slack-reply-satisfaction.json',
+      ].join('/');
+    }
   }
 
   if (input.communicationReplyContext) {

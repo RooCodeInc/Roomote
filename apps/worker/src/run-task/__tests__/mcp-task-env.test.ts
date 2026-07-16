@@ -136,7 +136,7 @@ describe('buildMcpTaskEnv', () => {
     });
   });
 
-  it('registers trusted Slack channel env before a delayed thread exists', () => {
+  it('registers trusted Slack channel env without reply satisfaction before a delayed thread exists', () => {
     const result = buildMcpTaskEnv({
       runtimeEnv: {
         HOME: '/home/worker',
@@ -147,6 +147,26 @@ describe('buildMcpTaskEnv', () => {
       slackReplyContext: {
         channel: 'CTRUSTED',
       },
+    });
+
+    expect(result).toEqual({
+      HOME: '/home/worker',
+      ROOMOTE_TASK_ID: 'task-1',
+      ROOMOTE_SLACK_CHANNEL: 'CTRUSTED',
+    });
+  });
+
+  it('registers reply satisfaction for channel-only late-bound automation roots', () => {
+    const result = buildMcpTaskEnv({
+      runtimeEnv: {
+        HOME: '/home/worker',
+        ROOMOTE_TASK_ID: 'task-1',
+      },
+      unsanitizedEnv: {},
+      slackReplyContext: {
+        channel: 'CTRUSTED',
+      },
+      allowLateBoundSlackRoot: true,
     });
 
     expect(result).toEqual({
