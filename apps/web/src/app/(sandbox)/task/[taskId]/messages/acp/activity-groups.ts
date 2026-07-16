@@ -10,6 +10,7 @@ import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-resul
 
 export const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
   'reasoning',
+  'todo_section',
   'tool_call',
   'tool_result',
 ] as const;
@@ -36,6 +37,7 @@ interface BuildAcpActivityRenderBlocksOptions {
   artifacts?: readonly TaskArtifact[] | null;
   displayMode?: 'default' | 'narration';
   hasLeadingTextBoundary?: boolean;
+  collapseLeadingActivity?: boolean;
 }
 
 function isToolMessage(
@@ -109,7 +111,9 @@ export function buildAcpActivityRenderBlocks(
 
   const groupedBlocks: AcpConversationRenderBlock[] = [];
   let cursor = 0;
-  let hasLeftTextBoundary = options.hasLeadingTextBoundary === true;
+  let hasLeftTextBoundary =
+    options.hasLeadingTextBoundary === true ||
+    options.collapseLeadingActivity !== false;
 
   while (cursor < blocks.length) {
     const current = blocks[cursor]!;

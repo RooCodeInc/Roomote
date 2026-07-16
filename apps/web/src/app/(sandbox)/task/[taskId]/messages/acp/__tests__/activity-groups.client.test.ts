@@ -175,6 +175,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
+      messageBlock('todo-1', 3_000, 'todo_section'),
       toolGroupBlock({
         id: 'group-1',
         ts: 4_000,
@@ -194,6 +195,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     }
 
     expect(entries[1].blocks.map((block) => block.kind)).toEqual([
+      'message',
       'message',
       'tool_group',
     ]);
@@ -288,18 +290,25 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
   });
 
-  it('keeps leading and trailing activity expanded', () => {
+  it('collapses leading eligible activity before the first text message', () => {
     const entries = buildAcpActivityRenderBlocks([
       messageBlock('leading', 1_000, 'reasoning'),
+      messageBlock('todo-1', 1_500, 'todo_section'),
       textBlock('text-1', 2_000),
       messageBlock('trailing', 3_000, 'reasoning'),
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
-      'message',
+      'activity_group',
       'message',
       'message',
     ]);
+
+    expect(entries[0]).toMatchObject({
+      kind: 'activity_group',
+      ts: 1_000,
+      endTs: 2_000,
+    });
   });
 
   it('collapses leading activity when an external session prompt provides the left text boundary', () => {
