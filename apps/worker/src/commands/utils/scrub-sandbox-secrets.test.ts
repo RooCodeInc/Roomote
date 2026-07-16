@@ -1,5 +1,10 @@
 import * as fs from 'fs';
 
+import {
+  isCredentialWriteBarrierEngaged,
+  resetCredentialWriteBarrierForTesting,
+} from '../../lib/credential-write-barrier';
+
 import { scrubSandboxSecretsBeforeSnapshot } from './scrub-sandbox-secrets';
 
 vi.mock('fs', async (importOriginal) => {
@@ -46,6 +51,7 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCredentialWriteBarrierForTesting();
     delete process.env.XDG_DATA_HOME;
   });
 
@@ -57,8 +63,8 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     }
   });
 
-  it('rewrites the common env file without any env var exports', () => {
-    scrubSandboxSecretsBeforeSnapshot();
+  it('rewrites the common env file without any env var exports', async () => {
+    await scrubSandboxSecretsBeforeSnapshot();
 
     const write = findWrite(COMMON_ENV_PATH);
     expect(write).toBeDefined();
@@ -75,18 +81,18 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     }
   });
 
-  it('removes git tokens and OpenCode credential files', () => {
-    scrubSandboxSecretsBeforeSnapshot();
+  it('removes git tokens and OpenCode credential files', async () => {
+    await scrubSandboxSecretsBeforeSnapshot();
 
     for (const path of EXPECTED_REMOVED_PATHS) {
       expect(fs.rmSync).toHaveBeenCalledWith(path, { force: true });
     }
   });
 
-  it('respects XDG_DATA_HOME when locating OpenCode credential files', () => {
+  it('respects XDG_DATA_HOME when locating OpenCode credential files', async () => {
     process.env.XDG_DATA_HOME = '/custom/data';
 
-    scrubSandboxSecretsBeforeSnapshot();
+    await scrubSandboxSecretsBeforeSnapshot();
 
     expect(fs.rmSync).toHaveBeenCalledWith('/custom/data/opencode/auth.json', {
       force: true,
@@ -97,8 +103,8 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     );
   });
 
-  it('uses the task runtime home for OpenCode credentials', () => {
-    scrubSandboxSecretsBeforeSnapshot(undefined, {
+  it('uses the task runtime home for OpenCode credentials', async () => {
+    await scrubSandboxSecretsBeforeSnapshot(undefined, {
       homeDir: '/workspace/.roomote-runtime-home',
       runtimeEnv: {},
     });
@@ -113,8 +119,8 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     );
   });
 
-  it('uses task-specific XDG_DATA_HOME for OpenCode credentials', () => {
-    scrubSandboxSecretsBeforeSnapshot(undefined, {
+  it('uses task-specific XDG_DATA_HOME for OpenCode credentials', async () => {
+    await scrubSandboxSecretsBeforeSnapshot(undefined, {
       homeDir: '/workspace/.roomote-runtime-home',
       runtimeEnv: { XDG_DATA_HOME: '/task/data' },
     });
@@ -124,22 +130,37 @@ describe('scrubSandboxSecretsBeforeSnapshot', () => {
     });
   });
 
-  it('continues scrubbing and warns instead of throwing when a step fails', () => {
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+  it('continues scrubbing, warns, and reports the failed step when a step fails', async () => {
+    vi.mocked(fs.writeFileSync).mockImplementationOnce(() => {
       throw new Error('disk full');
     });
 
     const logger = { info: vi.fn(), warn: vi.fn() };
 
-    expect(() => scrubSandboxSecretsBeforeSnapshot(logger)).not.toThrow();
+    const { failedSteps } = await scrubSandboxSecretsBeforeSnapshot(logger);
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('disk full'),
     );
+    expect(failedSteps).toEqual(['rewrite common env file without env vars']);
 
     // Later steps still ran despite the env-file failure.
     for (const path of EXPECTED_REMOVED_PATHS) {
       expect(fs.rmSync).toHaveBeenCalledWith(path, { force: true });
     }
+  });
+
+  it('reports no failed steps on success', async () => {
+    const { failedSteps } = await scrubSandboxSecretsBeforeSnapshot();
+
+    expect(failedSteps).toEqual([]);
+  });
+
+  it('engages the credential write barrier before scrubbing', async () => {
+    expect(isCredentialWriteBarrierEngaged()).toBe(false);
+
+    await scrubSandboxSecretsBeforeSnapshot();
+
+    expect(isCredentialWriteBarrierEngaged()).toBe(true);
   });
 });

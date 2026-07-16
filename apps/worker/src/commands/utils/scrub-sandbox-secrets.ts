@@ -1,6 +1,7 @@
 import { rmSync } from 'fs';
 import { homedir } from 'os';
 
+import { engageCredentialWriteBarrier } from '../../lib/credential-write-barrier';
 import {
   ensureSourceControlTokenEnvFiles,
   removeSourceControlCredentialFiles,
@@ -19,19 +20,26 @@ interface OpenCodeRuntime {
   runtimeEnv?: Record<string, string | undefined>;
 }
 
+interface ScrubSandboxSecretsResult {
+  /** Human-readable names of scrub steps that failed. Empty on full success. */
+  failedSteps: string[];
+}
+
 function runScrubStep(
   step: string,
   logger: ScrubLogger,
   scrub: () => void,
-): void {
+): boolean {
   try {
     scrub();
+    return true;
   } catch (error) {
     logger.warn(
       `[scrubSandboxSecrets] Failed to ${step}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    return false;
   }
 }
 
@@ -53,26 +61,38 @@ function runScrubStep(
  * - The OpenCode data dir holds the materialized `auth.json` and Google
  *   service-account JSON.
  */
-export function scrubSandboxSecretsBeforeSnapshot(
+export async function scrubSandboxSecretsBeforeSnapshot(
   logger: ScrubLogger = console,
   openCodeRuntime: OpenCodeRuntime = {},
-): void {
+): Promise<ScrubSandboxSecretsResult> {
   logger.info(
     '[scrubSandboxSecrets] Removing credential material before filesystem snapshot',
   );
 
-  runScrubStep('rewrite common env file without env vars', logger, () => {
+  // Quiesce credential writers (token refresh loop, env reloads) and wait for
+  // in-flight writes to settle so nothing re-materializes files between this
+  // scrub and the provider snapshot.
+  await engageCredentialWriteBarrier();
+
+  const failedSteps: string[] = [];
+  const trackScrubStep = (step: string, scrub: () => void): void => {
+    if (!runScrubStep(step, logger, scrub)) {
+      failedSteps.push(step);
+    }
+  };
+
+  trackScrubStep('rewrite common env file without env vars', () => {
     // Recreate the static token env scripts first: env.sh sources them, and
     // this also guarantees ~/.roomote exists.
     ensureSourceControlTokenEnvFiles();
     writeCommonEnvFile({});
   });
 
-  runScrubStep('remove source-control credential files', logger, () =>
+  trackScrubStep('remove source-control credential files', () =>
     removeSourceControlCredentialFiles(),
   );
 
-  runScrubStep('remove OpenCode credential files', logger, () => {
+  trackScrubStep('remove OpenCode credential files', () => {
     for (const filePath of resolveOpenCodeCredentialFilePaths(
       openCodeRuntime.homeDir ?? homedir(),
       openCodeRuntime.runtimeEnv ?? process.env,
@@ -80,4 +100,6 @@ export function scrubSandboxSecretsBeforeSnapshot(
       rmSync(filePath, { force: true });
     }
   });
+
+  return { failedSteps };
 }
