@@ -151,6 +151,47 @@ describe('buildAutoAddedTaskModelSettings', () => {
       GOOGLE.defaultRoomoteModel,
     );
   });
+
+  it('adds default-preset models without adding models unique to another preset', () => {
+    const provider = {
+      ...ANTHROPIC,
+      recommendedPresets: [
+        {
+          id: 'standard',
+          label: 'Standard',
+          default: true,
+          roles: {
+            coding: { modelId: 'anthropic/claude-sonnet-5' },
+            helper: { modelId: 'anthropic/claude-haiku-4-5' },
+          },
+        },
+        {
+          id: 'review-heavy',
+          label: 'Review heavy',
+          roles: {
+            coding: { modelId: 'anthropic/experimental-reviewer' },
+            codeReview: {
+              modelId: 'anthropic/experimental-reviewer',
+              displayName: 'Experimental reviewer',
+            },
+          },
+        },
+      ],
+    };
+
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['anthropic']),
+    });
+
+    expect(result?.addedModels.map((model) => model.id)).toContain(
+      'anthropic/claude-haiku-4-5',
+    );
+    expect(result?.addedModels.map((model) => model.id)).not.toContain(
+      'anthropic/experimental-reviewer',
+    );
+  });
 });
 
 describe('appendRecommendedTaskModels', () => {

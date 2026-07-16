@@ -2,6 +2,7 @@ import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildSetupModelStatus,
   buildTaskModelOption,
+  getDefaultRecommendedModelPreset,
   getTaskModelCatalog,
   getTaskModelProviderId,
   normalizeTaskModelId,
@@ -15,6 +16,10 @@ import {
 
 function deriveDisplayNameFromModelId(modelId: string): string {
   return modelId.split('/').at(-1) || modelId;
+}
+
+function deriveFamilyFromModelId(modelId: string): string | undefined {
+  return modelId.split('/').at(-2);
 }
 
 /**
@@ -153,11 +158,18 @@ export function buildAutoAddedTaskModelSettings(options: {
   const suggestions: readonly SuggestedTaskModel[] =
     options.provider.suggestedTaskModels;
 
+  const defaultPreset = getDefaultRecommendedModelPreset(options.provider);
+  const defaultPresetModels = Object.values(defaultPreset.roles);
   const providerDefaultModelId = normalizeTaskModelId(
-    options.provider.defaultRoomoteModel,
+    defaultPreset.roles.coding?.modelId ?? options.provider.defaultRoomoteModel,
   );
   const candidates: SuggestedTaskModel[] = [
     ...suggestions,
+    ...defaultPresetModels.map((role) => ({
+      id: role.modelId,
+      displayName: role.displayName ?? '',
+      family: role.family,
+    })),
     ...(suggestions.some(
       (suggestion) =>
         normalizeTaskModelId(suggestion.id) === providerDefaultModelId,
@@ -180,7 +192,7 @@ export function buildAutoAddedTaskModelSettings(options: {
       id: modelId,
       displayName:
         candidate.displayName || deriveDisplayNameFromModelId(modelId),
-      family: candidate.family,
+      family: candidate.family ?? deriveFamilyFromModelId(modelId),
     });
 
     modelsById.set(model.id, model);

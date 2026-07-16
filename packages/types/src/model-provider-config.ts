@@ -68,6 +68,20 @@ export type RecommendedRoleModels = Partial<
   Record<Exclude<TaskModelRole, 'coding'>, string>
 >;
 
+export type RecommendedPresetRole = {
+  modelId: string;
+  displayName?: string;
+  family?: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
+export type RecommendedModelPreset = {
+  id: string;
+  label: string;
+  default?: boolean;
+  roles: Partial<Record<TaskModelRole, RecommendedPresetRole>>;
+};
+
 /**
  * An additional credential value a provider needs beyond its primary API-key
  * env var (`envVarName`), such as an AWS region or a GCP project id. The
@@ -118,14 +132,9 @@ export type SetupModelProviderDescriptor = {
    * unaffected.
    */
   hidden?: boolean;
-  /**
-   * Recommended per-role default models, applied when the provider is
-   * connected during setup and by the models settings page's
-   * "Use recommended" action (see
-   * `buildRecommendedDeploymentModelConfig`). Providers without a mapping
-   * recommend `defaultRoomoteModel` for coding and "same as coding" for
-   * every other role.
-   */
+  /** Provider-local role mappings shown by the settings preset picker. */
+  recommendedPresets?: readonly RecommendedModelPreset[];
+  /** Legacy single-mapping shape used to synthesize a default preset. */
   recommendedRoleModels?: RecommendedRoleModels;
 };
 
@@ -144,14 +153,58 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels(
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
-    // Vision is unset: the recommended coding model is multimodal, so image
-    // work follows the coding model ("same as coding").
-    recommendedRoleModels: {
-      helper: 'openrouter/google/gemini-3.5-flash',
-      codeReview: 'openrouter/anthropic/claude-opus-4.8',
-      explore: 'openrouter/google/gemini-3.5-flash',
-      planning: 'openrouter/anthropic/claude-opus-4.8',
-    },
+    recommendedPresets: [
+      {
+        id: 'balanced',
+        label: 'Balanced',
+        default: true,
+        roles: {
+          coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'high',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'high',
+          },
+        },
+      },
+      {
+        id: 'quick-turnaround',
+        label: 'Quick turnaround',
+        roles: {
+          coding: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'medium',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'medium',
+          },
+        },
+      },
+    ],
   },
   {
     id: 'vercel',
@@ -551,6 +604,47 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   planning: 'high',
 } as const satisfies Record<TaskModelRole, ReasoningEffort>;
 
+const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
+
+export function getRecommendedModelPresets(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+  >,
+): readonly RecommendedModelPreset[] {
+  if (provider.recommendedPresets?.length) {
+    return provider.recommendedPresets;
+  }
+
+  const roleModels = provider.recommendedRoleModels ?? {};
+  return [
+    {
+      id: DEFAULT_RECOMMENDED_PRESET_ID,
+      label: 'Recommended',
+      default: true,
+      roles: {
+        coding: { modelId: provider.defaultRoomoteModel },
+        ...Object.fromEntries(
+          Object.entries(roleModels).map(([role, modelId]) => [
+            role,
+            { modelId },
+          ]),
+        ),
+      },
+    },
+  ];
+}
+
+export function getDefaultRecommendedModelPreset(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+  >,
+): RecommendedModelPreset {
+  const presets = getRecommendedModelPresets(provider);
+  return presets.find((preset) => preset.default) ?? presets[0]!;
+}
+
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
   savedApiKeySatisfied: boolean;
@@ -655,18 +749,29 @@ export function normalizeDeploymentModelConfig(
 export function buildRecommendedDeploymentModelConfig(
   provider: Pick<
     SetupModelProviderDescriptor,
-    'defaultRoomoteModel' | 'recommendedRoleModels'
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
   >,
+  presetId?: string,
 ): DeploymentModelConfig {
-  const roleModels = provider.recommendedRoleModels ?? {};
+  const presets = getRecommendedModelPresets(provider);
+  const preset = presetId
+    ? presets.find((candidate) => candidate.id === presetId)
+    : getDefaultRecommendedModelPreset(provider);
+  const roles = preset?.roles ?? {};
 
   return normalizeDeploymentModelConfig({
-    roomoteModel: provider.defaultRoomoteModel,
-    roomoteSmallModel: roleModels.helper,
-    roomoteVisionModel: roleModels.vision,
-    roomoteCodeReviewModel: roleModels.codeReview,
-    roomoteExploreModel: roleModels.explore,
-    roomotePlanningModel: roleModels.planning,
+    roomoteModel: roles.coding?.modelId ?? provider.defaultRoomoteModel,
+    roomoteSmallModel: roles.helper?.modelId,
+    roomoteVisionModel: roles.vision?.modelId,
+    roomoteCodeReviewModel: roles.codeReview?.modelId,
+    roomoteExploreModel: roles.explore?.modelId,
+    roomotePlanningModel: roles.planning?.modelId,
+    roomoteModelReasoningEffort: roles.coding?.reasoningEffort,
+    roomoteSmallModelReasoningEffort: roles.helper?.reasoningEffort,
+    roomoteVisionModelReasoningEffort: roles.vision?.reasoningEffort,
+    roomoteCodeReviewModelReasoningEffort: roles.codeReview?.reasoningEffort,
+    roomoteExploreModelReasoningEffort: roles.explore?.reasoningEffort,
+    roomotePlanningModelReasoningEffort: roles.planning?.reasoningEffort,
   });
 }
 
