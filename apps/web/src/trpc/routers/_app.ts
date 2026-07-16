@@ -30,6 +30,7 @@ import {
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
   analyticsFilterOptionsInputSchema,
+  analyticsOverviewInputSchema,
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
@@ -323,6 +324,7 @@ import {
   getAnalyticsDetailsCommand,
   exportAnalyticsCommand,
   getAnalyticsFiltersCommand,
+  getAnalyticsOverviewCommand,
   getPullRequestAnalyticsOverviewCommand,
 } from '../commands/analytics';
 import {
@@ -549,6 +551,12 @@ const automationsRouter = createRouter({
 
 export const appRouter = createRouter({
   analytics: createRouter({
+    overview: protectedProcedure
+      .input(analyticsOverviewInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsOverviewCommand(auth, input),
+      ),
+
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
       .query(({ ctx: { auth }, input }) =>
