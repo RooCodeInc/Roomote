@@ -107,6 +107,12 @@ const serverSchema = {
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  R_INSTANCE_ID: z
+    .string()
+    .min(6)
+    .max(128)
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .optional(),
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),

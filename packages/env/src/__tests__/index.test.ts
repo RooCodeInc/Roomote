@@ -187,6 +187,36 @@ describe('Env', () => {
     expect(isRoomoteCloudEnabled('false')).toBe(false);
   });
 
+  it('accepts valid Ping instance IDs and rejects invalid ones', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
+    for (const instanceId of [
+      'a'.repeat(6),
+      'cloud-123',
+      'instance.id:production',
+      'deployment_42',
+      'a'.repeat(128),
+    ]) {
+      expect(
+        createRoomoteEnv({ ...runtimeEnv, R_INSTANCE_ID: instanceId })
+          .R_INSTANCE_ID,
+      ).toBe(instanceId);
+    }
+
+    for (const instanceId of [
+      'short',
+      'has spaces',
+      'invalid/slash',
+      'instance-\u00e9',
+      'a'.repeat(129),
+    ]) {
+      expect(() =>
+        createRoomoteEnv({ ...runtimeEnv, R_INSTANCE_ID: instanceId }),
+      ).toThrow();
+    }
+  });
+
   it('allows the Modal VM memory allocation to be overridden', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     try {
