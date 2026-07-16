@@ -210,6 +210,14 @@ export class DiscordInboundQueue {
    * attempts hash would otherwise grow one orphaned field per shed event.
    */
   async pruneOrphanedAttempts(): Promise<number> {
+    // Snapshot the tracked ids BEFORE reading the oldest entry: an event
+    // enqueued (and attempted) between the two reads is then absent from the
+    // snapshot, so its live counter can never be mistaken for an orphan when
+    // the stream looked empty a moment earlier.
+    const trackedIds = await this.redis.hkeys(DISCORD_INBOUND_ATTEMPTS_KEY);
+    if (trackedIds.length === 0) {
+      return 0;
+    }
     const [oldest] = await this.redis.xrange(
       DISCORD_INBOUND_STREAM_KEY,
       '-',
@@ -218,7 +226,6 @@ export class DiscordInboundQueue {
       1,
     );
     const oldestId = oldest?.[0] ?? null;
-    const trackedIds = await this.redis.hkeys(DISCORD_INBOUND_ATTEMPTS_KEY);
     const orphaned = trackedIds.filter(
       (streamId) =>
         oldestId === null || compareStreamIds(streamId, oldestId) < 0,

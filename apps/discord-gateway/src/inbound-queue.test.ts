@@ -187,6 +187,40 @@ describe('DiscordInboundQueue', () => {
     );
   });
 
+  it('never deletes a counter recorded after the snapshot (empty-stream race)', async () => {
+    // Interleaving under test: HKEYS snapshots an empty hash, an event is
+    // then enqueued and attempted, and XRANGE still observes the pre-enqueue
+    // empty stream. The live counter is not in the snapshot, so it survives.
+    const hkeys = vi.fn().mockResolvedValue([]);
+    const xrange = vi.fn().mockResolvedValue([]);
+    const hdel = vi.fn();
+    const queue = new DiscordInboundQueue(mockRedis({ hkeys, xrange, hdel }));
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(0);
+    expect(hkeys).toHaveBeenCalled();
+    // Snapshot-first short-circuits: the stream is never even read, and no
+    // deletion can touch a counter created after the snapshot.
+    expect(xrange).not.toHaveBeenCalled();
+    expect(hdel).not.toHaveBeenCalled();
+  });
+
+  it('snapshots tracked ids before reading the oldest stream entry', async () => {
+    const order: string[] = [];
+    const hkeys = vi.fn(async () => {
+      order.push('hkeys');
+      return ['100-0'];
+    });
+    const xrange = vi.fn(async () => {
+      order.push('xrange');
+      return [];
+    });
+    const hdel = vi.fn().mockResolvedValue(1);
+    const queue = new DiscordInboundQueue(mockRedis({ hkeys, xrange, hdel }));
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(1);
+    expect(order).toEqual(['hkeys', 'xrange']);
+  });
+
   it('applies configured stream bounds and reports dead-letter depth', async () => {
     const redis = mockRedis({
       eval: vi.fn().mockResolvedValue('1-0'),
