@@ -147,7 +147,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   let apiKey: string | undefined;
 
   try {
-    apiKey = await resolveModelProviderEnvValue(provider.envVarName);
+    apiKey = await resolveModelProviderEnvValue(provider.envVarNames);
   } catch (error) {
     console.error(
       formatSingleLineLog(`${logPrefix} Failed to resolve provider key`, {

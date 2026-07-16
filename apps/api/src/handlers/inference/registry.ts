@@ -13,15 +13,15 @@ interface InferenceProviderDefinition {
   id: SetupModelProviderId;
   name: string;
   upstreamBaseUrl: string;
-  /** Deployment env var holding the provider API key. */
-  envVarName: string;
+  /** Deployment env vars holding the provider API key, in precedence order. */
+  envVarNames: readonly string[];
   authHeader: InferenceProviderAuthHeader;
   /**
    * Upstream path prefixes the gateway forwards. Everything else is rejected
    * so a run token can only reach inference endpoints, never the provider's
    * account, billing, or admin surface.
    */
-  allowedPathPrefixes: readonly string[];
+  allowedPaths: readonly string[];
 }
 
 /**
@@ -35,25 +35,30 @@ const INFERENCE_PROVIDERS: readonly InferenceProviderDefinition[] = [
     id: 'openrouter',
     name: 'OpenRouter',
     upstreamBaseUrl: 'https://openrouter.ai/api',
-    envVarName: 'OPENROUTER_API_KEY',
+    envVarNames: ['OPENROUTER_API_KEY'],
     authHeader: { name: 'authorization', scheme: 'bearer' },
-    allowedPathPrefixes: ['/v1'],
+    allowedPaths: [
+      '/v1/chat/completions',
+      '/v1/completions',
+      '/v1/embeddings',
+      '/v1/models',
+    ],
   },
   {
     id: 'anthropic',
     name: 'Anthropic',
     upstreamBaseUrl: 'https://api.anthropic.com',
-    envVarName: 'ANTHROPIC_API_KEY',
+    envVarNames: ['ANTHROPIC_API_KEY'],
     authHeader: { name: 'x-api-key' },
-    allowedPathPrefixes: ['/v1/messages', '/v1/models'],
+    allowedPaths: ['/v1/messages', '/v1/messages/count_tokens', '/v1/models'],
   },
   {
     id: 'openai',
     name: 'OpenAI',
     upstreamBaseUrl: 'https://api.openai.com',
-    envVarName: 'OPENAI_API_KEY',
+    envVarNames: ['OPENAI_API_KEY'],
     authHeader: { name: 'authorization', scheme: 'bearer' },
-    allowedPathPrefixes: [
+    allowedPaths: [
       '/v1/chat/completions',
       '/v1/responses',
       '/v1/embeddings',
@@ -64,9 +69,9 @@ const INFERENCE_PROVIDERS: readonly InferenceProviderDefinition[] = [
     id: 'google',
     name: 'Google Gemini',
     upstreamBaseUrl: 'https://generativelanguage.googleapis.com',
-    envVarName: 'GEMINI_API_KEY',
+    envVarNames: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
     authHeader: { name: 'x-goog-api-key' },
-    allowedPathPrefixes: ['/v1beta/models', '/v1/models'],
+    allowedPaths: ['/v1beta/models', '/v1/models'],
   },
 ];
 
@@ -77,19 +82,21 @@ export function getInferenceProvider(
 }
 
 /**
- * A path is allowed when it equals an allowed prefix or nests under it with a
- * `/` separator, so `/v1/messages-admin` cannot ride on a `/v1/messages`
- * allowance while `/v1beta/models/gemini-2.5-pro:streamGenerateContent`
- * passes under `/v1beta/models`.
+ * A path is allowed when it exactly matches an inference endpoint. Google
+ * model routes are the exception because their model ID and action are part
+ * of the nested path; their provider API has no account surface below models.
  */
 export function isInferencePathAllowed(
   provider: InferenceProviderDefinition,
   upstreamPath: string,
 ): boolean {
-  return provider.allowedPathPrefixes.some(
-    (prefix) =>
-      upstreamPath === prefix || upstreamPath.startsWith(`${prefix}/`),
-  );
+  return provider.allowedPaths.some((path) => {
+    if (upstreamPath === path) {
+      return true;
+    }
+
+    return provider.id === 'google' && upstreamPath.startsWith(`${path}/`);
+  });
 }
 
 export function formatProviderAuthHeaderValue(
