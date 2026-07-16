@@ -803,7 +803,7 @@ export function ModelSettingsSection({
     [sortedConnectedProviders, newModelProvider],
   );
   const normalizedNewModelId = newModelId.trim();
-  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 500);
+  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 150);
   const shouldShowSuggestions =
     suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 2;
   const suggestionsQuery = useQuery(
@@ -1944,11 +1944,13 @@ export function ModelSettingsSection({
                     </div>
                   )}
                 </div>
-                {pendingLookup.message && pendingLookup.status === 'error' && (
-                  <p className="text-xs text-destructive">
-                    {pendingLookup.message}
-                  </p>
-                )}
+                {pendingLookup.message &&
+                  pendingLookup.status === 'error' &&
+                  !shouldShowSuggestions && (
+                    <p className="text-xs text-destructive">
+                      {pendingLookup.message}
+                    </p>
+                  )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

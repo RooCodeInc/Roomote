@@ -622,6 +622,42 @@ describe('ModelSettingsSection', () => {
     }
   });
 
+  it('hides lookup errors while matching suggestions are open', async () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    lookupMutateAsyncMock.mockRejectedValue(new Error('Not found'));
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      fireEvent.change(screen.getByLabelText('New model slug'), {
+        target: { value: 'cl' },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          'Could not resolve this model from the provider. Check the slug.',
+        ),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('does not show suggestions before two characters', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
