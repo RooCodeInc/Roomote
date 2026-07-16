@@ -1,9 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { eq, sql } from 'drizzle-orm';
 
 import { db } from '../db';
-import { deploymentSettings } from '../schema';
+import { decryptSecrets } from '../encryption';
+import { deploymentSettings, environmentVariables } from '../schema';
+import { stringifyDecryptedEnvVarValue } from './environment-variables';
 import { resolveEffectiveDeploymentEnvVars } from './model-runtime-config';
 
 export type DiscordBotIdentity = {
@@ -404,9 +406,64 @@ export function invalidateDiscordRuntimeCredentialsCache(): void {
   gatewaySecretCache = null;
 }
 
+const DISCORD_GATEWAY_SECRET_ENV_NAME = 'R_DISCORD_GATEWAY_SECRET';
+const DISCORD_GATEWAY_SECRET_LOCK_KEY = 'roomote-discord-gateway-secret';
+
+/**
+ * Persist a new gateway↔API secret into the deployment vault when none exists.
+ * Serialized with an advisory lock so concurrent gateway/API processes agree.
+ * Replaces an existing blank vault row instead of failing on the name unique
+ * index.
+ */
+async function ensurePersistedDiscordGatewaySecret(): Promise<string> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${DISCORD_GATEWAY_SECRET_LOCK_KEY}))`,
+    );
+
+    const existingRow = await tx.query.environmentVariables.findFirst({
+      where: eq(environmentVariables.name, DISCORD_GATEWAY_SECRET_ENV_NAME),
+      columns: { id: true, value: true },
+    });
+    if (existingRow) {
+      const decrypted = await decryptSecrets<string>(existingRow.value);
+      const existing =
+        decrypted == null
+          ? ''
+          : stringifyDecryptedEnvVarValue(decrypted).trim();
+      if (existing) {
+        return existing;
+      }
+
+      const generated = randomUUID();
+      await tx
+        .update(environmentVariables)
+        .set({
+          value: generated,
+          updatedAt: new Date(),
+        })
+        .where(eq(environmentVariables.id, existingRow.id));
+      return generated;
+    }
+
+    const generated = randomUUID();
+    await tx.insert(environmentVariables).values({
+      userId: null,
+      name: DISCORD_GATEWAY_SECRET_ENV_NAME,
+      value: generated,
+      createdByUserId: null,
+      lastUpdatedByUserId: null,
+    });
+    return generated;
+  });
+}
+
 /**
  * Resolve the Discord gateway↔API transport secret. Process env wins over the
- * encrypted deployment vault (same source order as the bot token).
+ * encrypted deployment vault (same source order as the bot token). When Discord
+ * is already configured but the dedicated secret was never written (for example
+ * upgrades that introduced the secret after Discord setup), create and persist
+ * one automatically so event forwarding does not stay blocked.
  */
 export async function resolveDiscordGatewaySecret(): Promise<string | null> {
   const nowMs = Date.now();
@@ -421,7 +478,38 @@ export async function resolveDiscordGatewaySecret(): Promise<string | null> {
   }
 
   const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
-  const value = deploymentEnvVars.R_DISCORD_GATEWAY_SECRET?.trim() || null;
-  gatewaySecretCache = { value, expiresAtMs: nowMs + CACHE_TTL_MS };
-  return value;
+  const fromVault =
+    deploymentEnvVars[DISCORD_GATEWAY_SECRET_ENV_NAME]?.trim() || null;
+  if (fromVault) {
+    gatewaySecretCache = {
+      value: fromVault,
+      expiresAtMs: nowMs + CACHE_TTL_MS,
+    };
+    return fromVault;
+  }
+
+  const botConfigured = Boolean(
+    normalizeDiscordBotToken(process.env.R_DISCORD_BOT_TOKEN) ||
+    normalizeDiscordBotToken(deploymentEnvVars.R_DISCORD_BOT_TOKEN),
+  );
+  if (!botConfigured) {
+    gatewaySecretCache = { value: null, expiresAtMs: nowMs + CACHE_TTL_MS };
+    return null;
+  }
+
+  try {
+    const generated = await ensurePersistedDiscordGatewaySecret();
+    gatewaySecretCache = {
+      value: generated,
+      expiresAtMs: nowMs + CACHE_TTL_MS,
+    };
+    return generated;
+  } catch (error) {
+    console.warn(
+      `[discord] Failed to auto-generate ${DISCORD_GATEWAY_SECRET_ENV_NAME}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return null;
+  }
 }
