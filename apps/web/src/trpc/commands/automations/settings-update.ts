@@ -376,12 +376,20 @@ export async function updateBackgroundAgentSettingsCommand(
     : null;
   // These three Discord fields are optional in the API for deploy
   // compatibility: an older client that never sends them must preserve the
-  // persisted target, not clear it. Only an explicitly submitted value (set
-  // or null) goes through resolution below.
-  const suggesterDiscordProvided = input.suggesterDiscordChannel !== undefined;
-  const announcerDiscordProvided = input.announcerDiscordChannel !== undefined;
+  // persisted target, not clear it — UNLESS that client explicitly selected
+  // a Slack channel, which is a destination choice and must clear the
+  // Discord target it cannot see (otherwise both targets persist and a later
+  // current-client save would silently flip routing back to Discord). An
+  // empty Slack value expresses no choice and preserves the Discord target.
+  const suggesterDiscordProvided =
+    input.suggesterDiscordChannel !== undefined ||
+    normalizeOptionalText(input.suggesterSlackChannel) !== null;
+  const announcerDiscordProvided =
+    input.announcerDiscordChannel !== undefined ||
+    normalizeOptionalText(input.announcerSlackChannel) !== null;
   const platformIssueDiscordProvided =
-    input.platformIssueDiscordChannel !== undefined;
+    input.platformIssueDiscordChannel !== undefined ||
+    normalizeOptionalText(input.platformIssueSlackChannel) !== null;
   const suggesterDiscordChannel = shouldUpdateSuggester
     ? normalizeOptionalText(input.suggesterDiscordChannel)
     : null;

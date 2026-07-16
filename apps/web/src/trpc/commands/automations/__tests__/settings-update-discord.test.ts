@@ -515,6 +515,44 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     expect(automation?.enabled).toBe(true);
   }, 15_000);
 
+  it('clears the Discord target when a legacy client explicitly selects a Slack channel', async () => {
+    await insertSlackInstallation();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+    const first = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+    expect(first.success).toBe(true);
+
+    // A pre-deploy client cannot send the Discord field, but choosing a
+    // Slack channel is an explicit destination choice: it must clear the
+    // Discord target rather than leaving both stored (a later current-client
+    // save would otherwise silently flip routing back to Discord).
+    const input = buildInput({
+      savingAutomation: 'platformIssueAlerts',
+      platformIssueSlackChannel: 'C123456NEW',
+    });
+    delete (input as unknown as Record<string, unknown>)
+      .platformIssueDiscordChannel;
+    const second = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(second.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123456NEW',
+      },
+    ]);
+  }, 15_000);
+
   it('preserves suggester, announcer, and platform issue Discord targets when saving an unrelated automation', async () => {
     await insertSlackInstallation();
     await insertAvailableDiscordChannel({
