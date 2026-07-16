@@ -36,7 +36,10 @@ export async function getCostAnalyticsRows(
 ): Promise<AnalyticsRow[]> {
   const cutoff = getTimeCutoff(timePeriod, now);
   const usageCutoffCondition = cutoff
-    ? sql`coalesce(${llmUsageEvents.messageCompletedAt}, ${llmUsageEvents.createdAt}) >= ${cutoff}`
+    ? sql`coalesce(${llmUsageEvents.messageCompletedAt}, ${llmUsageEvents.createdAt}) >= ${sql.param(
+        cutoff,
+        llmUsageEvents.createdAt,
+      )}`
     : undefined;
   const usageRows = await db
     .select({
