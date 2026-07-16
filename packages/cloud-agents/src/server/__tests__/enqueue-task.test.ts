@@ -62,15 +62,26 @@ const explicitWorkKind = {
 
 describe('resolveFreshTaskComputeProvider', () => {
   it('forces fresh launches onto Roomote in cloud-managed deployments', () => {
-    expect(resolveFreshTaskComputeProvider('modal', 'docker', true)).toBe(
-      'roomote',
-    );
+    expect(
+      resolveFreshTaskComputeProvider('modal', 'docker', undefined, true),
+    ).toBe('roomote');
   });
 
   it('keeps the requested provider outside cloud-managed deployments', () => {
-    expect(resolveFreshTaskComputeProvider('modal', 'docker', false)).toBe(
-      'modal',
-    );
+    expect(
+      resolveFreshTaskComputeProvider('modal', 'docker', undefined, false),
+    ).toBe('modal');
+  });
+
+  it('keeps environment snapshots on their configured provider in cloud-managed deployments', () => {
+    expect(
+      resolveFreshTaskComputeProvider(
+        'modal',
+        'docker',
+        TaskPayloadKind.SnapshotEnvironment,
+        true,
+      ),
+    ).toBe('modal');
   });
 });
 
