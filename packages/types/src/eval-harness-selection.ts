@@ -35,8 +35,9 @@ export type EvalHarnessSelection =
  *   only launch harness for new work.
  * - The model becomes the override for the OpenCode harness. OpenCode accepts
  *   provider/model identifiers from the operator's selected config.
- * - Reasoning effort is not supported by OpenCode, so it is rejected rather
- *   than silently dropped.
+ * - Reasoning effort is accepted as-is: callers stamp it onto
+ *   `payload.reasoningEffort`, which the worker applies to the effective
+ *   coding model of the launch.
  *
  * The function is pure and validation-complete so both surfaces can share it:
  * each calls it to surface errors and to build the launch payload.
@@ -64,14 +65,6 @@ export function resolveEvalHarnessSelection(input: {
   // leave the harness implicit so the launch payload stays minimal.
   const effectiveHarness: LaunchCodingHarness | undefined =
     explicitHarness ?? (trimmedModel ? 'opencode-server' : undefined);
-
-  if (input.reasoningEffort) {
-    return {
-      ok: false,
-      error:
-        'Reasoning effort is not supported on the OpenCode harness; omit it when targeting opencode-server.',
-    };
-  }
 
   if (trimmedModel) {
     if (!OPENCODE_MODEL_PATTERN.test(trimmedModel)) {

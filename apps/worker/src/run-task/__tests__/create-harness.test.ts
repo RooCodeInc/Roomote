@@ -216,6 +216,7 @@ describe('createHarness', () => {
           harnessModelOverrides: {
             'opencode-server': 'provider-id/model-id',
           },
+          reasoningEffort: 'high',
         },
       } as never,
       callbacks: {} as never,
@@ -226,6 +227,7 @@ describe('createHarness', () => {
     expect(startOpenCodeServerHarnessMock).toHaveBeenCalledWith(
       expect.objectContaining({
         modelOverride: 'provider-id/model-id',
+        reasoningEffortOverride: 'high',
       }),
     );
     expect(getHarnessModelOverrideMock).toHaveBeenCalledTimes(1);

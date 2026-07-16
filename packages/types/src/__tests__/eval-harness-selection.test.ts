@@ -63,22 +63,25 @@ describe('resolveEvalHarnessSelection', () => {
     }
   });
 
-  it('rejects --reasoning on the OpenCode harness', () => {
-    const result = resolveEvalHarnessSelection({
-      harness: 'opencode-server',
-      reasoningEffort: 'xhigh',
-    });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('not supported on the OpenCode harness');
-    }
+  it('accepts --reasoning on the OpenCode harness', () => {
+    expect(
+      resolveEvalHarnessSelection({
+        harness: 'opencode-server',
+        reasoningEffort: 'xhigh',
+      }),
+    ).toEqual({ ok: true, harness: 'opencode-server' });
   });
 
-  it('rejects --reasoning when the OpenCode harness is inferred from the model', () => {
-    const result = resolveEvalHarnessSelection({
-      model: OPENCODE_MODEL,
-      reasoningEffort: 'high',
+  it('accepts --reasoning when the OpenCode harness is inferred from the model', () => {
+    expect(
+      resolveEvalHarnessSelection({
+        model: OPENCODE_MODEL,
+        reasoningEffort: 'high',
+      }),
+    ).toEqual({
+      ok: true,
+      harness: 'opencode-server',
+      harnessModelOverrides: { 'opencode-server': OPENCODE_MODEL },
     });
-    expect(result.ok).toBe(false);
   });
 });

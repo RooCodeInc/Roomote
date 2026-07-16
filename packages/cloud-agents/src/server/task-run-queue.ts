@@ -29,6 +29,7 @@ import {
   getUserDisplayName,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
+  isReasoningEffort,
   normalizeDeploymentModelConfig,
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
@@ -272,6 +273,9 @@ type ResolvedHarnessSelection = {
     | import('@roomote/types').TaskModelSettings
     | null;
   deploymentCodeReviewModelId?: string | null;
+  deploymentCodingReasoningEffort?:
+    | import('@roomote/types').ReasoningEffort
+    | null;
 };
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -301,6 +305,16 @@ function resolveCodeReviewModelId(
   return envCodeReviewModel ?? persistedConfig.roomoteCodeReviewModel;
 }
 
+function resolveCodingReasoningEffort(
+  persistedConfig: import('@roomote/types').DeploymentModelConfig,
+): import('@roomote/types').ReasoningEffort | null {
+  const envEffort = process.env.R_MODEL_REASONING_EFFORT?.trim();
+
+  return isReasoningEffort(envEffort)
+    ? envEffort
+    : persistedConfig.roomoteModelReasoningEffort;
+}
+
 async function resolveRequestedHarness(
   task: TaskSpec,
 ): Promise<ResolvedHarnessSelection> {
@@ -312,6 +326,9 @@ async function resolveRequestedHarness(
       runtimeModelConfig: true,
     },
   });
+  const deploymentModelConfig = normalizeDeploymentModelConfig(
+    deployment?.runtimeModelConfig,
+  );
 
   return {
     harness: task.harness ?? DEFAULT_LAUNCH_CODING_HARNESS,
@@ -319,7 +336,10 @@ async function resolveRequestedHarness(
       (deployment?.metadata as MetadataRecord | null | undefined) ?? null,
     deploymentTaskModelSettings: deployment?.taskModelSettings ?? null,
     deploymentCodeReviewModelId: resolveCodeReviewModelId(
-      normalizeDeploymentModelConfig(deployment?.runtimeModelConfig),
+      deploymentModelConfig,
+    ),
+    deploymentCodingReasoningEffort: resolveCodingReasoningEffort(
+      deploymentModelConfig,
     ),
   };
 }
@@ -1273,6 +1293,8 @@ async function enqueueFreshLaunch(
       deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
       deploymentCodeReviewModelId:
         resolvedHarness.deploymentCodeReviewModelId ?? null,
+      deploymentCodingReasoningEffort:
+        resolvedHarness.deploymentCodingReasoningEffort ?? null,
     });
 
   const repositoryName = taskWithHarnessOverrides.payload.repo || null;
@@ -1670,6 +1692,8 @@ export async function enqueueTaskRelaunch(
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,
+    deploymentCodingReasoningEffort:
+      resolvedHarness.deploymentCodingReasoningEffort ?? null,
   });
 
   const resolvedTaskPolicy = resolveTaskRuntimePolicy({
@@ -1863,6 +1887,8 @@ async function enqueueSnapshotResume(
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,
+    deploymentCodingReasoningEffort:
+      resolvedHarness.deploymentCodingReasoningEffort ?? null,
   });
 
   const targetComputeProvider =

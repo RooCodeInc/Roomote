@@ -3,6 +3,8 @@ import net from 'node:net';
 
 import { execa, type ResultPromise } from 'execa';
 
+import type { ReasoningEffort } from '@roomote/types';
+
 import type { HarnessLogger } from '../../../../logging';
 
 import { createPrefixedLogger, describeUnknownError } from '../logging';
@@ -24,6 +26,7 @@ interface StartOpenCodeServerHarnessOptions {
   mcpServers: Record<string, unknown>;
   initialSessionId?: string;
   modelOverride?: string;
+  reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
   /**
    * Invoked when the OpenCode server subprocess exits while the task was not
@@ -213,6 +216,7 @@ export async function startOpenCodeServerHarness({
   mcpServers,
   initialSessionId,
   modelOverride,
+  reasoningEffortOverride,
   developerInstructionsContent,
   onUnexpectedExit,
   onDiagnostic,
@@ -225,6 +229,7 @@ export async function startOpenCodeServerHarness({
     workspacePath,
     mcpServers,
     model: modelOverride,
+    reasoningEffortOverride,
     developerInstructionsContent,
     logger,
   });
