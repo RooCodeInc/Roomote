@@ -100,6 +100,7 @@ export function createServer({
   taskRunTaskId,
   slackReplySatisfactionStateFile,
   codingHarness,
+  taskRuntime,
   prepareActorScopedTurn,
 }: {
   /** Port to listen on. */
@@ -126,6 +127,11 @@ export function createServer({
   slackReplySatisfactionStateFile?: string;
   /** Effective coding harness for the current worker session. */
   codingHarness?: CodingHarness;
+  /** Task runtime home/env for locating harness credential files. */
+  taskRuntime?: {
+    homeDir: string;
+    runtimeEnv: Record<string, string | undefined>;
+  };
   /** Refresh actor-scoped integrations before delivering the next turn. */
   prepareActorScopedTurn?: (
     targetUserId?: string,
@@ -153,6 +159,7 @@ export function createServer({
     slackReplySatisfactionStateFile,
     codingHarness,
     workerEnv,
+    taskRuntime,
     prepareActorScopedTurn,
   });
 

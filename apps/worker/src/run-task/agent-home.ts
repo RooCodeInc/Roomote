@@ -13,6 +13,7 @@ import {
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
   type ReasoningEffort,
@@ -47,6 +48,8 @@ const OPENCODE_CONFIG_DIR_NAME = 'opencode';
 
 const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
   'google-application-credentials.json';
+
+export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
@@ -1408,7 +1411,7 @@ export function generateOpenCodeConfig({
  */
 export function resolveOpenCodeDataDir(
   homeDir: string,
-  runtimeEnv: Record<string, string>,
+  runtimeEnv: Record<string, string | undefined>,
 ): string {
   const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
 
@@ -1416,6 +1419,79 @@ export function resolveOpenCodeDataDir(
     xdgDataHome || path.join(homeDir, '.local', 'share'),
     OPENCODE_CONFIG_DIR_NAME,
   );
+}
+
+/**
+ * Credential files materialized under the OpenCode data dir for a run: the
+ * ChatGPT subscription `auth.json` and the inline Google service-account
+ * JSON. Deleted before filesystem snapshots; both are re-materialized from
+ * the dequeue/resume env at the next run start.
+ */
+export function resolveOpenCodeCredentialFilePaths(
+  homeDir: string,
+  runtimeEnv: Record<string, string | undefined>,
+): string[] {
+  const dataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
+
+  return [
+    path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
+    path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
+  ];
+}
+
+/**
+ * Rewrite the OpenCode credential files the pre-snapshot scrub removed, for
+ * a sandbox that survived an abandoned snapshot attempt. Normally these files
+ * are materialized once during harness bootstrap and the running harness
+ * keeps pointing at their paths (Google's auth library re-reads
+ * GOOGLE_APPLICATION_CREDENTIALS per token mint, and OpenCode persists OAuth
+ * refreshes back to auth.json), so restoring the same paths from the
+ * deployment's current env values heals the live harness without a restart.
+ * Files whose source env value is absent are skipped.
+ */
+export function rematerializeOpenCodeCredentialFiles(options: {
+  homeDir: string;
+  runtimeEnv: Record<string, string>;
+  logger: { info(message: string): void; warn(message: string): void };
+}): { failedSteps: string[] } {
+  const failedSteps: string[] = [];
+  // materializeInlineGoogleCredentials rewrites the env value to the file
+  // path; work on a copy so the caller's env is untouched.
+  const env = { ...options.runtimeEnv };
+
+  try {
+    materializeInlineGoogleCredentials(env, options.homeDir);
+  } catch (error) {
+    options.logger.warn(
+      `[rematerializeOpenCodeCredentialFiles] Failed to rewrite Google application credentials file: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    failedSteps.push('rewrite Google application credentials file');
+  }
+
+  const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+
+  if (authContent) {
+    try {
+      const dataDir = resolveOpenCodeDataDir(options.homeDir, env);
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
+        authContent,
+        { encoding: 'utf8', mode: 0o600 },
+      );
+    } catch (error) {
+      options.logger.warn(
+        `[rematerializeOpenCodeCredentialFiles] Failed to rewrite OpenCode auth file: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      failedSteps.push('rewrite OpenCode auth file');
+    }
+  }
+
+  return { failedSteps };
 }
 
 /**

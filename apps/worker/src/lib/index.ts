@@ -1,3 +1,4 @@
+export { runUnlessCredentialWriteBarrier } from './credential-write-barrier';
 export {
   ADO_TOKEN_ENV_FILE_PATH,
   applySourceControlTokenMetadata,

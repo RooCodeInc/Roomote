@@ -44,6 +44,16 @@ export interface Context {
   workerEnv?: WorkerEnv;
 
   /**
+   * Task runtime home and env, used to locate harness credential files (e.g.
+   * the OpenCode data dir) for the pre-snapshot scrub. These can differ from
+   * the worker process home/env when the run uses a task-scoped HOME.
+   */
+  taskRuntime?: {
+    homeDir: string;
+    runtimeEnv: Record<string, string | undefined>;
+  };
+
+  /**
    * Refresh actor-scoped integrations before delivering the next turn.
    * Returns `false` when the turn must not be delivered (default `block`
    * mismatch policy: the API's trusted pre-delivery actor sync did not put

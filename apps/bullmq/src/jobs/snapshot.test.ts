@@ -22,6 +22,7 @@ const {
   mockDrainLinearMessagesToResumeRun,
   mockDrainSlackMessagesToResumeRun,
   mockRecordComputeProviderUsage,
+  mockWithSandboxServerRpcClient,
   mockMarkTaskStartParallelCountEndedAt,
   mockSyncTaskStateFromRuns,
   transactionFn,
@@ -57,6 +58,7 @@ const {
     mockDrainLinearMessagesToResumeRun: vi.fn() as AnyMock,
     mockDrainSlackMessagesToResumeRun: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
+    mockWithSandboxServerRpcClient: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
     mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
     transactionFn: vi.fn() as AnyMock,
@@ -145,6 +147,7 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
+  withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
 }));
 
 vi.mock('../monitoring/sentry', () => ({
@@ -193,6 +196,7 @@ describe('snapshotJob', () => {
       linearOrganizationId: null,
     });
     mockFindSnapshotBySourceInstance.mockResolvedValue(null);
+    mockWithSandboxServerRpcClient.mockResolvedValue(undefined);
     mockDrainLinearMessagesToResumeRun.mockResolvedValue({ resumed: false });
     mockDrainSlackMessagesToResumeRun.mockResolvedValue({ resumed: false });
   });
@@ -238,6 +242,19 @@ describe('snapshotJob', () => {
     );
     expect(mockRecordTaskRunEvent).toHaveBeenNthCalledWith(
       3,
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'pre_snapshot_scrub_skipped',
+          reason: 'no_sandbox_server_url',
+        }),
+      }),
+    );
+    expect(mockRecordTaskRunEvent).toHaveBeenNthCalledWith(
+      4,
       expect.anything(),
       expect.objectContaining({
         runId: 123,
@@ -301,6 +318,118 @@ describe('snapshotJob', () => {
         source: 'snapshot_queue',
       },
     });
+  });
+
+  it('requests a sandbox-server scrub before creating the snapshot', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockResolvedValue({ snapshotId: 'snap_scrubbed' });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-scrub' },
+    } as never);
+
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledTimes(1);
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: 123,
+        userId: null,
+        sandboxServerUrl: 'https://sandbox.example.test',
+        timeoutMs: expect.any(Number),
+        call: expect.any(Function),
+      }),
+    );
+
+    const scrubOrder =
+      mockWithSandboxServerRpcClient.mock.invocationCallOrder[0] ?? 0;
+    const createSnapshotOrder =
+      mockCreateSnapshot.mock.invocationCallOrder[0] ?? 0;
+    expect(scrubOrder).toBeLessThan(createSnapshotOrder);
+
+    // The RPC callback invokes the scrub mutation on the sandbox client.
+    const scrubMutate = vi.fn().mockResolvedValue({ success: true });
+    await mockWithSandboxServerRpcClient.mock.calls[0]?.[0].call({
+      commands: { scrubSnapshotSecrets: { mutate: scrubMutate } },
+    });
+    expect(scrubMutate).toHaveBeenCalledTimes(1);
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'pre_snapshot_scrub_completed',
+        }),
+      }),
+    );
+  });
+
+  it('continues the snapshot when the sandbox-server scrub is unavailable', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockWithSandboxServerRpcClient.mockRejectedValue(
+      new Error('sandbox server unreachable'),
+    );
+    mockCreateSnapshot.mockResolvedValue({ snapshotId: 'snap_no_scrub' });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-scrub-down' },
+    } as never);
+
+    expect(mockCreateSnapshot).toHaveBeenCalledTimes(1);
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'pre_snapshot_scrub_unavailable',
+          error: 'sandbox server unreachable',
+        }),
+      }),
+    );
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'completed',
+        details: expect.objectContaining({ snapshotId: 'snap_no_scrub' }),
+      }),
+    );
+  });
+
+  it('skips the scrub request when the run has no sandbox server URL', async () => {
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockResolvedValue({ snapshotId: 'snap_no_url' });
+
+    await snapshotJob({
+      data: { runId: 123, sandboxId: 'sb-no-url' },
+    } as never);
+
+    expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'pre_snapshot_scrub_skipped',
+          reason: 'no_sandbox_server_url',
+        }),
+      }),
+    );
+    expect(mockCreateSnapshot).toHaveBeenCalledTimes(1);
   });
 
   it('marks the linked task completed when requested by completion-on-snapshot metadata', async () => {
@@ -542,7 +671,7 @@ describe('snapshotJob', () => {
       }),
     );
     expect(mockRecordTaskRunEvent).toHaveBeenNthCalledWith(
-      4,
+      5,
       expect.anything(),
       expect.objectContaining({
         runId: 123,
@@ -819,6 +948,103 @@ describe('snapshotJob', () => {
         signal: 'snapshot-failed',
       },
     );
+  });
+
+  it('asks the sandbox to restore credentials when a terminal failure leaves it running', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    // First RPC scrubs before the attempt, second restores after the
+    // terminal failure.
+    expect(mockWithSandboxServerRpcClient).toHaveBeenCalledTimes(2);
+    const restoreMutate = vi.fn().mockResolvedValue({ success: true });
+    await mockWithSandboxServerRpcClient.mock.calls[1]?.[0].call({
+      commands: { restoreScrubbedCredentials: { mutate: restoreMutate } },
+    });
+    expect(restoreMutate).toHaveBeenCalledTimes(1);
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'post_failure_credential_restore_completed',
+        }),
+      }),
+    );
+  });
+
+  it('records an unavailable credential restore without changing the failure outcome', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      sandboxServerUrl: 'https://sandbox.example.test',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+    // Scrub RPC succeeds, restore RPC fails.
+    mockWithSandboxServerRpcClient
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('sandbox server unreachable'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore-down' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 123,
+        source: 'snapshot_queue',
+        eventType: 'decision',
+        details: expect.objectContaining({
+          decision: 'post_failure_credential_restore_unavailable',
+          error: 'sandbox server unreachable',
+        }),
+      }),
+    );
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotRequestedAt: null,
+        sleepRequestedAt: null,
+        snapshotFailedAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('does not request a credential restore when the run has no sandbox server URL', async () => {
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    mockCreateSnapshot.mockRejectedValue(new Error('permanent failure'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-restore-no-url' },
+        id: 'snapshot-123',
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toMatchObject({ name: 'UnrecoverableError' });
+
+    expect(mockWithSandboxServerRpcClient).not.toHaveBeenCalled();
   });
 
   it('does not retry permanent createSnapshot failures when attempts remain', async () => {
