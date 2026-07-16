@@ -105,25 +105,35 @@ describe('getCostAnalyticsRows', () => {
       sourceControlProvider: 'github',
       host: 'github.com',
     });
-    const [usageEvent] = await db
+    const usageEvents = await db
       .insert(llmUsageEvents)
-      .values({
-        eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
-        costSource: 'missing',
-        taskId: task.id,
-        runId: run.id,
-        costMicroUsd: 1_000_000,
-        messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
-      })
+      .values([
+        {
+          eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
+          costSource: 'missing',
+          taskId: task.id,
+          runId: run.id,
+          costMicroUsd: 1_000_000,
+          messageCompletedAt: new Date('2026-07-15T12:00:00.000Z'),
+        },
+        {
+          eventKey: `cost-analytics-task-${crypto.randomUUID()}`,
+          costSource: 'missing',
+          taskId: task.id,
+          runId: run.id,
+          costMicroUsd: 500_000,
+          messageCompletedAt: new Date('2026-07-14T12:00:00.000Z'),
+        },
+      ])
       .returning({ id: llmUsageEvents.id });
-    usageEventIds.push(usageEvent!.id);
+    usageEventIds.push(...usageEvents.map((event) => event.id));
 
     const rows = await getCostAnalyticsRows(
       {} as UserAuthSuccess,
-      7,
+      'all',
       new Date('2026-07-16T16:00:00.000Z'),
     );
-    const row = rows.find((candidate) => candidate.id === usageEvent!.id);
+    const row = rows.find((candidate) => candidate.id === usageEvents[0]!.id);
 
     expect(row?.dimensions.project?.label).toBe(environment.name);
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);

@@ -100,26 +100,29 @@ export async function getCostAnalyticsRows(
   const environmentNameById = new Map(
     environmentRows.map((environment) => [environment.id, environment.name]),
   );
-  const taskIds = [
-    ...new Set(
-      usageRows
-        .map((row) => row.taskId)
-        .filter((taskId): taskId is string => Boolean(taskId)),
-    ),
-  ];
-  const pullRequestRows =
-    taskIds.length === 0
-      ? []
-      : await db
-          .select({
-            taskId: taskPullRequests.taskId,
-            repository: taskPullRequests.repository,
-            prNumber: taskPullRequests.prNumber,
-            sourceControlProvider: taskPullRequests.sourceControlProvider,
-            host: taskPullRequests.host,
-          })
-          .from(taskPullRequests)
-          .where(inArray(taskPullRequests.taskId, taskIds));
+  const pullRequestRows = await db
+    .select({
+      taskId: taskPullRequests.taskId,
+      repository: taskPullRequests.repository,
+      prNumber: taskPullRequests.prNumber,
+      sourceControlProvider: taskPullRequests.sourceControlProvider,
+      host: taskPullRequests.host,
+    })
+    .from(taskPullRequests)
+    .innerJoin(tasks, eq(tasks.id, taskPullRequests.taskId))
+    .where(
+      and(
+        isNull(tasks.deletedAt),
+        sql`exists (
+          select 1
+          from ${llmUsageEvents}
+          where ${and(
+            eq(llmUsageEvents.taskId, taskPullRequests.taskId),
+            usageCutoffCondition,
+          )}
+        )`,
+      ),
+    );
   const prKeysByTaskId = new Map<string, Set<string>>();
   for (const pullRequest of pullRequestRows) {
     if (pullRequest.prNumber === null || !pullRequest.repository) {
