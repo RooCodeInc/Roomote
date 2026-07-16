@@ -40,6 +40,7 @@ type SettingsNavigationItem = {
   href: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  hiddenWhenCloud?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
 };
@@ -87,6 +88,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     href: SETTINGS_PATHS.compute,
     icon: Cpu,
     adminOnly: true,
+    hiddenWhenCloud: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.compute),
   },
   {
@@ -188,9 +190,15 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
   },
 ];
 
-export function getAccessibleSettingsNavigation(opts: { isAdmin: boolean }) {
+export function getAccessibleSettingsNavigation(opts: {
+  isAdmin: boolean;
+  cloudEnabled: boolean;
+}) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
+      return false;
+    }
+    if (item.hiddenWhenCloud && opts.cloudEnabled) {
       return false;
     }
     return true;
