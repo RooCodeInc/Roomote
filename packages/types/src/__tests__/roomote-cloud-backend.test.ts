@@ -34,13 +34,22 @@ describe('resolveRoomoteCloudModalAppName', () => {
     ).toBe('roomote-acme');
   });
 
-  it('lets an explicit MODAL_APP_NAME win as an escape hatch', () => {
+  it('lets the dedicated ROOMOTE_CLOUD_APP_NAME override win', () => {
     expect(
       resolveRoomoteCloudModalAppName({
-        MODAL_APP_NAME: 'custom-app',
+        ROOMOTE_CLOUD_APP_NAME: 'managed-custom-app',
         ROOMOTE_CLOUD_SLUG: 'acme',
       }),
-    ).toBe('custom-app');
+    ).toBe('managed-custom-app');
+  });
+
+  it('ignores the BYO Modal MODAL_APP_NAME so it cannot redirect managed attribution', () => {
+    expect(
+      resolveRoomoteCloudModalAppName({
+        MODAL_APP_NAME: 'byo-custom-app',
+        ROOMOTE_CLOUD_SLUG: 'acme',
+      }),
+    ).toBe('roomote-acme');
   });
 
   it('returns undefined with neither, deferring to the client default', () => {

@@ -126,7 +126,7 @@ export class RoomoteController extends BaseController {
           modalAppName:
             provider === 'roomote'
               ? resolveRoomoteCloudModalAppName({
-                  MODAL_APP_NAME: Env.MODAL_APP_NAME,
+                  ROOMOTE_CLOUD_APP_NAME: resolvedEnv.ROOMOTE_CLOUD_APP_NAME,
                   ROOMOTE_CLOUD_SLUG: resolvedEnv.ROOMOTE_CLOUD_SLUG,
                 })
               : Env.MODAL_APP_NAME,
