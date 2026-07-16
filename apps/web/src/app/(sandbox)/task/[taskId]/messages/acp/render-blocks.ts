@@ -510,52 +510,72 @@ function buildGroupedToolItem(
  * `tool_call` is kept as a fallback for in-progress invocations that have not
  * yet produced a result.
  *
- * When `toolCallId` is missing, fall back to a stable payload signature so a
- * lone call/result pair still counts as one invocation rather than twice.
+ * Items with a `toolCallId` are matched globally by that id. Items without one
+ * only merge a consecutive `tool_call` + `tool_result` pair that share the same
+ * payload signature, so two legitimate repeated operations stay distinct.
  */
 function dedupeGroupItemsByToolCallId(
   items: GroupedToolCallItem[],
 ): GroupedToolCallItem[] {
-  const chosen = new Map<string, GroupedToolCallItem>();
+  const preferredByToolCallId = new Map<string, GroupedToolCallItem>();
 
   for (const item of items) {
-    const key = extractGroupItemDedupeKey(item);
+    const toolCallId = extractToolCallIdKey(item.msg.data.toolCallId);
 
-    if (key === null) {
+    if (!toolCallId) {
       continue;
     }
 
-    const existing = chosen.get(key);
+    const existing = preferredByToolCallId.get(toolCallId);
 
     if (
       !existing ||
       (item.msg.kind === 'tool_result' && existing.msg.kind !== 'tool_result')
     ) {
-      chosen.set(key, item);
+      preferredByToolCallId.set(toolCallId, item);
     }
   }
 
-  if (chosen.size === 0) {
-    return items;
-  }
-
-  const emittedKeys = new Set<string>();
   const result: GroupedToolCallItem[] = [];
+  const emittedToolCallIds = new Set<string>();
+  let index = 0;
 
-  for (const item of items) {
-    const key = extractGroupItemDedupeKey(item);
+  while (index < items.length) {
+    const item = items[index]!;
+    const toolCallId = extractToolCallIdKey(item.msg.data.toolCallId);
 
-    if (key === null) {
-      result.push(item);
+    if (toolCallId) {
+      if (!emittedToolCallIds.has(toolCallId)) {
+        emittedToolCallIds.add(toolCallId);
+        result.push(preferredByToolCallId.get(toolCallId)!);
+      }
+
+      index += 1;
       continue;
     }
 
-    if (emittedKeys.has(key)) {
+    const next = items[index + 1];
+    const signature = extractPayloadSignature(item);
+    const nextToolCallId = next
+      ? extractToolCallIdKey(next.msg.data.toolCallId)
+      : null;
+
+    if (
+      next &&
+      nextToolCallId === null &&
+      item.msg.kind === 'tool_call' &&
+      next.msg.kind === 'tool_result' &&
+      signature !== null &&
+      signature === extractPayloadSignature(next)
+    ) {
+      // Prefer the settled result for a single unpaired call/result stream.
+      result.push(next);
+      index += 2;
       continue;
     }
 
-    emittedKeys.add(key);
-    result.push(chosen.get(key)!);
+    result.push(item);
+    index += 1;
   }
 
   return result;
@@ -567,13 +587,7 @@ function extractToolCallIdKey(toolCallId: unknown): string | null {
     : null;
 }
 
-function extractGroupItemDedupeKey(item: GroupedToolCallItem): string | null {
-  const toolCallId = extractToolCallIdKey(item.msg.data.toolCallId);
-
-  if (toolCallId) {
-    return `id:${toolCallId}`;
-  }
-
+function extractPayloadSignature(item: GroupedToolCallItem): string | null {
   const title = item.msg.data.title?.trim() ?? '';
   const command = item.msg.data.command?.trim() ?? '';
   const label = item.objectLabel.trim();
@@ -582,7 +596,7 @@ function extractGroupItemDedupeKey(item: GroupedToolCallItem): string | null {
     return null;
   }
 
-  return `sig:${item.groupKey}|${title}|${command}|${label}`;
+  return `${item.groupKey}|${title}|${command}|${label}`;
 }
 
 function isEmptyCompletedTextMessage(msg: AcpUiMessage): boolean {

@@ -171,6 +171,53 @@ describe('buildAcpActivityRenderBlocks', () => {
     });
   });
 
+  it('keeps live partial reasoning and tools outside collapsed activity groups', () => {
+    const partialReasoning: AcpRenderBlock = {
+      kind: 'message',
+      msg: {
+        id: 'reasoning-partial',
+        ts: 2_000,
+        role: 'assistant',
+        kind: 'reasoning',
+        partial: true,
+        sessionId: 'session-1',
+        updateType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        text: 'thinking…',
+        data: {},
+      },
+    };
+
+    const inProgressTool: AcpRenderBlock = {
+      kind: 'message',
+      msg: {
+        ...buildToolResult({ id: 'tool-partial', ts: 3_000 }),
+        kind: 'tool_call',
+        partial: true,
+        updateType: 'roomote_runtime.tool_call',
+        data: {
+          ...buildToolResult({ id: 'tool-partial', ts: 3_000 }).data,
+          status: 'in_progress',
+          output: undefined,
+          exitCode: undefined,
+        },
+      },
+    };
+
+    const entries = buildAcpActivityRenderBlocks([
+      textBlock('text-1', 1_000),
+      partialReasoning,
+      inProgressTool,
+      textBlock('text-2', 4_000),
+    ]);
+
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      'message',
+      'message',
+      'message',
+      'message',
+    ]);
+  });
+
   it('collapses mixed eligible activity blocks into one group', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),

@@ -948,6 +948,61 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries[0].objectSummary).toBe('2 files');
   });
 
+  it('keeps distinct no-toolCallId results with the same signature separate', () => {
+    const firstRead = {
+      ...readFileToolMessage({
+        id: 'tool-1-result',
+        ts: 1,
+        title: 'Read server.ts',
+        text: 'first pass',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolMessage({
+          id: 'tool-1-result',
+          ts: 1,
+          title: 'Read server.ts',
+          text: 'first pass',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolResultUiMessage;
+
+    const secondRead = {
+      ...readFileToolMessage({
+        id: 'tool-2-result',
+        ts: 2,
+        title: 'Read server.ts',
+        text: 'second pass',
+        toolCallId: '',
+      }),
+      data: {
+        ...readFileToolMessage({
+          id: 'tool-2-result',
+          ts: 2,
+          title: 'Read server.ts',
+          text: 'second pass',
+          toolCallId: '',
+        }).data,
+        toolCallId: null,
+      },
+    } as AcpToolResultUiMessage;
+
+    const entries = buildAcpRenderBlocks([firstRead, secondRead]);
+
+    expect(entries).toHaveLength(1);
+    if (entries[0]?.kind !== 'tool_group') {
+      throw new Error('Expected tool_group entry');
+    }
+
+    expect(entries[0].items).toHaveLength(2);
+    expect(entries[0].items.map((item) => item.msg.id)).toEqual([
+      'tool-1-result',
+      'tool-2-result',
+    ]);
+  });
+
   it('does not group across non-tool messages', () => {
     const entries = buildAcpRenderBlocks([
       readFileToolMessage({

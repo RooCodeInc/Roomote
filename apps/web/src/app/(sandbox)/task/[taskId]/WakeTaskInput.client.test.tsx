@@ -260,7 +260,7 @@ describe('WakeTaskInput', () => {
       }),
     ]);
     expect(toastErrorMock).not.toHaveBeenCalled();
-    expect(capturedPlaceholder).toBe('Wake up Roomote with this message');
+    expect(capturedPlaceholder).toBe('Wake up Roomote with a message...');
     expect(capturedSuggestion).toBeUndefined();
     expect(capturedSubmitWithMetaKey).toBe(false);
   });

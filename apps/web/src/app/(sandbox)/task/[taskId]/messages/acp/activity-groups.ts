@@ -81,10 +81,31 @@ function isArtifactToolMessage(
   return resolveVisualProofMediaForToolMessage(msg, artifacts).length > 0;
 }
 
+function isLivePartialBlock(block: AcpRenderBlock): boolean {
+  if (block.kind === 'tool_group') {
+    return block.items.some(
+      (item) =>
+        item.msg.partial === true || item.msg.data.status === 'in_progress',
+    );
+  }
+
+  if (block.msg.partial === true) {
+    return true;
+  }
+
+  return isToolMessage(block.msg) && block.msg.data.status === 'in_progress';
+}
+
 export function isActivityCollapsibleBlock(
   block: AcpRenderBlock,
   artifacts?: readonly TaskArtifact[] | null,
 ): boolean {
+  // Keep in-flight reasoning/tool rows outside default-closed groups so current
+  // activity stays visible without a manual expand.
+  if (isLivePartialBlock(block)) {
+    return false;
+  }
+
   if (block.kind === 'tool_group') {
     return !block.items.some((item) =>
       isArtifactToolMessage(item.msg, artifacts),

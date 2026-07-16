@@ -49,6 +49,18 @@ export const AcpCommandOutputMessage = ({
   const isExitCodePresent = cmd.exitCode !== undefined;
   const isPending =
     status === 'in_progress' || (status === null && !isExitCodePresent);
+  const isFailed =
+    status === 'failed' || (isExitCodePresent && cmd.exitCode !== 0);
+
+  const statusText = isPending
+    ? null
+    : isExitCodePresent
+      ? cmd.exitCode === 0
+        ? null
+        : `exit ${cmd.exitCode}`
+      : status === 'failed'
+        ? 'failed'
+        : null;
 
   return (
     <Message from="assistant" className={cn('chat-command-output-message')}>
@@ -75,6 +87,13 @@ export const AcpCommandOutputMessage = ({
               >
                 {command ?? 'Terminal'}
               </CodeBlockCommand>
+              {statusText && (
+                <span
+                  className={`mt-[5px] text-[11px] shrink-0 self-start font-mono select-none ${isFailed ? 'text-red-500' : 'text-muted-foreground/75'}`}
+                >
+                  → {statusText}
+                </span>
+              )}
             </CodeBlockTitle>
           </CodeBlockHeader>
         </CodeBlock>
