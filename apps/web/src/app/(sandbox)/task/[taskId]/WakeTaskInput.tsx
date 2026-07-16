@@ -5,20 +5,24 @@ import { toast } from 'sonner';
 
 import type { PromptInputMessage } from '@/components/ai-elements';
 import { TaskPromptInput } from '@/components/tasks';
+import { Sun } from '@/components/system';
 import { useRestoreTaskRunSnapshot } from '@/hooks/snapshots';
 import { preparePromptAttachments } from '@/lib/prompt-attachments';
 import type { TaskRunDetail } from '@/lib/server';
+import { cn } from '@/lib/utils';
 
 import { useOptimisticPromptSubmission } from './prompt-input/useOptimisticPromptSubmission';
 
 interface WakeTaskInputProps {
   taskRun: Pick<TaskRunDetail, 'id' | 'snapshotId' | 'taskId'>;
   initialPrompt?: string;
+  embedded?: boolean;
 }
 
 export function WakeTaskInput({
   taskRun,
   initialPrompt = '',
+  embedded = false,
 }: WakeTaskInputProps) {
   const {
     rollbackOptimisticPromptSubmission,
@@ -115,19 +119,26 @@ export function WakeTaskInput({
     }
   };
 
-  return (
-    <div className="border-t">
-      <div className="mx-auto w-full max-w-4xl px-4 pt-4 pb-5">
-        <TaskPromptInput
-          isBusy={isBusy}
-          promptText={promptText}
-          onPromptTextChange={setPromptText}
-          onSubmit={handleSubmit}
-          placeholder="Wake up Roomote with this message"
-          animateContainer={false}
-          submitWithMetaKey={false}
-        />
-      </div>
+  const input = (
+    <div
+      className={cn(
+        'mx-auto w-full max-w-4xl',
+        embedded ? '' : 'px-4 pt-4 pb-5',
+      )}
+    >
+      <TaskPromptInput
+        isBusy={isBusy}
+        promptText={promptText}
+        onPromptTextChange={setPromptText}
+        onSubmit={handleSubmit}
+        placeholder="Wake up Roomote with a message..."
+        animateContainer={false}
+        submitWithMetaKey={false}
+        submitIcon={promptText.trim().length === 0 ? <Sun /> : undefined}
+        surface={embedded ? 'embedded' : 'default'}
+      />
     </div>
   );
+
+  return embedded ? input : <div className="border-t">{input}</div>;
 }

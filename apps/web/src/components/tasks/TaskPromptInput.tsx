@@ -34,9 +34,11 @@ import { cn } from '@/lib/utils';
 function SubmitButton({
   isBusy,
   disabledReason,
+  icon,
 }: {
   isBusy: boolean;
   disabledReason?: string;
+  icon?: ReactNode;
 }) {
   const isDisabled = isBusy || Boolean(disabledReason);
   const button = (
@@ -46,7 +48,9 @@ function SubmitButton({
       size="sm"
       className="group size-8 overflow-clip"
     >
-      <SendHorizontal className="fill-background group-[:not(:disabled):hover]:animate-fly-through" />
+      {icon ?? (
+        <SendHorizontal className="fill-background group-[:not(:disabled):hover]:animate-fly-through" />
+      )}
     </PromptInputSubmit>
   );
 
@@ -112,6 +116,8 @@ type TaskPromptInputProps = {
   submitDisabledReason?: string;
   /** When true, submit on Cmd/Ctrl+Enter instead of plain Enter. */
   submitWithMetaKey?: boolean;
+  submitIcon?: ReactNode;
+  surface?: 'default' | 'embedded';
 };
 
 export function TaskPromptInput({
@@ -127,6 +133,8 @@ export function TaskPromptInput({
   suggestion,
   submitDisabledReason,
   submitWithMetaKey = true,
+  submitIcon,
+  surface = 'default',
 }: TaskPromptInputProps) {
   const voiceDictation = useVoiceDictation({
     onTranscript: (text) => onPromptTextChange(text),
@@ -137,8 +145,12 @@ export function TaskPromptInput({
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 border rounded-lg p-2 bg-card border-input focus-within:border-accent-bright-foreground',
-        animateContainer && 'animate-[enter-down_1s_1_200ms_backwards]',
+        'flex flex-col gap-2',
+        surface === 'default' &&
+          'border rounded-lg p-2 bg-card border-input focus-within:border-accent-bright-foreground',
+        animateContainer &&
+          surface === 'default' &&
+          'animate-[enter-down_1s_1_200ms_backwards]',
       )}
     >
       <PromptInputRoot
@@ -154,7 +166,7 @@ export function TaskPromptInput({
             autoFocus={autoFocus}
             placeholder={placeholder}
             disabled={isBusy}
-            className="min-h-30"
+            className={surface === 'default' ? 'min-h-30' : undefined}
             style={
               textareaMaxHeight != null
                 ? { maxHeight: textareaMaxHeight }
@@ -165,7 +177,9 @@ export function TaskPromptInput({
             onChange={(e) => onPromptTextChange(e.target.value)}
           />
         </PromptInputBody>
-        <PromptInputFooter className="p-0">
+        <PromptInputFooter
+          className={surface === 'default' ? 'p-0' : 'pt-0 pb-4 px-4'}
+        >
           <PromptInputTools>
             <PromptInputActionMenu>
               <PromptInputActionMenuTrigger />
@@ -187,6 +201,7 @@ export function TaskPromptInput({
               <SubmitButton
                 isBusy={isBusy}
                 disabledReason={submitDisabledReason}
+                icon={submitIcon}
               />
             </div>
           </div>
