@@ -1,5 +1,3 @@
-export { useAnalyticsChart } from './useAnalyticsChart';
-export { useAnalyticsFilters } from './useAnalyticsFilters';
-
 export { useAnalyticsDetails } from './useAnalyticsDetails';
+export { useAnalyticsOverview } from './useAnalyticsOverview';
 export { usePullRequestAnalyticsOverview } from './usePullRequestAnalyticsOverview';

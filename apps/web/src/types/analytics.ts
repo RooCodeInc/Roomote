@@ -55,6 +55,10 @@ export const analyticsChartInputSchema = z.object({
   granularity: analyticsGranularitySchema.optional(),
 });
 
+export const analyticsOverviewInputSchema = analyticsChartInputSchema.extend(
+  {},
+);
+
 export const analyticsFilterOptionsInputSchema = z.object({
   object: analyticsObjectSchema,
   filters: analyticsFiltersSchema.optional(),
@@ -141,6 +145,11 @@ export type AnalyticsCostBreakdownRow = {
 export type AnalyticsFilterOptionsResponse = {
   filters: Partial<Record<AnalyticsDimension, AnalyticsFilterOption[]>>;
   availableViewBy: AnalyticsDimension[];
+};
+
+export type AnalyticsOverviewResponse = {
+  chart: AnalyticsChartResponse;
+  filterOptions: AnalyticsFilterOptionsResponse;
 };
 
 export type AnalyticsDetailsColumn = {
