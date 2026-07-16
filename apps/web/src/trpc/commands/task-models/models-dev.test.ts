@@ -4,6 +4,7 @@ import {
   fetchModelsDevCatalog,
   lookupModelMetadataFromCatalog,
   resolveModelsDevSlug,
+  suggestModelsFromCatalog,
   type ModelsDevCatalog,
 } from './models-dev';
 
@@ -368,5 +369,27 @@ describe('fetchModelsDevCatalog', () => {
     controller.abort();
     const result = await fetchModelsDevCatalog(controller.signal);
     expect(result).toBeNull();
+  });
+});
+
+describe('suggestModelsFromCatalog', () => {
+  it('finds model names with a fuzzy query', () => {
+    const catalog = buildCatalog({
+      providers: {
+        openrouter: {
+          models: {
+            'moonshotai/kimi-k3': { name: 'Kimi K3' },
+          },
+        },
+      },
+    });
+
+    expect(
+      suggestModelsFromCatalog({
+        catalog,
+        providerId: 'openrouter',
+        query: 'km3',
+      }),
+    ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
   });
 });

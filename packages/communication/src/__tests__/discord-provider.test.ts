@@ -58,6 +58,9 @@ describe('DiscordCommunicationProvider', () => {
       enforce_nonce: true,
       embeds: [{ description: 'Screenshot' }],
     });
+    // SUPPRESS_EMBEDS hides embeds the message carries itself, so a chunk
+    // sending images must not set it.
+    expect(requests[0]?.body).not.toHaveProperty('flags');
     expect(requests[1]?.body).toMatchObject({
       content: 'b'.repeat(25),
       allowed_mentions: { parse: [] },
@@ -71,6 +74,51 @@ describe('DiscordCommunicationProvider', () => {
         },
       ],
     });
+  });
+
+  it('suppresses link unfurls on messages that carry no embeds of their own', async () => {
+    // Discord unfurls any link into a preview card. Roomote posts task links
+    // constantly, and Slack has always sent `unfurl_links: false`.
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+
+    await provider.postMessage({
+      channelId,
+      text: 'Open the task: https://roomote.example/tasks/1',
+    });
+
+    const posted = server.state.requests.find(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('/messages'),
+    );
+    expect(posted?.body).toMatchObject({ flags: 4 });
+  });
+
+  it('never rewrites flags while editing a message', async () => {
+    // Editing `flags` replaces the whole bitfield. Discord retains embeds the
+    // original carried, so suppressing on an edit would hide images that were
+    // posted deliberately, and an interaction deferral's flags may carry
+    // EPHEMERAL — rewriting them could expose an ephemeral reply.
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+
+    const sent = await provider.postMessage({ channelId, text: 'working' });
+    await provider.editMessage({
+      channelId,
+      messageId: sent.messageId,
+      text: 'Open the task: https://roomote.example/tasks/1',
+    });
+    await provider.editInteractionResponse({
+      applicationId: '600000000000000001',
+      interactionToken: 'token-1',
+      text: 'Open the task: https://roomote.example/tasks/1',
+    });
+
+    for (const request of server.state.requests.filter(
+      (candidate) => candidate.method === 'PATCH',
+    )) {
+      expect(request.body).not.toHaveProperty('flags');
+    }
   });
 
   it('retries rate limits and deduplicates retried sends with a nonce', async () => {

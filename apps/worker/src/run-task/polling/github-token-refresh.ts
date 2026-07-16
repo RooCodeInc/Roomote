@@ -3,6 +3,7 @@ import { sdk } from '@roomote/sdk/client';
 import {
   applySourceControlTokenMetadata,
   ensureSourceControlTokenEnvFiles,
+  runUnlessCredentialWriteBarrier,
 } from '../../lib';
 import type { HarnessLogger } from '../../logging';
 
@@ -12,10 +13,10 @@ const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
 
 interface GitHubTokenRefreshOptions {
   runId: number;
-  logger: HarnessLogger;
+  logger: Pick<HarnessLogger, 'info' | 'error'>;
 }
 
-async function refreshGitHubToken({
+export async function refreshGitHubToken({
   runId,
   logger,
 }: GitHubTokenRefreshOptions): Promise<
@@ -79,8 +80,16 @@ export function createGitHubTokenRefreshInterval(
 
     refreshInFlight = true;
     try {
-      const result = await refreshGitHubToken(options);
-      nextRefreshAtMs = result.nextRefreshAtMs;
+      // Skipped once the pre-snapshot credential scrub engages its barrier:
+      // a refresh completing after the scrub would write token files back
+      // onto the filesystem right before the provider snapshots it.
+      const result = await runUnlessCredentialWriteBarrier(() =>
+        refreshGitHubToken(options),
+      );
+
+      if (result) {
+        nextRefreshAtMs = result.nextRefreshAtMs;
+      }
     } finally {
       refreshInFlight = false;
     }

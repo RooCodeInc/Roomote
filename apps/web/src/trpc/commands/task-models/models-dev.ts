@@ -6,6 +6,11 @@ import {
 
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
+const MODELS_DEV_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
+
+let cachedModelsDevCatalog:
+  | { catalog: ModelsDevCatalog; expiresAt: number }
+  | undefined;
 
 type ModelsDevModalities = {
   input?: string[];
@@ -140,7 +145,22 @@ function extractMetadataFromEntry(
 
 export async function fetchModelsDevCatalog(
   signal?: AbortSignal,
+  options?: { forceRefresh?: boolean },
 ): Promise<ModelsDevCatalog | null> {
+  if (signal?.aborted) {
+    return null;
+  }
+
+  const cachedCatalog = cachedModelsDevCatalog;
+
+  if (
+    !options?.forceRefresh &&
+    cachedCatalog &&
+    cachedCatalog.expiresAt > Date.now()
+  ) {
+    return cachedCatalog.catalog;
+  }
+
   try {
     const response = await fetch(MODELS_DEV_CATALOG_URL, { signal });
     if (!response.ok) {
@@ -160,11 +180,16 @@ export async function fetchModelsDevCatalog(
       }
       gatewayModelsByLowerSlug[gatewayProviderId] = byLowerSlug;
     }
-    return {
+    const catalog = {
       models: payload.models ?? {},
       providers,
       gatewayModelsByLowerSlug,
     };
+    cachedModelsDevCatalog = {
+      catalog,
+      expiresAt: Date.now() + MODELS_DEV_CATALOG_CACHE_TTL_MS,
+    };
+    return catalog;
   } catch {
     return null;
   }
@@ -277,7 +302,7 @@ export function suggestModelsFromCatalog(options: {
 }): ModelsDevSuggestion[] {
   const normalizedQuery = options.query.trim().toLowerCase();
 
-  if (normalizedQuery.length < 2) {
+  if (normalizedQuery.length < 1) {
     return [];
   }
 
@@ -304,6 +329,18 @@ export function suggestModelsFromCatalog(options: {
         rank = 4;
       } else if (lowerName.includes(normalizedQuery)) {
         rank = 5;
+      } else {
+        const fuzzySlugRank = getFuzzyMatchRank(lowerSlug, normalizedQuery);
+        const fuzzyNameRank = getFuzzyMatchRank(lowerName, normalizedQuery);
+
+        if (fuzzySlugRank !== null || fuzzyNameRank !== null) {
+          rank =
+            6 +
+            Math.min(
+              fuzzySlugRank ?? Number.POSITIVE_INFINITY,
+              fuzzyNameRank ?? Number.POSITIVE_INFINITY,
+            );
+        }
       }
 
       if (rank === null) {
@@ -343,4 +380,29 @@ export function suggestModelsFromCatalog(options: {
     })
     .slice(0, options.limit ?? 8)
     .map(({ slug, displayName }) => ({ slug, displayName }));
+}
+
+function getFuzzyMatchRank(candidate: string, query: string): number | null {
+  let candidateIndex = 0;
+  let previousMatchIndex = -1;
+  let rank = 0;
+
+  for (const queryCharacter of query) {
+    const matchIndex = candidate.indexOf(queryCharacter, candidateIndex);
+
+    if (matchIndex === -1) {
+      return null;
+    }
+
+    if (previousMatchIndex >= 0) {
+      rank += matchIndex - previousMatchIndex - 1;
+    } else {
+      rank += matchIndex;
+    }
+
+    previousMatchIndex = matchIndex;
+    candidateIndex = matchIndex + 1;
+  }
+
+  return rank;
 }

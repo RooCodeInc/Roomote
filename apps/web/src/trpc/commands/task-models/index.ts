@@ -1242,7 +1242,7 @@ export async function suggestTaskModelsCommand(
   const provider = getSetupModelProvider(input.providerId);
   const query = input.query.trim();
 
-  if (query.length < 2) {
+  if (query.length < 1) {
     return { suggestions: [] };
   }
 
@@ -1311,6 +1311,7 @@ export async function refreshTaskModelMetadataCommand(
 
   const catalog = await fetchModelsDevCatalog(
     AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    { forceRefresh: true },
   );
   if (!catalog) {
     return {

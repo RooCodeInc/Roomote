@@ -6,15 +6,20 @@
  */
 const AUTOMATION_LABEL_ACRONYMS = new Set(['pr', 'ci', 'mcp']);
 
+/** Token spellings that are not plain UPPERCASE acronyms. */
+const AUTOMATION_LABEL_TOKEN_OVERRIDES = new Map([['codeql', 'CodeQL']]);
+
 export function formatAutomationLabel(key: string): string {
   return key
     .split(/[_-]+/)
     .filter(Boolean)
-    .map((word) =>
-      AUTOMATION_LABEL_ACRONYMS.has(word)
+    .map((word) => {
+      const override = AUTOMATION_LABEL_TOKEN_OVERRIDES.get(word);
+      if (override) return override;
+      return AUTOMATION_LABEL_ACRONYMS.has(word)
         ? word.toUpperCase()
-        : word.charAt(0).toUpperCase() + word.slice(1),
-    )
+        : word.charAt(0).toUpperCase() + word.slice(1);
+    })
     .join(' ');
 }
 
