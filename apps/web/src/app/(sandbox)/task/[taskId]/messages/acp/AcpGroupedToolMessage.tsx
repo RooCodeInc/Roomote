@@ -87,7 +87,7 @@ export function AcpGroupedToolMessage({
             collapsible={showExpandedDetails}
           />
           {showExpandedDetails ? (
-            <ToolContent className="mt-2 space-y-4">
+            <ToolContent className="space-y-2 px-4 ml-1.5 mb-4 mt-2 border-l">
               {group.items.map((item) => {
                 const sectionTitle = sanitizeSandboxPathString(
                   item.objectLabel,

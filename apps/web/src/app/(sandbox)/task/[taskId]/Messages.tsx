@@ -40,8 +40,13 @@ import { SleepWakeMessages } from './messages/index';
 import {
   AcpMessageItem,
   AcpGroupedToolMessage,
+  AcpActivityGroupMessage,
   AcpTextMessage,
 } from './messages/acp';
+import {
+  buildAcpActivityRenderBlocks,
+  type AcpConversationRenderBlock,
+} from './messages/acp/activity-groups';
 import {
   buildAcpRenderBlocks,
   type AcpRenderBlock,
@@ -120,7 +125,11 @@ function DebugTimestamp({
   );
 }
 
-function blockUsesOwnTimestamp(block: AcpRenderBlock): boolean {
+function blockUsesOwnTimestamp(block: AcpConversationRenderBlock): boolean {
+  if (block.kind === 'activity_group') {
+    return false;
+  }
+
   if (block.kind === 'tool_group') {
     return false;
   }
@@ -139,8 +148,14 @@ function blockUsesOwnTimestamp(block: AcpRenderBlock): boolean {
   }
 }
 
-function hasVisibleAssistantOutput(blocks: AcpRenderBlock[]): boolean {
+function hasVisibleAssistantOutput(
+  blocks: AcpConversationRenderBlock[],
+): boolean {
   return blocks.some((block) => {
+    if (block.kind === 'activity_group') {
+      return hasVisibleAssistantOutput(block.blocks);
+    }
+
     if (block.kind === 'tool_group') {
       return false;
     }
@@ -212,18 +227,25 @@ const MessagesBase = ({
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
 
   const renderBlocks = useMemo(
-    () =>
-      buildAcpRenderBlocks(messages, {
+    () => {
+      const acpBlocks = buildAcpRenderBlocks(messages, {
         displayMode: resolvedMessageUiOptions.displayMode,
         initialPrompt: resolvedHideFirstAcpUserPrompt ? sessionPrompt : null,
         shouldHideFirstMessage: resolvedHideFirstAcpUserPrompt,
         showInternalMessages,
         suppressedMessageIds,
-      }),
+      });
+
+      return buildAcpActivityRenderBlocks(acpBlocks, {
+        artifacts: session.artifacts,
+        displayMode: resolvedMessageUiOptions.displayMode,
+      });
+    },
     [
       messages,
       resolvedHideFirstAcpUserPrompt,
       resolvedMessageUiOptions.displayMode,
+      session.artifacts,
       sessionPrompt,
       showInternalMessages,
       suppressedMessageIds,
@@ -244,24 +266,71 @@ const MessagesBase = ({
     ));
   }
 
-  function renderRenderBlock(block: AcpRenderBlock, nested: boolean) {
+  function renderRenderBlock(
+    block: AcpConversationRenderBlock,
+    nested: boolean,
+  ) {
     const timestamp =
       showInternalMessages && !blockUsesOwnTimestamp(block) ? (
         <DebugTimestamp
-          ts={block.kind === 'tool_group' ? block.ts : block.msg.ts}
+          ts={
+            block.kind === 'activity_group'
+              ? block.ts
+              : block.kind === 'tool_group'
+                ? block.ts
+                : block.msg.ts
+          }
           previousTs={
-            block.kind === 'tool_group'
-              ? block.items[0]?.msg.previousTs
-              : block.msg.previousTs
+            block.kind === 'activity_group'
+              ? block.blocks[0]?.kind === 'tool_group'
+                ? block.blocks[0].items[0]?.msg.previousTs
+                : block.blocks[0]?.msg.previousTs
+              : block.kind === 'tool_group'
+                ? block.items[0]?.msg.previousTs
+                : block.msg.previousTs
           }
           anchorId={
-            block.kind === 'tool_group'
+            block.kind === 'activity_group'
               ? messageAnchorId(block.ts)
-              : messageAnchorId(block.msg.ts)
+              : block.kind === 'tool_group'
+                ? messageAnchorId(block.ts)
+                : messageAnchorId(block.msg.ts)
           }
           isUser={block.kind === 'message' && block.msg.role === 'user'}
         />
       ) : null;
+
+    if (block.kind === 'activity_group') {
+      const content = (
+        <AcpActivityGroupMessage
+          group={block}
+          anchorIds={collectBlockAnchorIds(block.blocks, [
+            messageAnchorId(block.ts),
+          ])}
+        >
+          {renderNestedBlocks(block.blocks)}
+        </AcpActivityGroupMessage>
+      );
+
+      const blockWithTimestamp = (
+        <>
+          {content}
+          {timestamp}
+        </>
+      );
+
+      return nested ? (
+        blockWithTimestamp
+      ) : (
+        <LazyMessage
+          key={block.id}
+          anchorId={messageAnchorId(block.ts)}
+          forceVisible={block.blocks.some(blockHasPartialMessage)}
+        >
+          {blockWithTimestamp}
+        </LazyMessage>
+      );
+    }
 
     if (block.kind === 'tool_group') {
       const content = (
@@ -351,3 +420,56 @@ const MessagesBase = ({
 export const Messages = memo(MessagesBase);
 
 Messages.displayName = 'Messages';
+
+function collectBlockAnchorIds(
+  blocks: AcpRenderBlock[],
+  excludedAnchorIds: string[] = [],
+): string[] {
+  const excluded = new Set(excludedAnchorIds);
+  const anchorIds: string[] = [];
+
+  const pushAnchor = (anchorId: string) => {
+    if (excluded.has(anchorId)) {
+      return;
+    }
+
+    excluded.add(anchorId);
+    anchorIds.push(anchorId);
+  };
+
+  collectBlockAnchorIdsInto(blocks, pushAnchor);
+
+  return anchorIds;
+}
+
+function collectBlockAnchorIdsInto(
+  blocks: AcpRenderBlock[],
+  pushAnchor: (anchorId: string) => void,
+): void {
+  for (const block of blocks) {
+    if (block.kind === 'tool_group') {
+      pushAnchor(messageAnchorId(block.ts));
+      for (const item of block.items) {
+        pushAnchor(messageAnchorId(item.msg.ts));
+      }
+      continue;
+    }
+
+    pushAnchor(messageAnchorId(block.msg.ts));
+
+    if (block.childBlocks) {
+      collectBlockAnchorIdsInto(block.childBlocks, pushAnchor);
+    }
+  }
+}
+
+function blockHasPartialMessage(block: AcpRenderBlock): boolean {
+  if (block.kind === 'tool_group') {
+    return block.items.some((item) => item.msg.partial);
+  }
+
+  return (
+    block.msg.partial ||
+    Boolean(block.childBlocks?.some(blockHasPartialMessage))
+  );
+}

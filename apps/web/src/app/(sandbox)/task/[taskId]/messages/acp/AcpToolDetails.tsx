@@ -58,7 +58,10 @@ export function AcpToolDetails({
   }
 
   return sanitizedText ? (
+    <>
     <CodeBlock code={sanitizedText} language="bash" maxHeight={maxHeight} />
+    </>
+    
   ) : (
     <ToolInput
       input={sanitizedToolData}

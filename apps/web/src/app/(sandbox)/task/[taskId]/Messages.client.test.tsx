@@ -88,6 +88,20 @@ vi.mock('./messages/index', () => ({
 vi.mock('./messages/acp', () => ({
   AcpMessageItem: ({ msg }: { msg: { id: string } }) => <div>{msg.id}</div>,
   AcpGroupedToolMessage: () => null,
+  AcpActivityGroupMessage: ({
+    group,
+    children,
+  }: {
+    group: { ts: number; endTs: number };
+    children: ReactNode;
+  }) => (
+    <div>
+      <button type="button">
+        Worked for {Math.round((group.endTs - group.ts) / 1000)}s
+      </button>
+      <div>{children}</div>
+    </div>
+  ),
   AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
     <div>{msg.text}</div>
   ),
@@ -481,5 +495,56 @@ describe('Messages', () => {
         shouldHideFirstMessage: true,
       }),
     );
+  });
+
+  it('collapses eligible background activity between text messages', () => {
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-1',
+          ts: 1_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'reasoning-1',
+          ts: 2_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
+          id: 'assistant-text-2',
+          ts: 19_000,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+        },
+      },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-1',
+            prompt: null,
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('Worked for 17s')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 });
