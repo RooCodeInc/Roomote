@@ -83,6 +83,7 @@ const state = vi.hoisted(() => ({
   slackChannelsIsError: false,
   slackChannelsIsFetching: false,
   updateRouterDebugIsPending: false,
+  createSlackAppIsPending: false,
 }));
 
 const mutations = vi.hoisted(() => ({
@@ -123,10 +124,14 @@ vi.mock('@tanstack/react-query', () => ({
     };
   },
   useMutation: (options: {
+    mutationName?: string;
     onSuccess?: (settings: unknown) => void;
     onError?: (error: Error) => void;
   }) => ({
-    isPending: state.updateRouterDebugIsPending,
+    isPending:
+      options.mutationName === 'createSlackApp'
+        ? state.createSlackAppIsPending
+        : state.updateRouterDebugIsPending,
     mutate: (input: unknown) => {
       if (input && typeof input === 'object' && 'configToken' in input) {
         options.onSuccess?.({
@@ -194,7 +199,10 @@ vi.mock('@/trpc/client', () => ({
     slack: {
       installation: { queryKey: () => ['slack', 'installation'] },
       createAppFromManifest: {
-        mutationOptions: (options: unknown) => options,
+        mutationOptions: (options: unknown) => ({
+          ...(options as Record<string, unknown>),
+          mutationName: 'createSlackApp',
+        }),
       },
     },
     comms: {
@@ -202,6 +210,9 @@ vi.mock('@/trpc/client', () => ({
       repairTelegram: {
         mutationOptions: (options: unknown) => options,
       },
+    },
+    environmentVariables: {
+      list: { queryKey: () => ['environmentVariables', 'list'] },
     },
     routerDebug: {
       getSettings: {
@@ -555,6 +566,7 @@ describe('CommsProviderSection', () => {
     state.slackChannelsIsError = false;
     state.slackChannelsIsFetching = false;
     state.updateRouterDebugIsPending = false;
+    state.createSlackAppIsPending = false;
   });
 
   describe('numbered setup instructions', () => {
@@ -600,7 +612,7 @@ describe('CommsProviderSection', () => {
     });
 
     it('shows logo actions after creating a Slack app from a config token', async () => {
-      render(
+      const { rerender } = render(
         <CommsProviderSection
           provider={buildSlackProvider()}
           onSave={vi.fn()}
@@ -623,6 +635,49 @@ describe('CommsProviderSection', () => {
         'href',
         'https://api.slack.com/apps/A0NEWAPP',
       );
+
+      rerender(
+        <CommsProviderSection
+          provider={buildSlackProvider({
+            runtimeSatisfied: false,
+            savedSatisfied: true,
+            setupSatisfied: true,
+          })}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
+        'href',
+        'https://api.slack.com/apps/A0NEWAPP',
+      );
+    });
+
+    it('keeps alternate Slack setup actions disabled while app creation is pending', () => {
+      state.createSlackAppIsPending = true;
+
+      render(
+        <CommsProviderSection
+          provider={buildSlackProvider()}
+          onSave={vi.fn()}
+          onClear={vi.fn()}
+          savePending={false}
+          clearPending={false}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Set it up' }));
+
+      expect(screen.getByLabelText('App configuration token')).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /Create Slack app/ }),
+      ).toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: /Create app manually/ }),
+      ).toBeDisabled();
     });
 
     it('shows numbered Microsoft setup with the settings env-var note', () => {
@@ -692,6 +747,12 @@ describe('CommsProviderSection', () => {
       ).not.toBeInTheDocument();
       expect(
         screen.queryByPlaceholderText('Telegram Webhook Secret'),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole('link', { name: /prefilled manifest/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/Create the app in Slack/i),
       ).not.toBeInTheDocument();
       expect(screen.getByText('Telegram Bot Token')).toBeInTheDocument();
       expect(

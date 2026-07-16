@@ -501,6 +501,9 @@ export function CommsProviderSection({
         await queryClient.invalidateQueries({
           queryKey: trpc.comms.status.queryKey(),
         });
+        await queryClient.invalidateQueries({
+          queryKey: trpc.environmentVariables.list.queryKey(),
+        });
       },
       onError: (error) => toast.error(error.message),
     }),
@@ -570,7 +573,6 @@ export function CommsProviderSection({
     setEditingSavedValues({});
     setClearedSavedValues({});
     setShowManualSlackValues(false);
-    setCreatedSlackAppSettingsUrl(null);
     setRemoveDialogOpen(false);
     // nonSecretInitialValues is content-keyed to avoid identity-only resets.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
@@ -580,6 +582,10 @@ export function CommsProviderSection({
     provider.savedSatisfied,
     nonSecretValuesKey,
   ]);
+
+  useEffect(() => {
+    setCreatedSlackAppSettingsUrl(null);
+  }, [provider.id]);
 
   useEffect(() => {
     setExpanded(

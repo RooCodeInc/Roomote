@@ -628,6 +628,86 @@ describe('MockSlackServer', () => {
     }
   });
 
+  it('rejects apps.manifest.create with invalid_manifest when a string manifest parses to a non-object', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+      },
+    });
+
+    try {
+      await server.start();
+
+      for (const manifest of ['[]', '1', '"text"', 'null']) {
+        const response = await fetch(
+          `${server.baseUrl}/api/apps.manifest.create`,
+          {
+            method: 'POST',
+            headers: {
+              authorization: 'Bearer xoxe.xoxp-any-token',
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({ manifest }),
+          },
+        );
+
+        expect(response.status).toBe(200);
+        await expect(response.json()).resolves.toEqual({
+          ok: false,
+          error: 'invalid_manifest',
+          errors: [
+            { message: 'manifest must be a JSON object', pointer: '/manifest' },
+          ],
+        });
+      }
+
+      expect(server.getState().createdManifests ?? []).toEqual([]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('deletes an app through apps.manifest.delete with a config token', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedConfigTokens: ['xoxe.xoxp-config-token'],
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+        createdManifests: [
+          {
+            appId: 'A0MANIFEST',
+            manifest: { display_information: { name: 'Roomote' } },
+          },
+        ],
+      },
+    });
+
+    try {
+      await server.start();
+
+      const response = await fetch(
+        `${server.baseUrl}/api/apps.manifest.delete`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer xoxe.xoxp-config-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ app_id: 'A0MANIFEST' }),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      expect(server.getState().createdManifests).toEqual([]);
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('returns not_in_channel for conversations.members when the app is not in the channel', async () => {
     const server = new MockSlackServer({
       state: {

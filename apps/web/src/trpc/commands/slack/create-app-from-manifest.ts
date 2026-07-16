@@ -25,6 +25,11 @@ type SlackManifestCreateResponse = {
   oauth_authorize_url?: string;
 };
 
+type SlackManifestDeleteResponse = {
+  ok?: boolean;
+  error?: string;
+};
+
 type CreateSlackAppFromManifestResult =
   | { success: true; appId: string; appSettingsUrl: string }
   | { success: false; error: string };
@@ -61,6 +66,42 @@ function formatManifestErrors(
   }
 
   return `Slack rejected the generated app manifest: ${messages.join('; ')}`;
+}
+
+async function deleteSlackAppFromManifest({
+  configToken,
+  appId,
+}: {
+  configToken: string;
+  appId: string;
+}): Promise<{ success: true } | { success: false; error: string }> {
+  const response = await fetch(buildSlackApiUrl('apps.manifest.delete'), {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${configToken}`,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({ app_id: appId }),
+  });
+
+  let data: SlackManifestDeleteResponse | null = null;
+
+  try {
+    data = (await response.json()) as SlackManifestDeleteResponse;
+  } catch {
+    data = null;
+  }
+
+  if (data?.ok) {
+    return { success: true };
+  }
+
+  return {
+    success: false,
+    error: data?.error
+      ? `Slack returned an error while deleting the app: ${data.error}`
+      : `Failed to delete the Slack app after credential persistence failed (HTTP ${response.status}).`,
+  };
 }
 
 /**
@@ -146,23 +187,64 @@ export async function createSlackAppFromManifest({
     const clientSecret = data.credentials?.client_secret?.trim() ?? '';
     const signingSecret = data.credentials?.signing_secret?.trim() ?? '';
 
+    const cleanupCreatedApp = async (reason: string) => {
+      const cleanupResult = await deleteSlackAppFromManifest({
+        configToken: normalizedConfigToken,
+        appId,
+      });
+
+      if (!cleanupResult.success) {
+        console.error(
+          '[createSlackAppFromManifest] Failed to delete created Slack app:',
+          cleanupResult.error,
+        );
+
+        return {
+          success: false,
+          error: `${reason} The Slack app ${appId} was created but could not be deleted automatically; delete it from api.slack.com/apps before trying again.`,
+        } satisfies CreateSlackAppFromManifestResult;
+      }
+
+      return {
+        success: false,
+        error: `${reason} The Slack app was deleted automatically; try again when the issue is resolved.`,
+      } satisfies CreateSlackAppFromManifestResult;
+    };
+
     if (!appId || !clientId || !clientSecret || !signingSecret) {
+      if (appId) {
+        return await cleanupCreatedApp(
+          'Slack returned an incomplete app creation response.',
+        );
+      }
+
       return {
         success: false,
         error: 'Slack returned an incomplete app creation response.',
       };
     }
 
-    await db.transaction(async (tx) => {
-      await upsertDeploymentEnvironmentVariables(tx, {
-        userId: actorUserId,
-        values: [
-          { name: 'R_SLACK_CLIENT_ID', value: clientId },
-          { name: 'R_SLACK_CLIENT_SECRET', value: clientSecret },
-          { name: 'R_SLACK_SIGNING_SECRET', value: signingSecret },
-        ],
+    try {
+      await db.transaction(async (tx) => {
+        await upsertDeploymentEnvironmentVariables(tx, {
+          userId: actorUserId,
+          values: [
+            { name: 'R_SLACK_CLIENT_ID', value: clientId },
+            { name: 'R_SLACK_CLIENT_SECRET', value: clientSecret },
+            { name: 'R_SLACK_SIGNING_SECRET', value: signingSecret },
+          ],
+        });
       });
-    });
+    } catch (error) {
+      console.error(
+        '[createSlackAppFromManifest] Failed to persist Slack credentials:',
+        error,
+      );
+
+      return await cleanupCreatedApp(
+        'Slack app credentials could not be saved.',
+      );
+    }
 
     return {
       success: true,

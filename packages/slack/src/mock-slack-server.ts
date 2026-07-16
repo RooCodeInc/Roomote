@@ -645,7 +645,15 @@ export class MockSlackServer {
 
         if (typeof manifestValue === 'string') {
           try {
-            manifest = JSON.parse(manifestValue) as JsonRecord;
+            const parsedManifest = JSON.parse(manifestValue);
+
+            if (
+              parsedManifest &&
+              typeof parsedManifest === 'object' &&
+              !Array.isArray(parsedManifest)
+            ) {
+              manifest = parsedManifest as JsonRecord;
+            }
           } catch {
             manifest = null;
           }
@@ -695,6 +703,31 @@ export class MockSlackServer {
           },
           oauth_authorize_url: `https://slack.com/oauth/v2/authorize?client_id=${encodeURIComponent(clientId)}`,
         });
+        return;
+      }
+
+      case 'POST apps.manifest.delete': {
+        // Real Slack reports Web API failures as HTTP 200 with `ok: false`.
+        if (!this.isConfigTokenAuthorized(request)) {
+          json(response, 200, { ok: false, error: 'invalid_auth' });
+          return;
+        }
+
+        const appId =
+          typeof jsonBody.app_id === 'string' ? jsonBody.app_id : '';
+        const createdManifests = this.state.createdManifests ?? [];
+        const nextCreatedManifests = createdManifests.filter(
+          (createdManifest) => createdManifest.appId !== appId,
+        );
+
+        if (!appId || nextCreatedManifests.length === createdManifests.length) {
+          json(response, 200, { ok: false, error: 'app_not_found' });
+          return;
+        }
+
+        this.state.createdManifests = nextCreatedManifests;
+
+        json(response, 200, { ok: true });
         return;
       }
 

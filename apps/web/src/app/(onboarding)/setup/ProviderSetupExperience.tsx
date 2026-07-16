@@ -373,10 +373,9 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
     !props.provider.runtimeSatisfied &&
     !props.provider.savedSatisfied
   ) {
+    const createSlackAppPending = props.createSlackAppPending === true;
     const createSlackAppDisabled =
-      !props.onCreateSlackApp ||
-      props.disabled ||
-      props.createSlackAppPending === true;
+      !props.onCreateSlackApp || props.disabled || createSlackAppPending;
     const submitConfigToken = () => {
       const normalizedConfigToken = configToken.trim();
 
@@ -437,7 +436,7 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
                   }
                 }}
                 placeholder="xoxe.xoxp-..."
-                disabled={props.disabled || props.createSlackAppPending}
+                disabled={props.disabled || createSlackAppPending}
                 data-1p-ignore
               />
             </div>
@@ -446,7 +445,12 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center mt-8">
           {props.onBack ? (
-            <Button type="button" variant="outline" onClick={props.onBack}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={props.onBack}
+              disabled={createSlackAppPending}
+            >
               <ArrowLeft />
               Back
             </Button>
@@ -456,13 +460,14 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
             onClick={submitConfigToken}
             disabled={createSlackAppDisabled || configToken.trim().length === 0}
           >
-            {props.createSlackAppPending ? <Spinner /> : <Sparkles />}
+            {createSlackAppPending ? <Spinner /> : <Sparkles />}
             Create Slack app
           </Button>
           <Button
             type="button"
             variant="outline"
             onClick={props.onShowManualSlackValues}
+            disabled={createSlackAppPending}
           >
             <Pencil />
             Create app manually
@@ -646,9 +651,12 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
   const providerSetupLabel =
     providerSetupCopy?.setupLabel ?? `${props.provider.label} app`;
   const fields = getSetupVisibleFields(props.provider);
-  const slackManifestPrefillUrl = buildSlackManifestPrefillUrl({
-    publicOrigin: props.publicOrigin,
-  });
+  const slackManifestPrefillUrl =
+    props.provider.id === 'slack'
+      ? buildSlackManifestPrefillUrl({
+          publicOrigin: props.publicOrigin,
+        })
+      : null;
 
   return (
     <div className="relative w-full max-w-2xl space-y-5 py-2 md:py-0">
@@ -657,20 +665,22 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
         text={`Configure ${providerSetupLabel}`}
       />
 
-      <p className="text-sm text-muted-foreground max-w-xl">
-        Prefer not to use a configuration token? Create the app in Slack&apos;s
-        UI from a{' '}
-        <a
-          href={slackManifestPrefillUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-foreground underline"
-          onClick={props.onShowManualSlackValues}
-        >
-          prefilled manifest
-        </a>{' '}
-        and enter its credentials manually.
-      </p>
+      {slackManifestPrefillUrl ? (
+        <p className="text-sm text-muted-foreground max-w-xl">
+          Prefer not to use a configuration token? Create the app in
+          Slack&apos;s UI from a{' '}
+          <a
+            href={slackManifestPrefillUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline"
+            onClick={props.onShowManualSlackValues}
+          >
+            prefilled manifest
+          </a>{' '}
+          and enter its credentials manually.
+        </p>
+      ) : null}
 
       <NumberedStep number={1} className="mt-6">
         <p className="font-semibold">
