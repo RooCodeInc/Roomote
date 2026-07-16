@@ -82,13 +82,8 @@ describe('DiscordCommunicationProvider', () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';
 
-    const sent = await provider.postMessage({
+    await provider.postMessage({
       channelId,
-      text: 'Open the task: https://roomote.example/tasks/1',
-    });
-    await provider.editMessage({
-      channelId,
-      messageId: sent.messageId,
       text: 'Open the task: https://roomote.example/tasks/1',
     });
 
@@ -96,11 +91,34 @@ describe('DiscordCommunicationProvider', () => {
       (request) =>
         request.method === 'POST' && request.path.endsWith('/messages'),
     );
-    const edited = server.state.requests.find(
-      (request) => request.method === 'PATCH',
-    );
     expect(posted?.body).toMatchObject({ flags: 4 });
-    expect(edited?.body).toMatchObject({ flags: 4 });
+  });
+
+  it('never rewrites flags while editing a message', async () => {
+    // Editing `flags` replaces the whole bitfield. Discord retains embeds the
+    // original carried, so suppressing on an edit would hide images that were
+    // posted deliberately, and an interaction deferral's flags may carry
+    // EPHEMERAL — rewriting them could expose an ephemeral reply.
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+
+    const sent = await provider.postMessage({ channelId, text: 'working' });
+    await provider.editMessage({
+      channelId,
+      messageId: sent.messageId,
+      text: 'Open the task: https://roomote.example/tasks/1',
+    });
+    await provider.editInteractionResponse({
+      applicationId: '600000000000000001',
+      interactionToken: 'token-1',
+      text: 'Open the task: https://roomote.example/tasks/1',
+    });
+
+    for (const request of server.state.requests.filter(
+      (candidate) => candidate.method === 'PATCH',
+    )) {
+      expect(request.body).not.toHaveProperty('flags');
+    }
   });
 
   it('retries rate limits and deduplicates retried sends with a nonce', async () => {
