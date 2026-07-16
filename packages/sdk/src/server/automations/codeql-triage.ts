@@ -92,6 +92,14 @@ export const codeqlTriageJob = createScheduledTriageJob({
     const environmentBackedRepositories = getEnvironmentBackedCoverage(
       repositoryCoverage,
     ).map((coverage) => coverage.repositoryFullName);
+
+    if (environmentBackedRepositories.length === 0) {
+      return {
+        kind: 'skip',
+        reason: 'No active GitHub repositories have configured environments',
+      };
+    }
+
     const recentThreadFeedback = await loadAutomationThreadFeedbackContext({
       automationKey: 'codeql_triage',
       slackChannelId: channelId,
@@ -102,9 +110,7 @@ export const codeqlTriageJob = createScheduledTriageJob({
       kind: 'scan',
       payload: {
         repo: ALL_REPOSITORIES,
-        ...(environmentBackedRepositories.length > 0
-          ? { selectedRepositories: environmentBackedRepositories }
-          : {}),
+        selectedRepositories: environmentBackedRepositories,
         description: buildCodeqlTriagePrompt({
           channelId,
           destination,
