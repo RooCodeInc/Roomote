@@ -226,33 +226,30 @@ const MessagesBase = ({
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
 
-  const renderBlocks = useMemo(
-    () => {
-      const acpBlocks = buildAcpRenderBlocks(messages, {
-        displayMode: resolvedMessageUiOptions.displayMode,
-        initialPrompt: resolvedHideFirstAcpUserPrompt ? sessionPrompt : null,
-        shouldHideFirstMessage: resolvedHideFirstAcpUserPrompt,
-        showInternalMessages,
-        suppressedMessageIds,
-      });
-
-      return buildAcpActivityRenderBlocks(acpBlocks, {
-        artifacts: session.artifacts,
-        displayMode: resolvedMessageUiOptions.displayMode,
-        hasLeadingTextBoundary: shouldRenderSessionPrompt,
-      });
-    },
-    [
-      messages,
-      resolvedHideFirstAcpUserPrompt,
-      resolvedMessageUiOptions.displayMode,
-      session.artifacts,
-      sessionPrompt,
-      shouldRenderSessionPrompt,
+  const renderBlocks = useMemo(() => {
+    const acpBlocks = buildAcpRenderBlocks(messages, {
+      displayMode: resolvedMessageUiOptions.displayMode,
+      initialPrompt: resolvedHideFirstAcpUserPrompt ? sessionPrompt : null,
+      shouldHideFirstMessage: resolvedHideFirstAcpUserPrompt,
       showInternalMessages,
       suppressedMessageIds,
-    ],
-  );
+    });
+
+    return buildAcpActivityRenderBlocks(acpBlocks, {
+      artifacts: session.artifacts,
+      displayMode: resolvedMessageUiOptions.displayMode,
+      hasLeadingTextBoundary: shouldRenderSessionPrompt,
+    });
+  }, [
+    messages,
+    resolvedHideFirstAcpUserPrompt,
+    resolvedMessageUiOptions.displayMode,
+    session.artifacts,
+    sessionPrompt,
+    shouldRenderSessionPrompt,
+    showInternalMessages,
+    suppressedMessageIds,
+  ]);
   const hasVisibleAssistantOutputInTranscript =
     hasVisibleAssistantOutput(renderBlocks);
   const shouldShowNarrationWorkingReasoning =

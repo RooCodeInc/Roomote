@@ -47,7 +47,10 @@ export function AcpActivityGroupMessage({
           <ChevronRight className="size-4 transition-transform group-data-[state=open]/acp-activity:rotate-90" />
           <span>Worked for {formatWorkedDuration(group.endTs - group.ts)}</span>
         </CollapsibleTrigger>
-        <div className="h-px min-w-8 flex-1 border-t border-border/20 relative top-px" aria-hidden="true" />
+        <div
+          className="h-px min-w-8 flex-1 border-t border-border/20 relative top-px"
+          aria-hidden="true"
+        />
       </div>
       <CollapsibleContent className="mt-4 space-y-0 border-l border-border pl-4 ml-2 data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 data-[state=closed]:animate-out data-[state=open]:animate-in">
         {children}
@@ -61,6 +64,10 @@ function formatWorkedDuration(durationMs: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
+
+  if (totalSeconds < 13) {
+    return 'a bit';
+  }
 
   if (hours > 0) {
     return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;

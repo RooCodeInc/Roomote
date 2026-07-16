@@ -6,11 +6,11 @@ import {
   buildAcpActivityRenderBlocks,
   isActivityCollapsibleBlock,
 } from '../activity-groups';
-import type { AcpRenderBlock, GroupedToolCallRenderBlock } from '../render-blocks';
 import type {
-  AcpToolResultUiMessage,
-  AcpUiMessage,
-} from '../types';
+  AcpRenderBlock,
+  GroupedToolCallRenderBlock,
+} from '../render-blocks';
+import type { AcpToolResultUiMessage } from '../types';
 
 function textBlock(id: string, ts: number): AcpRenderBlock {
   return {
@@ -284,7 +284,10 @@ describe('buildAcpActivityRenderBlocks', () => {
         'Uploaded proof https://example.test/task/task-1/artifacts/tmp/proof.png?v=1',
     });
 
-    if (visualProof.kind !== 'message' || visualProof.msg.kind !== 'tool_result') {
+    if (
+      visualProof.kind !== 'message' ||
+      visualProof.msg.kind !== 'tool_result'
+    ) {
       throw new Error('Expected tool result');
     }
 

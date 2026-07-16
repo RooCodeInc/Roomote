@@ -40,8 +40,6 @@ const config: KnipConfig = {
     },
     'apps/preview-proxy': {
       project: ['src/**/*.ts'],
-      // Loaded by Pino transport resolution from the target string in logger.ts.
-      ignoreDependencies: ['pino-pretty'],
     },
     'apps/web': {
       entry: [

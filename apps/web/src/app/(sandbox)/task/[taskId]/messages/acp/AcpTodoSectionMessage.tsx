@@ -2,7 +2,7 @@ import { Message, MessageContent } from '@/components/ai-elements';
 
 import { messageAnchorId } from '../message-anchor';
 import type { AcpTodoSectionUiMessage } from './types';
-import { ArrowRight, CheckSquare, SquareDashed } from 'lucide-react';
+import { SquareDashed } from 'lucide-react';
 
 interface AcpTodoSectionMessageProps {
   msg: AcpTodoSectionUiMessage;

@@ -8,7 +8,7 @@ import type {
 import type { AcpRenderBlock } from './render-blocks';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
-export const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
+const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
   'reasoning',
   'tool_call',
   'tool_result',
