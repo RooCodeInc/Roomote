@@ -1,4 +1,4 @@
-import { Blocks, PlugZap, UserCog, UserKey } from 'lucide-react';
+import { Blocks, Cog, PlugZap, UserCog, UserKey } from 'lucide-react';
 import { InstructionUrl } from './ProviderSetupInstructions';
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
@@ -97,7 +97,12 @@ export function AdoSourceControlInstructions({
         Create a Microsoft Entra app.
       </p>
       <p className="text-sm">
-        Open{' '}
+        If you&apos;ve already created a Microsoft Entra app for Teams in this
+        tenant, you can reuse it{' '}
+        <span className="font-semibold">
+          after adding the Azure DevOps access below.
+        </span>{' '}
+        If not, open{' '}
         <a
           href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
           target="_blank"
@@ -107,16 +112,45 @@ export function AdoSourceControlInstructions({
           Azure App registrations
         </a>{' '}
         → New registration → Create an app in the Microsoft tenant that can
-        access your Azure DevOps organization. IF you&apos;ve created an app for
-        Teams, you can reuse it.
-        <br />
-        Make sure to add this Web Redirect URI:
+        access your Azure DevOps organization.
       </p>
-
-      <InstructionUrl
-        heading="Web redirect URI"
-        url={`${publicOrigin}/api/auth/oauth2/callback/ado`}
-      />
+      {authMode === 'delegated' && (
+        <>
+          <p className="text-sm">
+            In either case, add the specific web redirect URI below (under
+            Authentication):
+          </p>
+          <InstructionUrl
+            heading="Web redirect URI"
+            url={`${publicOrigin}/api/auth/oauth2/callback/ado`}
+          />
+        </>
+      )}
+      {authMode === 'entra' && (
+        <>
+          <p className="text-sm">
+            Then go to{' '}
+            <a
+              href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-semibold text-foreground underline"
+            >
+              Entra Enterprise Apps
+            </a>{' '}
+            → find the app you just created → copy the service principal object
+            ID.
+          </p>
+          <p className="text-sm">
+            In Azure DevOps, go to the organization →{' '}
+            <Cog className="inline mx-1" /> Organization Settings → Users → Add
+            users → paste the object ID.
+            <br />
+            Set the access to Basic, choose the right project/group membership →
+            Add.
+          </p>
+        </>
+      )}
     </div>
   );
 }
