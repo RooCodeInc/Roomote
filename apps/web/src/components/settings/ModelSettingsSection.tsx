@@ -7,12 +7,14 @@ import { toast } from 'sonner';
 import { useTRPC } from '@/trpc/client';
 
 import {
+  ArrowLeftRight,
   ArrowRight,
   Badge,
   BasicTooltip,
   Brain,
   Button,
   Check,
+  ChevronDown,
   Command,
   CommandEmpty,
   CommandGroup,
@@ -392,59 +394,40 @@ function TaskModelRoleEditor({
 }
 
 /**
- * The "Use recommended" header action for the Default Models section. With a
- * single connected provider it applies that provider's recommended defaults
- * directly; with several it opens a picker so the operator chooses whose
- * recommendations to apply.
+ * Opens the preset picker for the model mapping section.
  */
 function UseRecommendedDefaultsAction({
   providers,
-  onApply,
+  onSelect,
 }: {
   providers: SetupModelProviderStatus[];
-  onApply: (provider: SetupModelProviderStatus) => void;
+  onSelect: (provider: SetupModelProviderStatus) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [onlyProvider] = providers;
 
   if (providers.length === 0) {
     return null;
   }
 
-  if (providers.length === 1 && onlyProvider) {
-    return (
-      <BasicTooltip
-        content={`Reset the default models to the recommended ${onlyProvider.label} defaults.`}
-      >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onApply(onlyProvider)}
-        >
-          Use recommended
-        </Button>
-      </BasicTooltip>
-    );
-  }
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm">
-          Use recommended
+        <Button variant="ghost" size="sm">
+          Use a mapping preset
+          <ChevronDown />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-0">
         <Command>
           <CommandList>
-            <CommandGroup heading="Apply recommended defaults from">
+            <CommandGroup>
               {providers.map((provider) => (
                 <CommandItem
                   key={provider.id}
                   value={provider.label}
                   onSelect={() => {
                     setOpen(false);
-                    onApply(provider);
+                    onSelect(provider);
                   }}
                 >
                   {provider.label}
@@ -492,6 +475,21 @@ function getNewModelPlaceholder(provider: SetupModelProviderId): string {
     : defaultModel;
 
   return `Eg: ${exampleSlug}`;
+}
+
+function getRecommendedRoleModelIds(
+  provider: SetupModelProviderStatus,
+): Record<TaskModelRole, string | null> {
+  const recommended = buildRecommendedDeploymentModelConfig(provider);
+
+  return {
+    coding: recommended.roomoteModel,
+    helper: recommended.roomoteSmallModel,
+    vision: recommended.roomoteVisionModel,
+    codeReview: recommended.roomoteCodeReviewModel,
+    explore: recommended.roomoteExploreModel,
+    planning: recommended.roomotePlanningModel,
+  };
 }
 
 type PendingLookupState =
@@ -774,6 +772,8 @@ export function ModelSettingsSection({
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<
     string | null
   >(null);
+  const [selectedPresetProvider, setSelectedPresetProvider] =
+    useState<SetupModelProviderStatus | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingLookup, setPendingLookup] =
     useState<PendingLookupState>(IDLE_PENDING_LOOKUP);
@@ -1498,19 +1498,11 @@ export function ModelSettingsSection({
     toast.success('Task model removed.');
   };
 
-  // "Use recommended" is an apply-once macro: it resets the default-model
+  // A mapping preset resets the default-model
   // roles to the provider's recommended defaults (adding and enabling any
   // recommended models that are missing) through the normal draft/save flow.
   const applyRecommendedDefaults = (provider: SetupModelProviderStatus) => {
-    const recommended = buildRecommendedDeploymentModelConfig(provider);
-    const recommendedRoleModelIds: Record<TaskModelRole, string | null> = {
-      coding: recommended.roomoteModel,
-      helper: recommended.roomoteSmallModel,
-      vision: recommended.roomoteVisionModel,
-      codeReview: recommended.roomoteCodeReviewModel,
-      explore: recommended.roomoteExploreModel,
-      planning: recommended.roomotePlanningModel,
-    };
+    const recommendedRoleModelIds = getRecommendedRoleModelIds(provider);
     const suggestionsById = new Map(
       provider.suggestedTaskModels.map((suggestion) => [
         suggestion.id,
@@ -1573,8 +1565,32 @@ export function ModelSettingsSection({
       },
       0,
     );
-    toast.success(`Applied the recommended ${provider.label} default models.`);
+    toast.success(`Applied the ${provider.label} mapping preset.`);
   };
+
+  const selectedPresetMappings = selectedPresetProvider
+    ? (() => {
+        const recommendedRoleModelIds = getRecommendedRoleModelIds(
+          selectedPresetProvider,
+        );
+
+        return TASK_MODEL_ROLE_CONFIGS.map((config) => {
+          const modelId =
+            recommendedRoleModelIds[config.role] ??
+            recommendedRoleModelIds.coding;
+          const displayName = modelId
+            ? (models.find((model) => model.id === modelId)?.displayName ??
+              selectedPresetProvider.suggestedTaskModels.find(
+                (model) => model.id === modelId,
+              )?.displayName ??
+              modelId.split('/').at(-1) ??
+              modelId)
+            : 'Not set';
+
+          return { config, displayName };
+        });
+      })()
+    : [];
 
   const handleRefreshMetadata = async () => {
     const result = await refreshMetadataMutation.mutateAsync();
@@ -1616,12 +1632,12 @@ export function ModelSettingsSection({
   return (
     <div className="space-y-6">
       <Section
-        icon={Brain}
-        title="Default Models"
+        icon={ArrowLeftRight}
+        title="Model mapping"
         action={
           <UseRecommendedDefaultsAction
             providers={sortedConnectedProviders}
-            onApply={applyRecommendedDefaults}
+            onSelect={setSelectedPresetProvider}
           />
         }
       >
@@ -1659,6 +1675,61 @@ export function ModelSettingsSection({
           })}
         </div>
       </Section>
+
+      <Dialog
+        open={selectedPresetProvider !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedPresetProvider(null);
+          }
+        }}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>
+              Apply {selectedPresetProvider?.label} preset
+            </DialogTitle>
+            <DialogDescription>Set this model mapping</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-y-3 text-sm">
+            {selectedPresetMappings.map(({ config, displayName }) => {
+              const Icon = config.icon;
+
+              return (
+                <div
+                  key={config.role}
+                  className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-center gap-x-3"
+                >
+                  <Icon className="size-4 text-muted-foreground" />
+                  <span className="font-medium">{config.label}</span>
+                  <span className="truncate text-muted-foreground">
+                    {displayName}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setSelectedPresetProvider(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (selectedPresetProvider) {
+                  applyRecommendedDefaults(selectedPresetProvider);
+                  setSelectedPresetProvider(null);
+                }
+              }}
+            >
+              <Check />
+              Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Section
         icon={Brain}

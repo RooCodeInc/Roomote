@@ -530,13 +530,11 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    const defaultModelsSection = screen.getByTestId('section-Default Models');
+    const modelMappingSection = screen.getByTestId('section-Model mapping');
     // coding: Medium, helper + vision + explore: Low, code review + planning: High.
-    expect(
-      within(defaultModelsSection).getByText('Medium'),
-    ).toBeInTheDocument();
-    expect(within(defaultModelsSection).getAllByText('Low')).toHaveLength(3);
-    expect(within(defaultModelsSection).getAllByText('High')).toHaveLength(2);
+    expect(within(modelMappingSection).getByText('Medium')).toBeInTheDocument();
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(3);
+    expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
   });
 
   it('shows the persisted reasoning level on each default model row', () => {
@@ -547,13 +545,13 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    const defaultModelsSection = screen.getByTestId('section-Default Models');
-    expect(within(defaultModelsSection).getAllByText('High')).toHaveLength(2);
+    const modelMappingSection = screen.getByTestId('section-Model mapping');
+    expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
     expect(
-      within(defaultModelsSection).getByText('Extra high'),
+      within(modelMappingSection).getByText('Extra high'),
     ).toBeInTheDocument();
     // Helper, vision, and explore fall back to Low.
-    expect(within(defaultModelsSection).getAllByText('Low')).toHaveLength(3);
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(3);
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {
@@ -737,7 +735,14 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    expect(
+      screen.getByRole('heading', { name: 'Apply Anthropic preset' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
@@ -786,8 +791,11 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
     fireEvent.click(await screen.findByRole('option', { name: 'OpenRouter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
@@ -803,6 +811,44 @@ describe('ModelSettingsSection', () => {
         planningModelId: null,
       }),
     );
+  });
+
+  it('previews a preset mapping and does not apply it when cancelled', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      suggestedTaskModelsByProvider: {
+        anthropic: [
+          {
+            id: 'anthropic/claude-haiku-4-5',
+            displayName: 'Claude Haiku 4.5',
+          },
+        ],
+      },
+      recommendedRoleModelsByProvider: {
+        anthropic: { helper: 'anthropic/claude-haiku-4-5' },
+      },
+    });
+
+    renderModelSettingsSection();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(
+      within(dialog).getByText('Set this model mapping'),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('Default coding model'),
+    ).toBeInTheDocument();
+    expect(within(dialog).getByText('Claude Haiku 4.5')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(updateMutateAsyncMock).not.toHaveBeenCalled();
   });
 
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
@@ -829,7 +875,11 @@ describe('ModelSettingsSection', () => {
 
     renderModelSettingsSection();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use recommended' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
       expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
