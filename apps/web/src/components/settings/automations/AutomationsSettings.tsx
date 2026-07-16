@@ -2347,8 +2347,7 @@ export function AutomationsSettings() {
           value={selectedValue}
           options={options}
           disabled={isManagerChannelSelectionDisabled({
-            slackConnected:
-              capabilities?.slackConnected === true || discordConnected,
+            slackConnected: slackConnected || discordConnected,
             isFetching:
               slackChannelsQuery.isFetching || discordChannelsQuery.isFetching,
             hasValue: Boolean(value.trim()) || Boolean(discordValue.trim()),
@@ -2400,7 +2399,7 @@ export function AutomationsSettings() {
     },
     [
       buildSlackDestinationOptions,
-      capabilities?.slackConnected,
+      slackConnected,
       discordChannelsQuery.data?.channels,
       discordChannelsQuery.isFetching,
       discordConnected,
