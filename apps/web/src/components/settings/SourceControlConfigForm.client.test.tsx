@@ -268,7 +268,7 @@ describe('SourceControlConfigForm', () => {
       />,
     );
 
-    expect(screen.getByText('Azure DevOps Organization')).toBeInTheDocument();
+    expect(screen.getByText('ADO Organization (URL slug)')).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Access Token/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Base URL/)).toBeInTheDocument();
     expect(screen.getByText(/Azure DevOps Username/)).toBeInTheDocument();

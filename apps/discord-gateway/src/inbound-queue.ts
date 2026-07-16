@@ -6,12 +6,14 @@ export const DISCORD_DEAD_LETTER_STREAM_KEY =
   'discord:gateway:inbound:dead-letter';
 const DEDUPE_PREFIX = 'discord:gateway:dedupe';
 const DEDUPE_TTL_SECONDS = 24 * 60 * 60;
+const DEFAULT_INBOUND_MAX_ENTRIES = 50_000;
+const DEFAULT_DEAD_LETTER_MAX_ENTRIES = 1_000;
 
 const ENQUEUE_SCRIPT = `
 if redis.call('EXISTS', KEYS[1]) == 1 then
   return false
 end
-local streamId = redis.call('XADD', KEYS[2], '*', 'envelope', ARGV[2])
+local streamId = redis.call('XADD', KEYS[2], 'MAXLEN', '~', ARGV[3], '*', 'envelope', ARGV[2])
 redis.call('SET', KEYS[1], '1', 'EX', ARGV[1])
 return streamId
 `;
@@ -29,7 +31,7 @@ if #existing == 0 then
   return false
 end
 local deadLetterId = redis.call(
-  'XADD', KEYS[2], '*',
+  'XADD', KEYS[2], 'MAXLEN', '~', ARGV[6], '*',
   'sourceStreamId', ARGV[1],
   'envelope', ARGV[2],
   'reason', ARGV[3],
@@ -70,8 +72,35 @@ type DiscordInboundQueueEntry =
   | QueuedDiscordInboundEnvelope
   | MalformedDiscordInboundEntry;
 
+type DiscordInboundQueueOptions = {
+  /**
+   * Approximate cap on the durable inbound stream. During an extended
+   * delivery outage the oldest undelivered events are shed once the cap is
+   * exceeded — bounded memory is preferred over an unbounded Redis stream,
+   * and the status store surfaces the pressure before shedding starts.
+   */
+  maxEntries?: number;
+  /** Approximate cap on the dead-letter stream. */
+  deadLetterMaxEntries?: number;
+};
+
 export class DiscordInboundQueue {
-  constructor(private readonly redis: Redis) {}
+  private readonly maxEntries: number;
+  private readonly deadLetterMaxEntries: number;
+
+  constructor(
+    private readonly redis: Redis,
+    options: DiscordInboundQueueOptions = {},
+  ) {
+    this.maxEntries = options.maxEntries ?? DEFAULT_INBOUND_MAX_ENTRIES;
+    this.deadLetterMaxEntries =
+      options.deadLetterMaxEntries ?? DEFAULT_DEAD_LETTER_MAX_ENTRIES;
+  }
+
+  /** Approximate inbound stream cap, for capacity-pressure reporting. */
+  get capacity(): number {
+    return this.maxEntries;
+  }
 
   async enqueue(envelope: DiscordInboundEnvelope): Promise<boolean> {
     const dedupeKey = `${DEDUPE_PREFIX}:${envelope.eventType}:${envelope.eventId}`;
@@ -82,6 +111,7 @@ export class DiscordInboundQueue {
       DISCORD_INBOUND_STREAM_KEY,
       DEDUPE_TTL_SECONDS.toString(),
       JSON.stringify(envelope),
+      this.maxEntries.toString(),
     );
 
     return typeof result === 'string';
@@ -160,6 +190,7 @@ export class DiscordInboundQueue {
       input.reason.slice(0, 1_000),
       input.attempts.toString(),
       (input.quarantinedAt ?? new Date()).toISOString(),
+      this.deadLetterMaxEntries.toString(),
     );
     return typeof result === 'string';
   }
@@ -167,4 +198,48 @@ export class DiscordInboundQueue {
   async depth(): Promise<number> {
     return this.redis.xlen(DISCORD_INBOUND_STREAM_KEY);
   }
+
+  async deadLetterDepth(): Promise<number> {
+    return this.redis.xlen(DISCORD_DEAD_LETTER_STREAM_KEY);
+  }
+
+  /**
+   * Deletes attempt counters whose stream entries no longer exist.
+   * Acknowledge and quarantine clean up their own counters, but entries shed
+   * by the MAXLEN cap never reach either path, so during a long outage the
+   * attempts hash would otherwise grow one orphaned field per shed event.
+   */
+  async pruneOrphanedAttempts(): Promise<number> {
+    // Snapshot the tracked ids BEFORE reading the oldest entry: an event
+    // enqueued (and attempted) between the two reads is then absent from the
+    // snapshot, so its live counter can never be mistaken for an orphan when
+    // the stream looked empty a moment earlier.
+    const trackedIds = await this.redis.hkeys(DISCORD_INBOUND_ATTEMPTS_KEY);
+    if (trackedIds.length === 0) {
+      return 0;
+    }
+    const [oldest] = await this.redis.xrange(
+      DISCORD_INBOUND_STREAM_KEY,
+      '-',
+      '+',
+      'COUNT',
+      1,
+    );
+    const oldestId = oldest?.[0] ?? null;
+    const orphaned = trackedIds.filter(
+      (streamId) =>
+        oldestId === null || compareStreamIds(streamId, oldestId) < 0,
+    );
+    if (orphaned.length > 0) {
+      await this.redis.hdel(DISCORD_INBOUND_ATTEMPTS_KEY, ...orphaned);
+    }
+    return orphaned.length;
+  }
+}
+
+/** Numeric comparison of Redis stream ids ("<milliseconds>-<sequence>"). */
+function compareStreamIds(left: string, right: string): number {
+  const [leftMs = 0, leftSeq = 0] = left.split('-').map(Number);
+  const [rightMs = 0, rightSeq = 0] = right.split('-').map(Number);
+  return leftMs - rightMs || leftSeq - rightSeq;
 }

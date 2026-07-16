@@ -21,6 +21,7 @@ type ScheduledSuggestionSurfaceConfig = {
     | 'suggested_tasks'
     | 'sentry_triage'
     | 'dependabot_triage'
+    | 'codeql_triage'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -28,6 +29,7 @@ type ScheduledSuggestionSurfaceConfig = {
     | 'suggested_tasks'
     | 'sentry_triage'
     | 'dependabot_triage'
+    | 'codeql_triage'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -44,6 +46,7 @@ export type ScheduledSuggestionSlackConfig = {
     | 'suggester'
     | 'sentry_triage'
     | 'dependabot_triage'
+    | 'codeql_triage'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -54,6 +57,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
   | 'suggester'
   | 'sentry_triage'
   | 'dependabot_triage'
+  | 'codeql_triage'
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage',
@@ -117,6 +121,26 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
       overflowLabel: 'dependency update',
       fallbackLead:
         'I went through the open Dependabot alerts for updates worth taking now, and a few low-risk ones stood out.',
+    },
+  },
+  codeql_triage: {
+    suggestionType: 'codeql_triage',
+    summaryKind: 'codeql_triage',
+    actionFooterText:
+      'I pulled the strongest CodeQL remediation candidates into the thread for review.',
+    prompt: {
+      automationDescription: 'a CodeQL triage automation',
+      mainActionLine: 'Summarize the CodeQL findings worth fixing.',
+      highlightLabel: 'CodeQL findings worth fixing',
+      openerSignal: 'a CodeQL / code-scanning alert triage pass',
+      openerExamples: [
+        'I went through the open CodeQL alerts for security findings worth fixing before they pile up',
+        'I did a CodeQL pass, separating the high-confidence insecure patterns from noisier static findings',
+        'I triaged the current code-scanning alerts, watching for anything with real security exposure',
+      ],
+      overflowLabel: 'CodeQL finding',
+      fallbackLead:
+        'I went through the open CodeQL alerts for security findings worth fixing now, and a few stood out.',
     },
   },
   security_auditor: {
@@ -197,6 +221,7 @@ function getScheduledSuggestionSurfaceConfig(
     automationKey === 'suggester' ||
     automationKey === 'sentry_triage' ||
     automationKey === 'dependabot_triage' ||
+    automationKey === 'codeql_triage' ||
     automationKey === 'security_auditor' ||
     automationKey === 'code_quality_auditor' ||
     automationKey === 'ci_failure_triage'

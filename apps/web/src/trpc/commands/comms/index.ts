@@ -180,6 +180,8 @@ export type DiscordGatewayStatus = {
   forwardingReady: boolean;
   sessionResumed: boolean;
   queueDepth: number;
+  deadLetterDepth?: number;
+  capacityWarning?: string;
   botUserId?: string;
   botUsername?: string;
   lastEventAt?: string;

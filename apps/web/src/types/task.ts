@@ -31,6 +31,7 @@ export const taskSchema = z.object({
   attributionKind: z.string().nullable().optional(),
   title: z.string(),
   model: z.string().nullable().optional(),
+  modelProvider: z.string().nullable().optional(),
   modelDisplayName: z.string().nullable().optional(),
   mode: z.string().nullable(),
   state: z.enum(TASK_STATES),

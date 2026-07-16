@@ -162,6 +162,72 @@ describe('TaskInfoPanel', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows ChatGPT for tasks that used the subscription provider', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'chatgpt',
+          } as never
+        }
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via ChatGPT (subscription)'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows OpenAI for tasks that used the OpenAI provider', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'openai',
+          } as never
+        }
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via OpenAI'),
+    ).toBeInTheDocument();
+  });
+
+  it('falls back to the model prefix for legacy OpenCode tasks', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={
+          {
+            ...baseTask,
+            model: 'openai/gpt-5.6-sol',
+            modelProvider: 'opencode',
+          } as never
+        }
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via OpenAI'),
+    ).toBeInTheDocument();
+  });
+
   it('omits the inference provider suffix for bare model ids', () => {
     render(
       <TaskInfoPanel

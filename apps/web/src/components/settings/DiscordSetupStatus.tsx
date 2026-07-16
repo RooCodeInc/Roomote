@@ -83,6 +83,20 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
               : (status.gateway?.lastError ?? 'Discord is still connecting.')
           }
         />
+        {(status.gateway?.deadLetterDepth ?? 0) > 0 ? (
+          <DiagnosticRow
+            ok={true}
+            label="Event delivery history"
+            detail={`${status.gateway?.deadLetterDepth} undeliverable event${status.gateway?.deadLetterDepth === 1 ? ' was' : 's were'} quarantined.`}
+          />
+        ) : null}
+        {status.gateway?.capacityWarning ? (
+          <DiagnosticRow
+            ok={false}
+            label="Event backlog"
+            detail={status.gateway.capacityWarning}
+          />
+        ) : null}
         <DiagnosticRow
           ok={messageContentReady}
           label="Message Content intent"

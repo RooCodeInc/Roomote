@@ -67,6 +67,7 @@ export { acquireRedisLock, withRedisLock, withContention } from './lock';
 export type {
   RedisLockOptions,
   RedisLockHandle,
+  RedisLockRenewResult,
   LockResult,
   ContentionResult,
   ContentionOptions,

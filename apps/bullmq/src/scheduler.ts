@@ -3,6 +3,7 @@ import { Queue, QueueEvents, Worker, Job } from 'bullmq';
 import {
   announcerJob,
   codeQualityAuditorJob,
+  codeqlTriageJob,
   conflictScanJob,
   dependabotTriageJob,
   managerStatsJob,
@@ -61,6 +62,7 @@ const AUTOMATION_JOBS: Record<
   manager_stats: managerStatsJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
+  codeql_triage: codeqlTriageJob,
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
 };
@@ -123,6 +125,11 @@ async function createJobs(queue: Queue): Promise<void> {
 
   await queue.upsertJobScheduler(
     'dependabot_triage' satisfies ScheduledAutomationJobName,
+    { every: 60 * 60 * 1000 }, // Every 60 minutes.
+  );
+
+  await queue.upsertJobScheduler(
+    'codeql_triage' satisfies ScheduledAutomationJobName,
     { every: 60 * 60 * 1000 }, // Every 60 minutes.
   );
 

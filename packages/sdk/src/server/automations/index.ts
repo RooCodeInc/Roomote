@@ -1,6 +1,7 @@
 export { announcerJob } from './announcer';
 export { ciFailureTriageJob } from './ci-failure-triage';
 export { codeQualityAuditorJob } from './code-quality-auditor';
+export { codeqlTriageJob } from './codeql-triage';
 export { conflictScanJob } from './conflict-scan';
 export { dependabotTriageJob } from './dependabot-triage';
 export { managerStatsJob, formatManagerStatsMessage } from './manager-stats';

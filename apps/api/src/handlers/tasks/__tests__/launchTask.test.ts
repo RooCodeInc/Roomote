@@ -154,6 +154,59 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.sourceControlProvider).toBeUndefined();
   });
 
+  it('stamps a requested reasoning effort and model override into the payload', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 103, taskId: 'task-effort' });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Investigate this',
+          model: 'openrouter/z-ai/glm-5.2',
+          reasoningEffort: 'xhigh',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: {
+        payload: {
+          reasoningEffort?: string;
+          harnessModelOverrides?: Record<string, string>;
+        };
+      };
+    };
+    expect(enqueuedTask.task.payload.reasoningEffort).toBe('xhigh');
+    expect(enqueuedTask.task.payload.harnessModelOverrides).toEqual({
+      'opencode-server': 'openrouter/z-ai/glm-5.2',
+    });
+  });
+
+  it('stamps a requested reasoning effort without a model override', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 104, taskId: 'task-effort-only' });
+
+    const app = createApp(authContext);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Investigate this',
+          reasoningEffort: 'low',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { reasoningEffort?: string } };
+    };
+    expect(enqueuedTask.task.payload.reasoningEffort).toBe('low');
+  });
+
   it('stamps the launching run and settle opt-in for run-token launches with notifyOnSettle', async () => {
     mockEnqueueTask.mockResolvedValue({ id: 102, taskId: 'task-child' });
 

@@ -226,6 +226,26 @@ function ensureAdoTokenEnvFile(): string {
   return ADO_TOKEN_ENV_FILE_PATH;
 }
 
+/**
+ * Delete the on-disk source-control credential material (the GitHub token
+ * file and scoped repository credentials). Called before filesystem
+ * snapshots so tokens never persist inside snapshot images; the injection
+ * path recreates these files at the next run start. The credential helper,
+ * gh wrapper, and token env scripts all tolerate missing files.
+ */
+export function removeSourceControlCredentialFiles(): void {
+  const credentialFilePaths = [
+    GH_TOKEN_FILE_PATH,
+    SOURCE_CONTROL_CREDENTIALS_FILE_PATH,
+    LEGACY_GITLAB_TOKEN_FILE_PATH,
+    LEGACY_GITLAB_CREDENTIALS_FILE_PATH,
+  ];
+
+  for (const filePath of credentialFilePaths) {
+    rmSync(filePath, { force: true });
+  }
+}
+
 function ensureSourceControlGitConfigFile(): void {
   ensureGhTokenDirectory();
   if (!existsSync(SOURCE_CONTROL_GIT_CONFIG_PATH)) {

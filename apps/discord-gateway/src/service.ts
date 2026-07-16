@@ -1,4 +1,8 @@
-import { acquireRedisLock, type Redis } from '@roomote/redis';
+import {
+  acquireRedisLock,
+  type Redis,
+  type RedisLockRenewResult,
+} from '@roomote/redis';
 
 import { DiscordApiForwarder } from './api-forwarder';
 import type { DiscordGatewayConfig } from './config';
@@ -70,7 +74,7 @@ export class DiscordGatewayService {
 
         const activeLease = releaseLease;
         await this.runAsLeader(async () =>
-          activeLease.renew(this.config.leaderLeaseTtlSeconds),
+          activeLease.renewDetailed(this.config.leaderLeaseTtlSeconds),
         );
       } catch (error) {
         if (!this.stopped) {
@@ -108,8 +112,13 @@ export class DiscordGatewayService {
       .catch(() => undefined);
   }
 
-  private async runAsLeader(renewLease: () => Promise<boolean>): Promise<void> {
-    const queue = new DiscordInboundQueue(this.redis);
+  private async runAsLeader(
+    renewLease: () => Promise<RedisLockRenewResult>,
+  ): Promise<void> {
+    const queue = new DiscordInboundQueue(this.redis, {
+      maxEntries: this.config.inboundMaxEntries,
+      deadLetterMaxEntries: this.config.deadLetterMaxEntries,
+    });
     const session = new DiscordGatewaySession(queue, this.status);
     this.activeSession = session;
 
@@ -129,31 +138,62 @@ export class DiscordGatewayService {
       this.config.loginRetryBaseMs,
       this.config.loginRetryMaxMs,
     );
-
     const abortDelivery = () => {
       delivery.abort.abort();
       this.activeDeliveryAbort = delivery.abort;
     };
 
+    // The lease TTL (30s) leaves room for two renew intervals (10s), so a
+    // single transient Redis error must not tear down a healthy Gateway
+    // connection; only a definitive ownership loss or a second consecutive
+    // failure (past which the lease may genuinely have expired) does.
+    let renewErrorStreak = 0;
+    const abandonLeadership = () => {
+      leaseValid = false;
+      abortDelivery();
+      void session.disconnect();
+    };
     const leaseTimer = setInterval(() => {
       void renewLease()
-        .then((renewed) => {
-          if (!renewed) {
-            leaseValid = false;
-            abortDelivery();
-            void session.disconnect();
+        .then((result) => {
+          if (result === 'renewed') {
+            renewErrorStreak = 0;
+            return;
+          }
+          if (result === 'lost') {
+            abandonLeadership();
+            return;
+          }
+          renewErrorStreak += 1;
+          if (renewErrorStreak >= 2) {
+            abandonLeadership();
           }
         })
         .catch(() => {
-          leaseValid = false;
-          abortDelivery();
-          void session.disconnect();
+          abandonLeadership();
         });
     }, this.config.leaderLeaseRenewMs);
     const statusTimer = setInterval(() => {
-      void queue
-        .depth()
-        .then((queueDepth) => this.status.update({ queueDepth }))
+      void Promise.all([
+        queue.depth(),
+        queue.deadLetterDepth(),
+        queue.pruneOrphanedAttempts(),
+      ])
+        .then(([queueDepth, deadLetterDepth]) =>
+          this.status.update({
+            queueDepth,
+            deadLetterDepth,
+            // Surface capacity pressure before the approximate MAXLEN cap
+            // starts shedding the oldest undelivered events. This is a
+            // dedicated field with this timer as its only writer, so a
+            // successful delivery clearing lastError cannot erase it while
+            // the backlog is still high.
+            capacityWarning:
+              queueDepth >= queue.capacity * 0.9
+                ? `Inbound event stream is at ${queueDepth}/${queue.capacity} entries; oldest undelivered events will be shed at capacity.`
+                : undefined,
+          }),
+        )
         .catch((error) =>
           this.status.update({
             lastError: error instanceof Error ? error.message : String(error),

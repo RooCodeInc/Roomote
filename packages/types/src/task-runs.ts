@@ -259,6 +259,7 @@ export const TASK_SUGGESTION_SOURCES = [
   'suggest_ideas',
   'sentry_triage',
   'dependabot_triage',
+  'codeql_triage',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',

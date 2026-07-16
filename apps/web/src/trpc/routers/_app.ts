@@ -30,6 +30,7 @@ import {
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
   analyticsFilterOptionsInputSchema,
+  analyticsOverviewInputSchema,
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
@@ -323,6 +324,7 @@ import {
   getAnalyticsDetailsCommand,
   exportAnalyticsCommand,
   getAnalyticsFiltersCommand,
+  getAnalyticsOverviewCommand,
   getPullRequestAnalyticsOverviewCommand,
 } from '../commands/analytics';
 import {
@@ -350,6 +352,7 @@ const UPDATE_SETTINGS_SAVING_AUTOMATION_VALUES = [
   'suggester',
   'sentryTriage',
   'dependabotTriage',
+  'codeqlTriage',
   ...SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
   'announcer',
   'platformIssueAlerts',
@@ -461,16 +464,52 @@ const automationsRouter = createRouter({
           .min(1)
           .max(160)
           .nullable(),
+        codeqlTriageFrequency: z.enum(['off', 'daily', 'weekly']).optional(),
+        codeqlTriageSlackChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
+        codeqlTriageDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        suggesterDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
         suggesterRoutingInstructions: z.string().max(10_000).nullable(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        announcerDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        platformIssueDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()
@@ -528,6 +567,12 @@ const automationsRouter = createRouter({
 
 export const appRouter = createRouter({
   analytics: createRouter({
+    overview: protectedProcedure
+      .input(analyticsOverviewInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsOverviewCommand(auth, input),
+      ),
+
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
       .query(({ ctx: { auth }, input }) =>
@@ -1994,6 +2039,7 @@ export const appRouter = createRouter({
               'suggest_ideas',
               'sentry_triage',
               'dependabot_triage',
+              'codeql_triage',
               'security_auditor',
               'code_quality_auditor',
             ])

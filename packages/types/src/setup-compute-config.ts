@@ -278,6 +278,15 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
       },
       {
+        // Managed app-name override; deliberately separate from
+        // MODAL_APP_NAME so bring-your-own Modal settings cannot redirect
+        // managed-provider attribution.
+        envVarName: 'ROOMOTE_CLOUD_APP_NAME',
+        label: 'Roomote Cloud App Name',
+        required: false,
+        category: 'infrastructure',
+      },
+      {
         // Shared with the Modal provider: the default backend runs on Modal,
         // and the base image derives from the deployment's worker image.
         envVarName: 'MODAL_BASE_IMAGE_REF',
@@ -539,6 +548,7 @@ const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'ROOMOTE_CLOUD_TOKEN_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
+  'ROOMOTE_CLOUD_APP_NAME',
 ]);
 
 /**

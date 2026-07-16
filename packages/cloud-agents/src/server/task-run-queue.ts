@@ -7,6 +7,7 @@ import {
   type BackgroundAutomationKey,
   type TaskSpec,
   type CodingHarness,
+  type ComputeProvider,
   type SnapshotResumeTask,
   type RunLaunchClass,
   type SourceControlProvider,
@@ -23,23 +24,26 @@ import {
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
   getUserDisplayName,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
+  isReasoningEffort,
   normalizeDeploymentModelConfig,
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
   resolveComputeProviderTarget,
   TASK_TIMEOUT_MS,
 } from '@roomote/types';
-import { Env } from '@roomote/env';
+import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
   type TaskRun,
   type DatabaseTransaction,
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
@@ -85,6 +89,19 @@ enum TaskRunQueueKeys {
   Entries = 'queue:cloud-jobs:v2:entries',
   EntryScopes = 'queue:cloud-jobs:v2:entry-scopes',
   Scopes = 'queue:cloud-jobs:v2:scopes',
+}
+
+export function resolveFreshTaskComputeProvider(
+  provider: string | null | undefined,
+  fallback: ComputeProvider,
+  taskType?: TaskPayloadKind,
+  cloudEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+): ComputeProvider {
+  // Managed deployments own the sandbox lifecycle, so fresh work must not
+  // escape to a previously configured bring-your-own provider.
+  return cloudEnabled && taskType !== TaskPayloadKind.SnapshotEnvironment
+    ? 'roomote'
+    : resolveComputeProviderTarget(provider, fallback);
 }
 
 const ATOMIC_ENQUEUE_SCRIPT = `
@@ -257,6 +274,12 @@ type ResolvedHarnessSelection = {
     | import('@roomote/types').TaskModelSettings
     | null;
   deploymentCodeReviewModelId?: string | null;
+  deploymentCodeReviewReasoningEffort?:
+    | import('@roomote/types').ReasoningEffort
+    | null;
+  deploymentCodingReasoningEffort?:
+    | import('@roomote/types').ReasoningEffort
+    | null;
 };
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -286,6 +309,26 @@ function resolveCodeReviewModelId(
   return envCodeReviewModel ?? persistedConfig.roomoteCodeReviewModel;
 }
 
+function resolveCodingReasoningEffort(
+  persistedConfig: import('@roomote/types').DeploymentModelConfig,
+): import('@roomote/types').ReasoningEffort | null {
+  const envEffort = process.env.R_MODEL_REASONING_EFFORT?.trim();
+
+  return isReasoningEffort(envEffort)
+    ? envEffort
+    : persistedConfig.roomoteModelReasoningEffort;
+}
+
+function resolveCodeReviewReasoningEffort(
+  persistedConfig: import('@roomote/types').DeploymentModelConfig,
+): import('@roomote/types').ReasoningEffort | null {
+  const envEffort = process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT?.trim();
+
+  return isReasoningEffort(envEffort)
+    ? envEffort
+    : persistedConfig.roomoteCodeReviewModelReasoningEffort;
+}
+
 async function resolveRequestedHarness(
   task: TaskSpec,
 ): Promise<ResolvedHarnessSelection> {
@@ -297,6 +340,9 @@ async function resolveRequestedHarness(
       runtimeModelConfig: true,
     },
   });
+  const deploymentModelConfig = normalizeDeploymentModelConfig(
+    deployment?.runtimeModelConfig,
+  );
 
   return {
     harness: task.harness ?? DEFAULT_LAUNCH_CODING_HARNESS,
@@ -304,7 +350,13 @@ async function resolveRequestedHarness(
       (deployment?.metadata as MetadataRecord | null | undefined) ?? null,
     deploymentTaskModelSettings: deployment?.taskModelSettings ?? null,
     deploymentCodeReviewModelId: resolveCodeReviewModelId(
-      normalizeDeploymentModelConfig(deployment?.runtimeModelConfig),
+      deploymentModelConfig,
+    ),
+    deploymentCodeReviewReasoningEffort: resolveCodeReviewReasoningEffort(
+      deploymentModelConfig,
+    ),
+    deploymentCodingReasoningEffort: resolveCodingReasoningEffort(
+      deploymentModelConfig,
     ),
   };
 }
@@ -1258,6 +1310,10 @@ async function enqueueFreshLaunch(
       deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
       deploymentCodeReviewModelId:
         resolvedHarness.deploymentCodeReviewModelId ?? null,
+      deploymentCodeReviewReasoningEffort:
+        resolvedHarness.deploymentCodeReviewReasoningEffort ?? null,
+      deploymentCodingReasoningEffort:
+        resolvedHarness.deploymentCodingReasoningEffort ?? null,
     });
 
   const repositoryName = taskWithHarnessOverrides.payload.repo || null;
@@ -1288,9 +1344,10 @@ async function enqueueFreshLaunch(
   const titleIsLocked =
     explicitTitle !== null ||
     hasDeterministicTaskRunTitle(taskWithHarnessOverrides.type);
-  const targetComputeProvider = resolveComputeProviderTarget(
+  const targetComputeProvider = resolveFreshTaskComputeProvider(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
+    task.type,
   );
 
   const requestedWorkKindDecision =
@@ -1317,6 +1374,14 @@ async function enqueueFreshLaunch(
 
   // This is the only place where fresh tasks and their first runs are created.
   const taskRun = await db.transaction(async (tx) => {
+    const chatgptConnected = effectiveTaskModel.startsWith('openai/')
+      ? await isChatGptSubscriptionConnected(tx)
+      : false;
+    const modelProvider =
+      getDisplayModelProviderId(effectiveTaskModel, {
+        chatgptConnected,
+      }) ?? DEFAULT_STANDARD_TASK_MODEL_PROVIDER;
+
     // Commit-author evaluation is unconditional at fresh enqueue.
     const [authorshipSettingsRow, matchedHumanActor] = await Promise.all([
       tx.query.deploymentSettings.findFirst({
@@ -1351,7 +1416,7 @@ async function enqueueFreshLaunch(
         linearIssueId: input.channels?.linearIssueId ?? null,
         linearOrganizationId: input.channels?.linearOrganizationId ?? null,
         harness: targetHarness,
-        modelProvider: DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
+        modelProvider,
         model: effectiveTaskModel,
         title,
         ...(titleIsLocked
@@ -1650,6 +1715,10 @@ export async function enqueueTaskRelaunch(
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,
+    deploymentCodeReviewReasoningEffort:
+      resolvedHarness.deploymentCodeReviewReasoningEffort ?? null,
+    deploymentCodingReasoningEffort:
+      resolvedHarness.deploymentCodingReasoningEffort ?? null,
   });
 
   const resolvedTaskPolicy = resolveTaskRuntimePolicy({
@@ -1661,9 +1730,10 @@ export async function enqueueTaskRelaunch(
     sandboxTimeoutMs: TASK_TIMEOUT_MS,
   });
 
-  const targetComputeProvider = resolveComputeProviderTarget(
+  const targetComputeProvider = resolveFreshTaskComputeProvider(
     task.computeProvider,
     await resolveDefaultComputeProvider(),
+    task.type,
   );
 
   const taskRun = await db.transaction(async (tx) => {
@@ -1783,6 +1853,8 @@ async function enqueueSnapshotResume(
       taskId: true,
       harness: true,
       vendor: true,
+      payloadKind: true,
+      sourceRunId: true,
       payload: true,
     },
   });
@@ -1815,6 +1887,27 @@ async function enqueueSnapshotResume(
       harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
     }
   )?.harnessModelOverrides;
+  let sourceTaskType = sourceRun.payloadKind;
+  let parentRunId = sourceRun.sourceRunId;
+
+  // Snapshot resumes point to the immediately preceding resume, so follow the
+  // chain until reaching the original run whose role selected the model.
+  while (
+    sourceTaskType === TaskPayloadKind.SnapshotResume &&
+    parentRunId !== null
+  ) {
+    const parentRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, parentRunId),
+      columns: { payloadKind: true, sourceRunId: true },
+    });
+
+    if (!parentRun) {
+      break;
+    }
+
+    sourceTaskType = parentRun.payloadKind;
+    parentRunId = parentRun.sourceRunId;
+  }
 
   if (task.harness && sourceJobHarness !== task.harness) {
     console.warn(
@@ -1839,10 +1932,15 @@ async function enqueueSnapshotResume(
     targetHarness,
     isSnapshotResume: true,
     sourceRunHarnessModelOverrides,
+    sourceTaskType,
     deploymentMetadata: resolvedHarness.deploymentMetadata,
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
       resolvedHarness.deploymentCodeReviewModelId ?? null,
+    deploymentCodeReviewReasoningEffort:
+      resolvedHarness.deploymentCodeReviewReasoningEffort ?? null,
+    deploymentCodingReasoningEffort:
+      resolvedHarness.deploymentCodingReasoningEffort ?? null,
   });
 
   const targetComputeProvider =

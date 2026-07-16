@@ -3,6 +3,7 @@ import type { TriggerableBackgroundAutomationKey } from '@roomote/types';
 import { announcerJob } from './announcer';
 import { ciFailureTriageJob } from './ci-failure-triage';
 import { codeQualityAuditorJob } from './code-quality-auditor';
+import { codeqlTriageJob } from './codeql-triage';
 import { conflictScanJob } from './conflict-scan';
 import { dependabotTriageJob } from './dependabot-triage';
 import { managerStatsJob } from './manager-stats';
@@ -25,6 +26,7 @@ const AUTOMATION_RUNNERS: Record<
   manager_stats: managerStatsJob,
   sentry_triage: sentryTriageJob,
   dependabot_triage: dependabotTriageJob,
+  codeql_triage: codeqlTriageJob,
   security_auditor: securityAuditorJob,
   code_quality_auditor: codeQualityAuditorJob,
   ci_failure_triage: ciFailureTriageJob,

@@ -351,6 +351,18 @@ const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT = 5;
 const DISCORD_CHANNEL_TYPES_FORUM = new Set([15, 16]);
+/**
+ * SUPPRESS_EMBEDS. Discord unfurls every link it finds into a preview card,
+ * which turns a task link into a Roomote marketing embed under the message.
+ * Slack posts with `unfurl_links: false`; this is the same intent.
+ *
+ * Only ever set while creating a message, and only when that message sends no
+ * embeds of its own — the flag hides deliberate embeds too. Editing `flags`
+ * rewrites the whole bitfield, which on an edit would hide the embeds Discord
+ * retains from the original, and on an interaction response would rewrite the
+ * flags of a deferral that may be EPHEMERAL.
+ */
+const DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS = 1 << 2;
 const DISCORD_ERROR_CODE_UNKNOWN_MESSAGE = 10008;
 const DISCORD_ERROR_CODE_MESSAGE_ALREADY_HAS_THREAD = 160004;
 
@@ -442,7 +454,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
                 image: { url: image.url },
               })),
             }
-          : {}),
+          : { flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS }),
         ...(index === 0 && input.attachments?.length
           ? { attachments: input.attachments }
           : {}),
@@ -630,6 +642,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           ...(input.buttons
             ? { components: buildDiscordComponents(input.buttons) }
             : {}),
+          ...(input.images?.length
+            ? {}
+            : { flags: DISCORD_MESSAGE_FLAG_SUPPRESS_EMBEDS }),
         },
       },
       // The message nonce does not make the containing thread creation
@@ -1048,11 +1063,13 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     guildId: string;
     channelId: string;
   }): Promise<DiscordChannelPermissionDiagnostics> {
-    const [bot, member, roles, channel] = await Promise.all([
-      this.getBotInfo(),
+    // The guild-members endpoint takes a real user id — Discord rejects the
+    // literal `@me` there with 400 Invalid Form Body (unlike /users/@me).
+    const bot = await this.getBotInfo();
+    const [member, roles, channel] = await Promise.all([
       this.request<{ roles?: string[] }>(
         'GET',
-        `/guilds/${input.guildId}/members/@me`,
+        `/guilds/${input.guildId}/members/${bot.id}`,
         undefined,
         { retryNetworkErrors: true, retryServerErrors: true },
       ),

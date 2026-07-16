@@ -3,17 +3,23 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import type {
+  AnalyticsDimension,
   AnalyticsFilters,
+  AnalyticsGranularity,
+  AnalyticsMetric,
   AnalyticsObject,
   TimePeriodFilter,
 } from '@/types';
 import { useTRPC } from '@/trpc/client';
 
-export function useAnalyticsFilters(
+export function useAnalyticsOverview(
   input: {
     object: AnalyticsObject;
+    viewBy: AnalyticsDimension;
+    metric?: AnalyticsMetric;
     filters?: AnalyticsFilters;
     timePeriod?: TimePeriodFilter;
+    granularity?: AnalyticsGranularity;
   },
   options?: {
     enabled?: boolean;
@@ -22,7 +28,7 @@ export function useAnalyticsFilters(
   const trpc = useTRPC();
 
   return useQuery(
-    trpc.analytics.filters.queryOptions(input, {
+    trpc.analytics.overview.queryOptions(input, {
       placeholderData: keepPreviousData,
       enabled: options?.enabled,
     }),

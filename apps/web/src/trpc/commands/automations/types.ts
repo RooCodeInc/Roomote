@@ -6,6 +6,7 @@ import type {
   ConflictResolverMaxPrAgeDays,
   ConflictResolverFrequency,
   DependabotTriageFrequency,
+  CodeqlTriageFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
@@ -34,15 +35,20 @@ export type BackgroundAgentFieldErrorKey =
   | 'platformIssueSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
+  | 'codeqlTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
   | 'managerStatsDiscordChannel'
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
+  | 'codeqlTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | 'suggesterDiscordChannel'
+  | 'announcerDiscordChannel'
+  | 'platformIssueDiscordChannel'
   | 'sentryTriageProjectSlugs'
   | 'suggesterInstructions'
   | 'suggesterRoutingInstructions'
@@ -62,6 +68,7 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'platformIssueSlackChannel'
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
+  | 'codeqlTriageSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
@@ -72,9 +79,13 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'managerStatsDiscordChannel'
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
+  | 'codeqlTriageDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
+  | 'suggesterDiscordChannel'
+  | 'announcerDiscordChannel'
+  | 'platformIssueDiscordChannel'
 >;
 
 /** A Discord channel the automations destination picker can target. */
@@ -95,6 +106,7 @@ export interface SlackChannelAccessWarnings {
   platformIssueSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
+  codeqlTriageSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -109,6 +121,7 @@ export interface SlackChannelDisplayNames {
   platformIssueSlackChannel: string | null;
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
+  codeqlTriageSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -117,16 +130,21 @@ export interface SlackChannelDisplayNames {
 /**
  * Automations whose reports flow through the manager-channel destination
  * waterfall (own target -> Manager Channel -> primary conversation).
+ * platform_issue_alerts delivery only walks the first two levels (own
+ * target -> Manager Channel); it is included so the settings page can show
+ * its "Reports to" line.
  */
 export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'manager_stats',
   'sentry_triage',
   'dependabot_triage',
+  'codeql_triage',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
   'suggester',
   'announcer',
+  'platform_issue_alerts',
 ] as const satisfies readonly BackgroundAutomationKey[];
 
 export type ManagerReportingAutomationKey =
@@ -186,6 +204,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'suggester'
     | 'sentryTriage'
     | 'dependabotTriage'
+    | 'codeqlTriage'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
     | 'platformIssueAlerts';
@@ -219,15 +238,21 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   dependabotTriageFrequency?: DependabotTriageFrequency;
   dependabotTriageSlackChannel?: string | null;
   dependabotTriageDiscordChannel?: string | null;
+  codeqlTriageFrequency?: CodeqlTriageFrequency;
+  codeqlTriageSlackChannel?: string | null;
+  codeqlTriageDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
+  suggesterDiscordChannel?: string | null;
   suggesterInstructions: string | null;
   suggesterRoutingMode?: SuggesterRoutingMode;
   suggesterRoutingInstructions?: string | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannel: string | null;
+  announcerDiscordChannel?: string | null;
   announcerInstructions: string | null;
   platformIssueSlackChannel: string | null;
+  platformIssueDiscordChannel?: string | null;
   securityAuditorSlackChannel?: string | null;
   securityAuditorDiscordChannel?: string | null;
   codeQualityAuditorSlackChannel?: string | null;

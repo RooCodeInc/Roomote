@@ -107,6 +107,12 @@ const serverSchema = {
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
   R_PING_BASE_URL: z.string().url().default('https://ping.roomote.dev'),
+  R_INSTANCE_ID: z
+    .string()
+    .min(6)
+    .max(128)
+    .regex(/^[A-Za-z0-9._:-]+$/)
+    .optional(),
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
@@ -215,6 +221,7 @@ const serverSchema = {
   ROOMOTE_CLOUD_TOKEN_SECRET: z.string().optional(),
   ROOMOTE_CLOUD_BACKEND: z.enum(ROOMOTE_CLOUD_BACKENDS).optional(),
   ROOMOTE_CLOUD_SLUG: z.string().optional(),
+  ROOMOTE_CLOUD_APP_NAME: z.string().optional(),
   MODAL_ENDPOINT: z.string().optional(),
   MODAL_ENVIRONMENT: z.string().optional(),
   MODAL_APP_NAME: z.string().optional(),
@@ -391,6 +398,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'WORKER_RELEASE_VERSION',
   'RELEASE_VERSION',
   'R_PING_BASE_URL',
+  'R_INSTANCE_ID',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
@@ -435,6 +443,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'ROOMOTE_CLOUD_TOKEN_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
+  'ROOMOTE_CLOUD_APP_NAME',
   'MODAL_ENDPOINT',
   'MODAL_ENVIRONMENT',
   'MODAL_APP_NAME',

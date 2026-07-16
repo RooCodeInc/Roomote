@@ -6,6 +6,7 @@ import type {
   CodeQualityAuditorFrequency,
   ConflictResolverFrequency,
   ConflictResolverMaxPrAgeDays,
+  CodeqlTriageFrequency,
   DependabotTriageFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
@@ -460,15 +461,18 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   conflictResolverLastRunAt: Date | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannelId: string | null;
+  suggesterDiscordChannelId: string | null;
   suggesterInstructions: string | null;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string | null;
   suggesterLastRunAt: Date | null;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannelId: string | null;
+  announcerDiscordChannelId: string | null;
   announcerInstructions: string | null;
   announcerLastRunAt: Date | null;
   platformIssueSlackChannelId: string | null;
+  platformIssueDiscordChannelId: string | null;
   managerStatsFrequency: ManagerStatsFrequency;
   managerStatsSlackChannelId: string | null;
   managerStatsDiscordChannelId: string | null;
@@ -482,6 +486,10 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   dependabotTriageSlackChannelId: string | null;
   dependabotTriageDiscordChannelId: string | null;
   dependabotTriageLastRunAt: Date | null;
+  codeqlTriageFrequency: CodeqlTriageFrequency;
+  codeqlTriageSlackChannelId: string | null;
+  codeqlTriageDiscordChannelId: string | null;
+  codeqlTriageLastRunAt: Date | null;
   securityAuditorFrequency: SecurityAuditorFrequency;
   securityAuditorSlackChannelId: string | null;
   securityAuditorDiscordChannelId: string | null;

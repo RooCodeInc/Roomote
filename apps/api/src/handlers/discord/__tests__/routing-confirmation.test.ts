@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
   launchTask: vi.fn(),
+  reserveAnchoredThread: vi.fn(),
+  forgetPendingTaskThread: vi.fn(),
   resolveWorkspace: vi.fn(),
   reply: vi.fn(),
   redisSet: vi.fn(),
@@ -25,6 +27,8 @@ vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
 
 vi.mock('../task-launch.js', () => ({
   launchDiscordTask: mocks.launchTask,
+  reserveDiscordAnchoredThread: mocks.reserveAnchoredThread,
+  forgetPendingTaskThread: mocks.forgetPendingTaskThread,
   resolveDiscordWorkspace: mocks.resolveWorkspace,
 }));
 
@@ -48,6 +52,8 @@ describe('Discord routing confirmation', () => {
       { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
     ]);
     mocks.redisSet.mockResolvedValue('OK');
+    mocks.reserveAnchoredThread.mockResolvedValue(null);
+    mocks.forgetPendingTaskThread.mockResolvedValue(undefined);
     mocks.findMappedUser.mockResolvedValue('user-1');
     mocks.findSourceRun.mockResolvedValue(null);
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/task/task-1');
@@ -59,6 +65,7 @@ describe('Discord routing confirmation', () => {
     mocks.launchTask.mockResolvedValue({
       createdThread: { channelId: 'thread-1' },
       taskUrl: 'https://roomote.example/task/task-1',
+      launchResult: { id: 42, taskId: 'task-1' },
     });
     mocks.reply.mockResolvedValue({ messageId: 'confirmation-1' });
   });
@@ -156,6 +163,190 @@ describe('Discord routing confirmation', () => {
         ]),
       }),
     );
+  });
+
+  it('carries the thread anchor through the pending route to the launch', async () => {
+    // A confirmation card defers the launch to a button interaction, which
+    // has no message of its own. The anchor from the original mention must
+    // survive the round trip or the task thread silently detaches.
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: {
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'likely',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.7,
+          },
+        },
+      },
+    });
+
+    const stored = mocks.redisSet.mock.calls[0]?.[1] as string;
+    expect(JSON.parse(stored).metadata).toMatchObject({
+      communicationAnchorMessageId: 'message-1',
+    });
+  });
+
+  it('asks inside the task thread so the channel only shows the request', async () => {
+    // Slack posts its routing card into the thread on the requesting message.
+    // Reserving the thread up front is what lets Discord do the same; the
+    // launch then reuses that thread rather than opening a second one.
+    mocks.reserveAnchoredThread.mockResolvedValue({
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'Fix matchmaking',
+      kind: 'thread',
+      messageId: 'message-1',
+    });
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: { status: 'fallback', reason: 'ambiguous' },
+    });
+
+    expect(mocks.reply.mock.lastCall?.[0]?.channel).toMatchObject({
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      isThread: true,
+    });
+    const stored = JSON.parse(mocks.redisSet.mock.calls[0]?.[1] as string);
+    expect(stored.cardChannel).toMatchObject({ channelId: 'message-1' });
+    // The launch still receives the root channel, so it resolves the same
+    // thread parent and finds the reservation.
+    expect(stored.channel).toMatchObject({
+      channelId: 'channel-1',
+      isThread: false,
+    });
+  });
+
+  it('asks in the channel when the request cannot anchor a thread', async () => {
+    mocks.reserveAnchoredThread.mockResolvedValue(null);
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      routingDecision: { status: 'fallback', reason: 'ambiguous' },
+    });
+
+    expect(mocks.reply.mock.lastCall?.[0]?.channel).toMatchObject({
+      channelId: 'dm-1',
+    });
+    expect(
+      JSON.parse(mocks.redisSet.mock.calls[0]?.[1] as string).cardChannel,
+    ).toBeUndefined();
+  });
+
+  it('still asks in the channel when reserving the thread fails', async () => {
+    // Card placement is cosmetic; the launch retries the thread itself.
+    // Losing the whole request over it would not be.
+    mocks.reserveAnchoredThread.mockRejectedValue(new Error('Discord 503'));
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: { status: 'fallback', reason: 'ambiguous' },
+    });
+
+    expect(mocks.reply.mock.lastCall?.[0]?.channel).toMatchObject({
+      channelId: 'channel-1',
+    });
   });
 
   it('keeps every stored route visible within Discord action-row limits', async () => {
@@ -329,6 +520,150 @@ describe('Discord routing confirmation', () => {
       JSON.stringify(pending),
       'EX',
       900,
+    );
+  });
+
+  it('accepts the requester pressing a button inside the task thread', async () => {
+    // A card posted into the thread reports the thread as its channel. Matching
+    // the interaction against the originating channel would read the requester
+    // as an impostor and refuse every launch.
+    mocks.redisGetdel.mockResolvedValue(
+      JSON.stringify({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        cardChannel: {
+          channelId: 'message-1',
+          channelName: 'Fix matchmaking',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isDirectMessage: false,
+          isThread: true,
+        },
+        options: [
+          {
+            label: 'Sunny Acres',
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+          },
+        ],
+      }),
+    );
+
+    await handleDiscordRoutingCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        channel_id: 'message-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'discord:route:abcdefghijkl:0' },
+      },
+      interactionDeferred: true,
+      callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
+    });
+
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: expect.objectContaining({ channelId: 'channel-1' }),
+      }),
+    );
+    // The card is where the acknowledgement was going, so the launch turns it
+    // into one rather than posting a second, identical message beneath it.
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replaceMessage: expect.objectContaining({
+          channel: expect.objectContaining({ channelId: 'message-1' }),
+        }),
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalled();
+  });
+
+  it('keeps the launch acknowledgement when the card stayed in the channel', async () => {
+    mocks.redisGetdel.mockResolvedValue(
+      JSON.stringify({
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        options: [
+          {
+            label: 'Sunny Acres',
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+          },
+        ],
+      }),
+    );
+
+    await handleDiscordRoutingCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        channel_id: 'channel-1',
+        user: { id: 'discord-user-1', username: 'matt' },
+        data: { custom_id: 'discord:route:abcdefghijkl:0' },
+      },
+      interactionDeferred: true,
+      callback: { pendingRouteId: 'abcdefghijkl', selection: 0 },
+    });
+
+    expect(mocks.launchTask.mock.lastCall?.[0]?.replaceMessage).toBeUndefined();
+    expect(mocks.reply.mock.lastCall?.[0]?.text).toContain(
+      'Continue in the new task thread',
     );
   });
 });

@@ -28,18 +28,81 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     ).toEqual({ reasoning: { effort: 'high' } });
   });
 
-  it('maps Anthropic direct models to extended-thinking budgets', () => {
+  it('maps pre-adaptive Anthropic models to extended-thinking budgets', () => {
     expect(
       buildOpenCodeModelReasoningOptions('anthropic/claude-sonnet-4', 'high'),
     ).toEqual({
       thinking: { type: 'enabled', budgetTokens: 16_000 },
     });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'anthropic/claude-sonnet-4-5-20250929',
+        'medium',
+      ),
+    ).toEqual({
+      thinking: { type: 'enabled', budgetTokens: 8_000 },
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-haiku-4-5', 'low'),
+    ).toEqual({
+      thinking: { type: 'enabled', budgetTokens: 4_000 },
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-opus-4-5', 'high'),
+    ).toEqual({
+      thinking: { type: 'enabled', budgetTokens: 16_000 },
+    });
   });
 
-  it('maps Bedrock Mantle models to Anthropic extended-thinking budgets', () => {
+  it('maps adaptive-thinking Anthropic models to adaptive with effort', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-sonnet-5', 'xhigh'),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'xhigh',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-opus-4-8', 'high'),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'high',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-fable-5', 'medium'),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'medium',
+    });
+  });
+
+  it('clamps xhigh to high for the Anthropic 4.6 family', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-opus-4-6', 'xhigh'),
+    ).toEqual({
+      thinking: { type: 'adaptive' },
+      effort: 'high',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions('anthropic/claude-sonnet-4-6', 'high'),
+    ).toEqual({
+      thinking: { type: 'adaptive' },
+      effort: 'high',
+    });
+  });
+
+  it('maps Bedrock Mantle models like the Anthropic provider', () => {
     expect(
       buildOpenCodeModelReasoningOptions(
         'bedrock-mantle/anthropic.claude-sonnet-5',
+        'high',
+      ),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      effort: 'high',
+    });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'bedrock-mantle/anthropic.claude-haiku-4-5',
         'high',
       ),
     ).toEqual({

@@ -18,6 +18,7 @@ export type AnnouncerFrequency = 'off' | 'daily' | 'weekly';
 export type ManagerStatsFrequency = 'off' | 'weekly';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
+export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
 export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 
@@ -71,15 +72,21 @@ export type FormState = {
   dependabotTriageFrequency: DependabotTriageFrequency;
   dependabotTriageSlackChannel: string;
   dependabotTriageDiscordChannel: string;
+  codeqlTriageFrequency: CodeqlTriageFrequency;
+  codeqlTriageSlackChannel: string;
+  codeqlTriageDiscordChannel: string;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string;
+  suggesterDiscordChannel: string;
   suggesterInstructions: string;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
   announcerSlackChannel: string;
+  announcerDiscordChannel: string;
   announcerInstructions: string;
   platformIssueSlackChannel: string;
+  platformIssueDiscordChannel: string;
   securityAuditorSlackChannel: string;
   securityAuditorDiscordChannel: string;
   codeQualityAuditorSlackChannel: string;
@@ -94,6 +101,7 @@ export type AutomationId =
   | 'managerStats'
   | 'sentryTriage'
   | 'dependabotTriage'
+  | 'codeqlTriage'
   | ScheduleOnlyBackgroundAutomationId
   | 'reviewer'
   | 'conflictResolver'
@@ -147,9 +155,16 @@ const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageDiscordChannel',
 ];
 
+const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
+  'codeqlTriageFrequency',
+  'codeqlTriageSlackChannel',
+  'codeqlTriageDiscordChannel',
+];
+
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   'suggesterSlackChannel',
+  'suggesterDiscordChannel',
   'suggesterInstructions',
   'suggesterRoutingMode',
   'suggesterRoutingInstructions',
@@ -158,11 +173,13 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerFrequency',
   'announcerSlackChannel',
+  'announcerDiscordChannel',
   'announcerInstructions',
 ];
 
 const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
   'platformIssueSlackChannel',
+  'platformIssueDiscordChannel',
 ];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
@@ -188,6 +205,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   managerStats: MANAGER_STATS_FIELDS,
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
+  codeqlTriage: CODEQL_TRIAGE_FIELDS,
   ...SCHEDULE_ONLY_AUTOMATION_FIELDS,
   reviewer: REVIEWER_FIELDS,
   conflictResolver: CONFLICT_RESOLVER_FIELDS,
@@ -308,18 +326,27 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.dependabotTriageSlackChannel.trim() || null,
     dependabotTriageDiscordChannel:
       stateToSave.dependabotTriageDiscordChannel.trim() || null,
+    codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
+    codeqlTriageSlackChannel:
+      stateToSave.codeqlTriageSlackChannel.trim() || null,
+    codeqlTriageDiscordChannel:
+      stateToSave.codeqlTriageDiscordChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
+    suggesterDiscordChannel: stateToSave.suggesterDiscordChannel.trim() || null,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,
     announcerFrequency: stateToSave.announcerFrequency,
     announcerSlackChannel: stateToSave.announcerSlackChannel.trim() || null,
+    announcerDiscordChannel: stateToSave.announcerDiscordChannel.trim() || null,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
     platformIssueSlackChannel:
       stateToSave.platformIssueSlackChannel.trim() || null,
+    platformIssueDiscordChannel:
+      stateToSave.platformIssueDiscordChannel.trim() || null,
     securityAuditorSlackChannel:
       stateToSave.securityAuditorSlackChannel.trim() || null,
     securityAuditorDiscordChannel:

@@ -79,6 +79,7 @@ manager-facing updates and suggestions.
 | **Weekly Manager Stats**     | A weekly summary of Roomote activity                             | Weekly                                      |
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
+| **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
 | **Security Auditor**         | Security follow-up work from recently merged PRs                 | Every hour, every 6 hours, daily, or weekly |
 | **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
 | **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
@@ -100,11 +101,11 @@ surfaces).
 
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
-with. Triage Dependabot Alerts and CI Failure Triage are GitHub-only by
-nature. Security Auditor, Code Quality Auditor, Weekly Manager Stats, Suggest
-Ideas, Summarize Merged PRs, and Triage Sentry Issues work with any connected
-source-control provider. Resolve PR Conflicts supports GitHub, GitLab, and
-Azure DevOps.
+with. Triage Dependabot Alerts, Triage CodeQL Alerts, and CI Failure Triage are
+GitHub-only by nature. Security Auditor, Code Quality Auditor, Weekly Manager
+Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
+any connected source-control provider. Resolve PR Conflicts supports GitHub,
+GitLab, and Azure DevOps.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
 high-confidence maintainability issues worth a real follow-up task. It is
@@ -119,6 +120,11 @@ projects.
 **Triage Dependabot Alerts** scans open GitHub Dependabot alerts across your
 active repositories and suggests tightly scoped follow-up update tasks. It
 does not open PRs directly from the scheduled scan.
+
+**Triage CodeQL Alerts** scans open GitHub code-scanning alerts (especially
+CodeQL findings) across your active repositories and launches tightly scoped
+remediation follow-up tasks. It does not open PRs directly from the scheduled
+scan.
 
 **Security Auditor** reviews recently merged PRs for concrete security issues
 and secure-by-default gaps that are worth a real follow-up task.

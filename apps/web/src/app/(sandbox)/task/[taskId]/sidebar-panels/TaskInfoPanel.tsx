@@ -200,9 +200,12 @@ export function TaskInfoPanel({
     ? SANDBOX_PROVIDER_LABELS[taskRun.vendor]
     : 'Unknown';
   const taskModelReasoningEffort = taskRun.payload?.reasoningEffort;
-  const inferenceProviderId = task.model
-    ? getTaskModelProviderId(task.model)
-    : null;
+  const inferenceProviderId =
+    task.modelProvider && task.modelProvider !== 'opencode'
+      ? task.modelProvider
+      : task.model
+        ? getTaskModelProviderId(task.model)
+        : null;
   const inferenceProviderLabel =
     inferenceProviderId && task.model?.includes('/')
       ? getModelProviderLabel(inferenceProviderId)

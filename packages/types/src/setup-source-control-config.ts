@@ -308,7 +308,7 @@ function buildProviderFields(
         {
           envVarName: 'ADO_ORGANIZATION',
           acceptedEnvVarNames: ['ADO_ORGANIZATION'],
-          label: 'Azure DevOps Organization',
+          label: 'ADO Organization (URL slug)',
         },
         {
           envVarName: 'ADO_TOKEN',

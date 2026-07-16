@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 
 import {
   generateOpenCodeConfig,
+  OPENCODE_AUTH_FILE_NAME,
   resolveOpenCodeDataDir,
   ROOMOTE_OPENCODE_SLACK_STOP_HOOK_FILE_NAME,
   type OpenCodeConfigMcpServer,
@@ -12,6 +13,7 @@ import type { HarnessLogger } from '../../../../logging';
 import {
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  type ReasoningEffort,
 } from '@roomote/types';
 
 import {
@@ -158,6 +160,7 @@ export async function prepareOpenCodeCommandEnv(options: {
   workspacePath: string;
   mcpServers?: Record<string, unknown>;
   model?: string;
+  reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
   logger: HarnessLogger;
 }): Promise<{ commandEnv: Record<string, string>; model?: string }> {
@@ -188,6 +191,7 @@ export async function prepareOpenCodeCommandEnv(options: {
     developerInstructionsContent: options.developerInstructionsContent,
     mcpServers: normalizeOpenCodeMcpServers(parsedMcpServers, commandEnv),
     model: options.model,
+    reasoningEffortOverride: options.reasoningEffortOverride,
   });
   commandEnv.OPENCODE_CONFIG_CONTENT = configContent;
   commandEnv.ROOMOTE_NODE_EXECUTABLE = process.execPath;
@@ -291,7 +295,7 @@ async function materializeOpenCodeAuthJson(options: {
   try {
     const dataDir = resolveOpenCodeDataDir(homeDir, commandEnv);
     await fs.mkdir(dataDir, { recursive: true });
-    const authFilePath = path.join(dataDir, 'auth.json');
+    const authFilePath = path.join(dataDir, OPENCODE_AUTH_FILE_NAME);
     await fs.writeFile(authFilePath, authContent, { mode: 0o600 });
     delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
     logger.info(

@@ -3,6 +3,7 @@ import type { ResultPromise } from 'execa';
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 import {
   getHarnessModelOverride,
+  isReasoningEffort,
   type EnvironmentMcpServers,
   type LaunchCodingHarness,
 } from '@roomote/types';
@@ -97,6 +98,14 @@ export async function createHarness({
           harnessType,
         )
       : undefined;
+    // Per-task reasoning effort stamped at launch (or set explicitly via the
+    // public API). Applied to the effective coding model, which per-role env
+    // levels do not cover when a launch-time model override is in play.
+    const reasoningEffortOverride = isReasoningEffort(
+      taskRun.payload?.reasoningEffort,
+    )
+      ? taskRun.payload.reasoningEffort
+      : undefined;
 
     const commonOptions = {
       workspacePath,
@@ -110,6 +119,7 @@ export async function createHarness({
             await prepareQueuedPromptActorScope(userId)
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
+      ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
     };
 
     return await startOpenCodeServerHarness({

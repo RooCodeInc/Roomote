@@ -1,6 +1,10 @@
 import type { RunTokenContext } from '@roomote/types';
 
 import { WorkerEnv } from '../../../env';
+import {
+  engageCredentialWriteBarrier,
+  resetCredentialWriteBarrierForTesting,
+} from '../../../lib/credential-write-barrier';
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
@@ -101,6 +105,7 @@ function createCaller(workerEnv?: WorkerEnv, runId = 1) {
 describe('reloadDeploymentEnvVars procedure', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetCredentialWriteBarrierForTesting();
     mockGetResolvedRuntimeEnvVars.mockResolvedValue({
       OPENAI_API_KEY: 'new-openai-key',
       ANTHROPIC_API_KEY: 'new-anthropic-key',
@@ -174,5 +179,19 @@ describe('reloadDeploymentEnvVars procedure', () => {
     ).rejects.toMatchObject({
       message: 'Worker environment is not available for live reload',
     });
+  });
+
+  it('rejects without writing env files once the credential write barrier is engaged', async () => {
+    await engageCredentialWriteBarrier();
+
+    const { caller } = createCaller(createWorkerEnv());
+
+    await expect(
+      caller.commands.reloadDeploymentEnvVars(),
+    ).rejects.toMatchObject({
+      message:
+        'Environment reload is unavailable while the sandbox prepares for a snapshot',
+    });
+    expect(mockInjectEnvVars).not.toHaveBeenCalled();
   });
 });
