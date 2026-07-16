@@ -124,6 +124,8 @@ export async function batchCreateEnvironmentsCommand(
           name: environmentSpec.name,
           config,
           createdByUserId: userId,
+          isVerified: false,
+          verificationError: null,
         })
         .returning({ id: environments.id });
 

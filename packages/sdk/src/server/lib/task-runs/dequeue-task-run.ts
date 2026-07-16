@@ -28,6 +28,7 @@ import {
   createSourceControlTokenForTaskRun,
   type SourceControlRuntimeToken,
   cancelTaskRun,
+  notifyCanceledTaskRunOnSettle,
   reportBootstrapFailure,
   resolveGitAuthor,
   claimJobById,
@@ -393,6 +394,8 @@ export const dequeueTaskRun = async (
             }`,
           );
         }
+
+        await notifyCanceledTaskRunOnSettle(taskRun);
       }
 
       return undefined;

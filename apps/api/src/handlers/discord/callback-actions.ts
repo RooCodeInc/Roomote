@@ -129,6 +129,8 @@ async function handleCancelCallback(input: {
     run,
     authUserId: mappedUserId,
     allowDirectCancelWithoutSandbox: true,
+    // Provider Cancel is terminal: stop the turn and shut the sandbox down.
+    terminate: true,
     cancelledBy: {
       ...(cancelledByName ? { name: cancelledByName } : {}),
       source: 'discord',

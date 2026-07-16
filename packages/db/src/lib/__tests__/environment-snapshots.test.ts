@@ -488,6 +488,48 @@ describe('environment snapshot helpers', () => {
     );
   });
 
+  it('preserves snapshots when a full config payload only changes metadata', async () => {
+    await upsertEnvironmentSnapshot(db, {
+      environmentId: testEnvironmentId,
+      provider: 'modal',
+      snapshotId: 'sandbox-snapshot-123',
+      snapshotStatus: 'ready',
+      snapshotCreatedAt: new Date('2026-02-01T00:00:00.000Z'),
+      snapshotExpiresAt: new Date('2026-02-02T00:00:00.000Z'),
+    });
+
+    const environmentBefore = await db.query.environments.findFirst({
+      where: eq(environments.id, testEnvironmentId),
+    });
+
+    const result = await updateEnvironmentDefinition(db, {
+      environmentId: testEnvironmentId,
+      fields: {
+        description: 'Updated description',
+        config: {
+          ...environmentBefore!.config,
+          description: 'Updated description',
+        },
+      },
+    });
+
+    const snapshotRow = await db.query.environmentSnapshots.findFirst({
+      where: eq(environmentSnapshots.environmentId, testEnvironmentId),
+    });
+
+    expect(result).toEqual({
+      updated: true,
+      snapshotsInvalidated: false,
+      verificationCleared: false,
+    });
+    expect(snapshotRow).toEqual(
+      expect.objectContaining({
+        snapshotId: 'sandbox-snapshot-123',
+        deletedAt: null,
+      }),
+    );
+  });
+
   it('rejects stale refresh attachments after the active row is reused by a manual snapshot', async () => {
     const sourceCreatedAt = new Date('2026-02-01T00:00:00.000Z');
     const sourceExpiresAt = new Date('2026-02-02T00:00:00.000Z');
