@@ -374,6 +374,14 @@ export async function updateBackgroundAgentSettingsCommand(
   const ciFailureTriageDiscordChannel = shouldUpdateCiFailureTriage
     ? normalizeOptionalText(input.ciFailureTriageDiscordChannel)
     : null;
+  // These three Discord fields are optional in the API for deploy
+  // compatibility: an older client that never sends them must preserve the
+  // persisted target, not clear it. Only an explicitly submitted value (set
+  // or null) goes through resolution below.
+  const suggesterDiscordProvided = input.suggesterDiscordChannel !== undefined;
+  const announcerDiscordProvided = input.announcerDiscordChannel !== undefined;
+  const platformIssueDiscordProvided =
+    input.platformIssueDiscordChannel !== undefined;
   const suggesterDiscordChannel = shouldUpdateSuggester
     ? normalizeOptionalText(input.suggesterDiscordChannel)
     : null;
@@ -643,7 +651,7 @@ export async function updateBackgroundAgentSettingsCommand(
       : keepPersistedDiscordChannel(
           existingSettings?.ciFailureTriageDiscordChannelId,
         ),
-    shouldUpdateSuggester
+    shouldUpdateSuggester && suggesterDiscordProvided
       ? resolveDiscordChannelId({
           field: 'suggesterDiscordChannel',
           input: suggesterDiscordChannel,
@@ -651,7 +659,7 @@ export async function updateBackgroundAgentSettingsCommand(
       : keepPersistedDiscordChannel(
           existingSettings?.suggesterDiscordChannelId,
         ),
-    shouldUpdateAnnouncer
+    shouldUpdateAnnouncer && announcerDiscordProvided
       ? resolveDiscordChannelId({
           field: 'announcerDiscordChannel',
           input: announcerDiscordChannel,
@@ -659,7 +667,7 @@ export async function updateBackgroundAgentSettingsCommand(
       : keepPersistedDiscordChannel(
           existingSettings?.announcerDiscordChannelId,
         ),
-    shouldUpdatePlatformIssueAlerts
+    shouldUpdatePlatformIssueAlerts && platformIssueDiscordProvided
       ? resolveDiscordChannelId({
           field: 'platformIssueDiscordChannel',
           input: platformIssueDiscordChannel,

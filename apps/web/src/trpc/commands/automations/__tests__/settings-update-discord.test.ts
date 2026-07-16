@@ -476,6 +476,44 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
     }
   }, 15_000);
 
+  it('preserves a Discord target when an older client omits the optional field on a same-automation save', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+
+    // A new client selects a Discord destination for platform issue alerts.
+    const first = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+    expect(first.success).toBe(true);
+
+    // An older client (deployed before the field existed) re-saves the same
+    // automation without ever sending platformIssueDiscordChannel. Omission
+    // must preserve the target, not clear it and disable the automation.
+    const input = buildInput({ savingAutomation: 'platformIssueAlerts' });
+    delete (input as Record<string, unknown>).platformIssueDiscordChannel;
+    const second = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(second.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+    expect(automation?.enabled).toBe(true);
+  }, 15_000);
+
   it('preserves suggester, announcer, and platform issue Discord targets when saving an unrelated automation', async () => {
     await insertSlackInstallation();
     await insertAvailableDiscordChannel({
