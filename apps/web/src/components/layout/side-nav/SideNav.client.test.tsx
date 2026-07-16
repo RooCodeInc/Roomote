@@ -470,7 +470,7 @@ describe('SideNav quick access tasks', () => {
         placeholderData: expect.any(Function),
       }),
     );
-    expect(screen.getAllByRole('separator')).toHaveLength(2);
+    expect(screen.queryAllByRole('separator')).toHaveLength(0);
   });
 
   it('marks the active quick access task for task subroutes', () => {
