@@ -53,6 +53,7 @@ import { awaitSubprocess } from './subprocess';
 import { resolveStatus } from './resolve-status';
 import { getDefaultKeepaliveMs } from './completion';
 import { waitForExternalSleepAction } from './wait-for-external-sleep-action';
+import { scrubSandboxSecretsBeforeSnapshot } from '../commands/utils/scrub-sandbox-secrets';
 import {
   buildWorkerRuntimeStateDetails,
   buildWorkerTaskEventDetails,
@@ -1862,13 +1863,20 @@ export const runTask = async ({
       );
     }
 
-    const { claimed: sleepActionTriggered } =
-      skipExternalSleepAction || skipSleepAfterTerminalCancel
-        ? { claimed: false }
-        : await waitForExternalSleepAction({
-            taskRun,
-            logger,
-          });
+    let sleepActionTriggered = false;
+
+    if (!skipExternalSleepAction && !skipSleepAfterTerminalCancel) {
+      // BullMQ may claim the sleep action and snapshot the filesystem while
+      // the handoff helper polls below. The harness has already shut down, so
+      // drop on-disk credential material first; resume re-injects it from the
+      // dequeue response.
+      scrubSandboxSecretsBeforeSnapshot(logger);
+
+      ({ claimed: sleepActionTriggered } = await waitForExternalSleepAction({
+        taskRun,
+        logger,
+      }));
+    }
 
     // Fallback: check for pending Linear messages that arrived during the snapshot
     // window. In practice, the provider runtime is torn down during or

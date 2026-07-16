@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 
 import {
   generateOpenCodeConfig,
+  OPENCODE_AUTH_FILE_NAME,
   resolveOpenCodeDataDir,
   ROOMOTE_OPENCODE_SLACK_STOP_HOOK_FILE_NAME,
   type OpenCodeConfigMcpServer,
@@ -294,7 +295,7 @@ async function materializeOpenCodeAuthJson(options: {
   try {
     const dataDir = resolveOpenCodeDataDir(homeDir, commandEnv);
     await fs.mkdir(dataDir, { recursive: true });
-    const authFilePath = path.join(dataDir, 'auth.json');
+    const authFilePath = path.join(dataDir, OPENCODE_AUTH_FILE_NAME);
     await fs.writeFile(authFilePath, authContent, { mode: 0o600 });
     delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
     logger.info(
