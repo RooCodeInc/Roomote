@@ -96,6 +96,7 @@ import {
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
+  createSlackAppFromManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -218,6 +219,7 @@ import {
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
+  createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
@@ -884,6 +886,12 @@ export const appRouter = createRouter({
       .input(z.object({ redirectPath: z.string().optional() }).optional())
       .mutation(({ ctx: { auth }, input }) =>
         connectSlackAppCommand(auth, input),
+      ),
+
+    createAppFromManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createSlackAppFromManifestCommand(auth, input),
       ),
 
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1934,6 +1942,17 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ input }) => saveSetupBootstrapAuthConfigCommand(input)),
+
+    createSlackAppFromManifest: publicProcedure
+      .input(
+        z.object({
+          configToken: z.string().trim().min(1),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) =>
+        createSetupBootstrapSlackAppFromManifestCommand(input),
+      ),
   }),
 
   deployment: createRouter({

@@ -6,7 +6,13 @@ import type {
   ReactNode,
   SVGProps,
 } from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { SetupAuthStatus } from '@roomote/types';
 
@@ -33,6 +39,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('sonner', () => ({
   toast: {
+    success: vi.fn(),
     error: vi.fn(),
   },
 }));
@@ -48,6 +55,11 @@ vi.mock('@/lib/auth-client', () => ({
 
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
+    slack: {
+      createAppFromManifest: {
+        mutationOptions: (options: Record<string, unknown>) => options,
+      },
+    },
     setupNew: {
       saveAuthConfig: {
         mutationOptions: (options: Record<string, unknown>) => options,
@@ -58,6 +70,9 @@ vi.mock('@/trpc/client', () => ({
     },
     setupBootstrap: {
       saveAuthConfig: {
+        mutationOptions: (options: Record<string, unknown>) => options,
+      },
+      createSlackAppFromManifest: {
         mutationOptions: (options: Record<string, unknown>) => options,
       },
       status: {
@@ -382,7 +397,7 @@ describe('StepAuthEnvVars', () => {
     });
   });
 
-  it('defaults Slack to the manifest CTA and hides manual fields initially', () => {
+  it('defaults Slack to the config-token flow and hides manual fields initially', () => {
     render(
       <StepAuthEnvVars
         authSetup={buildAuthSetup('slack')}
@@ -390,14 +405,39 @@ describe('StepAuthEnvVars', () => {
       />,
     );
 
-    const link = screen.getByRole('link', {
-      name: /create slack app/i,
-    });
-    const url = new URL(link.getAttribute('href') ?? '');
-
     expect(
       screen.getByRole('heading', { name: /create slack app/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('App configuration token'),
+    ).toBeInTheDocument();
+    // The create action stays disabled until a token is entered.
+    expect(
+      screen.getByRole('button', { name: /create slack app/i }),
+    ).toBeDisabled();
+
+    expect(
+      screen.getByRole('button', { name: /create app manually/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Slack Client ID'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the manual value form after opening the prefilled-manifest flow', () => {
+    render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('slack')}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: /create app manually/i }),
+    );
+
+    const link = screen.getByRole('link', { name: /prefilled manifest/i });
+    const url = new URL(link.getAttribute('href') ?? '');
     expect(url.origin + url.pathname).toBe('https://api.slack.com/apps');
     expect(url.searchParams.get('new_app')).toBe('1');
     expect(
@@ -409,12 +449,129 @@ describe('StepAuthEnvVars', () => {
         },
       },
     });
+
+    expect(screen.getByPlaceholderText('Slack Client ID')).toBeInTheDocument();
     expect(
-      screen.queryByPlaceholderText('Slack Client ID'),
+      screen.getByPlaceholderText('Slack Client Secret'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /create slack app/i }),
     ).not.toBeInTheDocument();
   });
 
-  it('shows the manual value form after opening the Slack app creation flow', () => {
+  it('creates the Slack app from a config token, shows optional icon guidance, and continues setup', async () => {
+    const invalidateQueries = vi.fn();
+    mockUseQueryClient.mockReturnValue({
+      invalidateQueries,
+    } as unknown as ReturnType<typeof mockUseQueryClient>);
+
+    const recordedOptions: Array<{
+      onSuccess?: (result: unknown) => Promise<void> | void;
+    }> = [];
+    const mutate = vi.fn();
+    const mutateAsync = vi.fn(async (input) => input);
+    mockUseMutation.mockImplementation((options) => {
+      recordedOptions.push(
+        options as { onSuccess?: (result: unknown) => Promise<void> | void },
+      );
+
+      return {
+        mutate,
+        mutateAsync,
+        isPending: false,
+      } as unknown as ReturnType<typeof useMutation>;
+    });
+
+    const { rerender } = render(
+      <StepAuthEnvVars
+        authSetup={buildAuthSetup('slack')}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText('App configuration token'), {
+      target: { value: '  xoxe.xoxp-config-token  ' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /create slack app/i }));
+
+    expect(mutate).toHaveBeenCalledWith({
+      configToken: 'xoxe.xoxp-config-token',
+    });
+
+    // The first useMutation registered by the component is createSlackApp.
+    await act(async () => {
+      await recordedOptions[0]?.onSuccess?.({
+        success: true,
+        appId: 'A1',
+        appSettingsUrl: 'https://api.slack.com/apps/A1',
+      });
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ['setupNew.status'],
+    });
+    expect(
+      await screen.findByRole('heading', { name: /finish slack app/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Your Slack app is ready/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /the Roomote logo/i }),
+    ).toHaveAttribute('href', '/api/setup/roomote-logo');
+    expect(screen.getByRole('link', { name: /the app/i })).toHaveAttribute(
+      'href',
+      'https://api.slack.com/apps/A1',
+    );
+    expect(
+      screen.queryByPlaceholderText('Slack Client ID'),
+    ).not.toBeInTheDocument();
+    expect(mutateAsync).not.toHaveBeenCalled();
+
+    const refreshedAuthSetup = buildAuthSetup('slack');
+    rerender(
+      <StepAuthEnvVars
+        authSetup={{
+          ...refreshedAuthSetup,
+          providers: refreshedAuthSetup.providers.map((provider) =>
+            provider.id === 'slack'
+              ? { ...provider, savedSatisfied: true, setupSatisfied: true }
+              : provider,
+          ),
+        }}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('heading', { name: /finish slack app/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText('Slack Client ID'),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    expect(mutateAsync).toHaveBeenCalledWith({ provider: 'slack', values: {} });
+  });
+
+  it('surfaces Slack app creation failures without advancing', async () => {
+    const { toast } = await import('sonner');
+    const recordedOptions: Array<{
+      onSuccess?: (result: unknown) => Promise<void> | void;
+    }> = [];
+    const mutate = vi.fn();
+    const mutateAsync = vi.fn(async (input) => input);
+    mockUseMutation.mockImplementation((options) => {
+      recordedOptions.push(
+        options as { onSuccess?: (result: unknown) => Promise<void> | void },
+      );
+
+      return {
+        mutate,
+        mutateAsync,
+        isPending: false,
+      } as unknown as ReturnType<typeof useMutation>;
+    });
+
     render(
       <StepAuthEnvVars
         authSetup={buildAuthSetup('slack')}
@@ -422,15 +579,15 @@ describe('StepAuthEnvVars', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('link', { name: /create slack app/i }));
+    await recordedOptions[0]?.onSuccess?.({
+      success: false,
+      error: 'Slack rejected the app configuration token.',
+    });
 
-    expect(screen.getByPlaceholderText('Slack Client ID')).toBeInTheDocument();
-    expect(
-      screen.getByPlaceholderText('Slack Client Secret'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('link', { name: /create slack app/i }),
-    ).not.toBeInTheDocument();
+    expect(toast.error).toHaveBeenCalledWith(
+      'Slack rejected the app configuration token.',
+    );
+    expect(mutateAsync).not.toHaveBeenCalled();
   });
 
   it('reveals existing Slack inputs when entering values manually', () => {
@@ -442,7 +599,7 @@ describe('StepAuthEnvVars', () => {
     );
 
     fireEvent.click(
-      screen.getByRole('button', { name: /enter values manually/i }),
+      screen.getByRole('button', { name: /create app manually/i }),
     );
 
     expect(screen.getByPlaceholderText('Slack Client ID')).toBeInTheDocument();
@@ -872,7 +1029,7 @@ describe('StepAuthEnvVars', () => {
     );
 
     fireEvent.click(
-      screen.getByRole('button', { name: /enter values manually/i }),
+      screen.getByRole('button', { name: /create app manually/i }),
     );
     fireEvent.change(screen.getByPlaceholderText('Slack Client ID'), {
       target: { value: 'client-id' },

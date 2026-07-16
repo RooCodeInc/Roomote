@@ -48,7 +48,7 @@ function getTokenBackedConnectCopy({
   providerLabel: string;
 }): string {
   if (lockedByRuntime) {
-    return 'Connect to continue';
+    return "We've got all the config we need, just connect to continue.";
   }
 
   switch (provider) {
@@ -168,7 +168,7 @@ export function StepSourceControlConnect({
   const lockedByRuntime = providerStatus?.configSatisfiedByRuntimeEnv === true;
   const providerLabel = providerStatus?.label ?? provider;
   const githubCopy = lockedByRuntime
-    ? 'Connect to continue'
+    ? "We've got all the config we need, just connect to continue."
     : 'Connect the GitHub App to grant Roomote access to your repositories.';
 
   const tokenBackedCopy = getTokenBackedConnectCopy({
