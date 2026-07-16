@@ -25,13 +25,15 @@ function omitKeys(
 /**
  * Fetch the deployment's current env vars and rewrite the sandbox env
  * (env.sh, runtime env, harness command env) from them. Shared by the live
- * reload mutation and the post-snapshot-failure credential restore.
+ * reload mutation and the post-snapshot-failure credential restore. The
+ * returned `envVars` carry raw values and must never be returned to RPC
+ * callers.
  */
 export async function applyDeploymentEnvVarsReload(input: {
   runId: number;
   workerEnv: WorkerEnv;
   harness: Harness;
-}): Promise<{ success: true; names: string[] }> {
+}): Promise<{ names: string[]; envVars: Record<string, string> }> {
   const { runId, workerEnv, harness } = input;
 
   const [freshEnvVars, taskRun] = await Promise.all([
@@ -69,10 +71,10 @@ export async function applyDeploymentEnvVarsReload(input: {
   });
 
   return {
-    success: true,
     names: Object.keys(freshEnvVars).sort((left, right) =>
       left.localeCompare(right),
     ),
+    envVars: freshEnvVars,
   };
 }
 
@@ -109,6 +111,7 @@ export const reloadDeploymentEnvVars = publicProcedure.mutation(
       });
     }
 
-    return reloadResult;
+    // Only the names leave the sandbox; the raw values stay in-process.
+    return { success: true as const, names: reloadResult.names };
   },
 );

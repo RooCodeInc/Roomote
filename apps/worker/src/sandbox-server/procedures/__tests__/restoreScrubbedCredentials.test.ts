@@ -8,16 +8,30 @@ import {
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
-const { mockRefreshGitHubToken, mockApplyDeploymentEnvVarsReload } = vi.hoisted(
-  () => ({
-    mockRefreshGitHubToken: vi.fn(),
-    mockApplyDeploymentEnvVarsReload: vi.fn(),
-  }),
-);
+const {
+  mockRefreshGitHubToken,
+  mockApplyDeploymentEnvVarsReload,
+  mockRematerializeOpenCodeCredentialFiles,
+} = vi.hoisted(() => ({
+  mockRefreshGitHubToken: vi.fn(),
+  mockApplyDeploymentEnvVarsReload: vi.fn(),
+  mockRematerializeOpenCodeCredentialFiles: vi.fn(),
+}));
 
 vi.mock('../../../run-task/polling/github-token-refresh', () => ({
   refreshGitHubToken: mockRefreshGitHubToken,
 }));
+
+vi.mock('../../../run-task/agent-home', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../run-task/agent-home')>();
+
+  return {
+    ...actual,
+    rematerializeOpenCodeCredentialFiles:
+      mockRematerializeOpenCodeCredentialFiles,
+  };
+});
 
 vi.mock('../reloadDeploymentEnvVars', async (importOriginal) => {
   const actual =
@@ -29,11 +43,16 @@ vi.mock('../reloadDeploymentEnvVars', async (importOriginal) => {
   };
 });
 
-function createCaller(options: { workerEnv?: unknown } = { workerEnv: {} }) {
+function createCaller(
+  options: { workerEnv?: unknown; taskRuntime?: Context['taskRuntime'] } = {
+    workerEnv: {},
+  },
+) {
   const ctx = {
     workingDirectory: '/tmp',
     harness: { isConnected: true },
     workerEnv: options.workerEnv,
+    taskRuntime: options.taskRuntime,
     auth: {
       runId: 1,
       userId: null,
@@ -57,14 +76,32 @@ describe('restoreScrubbedCredentials procedure', () => {
       expiresAt: null,
     });
     mockApplyDeploymentEnvVarsReload.mockResolvedValue({
-      success: true,
       names: ['OPENAI_API_KEY'],
+      envVars: { OPENAI_API_KEY: 'fresh-openai-key' },
+    });
+    mockRematerializeOpenCodeCredentialFiles.mockReturnValue({
+      failedSteps: [],
     });
   });
 
-  it('releases the barrier and re-materializes token files and env vars', async () => {
+  it('releases the barrier and re-materializes token files, env vars, and OpenCode credentials', async () => {
     await engageCredentialWriteBarrier();
-    const caller = createCaller();
+    const caller = createCaller({
+      workerEnv: {},
+      taskRuntime: {
+        homeDir: '/workspace/.roomote-runtime-home',
+        runtimeEnv: {
+          XDG_DATA_HOME: '/task/data',
+          // Bootstrap already rewrote this to a file path; the fresh
+          // deployment value must win in the merged env.
+          GOOGLE_APPLICATION_CREDENTIALS: '/task/data/opencode/google.json',
+        },
+      },
+    });
+    mockApplyDeploymentEnvVarsReload.mockResolvedValue({
+      names: ['GOOGLE_APPLICATION_CREDENTIALS'],
+      envVars: { GOOGLE_APPLICATION_CREDENTIALS: '{"type":"sa"}' },
+    });
 
     const result = await caller.commands.restoreScrubbedCredentials();
 
@@ -76,6 +113,26 @@ describe('restoreScrubbedCredentials procedure', () => {
     expect(mockApplyDeploymentEnvVarsReload).toHaveBeenCalledWith(
       expect.objectContaining({ runId: 1 }),
     );
+    expect(mockRematerializeOpenCodeCredentialFiles).toHaveBeenCalledWith({
+      homeDir: '/workspace/.roomote-runtime-home',
+      runtimeEnv: {
+        XDG_DATA_HOME: '/task/data',
+        GOOGLE_APPLICATION_CREDENTIALS: '{"type":"sa"}',
+      },
+      logger: console,
+    });
+  });
+
+  it('fails when rewriting OpenCode credential files fails', async () => {
+    mockRematerializeOpenCodeCredentialFiles.mockReturnValue({
+      failedSteps: ['rewrite Google application credentials file'],
+    });
+    const caller = createCaller();
+
+    await expect(caller.commands.restoreScrubbedCredentials()).rejects.toThrow(
+      'rewrite Google application credentials file',
+    );
+    expect(isCredentialWriteBarrierEngaged()).toBe(false);
   });
 
   it('fails when the token refresh could not produce a token', async () => {
