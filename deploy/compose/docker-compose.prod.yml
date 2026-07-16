@@ -20,6 +20,7 @@ x-roomote-base-env: &roomote-base-env
   ROOMOTE_APP_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   R_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
   ROOMOTE_PUBLIC_URL: https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}
+  R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   TRPC_URL: ${TRPC_URL:-https://${ROOMOTE_APP_DOMAIN:?ROOMOTE_APP_DOMAIN is required}/_roomote-api}
 
 x-roomote-inference-env: &roomote-inference-env

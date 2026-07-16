@@ -647,6 +647,7 @@ describe('Env', () => {
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
       R_PUBLIC_URL: '',
+      R_INSTANCE_ID: '',
       R_TEAMS_BOT_APP_ID: '',
       R_TEAMS_BOT_APP_PASSWORD: '',
       R_TEAMS_BOT_TENANT_ID: '',
@@ -675,6 +676,7 @@ describe('Env', () => {
       const env = createRoomoteEnv(runtimeEnv);
 
       expect(env.R_PUBLIC_URL).toBeUndefined();
+      expect(env.R_INSTANCE_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();

@@ -20,10 +20,10 @@ export function generateAnalyticsId(): string {
 }
 
 /**
- * Returns the stable anonymous instance analytics id, lazily generating and
- * persisting it on first use. The id lives on the deployment_settings
- * singleton row, is never derived from customer data, and has no
- * user-facing write path.
+ * Returns the configured instance analytics id or lazily generates and
+ * persists one on first use. Without R_INSTANCE_ID, the id lives on the
+ * deployment_settings singleton row, is never derived from customer data, and
+ * has no user-facing write path.
  *
  * Concurrency-safe: the UPDATE only fills a NULL column, so racing callers
  * converge on whichever id was committed first.

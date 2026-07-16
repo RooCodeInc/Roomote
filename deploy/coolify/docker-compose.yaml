@@ -63,6 +63,7 @@ x-roomote-shared-env: &roomote-shared-env
   REDIS_URL: redis://redis:6379
   R_APP_URL: ${SERVICE_URL_WEB}
   R_PUBLIC_URL: ${SERVICE_URL_WEB}
+  R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   TRPC_URL: ${SERVICE_URL_API}
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   S3_ENDPOINT: http://minio:9000
