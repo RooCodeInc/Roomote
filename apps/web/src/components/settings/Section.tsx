@@ -41,7 +41,7 @@ export const Section = ({
     : icon;
 
   return (
-    <Card className="gap-0 p-0">
+    <Card className="gap-0 p-0 border-0">
       <CardHeader className="px-4 flex items-center w-full h-14">
         <CardTitle className="flex items-center gap-2 w-full">
           {iconElement}
