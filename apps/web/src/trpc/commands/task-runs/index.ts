@@ -485,3 +485,5 @@ export async function cancelTaskRunCommand(
     };
   }
 }
+
+export { retryFailedTaskStartCommand } from './retry-failed-start';

@@ -74,7 +74,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
     const isCurrentItem = active ?? isActive ?? false;
 
     const itemClasses = cn(
-      'relative cursor-pointer flex items-center transition-all',
+      'relative cursor-pointer flex items-center transition-all text-sm',
       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
       '[&_svg]:size-5 [&_svg]:shrink-0',
       expanded
@@ -110,7 +110,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
           <span
             className={cn(
               'min-w-0 overflow-hidden transition-all',
-              expanded ? 'w-full pl-2 opacity-100' : 'hidden w-0 opacity-0',
+              expanded ? 'w-full pl-1 opacity-100' : 'hidden w-0 opacity-0',
             )}
           >
             <span className="block w-full truncate text-left font-medium">
@@ -193,7 +193,7 @@ export const SideNavItem = forwardRef<HTMLButtonElement, SideNavItemProps>(
           align="center"
           className={`text-sm p-3 pl-4 text-${side}`}
         >
-          <p className="font-bold">{tooltip}</p>
+          <p className="font-semibold">{tooltip}</p>
           {description ? <p className="text-muted">{description}</p> : null}
         </TooltipContent>
       </Tooltip>

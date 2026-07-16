@@ -78,6 +78,16 @@ describe('background automation registry', () => {
     });
   });
 
+  it('allows Slack and Discord destinations for the suggester', () => {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey('suggester');
+
+    expect(descriptor?.supportedCommunicationProviders).toEqual([
+      'slack',
+      'discord',
+    ]);
+  });
+
   it('allows Teams, Telegram, and Discord destinations for CI failure triage Run now', () => {
     const descriptor =
       getTriggerableBackgroundAutomationDescriptorByKey('ci_failure_triage');

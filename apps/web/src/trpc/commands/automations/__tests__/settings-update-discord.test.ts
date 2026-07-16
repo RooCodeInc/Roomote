@@ -54,6 +54,7 @@ const adminAuth: UserAuthSuccess = {
   isAdmin: true,
   featureFlags: {} as Record<FeatureFlag, boolean>,
   anonymousAnalyticsEnabled: false,
+  cloudEnabled: false,
   resource: {
     username: null,
     fullName: null,
@@ -111,13 +112,16 @@ function buildInput(
     ciFailureTriageDiscordChannel: null,
     suggesterFrequency: 'off',
     suggesterSlackChannel: null,
+    suggesterDiscordChannel: null,
     suggesterInstructions: null,
     suggesterRoutingMode: 'manager_channel',
     suggesterRoutingInstructions: null,
     announcerFrequency: 'off',
     announcerSlackChannel: null,
+    announcerDiscordChannel: null,
     announcerInstructions: null,
     platformIssueSlackChannel: null,
+    platformIssueDiscordChannel: null,
     ...overrides,
   };
 }
@@ -348,5 +352,265 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
         externalRef: 'D222',
       },
     ]);
+  }, 15_000);
+
+  it('writes a suggester discord_channel target and clears its Slack one', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+    await upsertAutomation(db, {
+      key: 'suggester',
+      enabled: true,
+      schedule: { mode: 'daily' },
+      targets: [
+        {
+          provider: 'slack',
+          targetKind: 'slack_channel',
+          externalRef: 'C123OLD',
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'suggester',
+        suggesterFrequency: 'daily',
+        suggesterDiscordChannel: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('suggester')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+
+    if (result.success) {
+      expect(result.settings.suggesterDiscordChannelId).toBe('D111');
+      expect(result.settings.suggesterSlackChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('writes an announcer slack_channel target and clears its Discord one', async () => {
+    await insertSlackInstallation();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+    await upsertAutomation(db, {
+      key: 'announcer',
+      enabled: true,
+      schedule: { mode: 'weekly' },
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D111',
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'announcer',
+        announcerFrequency: 'weekly',
+        announcerSlackChannel: 'C123456NEW',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('announcer')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123456NEW',
+      },
+    ]);
+
+    if (result.success) {
+      expect(result.settings.announcerSlackChannelId).toBe('C123456NEW');
+      expect(result.settings.announcerDiscordChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('enables platform issue alerts with a Discord destination and prefers Discord over a submitted Slack channel', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        // Server-side one-of backstop: when both somehow arrive, Discord
+        // wins and the Slack value is dropped.
+        platformIssueSlackChannel: 'C123456NEW',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+
+    expect(automation?.enabled).toBe(true);
+
+    if (result.success) {
+      expect(result.settings.platformIssueDiscordChannelId).toBe('D111');
+      expect(result.settings.platformIssueSlackChannelId).toBeNull();
+    }
+  }, 15_000);
+
+  it('preserves a Discord target when an older client omits the optional field on a same-automation save', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+
+    // A new client selects a Discord destination for platform issue alerts.
+    const first = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+    expect(first.success).toBe(true);
+
+    // An older client (deployed before the field existed) re-saves the same
+    // automation without ever sending platformIssueDiscordChannel. Omission
+    // must preserve the target, not clear it and disable the automation.
+    const input = buildInput({ savingAutomation: 'platformIssueAlerts' });
+    delete (input as unknown as Record<string, unknown>)
+      .platformIssueDiscordChannel;
+    const second = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(second.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+    const automation = await db.query.automations.findFirst({
+      where: eq(automations.key, 'platform_issue_alerts'),
+    });
+    expect(automation?.enabled).toBe(true);
+  }, 15_000);
+
+  it('clears the Discord target when a legacy client explicitly selects a Slack channel', async () => {
+    await insertSlackInstallation();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+    const first = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'platformIssueAlerts',
+        platformIssueDiscordChannel: 'D111',
+      }),
+    );
+    expect(first.success).toBe(true);
+
+    // A pre-deploy client cannot send the Discord field, but choosing a
+    // Slack channel is an explicit destination choice: it must clear the
+    // Discord target rather than leaving both stored (a later current-client
+    // save would otherwise silently flip routing back to Discord).
+    const input = buildInput({
+      savingAutomation: 'platformIssueAlerts',
+      platformIssueSlackChannel: 'C123456NEW',
+    });
+    delete (input as unknown as Record<string, unknown>)
+      .platformIssueDiscordChannel;
+    const second = await updateBackgroundAgentSettingsCommand(adminAuth, input);
+
+    expect(second.success).toBe(true);
+    expect(await getAutomationTargets('platform_issue_alerts')).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C123456NEW',
+      },
+    ]);
+  }, 15_000);
+
+  it('preserves suggester, announcer, and platform issue Discord targets when saving an unrelated automation', async () => {
+    await insertSlackInstallation();
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'automation-reports',
+    });
+
+    for (const key of [
+      'suggester',
+      'announcer',
+      'platform_issue_alerts',
+    ] as const) {
+      await upsertAutomation(db, {
+        key,
+        enabled: true,
+        ...(key === 'platform_issue_alerts'
+          ? {}
+          : { schedule: { mode: 'daily' } }),
+        targets: [
+          {
+            provider: 'discord',
+            targetKind: 'discord_channel',
+            externalRef: 'D111',
+          },
+        ],
+      });
+    }
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsSlackChannel: 'C123456NEW',
+        suggesterFrequency: 'daily',
+        announcerFrequency: 'daily',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+
+    for (const key of [
+      'suggester',
+      'announcer',
+      'platform_issue_alerts',
+    ] as const) {
+      expect(await getAutomationTargets(key)).toEqual([
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D111',
+        },
+      ]);
+    }
   }, 15_000);
 });

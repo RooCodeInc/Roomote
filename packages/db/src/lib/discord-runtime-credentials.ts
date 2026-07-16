@@ -66,6 +66,11 @@ let cachedCredentials: {
   expiresAtMs: number;
 } | null = null;
 
+let gatewaySecretCache: {
+  value: string | null;
+  expiresAtMs: number;
+} | null = null;
+
 /**
  * Accept a raw token or the value copied from an Authorization header. Discord
  * bot tokens contain no whitespace, so paste-introduced whitespace is safe to
@@ -396,4 +401,27 @@ export async function resolveDiscordRuntimeCredentials(): Promise<DiscordRuntime
 /** Drop the process cache after settings changes or an explicit repair. */
 export function invalidateDiscordRuntimeCredentialsCache(): void {
   cachedCredentials = null;
+  gatewaySecretCache = null;
+}
+
+/**
+ * Resolve the Discord gateway↔API transport secret. Process env wins over the
+ * encrypted deployment vault (same source order as the bot token).
+ */
+export async function resolveDiscordGatewaySecret(): Promise<string | null> {
+  const nowMs = Date.now();
+  if (gatewaySecretCache && gatewaySecretCache.expiresAtMs > nowMs) {
+    return gatewaySecretCache.value;
+  }
+
+  const fromEnv = process.env.R_DISCORD_GATEWAY_SECRET?.trim() || null;
+  if (fromEnv) {
+    gatewaySecretCache = { value: fromEnv, expiresAtMs: nowMs + CACHE_TTL_MS };
+    return fromEnv;
+  }
+
+  const deploymentEnvVars = await resolveEffectiveDeploymentEnvVars();
+  const value = deploymentEnvVars.R_DISCORD_GATEWAY_SECRET?.trim() || null;
+  gatewaySecretCache = { value, expiresAtMs: nowMs + CACHE_TTL_MS };
+  return value;
 }

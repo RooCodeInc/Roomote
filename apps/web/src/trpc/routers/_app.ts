@@ -30,6 +30,7 @@ import {
   analyticsDetailsInputSchema,
   analyticsExportInputSchema,
   analyticsFilterOptionsInputSchema,
+  analyticsOverviewInputSchema,
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
@@ -91,10 +92,12 @@ import {
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
+  retryFailedTaskStartCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
+  createSlackAppFromManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -217,6 +220,7 @@ import {
 import {
   getSetupNewStatusCommand,
   getSetupBootstrapStatusCommand,
+  createSetupBootstrapSlackAppFromManifestCommand,
   saveSetupBootstrapAuthConfigCommand,
   saveSetupBootstrapAuthProviderChoiceCommand,
   saveSetupNewAuthConfigCommand,
@@ -320,6 +324,7 @@ import {
   getAnalyticsDetailsCommand,
   exportAnalyticsCommand,
   getAnalyticsFiltersCommand,
+  getAnalyticsOverviewCommand,
   getPullRequestAnalyticsOverviewCommand,
 } from '../commands/analytics';
 import {
@@ -470,13 +475,34 @@ const automationsRouter = createRouter({
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        suggesterDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         suggesterInstructions: z.string().max(10_000).nullable(),
         suggesterRoutingMode: z.enum(SUGGESTER_ROUTING_MODES),
         suggesterRoutingInstructions: z.string().max(10_000).nullable(),
         announcerFrequency: z.enum(['off', 'daily', 'weekly']),
         announcerSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        announcerDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         announcerInstructions: z.string().max(8_000).nullable(),
         platformIssueSlackChannel: z.string().trim().min(1).max(160).nullable(),
+        platformIssueDiscordChannel: z
+          .string()
+          .trim()
+          .min(1)
+          .max(160)
+          .nullable()
+          .optional(),
         securityAuditorSlackChannel: z
           .string()
           .trim()
@@ -534,6 +560,12 @@ const automationsRouter = createRouter({
 
 export const appRouter = createRouter({
   analytics: createRouter({
+    overview: protectedProcedure
+      .input(analyticsOverviewInputSchema)
+      .query(({ ctx: { auth }, input }) =>
+        getAnalyticsOverviewCommand(auth, input),
+      ),
+
     pullRequestOverview: protectedProcedure
       .input(pullRequestAnalyticsOverviewInputSchema)
       .query(({ ctx: { auth }, input }) =>
@@ -708,6 +740,17 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         cancelTaskRunCommand(auth, input),
       ),
+
+    retryFailedStart: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          runId: z.number().int().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        retryFailedTaskStartCommand(auth, input),
+      ),
   }),
 
   github: createRouter({
@@ -881,6 +924,12 @@ export const appRouter = createRouter({
       .input(z.object({ redirectPath: z.string().optional() }).optional())
       .mutation(({ ctx: { auth }, input }) =>
         connectSlackAppCommand(auth, input),
+      ),
+
+    createAppFromManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        createSlackAppFromManifestCommand(auth, input),
       ),
 
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
@@ -1931,6 +1980,17 @@ export const appRouter = createRouter({
         }),
       )
       .mutation(({ input }) => saveSetupBootstrapAuthConfigCommand(input)),
+
+    createSlackAppFromManifest: publicProcedure
+      .input(
+        z.object({
+          configToken: z.string().trim().min(1),
+          setupToken: z.string().optional(),
+        }),
+      )
+      .mutation(({ input }) =>
+        createSetupBootstrapSlackAppFromManifestCommand(input),
+      ),
   }),
 
   deployment: createRouter({

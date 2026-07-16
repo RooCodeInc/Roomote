@@ -4,6 +4,8 @@ const DEFAULT_DELIVERY_MAX_ATTEMPTS = 8;
 const DEFAULT_DELIVERY_MAX_BACKOFF_MS = 30_000;
 const DEFAULT_LOGIN_RETRY_BASE_MS = 15_000;
 const DEFAULT_LOGIN_RETRY_MAX_MS = 5 * 60_000;
+const DEFAULT_INBOUND_MAX_ENTRIES = 50_000;
+const DEFAULT_DEAD_LETTER_MAX_ENTRIES = 1_000;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -21,7 +23,8 @@ function withoutTrailingSlashes(value: string): string {
 export type DiscordGatewayConfig = {
   port: number;
   apiEventsUrl: string;
-  apiSecret: string | null;
+  /** Snapshot used for secret/credential env resolution when embedded. */
+  processEnv: NodeJS.ProcessEnv;
   apiTimeoutMs: number;
   leaderLeaseTtlSeconds: number;
   leaderLeaseRenewMs: number;
@@ -32,6 +35,8 @@ export type DiscordGatewayConfig = {
   deliveryPollMs: number;
   deliveryMaxAttempts: number;
   deliveryMaxBackoffMs: number;
+  inboundMaxEntries: number;
+  deadLetterMaxEntries: number;
   loginRetryBaseMs: number;
   loginRetryMaxMs: number;
 };
@@ -44,13 +49,7 @@ export function resolveDiscordGatewayConfig(
   return {
     port: positiveInteger(env.PORT, DEFAULT_PORT),
     apiEventsUrl: `${withoutTrailingSlashes(apiBaseUrl)}/api/internal/discord/events`,
-    // ENCRYPTION_KEY is already shared between API/control-plane processes.
-    // A dedicated secret is preferred, while this fallback keeps existing
-    // self-hosted and local deployments bootable during the rollout.
-    apiSecret:
-      env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-      env.ENCRYPTION_KEY?.trim() ||
-      null,
+    processEnv: env,
     apiTimeoutMs: positiveInteger(
       env.DISCORD_GATEWAY_API_TIMEOUT_MS,
       DEFAULT_API_TIMEOUT_MS,
@@ -69,6 +68,14 @@ export function resolveDiscordGatewayConfig(
     deliveryMaxBackoffMs: positiveInteger(
       env.DISCORD_GATEWAY_DELIVERY_MAX_BACKOFF_MS,
       DEFAULT_DELIVERY_MAX_BACKOFF_MS,
+    ),
+    inboundMaxEntries: positiveInteger(
+      env.DISCORD_GATEWAY_INBOUND_MAX_ENTRIES,
+      DEFAULT_INBOUND_MAX_ENTRIES,
+    ),
+    deadLetterMaxEntries: positiveInteger(
+      env.DISCORD_GATEWAY_DEAD_LETTER_MAX_ENTRIES,
+      DEFAULT_DEAD_LETTER_MAX_ENTRIES,
     ),
     loginRetryBaseMs: positiveInteger(
       env.DISCORD_GATEWAY_LOGIN_RETRY_BASE_MS,

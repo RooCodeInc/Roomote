@@ -237,8 +237,7 @@ export function getDefaultAvailableComputeProvider(
 export const SETUP_COMPUTE_PROVIDER_CATALOG = [
   {
     provider: 'roomote',
-    label: 'Roomote Sandbox',
-    comment: 'Works out of the box',
+    label: 'Roomote',
     description:
       'Managed sandboxes preconfigured by your deployment, with snapshot support. Nothing to set up.',
     supportsSnapshots: true,
@@ -275,6 +274,15 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         // native grouping (Modal app name) for per-deployment attribution.
         envVarName: 'ROOMOTE_CLOUD_SLUG',
         label: 'Roomote Cloud Slug',
+        required: false,
+        category: 'infrastructure',
+      },
+      {
+        // Managed app-name override; deliberately separate from
+        // MODAL_APP_NAME so bring-your-own Modal settings cannot redirect
+        // managed-provider attribution.
+        envVarName: 'ROOMOTE_CLOUD_APP_NAME',
+        label: 'Roomote Cloud App Name',
         required: false,
         category: 'infrastructure',
       },
@@ -540,6 +548,7 @@ const DEPLOYMENT_MANAGED_COMPUTE_ENV_VARS: ReadonlySet<string> = new Set([
   'ROOMOTE_CLOUD_TOKEN_SECRET',
   'ROOMOTE_CLOUD_BACKEND',
   'ROOMOTE_CLOUD_SLUG',
+  'ROOMOTE_CLOUD_APP_NAME',
 ]);
 
 /**

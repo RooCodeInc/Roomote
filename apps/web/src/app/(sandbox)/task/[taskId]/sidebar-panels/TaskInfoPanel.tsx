@@ -71,7 +71,7 @@ const SANDBOX_PROVIDER_LABELS = {
   daytona: 'Daytona',
   e2b: 'E2B',
   blaxel: 'Blaxel',
-  roomote: 'Roomote Sandbox',
+  roomote: 'Roomote',
 } satisfies Record<ComputeProvider, string>;
 
 const SANDBOX_PROVIDER_ICONS = {

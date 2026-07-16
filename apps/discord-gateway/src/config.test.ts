@@ -1,26 +1,17 @@
 import { resolveDiscordGatewayConfig } from './config';
 
 describe('resolveDiscordGatewayConfig', () => {
-  it('preserves an API path prefix and prefers the dedicated secret', () => {
+  it('preserves an API path prefix', () => {
     expect(
       resolveDiscordGatewayConfig({
         TRPC_URL: 'https://roomote.example/_roomote-api/',
-        R_DISCORD_GATEWAY_SECRET: 'discord-secret',
-        ENCRYPTION_KEY: 'fallback-key',
         PORT: '13003',
       }),
     ).toMatchObject({
       apiEventsUrl:
         'https://roomote.example/_roomote-api/api/internal/discord/events',
-      apiSecret: 'discord-secret',
       port: 13003,
     });
-  });
-
-  it('uses the shared encryption key for rollout compatibility', () => {
-    expect(
-      resolveDiscordGatewayConfig({ ENCRYPTION_KEY: 'shared-key' }).apiSecret,
-    ).toBe('shared-key');
   });
 
   it('supports bounded delivery and login retry tuning', () => {

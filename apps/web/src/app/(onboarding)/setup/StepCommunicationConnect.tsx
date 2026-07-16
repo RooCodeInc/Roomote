@@ -127,7 +127,6 @@ export function StepCommunicationConnect({
                 </Button>
                 <Button
                   type="button"
-                  className="w-full sm:w-auto"
                   onClick={onContinue}
                   disabled={!primaryConversationReady}
                 >
@@ -157,7 +156,6 @@ export function StepCommunicationConnect({
       </p>
       <SetupFooter onBack={onBack}>
         <Button
-          className="w-full sm:w-auto"
           onClick={() => connectSlack.mutate()}
           disabled={connectSlack.isPending}
         >

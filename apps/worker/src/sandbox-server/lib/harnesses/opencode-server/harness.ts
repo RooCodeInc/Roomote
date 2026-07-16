@@ -2038,6 +2038,15 @@ export class OpenCodeServerHarness
     const text = command.data.text ?? '';
     this.stopHookReminderCount = 0;
 
+    // A soft cancel can race with the very first session creation and abort
+    // its dedicated controller before a session id exists. SendMessage is the
+    // resumable follow-up path, so give it a fresh controller instead of
+    // immediately replaying the already-aborted signal forever.
+    if (!this.sessionId && this.sessionCreateAbortController.signal.aborted) {
+      this.cancelRequestedBeforeSession = false;
+      this.resetSessionCreateAbortController();
+    }
+
     if (command.data.workflowPhase) {
       this.currentWorkflowPhase = command.data.workflowPhase;
     }

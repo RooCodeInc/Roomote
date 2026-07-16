@@ -14,6 +14,7 @@ import {
   getWebEnvFilePaths as getSharedWebEnvFilePaths,
   isEnvFlagEnabled,
   isExposedBindHost,
+  isRoomoteCloudEnabled,
   rehydrateEnv as rehydrateSharedEnv,
   setSecretProvider,
   type SecretName,
@@ -198,6 +199,7 @@ export {
   getArtifactSigningKeyPrevious,
   getBetterAuthSecret,
   isEnvFlagEnabled,
+  isRoomoteCloudEnabled,
   resolveAppEnv,
 };
 

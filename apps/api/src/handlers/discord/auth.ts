@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import { Env } from '@roomote/env';
+import { resolveDiscordGatewaySecret } from '@roomote/db/server';
 
 const DISCORD_GATEWAY_SECRET_HEADER =
   'x-roomote-discord-gateway-secret' as const;
@@ -12,12 +12,6 @@ type DiscordGatewayAuthError = {
   status: 503 | 401;
 };
 
-function configuredGatewaySecret(): string | null {
-  const value =
-    process.env.R_DISCORD_GATEWAY_SECRET?.trim() || Env.ENCRYPTION_KEY?.trim();
-  return value || null;
-}
-
 function secretsMatch(expected: string, received: string): boolean {
   const expectedBytes = Buffer.from(expected, 'utf8');
   const receivedBytes = Buffer.from(received, 'utf8');
@@ -27,10 +21,10 @@ function secretsMatch(expected: string, received: string): boolean {
   );
 }
 
-export function verifyDiscordGatewaySecret(
+export async function verifyDiscordGatewaySecret(
   received: string | undefined,
-): DiscordGatewayAuthError | null {
-  const expected = configuredGatewaySecret();
+): Promise<DiscordGatewayAuthError | null> {
+  const expected = await resolveDiscordGatewaySecret();
   if (!expected) {
     return {
       error: 'discord_gateway_secret_not_configured',

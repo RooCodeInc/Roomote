@@ -18,6 +18,8 @@ import {
   type TaskPhase,
   RunStatus,
   TaskPayloadKind,
+  TASK_KICKOFF_MESSAGE_SOURCE,
+  activeRunStatuses,
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
   DEFAULT_LAUNCH_CODING_HARNESS,
@@ -44,6 +46,7 @@ import {
   syncTaskStateFromRuns,
   taskPullRequests,
   taskRuns,
+  taskMessages,
   tasks,
   users,
   environments,
@@ -1510,6 +1513,246 @@ async function enqueueFreshLaunch(
       }
     })();
   }
+
+  return taskRun;
+}
+
+/**
+ * Payload kinds that can be re-enqueued on the same task after a terminal start
+ * failure (for example Modal spend limit during sandbox create).
+ * Snapshot resumes keep their dedicated retry path.
+ */
+const RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS: ReadonlySet<TaskPayloadKind> =
+  new Set([
+    TaskPayloadKind.StandardTask,
+    TaskPayloadKind.Scan,
+    TaskPayloadKind.SlackAppMention,
+    TaskPayloadKind.LinearAgentSession,
+    TaskPayloadKind.GithubPrReviewFollowUp,
+    TaskPayloadKind.McpRecommendations,
+  ]);
+
+export function isRelaunchableFailedStartPayloadKind(
+  payloadKind: TaskPayloadKind,
+): boolean {
+  return RELAUNCHABLE_FAILED_START_PAYLOAD_KINDS.has(payloadKind);
+}
+
+function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
+  return {
+    type: sourceRun.payloadKind,
+    harness: sourceRun.harness ?? undefined,
+    computeProvider: sourceRun.vendor ?? undefined,
+    payload: { ...(sourceRun.payload as object) },
+  } as FreshTask;
+}
+
+/**
+ * Re-enqueues a failed first-start run on the same task (new run row, same task
+ * id). Used when environment creation fails before the session can start and the
+ * user retries after fixing provider capacity or configuration.
+ */
+export async function enqueueTaskRelaunch(
+  input: {
+    sourceRunId: number;
+    actingUserId: string | null;
+  },
+  options: EnqueueTaskOptions = {},
+): Promise<TaskRun> {
+  await assertDeploymentIsActive();
+  await assertUserIsNotDeleted(input.actingUserId);
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.sourceRunId),
+  });
+
+  if (!sourceRun) {
+    throw new Error(
+      `Source run ${input.sourceRunId} was not found for task relaunch.`,
+    );
+  }
+
+  if (sourceRun.status !== RunStatus.Failed) {
+    throw new Error('Only failed task starts can be retried.');
+  }
+
+  if (!isRelaunchableFailedStartPayloadKind(sourceRun.payloadKind)) {
+    throw new Error(
+      `Task type '${sourceRun.payloadKind}' does not support start retry.`,
+    );
+  }
+
+  if (!sourceRun.payload?.repo && !sourceRun.payload?.environmentId) {
+    throw new Error('Failed run has no workspace information to relaunch.');
+  }
+
+  const existingTask = await db.query.tasks.findFirst({
+    where: and(eq(tasks.id, sourceRun.taskId), isNull(tasks.deletedAt)),
+    columns: {
+      id: true,
+      workflow: true,
+      harness: true,
+    },
+  });
+
+  if (!existingTask) {
+    throw new Error(
+      `Task ${sourceRun.taskId} was not found for task relaunch.`,
+    );
+  }
+
+  // Provider kickoff/start rows (for example Slack “started”) are written
+  // before provisioning and must not block restart after a failed start.
+  const priorHarnessMessage = await db.query.taskMessages.findFirst({
+    where: and(
+      eq(taskMessages.runId, sourceRun.id),
+      sql`coalesce(${taskMessages.metadata}->>'source', '') <> ${TASK_KICKOFF_MESSAGE_SOURCE}`,
+    ),
+    columns: { id: true },
+  });
+
+  if (priorHarnessMessage) {
+    throw new Error(
+      'Only failed environment starts can be restarted. This run already has task messages.',
+    );
+  }
+
+  const task = reconstructFreshTaskFromFailedRun({
+    ...sourceRun,
+    harness: sourceRun.harness ?? existingTask.harness,
+  });
+
+  const workspace = resolveTaskWorkspace(task.payload);
+
+  if (
+    !('sourceControlProvider' in task.payload) ||
+    !task.payload.sourceControlProvider
+  ) {
+    const resolvedProvider = await resolveWorkspaceSourceControlProvider(
+      db,
+      workspace,
+    );
+
+    if (resolvedProvider) {
+      task.payload.sourceControlProvider = resolvedProvider;
+    }
+  }
+
+  const { initialPaths } = await resolveEnvironmentContext(task);
+  const resolvedHarness = await resolveRequestedHarness(task);
+  const targetHarness = resolvedHarness.harness;
+  const { task: taskWithHarnessOverrides } = resolveEffectiveHarnessModelState({
+    task,
+    targetHarness,
+    isSnapshotResume: false,
+    sourceRunHarnessModelOverrides: undefined,
+    deploymentMetadata: resolvedHarness.deploymentMetadata,
+    deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
+    deploymentCodeReviewModelId:
+      resolvedHarness.deploymentCodeReviewModelId ?? null,
+  });
+
+  const resolvedTaskPolicy = resolveTaskRuntimePolicy({
+    taskType: taskWithHarnessOverrides.type,
+    launchClass: options.launchClass,
+    appEnv: Env.APP_ENV ?? 'development',
+    defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
+    delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,
+    sandboxTimeoutMs: TASK_TIMEOUT_MS,
+  });
+
+  const targetComputeProvider = resolveComputeProviderTarget(
+    task.computeProvider,
+    await resolveDefaultComputeProvider(),
+  );
+
+  const taskRun = await db.transaction(async (tx) => {
+    // Serialize concurrent retries on the same task so two retries cannot both
+    // observe an empty active-run set and insert separate pending runs.
+    await tx.execute(
+      sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
+    );
+
+    const activeRun = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, existingTask.id),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+      columns: { id: true },
+    });
+
+    if (activeRun) {
+      throw new Error('This task already has an active run.');
+    }
+
+    const stillFailed = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.id, sourceRun.id),
+        eq(taskRuns.status, RunStatus.Failed),
+      ),
+      columns: { id: true },
+    });
+
+    if (!stillFailed) {
+      throw new Error('Only failed task starts can be retried.');
+    }
+
+    const [insertedRun] = await tx
+      .insert(taskRuns)
+      .values({
+        taskId: existingTask.id,
+        kind: 'fresh',
+        sourceRunId: sourceRun.id,
+        payloadKind: taskWithHarnessOverrides.type,
+        actingUserId: options.skipInitialActingUser ? null : input.actingUserId,
+        status: options.initialStatus ?? RunStatus.Pending,
+        taskPhase: options.initialTaskPhase ?? null,
+        error: options.initialError ?? null,
+        ...(options.initialStatus === RunStatus.Dequeued
+          ? { dequeuedAt: new Date() }
+          : {}),
+        harness: targetHarness,
+        vendor: targetComputeProvider,
+        port: task.payload.port,
+        initialPaths,
+        payload: taskWithHarnessOverrides.payload,
+        keepaliveMs: resolvedTaskPolicy.keepaliveMs,
+      })
+      .returning();
+
+    if (!insertedRun) {
+      throw new Error('Failed to create `task_runs` record.');
+    }
+
+    if (options.afterCreateInTransaction) {
+      await options.afterCreateInTransaction(tx, insertedRun);
+    }
+
+    await syncTaskStateFromRuns(tx, existingTask.id);
+
+    return insertedRun;
+  });
+
+  void captureEvent('task_created', {
+    ...(input.actingUserId ? { userId: input.actingUserId } : {}),
+    properties: {
+      taskType: taskRun.payloadKind,
+      workflow: existingTask.workflow,
+      harness: taskRun.harness ?? null,
+      computeProvider: taskRun.vendor ?? null,
+      relaunch: true,
+      sourceRunId: sourceRun.id,
+    },
+  });
+
+  await pushRunOntoQueue({
+    taskRun,
+    scope: resolveQueueScope({
+      workflow: existingTask.workflow as TaskWorkflow,
+      payloadKind: taskRun.payloadKind,
+    }),
+    options,
+  });
 
   return taskRun;
 }

@@ -198,7 +198,7 @@ describe('GitHub App manifest commands', () => {
       ],
       request_oauth_on_install: true,
       setup_on_update: true,
-      public: false,
+      public: true,
     });
   });
 

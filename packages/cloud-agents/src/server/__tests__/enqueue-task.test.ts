@@ -19,6 +19,9 @@ import {
   type SnapshotResumeTask,
   RunStatus,
   TaskPayloadKind,
+  TASK_KICKOFF_MESSAGE_SOURCE,
+  ACP_ENVELOPE_EVENT_TYPES,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
 } from '@roomote/types';
 import {
   db,
@@ -26,6 +29,7 @@ import {
   inArray,
   tasks,
   taskRuns,
+  taskMessages,
   taskPullRequests,
   taskRunEvents,
   users,
@@ -40,6 +44,7 @@ import {
 import {
   TaskRunQueue,
   enqueueTask,
+  enqueueTaskRelaunch,
   resolveQueueScope,
   type FreshTaskLaunch,
 } from '../task-run-queue';
@@ -390,6 +395,126 @@ describe('enqueueTask snapshot resume', () => {
     await expect(
       enqueueTask({ task: resumeTask }, { enqueue: false }),
     ).rejects.toThrow('source run id');
+  });
+});
+
+describe('enqueueTaskRelaunch failed start', () => {
+  it('creates a new fresh run on the same task after a failed start', async () => {
+    const userId = await createUser();
+
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace has exceeded its spend limit',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, failedRun.taskId));
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.id).not.toBe(failedRun.id);
+    expect(relaunchRun.kind).toBe('fresh');
+    expect(relaunchRun.sourceRunId).toBe(failedRun.id);
+    expect(relaunchRun.payloadKind).toBe(TaskPayloadKind.StandardTask);
+    expect(relaunchRun.status).toBe(RunStatus.Pending);
+    expect(relaunchRun.actingUserId).toBe(userId);
+
+    const taskAfter = await db.query.tasks.findFirst({
+      where: eq(tasks.id, failedRun.taskId),
+    });
+    expect(taskAfter!.state).toBe('active');
+
+    const runsForTask = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, failedRun.taskId),
+    });
+    expect(runsForTask).toHaveLength(2);
+  });
+
+  it('rejects relaunch when the source run is not failed', async () => {
+    const userId = await createUser();
+
+    const pendingRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await expect(
+      enqueueTaskRelaunch(
+        {
+          sourceRunId: pendingRun.id,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      ),
+    ).rejects.toThrow('Only failed task starts can be retried');
+  });
+
+  it('allows relaunch when only a provider kickoff message exists', async () => {
+    const userId = await createUser();
+
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace has exceeded its spend limit',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, failedRun.id));
+
+    await db.insert(taskMessages).values({
+      runId: failedRun.id,
+      taskId: failedRun.taskId,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Looking into it in Full Stack.' }],
+      metadata: { source: TASK_KICKOFF_MESSAGE_SOURCE },
+      payload: {
+        text: 'Looking into it in Full Stack.',
+        source: TASK_KICKOFF_MESSAGE_SOURCE,
+      },
+    });
+
+    const relaunchRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(relaunchRun.taskId).toBe(failedRun.taskId);
+    expect(relaunchRun.sourceRunId).toBe(failedRun.id);
   });
 });
 

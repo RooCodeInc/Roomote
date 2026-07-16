@@ -130,6 +130,8 @@ services:
       ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
       R_AUTO_GENERATE_KEYS: 'true'
       ENCRYPTION_KEY: ${{secret(32)}}
+      # Transport secret between BullMQ Discord Gateway and API.
+      R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
       R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -148,6 +150,7 @@ services:
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
+      R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -184,6 +187,7 @@ services:
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
+      R_DISCORD_GATEWAY_SECRET: ${{api.R_DISCORD_GATEWAY_SECRET}}
       R_DISCORD_BOT_TOKEN: ${{api.R_DISCORD_BOT_TOKEN}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
@@ -193,6 +197,7 @@ services:
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
       SETUP_TOKEN: ${{api.SETUP_TOKEN}}
       R_PING_BASE_URL: ${{api.R_PING_BASE_URL}}
+      R_INSTANCE_ID: ${{api.R_INSTANCE_ID}}
       # Empty until previews are enabled; the web client builds preview
       # links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so the references
       # live in the shared block rather than only on preview-proxy.

@@ -94,17 +94,18 @@ Each automation card shows a **Reports to** line with the destination the next
 run will use and which setting produced it. Reports go to the automation's own
 channel when one is set, otherwise to the shared Manager Channel. When Slack
 is not connected at all, reports fall back automatically to your primary
-Microsoft Teams conversation or the configured Telegram chat (see
+Microsoft Teams conversation, the configured Telegram chat, or the configured
+Discord channel (see
 [Communications](/communications#supported-providers) for connecting those
 surfaces).
 
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
 with. Triage Dependabot Alerts, Triage CodeQL Alerts, and CI Failure Triage are
-GitHub-only by nature. The Security Auditor, Code Quality Auditor, and Resolve
-PR Conflicts automations currently support GitHub only, while Suggest Ideas,
-Summarize Merged PRs, and Triage Sentry Issues work with any connected
-source-control provider.
+GitHub-only by nature. Security Auditor, Code Quality Auditor, Weekly Manager
+Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
+any connected source-control provider. Resolve PR Conflicts supports GitHub,
+GitLab, and Azure DevOps.
 
 **Code Quality Auditor** inspects recently merged PR diffs and only posts
 high-confidence maintainability issues worth a real follow-up task. It is

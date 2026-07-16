@@ -11,6 +11,7 @@ import {
   getWebBundledEnvFilePaths,
   isAutoGenerateKeysEnabled,
   isExposedBindHost,
+  isRoomoteCloudEnabled,
   rehydrateEnv,
   resolveAppEnv,
   shouldAutoGenerateAuthKeypairs,
@@ -164,6 +165,56 @@ describe('Env', () => {
     expect(
       createRoomoteEnv(runtimeEnv).DOCKER_WORKER_ALLOW_UNBOUNDED_DISK,
     ).toBe(true);
+  });
+
+  it('parses Roomote Cloud analytics configuration', () => {
+    const runtimeEnv: NodeJS.ProcessEnv = {
+      ...process.env,
+      R_CLOUD_ENABLED: '1',
+      R_INTERCOM_APP_ID: 'intercom-app',
+      R_POSTHOG_PROJECT_KEY: 'posthog-project',
+      R_POSTHOG_HOST: 'https://eu.i.posthog.com',
+    };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    const env = createRoomoteEnv(runtimeEnv);
+
+    expect(env.R_CLOUD_ENABLED).toBe(true);
+    expect(env.R_INTERCOM_APP_ID).toBe('intercom-app');
+    expect(env.R_POSTHOG_PROJECT_KEY).toBe('posthog-project');
+    expect(env.R_POSTHOG_HOST).toBe('https://eu.i.posthog.com');
+    expect(isRoomoteCloudEnabled('true')).toBe(true);
+    expect(isRoomoteCloudEnabled('1')).toBe(true);
+    expect(isRoomoteCloudEnabled('false')).toBe(false);
+  });
+
+  it('accepts valid Ping instance IDs and rejects invalid ones', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
+    for (const instanceId of [
+      'a'.repeat(6),
+      'cloud-123',
+      'instance.id:production',
+      'deployment_42',
+      'a'.repeat(128),
+    ]) {
+      expect(
+        createRoomoteEnv({ ...runtimeEnv, R_INSTANCE_ID: instanceId })
+          .R_INSTANCE_ID,
+      ).toBe(instanceId);
+    }
+
+    for (const instanceId of [
+      'short',
+      'has spaces',
+      'invalid/slash',
+      'instance-\u00e9',
+      'a'.repeat(129),
+    ]) {
+      expect(() =>
+        createRoomoteEnv({ ...runtimeEnv, R_INSTANCE_ID: instanceId }),
+      ).toThrow();
+    }
   });
 
   it('allows the Modal VM memory allocation to be overridden', () => {
@@ -596,6 +647,7 @@ describe('Env', () => {
     const runtimeEnv: Record<string, string | undefined> = {
       ...productionCoreEnv,
       R_PUBLIC_URL: '',
+      R_INSTANCE_ID: '',
       R_TEAMS_BOT_APP_ID: '',
       R_TEAMS_BOT_APP_PASSWORD: '',
       R_TEAMS_BOT_TENANT_ID: '',
@@ -624,6 +676,7 @@ describe('Env', () => {
       const env = createRoomoteEnv(runtimeEnv);
 
       expect(env.R_PUBLIC_URL).toBeUndefined();
+      expect(env.R_INSTANCE_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();

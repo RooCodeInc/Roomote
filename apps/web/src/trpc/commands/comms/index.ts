@@ -132,6 +132,10 @@ function createTelegramWebhookSecret() {
   return crypto.randomUUID();
 }
 
+function createDiscordGatewaySecret() {
+  return crypto.randomUUID();
+}
+
 export type CommsProviderStatus = Omit<
   SetupAuthStatus['providers'][number],
   'id'
@@ -176,6 +180,8 @@ export type DiscordGatewayStatus = {
   forwardingReady: boolean;
   sessionResumed: boolean;
   queueDepth: number;
+  deadLetterDepth?: number;
+  capacityWarning?: string;
   botUserId?: string;
   botUsername?: string;
   lastEventAt?: string;
@@ -994,6 +1000,22 @@ export async function saveCommsAuthConfigCommand(
         valuesToSave.push({
           name: 'R_TELEGRAM_WEBHOOK_SECRET',
           value: telegramWebhookSecret,
+        });
+      }
+    }
+
+    if (input.provider === 'discord') {
+      const hasDiscordGatewaySecret =
+        Boolean(process.env.R_DISCORD_GATEWAY_SECRET?.trim()) ||
+        persistedEnvVarNames.includes('R_DISCORD_GATEWAY_SECRET') ||
+        Boolean(input.values?.R_DISCORD_GATEWAY_SECRET?.trim());
+      const discordGatewaySecret =
+        input.values?.R_DISCORD_GATEWAY_SECRET?.trim() ??
+        (hasDiscordGatewaySecret ? undefined : createDiscordGatewaySecret());
+      if (discordGatewaySecret) {
+        valuesToSave.push({
+          name: 'R_DISCORD_GATEWAY_SECRET',
+          value: discordGatewaySecret,
         });
       }
     }

@@ -237,6 +237,7 @@ vi.mock('@/components/system', () => ({
   Lightbulb: () => <svg aria-hidden="true" />,
   ListChevronsUpDown: () => <svg aria-hidden="true" />,
   MessageSquarePlus: () => <svg aria-hidden="true" />,
+  MessageCircleQuestionMark: () => <svg aria-hidden="true" />,
   Rows4: () => <svg aria-hidden="true" />,
   Settings: () => <svg aria-hidden="true" />,
   Search: () => <svg aria-hidden="true" />,
@@ -247,6 +248,7 @@ vi.mock('@/components/system', () => ({
 }));
 
 vi.mock('@/components/layout', () => ({
+  useChatWidgetButton: () => ({ isVisible: false, show: vi.fn() }),
   Logo: () => <div>logo</div>,
   RoomoteWordmark: ({
     className,
@@ -468,7 +470,7 @@ describe('SideNav quick access tasks', () => {
         placeholderData: expect.any(Function),
       }),
     );
-    expect(screen.getAllByRole('separator')).toHaveLength(2);
+    expect(screen.queryAllByRole('separator')).toHaveLength(0);
   });
 
   it('marks the active quick access task for task subroutes', () => {

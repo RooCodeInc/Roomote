@@ -56,6 +56,9 @@ export async function triggerAutoResume(
     const existingResume = await db.query.taskRuns.findFirst({
       where: and(
         eq(taskRuns.sourceRunId, taskRun.id),
+        // Cross-task spawned runs also point at their launching run through
+        // sourceRunId. Only a sibling run on this task can be its resume.
+        eq(taskRuns.taskId, taskRun.taskId),
         inArray(taskRuns.status, [...activeRunStatuses]),
       ),
       columns: { id: true, status: true },

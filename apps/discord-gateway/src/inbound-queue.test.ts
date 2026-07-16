@@ -13,6 +13,8 @@ function mockRedis(overrides: Record<string, unknown> = {}): Redis {
     eval: vi.fn(),
     xrange: vi.fn(),
     hincrby: vi.fn(),
+    hkeys: vi.fn().mockResolvedValue([]),
+    hdel: vi.fn(),
     xlen: vi.fn(),
     ...overrides,
   } as unknown as Redis;
@@ -39,7 +41,12 @@ describe('DiscordInboundQueue', () => {
       DISCORD_INBOUND_STREAM_KEY,
       '86400',
       JSON.stringify(envelope),
+      '50000',
     );
+    const enqueueScript = vi.mocked(redis.eval).mock.calls[0]?.[0] as string;
+    // The durable stream is approximately bounded so a long delivery outage
+    // cannot grow Redis without limit.
+    expect(enqueueScript).toContain("'MAXLEN', '~', ARGV[3]");
     const script = vi.mocked(redis.eval).mock.calls[0]?.[0] as string;
     expect(script.indexOf("redis.call('XADD'")).toBeLessThan(
       script.indexOf("redis.call('SET'"),
@@ -143,6 +150,93 @@ describe('DiscordInboundQueue', () => {
       'Permanent API rejection',
       '3',
       '2026-07-12T13:00:00.000Z',
+      '1000',
     );
+  });
+
+  it('prunes attempt counters for entries shed by the stream cap', async () => {
+    const redis = mockRedis({
+      // Oldest surviving entry is 200-0: 100-0 and 150-1 were shed by MAXLEN
+      // without passing through acknowledge/quarantine.
+      xrange: vi.fn().mockResolvedValue([['200-0', ['envelope', '{}']]]),
+      hkeys: vi.fn().mockResolvedValue(['100-0', '150-1', '200-0', '250-0']),
+      hdel: vi.fn().mockResolvedValue(2),
+    });
+    const queue = new DiscordInboundQueue(redis);
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(2);
+    expect(redis.hdel).toHaveBeenCalledWith(
+      DISCORD_INBOUND_ATTEMPTS_KEY,
+      '100-0',
+      '150-1',
+    );
+  });
+
+  it('prunes every attempt counter when the stream is empty', async () => {
+    const redis = mockRedis({
+      xrange: vi.fn().mockResolvedValue([]),
+      hkeys: vi.fn().mockResolvedValue(['100-0']),
+      hdel: vi.fn().mockResolvedValue(1),
+    });
+    const queue = new DiscordInboundQueue(redis);
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(1);
+    expect(redis.hdel).toHaveBeenCalledWith(
+      DISCORD_INBOUND_ATTEMPTS_KEY,
+      '100-0',
+    );
+  });
+
+  it('never deletes a counter recorded after the snapshot (empty-stream race)', async () => {
+    // Interleaving under test: HKEYS snapshots an empty hash, an event is
+    // then enqueued and attempted, and XRANGE still observes the pre-enqueue
+    // empty stream. The live counter is not in the snapshot, so it survives.
+    const hkeys = vi.fn().mockResolvedValue([]);
+    const xrange = vi.fn().mockResolvedValue([]);
+    const hdel = vi.fn();
+    const queue = new DiscordInboundQueue(mockRedis({ hkeys, xrange, hdel }));
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(0);
+    expect(hkeys).toHaveBeenCalled();
+    // Snapshot-first short-circuits: the stream is never even read, and no
+    // deletion can touch a counter created after the snapshot.
+    expect(xrange).not.toHaveBeenCalled();
+    expect(hdel).not.toHaveBeenCalled();
+  });
+
+  it('snapshots tracked ids before reading the oldest stream entry', async () => {
+    const order: string[] = [];
+    const hkeys = vi.fn(async () => {
+      order.push('hkeys');
+      return ['100-0'];
+    });
+    const xrange = vi.fn(async () => {
+      order.push('xrange');
+      return [];
+    });
+    const hdel = vi.fn().mockResolvedValue(1);
+    const queue = new DiscordInboundQueue(mockRedis({ hkeys, xrange, hdel }));
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(1);
+    expect(order).toEqual(['hkeys', 'xrange']);
+  });
+
+  it('applies configured stream bounds and reports dead-letter depth', async () => {
+    const redis = mockRedis({
+      eval: vi.fn().mockResolvedValue('1-0'),
+      xlen: vi.fn().mockResolvedValueOnce(42).mockResolvedValueOnce(7),
+    });
+    const queue = new DiscordInboundQueue(redis, {
+      maxEntries: 500,
+      deadLetterMaxEntries: 50,
+    });
+
+    expect(queue.capacity).toBe(500);
+    await queue.enqueue(envelope);
+    expect(vi.mocked(redis.eval).mock.calls[0]?.at(-1)).toBe('500');
+
+    await expect(queue.depth()).resolves.toBe(42);
+    await expect(queue.deadLetterDepth()).resolves.toBe(7);
+    expect(redis.xlen).toHaveBeenLastCalledWith(DISCORD_DEAD_LETTER_STREAM_KEY);
   });
 });

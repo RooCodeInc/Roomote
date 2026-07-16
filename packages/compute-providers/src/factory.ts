@@ -108,12 +108,12 @@ export function createComputeProviderClient(
       const modalEndpoint = envValue('MODAL_ENDPOINT');
       const modalEnvironment = envValue('MODAL_ENVIRONMENT');
       // The managed provider derives its app name from the engine-neutral
-      // deployment slug (explicit MODAL_APP_NAME still wins); plain Modal
-      // keeps reading only its own env var.
+      // deployment slug with its own dedicated override; plain Modal keeps
+      // reading only its own env var, and neither consults the other's.
       const modalAppName =
         options.provider === 'roomote'
           ? resolveRoomoteCloudModalAppName({
-              MODAL_APP_NAME: envValue('MODAL_APP_NAME'),
+              ROOMOTE_CLOUD_APP_NAME: envValue('ROOMOTE_CLOUD_APP_NAME'),
               ROOMOTE_CLOUD_SLUG: envValue('ROOMOTE_CLOUD_SLUG'),
             })
           : envValue('MODAL_APP_NAME');

@@ -31,7 +31,7 @@ import {
   createAdminDashboardMiddleware,
   resolveAdminDashboardAuth,
 } from './admin-auth';
-import { initBullMqSentry } from './monitoring/sentry';
+import { captureBullMqMessage, initBullMqSentry } from './monitoring/sentry';
 import { getRedis, closeRedis } from './redis';
 import { startScheduler } from './scheduler';
 import { startSandboxOidcRefreshQueue } from './sandbox-oidc-refresh-queue';
@@ -69,12 +69,25 @@ const redis = getRedis();
 
 initBullMqSentry();
 
-const discordGatewaySupervisor = startDiscordGatewaySupervisor(redis, {
-  ...process.env,
-  ENCRYPTION_KEY: Env.ENCRYPTION_KEY,
-  R_DISCORD_GATEWAY_SECRET: Env.R_DISCORD_GATEWAY_SECRET,
-  TRPC_URL: Env.TRPC_URL,
-});
+const discordGatewaySupervisor = startDiscordGatewaySupervisor(
+  redis,
+  {
+    ...process.env,
+    ENCRYPTION_KEY: Env.ENCRYPTION_KEY,
+    R_DISCORD_GATEWAY_SECRET: Env.R_DISCORD_GATEWAY_SECRET,
+    TRPC_URL: Env.TRPC_URL,
+  },
+  {
+    // A dead supervisor silently stops Discord ingestion while this process
+    // stays green; make sure it pages instead of only logging.
+    onFatal: (error) =>
+      captureBullMqMessage(
+        `Discord gateway supervisor stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+        { component: 'discord-gateway', signal: 'discord-gateway-fatal' },
+      ),
+  },
+);
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
   startScheduler();

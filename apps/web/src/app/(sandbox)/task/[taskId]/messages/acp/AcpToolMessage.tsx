@@ -135,7 +135,7 @@ export function AcpToolMessage({
             </div>
           ) : null}
           {showCollapsibleContent ? (
-            <ToolContent className="mt-2">
+            <ToolContent className="px-4 ml-1.5 mb-4 mt-2 border-l text-sm font-light text-muted-foreground">
               {showExpandedDetails ? (
                 <AcpToolDetails
                   msg={msg}

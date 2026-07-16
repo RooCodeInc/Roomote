@@ -19,6 +19,7 @@ import {
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { useEnvironments } from '@/hooks/environments/useEnvironments';
+import { useUser } from '@/hooks/useUser';
 import { buildInvokeMethods } from '../invokeMethods';
 import { StepTitle } from './StepTitle';
 import { getSetupStepDefinition } from './types';
@@ -48,6 +49,7 @@ export function StepInvoke({
 } = {}) {
   const router = useRouter();
   const trpc = useTRPC();
+  const { user } = useUser();
   const queryClient = useQueryClient();
   const environments = useEnvironments({ enabled: !onboardingTaskId });
   const commsStatus = useQuery(trpc.comms.status.queryOptions());
@@ -194,33 +196,36 @@ export function StepInvoke({
         ))}
       </div>
 
-      <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
-        <Checkbox
-          aria-label="Toggle anonymous analytics"
-          className="mt-0.5"
-          checked={anonymousAnalyticsEnabled}
-          onCheckedChange={(checked) =>
-            setAnonymousAnalyticsEnabled(checked === true)
-          }
-        />
-        <div className="space-y-0.5">
-          <p className="text-sm font-semibold">Anonymous analytics</p>
-          <p className="text-sm text-muted-foreground">
-            Share usage stats with the {PRODUCT_NAME} team for product
-            improvements.
-            <br />
-            No PII, code or conversation content is ever shared. Accrues good
-            karma.
-          </p>
+      {!user?.cloudEnabled && (
+        <div className="mt-4 flex items-start gap-2 border-t border-foreground/20 pt-4">
+          <Checkbox
+            aria-label="Toggle anonymous analytics"
+            className="mt-0.5"
+            checked={anonymousAnalyticsEnabled}
+            onCheckedChange={(checked) =>
+              setAnonymousAnalyticsEnabled(checked === true)
+            }
+          />
+          <div className="space-y-0.5">
+            <p className="text-sm font-semibold">Anonymous analytics</p>
+            <p className="text-sm text-muted-foreground">
+              Share usage stats with the {PRODUCT_NAME} team for product
+              improvements.
+              <br />
+              No PII, code or conversation content is ever shared. Accrues good
+              karma.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="mt-3 flex">
         <Button
-          className="w-full sm:w-auto"
           onClick={() => {
             onTryItOut?.();
-            completeSetup.mutate({ anonymousAnalyticsEnabled });
+            completeSetup.mutate(
+              user?.cloudEnabled ? {} : { anonymousAnalyticsEnabled },
+            );
           }}
           disabled={completeSetup.isPending}
         >

@@ -17,6 +17,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       docs_only: ${{ steps.changed-paths.outputs.docs_only }}
+      worker_image_affected: ${{ steps.changed-paths.outputs.worker_image_affected }}
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -28,8 +29,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          # Fail safe: when we cannot compute a reliable diff (manual dispatch,
+          # force-push over a gone base, or an empty diff), build everything.
+          emit_build_all() {
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "worker_image_affected=true" >> "$GITHUB_OUTPUT"
+          }
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            emit_build_all
             exit 0
           fi
 
@@ -45,29 +53,52 @@ jobs:
               changed_files="$(git diff --name-only "$before" "$GITHUB_SHA")"
             else
               # Force-pushed over the previous tip; the base is gone, so run everything.
-              echo "docs_only=false" >> "$GITHUB_OUTPUT"
+              emit_build_all
               exit 0
             fi
           fi
 
           if [ -z "$changed_files" ]; then
-            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            emit_build_all
             exit 0
           fi
 
+          # docs_only: every changed file is documentation or markdown, so all
+          # heavy jobs can skip.
+          #
+          # worker_image_affected: the worker image (apps/worker/Dockerfile)
+          # builds FROM ubuntu and copies no monorepo source, so it is affected
+          # only by its own Dockerfile/context inputs. The app image, by
+          # contrast, copies apps/worker (and packages the worker release), so a
+          # worker-only change still rebuilds the app image; the app rows stay
+          # gated on docs_only alone.
+          #
+          # This is a closed allowlist: worker_image_affected starts false and
+          # only the paths matched below flip it true, so an unrecognized path
+          # does NOT trigger a worker build. If the worker image ever consumes a
+          # new build-context input, add its path to the case below or the
+          # worker build will be skipped for changes to it. The build-everything
+          # fail-safe only covers the uncertain-diff cases handled by
+          # emit_build_all above (manual dispatch, gone base, empty diff).
           docs_only=true
+          worker_image_affected=false
           while IFS= read -r path; do
             case "$path" in
               apps/docs/*|*.md|*.mdx)
                 ;;
               *)
                 docs_only=false
-                break
+                ;;
+            esac
+            case "$path" in
+              apps/worker/*|.docker/sandbox/*|.dockerignore|.github/workflows/CI.yml)
+                worker_image_affected=true
                 ;;
             esac
           done <<< "$changed_files"
 
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "worker_image_affected=$worker_image_affected" >> "$GITHUB_OUTPUT"
 
   lint:
     name: Lint
@@ -242,7 +273,7 @@ jobs:
           BASELINE_CHANNEL: ${{ steps.baseline.outputs.channel }}
         run: bash deploy/ci/upgrade-compatibility.sh
 
-  docker-build:
+  docker-build-app:
     name: Docker Build (${{ matrix.app }}, ${{ matrix.arch }})
     needs: changes
     if: ${{ needs.changes.outputs.docs_only != 'true' }}
@@ -263,6 +294,40 @@ jobs:
             target: runtime-app
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Validate production Compose security contract
+        if: matrix.arch == 'amd64'
+        run: deploy/scripts/validate-compose-security.sh
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+      - name: Build ${{ matrix.app }} Dockerfile (${{ matrix.arch }})
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          push: false
+          build-args: R_APP_ENV=development
+
+  # The worker image builds FROM ubuntu and copies no monorepo source, so it is
+  # skipped unless its own Dockerfile or build context changed (see the
+  # worker_image_affected classifier). The app image copies apps/worker and
+  # packages the worker release, so worker-only changes still rebuild the app
+  # image above via the docs_only gate.
+  docker-build-worker:
+    name: Docker Build (${{ matrix.app }}, ${{ matrix.arch }})
+    needs: changes
+    if: ${{ needs.changes.outputs.docs_only != 'true' && needs.changes.outputs.worker_image_affected == 'true' }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      # Each arch builds natively, mirroring the publish workflow (no QEMU:
+      # rustc segfaults under emulation, rust-lang/rust#147026).
+      matrix:
+        include:
           - app: worker
             dockerfile: apps/worker/Dockerfile
             target: runtime
@@ -276,9 +341,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Validate production Compose security contract
-        if: matrix.app == 'app' && matrix.arch == 'amd64'
-        run: deploy/scripts/validate-compose-security.sh
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
       - name: Build ${{ matrix.app }} Dockerfile (${{ matrix.arch }})

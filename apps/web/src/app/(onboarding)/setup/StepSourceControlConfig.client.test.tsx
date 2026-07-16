@@ -176,7 +176,10 @@ describe('StepSourceControlConfig', () => {
       screen.getByRole('button', { name: 'Enter values manually' }),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText('GitHub organization (optional)'),
+      screen.queryByLabelText('GitHub organization'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Show advanced config' }),
     ).toBeInTheDocument();
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
@@ -207,7 +210,10 @@ describe('StepSourceControlConfig', () => {
       />,
     );
 
-    fireEvent.change(screen.getByLabelText('GitHub organization (optional)'), {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Show advanced config' }),
+    );
+    fireEvent.change(screen.getByLabelText('GitHub organization'), {
       target: { value: ' example-org ' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Create GitHub App' }));

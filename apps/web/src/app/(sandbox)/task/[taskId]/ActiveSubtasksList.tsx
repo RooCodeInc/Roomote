@@ -119,7 +119,7 @@ function ActiveSubtasksListContent({ taskEntryKey }: ActiveSubtasksListProps) {
 
   return (
     <div className="overflow-hidden border-b border-background">
-      <TodoListPrimitive>
+      <TodoListPrimitive className="mx-auto w-full max-w-4xl">
         <TodoListSection onOpenChange={setIsOpen} open={isOpen}>
           <TodoListSectionTrigger>
             <TodoListSectionLabel

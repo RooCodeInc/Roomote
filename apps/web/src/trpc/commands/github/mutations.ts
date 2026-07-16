@@ -252,7 +252,10 @@ function buildGitHubAppManifest(): GitHubAppManifest {
     default_events: [...GITHUB_APP_DEFAULT_EVENTS],
     request_oauth_on_install: true,
     setup_on_update: true,
-    public: false,
+    // Public so the app can be installed on any account via GitHub's install
+    // picker; a private app can only be installed on the account that owns
+    // it, which would force asking for the organization before creation.
+    public: true,
   };
 }
 

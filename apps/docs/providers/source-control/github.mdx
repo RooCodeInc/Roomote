@@ -16,7 +16,14 @@ Open `/setup`, choose GitHub, and click **Create GitHub App**. Roomote sends
 GitHub a manifest with the callback, webhook, permissions, and events
 preconfigured. After GitHub redirects back, Roomote saves the generated app ID,
 app slug, OAuth client credentials, webhook secret, and private key, then sends
-you to install the app on repositories.
+you to install the app on repositories. You pick the account or organization
+to install on during that install step.
+
+By default the app is created on your personal GitHub account and marked as
+installable on any account, so you can install it on any organization you
+belong to. If your organization should own the app instead, click **Show
+advanced config** and enter the organization name before clicking **Create
+GitHub App**.
 
 Use the manual steps only when you already have a GitHub App or want to manage
 these values in deployment environment variables yourself.
@@ -54,6 +61,11 @@ these values in deployment environment variables yourself.
 ```sh
 openssl rand -hex 32
 ```
+
+11. Under **Where can this GitHub App be installed?**, choose **Any account**
+    if you want to install the app somewhere other than the account that owns
+    it. **Only on this account** also works when the owning account is where
+    you will install it.
 
 ## Permissions and events
 

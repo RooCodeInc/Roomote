@@ -678,34 +678,6 @@ describe('setup-new compute config commands', () => {
     expect(result.runtimeComputeConfig.defaultProvider).toBe('docker');
   });
 
-  it('commits an already-configured hosted provider as the runtime default when chosen', async () => {
-    vi.stubEnv('MODAL_TOKEN_ID', 'token-id');
-    vi.stubEnv('MODAL_TOKEN_SECRET', 'token-secret');
-    vi.stubEnv('MODAL_BASE_IMAGE_REF', 'ghcr.io/roomote/modal-worker:test');
-
-    const result = await saveSetupNewComputeProviderChoiceCommand(
-      buildMockAuth(),
-      {
-        provider: 'modal',
-      },
-    );
-
-    expect(result.setupNewState.computeProvider).toBe('modal');
-    expect(result.runtimeComputeConfig.defaultProvider).toBe('modal');
-  });
-
-  it('leaves the runtime default unchanged for an unconfigured hosted provider choice', async () => {
-    const result = await saveSetupNewComputeProviderChoiceCommand(
-      buildMockAuth(),
-      {
-        provider: 'modal',
-      },
-    );
-
-    expect(result.setupNewState.computeProvider).toBe('modal');
-    expect(result.runtimeComputeConfig?.defaultProvider ?? null).toBeNull();
-  });
-
   it('rejects an excluded provider choice', async () => {
     vi.stubEnv('EXCLUDED_COMPUTE_PROVIDERS', 'docker');
 

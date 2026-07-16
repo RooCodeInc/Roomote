@@ -81,8 +81,9 @@ function buildSettleNotificationPrompt(input: {
  * run's `result` JSON).
  */
 export async function notifySourceRunOnSettle(
-  run: TaskRun & { task: { title: string | null } },
+  run: TaskRun,
   status: SettledStatus,
+  taskTitle?: string | null,
 ): Promise<void> {
   try {
     if (
@@ -137,7 +138,10 @@ export async function notifySourceRunOnSettle(
 
     const prompt = buildSettleNotificationPrompt({
       taskId: run.taskId,
-      taskTitle: run.task.title,
+      taskTitle:
+        taskTitle ??
+        (run as TaskRun & { task?: { title: string | null } }).task?.title ??
+        null,
       status,
       environmentSetupState: run.environmentSetupState ?? null,
       error: run.error ?? null,

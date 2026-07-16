@@ -21,7 +21,6 @@ import {
 } from './hooks/SandboxProvider';
 import { getDisplayedTodoStatus } from './todo-status';
 
-const HIDE_COMPLETED_TODOS_DELAY_MS = 10_000;
 const TODO_INACTIVE_TASK_PHASES: ReadonlySet<string> = new Set([
   'idle',
   'waiting_for_prompt',
@@ -67,8 +66,7 @@ const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
 
   const completedCount = todos.filter((t) => t.status === 'completed').length;
   const allDone = todos.length > 0 && completedCount === todos.length;
-  const [isHiddenAfterCompletion, setIsHiddenAfterCompletion] = useState(false);
-  const [isOpen, setIsOpen] = useState(() => !allDone);
+  const [isOpen, setIsOpen] = useState(false);
   const autoCollapsedKeysRef = useRef(new Set<string>());
   const wasAllDoneRef = useRef(allDone);
 
@@ -104,7 +102,6 @@ const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
 
   useEffect(() => {
     if (!allDone) {
-      setIsHiddenAfterCompletion(false);
       if (wasAllDoneRef.current) {
         setIsOpen(true);
       }
@@ -114,22 +111,15 @@ const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
 
     wasAllDoneRef.current = true;
     setIsOpen(false);
-    setIsHiddenAfterCompletion(false);
-
-    const hideTimer = window.setTimeout(() => {
-      setIsHiddenAfterCompletion(true);
-    }, HIDE_COMPLETED_TODOS_DELAY_MS);
-
-    return () => window.clearTimeout(hideTimer);
   }, [allDone, todoStatusSignature]);
 
-  if (todos.length === 0 || isHiddenAfterCompletion) {
+  if (todos.length === 0) {
     return null;
   }
 
   return (
     <div className="overflow-hidden border-b border-background">
-      <TodoListPrimitive>
+      <TodoListPrimitive className="mx-auto w-full max-w-4xl">
         <TodoListSection
           allCompleted={allDone}
           onOpenChange={setIsOpen}
@@ -139,7 +129,7 @@ const TodoListContent = ({ autoCollapseKey, taskEntryKey }: TodoListProps) => {
             <TodoListSectionLabel
               label={
                 allDone
-                  ? `${completedCount} to-dos done`
+                  ? `All ${completedCount} to-dos done`
                   : `${completedCount} of ${todos.length} to-dos done`
               }
             />

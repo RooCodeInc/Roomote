@@ -36,7 +36,12 @@ class FakeOpenCodeServerClient {
     | undefined;
 
   health = vi.fn(async () => ({ healthy: true as const, version: 'test' }));
-  createSession = vi.fn(async () => ({ id: 'ses_1', title: 'test' }));
+  createSession = vi.fn(
+    async (_options?: { title?: string; signal?: AbortSignal }) => ({
+      id: 'ses_1',
+      title: 'test',
+    }),
+  );
   promptAsync = vi.fn(async (_options: unknown) => undefined);
   messages = vi.fn(async () => [] as OpenCodeSessionMessage[]);
   message = vi.fn<() => Promise<OpenCodeSessionMessage>>();
@@ -3532,6 +3537,60 @@ describe('OpenCodeServerHarness', () => {
             event.payload?.[0] === 'ses_late',
         ),
       ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('creates a fresh session for a follow-up after cancel aborts initial session creation', async () => {
+    const client = new FakeOpenCodeServerClient();
+    client.createSession
+      .mockImplementationOnce(
+        (options?: { title?: string; signal?: AbortSignal }) =>
+          new Promise<{ id: string; title: string }>((_, reject) => {
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(new DOMException('Aborted', 'AbortError')),
+              { once: true },
+            );
+          }),
+      )
+      .mockResolvedValueOnce({ id: 'ses_followup', title: 'follow-up' });
+    const harness = new OpenCodeServerHarness({
+      client: client as unknown as OpenCodeServerClient,
+      workspacePath: '/sandbox/repos',
+      logger: createLogger(),
+      model: TEST_OPENCODE_MODEL,
+      eventStreamReadyTimeoutMs: 100,
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalledTimes(1);
+      });
+
+      harness.sendCommand({ commandName: TaskCommandName.CancelTask });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).not.toHaveBeenCalled();
+      });
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Resume work.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.createSession).toHaveBeenCalledTimes(2);
+        expect(client.promptAsync).toHaveBeenCalledWith(
+          expect.objectContaining({ sessionId: 'ses_followup' }),
+        );
+      });
     } finally {
       harness.dispose();
     }

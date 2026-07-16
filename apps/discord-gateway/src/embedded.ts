@@ -15,6 +15,15 @@ export type DiscordGatewaySupervisor = {
 export function startDiscordGatewaySupervisor(
   redis: Redis,
   env: NodeJS.ProcessEnv = process.env,
+  options: {
+    /**
+     * Invoked when the supervisor itself dies. Without it the only signal is
+     * a console line while the host process stays green and Discord
+     * ingestion is silently stopped — hosts should report this to their
+     * error tracker.
+     */
+    onFatal?: (error: unknown) => void;
+  } = {},
 ): DiscordGatewaySupervisor {
   const service = new DiscordGatewayService(
     redis,
@@ -24,6 +33,15 @@ export function startDiscordGatewaySupervisor(
     console.error(
       `[discord-gateway] supervisor stopped unexpectedly: ${error instanceof Error ? error.message : String(error)}`,
     );
+    void service.status
+      .update({
+        phase: 'error',
+        ready: false,
+        connected: false,
+        lastError: `Discord gateway supervisor stopped: ${error instanceof Error ? error.message : String(error)}`,
+      })
+      .catch(() => undefined);
+    options.onFatal?.(error);
   });
 
   return {

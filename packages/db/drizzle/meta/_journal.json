@@ -113,6 +113,13 @@
       "when": 1784151922303,
       "tag": "0015_slimy_vengeance",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1784169977755,
+      "tag": "0016_restore_rollback_compatibility",
+      "breakpoints": true
     }
   ]
 }

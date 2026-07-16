@@ -41,15 +41,25 @@ export function resolveRoomoteCloudSlug(
 }
 
 /**
+ * Dedicated managed-provider app-name override. Deliberately not
+ * `MODAL_APP_NAME`: that env var belongs to the bring-your-own Modal
+ * provider, and consulting it here would let a BYO customization redirect
+ * the managed provider's sandboxes in the hosting operator's shared
+ * workspace, defeating per-deployment attribution.
+ */
+export const ROOMOTE_CLOUD_APP_NAME_ENV_VAR = 'ROOMOTE_CLOUD_APP_NAME';
+
+/**
  * Modal app name for the managed provider's Modal backend. An explicit
- * `MODAL_APP_NAME` wins as an escape hatch; otherwise the deployment slug
- * maps to `roomote-<slug>`; with neither, the Modal client's default
- * applies.
+ * `ROOMOTE_CLOUD_APP_NAME` wins as the managed escape hatch; otherwise the
+ * deployment slug maps to `roomote-<slug>`; with neither, the Modal
+ * client's default applies. `MODAL_APP_NAME` is ignored by design (see
+ * ROOMOTE_CLOUD_APP_NAME_ENV_VAR).
  */
 export function resolveRoomoteCloudModalAppName(
   env: Partial<Record<string, string | undefined>>,
 ): string | undefined {
-  const explicit = env.MODAL_APP_NAME?.trim();
+  const explicit = env[ROOMOTE_CLOUD_APP_NAME_ENV_VAR]?.trim();
 
   if (explicit) {
     return explicit;

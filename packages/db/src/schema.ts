@@ -184,6 +184,16 @@ export const deploymentSettings = pgTable('deployment_settings', {
     .notNull()
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipAt: timestamp('compiled_authorship_at'),
+  // N-1 rollback compatibility for v0.5. The v0.6 product no longer reads or
+  // writes these settings, but the previous release still selects them while
+  // candidate migrations are applied and after a rollback. Remove these
+  // physical columns only after v0.6 becomes the supported rollback target.
+  styleGuidance: text('style_guidance'),
+  slackSummonEmoji: text('slack_summon_emoji'),
+  slackAckEmoji: text('slack_ack_emoji').notNull().default('eyes'),
+  slackCompletionEmoji: text('slack_completion_emoji')
+    .notNull()
+    .default('white_check_mark'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
@@ -1238,7 +1248,9 @@ export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
  */
 
 export const llmUsageEvents = pgTable(
-  'llm_usage_events',
+  // Keep the v0.5 physical table name for N-1 rollback compatibility. The
+  // generalized v0.6 API name is intentionally only a TypeScript-level rename.
+  'task_inference_usage_events',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     source: text('source').notNull().default('opencode'),
@@ -1312,20 +1324,24 @@ export const llmUsageEvents = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
-    uniqueIndex('llm_usage_events_session_message_unique').on(
+    uniqueIndex('task_inference_usage_events_session_message_unique').on(
       table.harnessSessionId,
       table.messageId,
     ),
-    uniqueIndex('llm_usage_events_event_key_unique').on(table.eventKey),
-    index('llm_usage_events_task_id_idx').on(table.taskId),
-    index('llm_usage_events_run_id_idx').on(table.runId),
-    index('llm_usage_events_user_id_idx').on(table.userId),
-    index('llm_usage_events_environment_id_idx').on(table.environmentId),
-    index('llm_usage_events_provider_model_idx').on(
+    uniqueIndex('task_inference_usage_events_event_key_unique').on(
+      table.eventKey,
+    ),
+    index('task_inference_usage_events_task_id_idx').on(table.taskId),
+    index('task_inference_usage_events_run_id_idx').on(table.runId),
+    index('task_inference_usage_events_user_id_idx').on(table.userId),
+    index('task_inference_usage_events_environment_id_idx').on(
+      table.environmentId,
+    ),
+    index('task_inference_usage_events_provider_model_idx').on(
       table.providerId,
       table.modelId,
     ),
-    index('llm_usage_events_created_at_idx').on(table.createdAt),
+    index('task_inference_usage_events_created_at_idx').on(table.createdAt),
   ],
 );
 
@@ -2838,12 +2854,12 @@ export const environments = pgTable(
     // Verification state. "Configured" means the environment definition exists
     // but its current runtime configuration has not been confirmed to work by a
     // follow-up verification task. "Verified" means a verification task
-    // explicitly reported success. The migration default keeps every existing
-    // environment verified; new environments start unverified. Any
+    // explicitly reported success. Migration 0013 preserved existing rows as
+    // verified; new environments start unverified. Any
     // runtime-affecting edit clears verification through
     // updateEnvironmentDefinition, so these fields cannot drift across the API,
     // Settings, agent, and declarative write paths.
-    isVerified: boolean('is_verified').notNull().default(true),
+    isVerified: boolean('is_verified').notNull().default(false),
     // Roomote task id of the verification task that most recently ran (or is
     // running) for the current configuration. Not a task-run id.
     verificationTaskId: text('verification_task_id'),

@@ -210,6 +210,9 @@ envVarGroups:
         value: 'true'
       - key: ENCRYPTION_KEY
         generateValue: true
+      # Transport secret between BullMQ Discord Gateway and API.
+      - key: R_DISCORD_GATEWAY_SECRET
+        generateValue: true
       # Optional process-env override. The setup UI stores the token encrypted
       # in Postgres when this is left blank.
       - key: R_DISCORD_BOT_TOKEN

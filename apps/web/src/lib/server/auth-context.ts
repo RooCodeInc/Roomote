@@ -17,6 +17,7 @@ import {
 } from '@/types';
 
 import { bootstrapWebRuntimeEnv } from './bootstrap-runtime-env';
+import { Env, isRoomoteCloudEnabled } from './env';
 import { setSentryUserContext } from './sentry-context';
 import { getAuth } from './auth';
 import {
@@ -348,7 +349,10 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
 
   const anonymousAnalyticsEnabled =
     isTelemetryEnvAllowed() &&
-    isAnonymousAnalyticsEnabledFromMetadata(authContext.deploymentMetadata);
+    isAnonymousAnalyticsEnabledFromMetadata(
+      authContext.deploymentMetadata,
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    );
 
   return {
     success: true,
@@ -359,6 +363,7 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     isAdmin: authContext.isAdmin,
     featureFlags,
     anonymousAnalyticsEnabled,
+    cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
     resource: authContext.resource,
   };
 }

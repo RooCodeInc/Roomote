@@ -52,3 +52,30 @@ export async function resolveDiscordGatewayCredentials(): Promise<DiscordGateway
       .digest('hex'),
   };
 }
+
+/**
+ * Resolve the dedicated gateway↔API transport secret: live process.env first,
+ * then the embedded env snapshot, then the deployment vault.
+ */
+export async function resolveDiscordGatewayApiSecret(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  const fromLive = process.env.R_DISCORD_GATEWAY_SECRET?.trim() || null;
+  if (fromLive) {
+    return fromLive;
+  }
+
+  const fromSnapshot = env.R_DISCORD_GATEWAY_SECRET?.trim() || null;
+  if (fromSnapshot) {
+    return fromSnapshot;
+  }
+
+  const dbServer = (await import('@roomote/db/server')) as unknown as {
+    resolveDiscordGatewaySecret?: () => Promise<string | null>;
+  };
+  if (dbServer.resolveDiscordGatewaySecret) {
+    return dbServer.resolveDiscordGatewaySecret();
+  }
+
+  return null;
+}

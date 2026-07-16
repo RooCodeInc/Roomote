@@ -119,10 +119,7 @@ function substitute(value: unknown): unknown {
   return value;
 }
 
-const gatewaySecret =
-  process.env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-  process.env.ENCRYPTION_KEY?.trim() ||
-  '';
+const gatewaySecret = process.env.R_DISCORD_GATEWAY_SECRET?.trim() || '';
 
 const server = new MockDiscordServer({
   ...(scenario.state.botToken ? { botToken: scenario.state.botToken } : {}),

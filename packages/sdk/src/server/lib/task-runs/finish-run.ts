@@ -237,6 +237,7 @@ export const finishRun = async ({
   await notifySourceRunOnSettle(
     { ...run, error: sanitizedError ?? run.error },
     status,
+    run.task.title,
   );
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
