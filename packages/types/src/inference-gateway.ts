@@ -300,6 +300,20 @@ export function parseInferenceGatewayKeys(
 }
 
 /**
+ * Strip trailing slashes without a backtracking-prone anchored regex
+ * (`/\/+$/` trips CodeQL's polynomial-ReDoS heuristic on untrusted input).
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+
+  while (end > 0 && value.charCodeAt(end - 1) === 47 /* '/' */) {
+    end -= 1;
+  }
+
+  return value.slice(0, end);
+}
+
+/**
  * The OpenCode `baseURL` override pointing a provider's SDK at the gateway:
  * `<gatewayUrl>/<providerId><sdk base-path suffix>`.
  */
@@ -307,7 +321,7 @@ export function buildInferenceGatewayOpenCodeBaseUrl(
   gatewayUrl: string,
   provider: InferenceGatewayProvider,
 ): string {
-  return `${gatewayUrl.replace(/\/+$/, '')}/${provider.id}${provider.openCodeBaseUrlSuffix}`;
+  return `${stripTrailingSlashes(gatewayUrl)}/${provider.id}${provider.openCodeBaseUrlSuffix}`;
 }
 
 /**
@@ -315,5 +329,5 @@ export function buildInferenceGatewayOpenCodeBaseUrl(
  * platform API URL (the same base workers use for tRPC).
  */
 export function buildInferenceGatewayUrl(platformApiUrl: string): string {
-  return `${platformApiUrl.replace(/\/+$/, '')}/api/inference`;
+  return `${stripTrailingSlashes(platformApiUrl)}/api/inference`;
 }
