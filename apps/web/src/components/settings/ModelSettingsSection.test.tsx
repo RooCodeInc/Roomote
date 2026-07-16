@@ -14,6 +14,9 @@ const settingsData = vi.hoisted(() => ({
 const providerSetupData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const suggestionData = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | null | undefined,
+}));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
@@ -23,9 +26,13 @@ vi.mock('@tanstack/react-query', () => ({
     const isProviderSetup =
       Array.isArray(options?.queryKey) &&
       options.queryKey[1] === 'providerSetup';
+    const isSuggestions =
+      Array.isArray(options?.queryKey) && options.queryKey[1] === 'suggest';
     const data = isProviderSetup
       ? providerSetupData.current
-      : settingsData.current;
+      : isSuggestions && suggestionData.current !== undefined
+        ? suggestionData.current
+        : settingsData.current;
 
     return {
       data,
@@ -334,6 +341,7 @@ describe('ModelSettingsSection', () => {
     refreshMutateAsyncMock.mockReset();
     settingsData.current = null;
     providerSetupData.current = buildProviderSetupData();
+    suggestionData.current = undefined;
     // cmdk scrolls the highlighted command item into view; jsdom does not
     // implement scrollIntoView.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -597,7 +605,7 @@ describe('ModelSettingsSection', () => {
     ).toHaveTextContent('Anthropic');
   });
 
-  it('shows provider-scoped suggestions after two characters and lets keyboard selection fill the slug', async () => {
+  it('shows provider-scoped suggestions after one character and lets keyboard selection fill the slug', async () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -609,13 +617,47 @@ describe('ModelSettingsSection', () => {
 
     try {
       const input = screen.getByLabelText('New model slug');
-      fireEvent.change(input, { target: { value: 'cl' } });
+      fireEvent.change(input, { target: { value: 'c' } });
 
       await act(async () => {
         vi.advanceTimersByTime(500);
       });
 
       expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps suggestions visible while a replacement query is loading', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
       expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -658,7 +700,7 @@ describe('ModelSettingsSection', () => {
     }
   });
 
-  it('does not show suggestions before two characters', () => {
+  it('does not show suggestions before a character is entered', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -667,7 +709,7 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     fireEvent.change(screen.getByLabelText('New model slug'), {
-      target: { value: 'c' },
+      target: { value: '' },
     });
 
     expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();

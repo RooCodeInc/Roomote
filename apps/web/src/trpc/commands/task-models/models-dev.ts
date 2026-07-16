@@ -145,6 +145,7 @@ function extractMetadataFromEntry(
 
 export async function fetchModelsDevCatalog(
   signal?: AbortSignal,
+  options?: { forceRefresh?: boolean },
 ): Promise<ModelsDevCatalog | null> {
   if (signal?.aborted) {
     return null;
@@ -152,7 +153,11 @@ export async function fetchModelsDevCatalog(
 
   const cachedCatalog = cachedModelsDevCatalog;
 
-  if (cachedCatalog && cachedCatalog.expiresAt > Date.now()) {
+  if (
+    !options?.forceRefresh &&
+    cachedCatalog &&
+    cachedCatalog.expiresAt > Date.now()
+  ) {
     return cachedCatalog.catalog;
   }
 
@@ -297,7 +302,7 @@ export function suggestModelsFromCatalog(options: {
 }): ModelsDevSuggestion[] {
   const normalizedQuery = options.query.trim().toLowerCase();
 
-  if (normalizedQuery.length < 2) {
+  if (normalizedQuery.length < 1) {
     return [];
   }
 
