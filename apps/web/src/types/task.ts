@@ -44,6 +44,7 @@ export const taskSchema = z.object({
   defaultBranch: z.string().nullable().optional(),
   // Conversation cargo (present when the full tasks row is returned, e.g. by
   // the by-id command; absent from trimmed list rows).
+  prompt: z.string().nullable().optional(),
   draftPrompt: z.string().nullable().optional(),
   slackChannelId: z.string().nullable().optional(),
   slackThreadTs: z.string().nullable().optional(),

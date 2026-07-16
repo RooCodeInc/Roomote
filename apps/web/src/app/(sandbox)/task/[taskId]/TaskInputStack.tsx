@@ -57,7 +57,16 @@ export function TaskInputStack({
         <div className="flex max-h-[50vh] min-h-0 flex-col">
           <Startup
             runId={bootingTaskRun.id}
+            taskId={session.taskId}
             initialTaskRun={bootingTaskRun}
+            prompt={
+              session.prompt && session.prompt.visibleInTranscript !== false
+                ? {
+                    text: session.prompt.text,
+                    images: session.prompt.images,
+                  }
+                : null
+            }
             onStatusChange={onBootStatusChange}
           />
         </div>
