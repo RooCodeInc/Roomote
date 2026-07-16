@@ -500,7 +500,7 @@ always take precedence. The random string secrets (`ENCRYPTION_KEY`,
 `R_DISCORD_GATEWAY_SECRET`, `ARTIFACT_SIGNING_KEY`, `DASHBOARD_PASSWORD`,
 `SETUP_TOKEN`) are still required and can come from the platform's secret
 generator. API and BullMQ must share the same `R_DISCORD_GATEWAY_SECRET` value
-when Discord is enabled; that value must not be the same as `ENCRYPTION_KEY`.
+when Discord is enabled.
 
 ### Port exposure and the queue dashboard
 
