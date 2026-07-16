@@ -29,7 +29,8 @@ Before you dive into details, check the basics:
 The task view gives you the working context for a run:
 
 - conversation history and Roomote updates
-- terminal and runtime logs
+- terminal and runtime logs, including individual environment setup-command
+  logs when setup is still running or needs troubleshooting
 - generated artifacts
 - code diffs
 - previews for running apps
@@ -57,6 +58,10 @@ look for:
 | Diff or PR        | Whether the actual code change matches the requested outcome                               |
 | Preview           | Whether the visible result matches the claim for UI or workflow changes                    |
 | Artifacts         | Plans, reports, screenshots, or other outputs you may want to reuse or review              |
+
+When an environment setup command fails, open the task **Logs** panel and
+select its `Setup: <command>` entry. The command's output is available there
+without needing to enter the sandbox workspace.
 
 ## Continuing work
 
