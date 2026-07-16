@@ -85,9 +85,9 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
         />
         {(status.gateway?.deadLetterDepth ?? 0) > 0 ? (
           <DiagnosticRow
-            ok={false}
-            label="Event delivery"
-            detail={`${status.gateway?.deadLetterDepth} undeliverable event${status.gateway?.deadLetterDepth === 1 ? ' was' : 's were'} quarantined; recent messages or commands may not have reached Roomote.`}
+            ok={true}
+            label="Event delivery history"
+            detail={`${status.gateway?.deadLetterDepth} undeliverable event${status.gateway?.deadLetterDepth === 1 ? ' was' : 's were'} quarantined.`}
           />
         ) : null}
         {status.gateway?.capacityWarning ? (

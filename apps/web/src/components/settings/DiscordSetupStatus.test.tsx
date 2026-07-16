@@ -257,4 +257,46 @@ describe('DiscordSetupStatus', () => {
     expect(screen.queryByText(/Gateway service/i)).not.toBeInTheDocument();
     expect(screen.getByText('Discord account linking')).toBeInTheDocument();
   });
+
+  it('shows quarantined events as delivery history instead of a current failure', () => {
+    render(
+      <DiscordSetupStatus
+        status={{
+          bot: {
+            applicationId: 'app-1',
+            applicationName: 'Roomote',
+            userId: 'bot-1',
+            username: 'roomote',
+            displayName: 'Roomote',
+            identitySource: 'live',
+            errorCode: null,
+          },
+          inviteUrl: null,
+          gateway: {
+            phase: 'ready',
+            live: true,
+            ready: true,
+            leader: true,
+            configured: true,
+            connected: true,
+            forwardingReady: true,
+            sessionResumed: false,
+            queueDepth: 0,
+            deadLetterDepth: 1,
+            updatedAt: '2026-07-12T00:00:00.000Z',
+          },
+          gatewaySession: null,
+          messageContentIntent: 'enabled',
+          commands: { status: 'registered', names: ['help', 'link', 'new'] },
+          installations: [],
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Event delivery history:/)).toBeInTheDocument();
+    expect(
+      screen.getByText('1 undeliverable event was quarantined.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/recent messages/i)).not.toBeInTheDocument();
+  });
 });

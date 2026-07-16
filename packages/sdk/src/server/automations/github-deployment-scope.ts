@@ -1,4 +1,5 @@
 import {
+  and,
   db,
   eq,
   githubInstallations,
@@ -38,6 +39,25 @@ export async function getActiveRepositoryFullNames(): Promise<string[]> {
     })
     .from(repositories)
     .where(eq(repositories.isActive, true))
+    .orderBy(repositories.fullName);
+
+  return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(
+    (left, right) => left.localeCompare(right),
+  );
+}
+
+export async function getActiveGitHubRepositoryFullNames(): Promise<string[]> {
+  const rows = await db
+    .select({
+      fullName: repositories.fullName,
+    })
+    .from(repositories)
+    .where(
+      and(
+        eq(repositories.isActive, true),
+        eq(repositories.sourceControlProvider, 'github'),
+      ),
+    )
     .orderBy(repositories.fullName);
 
   return [...new Set(rows.map((row) => row.fullName).filter(Boolean))].sort(

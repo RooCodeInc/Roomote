@@ -21,10 +21,10 @@ function isConfiguredModelId(
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function isCodeReviewTaskType(task: TaskSpec): boolean {
+function isCodeReviewTaskType(taskType: TaskPayloadKind): boolean {
   return (
-    task.type === TaskPayloadKind.GithubPrReview ||
-    task.type === TaskPayloadKind.GithubPrReviewSync
+    taskType === TaskPayloadKind.GithubPrReview ||
+    taskType === TaskPayloadKind.GithubPrReviewSync
   );
 }
 
@@ -80,7 +80,9 @@ function applyHarnessModelOverrides<T extends TaskSpec>(
 function resolveOverrideTaskReasoningEffort(options: {
   modelId: string;
   deploymentTaskModelSettings?: TaskModelSettings | null;
+  deploymentCodeReviewReasoningEffort?: ReasoningEffort | null;
   deploymentCodingReasoningEffort?: ReasoningEffort | null;
+  isCodeReviewTask: boolean;
 }): ReasoningEffort | null {
   const catalogModel = getTaskModelCatalog(
     options.deploymentTaskModelSettings,
@@ -90,10 +92,11 @@ function resolveOverrideTaskReasoningEffort(options: {
     return null;
   }
 
-  return (
-    options.deploymentCodingReasoningEffort ??
-    DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
-  );
+  return options.isCodeReviewTask
+    ? (options.deploymentCodeReviewReasoningEffort ??
+        DEFAULT_MODEL_ROLE_REASONING_EFFORTS.codeReview)
+    : (options.deploymentCodingReasoningEffort ??
+        DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding);
 }
 
 /**
@@ -107,7 +110,9 @@ function applyOverrideTaskReasoningEffort<T extends TaskSpec>(
   options: {
     targetHarness: CodingHarness;
     deploymentTaskModelSettings?: TaskModelSettings | null;
+    deploymentCodeReviewReasoningEffort?: ReasoningEffort | null;
     deploymentCodingReasoningEffort?: ReasoningEffort | null;
+    isCodeReviewTask: boolean;
   },
 ): T {
   if (options.targetHarness !== 'opencode-server') {
@@ -130,7 +135,10 @@ function applyOverrideTaskReasoningEffort<T extends TaskSpec>(
   const reasoningEffort = resolveOverrideTaskReasoningEffort({
     modelId: overrideModelId,
     deploymentTaskModelSettings: options.deploymentTaskModelSettings,
+    deploymentCodeReviewReasoningEffort:
+      options.deploymentCodeReviewReasoningEffort,
     deploymentCodingReasoningEffort: options.deploymentCodingReasoningEffort,
+    isCodeReviewTask: options.isCodeReviewTask,
   });
 
   if (!reasoningEffort) {
@@ -151,9 +159,11 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
   targetHarness: CodingHarness;
   isSnapshotResume: boolean;
   sourceRunHarnessModelOverrides?: HarnessModelOverrides;
+  sourceTaskType?: TaskPayloadKind;
   deploymentMetadata?: MetadataRecord | null;
   deploymentTaskModelSettings?: TaskModelSettings | null;
   deploymentCodeReviewModelId?: string | null;
+  deploymentCodeReviewReasoningEffort?: ReasoningEffort | null;
   deploymentCodingReasoningEffort?: ReasoningEffort | null;
 }): { task: T; model: string } {
   const shouldReuseSourceHarnessModelOverrides =
@@ -165,7 +175,12 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
         options.task,
         options.sourceRunHarnessModelOverrides,
       ),
-      options,
+      {
+        ...options,
+        isCodeReviewTask: isCodeReviewTaskType(
+          options.sourceTaskType ?? options.task.type,
+        ),
+      },
     );
 
     return {
@@ -196,7 +211,10 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
     }
 
     return {
-      task: applyOverrideTaskReasoningEffort(options.task, options),
+      task: applyOverrideTaskReasoningEffort(options.task, {
+        ...options,
+        isCodeReviewTask: isCodeReviewTaskType(options.task.type),
+      }),
       model: resolveTaskModelForHarness(
         options.targetHarness,
         options.task.payload.harnessModelOverrides,
@@ -213,7 +231,7 @@ export function resolveEffectiveHarnessModelState<T extends TaskSpec>(options: {
     ? options.deploymentCodeReviewModelId
     : null;
   const taskModelId =
-    isCodeReviewTaskType(options.task) && resolvedCodeReviewModelId
+    isCodeReviewTaskType(options.task.type) && resolvedCodeReviewModelId
       ? resolvedCodeReviewModelId
       : defaultTaskModelId;
   const nextTask = applyHarnessModelOverrides(options.task, {

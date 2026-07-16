@@ -190,9 +190,11 @@ describe('resolveEffectiveHarnessModelState', () => {
       sourceRunHarnessModelOverrides: {
         'opencode-server': 'openrouter/z-ai/glm-5.2',
       },
+      sourceTaskType: TaskPayloadKind.GithubPrReview,
       deploymentCodingReasoningEffort: 'high',
+      deploymentCodeReviewReasoningEffort: 'xhigh',
     });
 
-    expect(task.payload.reasoningEffort).toBe('high');
+    expect(task.payload.reasoningEffort).toBe('xhigh');
   });
 });
