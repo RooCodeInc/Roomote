@@ -115,6 +115,7 @@ The file must include the required production values from
 - `PREVIEW_AUTH_PRIVATE_KEY`
 - `PREVIEW_AUTH_PUBLIC_KEY`
 - `ENCRYPTION_KEY`
+- `R_DISCORD_GATEWAY_SECRET` (required outside local development when Discord is enabled)
 - `ARTIFACT_SIGNING_KEY`
 - `DASHBOARD_PASSWORD`
 - `R_GITHUB_APP_SLUG`
@@ -178,6 +179,7 @@ base64 < preview-auth-private-pkcs8.pem | tr -d '\n' # PREVIEW_AUTH_PRIVATE_KEY
 base64 < preview-auth-public.pem | tr -d '\n'        # PREVIEW_AUTH_PUBLIC_KEY
 
 openssl rand -base64 32 # ENCRYPTION_KEY
+openssl rand -base64 32 # R_DISCORD_GATEWAY_SECRET (distinct from ENCRYPTION_KEY)
 openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
 openssl rand -base64 24 # DASHBOARD_PASSWORD
 ```

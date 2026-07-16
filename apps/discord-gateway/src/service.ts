@@ -179,7 +179,7 @@ export class DiscordGatewayService {
           phase: 'error',
           forwardingReady: false,
           lastError:
-            'R_DISCORD_GATEWAY_SECRET or ENCRYPTION_KEY is required to forward Discord events',
+            'R_DISCORD_GATEWAY_SECRET is required to forward Discord events',
         });
       }
 

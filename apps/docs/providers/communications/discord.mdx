@@ -123,15 +123,18 @@ environment variable instead, set:
 
 ```sh
 R_DISCORD_BOT_TOKEN=<discord-bot-token>
+R_DISCORD_GATEWAY_SECRET=<random-secret>
 ```
 
 The Discord Gateway runs as an opt-in subsystem inside Roomote's existing
 BullMQ process, so enabling Discord does not add another container, process, or
 port. It stays dormant until a token is saved, uses Redis to elect a single
 active replica, and disconnects if Discord is removed. Durable event delivery
-uses Redis and the deployment encryption key by default. Operators that want a
-dedicated internal secret can set the same `R_DISCORD_GATEWAY_SECRET` value on
-the API and BullMQ processes.
+uses Redis and a dedicated internal shared secret. Set the same
+`R_DISCORD_GATEWAY_SECRET` value on the API and BullMQ processes (installers
+and platform templates generate this for you). Keep it separate from
+`ENCRYPTION_KEY` so a leaked transport secret cannot unlock secrets sealed at
+rest.
 
 Gateway session state is stored in the Roomote database. On a service restart
 or leader handoff, Roomote asks Discord to resume the previous session and

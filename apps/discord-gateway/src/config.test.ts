@@ -17,10 +17,31 @@ describe('resolveDiscordGatewayConfig', () => {
     });
   });
 
-  it('uses the shared encryption key for rollout compatibility', () => {
+  it('uses ENCRYPTION_KEY only as a local-development fallback', () => {
     expect(
-      resolveDiscordGatewayConfig({ ENCRYPTION_KEY: 'shared-key' }).apiSecret,
+      resolveDiscordGatewayConfig({
+        ENCRYPTION_KEY: 'shared-key',
+        R_APP_ENV: 'development',
+      }).apiSecret,
     ).toBe('shared-key');
+  });
+
+  it('does not accept ENCRYPTION_KEY under production-like config', () => {
+    expect(
+      resolveDiscordGatewayConfig({
+        ENCRYPTION_KEY: 'shared-key',
+        R_APP_ENV: 'production',
+      }).apiSecret,
+    ).toBeNull();
+  });
+
+  it('does not accept ENCRYPTION_KEY under preview config', () => {
+    expect(
+      resolveDiscordGatewayConfig({
+        ENCRYPTION_KEY: 'shared-key',
+        R_APP_ENV: 'preview',
+      }).apiSecret,
+    ).toBeNull();
   });
 
   it('supports bounded delivery and login retry tuning', () => {

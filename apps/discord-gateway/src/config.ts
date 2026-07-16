@@ -36,6 +36,32 @@ export type DiscordGatewayConfig = {
   loginRetryMaxMs: number;
 };
 
+/**
+ * ENCRYPTION_KEY fallback is local-dev only. Production and preview must set a
+ * dedicated `R_DISCORD_GATEWAY_SECRET` shared by API and BullMQ/gateway.
+ */
+function allowsEncryptionKeyFallback(env: NodeJS.ProcessEnv): boolean {
+  const appEnv = (env.R_APP_ENV || env.APP_ENV)?.trim();
+  if (appEnv === 'development') {
+    return true;
+  }
+  if (appEnv === 'production' || appEnv === 'preview') {
+    return false;
+  }
+  return env.NODE_ENV?.trim() === 'development';
+}
+
+function resolveApiSecret(env: NodeJS.ProcessEnv): string | null {
+  const dedicated = env.R_DISCORD_GATEWAY_SECRET?.trim();
+  if (dedicated) {
+    return dedicated;
+  }
+  if (!allowsEncryptionKeyFallback(env)) {
+    return null;
+  }
+  return env.ENCRYPTION_KEY?.trim() || null;
+}
+
 export function resolveDiscordGatewayConfig(
   env: NodeJS.ProcessEnv = process.env,
 ): DiscordGatewayConfig {
@@ -44,13 +70,7 @@ export function resolveDiscordGatewayConfig(
   return {
     port: positiveInteger(env.PORT, DEFAULT_PORT),
     apiEventsUrl: `${withoutTrailingSlashes(apiBaseUrl)}/api/internal/discord/events`,
-    // ENCRYPTION_KEY is already shared between API/control-plane processes.
-    // A dedicated secret is preferred, while this fallback keeps existing
-    // self-hosted and local deployments bootable during the rollout.
-    apiSecret:
-      env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-      env.ENCRYPTION_KEY?.trim() ||
-      null,
+    apiSecret: resolveApiSecret(env),
     apiTimeoutMs: positiveInteger(
       env.DISCORD_GATEWAY_API_TIMEOUT_MS,
       DEFAULT_API_TIMEOUT_MS,

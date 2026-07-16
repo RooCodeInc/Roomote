@@ -12,10 +12,44 @@ type DiscordGatewayAuthError = {
   status: 503 | 401;
 };
 
-function configuredGatewaySecret(): string | null {
-  const value =
-    process.env.R_DISCORD_GATEWAY_SECRET?.trim() || Env.ENCRYPTION_KEY?.trim();
-  return value || null;
+/**
+ * ENCRYPTION_KEY fallback is local-dev only. Production and preview must set a
+ * dedicated `R_DISCORD_GATEWAY_SECRET` so a leaked transport header cannot
+ * unlock the vault that encrypts stored secrets.
+ */
+function allowsEncryptionKeyFallback(
+  processEnv: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const appEnv = (
+    processEnv.R_APP_ENV ||
+    processEnv.APP_ENV ||
+    Env.APP_ENV
+  )?.trim();
+  if (appEnv === 'development') {
+    return true;
+  }
+  if (appEnv === 'production' || appEnv === 'preview') {
+    return false;
+  }
+  const nodeEnv = (processEnv.NODE_ENV || Env.NODE_ENV)?.trim();
+  return nodeEnv === 'development';
+}
+
+function configuredGatewaySecret(
+  processEnv: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const dedicated = processEnv.R_DISCORD_GATEWAY_SECRET?.trim();
+  if (dedicated) {
+    return dedicated;
+  }
+
+  if (!allowsEncryptionKeyFallback(processEnv)) {
+    return null;
+  }
+
+  return (
+    Env.ENCRYPTION_KEY?.trim() || processEnv.ENCRYPTION_KEY?.trim() || null
+  );
 }
 
 function secretsMatch(expected: string, received: string): boolean {
@@ -29,8 +63,9 @@ function secretsMatch(expected: string, received: string): boolean {
 
 export function verifyDiscordGatewaySecret(
   received: string | undefined,
+  processEnv: NodeJS.ProcessEnv = process.env,
 ): DiscordGatewayAuthError | null {
-  const expected = configuredGatewaySecret();
+  const expected = configuredGatewaySecret(processEnv);
   if (!expected) {
     return {
       error: 'discord_gateway_secret_not_configured',

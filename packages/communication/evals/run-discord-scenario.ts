@@ -119,9 +119,14 @@ function substitute(value: unknown): unknown {
   return value;
 }
 
+const appEnv = (
+  process.env.R_APP_ENV ||
+  process.env.APP_ENV ||
+  process.env.NODE_ENV
+)?.trim();
 const gatewaySecret =
   process.env.R_DISCORD_GATEWAY_SECRET?.trim() ||
-  process.env.ENCRYPTION_KEY?.trim() ||
+  (appEnv === 'development' ? process.env.ENCRYPTION_KEY?.trim() : undefined) ||
   '';
 
 const server = new MockDiscordServer({

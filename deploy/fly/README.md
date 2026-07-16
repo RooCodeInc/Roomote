@@ -111,7 +111,8 @@ fly secrets set --app "$APP" \
   ENCRYPTION_KEY="$(openssl rand -base64 32)" \
   ARTIFACT_SIGNING_KEY="$(openssl rand -base64 32)" \
   DASHBOARD_PASSWORD="$(openssl rand -base64 24)" \
-  SETUP_TOKEN="$(openssl rand -hex 16)"
+  SETUP_TOKEN="$(openssl rand -hex 16)" \
+  R_DISCORD_GATEWAY_SECRET="$(openssl rand -base64 32)"
 
 # One Machine per process group (web, api, controller, and bullmq). The
 # db-migrate release command runs schema migrations first.
@@ -157,6 +158,7 @@ Everything sensitive is a Fly secret, set once for the app:
 | `REDIS_URL`                                | printed by `fly redis create`           |
 | `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | printed by `fly storage create`         |
 | `ENCRYPTION_KEY`, `ARTIFACT_SIGNING_KEY`   | `openssl rand -base64 32`               |
+| `R_DISCORD_GATEWAY_SECRET`                 | `openssl rand -base64 32` (API + BullMQ Discord Gateway) |
 | `DASHBOARD_PASSWORD`                       | `openssl rand -base64 24`               |
 | `SETUP_TOKEN`                              | `openssl rand -hex 16` (gates `/setup`) |
 
