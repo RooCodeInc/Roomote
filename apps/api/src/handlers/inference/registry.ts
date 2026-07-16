@@ -16,11 +16,21 @@ export function getInferenceProvider(
  * whose route shape requires it (Google model routes, Vercel's AI Gateway
  * protocol) additionally allow nested paths; their upstreams serve no
  * account surface below the allowed prefixes.
+ *
+ * Paths containing dot segments or percent-encoded slashes are always rejected
+ * first: the match runs on the WHATWG-parsed pathname (which preserves `%2F`
+ * and does not collapse `%2e%2e`), so a nested-path provider could otherwise
+ * pass `/v1beta/models/..%2F..%2Fadmin` through the `startsWith` check and
+ * have the upstream normalize it back out of the inference surface.
  */
 export function isInferencePathAllowed(
   provider: InferenceGatewayProvider,
   upstreamPath: string,
 ): boolean {
+  if (hasTraversalOrEncodedSlash(upstreamPath)) {
+    return false;
+  }
+
   return provider.allowedPaths.some((path) => {
     if (upstreamPath === path) {
       return true;
@@ -30,6 +40,21 @@ export function isInferencePathAllowed(
       provider.allowNestedPaths === true && upstreamPath.startsWith(`${path}/`)
     );
   });
+}
+
+function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
+  const lowered = upstreamPath.toLowerCase();
+
+  if (lowered.includes('%2f') || lowered.includes('%5c')) {
+    return true;
+  }
+
+  // Any `.` or `..` path segment (literal or percent-encoded dots) is out of
+  // bounds for an inference endpoint allowlist.
+  return lowered
+    .replace(/%2e/g, '.')
+    .split('/')
+    .some((segment) => segment === '.' || segment === '..');
 }
 
 /**

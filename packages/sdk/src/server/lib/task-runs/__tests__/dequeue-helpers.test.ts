@@ -11,6 +11,7 @@ const {
   mockResolveEffectiveModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
+  mockIsInferenceGatewayEnabledForDeployment,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -21,6 +22,9 @@ const {
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
+  mockIsInferenceGatewayEnabledForDeployment: vi.fn(
+    async (_redis?: unknown, _prefix?: string) => false,
+  ),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -86,6 +90,15 @@ vi.mock('@roomote/ado', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
+}));
+
+vi.mock('@roomote/feature-flags/server', () => ({
+  isInferenceGatewayEnabledForDeployment: (redis: unknown, prefix?: string) =>
+    mockIsInferenceGatewayEnabledForDeployment(redis, prefix),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: vi.fn(() => ({})),
 }));
 
 vi.mock('../notify-source-run-on-settle', () => ({
@@ -579,5 +592,40 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     expect(envVars.ROOMOTE_MODEL).toBe('operator/explicit');
     expect(envVars.R_MODEL).toBe('anthropic/claude-test');
+  });
+
+  it('strips only the gateway-advertised keys from the merged sandbox env', async () => {
+    // The resolver advertises exactly ANTHROPIC_API_KEY as served; the raw
+    // deployment env vars are spread in first, so redaction must remove that
+    // key while leaving an unrelated provider key the user set for their code.
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+      R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      ANTHROPIC_API_KEY: 'sk-ant',
+      OPENAI_API_KEY: 'sk-openai-for-user-code',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(envVars.OPENAI_API_KEY).toBe('sk-openai-for-user-code');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+    expect(envVars.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+  });
+
+  it('leaves the merged env untouched when the gateway is off', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+
+    expect(envVars.ANTHROPIC_API_KEY).toBe('sk-ant');
+    expect(envVars).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
   });
 });

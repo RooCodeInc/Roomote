@@ -9,6 +9,16 @@ import type { SetupModelProviderId } from './model-provider-config';
 export const INFERENCE_GATEWAY_URL_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_URL';
 
 /**
+ * Sandbox-facing env var carrying the comma-separated provider key env-var
+ * names the gateway is serving for this run (the configured, gateway-covered
+ * keys withheld from the sandbox at dequeue). It is the single authoritative
+ * signal the worker uses to (1) strip exactly those keys from the harness
+ * env and (2) rebase exactly those providers onto the gateway, keeping the
+ * withheld set and the rebased set identical.
+ */
+export const INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_KEYS';
+
+/**
  * OpenCode registers Bedrock models under this provider id (an
  * Anthropic-compatible endpoint), distinct from the `amazon-bedrock` setup
  * provider id.
@@ -18,6 +28,9 @@ export const BEDROCK_MANTLE_OPENCODE_PROVIDER_ID = 'bedrock-mantle';
 /** Matches valid cloud regions like `us-east-1`. */
 export const INFERENCE_GATEWAY_REGION_PATTERN =
   /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
+
+/** Default AWS region for the Bedrock Mantle Anthropic-compatible endpoint. */
+export const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
 
 interface InferenceGatewayAuthHeader {
   name: string;
@@ -131,7 +144,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
     {
       id: 'google',
       name: 'Google Gemini',
-      envVarNames: ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY'],
+      // GOOGLE_GENERATIVE_AI_API_KEY first: it is @ai-sdk/google's native env
+      // var, so when both are set the pre-gateway sandbox used it. GEMINI_API_KEY
+      // is Roomote's setup-catalog alias and the common single-key case.
+      envVarNames: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
       upstreamBaseUrl: 'https://generativelanguage.googleapis.com',
       authHeader: { name: 'x-goog-api-key' },
       allowedPaths: ['/v1beta/models', '/v1/models'],
@@ -225,7 +241,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       name: 'Amazon Bedrock',
       envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],
       upstreamBaseUrl: 'https://bedrock-mantle.{region}.api.aws/anthropic',
-      region: { envVarName: 'AWS_REGION', default: 'us-east-1' },
+      region: {
+        envVarName: 'AWS_REGION',
+        default: DEFAULT_BEDROCK_MANTLE_REGION,
+      },
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
@@ -246,6 +265,38 @@ export function getInferenceGatewayProvider(
   return INFERENCE_GATEWAY_PROVIDERS.find(
     (provider) => provider.id === providerId,
   );
+}
+
+const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET = new Set(
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+);
+
+/** True when `envVarName` is a provider key the gateway can serve. */
+export function isInferenceGatewayCoveredEnvVar(envVarName: string): boolean {
+  return INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAME_SET.has(envVarName);
+}
+
+/**
+ * Resolve the gateway provider that owns a given key env-var name. Used by the
+ * worker to map the withheld/served key list back to the providers it must
+ * rebase onto the gateway.
+ */
+export function getInferenceGatewayProviderByEnvVarName(
+  envVarName: string,
+): InferenceGatewayProvider | undefined {
+  return INFERENCE_GATEWAY_PROVIDERS.find((provider) =>
+    provider.envVarNames.includes(envVarName),
+  );
+}
+
+/** Parse the comma-separated `R_INFERENCE_GATEWAY_KEYS` value into a list. */
+export function parseInferenceGatewayKeys(
+  value: string | undefined | null,
+): string[] {
+  return (value ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 /**

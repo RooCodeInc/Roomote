@@ -1,13 +1,12 @@
 import { eq } from 'drizzle-orm';
 import {
-  buildInferenceGatewayUrl,
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
-  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
-  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
+  isInferenceGatewayCoveredEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
@@ -175,12 +174,12 @@ export async function resolveEffectiveModelRuntimeEnv(
     deploymentEnvVars?: Record<string, string>;
     executor?: DatabaseOrTransaction;
     /**
-     * Route sandbox inference through the gateway: provider keys the gateway
-     * covers stay on the control plane and `R_INFERENCE_GATEWAY_URL` is
-     * emitted instead. Callers resolving env for the sandbox pass the
-     * evaluated InferenceGateway feature flag; control-plane callers
-     * (routing, titles, summaries) omit it because that inference holds no
-     * run token to present to the gateway.
+     * Route sandbox inference through the gateway: the configured provider
+     * keys the gateway can serve stay on the control plane and their names
+     * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Callers
+     * resolving env for the sandbox pass the evaluated InferenceGateway
+     * feature flag; control-plane callers (routing, titles, summaries) omit it
+     * because that inference holds no run token to present to the gateway.
      */
     inferenceGateway?: boolean;
   } = {},
@@ -295,23 +294,23 @@ export async function resolveEffectiveModelRuntimeEnv(
       resolvedRoomotePlanningModel,
     ],
   });
-  // Gateway-covered provider keys stay on the control plane, and the sandbox
-  // gets the gateway URL instead. Keys the gateway cannot serve yet (Bedrock,
-  // Vertex) still flow through. Requires a sandbox-reachable platform API
-  // URL; when none is configured, fall back to direct keys rather than
-  // breaking inference.
-  const gatewayPlatformApiUrl = normalizeConfiguredValue(runtimeEnv.TRPC_URL);
-  const inferenceGatewayUrl =
-    options.inferenceGateway && gatewayPlatformApiUrl
-      ? buildInferenceGatewayUrl(gatewayPlatformApiUrl)
-      : undefined;
-  const gatewayCoveredKeyNames = new Set(
-    INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
-  );
+  // When the gateway is active, the configured provider keys it can serve
+  // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
+  // the control plane and are advertised to the worker by name via
+  // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
+  // gateway URL from its own platform URL and rebases exactly these providers.
+  // Only configured keys are withheld, so a provider key the deployment set
+  // for its own code (not used by any configured model) still reaches the
+  // sandbox. Providers the gateway cannot serve (Vertex signing, ChatGPT
+  // subscription OAuth) are never covered and always flow through.
+  const gatewayServedKeyNames = options.inferenceGateway
+    ? providerKeyNames.filter((name) => isInferenceGatewayCoveredEnvVar(name))
+    : [];
+  const gatewayServedKeyNameSet = new Set(gatewayServedKeyNames);
 
   const resolvedProviderKeyValues = Object.fromEntries(
     providerKeyNames.flatMap((envVarName) => {
-      if (inferenceGatewayUrl && gatewayCoveredKeyNames.has(envVarName)) {
+      if (gatewayServedKeyNameSet.has(envVarName)) {
         return [];
       }
 
@@ -394,8 +393,8 @@ export async function resolveEffectiveModelRuntimeEnv(
         R_MODEL_ENV_KEYS: providerKeyNames.join(','),
       }),
     ...resolvedProviderKeyValues,
-    ...(inferenceGatewayUrl && {
-      [INFERENCE_GATEWAY_URL_ENV_VAR_NAME]: inferenceGatewayUrl,
+    ...(gatewayServedKeyNames.length > 0 && {
+      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
     }),
     ...(injectedOpenCodeAuthContent && {
       OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,

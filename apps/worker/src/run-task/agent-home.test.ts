@@ -143,6 +143,7 @@ describe('generateOpenCodeConfig provider support', () => {
         R_MODEL: 'anthropic/claude-sonnet-5',
         R_SMALL_MODEL: 'google/gemini-3.5-flash',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY,GEMINI_API_KEY',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -169,6 +170,7 @@ describe('generateOpenCodeConfig provider support', () => {
       runtimeEnv: {
         R_MODEL: 'openrouter/anthropic/claude-sonnet-5',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -191,6 +193,7 @@ describe('generateOpenCodeConfig provider support', () => {
         R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
         AWS_REGION: 'us-west-2',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'AWS_BEARER_TOKEN_BEDROCK',
       },
     });
     const config = JSON.parse(result.configContent) as {
@@ -215,6 +218,7 @@ describe('generateOpenCodeConfig provider support', () => {
       runtimeEnv: {
         R_MODEL: 'openai/gpt-5.4-codex',
         R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENAI_API_KEY',
         OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth"}}',
       },
     });

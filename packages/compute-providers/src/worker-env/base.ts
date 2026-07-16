@@ -84,9 +84,11 @@ function buildOperatorModelProviderEnv(
   }
 
   // When the inference gateway is enabled, gateway-covered provider keys
-  // stay on the control plane: the per-task dequeue env routes the harness
-  // through the gateway instead. Keys the gateway cannot serve yet (Bedrock,
-  // Vertex) still ship with the worker daemon env.
+  // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay off
+  // the worker daemon process env so they never appear in the sandbox's
+  // /proc; the per-task dequeue env routes the harness through the gateway
+  // instead. Keys the gateway cannot serve (Vertex signing, ChatGPT
+  // subscription OAuth) are not covered and still ship with the daemon env.
   const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
 
   for (const key of getOperatorModelProviderEnvKeys()) {

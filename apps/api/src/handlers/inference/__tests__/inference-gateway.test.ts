@@ -3,12 +3,17 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockFindTaskRun, mockResolveModelProviderEnvValue } = vi.hoisted(
-  () => ({
-    mockFindTaskRun: vi.fn(),
-    mockResolveModelProviderEnvValue: vi.fn(),
-  }),
-);
+const {
+  mockFindTaskRun,
+  mockResolveModelProviderEnvValue,
+  mockIsInferenceGatewayEnabledForDeployment,
+} = vi.hoisted(() => ({
+  mockFindTaskRun: vi.fn(),
+  mockResolveModelProviderEnvValue: vi.fn(),
+  mockIsInferenceGatewayEnabledForDeployment: vi.fn(
+    async (_redis?: unknown, _prefix?: string) => true,
+  ),
+}));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -19,6 +24,15 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: { id: 'id' },
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
+}));
+
+vi.mock('@roomote/feature-flags/server', () => ({
+  isInferenceGatewayEnabledForDeployment: (redis: unknown, prefix?: string) =>
+    mockIsInferenceGatewayEnabledForDeployment(redis, prefix),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: vi.fn(() => ({})),
 }));
 
 import { inference } from '../index';
@@ -85,6 +99,7 @@ describe('inference gateway', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    mockIsInferenceGatewayEnabledForDeployment.mockResolvedValue(true);
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {
@@ -111,6 +126,17 @@ describe('inference gateway', () => {
     const response = await postMessages(createApp(undefined));
 
     expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects requests when the gateway flag is disabled for the deployment', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockIsInferenceGatewayEnabledForDeployment.mockResolvedValue(false);
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(response.status).toBe(403);
+    expect(mockFindTaskRun).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -168,6 +194,25 @@ describe('inference gateway', () => {
 
     expect(anthropicResponse.status).toBe(403);
     expect(openRouterResponse.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects encoded-slash and dot-segment traversal under nested-path providers', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const app = createApp(createRunToken());
+
+    const [googleEncoded, googleDots, vercelEncoded] = await Promise.all([
+      postMessages(
+        app,
+        '/api/inference/google/v1beta/models/..%2F..%2Fv1internal',
+      ),
+      postMessages(app, '/api/inference/google/v1beta/models/../admin'),
+      postMessages(app, '/api/inference/vercel/v1/ai/..%2Fadmin'),
+    ]);
+
+    expect(googleEncoded.status).toBe(403);
+    expect(googleDots.status).toBe(403);
+    expect(vercelEncoded.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -384,8 +429,8 @@ describe('inference gateway', () => {
     const headers = new Headers(init.headers);
     expect(headers.get('x-goog-api-key')).toBe('provider-secret-key');
     expect(mockResolveModelProviderEnvValue).toHaveBeenCalledWith([
-      'GEMINI_API_KEY',
       'GOOGLE_GENERATIVE_AI_API_KEY',
+      'GEMINI_API_KEY',
     ]);
   });
 

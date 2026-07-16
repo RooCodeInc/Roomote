@@ -2,19 +2,23 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
-  getInferenceGatewayProvider,
+  DEFAULT_BEDROCK_MANTLE_REGION,
+  getInferenceGatewayProviderByEnvVarName,
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
-  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
@@ -57,12 +61,6 @@ const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
 export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
-
-const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
-
-const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
-
-const AWS_REGION_PATTERN = /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -572,7 +570,7 @@ function mergeBedrockMantleProviderConfig(
   const mantleModelIds = [
     ...new Set(
       modelIds.flatMap((modelId) => {
-        const prefix = `${BEDROCK_MANTLE_PROVIDER_ID}/`;
+        const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`;
         const normalized = modelId?.trim();
 
         return normalized?.startsWith(prefix)
@@ -588,13 +586,15 @@ function mergeBedrockMantleProviderConfig(
 
   const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
 
-  if (!AWS_REGION_PATTERN.test(region)) {
+  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
     throw new Error(
       `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
     );
   }
 
-  const existingProvider = asRecord(providerConfig[BEDROCK_MANTLE_PROVIDER_ID]);
+  const existingProvider = asRecord(
+    providerConfig[BEDROCK_MANTLE_OPENCODE_PROVIDER_ID],
+  );
   const existingOptions = asRecord(existingProvider.options);
   const existingModels = asRecord(existingProvider.models);
   const models = Object.fromEntries(
@@ -609,7 +609,7 @@ function mergeBedrockMantleProviderConfig(
 
   return {
     ...providerConfig,
-    [BEDROCK_MANTLE_PROVIDER_ID]: {
+    [BEDROCK_MANTLE_OPENCODE_PROVIDER_ID]: {
       ...existingProvider,
       npm: '@ai-sdk/anthropic',
       name: 'Amazon Bedrock',
@@ -636,31 +636,30 @@ function mergeBedrockMantleProviderConfig(
 function mergeInferenceGatewayProviderConfig(
   providerConfig: Record<string, unknown>,
   runtimeEnv: Record<string, string>,
-  modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
   const gatewayUrl = runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]?.trim();
+  const servedKeyNames = parseInferenceGatewayKeys(
+    runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+  );
 
-  if (!gatewayUrl) {
+  if (!gatewayUrl || servedKeyNames.length === 0) {
     return providerConfig;
   }
 
-  const providerIds = new Set(
-    modelIds.flatMap((modelId) => {
-      const providerId = modelId?.trim().split('/')[0];
+  // Rebase exactly the providers whose keys the gateway is serving (the same
+  // set dequeue withheld from the sandbox), so the withheld set and the
+  // rebased set stay identical regardless of which models reference them.
+  const gatewayProviders = new Map(
+    servedKeyNames.flatMap((keyName) => {
+      const provider = getInferenceGatewayProviderByEnvVarName(keyName);
 
-      return providerId ? [providerId] : [];
+      return provider ? [[provider.id, provider] as const] : [];
     }),
   );
 
   let merged = providerConfig;
 
-  for (const providerId of providerIds) {
-    const gatewayProvider = getInferenceGatewayProvider(providerId);
-
-    if (!gatewayProvider) {
-      continue;
-    }
-
+  for (const [providerId, gatewayProvider] of gatewayProviders) {
     // ChatGPT-subscription OAuth authenticates through opencode's Codex
     // plugin directly; leave the openai provider on its default base URL
     // when a subscription record is present.
@@ -1226,7 +1225,6 @@ function resolveModelBackedOpenCodeConfig(
       configuredModelIds,
     ),
     runtimeEnv,
-    configuredModelIds,
   );
 
   return {

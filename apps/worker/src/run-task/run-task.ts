@@ -1,6 +1,10 @@
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
+  buildInferenceGatewayUrl,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  parseInferenceGatewayKeys,
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
@@ -640,6 +644,34 @@ export const runTask = async ({
         ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
+    // Inference gateway: dequeue advertises the served provider keys by name
+    // (R_INFERENCE_GATEWAY_KEYS) rather than the gateway URL, so the URL is
+    // built here from the worker's own platform URL — already rewritten to be
+    // container-reachable per compute provider (Docker host.docker.internal,
+    // etc.). The served keys are stripped from the harness env even though
+    // dequeue withheld them, because buildOpenCodeHarnessEnv re-adds provider
+    // keys from the worker daemon's process env (present on sandboxes spawned
+    // before the flag was enabled); this keeps the withheld set out of the
+    // harness env and env.sh regardless of daemon state.
+    const inferenceGatewayServedKeys = parseInferenceGatewayKeys(
+      unsanitizedEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+    );
+
+    if (inferenceGatewayServedKeys.length > 0) {
+      for (const servedKey of inferenceGatewayServedKeys) {
+        delete runtimeEnv[servedKey];
+      }
+
+      runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME] =
+        inferenceGatewayServedKeys.join(',');
+      runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME] = buildInferenceGatewayUrl(
+        workerEnv.trpcUrl,
+      );
+    } else {
+      delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
+      delete runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME];
+    }
+
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
     if (workerHomeDir) {
