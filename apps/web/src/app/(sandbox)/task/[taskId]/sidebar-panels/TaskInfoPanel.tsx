@@ -10,15 +10,16 @@ import {
   type SourceControlProvider,
   HARNESS_LABELS,
   PRODUCT_NAME,
+  getDisplayModelProviderId,
   getModelProviderLabel,
   getReasoningEffortLabel,
   getSourceControlProviderLabel,
   getTaskModelDisplayName,
-  getTaskModelProviderId,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 
 import { useShowDebugUI } from '@/hooks/useShowDebugUI';
+import { useLaunchTaskModels } from '@/hooks/task-models/useLaunchTaskModels';
 import { getTaskRunDisplayError } from '@/lib/task-run-errors';
 import { formatInferenceCost } from '@/lib/formatters';
 import { getUserDisplayName } from '@/lib/user-display-name';
@@ -200,9 +201,10 @@ export function TaskInfoPanel({
     ? SANDBOX_PROVIDER_LABELS[taskRun.vendor]
     : 'Unknown';
   const taskModelReasoningEffort = taskRun.payload?.reasoningEffort;
-  const inferenceProviderId = task.model
-    ? getTaskModelProviderId(task.model)
-    : null;
+  const { data: launchTaskModels } = useLaunchTaskModels();
+  const inferenceProviderId = getDisplayModelProviderId(task.model, {
+    chatgptConnected: launchTaskModels?.chatgptConnected,
+  });
   const inferenceProviderLabel =
     inferenceProviderId && task.model?.includes('/')
       ? getModelProviderLabel(inferenceProviderId)

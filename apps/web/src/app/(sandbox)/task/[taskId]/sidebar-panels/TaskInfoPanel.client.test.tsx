@@ -5,11 +5,13 @@ import { TaskPayloadKind } from '@roomote/types';
 const {
   useSandboxMessagesMock,
   useTaskSummaryMock,
+  useLaunchTaskModelsMock,
   userState,
   showDebugUiState,
 } = vi.hoisted(() => ({
   useSandboxMessagesMock: vi.fn(),
   useTaskSummaryMock: vi.fn(),
+  useLaunchTaskModelsMock: vi.fn(),
   userState: {
     isSignedIn: true,
     user: {
@@ -35,6 +37,10 @@ vi.mock('@/hooks/useShowDebugUI', () => ({
     isUpdating: false,
     setDebugUIVisible: vi.fn(),
   }),
+}));
+
+vi.mock('@/hooks/task-models/useLaunchTaskModels', () => ({
+  useLaunchTaskModels: useLaunchTaskModelsMock,
 }));
 
 vi.mock('@/hooks/useUser', () => ({
@@ -129,6 +135,9 @@ describe('TaskInfoPanel', () => {
       isSummaryStale: false,
       regenerateSummary: vi.fn(),
     });
+    useLaunchTaskModelsMock.mockReturnValue({
+      data: { chatgptConnected: false },
+    });
   });
 
   it('hides the runtime row by default', () => {
@@ -159,6 +168,42 @@ describe('TaskInfoPanel', () => {
 
     expect(
       screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows ChatGPT for OpenAI models when a subscription is connected', () => {
+    useLaunchTaskModelsMock.mockReturnValue({
+      data: { chatgptConnected: true },
+    });
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={{ ...baseTask, model: 'openai/gpt-5.6-sol' } as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via ChatGPT (subscription)'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows OpenAI for OpenAI models without a subscription', () => {
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={{ ...baseTask, model: 'openai/gpt-5.6-sol' } as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText('openai/gpt-5.6-sol via OpenAI'),
     ).toBeInTheDocument();
   });
 
