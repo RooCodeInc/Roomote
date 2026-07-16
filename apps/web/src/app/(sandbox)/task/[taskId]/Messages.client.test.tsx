@@ -634,7 +634,7 @@ describe('Messages', () => {
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
   });
 
-  it('keeps initial todo section markers visible instead of collapsing them', () => {
+  it('keeps todo section markers visible while collapsing following activity', () => {
     mockBuildAcpRenderBlocks.mockReturnValue([
       {
         kind: 'message',
@@ -663,6 +663,16 @@ describe('Messages', () => {
       {
         kind: 'message',
         msg: {
+          id: 'reasoning-2',
+          ts: 4_000,
+          role: 'assistant',
+          kind: 'reasoning',
+          partial: false,
+        },
+      },
+      {
+        kind: 'message',
+        msg: {
           id: 'assistant-text-1',
           ts: 12_000,
           role: 'assistant',
@@ -685,8 +695,9 @@ describe('Messages', () => {
       />,
     );
 
-    expect(screen.queryByText(/^Worked for/)).not.toBeInTheDocument();
+    expect(screen.getByText('Worked for 8s')).toBeInTheDocument();
     expect(screen.getByText('reasoning-1')).toBeInTheDocument();
     expect(screen.getByText('todo-1')).toBeInTheDocument();
+    expect(screen.getByText('reasoning-2')).toBeInTheDocument();
   });
 });

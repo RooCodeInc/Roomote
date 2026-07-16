@@ -57,6 +57,10 @@ function isTextBoundaryBlock(block: AcpRenderBlock): boolean {
   return block.kind === 'message' && block.msg.kind === 'text';
 }
 
+function isProgressBoundaryBlock(block: AcpRenderBlock): boolean {
+  return block.kind === 'message' && block.msg.kind === 'todo_section';
+}
+
 function getToolName(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): string | null {
@@ -118,6 +122,13 @@ export function buildAcpActivityRenderBlocks(
     const current = blocks[cursor]!;
 
     if (isTextBoundaryBlock(current)) {
+      groupedBlocks.push(current);
+      hasLeftTextBoundary = true;
+      cursor += 1;
+      continue;
+    }
+
+    if (isProgressBoundaryBlock(current)) {
       groupedBlocks.push(current);
       hasLeftTextBoundary = true;
       cursor += 1;

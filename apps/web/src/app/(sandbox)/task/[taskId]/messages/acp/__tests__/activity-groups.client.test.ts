@@ -199,7 +199,7 @@ describe('buildAcpActivityRenderBlocks', () => {
     ]);
   });
 
-  it('keeps todo section markers visible and uses them as a boundary', () => {
+  it('keeps todo section markers visible and starts a new activity boundary after them', () => {
     const entries = buildAcpActivityRenderBlocks([
       textBlock('text-1', 1_000),
       messageBlock('reasoning-1', 2_000, 'reasoning'),
@@ -219,9 +219,15 @@ describe('buildAcpActivityRenderBlocks', () => {
       'message',
       'message',
       'message',
-      'tool_group',
+      'activity_group',
       'message',
     ]);
+
+    expect(entries[3]).toMatchObject({
+      kind: 'activity_group',
+      ts: 4_000,
+      endTs: 10_000,
+    });
   });
 
   it('keeps task cancellation visible and uses it as a boundary', () => {
@@ -333,18 +339,26 @@ describe('buildAcpActivityRenderBlocks', () => {
     });
   });
 
-  it('keeps leading todo section markers visible', () => {
+  it('keeps leading todo section markers visible and starts a new activity boundary after them', () => {
     const entries = buildAcpActivityRenderBlocks([
       messageBlock('leading', 1_000, 'reasoning'),
       messageBlock('todo-1', 1_500, 'todo_section'),
+      messageBlock('reasoning-2', 1_700, 'reasoning'),
       textBlock('text-1', 2_000),
     ]);
 
     expect(entries.map((entry) => entry.kind)).toEqual([
       'message',
       'message',
+      'activity_group',
       'message',
     ]);
+
+    expect(entries[2]).toMatchObject({
+      kind: 'activity_group',
+      ts: 1_700,
+      endTs: 2_000,
+    });
   });
 
   it('collapses leading activity when an external session prompt provides the left text boundary', () => {
