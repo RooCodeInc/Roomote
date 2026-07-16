@@ -110,6 +110,7 @@ describe('formatAutomationLabel', () => {
       'MCP Recommendations',
     );
     expect(formatAutomationLabel('ci-fixer')).toBe('CI Fixer');
+    expect(formatAutomationLabel('codeql_triage')).toBe('CodeQL Triage');
   });
 });
 
