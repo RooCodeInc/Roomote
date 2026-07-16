@@ -7,7 +7,10 @@ import {
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
-import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
+import type {
+  DiscordCommunicationProvider,
+  DiscordTaskThread,
+} from '@roomote/communication/discord-provider';
 import { getRedis } from '@roomote/redis';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import type { QueuedCommunicationMessage } from '@roomote/types';
@@ -16,12 +19,17 @@ import type { DiscordEventCommunicationMetadata } from '@roomote/communication/d
 import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
+  forgetPendingTaskThread,
   launchDiscordTask,
+  reserveDiscordAnchoredThread,
   resolveDiscordWorkspace,
   type DiscordChannelContext,
 } from './task-launch.js';
 
 const DISCORD_IMMEDIATE_CONFIRM_CONFIDENCE = 0.95;
+const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT = 5;
+const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
+const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const PENDING_ROUTE_TTL_SECONDS = 15 * 60;
 const PENDING_ROUTE_PREFIX = 'discord:pending_route:';
 // Discord supports at most five action rows. Reserve one for All repositories
@@ -39,6 +47,12 @@ type PendingDiscordRoute = {
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
+  /**
+   * The task thread the card was posted into, when the request could anchor
+   * one. Replies and the requester check follow the card; the launch keeps
+   * using `channel`, so it still resolves the same thread parent.
+   */
+  cardChannel?: DiscordChannelContext;
   options: PendingRouteOption[];
   forceNewThread?: boolean;
 };
@@ -130,6 +144,24 @@ function routeButtons(id: string, options: PendingRouteOption[]) {
   ];
 }
 
+function taskThreadChannelContext(input: {
+  channel: DiscordChannelContext;
+  thread: DiscordTaskThread;
+}): DiscordChannelContext {
+  return {
+    channelId: input.thread.channelId,
+    channelName: input.thread.name,
+    channelType:
+      input.channel.channelType === DISCORD_CHANNEL_TYPE_ANNOUNCEMENT
+        ? DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD
+        : DISCORD_CHANNEL_TYPE_PUBLIC_THREAD,
+    ...(input.channel.guildId ? { guildId: input.channel.guildId } : {}),
+    parentChannelId: input.thread.parentChannelId,
+    isDirectMessage: false,
+    isThread: true,
+  };
+}
+
 export function shouldAutoConfirmDiscordRoute(
   decision: RoutingDecision,
 ): boolean {
@@ -162,12 +194,37 @@ export async function requestDiscordRoutingConfirmation(input: {
       ? input.routingDecision.result.workspace
       : null,
   );
+  // Slack asks this question inside the thread on the requesting message, so
+  // the channel only ever shows the request itself. Start that thread now and
+  // put the card in it; the launch reuses this exact thread. An interaction
+  // answers through its own response, which always lands where it was invoked,
+  // so those keep the card in the channel.
+  const thread = input.interaction
+    ? null
+    : await reserveDiscordAnchoredThread({
+        provider: input.provider,
+        queuedMessage: input.queuedMessage,
+        metadata: input.metadata,
+        channel: input.channel,
+        ...(input.forceNewThread ? { forceNewThread: true } : {}),
+      }).catch((error) => {
+        // Asking in the channel still routes the task; the launch retries the
+        // thread. Failing the whole request over card placement would not.
+        console.warn(
+          `[discord] Failed to reserve task thread for event ${input.queuedMessage.ts}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
+      });
+  const cardChannel = thread
+    ? taskThreadChannelContext({ channel: input.channel, thread })
+    : null;
   await storePendingRoute(pendingRouteId, {
     requesterDiscordUserId: input.requesterDiscordUserId,
     launchOwnerUserId: input.launchOwnerUserId,
     queuedMessage: input.queuedMessage,
     metadata: input.metadata,
     channel: input.channel,
+    ...(cardChannel ? { cardChannel } : {}),
     options,
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
   });
@@ -175,7 +232,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   await replyToDiscordEvent({
     provider: input.provider,
     applicationId: input.applicationId,
-    channel: input.channel,
+    channel: cardChannel ?? input.channel,
     ...(input.interaction ? { interaction: input.interaction } : {}),
     text: suggested
       ? `Where should I run this? The best match is **${suggested}**.`
@@ -232,28 +289,35 @@ export async function handleDiscordRoutingCallback(input: {
     });
     return;
   }
+  // The card may live in the task thread rather than the channel it came from.
+  const replyChannel = pending.cardChannel ?? pending.channel;
   const mappedUserId = await findDiscordMappedUserId(interactionUser?.id);
   if (
     !interactionUser ||
     interactionUser.id !== pending.requesterDiscordUserId ||
     mappedUserId !== pending.launchOwnerUserId ||
-    input.interaction.channel_id !== pending.channel.channelId
+    input.interaction.channel_id !== replyChannel.channelId
   ) {
     await restorePendingRoute(input.callback.pendingRouteId, pending);
     await input.provider.postMessage({
-      channelId: pending.channel.parentChannelId ?? pending.channel.channelId,
-      ...(pending.channel.parentChannelId
-        ? { threadId: pending.channel.channelId }
+      channelId: replyChannel.parentChannelId ?? replyChannel.channelId,
+      ...(replyChannel.parentChannelId
+        ? { threadId: replyChannel.channelId }
         : {}),
       text: 'Only the person who started this request can choose its workspace.',
     });
     return;
   }
   if (input.callback.selection === 'cancel') {
+    // The reserved thread keeps the canceled card, exactly as a canceled Slack
+    // request leaves its thread behind, but nothing should launch into it.
+    await forgetPendingTaskThread(pending.queuedMessage.ts).catch(
+      () => undefined,
+    );
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
-      channel: pending.channel,
+      channel: replyChannel,
       interaction: {
         interaction: input.interaction,
         interactionDeferred: input.interactionDeferred,
@@ -267,7 +331,7 @@ export async function handleDiscordRoutingCallback(input: {
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
-      channel: pending.channel,
+      channel: replyChannel,
       interaction: {
         interaction: input.interaction,
         interactionDeferred: input.interactionDeferred,
@@ -298,7 +362,7 @@ export async function handleDiscordRoutingCallback(input: {
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
-      channel: pending.channel,
+      channel: replyChannel,
       interaction: {
         interaction: input.interaction,
         interactionDeferred: input.interactionDeferred,
@@ -322,7 +386,7 @@ export async function handleDiscordRoutingCallback(input: {
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
-      channel: pending.channel,
+      channel: replyChannel,
       interaction: {
         interaction: input.interaction,
         interactionDeferred: input.interactionDeferred,
@@ -341,6 +405,19 @@ export async function handleDiscordRoutingCallback(input: {
       channel: pending.channel,
       workspace,
       forceNewThread: pending.forceNewThread,
+      // A card already in the task thread is where the acknowledgement was
+      // going anyway, so the launch turns it into one instead of posting an
+      // identical message beneath it.
+      ...(pending.cardChannel
+        ? {
+            replaceMessage: {
+              applicationId: input.applicationId,
+              interaction: input.interaction,
+              interactionDeferred: input.interactionDeferred,
+              channel: pending.cardChannel,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     await restorePendingRoute(input.callback.pendingRouteId, pending).catch(
@@ -348,14 +425,18 @@ export async function handleDiscordRoutingCallback(input: {
     );
     throw error;
   }
+  // The launch already answered a card that lived in the task thread.
+  if (pending.cardChannel) return;
   await replyToDiscordEvent({
     provider: input.provider,
     applicationId: input.applicationId,
-    channel: pending.channel,
+    channel: replyChannel,
     interaction: {
       interaction: input.interaction,
       interactionDeferred: input.interactionDeferred,
     },
+    // Away from the thread the card stays a routing receipt, pointing at the
+    // thread that carries the real acknowledgement.
     text: launched.createdThread
       ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
       : `Started in **${workspace.workspaceDisplayName}**.`,

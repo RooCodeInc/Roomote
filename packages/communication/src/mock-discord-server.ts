@@ -434,7 +434,11 @@ export class MockDiscordServer {
         (1n << 38n);
       return jsonResponse([
         { id: this.guildId, permissions: '0' },
-        { id: 'role-roomote', permissions: String(allNeeded) },
+        {
+          id: 'role-roomote',
+          permissions: String(allNeeded),
+          tags: { bot_id: this.bot.id },
+        },
       ]);
     }
 

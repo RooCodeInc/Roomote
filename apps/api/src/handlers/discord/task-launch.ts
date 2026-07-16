@@ -15,10 +15,18 @@ import {
   type DiscordCommunicationProvider,
   type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
-import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
+import type {
+  DiscordEventCommunicationMetadata,
+  DiscordInteraction,
+} from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
+import { replyToDiscordEvent } from './replies.js';
+import {
+  discordTaskAcknowledgementText,
+  discordTaskButtons,
+} from './task-messages.js';
 
 const DISCORD_THREAD_TYPES = new Set([10, 11, 12]);
 const DISCORD_ROOT_TASK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
@@ -66,6 +74,12 @@ export async function resolveDiscordChannelContext(
 export function discordMetadataForChannel(input: {
   channel: DiscordChannelContext;
   messageId: string;
+  /**
+   * The real channel message that triggered the event — set only for
+   * message events. Interactions have no message a task thread could
+   * anchor to, so launches from them keep detached threads.
+   */
+  anchorMessageId?: string;
 }): DiscordEventCommunicationMetadata {
   return {
     communicationProvider: 'discord',
@@ -77,6 +91,9 @@ export function discordMetadataForChannel(input: {
     communicationMessageId: input.messageId,
     ...(input.channel.guildId
       ? { communicationGuildId: input.channel.guildId }
+      : {}),
+    ...(input.anchorMessageId
+      ? { communicationAnchorMessageId: input.anchorMessageId }
       : {}),
   };
 }
@@ -123,18 +140,6 @@ function taskThreadParentId(input: {
     DISCORD_ROOT_TASK_CHANNEL_TYPES.has(input.channel.channelType)
     ? input.channel.channelId
     : null;
-}
-
-function taskButtons(input: { runId: number; taskUrl: string | null }) {
-  return [
-    ...(input.taskUrl ? [[{ text: 'Follow Task', url: input.taskUrl }]] : []),
-    [
-      {
-        text: '✖️ Cancel task',
-        callbackData: `discord:cancel:${input.runId}`,
-      },
-    ],
-  ];
 }
 
 function pendingTaskThreadKey(sourceEventId: string): string {
@@ -187,8 +192,58 @@ async function rememberPendingTaskThread(
   );
 }
 
-async function forgetPendingTaskThread(sourceEventId: string): Promise<void> {
+export async function forgetPendingTaskThread(
+  sourceEventId: string,
+): Promise<void> {
   await getRedis().del(pendingTaskThreadKey(sourceEventId));
+}
+
+/**
+ * Starts the task thread on the message that asked for the task, ahead of the
+ * launch itself, so a routing card can be posted inside it the way Slack posts
+ * its card into the thread on the requesting message. `launchDiscordTask`
+ * reuses whatever this reserved via the pending-thread memo.
+ *
+ * Returns null when this surface cannot anchor — DMs, forum channels,
+ * interactions with no triggering message, `/new` siblings from inside a
+ * thread — or when the triggering message is already gone. Those callers keep
+ * the detached task thread that the launch creates.
+ */
+export async function reserveDiscordAnchoredThread(input: {
+  provider: DiscordCommunicationProvider;
+  queuedMessage: QueuedCommunicationMessage;
+  metadata: DiscordEventCommunicationMetadata;
+  channel: DiscordChannelContext;
+  forceNewThread?: boolean;
+}): Promise<DiscordTaskThread | null> {
+  const parentId = taskThreadParentId(input);
+  if (!parentId) return null;
+  const existing = await findPendingTaskThread(
+    input.queuedMessage.ts,
+    parentId,
+  );
+  if (existing) return existing;
+  const anchorMessageId =
+    !input.channel.isThread &&
+    DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES.has(input.channel.channelType)
+      ? input.metadata.communicationAnchorMessageId
+      : undefined;
+  if (!anchorMessageId) return null;
+  let thread: DiscordTaskThread;
+  try {
+    thread = await input.provider.createThreadFromMessage({
+      channelId: parentId,
+      messageId: anchorMessageId,
+      name: buildCommunicationTaskThreadName(input.queuedMessage.text),
+    });
+  } catch (error) {
+    // The triggering message was deleted before the thread could start; fall
+    // back to a detached task thread rather than failing the launch.
+    if (isDiscordUnknownMessageError(error)) return null;
+    throw error;
+  }
+  await rememberPendingTaskThread(input.queuedMessage.ts, thread);
+  return thread;
 }
 
 export async function launchDiscordTask(input: {
@@ -200,42 +255,24 @@ export async function launchDiscordTask(input: {
   workspace: DiscordWorkspaceSelection;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
+  /**
+   * An already-posted message to turn into the acknowledgement instead of
+   * posting a new one — a routing card sitting in the task thread becomes the
+   * started message rather than being followed by an identical one. Only pass
+   * a message that lives where the acknowledgement would have gone.
+   */
+  replaceMessage?: {
+    applicationId: string;
+    interaction: DiscordInteraction;
+    interactionDeferred: boolean;
+    channel: DiscordChannelContext;
+  };
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
   if (parentId) {
     const initialText = `Task request from ${input.queuedMessage.user}:\n\n${input.queuedMessage.text}`;
-    // Slack model: the task thread hangs off the message that asked for it.
-    // Only launches triggered by a real root-channel message can anchor;
-    // interactions, forum posts, and `/new` siblings from inside a thread
-    // fall back to a detached task thread.
-    const anchorMessageId =
-      !input.channel.isThread &&
-      DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES.has(input.channel.channelType)
-        ? input.metadata.communicationAnchorMessageId
-        : undefined;
-    createdThread = await findPendingTaskThread(
-      input.queuedMessage.ts,
-      parentId,
-    );
-    if (!createdThread && anchorMessageId) {
-      try {
-        createdThread = await input.provider.createThreadFromMessage({
-          channelId: parentId,
-          messageId: anchorMessageId,
-          name: buildCommunicationTaskThreadName(input.queuedMessage.text),
-        });
-      } catch (error) {
-        // The triggering message was deleted before the thread could start;
-        // fall back to a detached task thread rather than failing the launch.
-        if (!isDiscordUnknownMessageError(error)) {
-          throw error;
-        }
-      }
-      if (createdThread) {
-        await rememberPendingTaskThread(input.queuedMessage.ts, createdThread);
-      }
-    }
+    createdThread = await reserveDiscordAnchoredThread(input);
     if (!createdThread) {
       createdThread = await input.provider.reserveTaskThread({
         channelId: parentId,
@@ -314,14 +351,31 @@ export async function launchDiscordTask(input: {
     taskId: launchResult.taskId,
     utm: { source: 'discord', campaign: 'discord.thread_start' },
   });
-  const acknowledgement = await input.provider.postMessage({
-    channelId: communicationChannelId,
-    ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
-    text: taskUrl
-      ? `Started a task in ${input.workspace.workspaceDisplayName}.`
-      : `Queued a task in ${input.workspace.workspaceDisplayName}.`,
-    buttons: taskButtons({ runId: launchResult.id, taskUrl }),
-  });
+  const acknowledgementMessage = {
+    text: discordTaskAcknowledgementText({
+      workspaceDisplayName: input.workspace.workspaceDisplayName,
+      taskUrl,
+    }),
+    buttons: discordTaskButtons({ runId: launchResult.id, taskUrl }),
+  };
+  // Replacing already falls back to posting when the original message cannot
+  // be edited, so the task is acknowledged either way.
+  const acknowledgement = input.replaceMessage
+    ? await replyToDiscordEvent({
+        provider: input.provider,
+        applicationId: input.replaceMessage.applicationId,
+        channel: input.replaceMessage.channel,
+        interaction: {
+          interaction: input.replaceMessage.interaction,
+          interactionDeferred: input.replaceMessage.interactionDeferred,
+        },
+        ...acknowledgementMessage,
+      })
+    : await input.provider.postMessage({
+        channelId: communicationChannelId,
+        ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
+        ...acknowledgementMessage,
+      });
 
   if (createdThread) {
     await forgetPendingTaskThread(input.queuedMessage.ts).catch((error) => {

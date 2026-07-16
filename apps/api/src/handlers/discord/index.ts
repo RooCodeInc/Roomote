@@ -169,6 +169,9 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const metadata = discordMetadataForChannel({
     channel,
     messageId: event.payload.id,
+    // Only a real channel message provides an anchor for the task thread;
+    // interactions (slash commands, buttons) do not.
+    ...(message?.id ? { anchorMessageId: message.id } : {}),
   });
 
   if (interaction?.type === 3) {

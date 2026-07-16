@@ -74,7 +74,9 @@ export class DiscordGatewaySession {
   private manager: GatewayManager | null = null;
   private resumeStore: DiscordGatewayResumeStore | null = null;
   private channelCache = new DiscordGatewayChannelCache();
+  private botRoleIds = new Map<string, string | null>();
   private botUserId: string | undefined;
+  private botUsername: string | undefined;
   private expectedShardIds = new Set<number>();
   private connectedShardIds = new Set<number>();
   private dispatchState: DispatchConnectionState | null = null;
@@ -95,7 +97,9 @@ export class DiscordGatewaySession {
     }
 
     this.botUserId = identity.id;
+    this.botUsername = identity.username;
     this.channelCache = new DiscordGatewayChannelCache();
+    this.botRoleIds = new Map();
     this.connectedShardIds.clear();
     const dispatchState: DispatchConnectionState = {
       abortController: new AbortController(),
@@ -140,9 +144,20 @@ export class DiscordGatewaySession {
       dispatchState.pendingDispatches += 1;
       try {
         this.channelCache.ingest(data);
+        this.ingestBotRole(data);
         let enqueueUnknownGuildChannel = false;
         if (data.t === 'MESSAGE_CREATE') {
           const message = data.d as RawMessageDispatch;
+          if (message.guild_id && !this.botRoleIds.has(message.guild_id)) {
+            // Resumed sessions never replay GUILD_CREATE, so learn the bot's
+            // managed role lazily; a role mention cannot be classified
+            // without it. Failures are retried on the next guild message.
+            await this.fetchBotRole(message.guild_id, rest).catch((error) =>
+              this.status.update({
+                lastError: `Discord role lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+              }),
+            );
+          }
           if (message.guild_id && message.channel_id) {
             try {
               const channel = await this.channelCache.fetch(
@@ -163,6 +178,8 @@ export class DiscordGatewaySession {
         }
 
         await handleGatewayDispatch(data, {
+          getBotRoleId: (guildId) => this.botRoleIds.get(guildId),
+          getBotUsername: () => this.botUsername,
           rest,
           getBotUserId: () => this.botUserId,
           getCachedChannel: (channelId) => this.channelCache.get(channelId),
@@ -329,6 +346,34 @@ export class DiscordGatewaySession {
 
   needsReconnect(): boolean {
     return this.reconnectRequired;
+  }
+
+  /** Learns the bot's managed role id from GUILD_CREATE role tags. */
+  private ingestBotRole(packet: { t?: string; d?: unknown }): void {
+    if (packet.t !== 'GUILD_CREATE' || !this.botUserId) return;
+    const guild = packet.d as {
+      id?: string;
+      roles?: Array<{ id?: string; tags?: { bot_id?: string } }>;
+    };
+    if (!guild.id) return;
+    const managedRole = guild.roles?.find(
+      (role) => role.tags?.bot_id === this.botUserId,
+    );
+    this.botRoleIds.set(guild.id, managedRole?.id ?? null);
+  }
+
+  private async fetchBotRole(
+    guildId: string,
+    rest: Pick<REST, 'get'>,
+  ): Promise<void> {
+    if (!this.botUserId) return;
+    const roles = (await rest.get(
+      `/guilds/${guildId}/roles` as `/${string}`,
+    )) as Array<{ id?: string; tags?: { bot_id?: string } }>;
+    const managedRole = roles.find(
+      (role) => role.tags?.bot_id === this.botUserId,
+    );
+    this.botRoleIds.set(guildId, managedRole?.id ?? null);
   }
 
   private markReconnectRequired(state: DispatchConnectionState): void {

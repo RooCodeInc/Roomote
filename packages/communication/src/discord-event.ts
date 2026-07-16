@@ -92,7 +92,11 @@ export const discordInteractionSchema = z
       .optional(),
     data: z
       .object({
-        id: z.string().optional(),
+        // Slash commands carry the command's snowflake here (a string);
+        // component interactions carry the numeric layout id of the pressed
+        // component. Real button clicks were rejected as invalid while the
+        // string-only shape was assumed.
+        id: z.union([z.string(), z.number()]).optional(),
         name: z.string().optional(),
         type: z.number().int().optional(),
         options: z.array(discordInteractionOptionSchema).optional(),
