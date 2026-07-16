@@ -1854,6 +1854,7 @@ async function enqueueSnapshotResume(
       harness: true,
       vendor: true,
       payloadKind: true,
+      sourceRunId: true,
       payload: true,
     },
   });
@@ -1886,6 +1887,27 @@ async function enqueueSnapshotResume(
       harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
     }
   )?.harnessModelOverrides;
+  let sourceTaskType = sourceRun.payloadKind;
+  let parentRunId = sourceRun.sourceRunId;
+
+  // Snapshot resumes point to the immediately preceding resume, so follow the
+  // chain until reaching the original run whose role selected the model.
+  while (
+    sourceTaskType === TaskPayloadKind.SnapshotResume &&
+    parentRunId !== null
+  ) {
+    const parentRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, parentRunId),
+      columns: { payloadKind: true, sourceRunId: true },
+    });
+
+    if (!parentRun) {
+      break;
+    }
+
+    sourceTaskType = parentRun.payloadKind;
+    parentRunId = parentRun.sourceRunId;
+  }
 
   if (task.harness && sourceJobHarness !== task.harness) {
     console.warn(
@@ -1910,7 +1932,7 @@ async function enqueueSnapshotResume(
     targetHarness,
     isSnapshotResume: true,
     sourceRunHarnessModelOverrides,
-    sourceTaskType: sourceRun.payloadKind,
+    sourceTaskType,
     deploymentMetadata: resolvedHarness.deploymentMetadata,
     deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
     deploymentCodeReviewModelId:
