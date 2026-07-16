@@ -133,10 +133,12 @@ port. It stays dormant until a token is saved, uses Redis to elect a single
 active replica, and disconnects if Discord is removed. Durable event delivery
 uses Redis and a dedicated internal shared secret. Saving Discord credentials in
 settings generates `R_DISCORD_GATEWAY_SECRET` when it is not already configured.
-For env-var-only setups, set the same secret on the API and BullMQ processes
-yourself (installers and platform templates also generate one). That value must
-be unique to Discord transport — do not reuse `ENCRYPTION_KEY` or any other
-deployment secret.
+If Discord was already set up without one (for example after an upgrade),
+Roomote generates and persists the secret automatically the next time the
+gateway or API needs it, or when you use **Repair**. For env-var-only setups,
+set the same secret on the API and BullMQ processes yourself (installers and
+platform templates also generate one). That value must be unique to Discord
+transport — do not reuse `ENCRYPTION_KEY` or any other deployment secret.
 
 Gateway session state is stored in the Roomote database. On a service restart
 or leader handoff, Roomote asks Discord to resume the previous session and

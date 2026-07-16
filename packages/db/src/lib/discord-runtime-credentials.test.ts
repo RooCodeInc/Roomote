@@ -5,11 +5,23 @@ const {
   deploymentSettingsUpdateSetMock,
   deploymentSettingsUpdateWhereMock,
   resolveEffectiveDeploymentEnvVarsMock,
+  transactionMock,
+  insertValuesMock,
+  executeMock,
+  environmentVariablesFindFirstMock,
+  updateSetMock,
+  updateWhereMock,
 } = vi.hoisted(() => ({
   deploymentSettingsFindFirstMock: vi.fn(),
   deploymentSettingsUpdateSetMock: vi.fn(),
   deploymentSettingsUpdateWhereMock: vi.fn(),
   resolveEffectiveDeploymentEnvVarsMock: vi.fn(),
+  transactionMock: vi.fn(),
+  insertValuesMock: vi.fn(),
+  executeMock: vi.fn(),
+  environmentVariablesFindFirstMock: vi.fn(),
+  updateSetMock: vi.fn(),
+  updateWhereMock: vi.fn(),
 }));
 
 vi.mock('../db', () => ({
@@ -18,7 +30,14 @@ vi.mock('../db', () => ({
       deploymentSettings: { findFirst: deploymentSettingsFindFirstMock },
     },
     update: vi.fn(() => ({ set: deploymentSettingsUpdateSetMock })),
+    transaction: transactionMock,
+    insert: vi.fn(() => ({ values: insertValuesMock })),
+    execute: executeMock,
   },
+}));
+
+vi.mock('../encryption', () => ({
+  decryptSecrets: vi.fn(async (value: string | null) => value),
 }));
 
 vi.mock('./model-runtime-config', () => ({
@@ -29,6 +48,7 @@ import {
   DiscordBotTokenValidationError,
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
+  resolveDiscordGatewaySecret,
   resolveDiscordRuntimeCredentials,
   validateDiscordBotToken,
 } from './discord-runtime-credentials';
@@ -64,17 +84,52 @@ describe('Discord runtime credentials', () => {
   beforeEach(() => {
     invalidateDiscordRuntimeCredentialsCache();
     process.env.R_DISCORD_BOT_TOKEN = 'discord-token';
+    delete process.env.R_DISCORD_GATEWAY_SECRET;
     process.env.DISCORD_API_BASE_URL = 'https://discord.example.test/api/v10';
+    resolveEffectiveDeploymentEnvVarsMock.mockReset();
     resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
+    deploymentSettingsFindFirstMock.mockReset();
     deploymentSettingsFindFirstMock.mockResolvedValue({ metadata: {} });
+    deploymentSettingsUpdateSetMock.mockReset();
+    deploymentSettingsUpdateWhereMock.mockReset();
     deploymentSettingsUpdateSetMock.mockReturnValue({
       where: deploymentSettingsUpdateWhereMock,
     });
     deploymentSettingsUpdateWhereMock.mockResolvedValue(undefined);
+    executeMock.mockReset();
+    executeMock.mockResolvedValue(undefined);
+    insertValuesMock.mockReset();
+    insertValuesMock.mockResolvedValue(undefined);
+    environmentVariablesFindFirstMock.mockReset();
+    environmentVariablesFindFirstMock.mockResolvedValue(undefined);
+    updateSetMock.mockReset();
+    updateWhereMock.mockReset();
+    updateSetMock.mockReturnValue({ where: updateWhereMock });
+    updateWhereMock.mockResolvedValue(undefined);
+    transactionMock.mockReset();
+    transactionMock.mockImplementation(async (callback) => {
+      return callback({
+        execute: executeMock,
+        query: {
+          environmentVariables: {
+            findFirst: environmentVariablesFindFirstMock,
+          },
+        },
+        insert: () => ({ values: insertValuesMock }),
+        update: () => ({ set: updateSetMock }),
+      });
+    });
   });
 
   afterEach(() => {
-    process.env = { ...originalEnv };
+    for (const key of Object.keys(process.env)) {
+      if (!(key in originalEnv)) {
+        delete process.env[key];
+      }
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      process.env[key] = value;
+    }
     vi.restoreAllMocks();
   });
 
@@ -202,5 +257,69 @@ describe('Discord runtime credentials', () => {
       name: DiscordBotTokenValidationError.name,
       code: 'identity_mismatch',
     });
+  });
+
+  it('returns process-env gateway secret when present', async () => {
+    process.env.R_DISCORD_GATEWAY_SECRET = 'from-env';
+
+    await expect(resolveDiscordGatewaySecret()).resolves.toBe('from-env');
+    expect(resolveEffectiveDeploymentEnvVarsMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it('returns vault gateway secret when process env is unset', async () => {
+    resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({
+      R_DISCORD_GATEWAY_SECRET: 'from-vault',
+    });
+
+    await expect(resolveDiscordGatewaySecret()).resolves.toBe('from-vault');
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it('auto-generates and persists a gateway secret when Discord is configured without one', async () => {
+    resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
+
+    const secret = await resolveDiscordGatewaySecret();
+
+    expect(secret).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(transactionMock).toHaveBeenCalledOnce();
+    expect(insertValuesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'R_DISCORD_GATEWAY_SECRET',
+        value: secret,
+        userId: null,
+      }),
+    );
+  });
+
+  it('replaces a blank vault gateway secret row instead of failing on unique name', async () => {
+    resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
+    environmentVariablesFindFirstMock.mockResolvedValue({
+      id: 'env-row-1',
+      value: '   ',
+    });
+
+    const secret = await resolveDiscordGatewaySecret();
+
+    expect(secret).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+    );
+    expect(insertValuesMock).not.toHaveBeenCalled();
+    expect(updateSetMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        value: secret,
+      }),
+    );
+    expect(updateWhereMock).toHaveBeenCalled();
+  });
+
+  it('does not persist a gateway secret when Discord is unconfigured', async () => {
+    delete process.env.R_DISCORD_BOT_TOKEN;
+    resolveEffectiveDeploymentEnvVarsMock.mockResolvedValue({});
+
+    await expect(resolveDiscordGatewaySecret()).resolves.toBeNull();
+    expect(transactionMock).not.toHaveBeenCalled();
   });
 });
