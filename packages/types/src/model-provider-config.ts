@@ -171,6 +171,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'deepseek-v4-flash': 'vercel/deepseek/deepseek-v4-flash',
       'deepseek-v4-pro': 'vercel/deepseek/deepseek-v4-pro',
       'glm-5-2': 'vercel/zai/glm-5.2',
+      'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-6-plus': 'vercel/alibaba/qwen3.6-plus',
       'minimax-m3': 'vercel/minimax/minimax-m3',
@@ -275,6 +276,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'moonshotai/kimi-k2.7-code',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
+      'kimi-k3': 'moonshotai/kimi-k3',
       'kimi-k2-7-code': 'moonshotai/kimi-k2.7-code',
     }),
   },

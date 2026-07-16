@@ -261,6 +261,24 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
+  it('recommends Kimi K3 only from supported providers', () => {
+    const kimiK3ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Kimi K3',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(kimiK3ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
+      { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
+      { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
+    ]);
+  });
+
   it('maps Amazon Bedrock to a Bedrock API key plus an optional AWS region', () => {
     const bedrockProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
       (provider) => provider.id === 'amazon-bedrock',
