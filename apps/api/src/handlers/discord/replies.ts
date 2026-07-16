@@ -52,17 +52,20 @@ export async function replaceOrPostDiscordMessage(input: {
       ...message,
     });
   }
-  const channelId = channel.parentChannelId ?? channel.channelId;
+  const postChannelId = channel.parentChannelId ?? channel.channelId;
   if (input.replace.messageId) {
     try {
       await input.provider.editMessage({
-        channelId,
+        // A thread is itself a channel, and the message lives in it. Unlike
+        // postMessage, editMessage takes no separate thread id — addressing
+        // the parent here would only ever find an unknown message.
+        channelId: channel.channelId,
         messageId: input.replace.messageId,
         ...message,
       });
       return {
         provider: 'discord',
-        channelId,
+        channelId: postChannelId,
         messageId: input.replace.messageId,
         ...(channel.parentChannelId ? { threadId: channel.channelId } : {}),
       };
@@ -73,7 +76,7 @@ export async function replaceOrPostDiscordMessage(input: {
     }
   }
   return input.provider.postMessage({
-    channelId,
+    channelId: postChannelId,
     ...(channel.parentChannelId ? { threadId: channel.channelId } : {}),
     ...message,
   });

@@ -438,6 +438,58 @@ describe('Discord routing confirmation', () => {
     }
   });
 
+  it('does not resurrect a route claimed while the card was still posting', async () => {
+    // The card id is only knowable after posting, so the route is written a
+    // second time. A Nevermind landing in that window has already claimed the
+    // route; an unconditional write would bring it back and the timer would
+    // then launch the request the user just canceled.
+    mocks.reserveAnchoredThread.mockResolvedValue(null);
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: {
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'likely',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.7,
+          },
+        },
+      },
+    });
+
+    expect(mocks.redisSet).toHaveBeenCalledTimes(2);
+    expect(mocks.redisSet.mock.calls[0]).not.toContain('XX');
+    expect(mocks.redisSet.mock.calls[1]).toContain('XX');
+  });
+
   it('never auto-confirms a card the router had no suggestion for', async () => {
     // A fallback card is a plain menu. Auto-confirming its first option would
     // launch an alphabetical accident nobody chose.

@@ -82,13 +82,17 @@ function parsePendingRoute(value: string | null): PendingDiscordRoute | null {
 async function storePendingRoute(
   id: string,
   pending: PendingDiscordRoute,
+  options?: { onlyIfExists?: boolean },
 ): Promise<void> {
-  await getRedis().set(
-    pendingRouteKey(id),
-    JSON.stringify(pending),
-    'EX',
-    PENDING_ROUTE_TTL_SECONDS,
-  );
+  const key = pendingRouteKey(id);
+  const value = JSON.stringify(pending);
+  if (options?.onlyIfExists) {
+    // XX so a click that already claimed the route is not resurrected by a
+    // later write — otherwise the timer would launch a canceled request.
+    await getRedis().set(key, value, 'EX', PENDING_ROUTE_TTL_SECONDS, 'XX');
+    return;
+  }
+  await getRedis().set(key, value, 'EX', PENDING_ROUTE_TTL_SECONDS);
 }
 
 async function claimPendingRoute(
@@ -360,10 +364,16 @@ export async function requestDiscordRoutingConfirmation(input: {
   // Re-store so the timer can turn the card itself into the acknowledgement.
   // The route is stored before the card is posted so a fast click cannot miss
   // it, which leaves the card id as the one thing learned afterwards.
-  await storePendingRoute(pendingRouteId, {
-    ...pending,
-    ...(card.messageId ? { cardMessageId: card.messageId } : {}),
-  });
+  await storePendingRoute(
+    pendingRouteId,
+    {
+      ...pending,
+      ...(card.messageId ? { cardMessageId: card.messageId } : {}),
+    },
+    // A click can land while the card post is still completing and claim the
+    // route. This write must not bring it back from the dead.
+    { onlyIfExists: true },
+  );
   scheduleDiscordRoutingAutoConfirm({
     provider: input.provider,
     applicationId: input.applicationId,
