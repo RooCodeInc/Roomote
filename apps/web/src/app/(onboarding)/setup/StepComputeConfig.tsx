@@ -170,7 +170,29 @@ export function StepComputeConfig({
     deriveModalBaseImageRefDefault(workerImageValue) !== null;
   const hostedWorkerImageReady =
     workerImage.hostedReady || submittedHostedWorkerImageReady;
-  const missingHostedWorkerImage = isHostedProvider && !hostedWorkerImageReady;
+  // Hosted providers need a pullable (registry-qualified) worker image, but
+  // only when saving would actually derive or provision from it — Modal/E2B/
+  // Daytona build their base image, template, or snapshot from that image
+  // server-side. When every required managed artifact is already satisfied,
+  // saving touches none of them: this is the recovery path that re-confirms
+  // an already-configured provider to commit it as the dispatch default, and
+  // it must not dead-end on (or warn about) a locked local-tag worker image
+  // with no Back route.
+  const pendingManagedInfrastructure =
+    selectedProvider?.fields.some(
+      (field) =>
+        isComputeInfrastructureField(field) &&
+        !isComputeOperatorEditableField(field) &&
+        field.required !== false &&
+        !field.runtimeSatisfied &&
+        !field.savedSatisfied &&
+        !field.defaultSatisfied,
+    ) ?? true;
+  // Drives the missing-image warning, the auto-opened advanced section, and
+  // the Continue guard together so the form never blocks or warns on a
+  // worker image that saving would not use.
+  const missingHostedWorkerImage =
+    isHostedProvider && pendingManagedInfrastructure && !hostedWorkerImageReady;
   const canEditAdvancedWorkerImage =
     isHostedProvider && !workerImage.runtimeSatisfied;
   const shouldRenderAdvancedWorkerImage =
@@ -183,10 +205,7 @@ export function StepComputeConfig({
     ? getComputeCredentialsHint(selectedProvider.provider)
     : null;
 
-  // Hosted providers need a pullable (registry-qualified) worker image. A bare
-  // process-env local tag must not enable Save — Modal/E2B/Daytona derive or
-  // provision from that image server-side, not from form base-image fields.
-  const hostedRequirementMet = !isHostedProvider || hostedWorkerImageReady;
+  const hostedRequirementMet = !missingHostedWorkerImage;
 
   const credentialsMet = credentialFields.every(
     (field) =>
