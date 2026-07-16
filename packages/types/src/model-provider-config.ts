@@ -279,6 +279,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'moonshotai/kimi-k3',
       'kimi-k2-7-code': 'moonshotai/kimi-k2.7-code',
     }),
+    recommendedRoleModels: {
+      vision: 'moonshotai/kimi-k3',
+      codeReview: 'moonshotai/kimi-k3',
+      planning: 'moonshotai/kimi-k3',
+    },
   },
   {
     id: 'minimax',

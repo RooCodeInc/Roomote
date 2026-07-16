@@ -513,6 +513,27 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteModel: 'xai/grok-4.5',
     });
   });
+
+  it('recommends Kimi K3 for Moonshot vision, code review, and planning', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('moonshotai'),
+      ),
+    ).toEqual({
+      roomoteModel: 'moonshotai/kimi-k2.7-code',
+      roomoteSmallModel: null,
+      roomoteVisionModel: 'moonshotai/kimi-k3',
+      roomoteCodeReviewModel: 'moonshotai/kimi-k3',
+      roomoteExploreModel: null,
+      roomotePlanningModel: 'moonshotai/kimi-k3',
+      roomoteModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
 });
 
 describe('getModelProviderEnvKeyCandidates', () => {
