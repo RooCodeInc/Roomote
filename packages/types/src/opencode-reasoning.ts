@@ -3,7 +3,8 @@ import type { ReasoningEffort } from './task-runs';
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token
  * budgets OpenCode uses for its own built-in variants (`high` ~16k tokens,
- * `max` ~32k tokens).
+ * `max` ~32k tokens). Only applies to models predating adaptive thinking —
+ * see `resolveAnthropicThinkingMode`.
  */
 const ANTHROPIC_THINKING_BUDGET_TOKENS: Record<ReasoningEffort, number> = {
   low: 4_000,
@@ -11,6 +12,108 @@ const ANTHROPIC_THINKING_BUDGET_TOKENS: Record<ReasoningEffort, number> = {
   high: 16_000,
   xhigh: 31_999,
 };
+
+/**
+ * How an Anthropic model expects reasoning to be configured:
+ *
+ * - `adaptive` — Opus 4.7+, Sonnet 5+, and Fable/Mythos reject
+ *   `thinking.type: "enabled"` with a 400 and take
+ *   `thinking.type: "adaptive"` plus an `effort` (including `xhigh`). These
+ *   models also default thinking display to "omitted" (empty thinking
+ *   blocks), so we force `display: "summarized"`.
+ * - `adaptive-no-xhigh` — the 4.6 family accepts adaptive thinking but not
+ *   the `xhigh` effort, and already defaults display to "summarized".
+ * - `budget` — older models (Sonnet 4.5, Haiku 4.5, Opus 4.5, ...) still use
+ *   `thinking.type: "enabled"` with a token budget.
+ */
+type AnthropicThinkingMode = 'adaptive' | 'adaptive-no-xhigh' | 'budget';
+
+/**
+ * Parses the `<family>-<major>[-<minor>]` version out of an Anthropic model
+ * id, accepting `.` or `-` separators, dated suffixes
+ * (`claude-sonnet-4-5-20250929`), Bedrock's `anthropic.` prefix, and the
+ * inverted legacy ordering (`claude-3-5-sonnet`).
+ */
+function parseAnthropicModelVersion(
+  modelID: string,
+  family: 'opus' | 'sonnet',
+): { major: number; minor: number } | null {
+  const pattern = new RegExp(
+    `${family}-(\\d+)(?:[.-](\\d+))?(?:[.@-]|$)|claude-(\\d+)(?:[.-](\\d+))?-${family}(?:[.@-]|$)`,
+    'iu',
+  );
+  const match = pattern.exec(modelID);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    major: Number(match[1] ?? match[3]),
+    minor: Number(match[2] ?? match[4] ?? 0),
+  };
+}
+
+function resolveAnthropicThinkingMode(modelID: string): AnthropicThinkingMode {
+  const id = modelID.toLowerCase();
+
+  if (id.includes('fable') || id.includes('mythos')) {
+    return 'adaptive';
+  }
+
+  const opus = parseAnthropicModelVersion(id, 'opus');
+
+  if (opus) {
+    if (opus.major > 4 || (opus.major === 4 && opus.minor >= 7)) {
+      return 'adaptive';
+    }
+
+    return opus.major === 4 && opus.minor === 6
+      ? 'adaptive-no-xhigh'
+      : 'budget';
+  }
+
+  const sonnet = parseAnthropicModelVersion(id, 'sonnet');
+
+  if (sonnet) {
+    if (sonnet.major >= 5) {
+      return 'adaptive';
+    }
+
+    return sonnet.major === 4 && sonnet.minor === 6
+      ? 'adaptive-no-xhigh'
+      : 'budget';
+  }
+
+  return 'budget';
+}
+
+function buildAnthropicReasoningOptions(
+  modelID: string,
+  reasoningEffort: ReasoningEffort,
+): Record<string, unknown> {
+  const mode = resolveAnthropicThinkingMode(modelID);
+
+  if (mode === 'budget') {
+    return {
+      thinking: {
+        type: 'enabled',
+        budgetTokens: ANTHROPIC_THINKING_BUDGET_TOKENS[reasoningEffort],
+      },
+    };
+  }
+
+  return {
+    thinking: {
+      type: 'adaptive',
+      ...(mode === 'adaptive' ? { display: 'summarized' } : {}),
+    },
+    effort:
+      mode === 'adaptive-no-xhigh' && reasoningEffort === 'xhigh'
+        ? 'high'
+        : reasoningEffort,
+  };
+}
 
 export function splitTaskModelId(
   modelId: string,
@@ -38,8 +141,9 @@ function isOpenAiStyleOpenRouterModel(modelID: string): boolean {
  * Builds the OpenCode per-model `options` payload that applies a reasoning
  * effort for the given `provider/model` id. The option keys mirror the
  * provider-specific shapes OpenCode uses for its own built-in reasoning
- * variants: OpenRouter takes `reasoning.effort`, Anthropic takes an
- * extended-thinking budget, and OpenAI-compatible providers take
+ * variants: OpenRouter takes `reasoning.effort`, Anthropic takes adaptive
+ * thinking with an effort (or an extended-thinking budget on models
+ * predating adaptive thinking), and OpenAI-compatible providers take
  * `reasoningEffort`.
  *
  * Returns `null` when the model id cannot be parsed.
@@ -68,12 +172,7 @@ export function buildOpenCodeModelReasoningOptions(
     }
     case 'anthropic':
     case 'bedrock-mantle':
-      return {
-        thinking: {
-          type: 'enabled',
-          budgetTokens: ANTHROPIC_THINKING_BUDGET_TOKENS[reasoningEffort],
-        },
-      };
+      return buildAnthropicReasoningOptions(selection.modelID, reasoningEffort);
     default:
       return { reasoningEffort };
   }
