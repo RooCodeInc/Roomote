@@ -215,6 +215,43 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe(false);
   });
 
+  it('rejects thread_activity-only crafted non-matches without hanging', () => {
+    const crafted = `${'<thread_activity>'.repeat(2000)}crafted`;
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: crafted }],
+      }),
+    ).toBe(true);
+
+    expect(normalizeTranscriptUserText(crafted)).toBe(crafted);
+  });
+
+  it('rejects incomplete slack transcript wrappers without hanging', () => {
+    const crafted = `${'<thread_activity>\npartial\n'.repeat(500)}<slack_message>\nopen\n`;
+
+    expect(normalizeTranscriptUserText(crafted)).toBe(crafted);
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: crafted }],
+      }),
+    ).toBe(true);
+  });
+
+  it('strips thread_activity that appears after thread_context', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<thread_context>\nAlice Example: Earlier detail\n</thread_context>',
+          '<thread_activity>\nBob Example: Uploaded a screenshot [1 image(s) attached]\n</thread_activity>',
+          '<slack_message>\nlatest question\n</slack_message>',
+        ].join('\n\n'),
+      ),
+    ).toBe('latest question');
+  });
+
   it('extracts slack_message content when only the slack_message block is present', () => {
     expect(
       normalizeTranscriptUserText(
