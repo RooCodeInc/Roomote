@@ -505,6 +505,24 @@ export function CommsProviderSection({
       onError: (error) => toast.error(error.message),
     }),
   );
+  const createSlackApp = useMutation(
+    trpc.slack.createAppFromManifest.mutationOptions({
+      onSuccess: async (result) => {
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+
+        toast.success(
+          'Slack app created and credentials saved. Connect it to your workspace to finish.',
+        );
+        await queryClient.invalidateQueries({
+          queryKey: trpc.comms.status.queryKey(),
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
   const isMicrosoftProvider = provider.id === 'microsoft';
   const teamsIntegrationStatus = useTeamsIntegrationStatus({
     enabled: isMicrosoftProvider,
@@ -713,6 +731,7 @@ export function CommsProviderSection({
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
               showManualSlackValues={showManualSlackValues}
+              createSlackAppPending={createSlackApp.isPending}
               surface="settings"
               envVarsInfoNote={
                 !provider.runtimeSatisfied && provider.id === 'telegram'
@@ -720,6 +739,9 @@ export function CommsProviderSection({
                   : !provider.runtimeSatisfied && provider.id === 'discord'
                     ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
                     : undefined
+              }
+              onCreateSlackApp={(configToken) =>
+                createSlackApp.mutate({ configToken })
               }
               onShowManualSlackValues={() => setShowManualSlackValues(true)}
               onValueChange={(envVarName, value) =>

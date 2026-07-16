@@ -18,11 +18,25 @@ or configured for your self-hosted deployment.
 
 ## Fast path
 
-In `/setup`, choose **Create Slack app from manifest**. Roomote opens Slack's
-create-app flow with redirect URLs, webhook URLs, interactivity, scopes, and
-events prefilled for the current public URL.
+In `/setup`, paste a Slack **app configuration token** and Roomote creates the
+Slack app for you through Slack's `apps.manifest.create` API:
 
-After Slack creates the app:
+1. open [api.slack.com/apps](https://api.slack.com/apps) and click
+   **Generate Token** under **Your App Configuration Tokens**, picking the
+   workspace where Roomote should live
+2. paste the access token into Roomote setup and click **Create Slack app**
+
+Roomote creates the app with redirect URLs, webhook URLs, interactivity,
+scopes, and events preconfigured for the current public URL, then saves the
+**Client ID**, **Client Secret**, and **Signing Secret** automatically. The
+configuration token is used once to create the app and never stored. Finish
+the Slack install step so Roomote can receive events and post replies.
+
+### Alternative: prefilled manifest
+
+If you prefer not to use a configuration token, choose the **prefilled
+manifest** link instead. Roomote opens Slack's create-app flow with the same
+manifest prefilled. After Slack creates the app:
 
 1. copy **Client ID**, **Client Secret**, and **Signing Secret** from
    **Basic Information > App Credentials**

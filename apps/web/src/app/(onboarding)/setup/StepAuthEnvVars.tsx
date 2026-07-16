@@ -69,6 +69,36 @@ export function StepAuthEnvVars({
   >({});
   const [showMicrosoftAdvancedConfig, setShowMicrosoftAdvancedConfig] =
     useState(false);
+  const createSlackApp = useMutation(
+    (bootstrapMode
+      ? trpc.setupBootstrap.createSlackAppFromManifest
+      : trpc.slack.createAppFromManifest
+    ).mutationOptions({
+      onSuccess: async (result) => {
+        if (!result.success) {
+          toast.error(result.error);
+          return;
+        }
+
+        await queryClient.invalidateQueries({
+          queryKey: bootstrapMode
+            ? trpc.setupBootstrap.status.queryKey()
+            : trpc.setupNew.status.queryKey(),
+        });
+
+        try {
+          // The credentials are already persisted, so this records the
+          // provider choice and advances (or, in bootstrap mode, signs in).
+          await handleContinue();
+        } catch {
+          // saveAuthConfig's own onError already surfaced the failure.
+        }
+      },
+      onError: (error) => {
+        toast.error(error.message);
+      },
+    }),
+  );
   const saveAuthConfig = useMutation(
     (bootstrapMode
       ? trpc.setupBootstrap.saveAuthConfig
@@ -301,7 +331,16 @@ export function StepAuthEnvVars({
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
           showManualSlackValues={showManualSlackValues}
+          createSlackAppPending={
+            createSlackApp.isPending || saveAuthConfig.isPending
+          }
           showMicrosoftAdvancedConfig={showMicrosoftAdvancedConfig}
+          onCreateSlackApp={(configToken) =>
+            createSlackApp.mutate({
+              configToken,
+              ...(bootstrapMode && setupToken ? { setupToken } : {}),
+            })
+          }
           onShowManualSlackValues={() => setShowManualSlackValues(true)}
           onToggleMicrosoftAdvancedConfig={() =>
             setShowMicrosoftAdvancedConfig((current) => !current)

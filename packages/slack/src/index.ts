@@ -16,6 +16,7 @@ export * from './manager-mcp-setup';
 export * from './request-user-input-blocks';
 export * from './request-user-input';
 export * from './router-debug';
+export * from './slack-api-base-url';
 export * from './slack-messages';
 export * from './slack-notifier';
 export * from './slack-system-messages';

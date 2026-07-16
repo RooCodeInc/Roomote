@@ -184,6 +184,9 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
       installation: { queryKey: () => ['slack', 'installation'] },
+      createAppFromManifest: {
+        mutationOptions: (options: unknown) => options,
+      },
     },
     comms: {
       status: { queryKey: () => ['comms', 'status'] },
@@ -563,7 +566,13 @@ describe('CommsProviderSection', () => {
         screen.queryByRole('heading', { name: 'Create Slack app' }),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByRole('link', { name: 'Create Slack app' }),
+        screen.getByRole('button', { name: 'Create Slack app' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByLabelText('App configuration token'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: /prefilled manifest/ }),
       ).toBeInTheDocument();
 
       fireEvent.click(

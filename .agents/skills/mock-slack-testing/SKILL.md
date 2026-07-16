@@ -1,6 +1,6 @@
 ---
 name: mock-slack-testing
-description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_slack_channel`, `SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Slack integration flows through the existing mock Slack harness instead of a real Slack workspace. Use when testing Slack app mentions, interactive payloads, URL verification, outbound Slack posts, deleted-thread suppression, `reply_to_slack_thread`, `post_to_slack_channel`, Slack app creation via `apps.manifest.create`, `SLACK_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Slack Testing
@@ -129,6 +129,28 @@ curl -s http://127.0.0.1:3012/mock/state | jq '.messages'
 
 # Check if a specific thread reply was recorded
 curl -s http://127.0.0.1:3012/mock/state | jq '.messages[] | select(.thread_ts != null)'
+```
+
+## Testing Slack app creation (`apps.manifest.create`)
+
+The harness also mocks Slack's `apps.manifest.create` endpoint, which backs
+the setup flow where an admin pastes an app configuration token and Roomote
+creates the Slack app. Point the web server at the harness
+(`SLACK_API_BASE_URL=http://127.0.0.1:3012/api/`), then drive the setup UI or
+the `slack.createAppFromManifest` tRPC mutation.
+
+Optional state knobs:
+
+- `acceptedConfigTokens` — allowlist for config tokens; unknown tokens get
+  `{ "ok": false, "error": "invalid_auth" }`. Config tokens are a separate
+  token space from `acceptedBotTokens`.
+- `manifestCredentials` — `{ appId, clientId, clientSecret, signingSecret,
+  verificationToken }` overrides for the returned credentials.
+
+Created apps are recorded in mock state:
+
+```bash
+curl -s http://127.0.0.1:3012/mock/state | jq '.createdManifests'
 ```
 
 ## Scenario Selection

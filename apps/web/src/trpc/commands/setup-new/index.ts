@@ -138,6 +138,7 @@ import {
   prepareComputeProvisioningStart,
   runComputeProvisioning,
 } from '../compute/compute-provisioning';
+import { createSlackAppFromManifest } from '../slack/create-app-from-manifest';
 import {
   assertValidSourceControlConfigInput,
   saveSourceControlConfigValues,
@@ -2257,6 +2258,19 @@ export async function saveSetupBootstrapAuthConfigCommand(input: {
     values: input.values,
     actorUserId: null,
     requireBootstrapOpen: true,
+  });
+}
+
+export async function createSetupBootstrapSlackAppFromManifestCommand(input: {
+  configToken: string;
+  setupToken?: string;
+}) {
+  assertSetupTokenValid(await resolveSetupTokenInput(input.setupToken));
+  await assertSetupBootstrapOpen();
+
+  return createSlackAppFromManifest({
+    configToken: input.configToken,
+    actorUserId: null,
   });
 }
 
