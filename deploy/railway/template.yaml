@@ -150,6 +150,7 @@ services:
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
+      R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
@@ -196,6 +197,7 @@ services:
       S3_BUCKET_ARTIFACTS: ${{api.S3_BUCKET_ARTIFACTS}}
       SETUP_TOKEN: ${{api.SETUP_TOKEN}}
       R_PING_BASE_URL: ${{api.R_PING_BASE_URL}}
+      R_INSTANCE_ID: ${{api.R_INSTANCE_ID}}
       # Empty until previews are enabled; the web client builds preview
       # links from NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL, so the references
       # live in the shared block rather than only on preview-proxy.

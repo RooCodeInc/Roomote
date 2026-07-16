@@ -1,5 +1,7 @@
 import { nanoid } from 'nanoid';
 
+import { Env } from '@roomote/env';
+
 import { db } from '../db';
 import { deploymentSettings, users } from '../schema';
 import { eq, isNull, and } from 'drizzle-orm';
@@ -18,15 +20,19 @@ export function generateAnalyticsId(): string {
 }
 
 /**
- * Returns the stable anonymous instance analytics id, lazily generating and
- * persisting it on first use. The id lives on the deployment_settings
- * singleton row, is never derived from customer data, and has no
- * user-facing write path.
+ * Returns the configured instance analytics id or lazily generates and
+ * persists one on first use. Without R_INSTANCE_ID, the id lives on the
+ * deployment_settings singleton row, is never derived from customer data, and
+ * has no user-facing write path.
  *
  * Concurrency-safe: the UPDATE only fills a NULL column, so racing callers
  * converge on whichever id was committed first.
  */
 export async function getInstanceAnalyticsId(): Promise<string> {
+  if (Env.R_INSTANCE_ID) {
+    return Env.R_INSTANCE_ID;
+  }
+
   const existing = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: { instanceAnalyticsId: true },
