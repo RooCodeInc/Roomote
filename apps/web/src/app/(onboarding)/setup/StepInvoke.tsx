@@ -221,7 +221,6 @@ export function StepInvoke({
 
       <div className="mt-3 flex">
         <Button
-          className="w-full sm:w-auto"
           onClick={() => {
             onTryItOut?.();
             completeSetup.mutate(
