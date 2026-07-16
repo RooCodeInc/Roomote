@@ -856,6 +856,12 @@ export function ModelSettingsSection({
       return;
     }
 
+    if (suggestionsQuery.isError) {
+      suggestionRequestRef.current += 1;
+      setSuggestionState(EMPTY_SUGGESTION_STATE);
+      return;
+    }
+
     if (!suggestionsQuery.data) {
       return;
     }
@@ -890,7 +896,12 @@ export function ModelSettingsSection({
         highlightedIndex: nextHighlightedIndex >= 0 ? nextHighlightedIndex : 0,
       };
     });
-  }, [activeNewModelProvider, debouncedSuggestionQuery, suggestionsQuery.data]);
+  }, [
+    activeNewModelProvider,
+    debouncedSuggestionQuery,
+    suggestionsQuery.data,
+    suggestionsQuery.isError,
+  ]);
 
   useEffect(() => {
     if (selectedSuggestionSlugRef.current !== normalizedNewModelId) {

@@ -17,6 +17,7 @@ const providerSetupData = vi.hoisted(() => ({
 const suggestionData = vi.hoisted(() => ({
   current: undefined as Record<string, unknown> | null | undefined,
 }));
+const suggestionQueryError = vi.hoisted(() => ({ current: false }));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
@@ -37,6 +38,7 @@ vi.mock('@tanstack/react-query', () => ({
     return {
       data,
       isPending: data === null,
+      isError: isSuggestions && suggestionQueryError.current,
     };
   },
   useMutation: (options?: { mutationKey?: unknown[] }) => {
@@ -342,6 +344,7 @@ describe('ModelSettingsSection', () => {
     settingsData.current = null;
     providerSetupData.current = buildProviderSetupData();
     suggestionData.current = undefined;
+    suggestionQueryError.current = false;
     // cmdk scrolls the highlighted command item into view; jsdom does not
     // implement scrollIntoView.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -659,6 +662,41 @@ describe('ModelSettingsSection', () => {
       });
 
       expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears suggestions when a replacement query fails', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      suggestionQueryError.current = true;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
+      expect(screen.queryByText('Claude Sonnet 4')).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
