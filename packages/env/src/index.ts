@@ -713,6 +713,11 @@ function buildRoomoteRuntimeEnv(
     env.ENCRYPTION_KEY ??= LOCAL_ENCRYPTION_KEY;
     env.ARTIFACT_SIGNING_KEY ??= LOCAL_ARTIFACT_SIGNING_KEY;
     env.R_DISCORD_GATEWAY_SECRET ??= LOCAL_DISCORD_GATEWAY_SECRET;
+    // Keep process.env aligned so API auth, BullMQ, and the gateway share the
+    // same local default instead of only one process reading Env.*.
+    if (!processEnv.R_DISCORD_GATEWAY_SECRET?.trim()) {
+      processEnv.R_DISCORD_GATEWAY_SECRET = env.R_DISCORD_GATEWAY_SECRET;
+    }
     env.PREVIEW_PROXY_BASE_URL ??= getDefaultPreviewProxyBaseUrl(appEnv);
     env.PREVIEW_DOMAINS ??= LOCAL_PREVIEW_DOMAINS;
     env.S3_ENDPOINT ??= LOCAL_S3_ENDPOINT;
