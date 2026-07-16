@@ -2,14 +2,19 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
+  getInferenceGatewayProvider,
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
@@ -618,6 +623,73 @@ function mergeBedrockMantleProviderConfig(
   };
 }
 
+/**
+ * When the dequeue env carries an inference gateway URL, rebase each
+ * gateway-covered provider that a selected model uses onto the gateway. The
+ * SDK authenticates with the run token (already in the harness env), which
+ * the gateway exchanges for the deployment's provider key server-side, so
+ * the raw key never enters the sandbox.
+ */
+function mergeInferenceGatewayProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  const gatewayUrl = runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]?.trim();
+
+  if (!gatewayUrl) {
+    return providerConfig;
+  }
+
+  const providerIds = new Set(
+    modelIds.flatMap((modelId) => {
+      const providerId = modelId?.trim().split('/')[0];
+
+      return providerId ? [providerId] : [];
+    }),
+  );
+
+  let merged = providerConfig;
+
+  for (const providerId of providerIds) {
+    const gatewayProvider = getInferenceGatewayProvider(providerId);
+
+    if (!gatewayProvider) {
+      continue;
+    }
+
+    // ChatGPT-subscription OAuth authenticates through opencode's Codex
+    // plugin directly; leave the openai provider on its default base URL
+    // when a subscription record is present.
+    if (
+      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
+      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
+    ) {
+      continue;
+    }
+
+    const existingProvider = asRecord(merged[providerId]);
+    const existingOptions = asRecord(existingProvider.options);
+
+    merged = {
+      ...merged,
+      [providerId]: {
+        ...existingProvider,
+        options: {
+          ...existingOptions,
+          baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+            gatewayUrl,
+            gatewayProvider,
+          ),
+          apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+        },
+      },
+    };
+  }
+
+  return merged;
+}
+
 function normalizeStringList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === 'string');
@@ -1132,18 +1204,26 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeBedrockMantleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+  const configuredModelIds = [
+    effectiveCodingModel,
+    model,
+    smallModel,
+    visionModel,
+    codeReviewModel,
+    exploreModel,
+    planningModel,
+  ];
+  const providerConfig = mergeInferenceGatewayProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeOpenRouterVariantAliasModels(
+        providerReasoningConfig,
+        variantAliases,
+      ),
+      runtimeEnv,
+      configuredModelIds,
+    ),
     runtimeEnv,
-    [
-      effectiveCodingModel,
-      model,
-      smallModel,
-      visionModel,
-      codeReviewModel,
-      exploreModel,
-      planningModel,
-    ],
+    configuredModelIds,
   );
 
   return {

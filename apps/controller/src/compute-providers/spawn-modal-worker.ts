@@ -22,6 +22,7 @@ import {
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
+import { isInferenceGatewayEnabledForWorkerEnv } from './inference-gateway-flag';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
@@ -409,6 +410,7 @@ export async function spawnModalWorker(
       args,
       env: buildModalWorkerEnv({
         authToken,
+        inferenceGatewayEnabled: await isInferenceGatewayEnabledForWorkerEnv(),
         sandboxExpiresAtMs: Date.now() + modalTimeoutMs,
         deploymentSlug,
         environmentId,

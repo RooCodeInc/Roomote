@@ -11,6 +11,7 @@ export enum FeatureFlag {
   AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
   CodeMode = 'CodeMode',
+  InferenceGateway = 'InferenceGateway',
 }
 
 export type FeatureFlagValue =

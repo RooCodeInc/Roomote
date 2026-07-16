@@ -1,6 +1,7 @@
 import { Env } from '@roomote/env';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -28,7 +29,9 @@ function getOperatorModelProviderEnvKeys(): string[] {
   return [...new Set([...DEFAULT_MODEL_PROVIDER_ENV_KEYS, ...configured])];
 }
 
-function buildOperatorModelProviderEnv(): Record<string, string> {
+function buildOperatorModelProviderEnv(
+  inferenceGatewayEnabled: boolean,
+): Record<string, string> {
   const env: Record<string, string> = {};
   const model = process.env.R_MODEL?.trim();
   const smallModel = process.env.R_SMALL_MODEL?.trim();
@@ -80,8 +83,18 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     env.R_MODEL_ENV_KEYS = process.env.R_MODEL_ENV_KEYS;
   }
 
+  // When the inference gateway is enabled, gateway-covered provider keys
+  // stay on the control plane: the per-task dequeue env routes the harness
+  // through the gateway instead. Keys the gateway cannot serve yet (Bedrock,
+  // Vertex) still ship with the worker daemon env.
+  const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
+
   for (const key of getOperatorModelProviderEnvKeys()) {
     if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+      continue;
+    }
+
+    if (inferenceGatewayEnabled && gatewayCoveredKeys.has(key)) {
       continue;
     }
 
@@ -99,6 +112,7 @@ export function buildBaseWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  inferenceGatewayEnabled = false,
 }: BuildWorkerEnvOptions): Record<string, string> {
   const previewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 
@@ -147,7 +161,7 @@ export function buildBaseWorkerEnv({
     ...(process.env.PREVIEW_AUTH_COOKIE_NAME && {
       PREVIEW_AUTH_COOKIE_NAME: process.env.PREVIEW_AUTH_COOKIE_NAME,
     }),
-    ...buildOperatorModelProviderEnv(),
+    ...buildOperatorModelProviderEnv(inferenceGatewayEnabled),
     ...filterWorkerExtraEnv(extraEnv),
   };
 }

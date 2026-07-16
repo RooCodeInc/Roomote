@@ -142,4 +142,23 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_MODEL).toBe('vercel/openai/gpt-5.4');
     expect(env.AI_GATEWAY_API_KEY).toBe('vercel-key');
   });
+
+  it('holds back gateway-covered provider keys when the inference gateway is enabled', () => {
+    process.env.R_MODEL = 'anthropic/claude-sonnet-5';
+    process.env.ANTHROPIC_API_KEY = 'anthropic-key';
+    process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.AWS_BEARER_TOKEN_BEDROCK = 'bedrock-key';
+
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {},
+      inferenceGatewayEnabled: true,
+    });
+
+    expect(env.R_MODEL).toBe('anthropic/claude-sonnet-5');
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    // The gateway cannot serve Bedrock yet, so its key still ships.
+    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBe('bedrock-key');
+  });
 });

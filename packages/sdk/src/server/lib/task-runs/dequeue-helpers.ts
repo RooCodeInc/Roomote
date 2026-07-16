@@ -1,5 +1,7 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
@@ -22,6 +24,11 @@ import {
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
+import {
+  FeatureFlag,
+  getFeatureFlagEvaluator,
+} from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
@@ -208,16 +215,61 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
   const resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv({
     deploymentEnvVars: envVars,
+    inferenceGateway: await isInferenceGatewayFlagEnabled(),
   });
 
   return redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
-      withLegacySnapshotModelEnvAliases({
-        ...envVars,
-        ...resolvedModelRuntimeEnv,
-      }),
+      redactInferenceGatewayProviderKeys(
+        withLegacySnapshotModelEnvAliases({
+          ...envVars,
+          ...resolvedModelRuntimeEnv,
+        }),
+      ),
       options?.sourceControlProvider,
     ),
+  );
+}
+
+/**
+ * Evaluate the deployment-level InferenceGateway feature flag. Fails closed
+ * (direct provider keys, the long-standing behavior) if flag evaluation is
+ * unavailable, so a Redis outage cannot break task inference.
+ */
+async function isInferenceGatewayFlagEnabled(): Promise<boolean> {
+  try {
+    return await getFeatureFlagEvaluator(getRedis()).evaluate(
+      FeatureFlag.InferenceGateway,
+      { isDeploymentContext: true },
+    );
+  } catch (error) {
+    console.warn(
+      `[fetchResolvedRuntimeEnvVars] InferenceGateway flag evaluation failed; using direct provider keys: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return false;
+  }
+}
+
+/**
+ * When the inference gateway is active (the resolver emitted a gateway URL),
+ * provider keys the gateway covers stay on the control plane. The raw
+ * deployment env vars are spread into the sandbox env above, so the keys
+ * must be stripped from the merged result, not just left unresolved.
+ */
+function redactInferenceGatewayProviderKeys(
+  envVars: Record<string, string>,
+): Record<string, string> {
+  if (!envVars[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]) {
+    return envVars;
+  }
+
+  const coveredKeyNames = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
+
+  return Object.fromEntries(
+    Object.entries(envVars).filter(([key]) => !coveredKeyNames.has(key)),
   );
 }
 

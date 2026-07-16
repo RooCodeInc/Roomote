@@ -7,6 +7,7 @@ export function buildModalWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
+  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   baseImageRef,
@@ -16,7 +17,12 @@ export function buildModalWorkerEnv({
   baseImageRef: string;
 }): Record<string, string> {
   return {
-    ...buildBaseWorkerEnv({ authToken, sandboxExpiresAtMs, extraEnv }),
+    ...buildBaseWorkerEnv({
+      authToken,
+      sandboxExpiresAtMs,
+      extraEnv,
+      inferenceGatewayEnabled,
+    }),
     ...buildWorkerContextEnv({
       provider: 'modal',
       fingerprint: baseImageRef,
