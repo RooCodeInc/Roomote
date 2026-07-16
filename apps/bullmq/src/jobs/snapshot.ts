@@ -35,6 +35,7 @@ import {
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
+import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -51,6 +52,7 @@ export interface SnapshotJobData {
 type SnapshotJob = Job<SnapshotJobData, void, string>;
 
 const SNAPSHOT_RECONCILE_TIMEOUT_MS = 60_000;
+const PRE_SNAPSHOT_SCRUB_RPC_TIMEOUT_MS = 10_000;
 const SNAPSHOT_RECONCILE_INTERVAL_MS = 2_000;
 const SNAPSHOT_RECONCILE_SINCE_SKEW_MS = 10_000;
 const TRANSIENT_SNAPSHOT_FAILURE_STATUSES = new Set([408, 409, 425, 429]);
@@ -305,6 +307,15 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
   }
 
   if (!snapshotResult) {
+    await requestPreSnapshotScrub({
+      taskRun,
+      instanceId,
+      queueAttempt,
+      queueJobId,
+      snapshotIntentId,
+      triggerPath,
+    });
+
     try {
       await recordMutation({
         provider,
@@ -731,6 +742,82 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     }
   }
 };
+
+/**
+ * Ask the sandbox server to drop worker-managed credential files before the
+ * provider snapshots the filesystem. Worker-cooperative paths (the snapshot
+ * command and the sleep handoff) already scrub on their own; this covers
+ * queue-triggered snapshots where the worker never ran its pre-snapshot
+ * scrub, such as the heartbeat-recovery paths. The scrub is idempotent and
+ * everything it removes is re-materialized at the next run start, so it is
+ * requested on every snapshot. Best-effort only: failures are recorded as
+ * run events and never block the snapshot.
+ */
+async function requestPreSnapshotScrub(input: {
+  taskRun: TaskRun;
+  instanceId: string;
+  queueAttempt: number;
+  queueJobId: string | null;
+  snapshotIntentId: string;
+  triggerPath: string | null;
+}): Promise<void> {
+  const { taskRun, instanceId } = input;
+  const baseDetails = {
+    queueJobId: input.queueJobId,
+    queueAttempt: input.queueAttempt,
+    snapshotIntentId: input.snapshotIntentId,
+    triggerPath: input.triggerPath,
+    sandboxId: instanceId,
+  };
+
+  if (!taskRun.sandboxServerUrl) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Skipped pre-snapshot scrub for sandbox ${instanceId} because the run has no sandbox server URL.`,
+      details: {
+        ...baseDetails,
+        decision: 'pre_snapshot_scrub_skipped',
+        reason: 'no_sandbox_server_url',
+      },
+    });
+    return;
+  }
+
+  try {
+    await withSandboxServerRpcClient({
+      runId: taskRun.id,
+      // Platform automation with no human actor.
+      userId: null,
+      sandboxServerUrl: taskRun.sandboxServerUrl,
+      timeoutMs: PRE_SNAPSHOT_SCRUB_RPC_TIMEOUT_MS,
+      call: (client) => client.commands.scrubSnapshotSecrets.mutate(),
+    });
+
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Sandbox ${instanceId} scrubbed worker-managed credential files before the snapshot.`,
+      details: {
+        ...baseDetails,
+        decision: 'pre_snapshot_scrub_completed',
+      },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    console.warn(
+      `[SnapshotQueue] Pre-snapshot scrub unavailable for task run #${taskRun.id}: ${errorMessage}`,
+    );
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Pre-snapshot scrub was unavailable for sandbox ${instanceId}; continuing with the snapshot.`,
+      details: {
+        ...baseDetails,
+        decision: 'pre_snapshot_scrub_unavailable',
+        error: errorMessage,
+      },
+    });
+  }
+}
 
 async function recordSnapshotQueueEvent(
   taskRun: TaskRun,

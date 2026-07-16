@@ -17,6 +17,7 @@ import {
   cancelTask,
   touchKeepalive,
   reloadDeploymentEnvVars,
+  scrubSnapshotSecrets,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -36,4 +37,5 @@ export const commandsRouter = router({
   cancelTask,
   touchKeepalive,
   reloadDeploymentEnvVars,
+  scrubSnapshotSecrets,
 });
