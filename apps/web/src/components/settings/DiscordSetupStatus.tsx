@@ -90,6 +90,13 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
             detail={`${status.gateway?.deadLetterDepth} undeliverable event${status.gateway?.deadLetterDepth === 1 ? ' was' : 's were'} quarantined; recent messages or commands may not have reached Roomote.`}
           />
         ) : null}
+        {status.gateway?.capacityWarning ? (
+          <DiagnosticRow
+            ok={false}
+            label="Event backlog"
+            detail={status.gateway.capacityWarning}
+          />
+        ) : null}
         <DiagnosticRow
           ok={messageContentReady}
           label="Message Content intent"

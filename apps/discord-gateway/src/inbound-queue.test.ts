@@ -13,6 +13,8 @@ function mockRedis(overrides: Record<string, unknown> = {}): Redis {
     eval: vi.fn(),
     xrange: vi.fn(),
     hincrby: vi.fn(),
+    hkeys: vi.fn().mockResolvedValue([]),
+    hdel: vi.fn(),
     xlen: vi.fn(),
     ...overrides,
   } as unknown as Redis;
@@ -149,6 +151,39 @@ describe('DiscordInboundQueue', () => {
       '3',
       '2026-07-12T13:00:00.000Z',
       '1000',
+    );
+  });
+
+  it('prunes attempt counters for entries shed by the stream cap', async () => {
+    const redis = mockRedis({
+      // Oldest surviving entry is 200-0: 100-0 and 150-1 were shed by MAXLEN
+      // without passing through acknowledge/quarantine.
+      xrange: vi.fn().mockResolvedValue([['200-0', ['envelope', '{}']]]),
+      hkeys: vi.fn().mockResolvedValue(['100-0', '150-1', '200-0', '250-0']),
+      hdel: vi.fn().mockResolvedValue(2),
+    });
+    const queue = new DiscordInboundQueue(redis);
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(2);
+    expect(redis.hdel).toHaveBeenCalledWith(
+      DISCORD_INBOUND_ATTEMPTS_KEY,
+      '100-0',
+      '150-1',
+    );
+  });
+
+  it('prunes every attempt counter when the stream is empty', async () => {
+    const redis = mockRedis({
+      xrange: vi.fn().mockResolvedValue([]),
+      hkeys: vi.fn().mockResolvedValue(['100-0']),
+      hdel: vi.fn().mockResolvedValue(1),
+    });
+    const queue = new DiscordInboundQueue(redis);
+
+    await expect(queue.pruneOrphanedAttempts()).resolves.toBe(1);
+    expect(redis.hdel).toHaveBeenCalledWith(
+      DISCORD_INBOUND_ATTEMPTS_KEY,
+      '100-0',
     );
   });
 

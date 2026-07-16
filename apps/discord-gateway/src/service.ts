@@ -174,18 +174,24 @@ export class DiscordGatewayService {
         });
     }, this.config.leaderLeaseRenewMs);
     const statusTimer = setInterval(() => {
-      void Promise.all([queue.depth(), queue.deadLetterDepth()])
+      void Promise.all([
+        queue.depth(),
+        queue.deadLetterDepth(),
+        queue.pruneOrphanedAttempts(),
+      ])
         .then(([queueDepth, deadLetterDepth]) =>
           this.status.update({
             queueDepth,
             deadLetterDepth,
             // Surface capacity pressure before the approximate MAXLEN cap
-            // starts shedding the oldest undelivered events.
-            ...(queueDepth >= queue.capacity * 0.9
-              ? {
-                  lastError: `Inbound event stream is at ${queueDepth}/${queue.capacity} entries; oldest undelivered events will be shed at capacity.`,
-                }
-              : {}),
+            // starts shedding the oldest undelivered events. This is a
+            // dedicated field with this timer as its only writer, so a
+            // successful delivery clearing lastError cannot erase it while
+            // the backlog is still high.
+            capacityWarning:
+              queueDepth >= queue.capacity * 0.9
+                ? `Inbound event stream is at ${queueDepth}/${queue.capacity} entries; oldest undelivered events will be shed at capacity.`
+                : undefined,
           }),
         )
         .catch((error) =>

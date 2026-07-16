@@ -25,6 +25,8 @@ type DiscordGatewayStatus = {
   sessionResumed: boolean;
   queueDepth: number;
   deadLetterDepth: number;
+  /** Set while the inbound stream is close enough to its cap to shed soon. */
+  capacityWarning?: string;
   botUserId?: string;
   botUsername?: string;
   lastEventAt?: string;

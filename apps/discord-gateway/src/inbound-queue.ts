@@ -202,4 +202,37 @@ export class DiscordInboundQueue {
   async deadLetterDepth(): Promise<number> {
     return this.redis.xlen(DISCORD_DEAD_LETTER_STREAM_KEY);
   }
+
+  /**
+   * Deletes attempt counters whose stream entries no longer exist.
+   * Acknowledge and quarantine clean up their own counters, but entries shed
+   * by the MAXLEN cap never reach either path, so during a long outage the
+   * attempts hash would otherwise grow one orphaned field per shed event.
+   */
+  async pruneOrphanedAttempts(): Promise<number> {
+    const [oldest] = await this.redis.xrange(
+      DISCORD_INBOUND_STREAM_KEY,
+      '-',
+      '+',
+      'COUNT',
+      1,
+    );
+    const oldestId = oldest?.[0] ?? null;
+    const trackedIds = await this.redis.hkeys(DISCORD_INBOUND_ATTEMPTS_KEY);
+    const orphaned = trackedIds.filter(
+      (streamId) =>
+        oldestId === null || compareStreamIds(streamId, oldestId) < 0,
+    );
+    if (orphaned.length > 0) {
+      await this.redis.hdel(DISCORD_INBOUND_ATTEMPTS_KEY, ...orphaned);
+    }
+    return orphaned.length;
+  }
+}
+
+/** Numeric comparison of Redis stream ids ("<milliseconds>-<sequence>"). */
+function compareStreamIds(left: string, right: string): number {
+  const [leftMs = 0, leftSeq = 0] = left.split('-').map(Number);
+  const [rightMs = 0, rightSeq = 0] = right.split('-').map(Number);
+  return leftMs - rightMs || leftSeq - rightSeq;
 }
