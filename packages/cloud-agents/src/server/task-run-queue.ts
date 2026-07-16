@@ -24,6 +24,7 @@ import {
   DEFAULT_DELEGATED_KEEPALIVE_MS,
   DEFAULT_KEEPALIVE_MS,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
   getUserDisplayName,
   getPrimaryPortFromConfig,
@@ -41,6 +42,7 @@ import {
   db,
   deploymentSettings,
   ensureAutomationRowsOnce,
+  isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
   recordTaskStartParallelCount,
@@ -1330,6 +1332,11 @@ async function enqueueFreshLaunch(
 
   // This is the only place where fresh tasks and their first runs are created.
   const taskRun = await db.transaction(async (tx) => {
+    const modelProvider =
+      getDisplayModelProviderId(effectiveTaskModel, {
+        chatgptConnected: await isChatGptSubscriptionConnected(tx),
+      }) ?? DEFAULT_STANDARD_TASK_MODEL_PROVIDER;
+
     // Commit-author evaluation is unconditional at fresh enqueue.
     const [authorshipSettingsRow, matchedHumanActor] = await Promise.all([
       tx.query.deploymentSettings.findFirst({
@@ -1364,7 +1371,7 @@ async function enqueueFreshLaunch(
         linearIssueId: input.channels?.linearIssueId ?? null,
         linearOrganizationId: input.channels?.linearOrganizationId ?? null,
         harness: targetHarness,
-        modelProvider: DEFAULT_STANDARD_TASK_MODEL_PROVIDER,
+        modelProvider,
         model: effectiveTaskModel,
         title,
         ...(titleIsLocked
