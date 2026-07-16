@@ -26,7 +26,7 @@ function shouldShowDefaultChatWidgetLauncher(pathname: string | null): boolean {
   );
 }
 
-export function useChatWidgetButton() {
+function useChatWidgetButton() {
   const pathname = usePathname();
   const [hasIntercom, setHasIntercom] = useState(false);
 

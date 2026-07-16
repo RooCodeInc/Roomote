@@ -7,9 +7,4 @@ export { Logo } from './Logo';
 export { OriginMismatchAlert } from './OriginMismatchAlert';
 export { RoomoteWordmark } from './RoomoteWordmark';
 export { UserMenu } from './UserMenu';
-export {
-  ChatWidgetButton,
-  ChatWidgetSideNavItem,
-  useChatWidgetButton,
-} from './ChatWidgetButton';
 export { SideNav } from './side-nav';
