@@ -965,9 +965,6 @@ importers:
       '@roomote/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
-      '@types/dompurify':
-        specifier: 3.2.0
-        version: 3.2.0
       '@types/http-proxy':
         specifier: ^1.17.17
         version: 1.17.17
@@ -5858,10 +5855,6 @@ packages:
 
   '@types/doctrine@0.0.9':
     resolution: {integrity: sha512-eOIHzCUSH7SMfonMG1LsC2f8vxBFtho6NGBznK41R84YzPuvSBzrhEps33IsQiOW9+VL6NQ9DbjQJznk/S4uRA==}
-
-  '@types/dompurify@3.2.0':
-    resolution: {integrity: sha512-Fgg31wv9QbLDA0SpTOXO3MaxySc4DKGLi8sna4/Utjo4r3ZRPdCt4UQee8BWr+Q5z21yifghREPJGYaEOEIACg==}
-    deprecated: This is a stub types definition. dompurify provides its own type definitions, so you do not need this installed.
 
   '@types/eslint-scope@3.7.7':
     resolution: {integrity: sha512-MzMFlSLBqNF2gcHWO0G1vP/YQyfvrxZ0bF+u7mzUdZ1/xK4A4sru+nraZz5i3iEIk1l1uyicaDVTB4QbbEkAYg==}
@@ -16146,10 +16139,6 @@ snapshots:
       '@types/ssh2': 1.15.5
 
   '@types/doctrine@0.0.9': {}
-
-  '@types/dompurify@3.2.0':
-    dependencies:
-      dompurify: 3.4.11
 
   '@types/eslint-scope@3.7.7':
     dependencies:
