@@ -11,13 +11,6 @@ The routing evaluations ensure the LLM router correctly:
 - Produces appropriate confidence scores based on context clarity
 - Handles edge cases and adversarial inputs gracefully
 
-The authorship evaluations ensure the authorship-rules compiler correctly:
-
-- Compiles deterministic natural-language authorship instructions into structured rules
-- Preserves narrow source/repository/user conditions from user-entered guidance
-- Refuses ambiguous or subjective instructions instead of guessing
-- Carries forward concrete portions of mixed guidance while flagging unclear portions
-
 ## Prerequisites
 
 Ensure your promptfoo provider credentials are available in the environment
@@ -25,8 +18,8 @@ loaded by dotenvx. Runtime routing uses `R_SMALL_MODEL`, falling back
 to `R_MODEL`; these evals are standalone promptfoo suites.
 
 Provider ids default to `openrouter:anthropic/claude-haiku-4.5`. Override them
-with `ROUTER_EVAL_PROVIDER`, `ROUTER_FOLLOWUP_EVAL_PROVIDER`, or
-`AUTHORSHIP_RULES_EVAL_PROVIDER` when testing a different promptfoo provider.
+with `ROUTER_EVAL_PROVIDER` or `ROUTER_FOLLOWUP_EVAL_PROVIDER` when testing a
+different promptfoo provider.
 
 ## Running Evaluations
 
@@ -42,13 +35,6 @@ pnpm evals
 
 ```bash
 cd packages/cloud-agents/evals/router
-npx promptfoo eval
-```
-
-### Run the Authorship Eval Suite
-
-```bash
-cd packages/cloud-agents/evals/authorship
 npx promptfoo eval
 ```
 
@@ -118,16 +104,6 @@ After running `npx promptfoo eval`, a summary table is displayed in the terminal
 
 ```
 evals/
-├── authorship/
-│   ├── promptfooconfig.ts
-│   ├── prompts/
-│   │   └── compile-authorship.ts
-│   ├── datasets/
-│   │   └── convoluted-and-ambiguous.yaml
-│   ├── assertions/
-│   │   └── authorship-assertions.ts
-│   └── results/
-│       └── eval-results.json
 └── router/
     ├── promptfooconfig.ts
     ├── prompts/

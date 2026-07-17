@@ -19,6 +19,14 @@ boundary: `@roomote/db` is the client-safe/type-oriented surface, while
   typed wrappers.
 - Preserve the explicit initialization, diagnostics, and test-safety behavior
   in `src/db.ts` when changing connection bootstrap.
+- Honor the **N-1 schema rollback guarantee**: application code is always
+  expected to roll back safely by one release against the current database.
+  When retiring a product feature, stop reading and writing its columns in
+  application code first, but keep the physical columns (and any tables the
+  previous release still selects or inserts into) in `src/schema.ts` with an
+  explicit N-1 rollback comment until the following release is the supported
+  rollback target. Do not drop those columns in the same release that removes
+  the code path.
 
 ## Don'ts
 
@@ -30,3 +38,6 @@ boundary: `@roomote/db` is the client-safe/type-oriented surface, while
   client-safe.
 - Do not create app-local Postgres access patterns when the package should own
   the shared query or helper.
+- Do not drop tables or columns that the previous release still selects or
+  inserts into. Physical deletion belongs to a later release after N-1 code
+  rollback no longer needs them.

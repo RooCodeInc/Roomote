@@ -8,7 +8,6 @@ export const mockFeatureFlags: Record<FeatureFlag, boolean> = {
   [FeatureFlag.SlackProofAutoPost]: false,
   [FeatureFlag.SuggestionRouting]: false,
   [FeatureFlag.VisualProofAutoScreencast]: false,
-  [FeatureFlag.AuthorshipRules]: false,
   [FeatureFlag.BackgroundSubagents]: false,
   [FeatureFlag.CodeMode]: false,
 };

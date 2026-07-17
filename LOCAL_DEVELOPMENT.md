@@ -246,8 +246,8 @@ pnpm eval:router:share
 Eval configs and datasets live in `packages/cloud-agents/evals/router/`.
 They are not run in CI by default. Runtime routing, title generation, and
 summaries use `R_SMALL_MODEL`, falling back to `R_MODEL`. Set
-`ROUTER_EVAL_PROVIDER`, `ROUTER_FOLLOWUP_EVAL_PROVIDER`, or
-`AUTHORSHIP_RULES_EVAL_PROVIDER` to test a different promptfoo provider.
+`ROUTER_EVAL_PROVIDER` or `ROUTER_FOLLOWUP_EVAL_PROVIDER` to test a
+different promptfoo provider.
 
 ## Troubleshooting
 
