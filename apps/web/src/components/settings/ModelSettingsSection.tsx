@@ -1673,9 +1673,12 @@ export function ModelSettingsSection({
           const modelId = managedByEnv
             ? status?.effectiveModelId
             : (recommendedRoleModelIds[config.role] ?? codingModelId);
+          const presetModel = Object.values(selectedPreset.preset.roles).find(
+            (roleModel) => roleModel?.modelId === modelId,
+          );
           const displayName = modelId
             ? (models.find((model) => model.id === modelId)?.displayName ??
-              selectedPreset.preset.roles[config.role]?.displayName ??
+              presetModel?.displayName ??
               selectedPreset.provider.suggestedTaskModels.find(
                 (model) => model.id === modelId,
               )?.displayName ??

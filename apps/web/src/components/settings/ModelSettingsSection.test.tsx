@@ -1165,6 +1165,52 @@ describe('ModelSettingsSection', () => {
     expect(within(dialog).getAllByText('default-model')).toHaveLength(6);
   });
 
+  it('matches preset display metadata to the resolved preview model', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/acme/env-model',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'named-models',
+            label: 'Named models',
+            default: true,
+            roles: {
+              coding: {
+                modelId: 'anthropic/claude-sonnet-6',
+                displayName: 'Claude Sonnet 6',
+              },
+              helper: {
+                modelId: 'anthropic/claude-haiku-6',
+                displayName: 'Claude Haiku 6',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Named models (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(5);
+    expect(within(dialog).getByText('env-model')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText('Claude Haiku 6'),
+    ).not.toBeInTheDocument();
+  });
+
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
     settingsData.current = buildSettingsData({
       helperManagedByEnv: true,
