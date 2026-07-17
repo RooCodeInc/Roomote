@@ -10,6 +10,8 @@ import {
   users,
 } from '@roomote/db/server';
 
+import { Env } from './env';
+
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
 /**
@@ -162,6 +164,27 @@ export function resolveLicenseState(
 }
 
 /**
+ * Operator-owned license key from `R_LICENSE_KEY`, when set. Takes precedence
+ * over the key stored in deployment_settings so self-hosted deploys can
+ * provision licensing via their secret store / Compose env without using the
+ * Settings UI.
+ */
+export function getEnvLicenseKey(): string | null {
+  const value = Env.R_LICENSE_KEY?.trim();
+  return value || null;
+}
+
+/**
+ * Effective license key for the deployment: env var when present, otherwise
+ * the DB-backed Settings → Users key.
+ */
+export function resolveConfiguredLicenseKey(
+  storedLicenseKey: string | null | undefined,
+): string | null {
+  return getEnvLicenseKey() ?? (storedLicenseKey?.trim() || null);
+}
+
+/**
  * Read the deployment's license key and resolve its state. Pass a transaction
  * to read the settings row under that transaction's locks (the seat gate does
  * this with the row locked FOR UPDATE to serialize concurrent admissions).
@@ -169,6 +192,11 @@ export function resolveLicenseState(
 export async function getDeploymentLicenseState(
   executor: DatabaseOrTransaction = db,
 ): Promise<DeploymentLicenseState> {
+  const envLicenseKey = getEnvLicenseKey();
+  if (envLicenseKey) {
+    return resolveLicenseState(envLicenseKey);
+  }
+
   const [settings] = await executor
     .select({ licenseKey: deploymentSettings.licenseKey })
     .from(deploymentSettings)
@@ -216,6 +244,8 @@ export async function hasSeatAvailable(): Promise<boolean> {
 export async function assertSeatAvailable(
   tx: DatabaseOrTransaction,
 ): Promise<void> {
+  // Still lock the settings row so concurrent admissions serialize even when
+  // the license key itself comes from R_LICENSE_KEY rather than the DB.
   const [settings] = await tx
     .select({ licenseKey: deploymentSettings.licenseKey })
     .from(deploymentSettings)
@@ -227,7 +257,9 @@ export async function assertSeatAvailable(
     .from(users)
     .where(isNull(users.deletedAt));
 
-  const licenseState = resolveLicenseState(settings?.licenseKey);
+  const licenseState = resolveLicenseState(
+    resolveConfiguredLicenseKey(settings?.licenseKey),
+  );
 
   if ((activeUsers?.count ?? 0) >= licenseState.seatLimit) {
     throw new SeatLimitExceededError(licenseState.seatLimit);

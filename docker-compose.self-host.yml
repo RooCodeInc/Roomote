@@ -26,6 +26,7 @@ x-roomote-env: &roomote-env
   PREVIEW_DOMAINS: ${PREVIEW_DOMAINS:-localhost,127.0.0.1,roomotepreview.localhost}
   R_PUBLIC_URL: ${R_PUBLIC_URL:-}
   R_ALLOWED_EMAILS: ${R_ALLOWED_EMAILS:-}
+  R_LICENSE_KEY: ${R_LICENSE_KEY:-}
   R_MODEL: ${R_MODEL:-}
   R_SMALL_MODEL: ${R_SMALL_MODEL:-}
   R_CODE_REVIEW_MODEL: ${R_CODE_REVIEW_MODEL:-}

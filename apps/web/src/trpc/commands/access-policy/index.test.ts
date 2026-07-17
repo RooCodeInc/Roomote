@@ -7,12 +7,13 @@ type TestUser = {
   createdAt: Date;
 };
 
-const { state } = vi.hoisted(() => ({
+const { state, getEnvLicenseKeyMock } = vi.hoisted(() => ({
   state: {
     users: [] as TestUser[],
     credentialUserIds: [] as string[],
     createdResetLinkForUserId: null as string | null,
   },
+  getEnvLicenseKeyMock: vi.fn(() => null as string | null),
 }));
 
 vi.mock('@roomote/db/server', () => {
@@ -69,6 +70,7 @@ vi.mock('@/lib/server', () => ({
     status: 'unlicensed',
     seatLimit: 10,
   })),
+  getEnvLicenseKey: getEnvLicenseKeyMock,
   isInviteUsable: vi.fn(() => true),
   listInvites: vi.fn(async () => []),
   removeUser: vi.fn(),
@@ -97,6 +99,7 @@ vi.mock('@/lib/server/auth-provider-config', () => ({
 import {
   createPasswordResetLinkCommand,
   getAccessPolicySettingsCommand,
+  setLicenseKeyCommand,
 } from './index';
 
 describe('access policy commands', () => {
@@ -104,6 +107,7 @@ describe('access policy commands', () => {
     state.users = [];
     state.credentialUserIds = [];
     state.createdResetLinkForUserId = null;
+    getEnvLicenseKeyMock.mockReturnValue(null);
   });
 
   it('marks active users that have credential accounts', async () => {
@@ -141,6 +145,27 @@ describe('access policy commands', () => {
         hasCredentialAccount: true,
       }),
     ]);
+    expect(result.license.fromEnv).toBe(false);
+  });
+
+  it('marks license.fromEnv when R_LICENSE_KEY is set', async () => {
+    getEnvLicenseKeyMock.mockReturnValue('RMLK1.env-key.signature');
+
+    const result = await getAccessPolicySettingsCommand({
+      isAdmin: true,
+    } as never);
+
+    expect(result.license.fromEnv).toBe(true);
+  });
+
+  it('rejects license key changes when R_LICENSE_KEY is set', async () => {
+    getEnvLicenseKeyMock.mockReturnValue('RMLK1.env-key.signature');
+
+    await expect(
+      setLicenseKeyCommand({ isAdmin: true } as never, {
+        licenseKey: 'RMLK1.ui-key.signature',
+      }),
+    ).rejects.toThrow(/R_LICENSE_KEY environment variable/);
   });
 
   it('rejects password reset link creation for non-admins', async () => {

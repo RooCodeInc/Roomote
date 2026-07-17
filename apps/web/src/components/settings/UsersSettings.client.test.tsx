@@ -38,6 +38,7 @@ type LicenseSummary = {
   freeSeatLimit: number;
   licensee: string | null;
   expiresAt: Date | null;
+  fromEnv: boolean;
 };
 
 const unlicensedLicense: LicenseSummary = {
@@ -47,6 +48,7 @@ const unlicensedLicense: LicenseSummary = {
   freeSeatLimit: 10,
   licensee: null,
   expiresAt: null,
+  fromEnv: false,
 };
 
 function createDeferred<T>() {
@@ -88,6 +90,7 @@ const {
         freeSeatLimit: 10,
         licensee: null,
         expiresAt: null,
+        fromEnv: false,
       } as LicenseSummary,
     },
   },
@@ -648,6 +651,7 @@ describe('UsersSettings', () => {
         freeSeatLimit: 10,
         licensee: 'Acme Corp',
         expiresAt: null,
+        fromEnv: false,
       },
     };
 
@@ -666,5 +670,41 @@ describe('UsersSettings', () => {
       });
     });
     expect(toast.success).toHaveBeenCalledWith('License key removed.');
+  });
+
+  it('hides the license key form when the key is provided by R_LICENSE_KEY', async () => {
+    mockSettingsState.current = {
+      ...mockSettingsState.current,
+      license: {
+        status: 'valid',
+        seatLimit: 50,
+        seatsUsed: 4,
+        freeSeatLimit: 10,
+        licensee: 'Acme Corp',
+        expiresAt: null,
+        fromEnv: true,
+      },
+    };
+
+    renderUsersSettings();
+
+    expect(await screen.findByText('Licensed')).toBeInTheDocument();
+    expect(
+      screen.getByText((_content, element) => {
+        return (
+          element?.tagName === 'P' &&
+          (element.textContent ?? '').includes(
+            'License key is provided by the R_LICENSE_KEY environment variable',
+          )
+        );
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('License key')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Save key' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Remove key' }),
+    ).not.toBeInTheDocument();
   });
 });
