@@ -38,11 +38,12 @@
 # - Zero required deploy-time inputs. Modal tokens and model provider keys
 #   are entered in the /setup wizard after first boot and stored encrypted
 #   in Postgres. Auth keypairs come from R_AUTO_GENERATE_KEYS=true.
-#   The one optional deploy-time prompt is R_APP_URL on api (see the
-#   annotation on that variable): deployers who already own a domain
-#   override the pre-filled default with https://<their-domain> before the
-#   first deploy instead of editing the variable after hitting 403
-#   "Invalid origin" errors.
+#   The optional deploy-time prompts are R_APP_URL on api (see the annotation
+#   on that variable), for deployers who already own a domain, and
+#   R_LICENSE_KEY, for operators provisioning a paid-seat license. Override
+#   the pre-filled R_APP_URL default with https://<their-domain> before the
+#   first deploy instead of editing the variable after hitting 403 "Invalid
+#   origin" errors.
 # - The api service must be publicly reachable: hosted sandboxes workers and
 #   GitHub webhooks call `TRPC_URL` directly.
 # - Both published images are public on GHCR: Railway pulls roomote-app and
@@ -132,6 +133,8 @@ services:
       ENCRYPTION_KEY: ${{secret(32)}}
       # Transport secret between BullMQ Discord Gateway and API.
       R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
+      # Optional paid-seat license key; takes precedence over Settings > Users.
+      R_LICENSE_KEY: ''
       R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -155,8 +158,8 @@ services:
       EXCLUDED_COMPUTE_PROVIDERS: docker
       DATABASE_URL: ${{Postgres.DATABASE_URL}}
       REDIS_URL: ${{Redis.REDIS_URL}}
-      # The single canonical-origin knob, and the template's one (optional)
-      # deploy-time prompt. In the Template Composer, give this variable the
+      # The single canonical-origin knob and one of the template's optional
+      # deploy-time prompts. In the Template Composer, give this variable the
       # description below so Railway surfaces it on the deploy screen with
       # the reference default pre-filled. Leaving the default keeps the
       # Railway-generated domain; overriding it with https://<domain> sets a
@@ -188,6 +191,7 @@ services:
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
       R_DISCORD_GATEWAY_SECRET: ${{api.R_DISCORD_GATEWAY_SECRET}}
+      R_LICENSE_KEY: ${{api.R_LICENSE_KEY}}
       R_DISCORD_BOT_TOKEN: ${{api.R_DISCORD_BOT_TOKEN}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
