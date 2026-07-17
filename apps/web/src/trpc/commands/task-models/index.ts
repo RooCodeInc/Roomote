@@ -43,6 +43,7 @@ import type {
 import {
   getDeploymentRuntimeModelConfig,
   getDeploymentTaskModelSettings,
+  getPersistedDeploymentTaskModelSettings,
 } from '@/lib/server/task-models';
 import {
   getPersistedEnvironmentVariableValues,
@@ -336,11 +337,13 @@ export async function getTaskModelSettingsCommand(
 
   const [
     settings,
+    persistedSettings,
     persistedRuntimeModelConfig,
     persistedEnvVarNames,
     chatgptConnected,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
+    getPersistedDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
@@ -348,13 +351,24 @@ export async function getTaskModelSettingsCommand(
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
   // disabled until an operator enables them.
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+  });
+  // `getTaskModelCatalog` falls back to the OpenRouter recommendation set on
+  // a new deployment. Scope that implicit catalog to connected providers, but
+  // preserve explicit model choices so an operator can reconnect their provider
+  // instead of losing an existing configuration.
   const catalog = appendRecommendedTaskModels({
-    models: getTaskModelCatalog(settings),
-    connectedProviderIds: collectConnectedTaskModelProviderIds({
-      runtimeEnv: process.env,
-      persistedEnvVarNames,
-      chatgptConnected,
-    }),
+    models: persistedSettings
+      ? getTaskModelCatalog(settings)
+      : getTaskModelCatalog(settings).filter((model) => {
+          const providerId = getTaskModelProviderId(model.id);
+
+          return providerId !== null && connectedProviderIds.has(providerId);
+        }),
+    connectedProviderIds,
   });
 
   return {

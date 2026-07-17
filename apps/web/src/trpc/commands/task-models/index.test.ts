@@ -87,6 +87,7 @@ const PROVIDER_ENV_VAR_NAMES = [
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_REGION',
   'GEMINI_API_KEY',
+  'OLLAMA_BASE_URL',
   'R_MODEL',
 ] as const;
 
@@ -1466,6 +1467,16 @@ describe('task model provider commands', () => {
     expect(result.models.some((model) => model.id.startsWith('google/'))).toBe(
       false,
     );
+  });
+
+  it('does not expose the implicit OpenRouter catalog when only Ollama is connected', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OLLAMA_BASE_URL',
+    ]);
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+
+    expect(result.models).toEqual([]);
   });
 
   it('preselects the saved provider choice and reports saved API keys', async () => {

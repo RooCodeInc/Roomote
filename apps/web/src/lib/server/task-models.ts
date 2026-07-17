@@ -4,7 +4,9 @@ import {
   getTaskModelDisplayName,
   normalizeDeploymentModelConfig,
   normalizeTaskModelSettings,
+  taskModelSettingsSchema,
 } from '@roomote/types';
+import type { TaskModelSettings } from '@roomote/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
@@ -17,6 +19,26 @@ export async function getDeploymentTaskModelSettings() {
   });
 
   return normalizeTaskModelSettings(deployment?.taskModelSettings);
+}
+
+/**
+ * Returns model settings only when an operator has actually persisted a
+ * valid catalog. Callers that need to distinguish the implicit default
+ * OpenRouter catalog from saved choices should use this instead of the
+ * normalized fallback above.
+ */
+export async function getPersistedDeploymentTaskModelSettings(): Promise<TaskModelSettings | null> {
+  const deployment = await db.query.deploymentSettings.findFirst({
+    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
+    columns: {
+      taskModelSettings: true,
+    },
+  });
+  const parsed = taskModelSettingsSchema.safeParse(
+    deployment?.taskModelSettings,
+  );
+
+  return parsed.success ? parsed.data : null;
 }
 
 export async function getDeploymentRuntimeModelConfig(): Promise<DeploymentModelConfig> {
