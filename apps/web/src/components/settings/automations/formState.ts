@@ -1,4 +1,5 @@
 import {
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST,
   type ChannelAutoStartLaunchMode,
   type ConflictResolverMaxPrAgeDays,
@@ -44,6 +45,22 @@ type ScheduleOnlyAutomationFrequencyState = Pick<
   ScheduleOnlyBackgroundAutomationFrequencyField
 >;
 
+type DestinationChannelFormFields = {
+  [K in
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField']]: string;
+};
+
+const DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.automationId,
+    [descriptor.slackField, descriptor.discordField],
+  ]),
+) as Record<
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationId'],
+  Array<keyof FormState>
+>;
+
 export type FormState = {
   reviewerEnabled: boolean;
   reviewerEnvironmentScope: ReviewerEnvironmentScope;
@@ -63,37 +80,18 @@ export type FormState = {
   channelAutoStartSlackChannels: ChannelAutoStartFormRow[];
   managerSlackChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
-  managerStatsSlackChannel: string;
-  managerStatsDiscordChannel: string;
   sentryTriageFrequency: SentryTriageFrequency;
-  sentryTriageSlackChannel: string;
-  sentryTriageDiscordChannel: string;
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
-  dependabotTriageSlackChannel: string;
-  dependabotTriageDiscordChannel: string;
   codeqlTriageFrequency: CodeqlTriageFrequency;
-  codeqlTriageSlackChannel: string;
-  codeqlTriageDiscordChannel: string;
   suggesterFrequency: SuggesterFrequency;
-  suggesterSlackChannel: string;
-  suggesterDiscordChannel: string;
   suggesterInstructions: string;
   suggesterRoutingMode: SuggesterRoutingMode;
   suggesterRoutingInstructions: string;
   announcerFrequency: AnnouncerFrequency;
-  announcerSlackChannel: string;
-  announcerDiscordChannel: string;
   announcerInstructions: string;
-  platformIssueSlackChannel: string;
-  platformIssueDiscordChannel: string;
-  securityAuditorSlackChannel: string;
-  securityAuditorDiscordChannel: string;
-  codeQualityAuditorSlackChannel: string;
-  codeQualityAuditorDiscordChannel: string;
-  ciFailureTriageSlackChannel: string;
-  ciFailureTriageDiscordChannel: string;
-} & ScheduleOnlyAutomationFormFields;
+} & DestinationChannelFormFields &
+  ScheduleOnlyAutomationFormFields;
 
 export type AutomationId =
   | 'channelAutoStart'
@@ -138,33 +136,28 @@ const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = ['managerSlackChannel'];
 
 const MANAGER_STATS_FIELDS: Array<keyof FormState> = [
   'managerStatsFrequency',
-  'managerStatsSlackChannel',
-  'managerStatsDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.managerStats,
 ];
 
 const SENTRY_TRIAGE_FIELDS: Array<keyof FormState> = [
   'sentryTriageFrequency',
-  'sentryTriageSlackChannel',
-  'sentryTriageDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.sentryTriage,
   'sentryTriageProjectSlugs',
 ];
 
 const DEPENDABOT_TRIAGE_FIELDS: Array<keyof FormState> = [
   'dependabotTriageFrequency',
-  'dependabotTriageSlackChannel',
-  'dependabotTriageDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.dependabotTriage,
 ];
 
 const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
   'codeqlTriageFrequency',
-  'codeqlTriageSlackChannel',
-  'codeqlTriageDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.codeqlTriage,
 ];
 
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
-  'suggesterSlackChannel',
-  'suggesterDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.suggester,
   'suggesterInstructions',
   'suggesterRoutingMode',
   'suggesterRoutingInstructions',
@@ -172,29 +165,21 @@ const SUGGESTER_FIELDS: Array<keyof FormState> = [
 
 const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerFrequency',
-  'announcerSlackChannel',
-  'announcerDiscordChannel',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.announcer,
   'announcerInstructions',
 ];
 
-const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
-  'platformIssueSlackChannel',
-  'platformIssueDiscordChannel',
-];
+const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> =
+  DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts;
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
     automation.id,
     [
       automation.frequencyField,
-      ...(automation.id === 'securityAuditor'
-        ? ['securityAuditorSlackChannel', 'securityAuditorDiscordChannel']
-        : automation.id === 'codeQualityAuditor'
-          ? [
-              'codeQualityAuditorSlackChannel',
-              'codeQualityAuditorDiscordChannel',
-            ]
-          : ['ciFailureTriageSlackChannel', 'ciFailureTriageDiscordChannel']),
+      ...(DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID[
+        automation.id as keyof typeof DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID
+      ] ?? []),
     ],
   ]),
 ) as Record<ScheduleOnlyBackgroundAutomationId, Array<keyof FormState>>;
@@ -269,6 +254,22 @@ function buildScheduleOnlyAutomationSaveInput(
   ) as ScheduleOnlyAutomationFrequencyState;
 }
 
+function buildDestinationChannelSaveInput(formState: FormState) {
+  return Object.fromEntries(
+    AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => [
+      [descriptor.slackField, formState[descriptor.slackField].trim() || null],
+      [
+        descriptor.discordField,
+        formState[descriptor.discordField].trim() || null,
+      ],
+    ]),
+  ) as Record<
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField']
+    | (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'],
+    string | null
+  >;
+}
+
 export function buildAutomationSettingsSaveInput(
   formState: FormState,
   savedState: FormState,
@@ -310,55 +311,20 @@ export function buildAutomationSettingsSaveInput(
       })),
     managerSlackChannel: stateToSave.managerSlackChannel.trim() || null,
     managerStatsFrequency: stateToSave.managerStatsFrequency,
-    managerStatsSlackChannel:
-      stateToSave.managerStatsSlackChannel.trim() || null,
-    managerStatsDiscordChannel:
-      stateToSave.managerStatsDiscordChannel.trim() || null,
     sentryTriageFrequency: stateToSave.sentryTriageFrequency,
-    sentryTriageSlackChannel:
-      stateToSave.sentryTriageSlackChannel.trim() || null,
-    sentryTriageDiscordChannel:
-      stateToSave.sentryTriageDiscordChannel.trim() || null,
     sentryTriageProjectSlugs:
       stateToSave.sentryTriageProjectSlugs.trim() || null,
     dependabotTriageFrequency: stateToSave.dependabotTriageFrequency,
-    dependabotTriageSlackChannel:
-      stateToSave.dependabotTriageSlackChannel.trim() || null,
-    dependabotTriageDiscordChannel:
-      stateToSave.dependabotTriageDiscordChannel.trim() || null,
     codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
-    codeqlTriageSlackChannel:
-      stateToSave.codeqlTriageSlackChannel.trim() || null,
-    codeqlTriageDiscordChannel:
-      stateToSave.codeqlTriageDiscordChannel.trim() || null,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
-    suggesterSlackChannel: stateToSave.suggesterSlackChannel.trim() || null,
-    suggesterDiscordChannel: stateToSave.suggesterDiscordChannel.trim() || null,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,
     suggesterRoutingMode: stateToSave.suggesterRoutingMode,
     suggesterRoutingInstructions:
       stateToSave.suggesterRoutingInstructions.trim() || null,
     announcerFrequency: stateToSave.announcerFrequency,
-    announcerSlackChannel: stateToSave.announcerSlackChannel.trim() || null,
-    announcerDiscordChannel: stateToSave.announcerDiscordChannel.trim() || null,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
-    platformIssueSlackChannel:
-      stateToSave.platformIssueSlackChannel.trim() || null,
-    platformIssueDiscordChannel:
-      stateToSave.platformIssueDiscordChannel.trim() || null,
-    securityAuditorSlackChannel:
-      stateToSave.securityAuditorSlackChannel.trim() || null,
-    securityAuditorDiscordChannel:
-      stateToSave.securityAuditorDiscordChannel.trim() || null,
-    codeQualityAuditorSlackChannel:
-      stateToSave.codeQualityAuditorSlackChannel.trim() || null,
-    codeQualityAuditorDiscordChannel:
-      stateToSave.codeQualityAuditorDiscordChannel.trim() || null,
-    ciFailureTriageSlackChannel:
-      stateToSave.ciFailureTriageSlackChannel.trim() || null,
-    ciFailureTriageDiscordChannel:
-      stateToSave.ciFailureTriageDiscordChannel.trim() || null,
+    ...buildDestinationChannelSaveInput(stateToSave),
   };
 }
 

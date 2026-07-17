@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FeatureFlag } from '@roomote/feature-flags';
 import {
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   type BackgroundAutomationKey,
   type CommunicationProvider,
   communicationProviders,
@@ -178,76 +179,38 @@ type SlackChannelAccessWarnings = {
 };
 
 type AutomationSlackDestinationField =
-  | 'managerStatsSlackChannel'
-  | 'sentryTriageSlackChannel'
-  | 'dependabotTriageSlackChannel'
-  | 'codeqlTriageSlackChannel'
-  | 'securityAuditorSlackChannel'
-  | 'codeQualityAuditorSlackChannel'
-  | 'ciFailureTriageSlackChannel'
-  | 'suggesterSlackChannel'
-  | 'announcerSlackChannel'
-  | 'platformIssueSlackChannel';
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField'];
 
-const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
-  managerStatsSlackChannel: 'manager_stats',
-  sentryTriageSlackChannel: 'sentry_triage',
-  dependabotTriageSlackChannel: 'dependabot_triage',
-  codeqlTriageSlackChannel: 'codeql_triage',
-  securityAuditorSlackChannel: 'security_auditor',
-  codeQualityAuditorSlackChannel: 'code_quality_auditor',
-  ciFailureTriageSlackChannel: 'ci_failure_triage',
-  suggesterSlackChannel: 'suggester',
-  announcerSlackChannel: 'announcer',
-  platformIssueSlackChannel: 'platform_issue_alerts',
-} as const satisfies Record<
-  AutomationSlackDestinationField,
-  BackgroundAutomationKey
->;
+const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.automationKey,
+  ]),
+) as {
+  [K in AutomationSlackDestinationField]: Extract<
+    BackgroundAutomationKey,
+    (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationKey']
+  >;
+};
 
-const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = {
-  managerStatsSlackChannel: 'managerStats',
-  sentryTriageSlackChannel: 'sentryTriage',
-  dependabotTriageSlackChannel: 'dependabotTriage',
-  codeqlTriageSlackChannel: 'codeqlTriage',
-  securityAuditorSlackChannel: 'securityAuditor',
-  codeQualityAuditorSlackChannel: 'codeQualityAuditor',
-  ciFailureTriageSlackChannel: 'ciFailureTriage',
-  suggesterSlackChannel: 'suggester',
-  announcerSlackChannel: 'announcer',
-  platformIssueSlackChannel: 'platformIssueAlerts',
-} as const satisfies Record<AutomationSlackDestinationField, AutomationId>;
+const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.automationId,
+  ]),
+) as Record<AutomationSlackDestinationField, AutomationId>;
 
 type AutomationDiscordDestinationField =
-  | 'managerStatsDiscordChannel'
-  | 'sentryTriageDiscordChannel'
-  | 'dependabotTriageDiscordChannel'
-  | 'codeqlTriageDiscordChannel'
-  | 'securityAuditorDiscordChannel'
-  | 'codeQualityAuditorDiscordChannel'
-  | 'ciFailureTriageDiscordChannel'
-  | 'suggesterDiscordChannel'
-  | 'announcerDiscordChannel'
-  | 'platformIssueDiscordChannel';
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'];
 
 // The form field holding the same automation's Discord destination; the
 // destination picker is one-of, so selecting one provider clears the other.
-const SLACK_TO_DISCORD_DESTINATION_FIELDS = {
-  managerStatsSlackChannel: 'managerStatsDiscordChannel',
-  sentryTriageSlackChannel: 'sentryTriageDiscordChannel',
-  dependabotTriageSlackChannel: 'dependabotTriageDiscordChannel',
-  codeqlTriageSlackChannel: 'codeqlTriageDiscordChannel',
-  securityAuditorSlackChannel: 'securityAuditorDiscordChannel',
-  codeQualityAuditorSlackChannel: 'codeQualityAuditorDiscordChannel',
-  ciFailureTriageSlackChannel: 'ciFailureTriageDiscordChannel',
-  suggesterSlackChannel: 'suggesterDiscordChannel',
-  announcerSlackChannel: 'announcerDiscordChannel',
-  platformIssueSlackChannel: 'platformIssueDiscordChannel',
-} as const satisfies Record<
-  AutomationSlackDestinationField,
-  AutomationDiscordDestinationField
->;
-
+const SLACK_TO_DISCORD_DESTINATION_FIELDS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.discordField,
+  ]),
+) as Record<AutomationSlackDestinationField, AutomationDiscordDestinationField>;
 /**
  * Discord options share the Slack destination combobox, so their option ids
  * are prefixed to distinguish them from (unprefixed) Slack channel ids.
