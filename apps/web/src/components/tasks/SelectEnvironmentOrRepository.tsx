@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import {
   Settings,
@@ -69,6 +69,10 @@ export const SelectEnvironmentOrRepository = ({
   const { setWorkspace } = useWorkspaceStorage();
   const [hasAppliedDefaultWorkspace, setHasAppliedDefaultWorkspace] =
     useState(false);
+  // Tracks menu choices only so programmatic form resets (e.g. Home workspace
+  // restoration writing Auto after this selector defaults the sole env) can
+  // re-apply the sole-environment default.
+  const hasUserSelectedWorkspaceRef = useRef(false);
 
   const environments = useEnvironments();
   const repositories = useRepositories();
@@ -103,11 +107,19 @@ export const SelectEnvironmentOrRepository = ({
   );
 
   useEffect(() => {
-    if (hasAppliedDefaultWorkspace) {
+    if (environments.isPending || !environments.isSuccess) {
       return;
     }
 
-    if (environments.isPending || !environments.isSuccess) {
+    const canRetrySoleDefaultAfterReset =
+      hasAppliedDefaultWorkspace &&
+      !hasUserSelectedWorkspaceRef.current &&
+      allowAuto &&
+      !environmentId &&
+      (!repository || repository === AUTO_WORKSPACE_VALUE) &&
+      sortedEnvironments.length === 1;
+
+    if (hasAppliedDefaultWorkspace && !canRetrySoleDefaultAfterReset) {
       return;
     }
 
@@ -284,6 +296,8 @@ export const SelectEnvironmentOrRepository = ({
         onCreate();
         return;
       }
+
+      hasUserSelectedWorkspaceRef.current = true;
 
       if (value.startsWith(ENV_PREFIX)) {
         const environmentId = value.slice(ENV_PREFIX.length);

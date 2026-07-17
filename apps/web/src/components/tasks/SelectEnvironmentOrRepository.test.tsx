@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -255,6 +255,81 @@ describe('SelectEnvironmentOrRepository', () => {
     });
     expect(setWorkspace).toHaveBeenCalledWith({
       workspace: { type: 'environment', id: 'env_123' },
+    });
+  });
+
+  it('re-defaults to the sole environment after a programmatic reset backs out to Auto', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+    let setFormValues:
+      | ((values: Partial<CreateTaskFormValues>) => void)
+      | undefined;
+
+    const FormControlHarness = ({
+      onValuesChange,
+    }: {
+      onValuesChange: (values: WorkspaceSelectionValues) => void;
+    }) => {
+      const form = useForm<CreateTaskFormValues>({
+        defaultValues: {
+          ...DEFAULT_VALUES,
+          repository: AUTO_WORKSPACE_VALUE,
+        },
+      });
+
+      setFormValues = (values) => {
+        if (values.repository !== undefined) {
+          form.setValue('repository', values.repository);
+        }
+        if (values.environmentId !== undefined) {
+          form.setValue('environmentId', values.environmentId);
+        }
+        if (values.branch !== undefined) {
+          form.setValue('branch', values.branch);
+        }
+        if (
+          values.environmentId === undefined &&
+          Object.prototype.hasOwnProperty.call(values, 'environmentId')
+        ) {
+          form.setValue('environmentId', undefined);
+        }
+      };
+
+      return (
+        <FormProvider {...form}>
+          <WorkspaceValuesProbe onChange={onValuesChange} />
+          <SelectEnvironmentOrRepository
+            allowAuto
+            onCreate={vi.fn()}
+            onEdit={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </FormProvider>
+      );
+    };
+
+    render(
+      <FormControlHarness
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_123');
+    });
+
+    act(() => {
+      setFormValues?.({
+        repository: AUTO_WORKSPACE_VALUE,
+        environmentId: undefined,
+        branch: '',
+      });
+    });
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_123');
+      expect(latestValues?.repository).toBe('env_123');
     });
   });
 
