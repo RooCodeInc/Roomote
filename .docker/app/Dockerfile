@@ -283,7 +283,7 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/roomote/.docker/app/entrypoint.sh"]
 # control-plane calls) starts a managed OpenCode SDK server in-process.
 FROM runtime-base AS runtime-inference-base
 
-ARG OPENCODE_CLI_VERSION=1.17.8
+ARG OPENCODE_CLI_VERSION=1.17.18
 
 # The install and version check run as root; with the image's HOME=/tmp they
 # would bake root-owned dotdirs (npm cache, OpenCode's data/config/cache

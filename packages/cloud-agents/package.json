@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.25",
-    "@opencode-ai/sdk": "1.17.8",
+    "@opencode-ai/sdk": "1.17.18",
     "@roomote/auth": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",
