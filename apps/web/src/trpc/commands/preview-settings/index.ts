@@ -17,7 +17,6 @@ import {
   appendEnvironmentDefinitionGuidance,
   buildExamplePreviewHostname,
   deriveRoomotePreviewDomain,
-  ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
   ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
   hasConfiguredPreviewPorts,
   INTERNAL_PORTS,
@@ -30,7 +29,10 @@ import {
   type RunStatus,
 } from '@roomote/types';
 
-import { buildUpdateEnvironmentDefinitionPrompt } from '@/lib/environment-definition';
+import {
+  buildEnvironmentPreviewRepairPrompt,
+  buildUpdateEnvironmentDefinitionPrompt,
+} from '@/lib/environment-definition';
 
 import { getActiveEnvironmentAgentTask } from '../environments';
 import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
@@ -584,18 +586,29 @@ export async function startPreviewSetupTaskCommand(
     (repository) => repository.repository,
   );
 
-  const prompt = appendEnvironmentDefinitionGuidance(
-    buildUpdateEnvironmentDefinitionPrompt({
-      environmentId: environment.id,
-      environmentName: environment.name,
-      repositoryFullNames,
-      config: environment.config,
-    }),
+  // Repair mode deliberately skips the $environment-setup skill: that
+  // workflow prohibits application source changes, and broken previews often
+  // need exactly those (framing headers, CORS, allowed hosts). The repair
+  // prompt is a standalone coding-task brief that can fix env config through
+  // the manage_environments MCP action, fix app code via a PR, and verify
+  // through the public preview origin.
+  const prompt =
     mode === 'repair'
-      ? ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST
-      : ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
-    'Requested changes from the user:',
-  );
+      ? buildEnvironmentPreviewRepairPrompt({
+          environmentId: environment.id,
+          environmentName: environment.name,
+          config: environment.config,
+        })
+      : appendEnvironmentDefinitionGuidance(
+          buildUpdateEnvironmentDefinitionPrompt({
+            environmentId: environment.id,
+            environmentName: environment.name,
+            repositoryFullNames,
+            config: environment.config,
+          }),
+          ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
+          'Requested changes from the user:',
+        );
 
   return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
     const activeTask = await getActiveEnvironmentAgentTask(tx, environment.id);

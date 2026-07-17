@@ -95,13 +95,6 @@ When you have a clear outcome, record it by calling the ${PRODUCT_NAME} MCP tool
  */
 export const ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST = `Get live previews working for this environment. You are running inside the environment, so its commands and services have already started. Identify the human-facing web UI surface(s), validate that each one serves HTTP on localhost, and add a matching top-level \`ports\` entry for each: short uppercase \`name\`, the validated port, \`initial_path\` when a specific landing path is better than \`/\`, and \`primary: true\` on the main surface. If the config contains \`previews_enabled: false\`, remove it; that flag is deprecated and ignored. Keep every other environment setting unchanged unless it blocks the app from starting.`;
 
-/**
- * Canned change request for the preview pane's "preview not working" help
- * flow: the environment already publishes a preview URL, but the app does not
- * load or behave correctly behind the preview proxy.
- */
-export const ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST = `Live previews are configured for this environment, but the user reports the preview does not load or work correctly. You are running inside the environment, so its commands and services have already started. Validate each configured port's surface on localhost and diagnose why it would fail behind the preview proxy. Check the common causes: dev servers that reject unknown hosts (allowed-hosts or host-header checks) or listen only on a loopback interface, hardcoded localhost or 127.0.0.1 origins in client code or API calls (the sandbox exposes the public preview origin for each port as \`ROOMOTE_<PORT_NAME>_HOST\`), CORS failures on cross-origin API requests, response headers that block framing (\`X-Frame-Options\`, \`Content-Security-Policy\` \`frame-ancestors\`), and websocket or HMR endpoints that bypass the proxy. Fix what can be fixed through the environment definition: commands, env vars, port settings, services, and docker projects. If the fix requires application source-code changes (for example framing or CORS headers set by the app, or an allowed-hosts list checked into the repo), do not modify application code in this task; report exactly which files need which changes as the blocker outcome so the user can apply them in a normal coding task. Keep every other environment setting unchanged.`;
-
 export function appendEnvironmentDefinitionGuidance(
   prompt: string,
   guidance: string | null | undefined,

@@ -7,7 +7,6 @@ import {
   eq,
 } from '@roomote/db/server';
 import {
-  ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
   ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
   RunStatus,
 } from '@roomote/types';
@@ -300,8 +299,16 @@ describe('startPreviewSetupTaskCommand', () => {
     };
     expect(enqueueInput.title).toMatch(/^Fix live previews: /);
     expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
+    // Repair prompts are standalone coding-task briefs, not $environment-setup
+    // skill invocations: the skill prohibits application source changes.
+    expect(
+      enqueueInput.task.payload.description.startsWith('$environment-setup'),
+    ).toBe(false);
     expect(enqueueInput.task.payload.description).toContain(
-      ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
+      'behind the preview proxy',
+    );
+    expect(enqueueInput.task.payload.description).toContain(
+      'manage_environments',
     );
   });
 
