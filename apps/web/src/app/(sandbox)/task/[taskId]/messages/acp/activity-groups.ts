@@ -6,6 +6,7 @@ import type {
   AcpUiMessage,
 } from './types';
 import type { AcpRenderBlock } from './render-blocks';
+import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
 const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
@@ -19,6 +20,7 @@ const COLLAPSIBLE_ACP_MESSAGE_KIND_SET = new Set<string>(
 );
 
 const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
+const SHOW_WIDGET_TOOL_NAME = 'show_widget';
 
 export interface AcpActivityGroupRenderBlock {
   kind: 'activity_group';
@@ -74,7 +76,16 @@ function isArtifactToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
   artifacts: readonly TaskArtifact[] | null | undefined,
 ): boolean {
-  if (getToolName(msg) === MANAGE_ARTIFACTS_TOOL_NAME) {
+  const toolName = getToolName(msg);
+
+  if (
+    toolName === MANAGE_ARTIFACTS_TOOL_NAME ||
+    toolName === SHOW_WIDGET_TOOL_NAME
+  ) {
+    return true;
+  }
+
+  if (resolveShowWidgetForToolMessage(msg) !== null) {
     return true;
   }
 

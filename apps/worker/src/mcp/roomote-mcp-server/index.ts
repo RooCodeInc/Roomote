@@ -41,6 +41,7 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
+import { handleShowWidget } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import {
   type ChatReplyPurpose,
@@ -112,6 +113,56 @@ roomoteMcpServer.registerTool(
         };
     }
   },
+);
+
+roomoteMcpServer.registerTool(
+  'show_widget',
+  {
+    title: 'Show Widget',
+    description:
+      'Render a presentational HTML widget in the Roomote task transcript. ' +
+      'Use this to show tables, status cards, annotated plans, mock UI, or other HTML the user should look at. ' +
+      'HTML is displayed in a sandboxed iframe with scripts disabled; Roomote injects default styles when css is omitted. ' +
+      'This is display-only — use request_user_input when you need answers. ' +
+      'Optional textFallback is used on surfaces that cannot render HTML (for example Slack).',
+    inputSchema: {
+      html: z
+        .string()
+        .min(1)
+        .describe(
+          'HTML fragment or full document to display. Scripts and nested browsing contexts are stripped.',
+        ),
+      title: z
+        .string()
+        .optional()
+        .describe('Optional short title shown above the widget card'),
+      css: z
+        .string()
+        .optional()
+        .describe(
+          'Optional extra CSS injected into the widget document after Roomote defaults',
+        ),
+      height: z
+        .number()
+        .optional()
+        .describe(
+          'Optional widget iframe height in pixels (clamped to a safe range; default 320)',
+        ),
+      textFallback: z
+        .string()
+        .optional()
+        .describe(
+          'Optional plain-text fallback for non-web surfaces such as Slack',
+        ),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => handleShowWidget(params),
 );
 
 roomoteMcpServer.registerTool(

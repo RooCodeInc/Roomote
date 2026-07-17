@@ -196,6 +196,20 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('registers show_widget for presentational HTML in the task transcript', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'show_widget');
+
+    expect(tool.config.description).toContain(
+      'Render a presentational HTML widget in the Roomote task transcript.',
+    );
+    expect(tool.config.description).toContain('request_user_input');
+    expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
+    expect(getInputSchemaField(tool, 'textFallback').description).toContain(
+      'Slack',
+    );
+  });
+
   it('documents manual visual-proof posting when Slack auto-post is disabled', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_SLACK_CHANNEL: 'C123',
