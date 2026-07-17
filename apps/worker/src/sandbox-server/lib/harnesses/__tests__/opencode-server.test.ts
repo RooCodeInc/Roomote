@@ -1852,7 +1852,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('clears queued prompts instead of draining them after a terminal session error', async () => {
+  it('immediately aborts and clears queued prompts for explicit non-retryable provider errors', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
 
@@ -1890,7 +1890,14 @@ describe('OpenCodeServerHarness', () => {
         type: 'session.error',
         properties: {
           sessionID: 'ses_1',
-          error: { message: 'boom' },
+          error: {
+            name: 'APIError',
+            data: {
+              message: 'The selected model is not available in your region.',
+              statusCode: 403,
+              isRetryable: false,
+            },
+          },
         },
       });
 
@@ -1901,6 +1908,161 @@ describe('OpenCodeServerHarness', () => {
       ).toBe(true);
       expect(harness.getQueuedMessages()).toEqual([]);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('retries a cyber policy refusal with safer framing without aborting the task', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Review the change.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Queued follow-up.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'UnknownError',
+            data: {
+              message: JSON.stringify({
+                type: 'error',
+                error: {
+                  type: 'invalid_request',
+                  code: 'cyber_policy',
+                  message:
+                    'This content was flagged for possible cybersecurity risk.',
+                },
+              }),
+            },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      const retryPrompt = client.promptAsync.mock.calls[1]?.[0] as
+        | {
+            request?: {
+              parts?: Array<{ type?: string; text?: string }>;
+            };
+          }
+        | undefined;
+      const retryPromptText = (retryPrompt?.request?.parts ?? [])
+        .map((part) => part.text)
+        .filter((text): text is string => typeof text === 'string')
+        .join('\n');
+
+      expect(retryPromptText).toContain('Continue the legitimate task');
+      expect(retryPromptText).toContain('Do not attempt to bypass the policy');
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'Provider safety refusal; automatically retrying the turn',
+            ),
+        ),
+      ).toBe(true);
+      expect(
+        harness.getQueuedMessages().map((message) => message.text),
+      ).toEqual(['Queued follow-up.']);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('retries an unknown provider error once before aborting', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const providerError = {
+        name: 'UnknownError',
+        data: { message: 'Upstream connection closed unexpectedly.' },
+      };
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: providerError },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: providerError },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
     } finally {
       harness.dispose();
     }
