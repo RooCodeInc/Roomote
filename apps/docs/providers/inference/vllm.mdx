@@ -1,0 +1,76 @@
+---
+title: vLLM
+icon: server
+description: Serve OpenAI-compatible models on vLLM infrastructure for Roomote tasks.
+---
+
+vLLM exposes OpenAI-compatible APIs for models that you serve on your own GPU
+infrastructure. Use it when you need control over model hosting, capacity, and
+network placement while keeping the standard Roomote model workflow.
+
+## Configure vLLM
+
+In **Settings > Models**, add vLLM and provide its endpoint URL. If your vLLM
+server requires bearer authentication, also provide an API key. You can manage
+the same values as deployment environment variables:
+
+```sh
+VLLM_BASE_URL=https://vllm.example.com/v1
+VLLM_API_KEY=...
+```
+
+`VLLM_API_KEY` is optional only when the vLLM endpoint intentionally accepts
+unauthenticated traffic. The endpoint normally includes the `/v1` API path.
+After saving it, Roomote discovers the served models. Enable the models you want
+and use IDs in the `vllm/<served-model-name>` form.
+
+### vLLM server flags
+
+Set the served model name to the model ID you want Roomote to discover, and use
+vLLM's host, port, and API-key flags to match the endpoint configuration:
+
+```sh
+vllm serve <model> --host 0.0.0.0 --port 8000 --api-key "$VLLM_API_KEY" \
+  --served-model-name <served-model-name>
+```
+
+When vLLM is behind a reverse proxy, keep the `/v1` path available and point
+`VLLM_BASE_URL` at the proxy's OpenAI-compatible API URL.
+
+## Connectivity and security
+
+The vLLM endpoint must be reachable from the Roomote deployment. Place a
+same-host service behind a private network or connect remote infrastructure over
+TLS and a restricted ingress. A task sandbox does not need direct vLLM access:
+Roomote's inference gateway holds the deployment credential and proxies model
+requests.
+
+Require `VLLM_API_KEY` when the endpoint is reachable beyond a tightly
+controlled private network. Store the key in your deployment secret manager or
+as an encrypted Roomote deployment variable, never in a repository or task
+environment. Limit inbound access to Roomote and trusted operators; OpenAI-
+compatible inference endpoints are not safe to expose publicly without an
+authentication and network boundary.
+
+## Cost behavior
+
+vLLM can report token usage, but Roomote cannot calculate the cost of hardware
+you operate. Account separately for GPU instances, reserved capacity,
+electricity, storage, and idle time. Use task usage to understand demand and
+your infrastructure monitoring to set the cost per token or per task.
+
+## Verify setup
+
+1. confirm the vLLM server lists its served model at its `/v1/models` endpoint
+2. save `VLLM_BASE_URL` and, when required, `VLLM_API_KEY`
+3. confirm the model appears in **Settings > Models**
+4. enable it, select it for a model role, and start a small task
+
+## Common issues
+
+- **No models appear.** Confirm the endpoint includes `/v1` and that Roomote
+  can call the server's models endpoint.
+- **Requests return unauthorized.** Check `VLLM_API_KEY`, its bearer-token
+  configuration on vLLM, and any reverse-proxy authentication.
+- **Tasks are slow or queue.** Check GPU memory, batch and concurrency settings,
+  and capacity at the vLLM server.

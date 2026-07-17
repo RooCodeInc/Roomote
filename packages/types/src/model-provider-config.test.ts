@@ -229,6 +229,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'amazon-bedrock',
         'google',
         'xai',
+        'litellm',
+        'ollama',
+        'vllm',
         'chatgpt',
       ],
     );
@@ -236,6 +239,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
   it('keeps recommended-model slugs and default models under each provider prefix', () => {
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
+      if ('dynamicModels' in provider && provider.dynamicModels) {
+        expect(provider.defaultRoomoteModel).toBe('');
+        expect(provider.suggestedTaskModels).toEqual([]);
+        continue;
+      }
       // ChatGPT serves openai/ models; the Bedrock setup surface serves the
       // worker's custom bedrock-mantle/ OpenCode provider.
       const expectedPrefix =
@@ -262,6 +270,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       SETUP_MODEL_PROVIDER_CATALOG;
 
     for (const provider of providers) {
+      if (provider.dynamicModels) {
+        continue;
+      }
+
       const expectedPrefix =
         provider.id === 'chatgpt'
           ? 'openai/'

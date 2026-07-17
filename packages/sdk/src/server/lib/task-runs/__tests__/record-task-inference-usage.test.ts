@@ -196,6 +196,28 @@ describe('recordTaskInferenceUsage', () => {
     });
   });
 
+  it('accepts LiteLLM response costs', async () => {
+    await recordLlmUsage({
+      source: 'litellm',
+      usageType: 'inference',
+      eventKey: 'litellm-response-cost-1',
+      providerId: 'litellm',
+      modelId: 'gpt-4o',
+      costMicroUsd: 123,
+      costSource: 'litellm_gateway',
+    });
+
+    const [event] = await db
+      .select()
+      .from(llmUsageEvents)
+      .where(eq(llmUsageEvents.eventKey, 'litellm-response-cost-1'));
+
+    expect(event).toMatchObject({
+      costMicroUsd: 123,
+      costSource: 'litellm_gateway',
+    });
+  });
+
   it('upserts non-task usage by event key and keeps model rows separate', async () => {
     await recordLlmUsage({
       source: 'router',

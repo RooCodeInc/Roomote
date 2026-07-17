@@ -42,6 +42,9 @@ vi.mock('@/trpc/client', () => ({
       deleteProvider: {
         mutationOptions: () => ({ mutationKey: ['deleteProvider'] }),
       },
+      discoverProviderModels: {
+        mutationOptions: () => ({ mutationKey: ['discoverProviderModels'] }),
+      },
     },
     chatgptSubscription: {
       status: {
@@ -548,5 +551,95 @@ describe('InferenceProviderSection', () => {
       apiKey: 'bedrock-key',
       additionalEnvValues: { AWS_REGION: 'us-west-2' },
     });
+  });
+
+  it('closes the endpoint dialog after connecting', async () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'ollama',
+        label: 'Ollama',
+        envVarName: 'OLLAMA_BASE_URL',
+        envVarLabel: 'Endpoint URL',
+        defaultRoomoteModel: '',
+        authKind: 'endpoint',
+        suggestedTaskModels: [],
+        additionalEnvFields: [],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: false,
+        additionalEnvValues: {},
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+    mutateAsyncMock.mockResolvedValue({
+      addedRecommendedModelCount: 0,
+      addedDiscoveredModelCount: 1,
+      discoveryError: null,
+    });
+
+    renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+    fireEvent.change(screen.getByLabelText('Endpoint URL for Ollama'), {
+      target: { value: 'http://ollama.example' },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
+      provider: 'ollama',
+      apiKey: 'http://ollama.example',
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps endpoint credentials while provider metadata refreshes', () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'ollama',
+        label: 'Ollama',
+        envVarName: 'OLLAMA_BASE_URL',
+        envVarLabel: 'Endpoint URL',
+        defaultRoomoteModel: '',
+        authKind: 'endpoint',
+        suggestedTaskModels: [],
+        additionalEnvFields: [],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: false,
+        additionalEnvValues: {},
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+
+    const view = renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+    fireEvent.change(screen.getByLabelText('Endpoint URL for Ollama'), {
+      target: { value: 'http://127.0.0.1:11434' },
+    });
+
+    const refreshedProviderSetup = {
+      ...providerSetup,
+      providers: providerSetup.providers.map((provider) => ({ ...provider })),
+    };
+    const { connectedProviders, availableProviders } = splitInferenceProviders(
+      refreshedProviderSetup,
+    );
+
+    view.rerender(
+      <InferenceProviderSection
+        providerSetup={refreshedProviderSetup}
+        providerSetupPending={false}
+        connectedProviders={connectedProviders}
+        availableProviders={availableProviders}
+      />,
+    );
+
+    expect(screen.getByLabelText('Endpoint URL for Ollama')).toHaveValue(
+      'http://127.0.0.1:11434',
+    );
   });
 });

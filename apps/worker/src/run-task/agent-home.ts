@@ -68,6 +68,33 @@ export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
 
+const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
+  ollama: {
+    name: 'Ollama',
+    baseUrlEnvVarName: 'OLLAMA_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
+    apiKeyEnvVarName: undefined,
+    keyless: true,
+  },
+  vllm: {
+    name: 'vLLM',
+    baseUrlEnvVarName: 'VLLM_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:8000/v1',
+    apiKeyEnvVarName: 'VLLM_API_KEY',
+    keyless: false,
+  },
+  litellm: {
+    name: 'LiteLLM',
+    baseUrlEnvVarName: 'LITELLM_BASE_URL',
+    fallbackBaseUrl: 'http://127.0.0.1:4000/v1',
+    apiKeyEnvVarName: 'LITELLM_API_KEY',
+    keyless: false,
+  },
+} as const;
+
+type OpenAiCompatibleProviderId =
+  keyof typeof OPENAI_COMPATIBLE_PROVIDER_CONFIGS;
+
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
  * and `X-Title` request headers rather than the standard `User-Agent`.
@@ -644,6 +671,82 @@ function mergeBedrockMantleProviderConfig(
   };
 }
 
+function mergeOpenAiCompatibleProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  let merged = providerConfig;
+
+  for (const providerId of Object.keys(
+    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+  ) as OpenAiCompatibleProviderId[]) {
+    const provider = OPENAI_COMPATIBLE_PROVIDER_CONFIGS[providerId];
+    const prefix = `${providerId}/`;
+    const modelIdsForProvider = [
+      ...new Set(
+        modelIds.flatMap((modelId) => {
+          const normalized = modelId?.trim();
+
+          return normalized?.startsWith(prefix)
+            ? [normalized.slice(prefix.length)]
+            : [];
+        }),
+      ),
+    ];
+
+    if (modelIdsForProvider.length === 0) {
+      continue;
+    }
+
+    const existingProvider = asRecord(merged[providerId]);
+    const existingOptions = asRecord(existingProvider.options);
+    const existingModels = asRecord(existingProvider.models);
+    const directApiKey = provider.apiKeyEnvVarName
+      ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
+      : undefined;
+
+    merged = {
+      ...merged,
+      [providerId]: {
+        ...existingProvider,
+        npm: '@ai-sdk/openai-compatible',
+        name: provider.name,
+        options: {
+          ...existingOptions,
+          baseURL:
+            runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
+            (!provider.keyless ? runtimeEnv.OPENAI_BASE_URL?.trim() : '') ||
+            provider.fallbackBaseUrl,
+          // OpenAI-compatible clients require an API key even though Ollama
+          // itself accepts unauthenticated requests.
+          ...(directApiKey
+            ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
+            : provider.keyless
+              ? { apiKey: 'ollama' }
+              : runtimeEnv.OPENAI_API_KEY?.trim()
+                ? { apiKey: '{env:OPENAI_API_KEY}' }
+                : {}),
+        },
+        models: {
+          ...existingModels,
+          ...Object.fromEntries(
+            modelIdsForProvider.map((modelId) => [
+              modelId,
+              {
+                name: modelId,
+                ...asRecord(existingModels[modelId]),
+              },
+            ]),
+          ),
+        },
+      },
+    };
+  }
+
+  return merged;
+}
+
 /**
  * When the dequeue env carries an inference gateway URL, rebase each
  * gateway-covered provider that a selected model uses onto the gateway. The
@@ -654,6 +757,7 @@ function mergeBedrockMantleProviderConfig(
 function mergeInferenceGatewayProviderConfig(
   providerConfig: Record<string, unknown>,
   runtimeEnv: Record<string, string>,
+  modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
   const gatewayUrl = runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]?.trim();
   const servedKeyNames = parseInferenceGatewayKeys(
@@ -662,10 +766,7 @@ function mergeInferenceGatewayProviderConfig(
   const routeChatGptThroughGateway =
     runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
 
-  if (
-    !gatewayUrl ||
-    (servedKeyNames.length === 0 && !routeChatGptThroughGateway)
-  ) {
+  if (!gatewayUrl) {
     return providerConfig;
   }
 
@@ -716,6 +817,27 @@ function mergeInferenceGatewayProviderConfig(
         CHATGPT_OPENCODE_PROVIDER_ID,
         gatewayUrl,
         chatGptProvider,
+      );
+    }
+  }
+
+  // These providers are configured explicitly because OpenCode has no catalog
+  // entries for their arbitrary model IDs. Rebase only registered gateway
+  // providers: vLLM stays direct until the gateway declares its route.
+  for (const providerId of Object.keys(
+    OPENAI_COMPATIBLE_PROVIDER_CONFIGS,
+  ) as OpenAiCompatibleProviderId[]) {
+    const gatewayProvider = getInferenceGatewayProvider(providerId);
+
+    if (
+      gatewayProvider &&
+      modelIds.some((modelId) => modelId?.trim().startsWith(`${providerId}/`))
+    ) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        providerId,
+        gatewayUrl,
+        gatewayProvider,
       );
     }
   }
@@ -1292,14 +1414,19 @@ function resolveModelBackedOpenCodeConfig(
   ];
   const providerConfig = mergeInferenceGatewayProviderConfig(
     mergeBedrockMantleProviderConfig(
-      mergeOpenRouterVariantAliasModels(
-        providerReasoningConfig,
-        variantAliases,
+      mergeOpenAiCompatibleProviderConfig(
+        mergeOpenRouterVariantAliasModels(
+          providerReasoningConfig,
+          variantAliases,
+        ),
+        runtimeEnv,
+        configuredModelIds,
       ),
       runtimeEnv,
       configuredModelIds,
     ),
     runtimeEnv,
+    configuredModelIds,
   );
 
   return {

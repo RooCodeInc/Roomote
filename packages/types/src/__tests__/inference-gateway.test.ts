@@ -57,7 +57,9 @@ describe('inference gateway key lookups', () => {
   it('maps each covered env var name back to its provider', () => {
     for (const envVarName of INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES) {
       const provider = getInferenceGatewayProviderByEnvVarName(envVarName);
-      expect(provider?.envVarNames).toContain(envVarName);
+      expect(provider?.gatewayEnvVarNames ?? provider?.envVarNames).toContain(
+        envVarName,
+      );
       expect(isInferenceGatewayCoveredEnvVar(envVarName)).toBe(true);
     }
   });
@@ -77,6 +79,21 @@ describe('inference gateway key lookups', () => {
       isInferenceGatewayCoveredEnvVar('GOOGLE_APPLICATION_CREDENTIALS'),
     ).toBe(false);
     expect(isInferenceGatewayCoveredEnvVar('SOME_OTHER_KEY')).toBe(false);
+  });
+
+  it('registers local OpenAI-compatible endpoint providers', () => {
+    expect(getInferenceGatewayProvider('litellm')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
+      gatewayEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
+    });
+    expect(getInferenceGatewayProvider('ollama')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'OLLAMA_BASE_URL',
+      gatewayEnvVarNames: ['OLLAMA_BASE_URL'],
+    });
+    expect(getInferenceGatewayProvider('vllm')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'VLLM_BASE_URL',
+      gatewayEnvVarNames: ['VLLM_BASE_URL', 'VLLM_API_KEY'],
+    });
   });
 
   it('parses a comma-separated served-keys value', () => {

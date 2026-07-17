@@ -1,0 +1,74 @@
+---
+title: Ollama
+icon: cpu
+description: Use locally or privately served Ollama models with Roomote.
+---
+
+Ollama serves models on infrastructure you control. Use it for local
+development, private deployments, or workloads where you want to keep inference
+inside your own network.
+
+## Configure Ollama
+
+In **Settings > Models**, add Ollama and provide the endpoint URL. Ollama does
+not require an API key. You can also set the endpoint as a deployment variable:
+
+```sh
+OLLAMA_BASE_URL=http://ollama:11434
+```
+
+Use the Ollama service root, not its `/v1` path. The local default is
+`http://127.0.0.1:11434`; in a container deployment, use a hostname that
+Roomote can resolve, such as `http://ollama:11434`.
+
+After saving the provider, Roomote discovers available Ollama models. Enable the
+models you need and select them using `ollama/<model-name>`, for example
+`ollama/qwen3-coder`.
+
+## Connectivity and security
+
+The Ollama endpoint must be reachable from the Roomote deployment. It does not
+need to be exposed to every Roomote task sandbox. When Roomote and Ollama run in
+separate containers, `127.0.0.1` points to the Roomote container, not the
+Ollama container; use a shared network and service DNS instead.
+
+Ollama normally accepts unauthenticated requests. Keep it bound to loopback or
+a private network, and do not publish it directly to the internet. If traffic
+must leave a trusted network, place a TLS-terminating, authenticated proxy in
+front of Ollama and point Roomote at that private or protected endpoint.
+
+### Ollama listen address
+
+Ollama listens only where its `OLLAMA_HOST` setting permits. To make it
+reachable by another container on a private network, configure a listen address
+that accepts the network connection, for example:
+
+```sh
+OLLAMA_HOST=0.0.0.0:11434 ollama serve
+```
+
+Do not use a public bind address without a protected reverse proxy or equivalent
+network controls. Keep `OLLAMA_BASE_URL` pointed at the private service URL.
+
+## Cost behavior
+
+Ollama does not charge a per-token provider price for locally served models.
+Roomote can record model usage, but it cannot infer your hardware, electricity,
+hosting, or capacity costs. Monitor GPU utilization and infrastructure spend
+separately when comparing Ollama with hosted providers.
+
+## Verify setup
+
+1. pull a model with Ollama and confirm it appears in `ollama list`
+2. save `OLLAMA_BASE_URL` or the equivalent Settings value
+3. confirm the model appears in **Settings > Models**
+4. enable it, make it the default coding model, and start a small task
+
+## Common issues
+
+- **The model list is empty.** Confirm Ollama is running, the model is pulled,
+  and Roomote can reach the configured endpoint.
+- **Connection refused in Docker.** Use the Ollama service name instead of
+  `127.0.0.1`, and confirm both services share a network.
+- **Responses are slow or fail under load.** Choose a smaller model, add GPU
+  capacity, or reduce concurrent task demand.

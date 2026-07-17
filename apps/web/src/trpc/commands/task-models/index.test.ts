@@ -68,7 +68,10 @@ import {
   getTaskModelProviderSetupCommand,
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
+  discoverProviderModelsCommand,
+  getRecommendedLocalProviderModels,
   lookupTaskModelCommand,
+  qualifyProviderModelCommand,
   refreshTaskModelMetadataCommand,
   saveTaskModelProviderCommand,
   updateTaskModelSettingsCommand,
@@ -84,6 +87,8 @@ const PROVIDER_ENV_VAR_NAMES = [
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_REGION',
   'GEMINI_API_KEY',
+  'OLLAMA_BASE_URL',
+  'VLLM_BASE_URL',
   'R_MODEL',
 ] as const;
 
@@ -111,6 +116,55 @@ function buildMockAuth(
     ...overrides,
   } as UserAuthSuccess;
 }
+
+describe('getRecommendedLocalProviderModels', () => {
+  it('prefers capable coding models and excludes tiny or specialized models', () => {
+    const recommended = getRecommendedLocalProviderModels([
+      {
+        modelId: 'ollama/tinyllama:1.1b',
+        displayName: 'tinyllama:1.1b',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/nomic-embed-text',
+        displayName: 'nomic-embed-text',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/llama3.3:70b',
+        displayName: 'llama3.3:70b',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/qwen3-coder:30b',
+        displayName: 'qwen3-coder:30b',
+        family: null,
+        metadata: null,
+      },
+    ]);
+
+    expect(recommended.map((model) => model.modelId)).toEqual([
+      'ollama/qwen3-coder:30b',
+      'ollama/llama3.3:70b',
+    ]);
+  });
+
+  it('does not automatically choose unknown local model aliases', () => {
+    expect(
+      getRecommendedLocalProviderModels([
+        {
+          modelId: 'litellm/team-default',
+          displayName: 'team-default',
+          family: null,
+          metadata: null,
+        },
+      ]),
+    ).toEqual([]);
+  });
+});
 
 describe('lookupTaskModelCommand', () => {
   // Settings reads now depend on which provider env keys are configured
@@ -146,6 +200,7 @@ describe('lookupTaskModelCommand', () => {
     delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
         ?.columns;
@@ -252,6 +307,199 @@ describe('lookupTaskModelCommand', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('discovers Ollama models from /api/tags and prefixes their IDs', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+      }),
+    ).resolves.toMatchObject({
+      error: null,
+      modelCount: 1,
+      recommendedModels: [{ modelId: 'ollama/qwen3:8b' }],
+      models: [
+        {
+          modelId: 'ollama/qwen3:8b',
+          displayName: 'qwen3:8b',
+        },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://ollama.example/api/tags',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('falls back to the OpenAI models endpoint when Ollama tags are unavailable', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ id: 'llama3.3' }] }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example/v1',
+      }),
+    ).resolves.toMatchObject({
+      error: null,
+      models: [{ modelId: 'ollama/llama3.3' }],
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://ollama.example/v1/models',
+      expect.anything(),
+    );
+  });
+
+  it('uses saved LiteLLM credentials and metadata when discovering models', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      LITELLM_BASE_URL: 'https://litellm.example/v1',
+      LITELLM_API_KEY: 'saved-key',
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ id: 'azure/gpt-4o' }] }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                model_name: 'azure/gpt-4o',
+                model_info: { max_input_tokens: 128_000 },
+              },
+            ],
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), { provider: 'litellm' }),
+    ).resolves.toMatchObject({
+      models: [
+        {
+          modelId: 'litellm/azure/gpt-4o',
+          metadata: expect.objectContaining({ contextWindow: 128_000 }),
+        },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://litellm.example/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer saved-key' },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://litellm.example/model/info',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer saved-key' },
+      }),
+    );
+  });
+
+  it('qualifies a provider model with a streaming tool request', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"ping"}}]}}]}\n\n',
+        {
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      ),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example/v1',
+        apiKey: 'submitted-key',
+        modelId: 'vllm/qwen3',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://vllm.example/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer submitted-key',
+        }),
+        body: expect.stringContaining('"stream":true'),
+      }),
+    );
+  });
+
+  it('rejects streams that do not call the qualification tool', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"pong"}}]}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+        modelId: 'ollama/qwen3',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining('did not call the required tool'),
+    });
+  });
+
+  it('returns provider compatibility details from qualification errors', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ detail: 'tools are unsupported for this model' }),
+        {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example',
+        modelId: 'vllm/qwen3',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining('tools are unsupported for this model'),
+    });
+  });
+
+  it('uses discovery data when looking up a local provider model', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'llama3.3' }] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'vllm/llama3.3',
+      }),
+    ).resolves.toMatchObject({ modelId: 'vllm/llama3.3' });
   });
 
   it.each(['google-vertex/gemini-3.5-flash', 'mistral/mistral-large-latest'])(
@@ -438,101 +686,57 @@ describe('lookupTaskModelCommand', () => {
 
   it('accepts shorthand default model IDs when they normalize to an enabled model', async () => {
     const auth = buildMockAuth();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
 
-    await expect(
-      updateTaskModelSettingsCommand(auth, {
-        models: [
-          {
-            id: 'z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-          },
-        ],
-        allowedModelIds: ['z-ai/glm-5.6'],
-        defaultModelId: 'z-ai/glm-5.6',
-        helperModelId: null,
-        visionModelId: null,
-        codeReviewModelId: null,
-        planningModelId: null,
-        codingModelReasoningEffort: null,
-        helperModelReasoningEffort: null,
-        visionModelReasoningEffort: null,
-        codeReviewModelReasoningEffort: null,
-        planningModelReasoningEffort: null,
-      }),
-    ).resolves.toEqual({
+    const result = await updateTaskModelSettingsCommand(auth, {
+      models: [
+        {
+          id: 'z-ai/glm-5.6',
+          displayName: 'GLM 5.6',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['z-ai/glm-5.6'],
+      defaultModelId: 'z-ai/glm-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    if (!result.success) {
+      throw new Error('Expected the model settings update to succeed.');
+    }
+
+    expect(result).toMatchObject({
       success: true,
       settings: {
         defaultModelId: 'openrouter/z-ai/glm-5.6',
-        models: [
-          {
-            id: 'openrouter/z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-            metadata: null,
-            enabled: true,
-            isDefault: true,
-          },
-        ],
         runtimeModels: {
           codingModel: {
             effectiveModelId: 'openrouter/z-ai/glm-5.6',
             persistedModelId: 'openrouter/z-ai/glm-5.6',
             source: 'database',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          helperModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          visionModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          codeReviewModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          exploreModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          planningModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
           },
         },
-        helperModelOptions: [
-          {
-            id: 'openrouter/z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-          },
-        ],
       },
     });
+    expect(result.settings.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'openrouter/z-ai/glm-5.6',
+          enabled: true,
+          isDefault: true,
+        }),
+      ]),
+    );
 
     expect(mockInsertDeploymentSettings).toHaveBeenCalled();
     expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
@@ -1222,6 +1426,35 @@ describe('task model provider commands', () => {
     );
   });
 
+  it('hides persisted OpenRouter models when only vLLM is connected', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'VLLM_BASE_URL',
+    ]);
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/openai/gpt-5.6-terra',
+            displayName: 'GPT 5.6 Terra',
+            family: 'GPT',
+          },
+          {
+            id: 'vllm/qwen3:8b',
+            displayName: 'Qwen 3 8B',
+            family: 'Qwen',
+          },
+        ],
+        allowedModelIds: ['openrouter/openai/gpt-5.6-terra', 'vllm/qwen3:8b'],
+        defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      },
+      runtimeModelConfig: null,
+    });
+
+    const result = await getTaskModelSettingsCommand(buildMockAuth());
+
+    expect(result.models.map((model) => model.id)).toEqual(['vllm/qwen3:8b']);
+  });
+
   it('preselects the saved provider choice and reports saved API keys', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'ANTHROPIC_API_KEY',
@@ -1245,6 +1478,9 @@ describe('task model provider commands', () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'AWS_BEARER_TOKEN_BEDROCK',
       'AWS_REGION',
+      'LITELLM_BASE_URL',
+      'OLLAMA_BASE_URL',
+      'VLLM_BASE_URL',
     ]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
       AWS_REGION: 'us-west-2',
@@ -1254,6 +1490,9 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
+      'LITELLM_BASE_URL',
+      'OLLAMA_BASE_URL',
+      'VLLM_BASE_URL',
     ]);
     expect(
       result.providerSetup.providers.find(
