@@ -187,30 +187,36 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
         <p className="text-sm font-medium">
           {status.environment.name} doesn&apos;t expose any preview ports yet
         </p>
-        <p className="text-sm text-muted-foreground">
-          An agent can find the web app in this environment, verify that it
-          runs, and publish a live preview for future tasks.
-        </p>
-        <Button
-          size="sm"
-          onClick={() => startSetupMutation.mutate({ taskId })}
-          disabled={startSetupMutation.isPending}
-        >
-          {startSetupMutation.isPending ? <Spinner /> : <Sparkles />}
-          Set up previews with an agent
-        </Button>
         {isAdmin ? (
-          <p className="text-sm text-muted-foreground">
-            Or{' '}
-            <Link
-              href={SETTINGS_PATHS.editEnvironment(status.environment.id)}
-              className="text-primary underline hover:no-underline"
+          <>
+            <p className="text-sm text-muted-foreground">
+              An agent can find the web app in this environment, verify that it
+              runs, and publish a live preview for future tasks.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => startSetupMutation.mutate({ taskId })}
+              disabled={startSetupMutation.isPending}
             >
-              configure ports manually
-            </Link>
-            .
+              {startSetupMutation.isPending ? <Spinner /> : <Sparkles />}
+              Set up previews with an agent
+            </Button>
+            <p className="text-sm text-muted-foreground">
+              Or{' '}
+              <Link
+                href={SETTINGS_PATHS.editEnvironment(status.environment.id)}
+                className="text-primary underline hover:no-underline"
+              >
+                configure ports manually
+              </Link>
+              .
+            </p>
+          </>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            Ask an administrator to set up live previews for this environment.
           </p>
-        ) : null}
+        )}
       </CenteredMessage>
     );
   }

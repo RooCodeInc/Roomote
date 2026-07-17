@@ -181,7 +181,8 @@ describe('PreviewSetupState', () => {
     expect(await screen.findByText('runtime-setup-blocks')).toBeInTheDocument();
   });
 
-  it('launches the setup agent for environments without ports', async () => {
+  it('lets admins launch the setup agent for environments without ports', async () => {
+    authState.isAdmin = true;
     statusState.data = buildStatus();
 
     renderSetupState(taskRun);
@@ -195,6 +196,21 @@ describe('PreviewSetupState', () => {
       expect(startSetupMock).toHaveBeenCalledTimes(1);
     });
     expect(startSetupMock.mock.calls[0]?.[0]).toEqual({ taskId: 'task-1' });
+  });
+
+  it('tells non-admins to ask an administrator for environments without ports', async () => {
+    statusState.data = buildStatus();
+
+    renderSetupState(taskRun);
+
+    expect(
+      await screen.findByText(
+        'Ask an administrator to set up live previews for this environment.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /set up previews with an agent/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('offers admins a manual ports link for environments without ports', async () => {

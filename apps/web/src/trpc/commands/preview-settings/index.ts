@@ -524,15 +524,18 @@ export async function getTaskPreviewStatusCommand(
 
 /**
  * Launch an environment-setup agent focused on getting live previews working
- * for the task's environment. The environment id is derived server-side from
- * the task run, so callers cannot target arbitrary environments. If an agent
- * is already working on the environment, returns that task instead of
- * launching a duplicate.
+ * for the task's environment. Admin-only, matching the rest of environment
+ * management. The environment id is derived server-side from the task run, so
+ * callers cannot target arbitrary environments. If an agent is already
+ * working on the environment, returns that task instead of launching a
+ * duplicate.
  */
 export async function startPreviewSetupTaskCommand(
   auth: UserAuthSuccess,
   input: { taskId: string },
 ): Promise<{ taskId: string; alreadyRunning: boolean }> {
+  assertAdmin(auth);
+
   const taskRun = await resolveLatestTaskRunForTask(input.taskId);
   const environmentId = getEnvironmentIdFromPayload(taskRun?.payload);
 

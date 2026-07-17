@@ -22,6 +22,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 }));
 
 const auth = { userId: 'test-user', isAdmin: false } as UserAuthSuccess;
+const adminAuth = { userId: 'test-admin', isAdmin: true } as UserAuthSuccess;
 
 async function createEnvironmentBackedTask(params: {
   environmentId: string;
@@ -178,6 +179,19 @@ describe('getTaskPreviewStatusCommand', () => {
 });
 
 describe('startPreviewSetupTaskCommand', () => {
+  it('rejects non-admin callers', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+
+    await expect(
+      startPreviewSetupTaskCommand(auth, { taskId: task.id }),
+    ).rejects.toThrow('Unauthorized');
+  });
+
   it('rejects repo-only tasks', async () => {
     const task = await taskFactory.create({ workflow: 'standard' });
     await runFactory.create({
@@ -186,7 +200,7 @@ describe('startPreviewSetupTaskCommand', () => {
     });
 
     await expect(
-      startPreviewSetupTaskCommand(auth, { taskId: task.id }),
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
     ).rejects.toThrow(
       'Live preview setup is only available for environment-backed tasks.',
     );
@@ -202,7 +216,7 @@ describe('startPreviewSetupTaskCommand', () => {
     const setupTask = await createActiveSetupTask(environment.id);
 
     await expect(
-      startPreviewSetupTaskCommand(auth, { taskId: task.id }),
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
     ).resolves.toEqual({
       taskId: setupTask.id,
       alreadyRunning: true,
