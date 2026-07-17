@@ -2,6 +2,8 @@ const mocks = vi.hoisted(() => ({
   getAvailableEnvironments: vi.fn(),
   getRoutingAutoConfirmDelayMs: vi.fn(),
   getTaskUrl: vi.fn(),
+  classifyFollowUp: vi.fn(),
+  routeTask: vi.fn(),
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
   launchTask: vi.fn(),
@@ -10,14 +12,18 @@ const mocks = vi.hoisted(() => ({
   resolveWorkspace: vi.fn(),
   reply: vi.fn(),
   redisSet: vi.fn(),
+  redisGet: vi.fn(),
   redisGetdel: vi.fn(),
+  redisDel: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  classifyFollowUp: mocks.classifyFollowUp,
   getAvailableEnvironments: mocks.getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs: mocks.getRoutingAutoConfirmDelayMs,
   getTaskUrl: mocks.getTaskUrl,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 30_000,
+  routeTask: mocks.routeTask,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -36,12 +42,19 @@ vi.mock('../task-launch.js', () => ({
 }));
 
 vi.mock('@roomote/redis', () => ({
-  getRedis: () => ({ set: mocks.redisSet, getdel: mocks.redisGetdel }),
+  getRedis: () => ({
+    set: mocks.redisSet,
+    get: mocks.redisGet,
+    getdel: mocks.redisGetdel,
+    del: mocks.redisDel,
+  }),
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
 import {
+  findDiscordPendingRoutingReply,
+  handleDiscordRoutingReply,
   handleDiscordRoutingCallback,
   requestDiscordRoutingConfirmation,
   shouldAutoConfirmDiscordRoute,
@@ -55,6 +68,10 @@ describe('Discord routing confirmation', () => {
       { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
     ]);
     mocks.getRoutingAutoConfirmDelayMs.mockReturnValue(30_000);
+    mocks.classifyFollowUp.mockResolvedValue({
+      intent: 'correct',
+      reasoning: 'Treat as a correction',
+    });
     mocks.redisSet.mockResolvedValue('OK');
     mocks.reserveAnchoredThread.mockResolvedValue(null);
     mocks.forgetPendingTaskThread.mockResolvedValue(undefined);
@@ -662,9 +679,12 @@ describe('Discord routing confirmation', () => {
       },
     });
 
-    expect(mocks.redisSet).toHaveBeenCalledTimes(2);
-    expect(mocks.redisSet.mock.calls[0]).not.toContain('XX');
-    expect(mocks.redisSet.mock.calls[1]).toContain('XX');
+    const routeWrites = mocks.redisSet.mock.calls.filter(([key]) =>
+      String(key).startsWith('discord:pending_route:'),
+    );
+    expect(routeWrites).toHaveLength(2);
+    expect(routeWrites[0]).not.toContain('XX');
+    expect(routeWrites[1]).toContain('XX');
   });
 
   it('never auto-confirms a card the router had no suggestion for', async () => {
@@ -770,6 +790,150 @@ describe('Discord routing confirmation', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('re-routes a normal thread reply while preserving the original task request', async () => {
+    const pendingRouteId = 'pendingReply1';
+    const pending = JSON.stringify({
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      routingContext: {
+        taskDescription: 'Fix matchmaking',
+        source: {
+          type: 'discord',
+          guildName: 'Acme',
+          channelName: 'general',
+          threadMessages: [{ user: 'Matt', text: 'Fix matchmaking' }],
+        },
+        availableEnvironments: [
+          {
+            id: 'env-1',
+            name: 'Sunny Acres',
+            repositoryNames: ['acme/game'],
+          },
+          { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
+        ],
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      cardChannel: {
+        channelId: 'thread-1',
+        channelName: 'Fix matchmaking',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      cardMessageId: 'card-1',
+      options: [
+        {
+          label: 'Sunny Acres',
+          workspace: {
+            type: 'environment',
+            id: 'env-1',
+            name: 'Sunny Acres',
+          },
+        },
+      ],
+      suggestedIndex: 0,
+    });
+    mocks.redisGet
+      .mockResolvedValueOnce(pendingRouteId)
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(pendingRouteId)
+      .mockResolvedValueOnce(pendingRouteId);
+    mocks.redisGetdel.mockResolvedValueOnce(pending);
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'correct',
+      reasoning: 'The user named API',
+    });
+    mocks.routeTask.mockResolvedValueOnce({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-2', name: 'API' },
+        reasoning: 'Explicit correction',
+        debug: { confidence: 0.99 },
+      },
+    });
+    mocks.getRoutingAutoConfirmDelayMs.mockReturnValueOnce(0);
+    mocks.resolveWorkspace.mockResolvedValueOnce({
+      environmentId: 'env-2',
+      repoForPayload: 'acme/api',
+      workspaceDisplayName: 'API',
+    });
+    const threadChannel = {
+      channelId: 'thread-1',
+      channelName: 'Fix matchmaking',
+      channelType: 11,
+      guildId: 'guild-1',
+      parentChannelId: 'channel-1',
+      isDirectMessage: false,
+      isThread: true,
+    };
+
+    const located = await findDiscordPendingRoutingReply({
+      channel: threadChannel,
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+    });
+    expect(located).toEqual({ pendingRouteId });
+
+    await expect(
+      handleDiscordRoutingReply({
+        provider: {} as never,
+        applicationId: 'app-1',
+        pendingRouteId,
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'use API instead',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-2',
+        },
+        channel: threadChannel,
+      }),
+    ).resolves.toBe(true);
+
+    expect(mocks.routeTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDescription: 'use API instead',
+        previousSuggestion: {
+          workspaceValue: 'env-1',
+          workspaceDisplayName: 'Sunny Acres',
+        },
+      }),
+    );
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queuedMessage: expect.objectContaining({
+          text: 'Fix matchmaking',
+          ts: 'message-1',
+        }),
+        workspace: expect.objectContaining({ environmentId: 'env-2' }),
+      }),
+    );
   });
 
   it('keeps every stored route visible within Discord action-row limits', async () => {

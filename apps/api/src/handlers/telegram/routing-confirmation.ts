@@ -10,10 +10,12 @@ import {
   getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs,
   type RoutingDecision,
+  type RoutingContext,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
+import { resolveRoutingFollowUp } from '../tasks/routing-follow-up.js';
 import {
   buildTelegramRouteAltCallbackData,
   buildTelegramRouteNoCallbackData,
@@ -23,6 +25,7 @@ import {
 } from './callback-data.js';
 import { resolveTelegramSenderUserId } from './linked-user.js';
 import {
+  ackTelegramMessageBestEffort,
   answerTelegramCallbackQueryBestEffort,
   clearTelegramMessageButtonsBestEffort,
   editTelegramMessageBestEffort,
@@ -51,6 +54,7 @@ type PendingTelegramRoute = {
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
+  routingContext?: RoutingContext;
   createTopicForTask?: boolean;
   options: PendingTelegramRouteOption[];
   /**
@@ -102,8 +106,19 @@ async function claimPendingTelegramRoute(
   pendingRouteId: string,
 ): Promise<PendingTelegramRoute | null> {
   const redis = getRedis();
+  const pending = parsePendingRoute(
+    await redis.getdel(pendingRouteKey(pendingRouteId)),
+  );
 
-  return parsePendingRoute(await redis.getdel(pendingRouteKey(pendingRouteId)));
+  if (
+    pending &&
+    (await redis.get(pendingRoutePointerKey(pending.metadata))) ===
+      pendingRouteId
+  ) {
+    await redis.del(pendingRoutePointerKey(pending.metadata));
+  }
+
+  return pending;
 }
 
 async function storePendingTelegramRoute(
@@ -351,6 +366,7 @@ async function autoConfirmTelegramRouting(
  */
 export async function maybeRequestTelegramRoutingConfirmation(input: {
   routingDecision: Exclude<RoutingDecision, { status: 'platform_answer' }>;
+  routingContext: RoutingContext;
   launchOwnerUserId: string;
   queuedMessage: QueuedTelegramCommunicationMessage;
   metadata: TelegramUpdateCommunicationMetadata;
@@ -382,6 +398,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      routingContext: input.routingContext,
       createTopicForTask: input.createTopicForTask,
       options,
       suggestedIndex,
@@ -493,6 +510,213 @@ async function switchToWorkspacePicker(params: {
   await answerTelegramCallbackQueryBestEffort({
     callbackQueryId: params.query.id,
   });
+}
+
+async function launchPendingTelegramRoute(input: {
+  pending: PendingTelegramRoute;
+  option: PendingTelegramRouteOption;
+}): Promise<void> {
+  const workspace = await resolveTelegramWorkspace(input.option.workspace);
+
+  if (!workspace) {
+    throw new Error('The selected Telegram workspace is no longer available.');
+  }
+
+  await launchTelegramTask({
+    launchOwnerUserId: input.pending.launchOwnerUserId,
+    queuedMessage: input.pending.queuedMessage,
+    metadata: input.pending.metadata,
+    workspace,
+    createTopicForTask: input.pending.createTopicForTask,
+  });
+
+  if (input.pending.confirmMessageId) {
+    await finalizeConfirmationCard({
+      chatId: input.pending.metadata.communicationChannelId,
+      messageId: input.pending.confirmMessageId,
+      text: `Starting in **${workspace.workspaceDisplayName}**.`,
+    });
+  }
+}
+
+/**
+ * Treat a normal message sent while a routing card is pending as a response
+ * to that card. This runs before normal task-entry and snapshot-resume logic,
+ * so a correction never becomes a second task or replaces the original text.
+ */
+export async function handleTelegramRoutingReply(input: {
+  launchOwnerUserId: string;
+  queuedMessage: QueuedTelegramCommunicationMessage;
+  metadata: TelegramUpdateCommunicationMetadata;
+}): Promise<boolean> {
+  const redis = getRedis();
+  const pendingRouteId = await redis.get(
+    pendingRoutePointerKey(input.metadata),
+  );
+
+  if (!pendingRouteId) {
+    return false;
+  }
+
+  const pending = await peekPendingTelegramRoute(pendingRouteId);
+
+  if (
+    !pending ||
+    !pending.routingContext ||
+    pending.launchOwnerUserId !== input.launchOwnerUserId ||
+    pending.metadata.communicationChannelId !==
+      input.metadata.communicationChannelId ||
+    pending.metadata.communicationThreadId !==
+      input.metadata.communicationThreadId
+  ) {
+    return false;
+  }
+
+  const claimed = await claimPendingTelegramRoute(pendingRouteId);
+
+  if (!claimed) {
+    return false;
+  }
+
+  await ackTelegramMessageBestEffort({
+    chatId: input.metadata.communicationChannelId,
+    messageId: input.metadata.communicationMessageId,
+  });
+
+  const suggestedOption =
+    claimed.suggestedIndex === null
+      ? null
+      : (claimed.options[claimed.suggestedIndex] ?? null);
+
+  try {
+    const resolution = await resolveRoutingFollowUp({
+      routingContext: claimed.routingContext!,
+      suggestion: suggestedOption
+        ? {
+            workspace: suggestedOption.workspace,
+            workspaceDisplayName: suggestedOption.label,
+          }
+        : null,
+      userResponse: input.queuedMessage.text,
+      userName: input.queuedMessage.user,
+      userId: input.launchOwnerUserId,
+    });
+
+    if (resolution.intent === 'cancel') {
+      if (claimed.confirmMessageId) {
+        await finalizeConfirmationCard({
+          chatId: claimed.metadata.communicationChannelId,
+          messageId: claimed.confirmMessageId,
+          text: 'Okay — not starting a task.',
+        });
+      }
+      return true;
+    }
+
+    if (resolution.intent === 'confirm') {
+      if (!suggestedOption) {
+        throw new Error('A Telegram routing confirmation had no suggestion.');
+      }
+      await launchPendingTelegramRoute({
+        pending: claimed,
+        option: suggestedOption,
+      });
+      return true;
+    }
+
+    const routingDecision = resolution.routingDecision;
+
+    if (routingDecision.status === 'platform_answer') {
+      if (claimed.confirmMessageId) {
+        await finalizeConfirmationCard({
+          chatId: claimed.metadata.communicationChannelId,
+          messageId: claimed.confirmMessageId,
+          text: routingDecision.result.answer,
+        });
+      }
+      return true;
+    }
+
+    const routed =
+      routingDecision.status === 'routed' ? routingDecision.result : null;
+    const { options, suggestedIndex } = await buildWorkspaceOptions(
+      routed?.workspace ?? null,
+    );
+    const autoConfirmDelayMs = routed
+      ? getRoutingAutoConfirmDelayMs(routed.debug, routed.workspace.type)
+      : null;
+    const nextSuggestedOption =
+      suggestedIndex === null ? null : (options[suggestedIndex] ?? null);
+    const nextPending: PendingTelegramRoute = {
+      ...claimed,
+      options,
+      suggestedIndex,
+    };
+
+    if (
+      nextSuggestedOption &&
+      (options.length <= 1 || autoConfirmDelayMs === 0)
+    ) {
+      await launchPendingTelegramRoute({
+        pending: nextPending,
+        option: nextSuggestedOption,
+      });
+      return true;
+    }
+
+    const nextPendingRouteId = newPendingRouteId();
+    await storePendingTelegramRoute(nextPendingRouteId, nextPending);
+
+    const text =
+      nextSuggestedOption && autoConfirmDelayMs !== null
+        ? `Planning to run this in **${nextSuggestedOption.label}** — starting in ~${Math.round(autoConfirmDelayMs / 1000)}s.`
+        : PICKER_TEXT;
+    const buttons = nextSuggestedOption
+      ? buildConfirmButtons(nextPendingRouteId)
+      : buildPickerButtons(nextPendingRouteId, options);
+    const edited = claimed.confirmMessageId
+      ? await editTelegramMessageBestEffort({
+          chatId: claimed.metadata.communicationChannelId,
+          messageId: claimed.confirmMessageId,
+          text,
+          textFormat: 'markdown',
+          buttons,
+        })
+      : null;
+
+    if (!edited) {
+      const posted = await postTelegramMessageBestEffort({
+        chatId: claimed.metadata.communicationChannelId,
+        threadId: claimed.metadata.communicationThreadId,
+        replyToMessageId: input.metadata.communicationMessageId,
+        text,
+        textFormat: 'markdown',
+        buttons,
+      });
+
+      if (!posted) {
+        await claimPendingTelegramRoute(nextPendingRouteId);
+        throw new Error('Could not update the Telegram routing card.');
+      }
+
+      nextPending.confirmMessageId = posted.messageId;
+      await storePendingTelegramRoute(nextPendingRouteId, nextPending);
+    }
+
+    if (nextSuggestedOption && autoConfirmDelayMs !== null) {
+      scheduleTelegramRoutingAutoConfirm(
+        nextPendingRouteId,
+        autoConfirmDelayMs,
+      );
+    }
+
+    return true;
+  } catch (error) {
+    await storePendingTelegramRoute(pendingRouteId, claimed).catch(
+      () => undefined,
+    );
+    throw error;
+  }
 }
 
 /** Handle a click on one of the routing-confirmation buttons. */

@@ -163,6 +163,7 @@ export async function startNewDiscordTask(input: {
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      routingContext,
       channel: input.channel,
       routingDecision,
       forceNewThread: input.forceNewThread,

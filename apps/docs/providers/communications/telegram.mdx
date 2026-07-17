@@ -52,6 +52,11 @@ R_TELEGRAM_BOT_TOKEN=<botfather-token>
 Roomote reads the bot username from Telegram using the bot token, so it does
 not need to be configured separately.
 
+When Roomote asks you to confirm an environment, you can use the buttons or
+reply naturally in the same chat or topic. Replies such as `yes`, `never mind`,
+or `use API instead` confirm, cancel, or revise the pending route without
+turning the reply into a second task.
+
 Restart Roomote after changing Telegram env vars. Inbound webhooks are accepted
 only when Telegram sends the matching `X-Telegram-Bot-Api-Secret-Token`
 header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
@@ -94,7 +99,9 @@ up on tasks on their behalf.
 1. send a direct message to the bot, or mention the bot in a group
 2. confirm Roomote starts a task and posts a Telegram reply with the task link
 3. confirm a new task opens in its own topic when Threaded Mode is enabled
-4. reply in that topic to send a follow-up
+4. when an environment confirmation appears, answer it with a button or a
+   natural reply
+5. reply in the task topic to send a follow-up
 
 Photos are passed to the task as image input. Supported text documents are
 downloaded server-side and their extracted content is added to the request;
