@@ -394,7 +394,7 @@ describe('Discord routing confirmation', () => {
       'All repositories',
     );
     expect(buttons.at(-1)).toEqual([
-      expect.objectContaining({ text: 'Nevermind' }),
+      expect.objectContaining({ text: 'Never mind' }),
     ]);
   });
 

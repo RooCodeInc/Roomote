@@ -1385,7 +1385,7 @@ export async function showTaskConfiguration({
         },
         {
           type: 'button',
-          text: { type: 'plain_text', text: 'Nevermind', emoji: true },
+          text: { type: 'plain_text', text: 'Never mind', emoji: true },
           action_id: 'nevermind_task',
         },
       ],
@@ -2952,7 +2952,7 @@ export async function handleRoutingRejectNo(payload: SlackInteractivePayload) {
 }
 
 /**
- * Handles the "Nevermind" button click on the manual selection UI.
+ * Handles the "Never mind" button click on the manual selection UI.
  * Cleans up pending state and replaces the selection message with
  * a cancellation confirmation so the user knows the task was dropped.
  */

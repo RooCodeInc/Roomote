@@ -228,7 +228,7 @@ function buildPickerButtons(
     ]),
     [
       {
-        text: '✖️ Nevermind',
+        text: '✖️ Never mind',
         callbackData: buildTelegramRouteNoCallbackData(pendingRouteId),
       },
     ],
