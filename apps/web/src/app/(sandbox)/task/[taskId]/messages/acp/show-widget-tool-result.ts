@@ -1,6 +1,7 @@
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 export const SHOW_WIDGET_TOOL_NAME = 'show_widget';
+const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 
 const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
 const SHOW_WIDGET_MIN_HEIGHT = 120;
@@ -63,6 +64,20 @@ function getMcpToolName(
   );
 }
 
+function getMcpServerName(
+  data: AcpToolCallUiMessage['data'] | AcpToolResultUiMessage['data'],
+): string | null {
+  const raw =
+    asNonEmptyString(data.mcpServerName) ?? asNonEmptyString(data.serverName);
+  return raw ? raw.toLowerCase() : null;
+}
+
+function isRoomoteMcpServer(
+  data: AcpToolCallUiMessage['data'] | AcpToolResultUiMessage['data'],
+): boolean {
+  return getMcpServerName(data) === ROOMOTE_MCP_SERVER_NAME;
+}
+
 function clampWidgetHeight(height: unknown): number {
   if (typeof height !== 'number' || !Number.isFinite(height)) {
     return SHOW_WIDGET_DEFAULT_HEIGHT;
@@ -119,6 +134,10 @@ export function resolveShowWidgetForToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
 ): ShowWidgetPayload | null {
   if (msg.data.isMcp !== true) {
+    return null;
+  }
+
+  if (!isRoomoteMcpServer(msg.data)) {
     return null;
   }
 
@@ -260,35 +279,21 @@ img, svg, video {
 export function buildShowWidgetSrcDoc(payload: ShowWidgetPayload): string {
   const styles = [SHOW_WIDGET_DEFAULT_CSS, payload.css ?? '']
     .filter((part) => part.trim().length > 0)
-    .map((part) =>
-      part
-        .replace(/<\/?style\b[^>]*>/gi, '')
-        .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '')
-        .replace(/<\/?script\b[^>]*>/gi, ''),
-    )
+    .map((part) => part.replace(/[<>]/g, ''))
     .join('\n\n');
 
   const styleTag = `<style>${styles}</style>`;
+  // Block all network access from the widget document: no remote images,
+  // stylesheets, fonts, XHR, or framing. Only inline styles and empty defaults.
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">`;
   const title = payload.title
     ? `<title>${escapeHtmlText(payload.title)}</title>`
     : '';
+  const headBits = `${csp}${title}${styleTag}`;
 
-  // If the model already gave a full document, inject styles into <head>.
-  if (/<html[\s>]/i.test(payload.html)) {
-    if (/<head[\s>]/i.test(payload.html)) {
-      return payload.html.replace(
-        /<head([^>]*)>/i,
-        `<head$1>${title}${styleTag}`,
-      );
-    }
-
-    return payload.html.replace(
-      /<html([^>]*)>/i,
-      `<html$1><head>${title}${styleTag}</head>`,
-    );
-  }
-
-  return `<!DOCTYPE html><html><head><meta charset="utf-8">${title}${styleTag}</head><body>${payload.html}</body></html>`;
+  // Always wrap as a full document we fully control. Do not inject into
+  // attacker-supplied <html>/<head> shells that could reintroduce remote loads.
+  return `<!DOCTYPE html><html><head><meta charset="utf-8">${headBits}</head><body>${payload.html}</body></html>`;
 }
 
 function escapeHtmlText(value: string): string {

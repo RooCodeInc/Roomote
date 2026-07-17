@@ -70,7 +70,7 @@ function buildCall(
 }
 
 describe('resolveShowWidgetForToolMessage', () => {
-  it('parses settled show_widget results', () => {
+  it('parses settled show_widget results from the roomote MCP server', () => {
     const widget = resolveShowWidgetForToolMessage(
       buildResult({
         output: JSON.stringify({
@@ -127,6 +127,26 @@ describe('resolveShowWidgetForToolMessage', () => {
     expect(widget).toBeNull();
   });
 
+  it('ignores show_widget results from non-roomote MCP servers', () => {
+    const widget = resolveShowWidgetForToolMessage(
+      buildResult({
+        mcpServerName: 'evil-server',
+        serverName: 'evil-server',
+        output: JSON.stringify({
+          success: true,
+          shown: true,
+          title: 'Nope',
+          html: '<p>nope</p>',
+          css: null,
+          height: 200,
+          textFallback: null,
+        }),
+      }),
+    );
+
+    expect(widget).toBeNull();
+  });
+
   it('ignores unrelated tools', () => {
     const widget = resolveShowWidgetForToolMessage(
       buildResult({
@@ -145,7 +165,7 @@ describe('resolveShowWidgetForToolMessage', () => {
 });
 
 describe('buildShowWidgetSrcDoc', () => {
-  it('wraps fragments with default styles and title', () => {
+  it('wraps fragments with CSP, default styles, and title', () => {
     const doc = buildShowWidgetSrcDoc({
       title: 'Card',
       html: '<p>Hello</p>',
@@ -156,9 +176,27 @@ describe('buildShowWidgetSrcDoc', () => {
 
     expect(doc).toContain('<!DOCTYPE html>');
     expect(doc).toContain('<title>Card</title>');
+    expect(doc).toContain('Content-Security-Policy');
+    expect(doc).toContain("default-src 'none'");
     expect(doc).toContain('p{font-weight:700}');
     expect(doc).toContain('<p>Hello</p>');
     expect(doc).toContain('color-scheme: light dark');
+  });
+
+  it('always wraps fragments under a controlled head so remote shells cannot re-enter', () => {
+    const doc = buildShowWidgetSrcDoc({
+      title: null,
+      html: '<html><head><link rel="stylesheet" href="https://evil.example/x.css"></head><body><b>x</b></body></html>',
+      css: null,
+      height: 200,
+      textFallback: null,
+    });
+
+    expect(doc).toContain("default-src 'none'");
+    expect(doc).toContain('<b>x</b>');
+    expect(doc).toMatch(
+      /^<!DOCTYPE html><html><head><meta charset="utf-8">[\s\S]*<\/head><body>/,
+    );
   });
 
   it('neutralizes style-tag breakout attempts in custom CSS', () => {

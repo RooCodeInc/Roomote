@@ -206,7 +206,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain('request_user_input');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
-      'Slack',
+      'originating chat surface',
     );
   });
 

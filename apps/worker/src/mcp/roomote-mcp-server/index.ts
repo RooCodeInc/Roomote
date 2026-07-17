@@ -122,9 +122,9 @@ roomoteMcpServer.registerTool(
     description:
       'Render a presentational HTML widget in the Roomote task transcript. ' +
       'Use this to show tables, status cards, annotated plans, mock UI, or other HTML the user should look at. ' +
-      'HTML is displayed in a sandboxed iframe with scripts disabled; Roomote injects default styles when css is omitted. ' +
+      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked; Roomote injects default styles when css is omitted. ' +
       'This is display-only — use request_user_input when you need answers. ' +
-      'Optional textFallback is used on surfaces that cannot render HTML (for example Slack).',
+      'Optional textFallback is posted to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
       html: z
         .string()
@@ -152,7 +152,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Optional plain-text fallback for non-web surfaces such as Slack',
+          'Optional plain-text fallback posted to the originating chat surface when this task was started from chat',
         ),
     },
     annotations: {
@@ -162,7 +162,10 @@ roomoteMcpServer.registerTool(
       openWorldHint: false,
     },
   },
-  async (params): Promise<ToolResult> => handleShowWidget(params),
+  async (params): Promise<ToolResult> =>
+    handleShowWidget(params, {
+      roomoteConfig: getRoomoteConfig(),
+    }),
 );
 
 roomoteMcpServer.registerTool(
