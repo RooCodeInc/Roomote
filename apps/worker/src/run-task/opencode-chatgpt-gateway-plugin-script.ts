@@ -18,13 +18,9 @@ const ALLOWED_MODELS = new Set([
   'gpt-5.4',
   'gpt-5.4-mini',
 ]);
-const DISALLOWED_MODELS = new Set(['gpt-5.5-pro']);
 
 function isSubscriptionModel(model) {
-  if (model.options.reasoningMode === 'pro') return false;
   if (ALLOWED_MODELS.has(model.api.id)) return true;
-  if (DISALLOWED_MODELS.has(model.api.id)) return false;
-  if (model.api.id === 'gpt-5.6') return false;
 
   const match = model.api.id.match(/^gpt-(\d+\.\d+)/);
   return match ? Number.parseFloat(match[1]) > 5.4 : false;
@@ -44,13 +40,7 @@ function asSubscriptionModel(model) {
           input: 272_000,
           output: 128_000,
         }
-      : model.id.includes('gpt-5.6')
-        ? {
-            context: 500_000,
-            input: 372_000,
-            output: 128_000,
-          }
-        : model.limit,
+      : model.limit,
   };
 }
 

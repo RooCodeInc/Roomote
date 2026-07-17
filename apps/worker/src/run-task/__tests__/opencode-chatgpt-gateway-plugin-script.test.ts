@@ -101,7 +101,13 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
       },
     });
 
-    expect(Object.keys(models)).toEqual(['gpt-5.4', 'gpt-5.6-luna']);
+    expect(Object.keys(models)).toEqual([
+      'gpt-5.4',
+      'gpt-5.6-luna',
+      'gpt-5.6',
+      'gpt-5.5-pro',
+      'gpt-5.7-pro',
+    ]);
     expect(models['gpt-5.4']?.cost).toEqual({
       input: 0,
       output: 0,
@@ -114,10 +120,26 @@ describe('OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT', () => {
         cache: { read: 0, write: 0 },
       },
       limit: {
-        context: 500_000,
-        input: 372_000,
+        context: 200_000,
+        output: 64_000,
+      },
+    });
+    expect(models['gpt-5.5-pro']).toMatchObject({
+      cost: {
+        input: 0,
+        output: 0,
+        cache: { read: 0, write: 0 },
+      },
+      limit: {
+        context: 400_000,
+        input: 272_000,
         output: 128_000,
       },
+    });
+    expect(models['gpt-5.7-pro']?.cost).toEqual({
+      input: 0,
+      output: 0,
+      cache: { read: 0, write: 0 },
     });
   });
 });
