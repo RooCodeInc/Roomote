@@ -474,7 +474,11 @@ export const searchTasks = async ({
   ];
 
   if (query && query.trim().length > 0) {
-    const escaped = query.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+    const escaped = query
+      .trim()
+      .replace(/\\/g, '\\\\')
+      .replace(/%/g, '\\%')
+      .replace(/_/g, '\\_');
     searchConditions.push(sql`${tasks.title} ILIKE ${'%' + escaped + '%'}`);
   }
 

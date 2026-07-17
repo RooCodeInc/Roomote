@@ -28,6 +28,8 @@ jobs:
   prepare:
     name: Resolve build metadata
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
     outputs:
       docs_only: ${{ steps.changed-paths.outputs.docs_only }}
       owner: ${{ steps.vars.outputs.owner }}

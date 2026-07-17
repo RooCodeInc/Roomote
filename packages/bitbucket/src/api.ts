@@ -183,8 +183,16 @@ export class BitbucketApiError extends Error {
   }
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 function normalizeBaseUrl(baseUrl: string): string {
-  const trimmed = baseUrl.trim().replace(/\/+$/, '');
+  const trimmed = stripTrailingSlashes(baseUrl.trim());
 
   if (!trimmed) {
     throw new Error('BITBUCKET_BASE_URL cannot be empty.');

@@ -153,11 +153,15 @@ export function insertChangelogSection(existingChangelogMarkdown, newSection) {
  * Extract the markdown body for a given version heading from CHANGELOG.md.
  * Matches headings like `## 0.1.1` or `## v0.1.1`.
  */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 export function extractChangelogSection(changelogMarkdown, version) {
   const bare = version.replace(/^v/, '');
   const lines = changelogMarkdown.split(/\r?\n/);
   const headingRe = new RegExp(
-    `^##\\s+v?${bare.replace(/\./g, '\\.')}(?:\\s|\\(|$)`,
+    `^##\\s+v?${escapeRegExp(bare)}(?:\\s|\\(|$)`,
   );
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
