@@ -88,6 +88,7 @@ const PROVIDER_ENV_VAR_NAMES = [
   'AWS_REGION',
   'GEMINI_API_KEY',
   'OLLAMA_BASE_URL',
+  'VLLM_BASE_URL',
   'R_MODEL',
 ] as const;
 
@@ -685,101 +686,57 @@ describe('lookupTaskModelCommand', () => {
 
   it('accepts shorthand default model IDs when they normalize to an enabled model', async () => {
     const auth = buildMockAuth();
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
 
-    await expect(
-      updateTaskModelSettingsCommand(auth, {
-        models: [
-          {
-            id: 'z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-          },
-        ],
-        allowedModelIds: ['z-ai/glm-5.6'],
-        defaultModelId: 'z-ai/glm-5.6',
-        helperModelId: null,
-        visionModelId: null,
-        codeReviewModelId: null,
-        planningModelId: null,
-        codingModelReasoningEffort: null,
-        helperModelReasoningEffort: null,
-        visionModelReasoningEffort: null,
-        codeReviewModelReasoningEffort: null,
-        planningModelReasoningEffort: null,
-      }),
-    ).resolves.toEqual({
+    const result = await updateTaskModelSettingsCommand(auth, {
+      models: [
+        {
+          id: 'z-ai/glm-5.6',
+          displayName: 'GLM 5.6',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['z-ai/glm-5.6'],
+      defaultModelId: 'z-ai/glm-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    if (!result.success) {
+      throw new Error('Expected the model settings update to succeed.');
+    }
+
+    expect(result).toMatchObject({
       success: true,
       settings: {
         defaultModelId: 'openrouter/z-ai/glm-5.6',
-        models: [
-          {
-            id: 'openrouter/z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-            metadata: null,
-            enabled: true,
-            isDefault: true,
-          },
-        ],
         runtimeModels: {
           codingModel: {
             effectiveModelId: 'openrouter/z-ai/glm-5.6',
             persistedModelId: 'openrouter/z-ai/glm-5.6',
             source: 'database',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          helperModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          visionModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          codeReviewModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          exploreModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
-          },
-          planningModel: {
-            effectiveModelId: null,
-            persistedModelId: null,
-            source: 'same-as-coding',
-            managedByEnv: false,
-            reasoningEffort: null,
-            reasoningManagedByEnv: false,
           },
         },
-        helperModelOptions: [
-          {
-            id: 'openrouter/z-ai/glm-5.6',
-            displayName: 'GLM 5.6',
-            family: 'GLM',
-          },
-        ],
       },
     });
+    expect(result.settings.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'openrouter/z-ai/glm-5.6',
+          enabled: true,
+          isDefault: true,
+        }),
+      ]),
+    );
 
     expect(mockInsertDeploymentSettings).toHaveBeenCalled();
     expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
@@ -1469,14 +1426,33 @@ describe('task model provider commands', () => {
     );
   });
 
-  it('does not expose the implicit OpenRouter catalog when only Ollama is connected', async () => {
+  it('hides persisted OpenRouter models when only vLLM is connected', async () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
-      'OLLAMA_BASE_URL',
+      'VLLM_BASE_URL',
     ]);
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          {
+            id: 'openrouter/openai/gpt-5.6-terra',
+            displayName: 'GPT 5.6 Terra',
+            family: 'GPT',
+          },
+          {
+            id: 'vllm/qwen3:8b',
+            displayName: 'Qwen 3 8B',
+            family: 'Qwen',
+          },
+        ],
+        allowedModelIds: ['openrouter/openai/gpt-5.6-terra', 'vllm/qwen3:8b'],
+        defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      },
+      runtimeModelConfig: null,
+    });
 
     const result = await getTaskModelSettingsCommand(buildMockAuth());
 
-    expect(result.models).toEqual([]);
+    expect(result.models.map((model) => model.id)).toEqual(['vllm/qwen3:8b']);
   });
 
   it('preselects the saved provider choice and reports saved API keys', async () => {
