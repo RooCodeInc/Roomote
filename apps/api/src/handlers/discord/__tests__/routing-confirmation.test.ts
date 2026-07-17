@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   getRoutingAutoConfirmDelayMs: vi.fn(),
   getTaskUrl: vi.fn(),
   classifyFollowUp: vi.fn(),
+  resolveRoutingFollowUp: vi.fn(),
   routeTask: vi.fn(),
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getRoutingAutoConfirmDelayMs: mocks.getRoutingAutoConfirmDelayMs,
   getTaskUrl: mocks.getTaskUrl,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 30_000,
+  resolveRoutingFollowUp: mocks.resolveRoutingFollowUp,
   routeTask: mocks.routeTask,
 }));
 
@@ -72,6 +74,34 @@ describe('Discord routing confirmation', () => {
       intent: 'correct',
       reasoning: 'Treat as a correction',
     });
+    mocks.resolveRoutingFollowUp.mockImplementation(
+      async (input: {
+        suggestion: Record<string, unknown> | null;
+        userResponse: string;
+        userId?: string | null;
+        buildCorrectionContext: () => Promise<Record<string, unknown>>;
+      }) => {
+        const classification = await mocks.classifyFollowUp({
+          suggestedWorkspace:
+            input.suggestion?.workspaceDisplayName ?? 'the workspace picker',
+          userResponse: input.userResponse,
+          userId: input.userId,
+        });
+        if (classification.intent !== 'correct') {
+          return { intent: classification.intent };
+        }
+        const context = await input.buildCorrectionContext();
+        return {
+          intent: 'correct',
+          routingDecision: await mocks.routeTask({
+            ...context,
+            ...(input.suggestion
+              ? { previousSuggestion: input.suggestion }
+              : {}),
+          }),
+        };
+      },
+    );
     mocks.redisSet.mockResolvedValue('OK');
     mocks.reserveAnchoredThread.mockResolvedValue(null);
     mocks.forgetPendingTaskThread.mockResolvedValue(undefined);

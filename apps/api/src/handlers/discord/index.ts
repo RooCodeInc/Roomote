@@ -362,7 +362,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
     botUserId: resolved.botUserId,
     userId: senderUserId,
-    isTaskThread: Boolean(activeRun || completedRun),
+    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
     parentChannelId: channel.parentChannelId,
     attachmentImages: processedAttachments.images,
     attachmentText: processedAttachments.attachmentTexts,

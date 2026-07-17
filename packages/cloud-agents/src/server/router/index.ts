@@ -41,6 +41,7 @@ export {
 } from './types';
 
 export { routeTask, routeGitHubTask, classifyFollowUp } from './router-service';
+export { resolveRoutingFollowUp } from './follow-up-service';
 export { evaluateChannelLaunchCriteria } from './channel-launch-gate';
 export type {
   ChannelLaunchGateActivityEntry,

@@ -30,6 +30,7 @@ const {
   redisGetMock,
   redisGetdelMock,
   redisSetMock,
+  resolveRoutingFollowUpMock,
   routeTaskMock,
   setLatestInboundMessageIdMock,
   setTrustedRunActingUserMock,
@@ -72,6 +73,7 @@ const {
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
   redisSetMock: vi.fn(),
+  resolveRoutingFollowUpMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
@@ -287,6 +289,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getAvailableEnvironments: getAvailableEnvironmentsMock,
   getRoutingAutoConfirmDelayMs: getRoutingAutoConfirmDelayMsMock,
   getTaskUrl: getTaskUrlMock,
+  resolveRoutingFollowUp: resolveRoutingFollowUpMock,
   routeTask: routeTaskMock,
 }));
 
@@ -405,6 +408,35 @@ describe('Telegram webhook handler', () => {
       intent: 'correct',
       reasoning: 'Treat as a correction',
     });
+    resolveRoutingFollowUpMock.mockImplementation(
+      async (input: {
+        suggestion: Record<string, unknown> | null;
+        userResponse: string;
+        userId?: string | null;
+        correctionMessage?: { user: string; text: string };
+        buildCorrectionContext: () => Promise<Record<string, unknown>>;
+      }) => {
+        const classification = await classifyFollowUpMock({
+          suggestedWorkspace:
+            input.suggestion?.workspaceDisplayName ?? 'the workspace picker',
+          userResponse: input.userResponse,
+          userId: input.userId,
+        });
+        if (classification.intent !== 'correct') {
+          return { intent: classification.intent };
+        }
+        const context = await input.buildCorrectionContext();
+        return {
+          intent: 'correct',
+          routingDecision: await routeTaskMock({
+            ...context,
+            ...(input.suggestion
+              ? { previousSuggestion: input.suggestion }
+              : {}),
+          }),
+        };
+      },
+    );
     routeTaskMock.mockResolvedValue({
       status: 'routed',
       result: {

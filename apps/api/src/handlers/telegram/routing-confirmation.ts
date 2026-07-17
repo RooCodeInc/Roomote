@@ -9,13 +9,13 @@ import { getRedis } from '@roomote/redis';
 import {
   getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs,
+  resolveRoutingFollowUp,
   type RoutingDecision,
   type RoutingContext,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
 import { apiLogger } from '../../logging.js';
-import { resolveRoutingFollowUp } from '../tasks/routing-follow-up.js';
 import {
   buildTelegramRouteAltCallbackData,
   buildTelegramRouteNoCallbackData,
@@ -314,11 +314,12 @@ async function autoConfirmTelegramRouting(
   }
 
   const option = pending.options[pending.suggestedIndex];
-  const workspace = option
-    ? await resolveTelegramWorkspace(option.workspace)
-    : null;
+  if (!option) return;
 
-  if (!workspace) {
+  try {
+    const launched = await launchPendingTelegramRoute({ pending, option });
+    if (launched) return;
+
     if (pending.confirmMessageId) {
       await clearTelegramMessageButtonsBestEffort({
         chatId: pending.metadata.communicationChannelId,
@@ -331,24 +332,12 @@ async function autoConfirmTelegramRouting(
       replyToMessageId: pending.metadata.communicationMessageId,
       text: 'Could not start the task — the suggested workspace is no longer available. Send the request again.',
     });
-    return;
+  } catch (error) {
+    await storePendingTelegramRoute(pendingRouteId, pending).catch(
+      () => undefined,
+    );
+    throw error;
   }
-
-  if (pending.confirmMessageId) {
-    await finalizeConfirmationCard({
-      chatId: pending.metadata.communicationChannelId,
-      messageId: pending.confirmMessageId,
-      text: `Starting in **${workspace.workspaceDisplayName}**.`,
-    });
-  }
-
-  await launchTelegramTask({
-    launchOwnerUserId: pending.launchOwnerUserId,
-    queuedMessage: pending.queuedMessage,
-    metadata: pending.metadata,
-    workspace,
-    createTopicForTask: pending.createTopicForTask,
-  });
 }
 
 /**
@@ -515,11 +504,11 @@ async function switchToWorkspacePicker(params: {
 async function launchPendingTelegramRoute(input: {
   pending: PendingTelegramRoute;
   option: PendingTelegramRouteOption;
-}): Promise<void> {
+}): Promise<{ workspaceDisplayName: string } | null> {
   const workspace = await resolveTelegramWorkspace(input.option.workspace);
 
   if (!workspace) {
-    throw new Error('The selected Telegram workspace is no longer available.');
+    return null;
   }
 
   await launchTelegramTask({
@@ -537,6 +526,8 @@ async function launchPendingTelegramRoute(input: {
       text: `Starting in **${workspace.workspaceDisplayName}**.`,
     });
   }
+
+  return { workspaceDisplayName: workspace.workspaceDisplayName };
 }
 
 /**
@@ -574,9 +565,13 @@ export async function handleTelegramRoutingReply(input: {
 
   const claimed = await claimPendingTelegramRoute(pendingRouteId);
 
-  if (!claimed) {
+  if (!claimed?.routingContext) {
+    if (claimed) {
+      await storePendingTelegramRoute(pendingRouteId, claimed);
+    }
     return false;
   }
+  const routingContext = claimed.routingContext;
 
   await ackTelegramMessageBestEffort({
     chatId: input.metadata.communicationChannelId,
@@ -590,16 +585,25 @@ export async function handleTelegramRoutingReply(input: {
 
   try {
     const resolution = await resolveRoutingFollowUp({
-      routingContext: claimed.routingContext!,
       suggestion: suggestedOption
         ? {
-            workspace: suggestedOption.workspace,
+            workspaceValue:
+              suggestedOption.workspace.type === 'environment'
+                ? suggestedOption.workspace.id
+                : 'all_repositories',
             workspaceDisplayName: suggestedOption.label,
           }
         : null,
       userResponse: input.queuedMessage.text,
-      userName: input.queuedMessage.user,
       userId: input.launchOwnerUserId,
+      correctionMessage: {
+        user: input.queuedMessage.user,
+        text: input.queuedMessage.text,
+      },
+      buildCorrectionContext: async () => ({
+        ...routingContext,
+        taskDescription: input.queuedMessage.text,
+      }),
     });
 
     if (resolution.intent === 'cancel') {
@@ -617,10 +621,17 @@ export async function handleTelegramRoutingReply(input: {
       if (!suggestedOption) {
         throw new Error('A Telegram routing confirmation had no suggestion.');
       }
-      await launchPendingTelegramRoute({
+      const launched = await launchPendingTelegramRoute({
         pending: claimed,
         option: suggestedOption,
       });
+      if (!launched && claimed.confirmMessageId) {
+        await finalizeConfirmationCard({
+          chatId: claimed.metadata.communicationChannelId,
+          messageId: claimed.confirmMessageId,
+          text: 'Could not start the task — that workspace is no longer available.',
+        });
+      }
       return true;
     }
 
@@ -657,10 +668,17 @@ export async function handleTelegramRoutingReply(input: {
       nextSuggestedOption &&
       (options.length <= 1 || autoConfirmDelayMs === 0)
     ) {
-      await launchPendingTelegramRoute({
+      const launched = await launchPendingTelegramRoute({
         pending: nextPending,
         option: nextSuggestedOption,
       });
+      if (!launched && nextPending.confirmMessageId) {
+        await finalizeConfirmationCard({
+          chatId: nextPending.metadata.communicationChannelId,
+          messageId: nextPending.confirmMessageId,
+          text: 'Could not start the task — that workspace is no longer available.',
+        });
+      }
       return true;
     }
 
@@ -808,11 +826,34 @@ export async function handleTelegramRoutingCallback(params: {
   }
 
   const option = claimed.options[optionIndex!];
-  const workspace = option
-    ? await resolveTelegramWorkspace(option.workspace)
-    : null;
+  if (!option) {
+    await answerTelegramCallbackQueryBestEffort({ callbackQueryId: query.id });
+    return;
+  }
 
-  if (!workspace) {
+  let launched: Awaited<ReturnType<typeof launchPendingTelegramRoute>>;
+  try {
+    launched = await launchPendingTelegramRoute({
+      pending: claimed,
+      option,
+    });
+  } catch (error) {
+    await storePendingTelegramRoute(action.pendingRouteId, claimed).catch(
+      () => undefined,
+    );
+    apiLogger.warn(
+      `[telegram] Failed to launch task from routing confirmation: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    await answerTelegramCallbackQueryBestEffort({
+      callbackQueryId: query.id,
+      text: 'Could not start the task — try again.',
+    });
+    return;
+  }
+
+  if (!launched) {
     await answerTelegramCallbackQueryBestEffort({
       callbackQueryId: query.id,
       text: 'That workspace is no longer available.',
@@ -830,35 +871,6 @@ export async function handleTelegramRoutingCallback(params: {
 
   await answerTelegramCallbackQueryBestEffort({
     callbackQueryId: query.id,
-    text: `Starting in ${workspace.workspaceDisplayName}.`,
+    text: `Starting in ${launched.workspaceDisplayName}.`,
   });
-  await finalizeConfirmationCard({
-    chatId,
-    messageId: String(message.message_id),
-    text: `Starting in **${workspace.workspaceDisplayName}**.`,
-  });
-
-  try {
-    await launchTelegramTask({
-      launchOwnerUserId: claimed.launchOwnerUserId,
-      queuedMessage: claimed.queuedMessage,
-      metadata: claimed.metadata,
-      workspace,
-      createTopicForTask: claimed.createTopicForTask,
-    });
-  } catch (error) {
-    apiLogger.warn(
-      `[telegram] Failed to launch task from routing confirmation: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    await postTelegramMessageBestEffort({
-      chatId,
-      ...(message.message_thread_id !== undefined
-        ? { threadId: String(message.message_thread_id) }
-        : {}),
-      replyToMessageId: String(message.message_id),
-      text: 'Could not start the task — send the request again.',
-    });
-  }
 }

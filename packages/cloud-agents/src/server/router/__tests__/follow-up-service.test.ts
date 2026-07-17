@@ -3,15 +3,15 @@ const mocks = vi.hoisted(() => ({
   routeTask: vi.fn(),
 }));
 
-vi.mock('@roomote/cloud-agents/server', () => ({
+vi.mock('../router-service', () => ({
   classifyFollowUp: mocks.classifyFollowUp,
   routeTask: mocks.routeTask,
 }));
 
-import { resolveRoutingFollowUp } from '../routing-follow-up.js';
+import { resolveRoutingFollowUp } from '../follow-up-service';
 
 const routingContext = {
-  taskDescription: 'Fix the flaky login test',
+  taskDescription: 'use API instead',
   source: {
     type: 'telegram' as const,
     chatName: 'Engineering',
@@ -28,49 +28,51 @@ describe('resolveRoutingFollowUp', () => {
     vi.clearAllMocks();
   });
 
-  it('confirms a proposed workspace without routing again', async () => {
+  it('confirms a proposed workspace without building context or routing again', async () => {
     mocks.classifyFollowUp.mockResolvedValueOnce({
       intent: 'confirm',
       reasoning: 'accepted',
     });
+    const buildCorrectionContext = vi.fn();
 
     await expect(
       resolveRoutingFollowUp({
-        routingContext,
         suggestion: {
-          workspace: { type: 'environment', id: 'web', name: 'Web App' },
+          workspaceValue: 'web',
           workspaceDisplayName: 'Web App',
         },
         userResponse: 'yes',
-        userName: 'Grace',
         userId: 'user-1',
+        buildCorrectionContext,
       }),
     ).resolves.toEqual({ intent: 'confirm' });
+    expect(buildCorrectionContext).not.toHaveBeenCalled();
     expect(mocks.routeTask).not.toHaveBeenCalled();
   });
 
-  it('cancels without routing again', async () => {
+  it('cancels without building context or routing again', async () => {
     mocks.classifyFollowUp.mockResolvedValueOnce({
       intent: 'cancel',
       reasoning: 'stopped',
     });
+    const buildCorrectionContext = vi.fn();
 
     await expect(
       resolveRoutingFollowUp({
-        routingContext,
         suggestion: {
-          workspace: { type: 'environment', id: 'web', name: 'Web App' },
+          workspaceValue: 'web',
           workspaceDisplayName: 'Web App',
         },
         userResponse: 'never mind',
-        userName: 'Grace',
         userId: 'user-1',
+        buildCorrectionContext,
       }),
     ).resolves.toEqual({ intent: 'cancel' });
+    expect(buildCorrectionContext).not.toHaveBeenCalled();
     expect(mocks.routeTask).not.toHaveBeenCalled();
   });
 
-  it('uses the reply as a routing correction while retaining the original request as context', async () => {
+  it('routes a correction with the previous suggestion and reply in context', async () => {
     mocks.classifyFollowUp.mockResolvedValueOnce({
       intent: 'correct',
       reasoning: 'different workspace',
@@ -86,19 +88,18 @@ describe('resolveRoutingFollowUp', () => {
 
     await expect(
       resolveRoutingFollowUp({
-        routingContext,
         suggestion: {
-          workspace: { type: 'environment', id: 'web', name: 'Web App' },
+          workspaceValue: 'web',
           workspaceDisplayName: 'Web App',
         },
         userResponse: 'use API instead',
-        userName: 'Grace',
         userId: 'user-1',
+        correctionMessage: { user: 'Grace', text: 'use API instead' },
+        buildCorrectionContext: async () => routingContext,
       }),
     ).resolves.toEqual({ intent: 'correct', routingDecision });
     expect(mocks.routeTask).toHaveBeenCalledWith({
       ...routingContext,
-      taskDescription: 'use API instead',
       source: {
         ...routingContext.source,
         threadMessages: [
@@ -124,11 +125,10 @@ describe('resolveRoutingFollowUp', () => {
     });
 
     const result = await resolveRoutingFollowUp({
-      routingContext,
       suggestion: null,
       userResponse: 'yes',
-      userName: 'Grace',
       userId: 'user-1',
+      buildCorrectionContext: async () => routingContext,
     });
 
     expect(result.intent).toBe('correct');
