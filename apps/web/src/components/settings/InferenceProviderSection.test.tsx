@@ -166,34 +166,6 @@ function buildProviderSetup(
                     >)
                   : ({} satisfies Record<string, string>),
               },
-              {
-                id: 'google-vertex' as SetupModelProviderId,
-                label: 'Google Vertex AI',
-                envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
-                envVarLabel: 'Service account JSON',
-                additionalEnvFields: [
-                  {
-                    envVarName: 'GOOGLE_VERTEX_PROJECT',
-                    label: 'Project ID',
-                    secret: false,
-                    required: true,
-                    placeholder: 'my-gcp-project',
-                  },
-                  {
-                    envVarName: 'GOOGLE_VERTEX_LOCATION',
-                    label: 'Location',
-                    secret: false,
-                    required: false,
-                    placeholder: 'us-central1',
-                  },
-                ],
-                defaultRoomoteModel: 'google-vertex/gemini-3.5-flash',
-                authKind: 'api-key' as const,
-                suggestedTaskModels: [],
-                runtimeApiKeySatisfied: false,
-                savedApiKeySatisfied: false,
-                additionalEnvValues: {} satisfies Record<string, string>,
-              },
             ]
           : []),
         {
@@ -575,47 +547,6 @@ describe('InferenceProviderSection', () => {
       provider: 'amazon-bedrock',
       apiKey: 'bedrock-key',
       additionalEnvValues: { AWS_REGION: 'us-west-2' },
-    });
-  });
-
-  it('disables saving a multi-credential provider until required fields are filled', async () => {
-    providerSetupData.current = buildProviderSetup({
-      openrouterSavedKey: true,
-      openaiSavedKey: true,
-      anthropicSavedKey: true,
-      includeMultiCredentialProviders: true,
-      bedrockSavedKey: true,
-    });
-    chatgptStatusData.current = { status: 'connected' };
-    mutateAsyncMock.mockResolvedValue({});
-
-    renderInferenceProviderSection();
-
-    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
-
-    // The picker preselects Google Vertex AI, whose Project ID is required.
-    expect(
-      screen.getByRole('combobox', { name: 'Provider to add' }),
-    ).toHaveTextContent('Google Vertex AI');
-
-    fireEvent.change(
-      screen.getByLabelText('Service account JSON for Google Vertex AI'),
-      { target: { value: '{"type":"service_account"}' } },
-    );
-    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
-
-    await act(async () => {
-      fireEvent.change(
-        screen.getByLabelText('Project ID for Google Vertex AI'),
-        { target: { value: 'my-project' } },
-      );
-      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-    });
-
-    expect(mutateAsyncMock).toHaveBeenCalledWith({
-      provider: 'google-vertex',
-      apiKey: '{"type":"service_account"}',
-      additionalEnvValues: { GOOGLE_VERTEX_PROJECT: 'my-project' },
     });
   });
 });

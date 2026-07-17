@@ -24,6 +24,7 @@ import {
   getTaskModelProviderId,
   getEnabledTaskModels,
   isConfiguredEnvValue,
+  isTaskModelIdDisabled,
   normalizeOptionalReasoningEffort,
   normalizeSetupNewState,
   normalizeTaskModelId,
@@ -1122,6 +1123,11 @@ export async function lookupTaskModelCommand(
   assertAdmin(auth);
 
   const modelId = normalizeTaskModelId(input.modelId);
+
+  if (isTaskModelIdDisabled(modelId)) {
+    throw new Error('This direct model provider is currently disabled.');
+  }
+
   const existingCatalogModel =
     TASK_MODEL_CATALOG.find((option) => option.id === modelId) ?? null;
 

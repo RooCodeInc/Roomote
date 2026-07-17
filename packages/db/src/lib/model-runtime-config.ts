@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm';
 import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
@@ -27,6 +28,9 @@ import {
 } from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET = new Set<string>(
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+);
 
 async function loadPersistedDeploymentEnvVars(
   executor: DatabaseOrTransaction = db,
@@ -110,6 +114,8 @@ function resolveProviderKeyNames({
 }): string[] {
   const configuredProviderKeys = parseModelProviderEnvKeys(
     runtimeRoomoteModelEnvKeys,
+  ).filter(
+    (envVarName) => !DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET.has(envVarName),
   );
 
   if (configuredProviderKeys.length > 0) {
@@ -200,25 +206,33 @@ export async function resolveEffectiveModelRuntimeEnv(
     loadPersistedRuntimeModelConfig(executor),
   ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
+  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
+    roomoteModel: runtimeEnv.R_MODEL,
+    roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
+    roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
+    roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
+    roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
+    roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
+  });
   const resolvedRoomoteModel =
-    normalizeConfiguredValue(runtimeEnv.R_MODEL) ??
+    runtimeOverrideModelConfig.roomoteModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel);
   const resolvedRoomoteSmallModel =
-    normalizeConfiguredValue(runtimeEnv.R_SMALL_MODEL) ??
+    runtimeOverrideModelConfig.roomoteSmallModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel);
   const resolvedRoomoteVisionModel =
-    normalizeConfiguredValue(runtimeEnv.R_VISION_MODEL) ??
+    runtimeOverrideModelConfig.roomoteVisionModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel);
   const resolvedRoomoteCodeReviewModel =
-    normalizeConfiguredValue(runtimeEnv.R_CODE_REVIEW_MODEL) ??
+    runtimeOverrideModelConfig.roomoteCodeReviewModel ??
     normalizeConfiguredValue(
       persistedRuntimeModelConfig.roomoteCodeReviewModel,
     );
   const resolvedRoomoteExploreModel =
-    normalizeConfiguredValue(runtimeEnv.R_EXPLORE_MODEL) ??
+    runtimeOverrideModelConfig.roomoteExploreModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel);
   const resolvedRoomotePlanningModel =
-    normalizeConfiguredValue(runtimeEnv.R_PLANNING_MODEL) ??
+    runtimeOverrideModelConfig.roomotePlanningModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomotePlanningModel);
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
@@ -285,9 +299,9 @@ export async function resolveEffectiveModelRuntimeEnv(
     )
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
       : undefined);
-  const runtimeRoomoteModelEnvKeys = normalizeConfiguredValue(
-    runtimeEnv.R_MODEL_ENV_KEYS,
-  );
+  const configuredRoomoteModelEnvKeys =
+    normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
+    normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
   const resolvedRoleModels = [
     resolvedRoomoteModel,
     resolvedRoomoteSmallModel,
@@ -297,7 +311,7 @@ export async function resolveEffectiveModelRuntimeEnv(
     resolvedRoomotePlanningModel,
   ];
   const providerKeyNames = resolveProviderKeyNames({
-    runtimeRoomoteModelEnvKeys,
+    runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
     resolvedRoomoteModels: resolvedRoleModels,
   });
   // A running OpenCode task can switch to any enabled catalog model without
@@ -321,8 +335,8 @@ export async function resolveEffectiveModelRuntimeEnv(
   // the control plane and are advertised to the worker by name via
   // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
   // gateway URL from its own platform URL and rebases exactly these providers.
-  // Only configured keys are withheld. Providers the gateway cannot serve
-  // (such as Vertex request signing) continue to flow through.
+  // Only configured keys are withheld; credentials for disabled providers are
+  // filtered before this point and never flow to the task runtime.
   const gatewayServedKeyNames = options.inferenceGateway
     ? gatewayProviderKeyNames.filter(
         (name) =>
@@ -412,13 +426,9 @@ export async function resolveEffectiveModelRuntimeEnv(
       R_PLANNING_MODEL_REASONING_EFFORT:
         resolvedRoomotePlanningModelReasoningEffort,
     }),
-    ...(runtimeRoomoteModelEnvKeys && {
-      R_MODEL_ENV_KEYS: runtimeRoomoteModelEnvKeys,
+    ...(providerKeyNames.length > 0 && {
+      R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
-    ...(!runtimeRoomoteModelEnvKeys &&
-      providerKeyNames.length > 0 && {
-        R_MODEL_ENV_KEYS: providerKeyNames.join(','),
-      }),
     ...resolvedProviderKeyValues,
     ...(gatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),

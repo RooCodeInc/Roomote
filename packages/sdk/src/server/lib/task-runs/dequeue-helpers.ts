@@ -1,7 +1,11 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
+  parseModelProviderEnvKeys,
   RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
@@ -184,6 +188,15 @@ const LEGACY_MODEL_RUNTIME_ENV_ALIASES: Record<string, string> = {
   R_MODEL_ENV_KEYS: 'ROOMOTE_MODEL_ENV_KEYS',
 };
 
+const MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  ...Object.keys(LEGACY_MODEL_RUNTIME_ENV_ALIASES),
+  ...Object.values(LEGACY_MODEL_RUNTIME_ENV_ALIASES),
+  ...DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
+  ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+]);
+
 function withLegacySnapshotModelEnvAliases(
   env: Record<string, string>,
 ): Record<string, string> {
@@ -200,6 +213,33 @@ function withLegacySnapshotModelEnvAliases(
   }
 
   return aliased;
+}
+
+/**
+ * Removes model-runtime values from the generic deployment env stream. Model
+ * configuration and provider credentials are reintroduced exclusively from
+ * resolveEffectiveModelRuntimeEnv below, making that resolver the allowlist
+ * boundary while preserving unrelated task variables from the shared table.
+ *
+ * R_MODEL_ENV_KEYS may name a custom provider credential that is not in the
+ * built-in provider catalog, so include configured names in the managed set.
+ */
+function redactModelRuntimeManagedEnvVars(
+  envVars: Record<string, string>,
+  resolvedModelRuntimeEnv: Record<string, string>,
+): Record<string, string> {
+  const configuredProviderEnvVarNames = new Set([
+    ...parseModelProviderEnvKeys(envVars.R_MODEL_ENV_KEYS),
+    ...parseModelProviderEnvKeys(resolvedModelRuntimeEnv.R_MODEL_ENV_KEYS),
+  ]);
+
+  return Object.fromEntries(
+    Object.entries(envVars).filter(
+      ([name]) =>
+        !MODEL_RUNTIME_ENV_VAR_NAMES.has(name) &&
+        !configuredProviderEnvVarNames.has(name),
+    ),
+  );
 }
 
 export async function fetchResolvedRuntimeEnvVars(
@@ -222,7 +262,7 @@ export async function fetchResolvedRuntimeEnvVars(
     redactSourceControlProviderEnvVars(
       redactInferenceGatewayProviderKeys(
         withLegacySnapshotModelEnvAliases({
-          ...envVars,
+          ...redactModelRuntimeManagedEnvVars(envVars, resolvedModelRuntimeEnv),
           ...resolvedModelRuntimeEnv,
         }),
       ),
@@ -233,11 +273,9 @@ export async function fetchResolvedRuntimeEnvVars(
 
 /**
  * When the gateway is active the resolver emits R_INFERENCE_GATEWAY_KEYS
- * listing exactly the configured provider keys it is serving. Those raw keys
- * are spread into the sandbox env above (from the deployment env vars), so
- * strip precisely that set from the merged result — never a broader set, so a
- * provider key the deployment set for its own code (not gateway-served) still
- * reaches the sandbox.
+ * listing exactly the configured provider keys it is serving. Provider keys
+ * are already admitted only through the resolver, but strip the advertised
+ * set as defense in depth in case a future resolver accidentally returns one.
  */
 function redactInferenceGatewayProviderKeys(
   envVars: Record<string, string>,

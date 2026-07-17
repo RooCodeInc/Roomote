@@ -120,6 +120,28 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
+  it('uses persisted custom provider key names when no runtime override exists', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'custom/test-model',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+        CUSTOM_LLM_TOKEN: 'saved-token',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'custom/test-model',
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'saved-token',
+    });
+  });
+
   it('falls back to persisted roomoteSmallModel when the env var is absent', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
@@ -537,11 +559,12 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
-  it('forwards every declared env var for multi-credential providers', async () => {
+  it('ignores disabled provider roles and forwards enabled provider credentials', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
         roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
+        roomoteVisionModel: 'mistral/mistral-large-latest',
       },
     });
 
@@ -552,20 +575,22 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         AWS_REGION: 'us-west-2',
         GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
         GOOGLE_VERTEX_PROJECT: 'my-project',
+        MISTRAL_API_KEY: 'mistral-key',
       },
     });
 
     expect(env).toMatchObject({
       R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
-      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
-      R_MODEL_ENV_KEYS:
-        'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,GOOGLE_VERTEX_PROJECT,GOOGLE_VERTEX_LOCATION',
+      R_MODEL_ENV_KEYS: 'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION',
       AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
       AWS_REGION: 'us-west-2',
-      GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
-      GOOGLE_VERTEX_PROJECT: 'my-project',
     });
+    expect(env).not.toHaveProperty('R_SMALL_MODEL');
+    expect(env).not.toHaveProperty('R_VISION_MODEL');
+    expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(env).not.toHaveProperty('GOOGLE_VERTEX_PROJECT');
     expect(env).not.toHaveProperty('GOOGLE_VERTEX_LOCATION');
+    expect(env).not.toHaveProperty('MISTRAL_API_KEY');
   });
 
   it('injects OPENCODE_AUTH_CONTENT when an openai/ model is used and the ChatGPT subscription is connected', async () => {
@@ -764,27 +789,25 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
     });
 
-    it('withholds Bedrock but keeps Vertex, which the gateway cannot serve', async () => {
+    it('drops disabled-provider credentials even when explicitly requested', async () => {
       const env = await resolveEffectiveModelRuntimeEnv({
         inferenceGateway: true,
         runtimeEnv: {
           R_MODEL_ENV_KEYS:
-            'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS',
+            'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS,MISTRAL_API_KEY',
         },
         deploymentEnvVars: {
           ANTHROPIC_API_KEY: 'sk-anthropic',
           AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
           GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+          MISTRAL_API_KEY: 'mistral-key',
         },
       });
 
       expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
       expect(env).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
-      // Vertex needs request signing, not header injection, so its
-      // credentials still flow.
-      expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-        '{"type":"service_account"}',
-      );
+      expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+      expect(env).not.toHaveProperty('MISTRAL_API_KEY');
       expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
         'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
       );

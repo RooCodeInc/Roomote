@@ -290,7 +290,6 @@ common provider keys into worker containers:
 - `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
-- `MISTRAL_API_KEY`
 - `MOONSHOT_API_KEY`
 - `MINIMAX_API_KEY`
 - `OPENCODE_API_KEY`

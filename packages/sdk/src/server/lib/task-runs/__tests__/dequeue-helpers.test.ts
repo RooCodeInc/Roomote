@@ -509,7 +509,7 @@ describe('redactSourceControlProviderEnvVars', () => {
 });
 
 describe('redactControlPlaneEnvVars', () => {
-  it('strips instance/control-plane secrets but keeps task env and model keys', () => {
+  it('strips control-plane and disabled-provider secrets but keeps enabled model keys', () => {
     expect(
       redactControlPlaneEnvVars({
         // Control-plane secrets that must never reach the sandbox.
@@ -533,6 +533,8 @@ describe('redactControlPlaneEnvVars', () => {
         R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).
         R_TEAMS_BOT_APP_PASSWORD: 'teams',
+        GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+        MISTRAL_API_KEY: 'mistral-key',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',
@@ -581,7 +583,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     });
   });
 
-  it('does not overwrite an explicitly configured legacy name', async () => {
+  it('derives legacy aliases from the resolved model env', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
     });
@@ -590,14 +592,11 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       ROOMOTE_MODEL: 'operator/explicit',
     });
 
-    expect(envVars.ROOMOTE_MODEL).toBe('operator/explicit');
+    expect(envVars.ROOMOTE_MODEL).toBe('anthropic/claude-test');
     expect(envVars.R_MODEL).toBe('anthropic/claude-test');
   });
 
-  it('strips only the gateway-advertised keys from the merged sandbox env', async () => {
-    // The resolver advertises exactly ANTHROPIC_API_KEY as served; the raw
-    // deployment env vars are spread in first, so redaction must remove that
-    // key while leaving an unrelated provider key the user set for their code.
+  it('admits no raw provider keys when the gateway is enabled', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY',
@@ -605,17 +604,17 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     const envVars = await fetchResolvedRuntimeEnvVars({
       ANTHROPIC_API_KEY: 'sk-ant',
-      OPENAI_API_KEY: 'sk-openai-for-user-code',
+      OPENAI_API_KEY: 'sk-openai',
       MY_APP_CONFIG: 'value',
     });
 
     expect(envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
-    expect(envVars.OPENAI_API_KEY).toBe('sk-openai-for-user-code');
+    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
     expect(envVars.MY_APP_CONFIG).toBe('value');
     expect(envVars.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
   });
 
-  it('leaves the merged env untouched when the gateway is off', async () => {
+  it('admits only resolver-selected provider keys when the gateway is off', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       ANTHROPIC_API_KEY: 'sk-ant',
@@ -623,9 +622,36 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     const envVars = await fetchResolvedRuntimeEnvVars({
       ANTHROPIC_API_KEY: 'sk-ant',
+      OPENAI_API_KEY: 'sk-openai',
+      AWS_BEARER_TOKEN_BEDROCK: 'bedrock-token',
+      AWS_REGION: 'us-west-2',
+      STRIPE_API_KEY: 'sk-stripe',
     });
 
     expect(envVars.ANTHROPIC_API_KEY).toBe('sk-ant');
+    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+    expect(envVars.AWS_REGION).toBe('us-west-2');
+    expect(envVars.STRIPE_API_KEY).toBe('sk-stripe');
     expect(envVars).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
+  });
+
+  it('treats custom R_MODEL_ENV_KEYS credentials as resolver-managed', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'custom/test-model',
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'selected-token',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN,STALE_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'stored-token',
+      STALE_LLM_TOKEN: 'stale-token',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars.CUSTOM_LLM_TOKEN).toBe('selected-token');
+    expect(envVars).not.toHaveProperty('STALE_LLM_TOKEN');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
   });
 });

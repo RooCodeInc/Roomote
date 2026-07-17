@@ -1597,7 +1597,7 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
   });
 
-  it('materializes inline GOOGLE_APPLICATION_CREDENTIALS JSON to a file path', async () => {
+  it('strips disabled-provider credentials after sourcing the shared BASH_ENV', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1609,19 +1609,12 @@ describe('opencode-server bootstrap', () => {
     const sharedBashEnvPath = path.join(homeDir, 'roomote-env.sh');
     fs.writeFileSync(
       sharedBashEnvPath,
-      `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'\n`,
+      [
+        `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'`,
+        "export MISTRAL_API_KEY='mistral-key'",
+        '',
+      ].join('\n'),
     );
-
-    const { commandEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        BASH_ENV: sharedBashEnvPath,
-        GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
     const credentialsPath = path.join(
       homeDir,
       '.local',
@@ -1629,8 +1622,23 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'google-application-credentials.json',
     );
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentialsPath);
-    expect(fs.readFileSync(credentialsPath, 'utf8')).toBe(credentialsJson);
+    fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+    fs.writeFileSync(credentialsPath, credentialsJson);
+
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        BASH_ENV: sharedBashEnvPath,
+        GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
+        MISTRAL_API_KEY: 'mistral-key',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
+    expect(fs.existsSync(credentialsPath)).toBe(false);
     const openCodeBashEnvPath = commandEnv.BASH_ENV;
     expect(openCodeBashEnvPath).toBe(
       path.join(
@@ -1647,19 +1655,28 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).not.toContain(
       credentialsJson,
     );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset GOOGLE_APPLICATION_CREDENTIALS',
+    );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset MISTRAL_API_KEY',
+    );
     expect(
       execFileSync(
         'bash',
-        ['-lc', 'printf %s "$GOOGLE_APPLICATION_CREDENTIALS"'],
+        [
+          '-lc',
+          'printf "%s|%s" "$GOOGLE_APPLICATION_CREDENTIALS" "$MISTRAL_API_KEY"',
+        ],
         {
           env: commandEnv,
           encoding: 'utf8',
         },
       ),
-    ).toBe(credentialsPath);
+    ).toBe('|');
   });
 
-  it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', async () => {
+  it('strips a GOOGLE_APPLICATION_CREDENTIALS file path', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1669,13 +1686,13 @@ describe('opencode-server bootstrap', () => {
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
         GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
+        MISTRAL_API_KEY: 'mistral-key',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
     });
 
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-      '/etc/roomote/service-account.json',
-    );
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
   });
 });

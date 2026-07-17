@@ -2,9 +2,11 @@ import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
   buildInferenceGatewayUrl,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  isTaskModelIdDisabled,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   RunStatus,
@@ -646,6 +648,26 @@ export const runTask = async ({
         ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
+    // Strip credentials for disabled providers as defense in depth, even if a
+    // stale worker/dequeue payload still contains them.
+    for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+      delete runtimeEnv[envVarName];
+    }
+    for (const modelEnvVarName of [
+      'R_MODEL',
+      'R_SMALL_MODEL',
+      'R_VISION_MODEL',
+      'R_CODE_REVIEW_MODEL',
+      'R_EXPLORE_MODEL',
+      'R_PLANNING_MODEL',
+    ] as const) {
+      const modelId = runtimeEnv[modelEnvVarName];
+
+      if (modelId && isTaskModelIdDisabled(modelId)) {
+        delete runtimeEnv[modelEnvVarName];
+      }
+    }
+
     // Inference gateway: dequeue advertises the served provider keys by name
     // (R_INFERENCE_GATEWAY_KEYS) rather than the gateway URL, so the URL is
     // built here from the worker's own platform URL — already rewritten to be

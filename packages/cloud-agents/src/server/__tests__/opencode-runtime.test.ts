@@ -8,6 +8,7 @@ import {
   buildOpenCodeCliEnv,
   killOpenCodeSdkServerProcessesForShutdown,
   leaseOpenCodeSdkServer,
+  readOpenCodeDebugConfig,
 } from '../opencode-runtime';
 
 describe('buildOpenCodeCliEnv', () => {
@@ -18,6 +19,9 @@ describe('buildOpenCodeCliEnv', () => {
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
     'GOOGLE_APPLICATION_CREDENTIALS',
+    'MISTRAL_API_KEY',
+    'BASH_ENV',
+    'OPENCODE_COMMAND',
   ] as const;
   const originalValues = new Map<string, string | undefined>();
 
@@ -143,7 +147,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('materializes inline GOOGLE_APPLICATION_CREDENTIALS JSON to a temp file path', () => {
+  it('strips disabled-provider credentials', () => {
     const credentialsJson = JSON.stringify({
       type: 'service_account',
       project_id: 'my-project',
@@ -151,22 +155,58 @@ describe('buildOpenCodeCliEnv', () => {
 
     const env = buildOpenCodeCliEnv({
       GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
+      MISTRAL_API_KEY: 'mistral-key',
     });
 
-    const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS;
-    expect(credentialsPath).toBeDefined();
-    expect(credentialsPath).not.toBe(credentialsJson);
-    expect(readFileSync(credentialsPath!, 'utf8')).toBe(credentialsJson);
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.MISTRAL_API_KEY).toBeUndefined();
   });
 
-  it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', () => {
+  it('strips disabled model role overrides', () => {
     const env = buildOpenCodeCliEnv({
+      R_MODEL: 'google-vertex/gemini-3.5-flash',
+      R_SMALL_MODEL: 'mistral/mistral-large-latest',
+      MISTRAL_API_KEY: 'mistral-key',
       GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
     });
 
-    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-      '/etc/roomote/service-account.json',
+    expect(env.R_MODEL).toBeUndefined();
+    expect(env.R_SMALL_MODEL).toBeUndefined();
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.MISTRAL_API_KEY).toBeUndefined();
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+  });
+
+  it('prevents inherited BASH_ENV from restoring disabled credentials through a shell wrapper', () => {
+    const fixtureDir = mkdtempSync(
+      path.join(tmpdir(), 'opencode-bash-env-test-'),
     );
+    const bashEnvPath = path.join(fixtureDir, 'shared-env.sh');
+    const commandPath = path.join(fixtureDir, 'print-env.cjs');
+
+    writeFileSync(
+      bashEnvPath,
+      [
+        "export GOOGLE_APPLICATION_CREDENTIALS='/stale/vertex.json'",
+        "export MISTRAL_API_KEY='stale-mistral-key'",
+      ].join('\n'),
+    );
+    writeFileSync(
+      commandPath,
+      `process.stdout.write(JSON.stringify({
+        googleCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        mistralApiKey: process.env.MISTRAL_API_KEY,
+      }));`,
+    );
+
+    process.env.BASH_ENV = bashEnvPath;
+    process.env.OPENCODE_COMMAND = `${process.execPath} ${commandPath}`;
+
+    try {
+      expect(JSON.parse(readOpenCodeDebugConfig())).toEqual({});
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
   });
 });
 
