@@ -2634,60 +2634,6 @@ export function AutomationsSettings() {
           <div className="space-y-4">
             <div className="space-y-3">
               <h2 className="text-base font-semibold text-foreground">
-                Slack automations
-              </h2>
-
-              <AutomationCard
-                automation={AUTOMATION_DEFINITIONS.channelAutoStart}
-                isOpen={openAutomationIds.has('channelAutoStart')}
-                onOpenChange={(open) =>
-                  setAutomationOpen('channelAutoStart', open)
-                }
-                iconEnabled={iconEnabled.channelAutoStart}
-                footer={
-                  <AutomationFooter
-                    isDirty={isDirty.channelAutoStart}
-                    isPending={
-                      updateMutation.isPending &&
-                      savingAutomation === 'channelAutoStart'
-                    }
-                    onSave={() => saveAgent('channelAutoStart')}
-                    onReset={() => resetAgent('channelAutoStart')}
-                  />
-                }
-              >
-                <ChannelAutoStartEditor
-                  slackAppMention={slackAppMention}
-                  rows={formState.channelAutoStartSlackChannels}
-                  launchModeOptions={channelAutoStartLaunchModeOptions}
-                  showLaunchModePicker={showChannelAutoStartLaunchModePicker}
-                  availableTemplates={availableAutoRespondChannelTemplates}
-                  isEnabled={channelAutoStartIsEnabled}
-                  warning={
-                    showChannelAutoStartSlackChannelWarning ? (
-                      <SlackChannelAccessWarning
-                        slackAppMention={slackAppMention}
-                      />
-                    ) : undefined
-                  }
-                  channelFieldError={fieldErrors.channelAutoStartSlackChannels}
-                  instructionsFieldError={
-                    fieldErrors.channelAutoStartInstructions
-                  }
-                  onRowsChange={(rows) =>
-                    setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            channelAutoStartSlackChannels: rows,
-                          }
-                        : prev,
-                    )
-                  }
-                />
-              </AutomationCard>
-
-              <h2 className="pt-2 text-base font-semibold text-foreground">
                 Source Code automations
               </h2>
 
@@ -3402,6 +3348,60 @@ export function AutomationsSettings() {
                   </AutomationCard>
                 );
               })}
+
+              <h2 className="pt-2 text-base font-semibold text-foreground">
+                Slack automations
+              </h2>
+
+              <AutomationCard
+                automation={AUTOMATION_DEFINITIONS.channelAutoStart}
+                isOpen={openAutomationIds.has('channelAutoStart')}
+                onOpenChange={(open) =>
+                  setAutomationOpen('channelAutoStart', open)
+                }
+                iconEnabled={iconEnabled.channelAutoStart}
+                footer={
+                  <AutomationFooter
+                    isDirty={isDirty.channelAutoStart}
+                    isPending={
+                      updateMutation.isPending &&
+                      savingAutomation === 'channelAutoStart'
+                    }
+                    onSave={() => saveAgent('channelAutoStart')}
+                    onReset={() => resetAgent('channelAutoStart')}
+                  />
+                }
+              >
+                <ChannelAutoStartEditor
+                  slackAppMention={slackAppMention}
+                  rows={formState.channelAutoStartSlackChannels}
+                  launchModeOptions={channelAutoStartLaunchModeOptions}
+                  showLaunchModePicker={showChannelAutoStartLaunchModePicker}
+                  availableTemplates={availableAutoRespondChannelTemplates}
+                  isEnabled={channelAutoStartIsEnabled}
+                  warning={
+                    showChannelAutoStartSlackChannelWarning ? (
+                      <SlackChannelAccessWarning
+                        slackAppMention={slackAppMention}
+                      />
+                    ) : undefined
+                  }
+                  channelFieldError={fieldErrors.channelAutoStartSlackChannels}
+                  instructionsFieldError={
+                    fieldErrors.channelAutoStartInstructions
+                  }
+                  onRowsChange={(rows) =>
+                    setFormState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            channelAutoStartSlackChannels: rows,
+                          }
+                        : prev,
+                    )
+                  }
+                />
+              </AutomationCard>
 
               <h2 className="pt-2 text-base font-semibold text-foreground">
                 Automations for Roomote Managers
