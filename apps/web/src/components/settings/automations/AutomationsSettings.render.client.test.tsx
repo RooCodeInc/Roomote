@@ -646,9 +646,7 @@ describe('AutomationsSettings', () => {
       screen.getByRole('switch', { name: /review prs not created by/i }),
     ).toBeChecked();
     expect(
-      screen.getByText(
-        /Automatically review any new PRs and follow-up commits/i,
-      ),
+      screen.getByText(/Automatically review new PRs and follow-up commits/i),
     ).toBeInTheDocument();
     expect(
       screen.queryByText(/Which PRs get reviewed/i),
