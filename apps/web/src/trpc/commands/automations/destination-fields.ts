@@ -6,11 +6,7 @@ import {
 } from '@roomote/types';
 
 import { normalizeOptionalText } from './channel-auto-start';
-import type {
-  DiscordChannelFieldErrorKey,
-  SlackChannelFieldErrorKey,
-  UpdateBackgroundAgentSettingsInput,
-} from './types';
+import type { UpdateBackgroundAgentSettingsInput } from './types';
 
 type SettingsChannelRecord = Partial<
   Record<
@@ -20,7 +16,7 @@ type SettingsChannelRecord = Partial<
   >
 >;
 
-export type SubmittedDestinationChannels = {
+type SubmittedDestinationChannels = {
   slackChannel: string | null;
   discordChannel: string | null;
   /** Whether Discord should be resolved (vs keep-persisted for optional fields). */
@@ -90,34 +86,3 @@ export function getPersistedDiscordChannelForDestination(
 export function listAutomationDestinationDescriptors() {
   return AUTOMATION_DESTINATION_DESCRIPTORS;
 }
-
-export function isDestinationSlackField(
-  field: string,
-): field is AutomationDestinationSlackField {
-  return AUTOMATION_DESTINATION_DESCRIPTORS.some(
-    (descriptor) => descriptor.slackField === field,
-  );
-}
-
-export function isDestinationDiscordField(
-  field: string,
-): field is AutomationDestinationDiscordField {
-  return AUTOMATION_DESTINATION_DESCRIPTORS.some(
-    (descriptor) => descriptor.discordField === field,
-  );
-}
-
-export type DestinationChannelResults = Record<
-  AutomationDestinationDescriptorItem['automationId'],
-  {
-    slack: {
-      channelId: string | null;
-      channelName: string | null;
-      error?: { field: SlackChannelFieldErrorKey; message: string };
-    };
-    discord: {
-      channelId: string | null;
-      error?: { field: DiscordChannelFieldErrorKey; message: string };
-    };
-  }
->;
