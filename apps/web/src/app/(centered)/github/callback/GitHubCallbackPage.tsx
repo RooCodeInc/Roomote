@@ -46,12 +46,11 @@ import {
   useFinishAuthenticateGitHubAccount,
   useFinishCreateGitHubAppManifest,
   useFinishCreateGitHubInstallation,
-  useGitHubPendingInstallations,
-  useResolvePendingGitHubInstallations,
   useSyncGitHubInstallation,
 } from '@/hooks/github';
 
 import { Alert, AlertDescription, Button } from '@/components/system';
+import { GitHubInstallRequestPending } from '@/components/github/GitHubInstallRequestPending';
 
 export default function Page() {
   const router = useRouter();
@@ -63,9 +62,6 @@ export default function Page() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isInstallRequested, setIsInstallRequested] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [manualCheckMessage, setManualCheckMessage] = useState<string | null>(
-    null,
-  );
   const [error, setError] = useState<string | null>(null);
   useRedirectToSignIn(authStatus === 'signed-out');
 
@@ -159,43 +155,11 @@ export default function Page() {
     },
   });
 
-  // While the install request awaits an org owner's approval, poll for the
-  // webhook-driven completion (which deletes the pending row) so the user can
-  // continue without manually revisiting setup.
-  const pendingInstallations = useGitHubPendingInstallations({
-    enabled: isInstallRequested,
-    refetchInterval: 10_000,
-  });
-
-  const resolvePendingInstallations = useResolvePendingGitHubInstallations({
-    onSuccess: (result) => {
-      if (result.success && result.completed > 0) {
-        setIsInstallRequested(false);
-        setIsInstalled(true);
-        navigateFromState();
-      } else if (result.success) {
-        setManualCheckMessage(
-          'Not approved yet. Hang tight, this page keeps checking on its own.',
-        );
-      } else {
-        setManualCheckMessage(result.error);
-      }
-    },
-    onError: (error) => {
-      setManualCheckMessage(error.message);
-    },
-  });
-
-  const isInstallRequestApproved =
-    isInstallRequested && pendingInstallations.data?.pending === false;
-
-  useEffect(() => {
-    if (isInstallRequestApproved) {
-      setIsInstallRequested(false);
-      setIsInstalled(true);
-      navigateFromState();
-    }
-  }, [isInstallRequestApproved, navigateFromState]);
+  const handleInstallApproved = useCallback(() => {
+    setIsInstallRequested(false);
+    setIsInstalled(true);
+    navigateFromState();
+  }, [navigateFromState]);
 
   const hasHandledCallback = useRef(false);
 
@@ -317,44 +281,18 @@ export default function Page() {
         </>
       )}
       {isInstallRequested && (
-        <Alert className="w-sm">
-          <AlertDescription>
-            <div className="flex flex-col gap-4">
-              <div>
-                Your request is pending approval from a GitHub organization
-                owner. You can wait here and we&apos;ll continue automatically
-                once it&apos;s approved.
-              </div>
-              {manualCheckMessage && (
-                <div className="text-muted-foreground">
-                  {manualCheckMessage}
-                </div>
-              )}
-              <div className="flex items-center gap-2 self-center">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={resolvePendingInstallations.isPending}
-                  onClick={() => {
-                    setManualCheckMessage(null);
-                    resolvePendingInstallations.mutate();
-                  }}
-                >
-                  {resolvePendingInstallations.isPending
-                    ? 'Checking...'
-                    : 'Check now'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => router.push('/')}
-                >
-                  <Home />
-                </Button>
-              </div>
-            </div>
-          </AlertDescription>
-        </Alert>
+        <GitHubInstallRequestPending
+          onApproved={handleInstallApproved}
+          footer={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => router.push('/')}
+            >
+              <Home />
+            </Button>
+          }
+        />
       )}
     </div>
   );

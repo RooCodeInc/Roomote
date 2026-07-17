@@ -18,6 +18,8 @@ import {
   Spinner,
 } from '@/components/system';
 import { useCreateGitHubInstallation } from '@/hooks/github/useCreateGitHubInstallation';
+import { useGitHubPendingInstallations } from '@/hooks/github';
+import { GitHubInstallRequestPending } from '@/components/github/GitHubInstallRequestPending';
 import {
   useAdoLinkedAccount,
   useAuthenticateAdoAccount,
@@ -155,6 +157,29 @@ export function StepSourceControlConnect({
   );
 
   const alreadyConnected = providerStatus?.connected === true;
+
+  // A non-owner can't install the GitHub App themselves; they request it and
+  // wait for an org owner to approve. Surface that pending state here too, so a
+  // user who returns to setup (rather than the OAuth callback) isn't dropped
+  // back onto a bare "Connect to GitHub" button that restarts the request.
+  const githubPendingInstallations = useGitHubPendingInstallations({
+    enabled: provider === 'github' && !alreadyConnected,
+  });
+  const githubInstallPending =
+    provider === 'github' &&
+    !alreadyConnected &&
+    githubPendingInstallations.data?.pending === true;
+
+  const handleGitHubInstallApproved = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: trpc.setupNew.status.queryKey(),
+    });
+    await queryClient.invalidateQueries({
+      queryKey: trpc.sourceControl.repositories.queryKey(),
+    });
+
+    onContinue();
+  }, [onContinue, queryClient, trpc]);
   const adoAuthMode = providerStatus?.fields.find(
     (field) => field.envVarName === 'ADO_AUTH_MODE',
   )?.savedValue;
@@ -353,6 +378,13 @@ export function StepSourceControlConnect({
               </Button>
             )}
           </SetupFooter>
+        </div>
+      ) : provider === 'github' && githubInstallPending ? (
+        <div className="space-y-4">
+          <GitHubInstallRequestPending
+            onApproved={handleGitHubInstallApproved}
+          />
+          <SetupFooter onBack={onBack} />
         </div>
       ) : provider === 'github' ? (
         <div className="space-y-4">
