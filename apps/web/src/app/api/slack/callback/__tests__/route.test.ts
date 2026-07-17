@@ -1,8 +1,11 @@
 import { NextRequest } from 'next/server';
 
 import { createServerCaller } from '@/trpc/server';
+import {
+  createSignedSlackInstallState,
+  createSignedSlackLinkAccountState,
+} from '@/lib/server/slack-oauth-state';
 import { encodeRecord } from '@/lib/url-coder';
-import { createSignedSlackInstallState } from '@/lib/server/slack-oauth-state';
 
 import { GET } from '../route';
 
@@ -22,6 +25,13 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 const mockCreateServerCaller = vi.mocked(createServerCaller);
 const mockExchangeOAuthCode = vi.fn();
 const mockFinishAuthenticateAccount = vi.fn();
+
+function redirectPathAndSearch(response: Response): string {
+  const location = response.headers.get('location');
+  expect(location).toBeTruthy();
+  const url = new URL(location!);
+  return `${url.pathname}${url.search}`;
+}
 
 describe('GET /api/slack/callback', () => {
   beforeEach(() => {
@@ -48,8 +58,8 @@ describe('GET /api/slack/callback', () => {
     );
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:13000/settings/integrations?slack=connected',
+    expect(redirectPathAndSearch(response)).toBe(
+      '/settings/integrations?slack=connected',
     );
     expect(mockExchangeOAuthCode).toHaveBeenCalledWith({
       code: 'oauth-code',
@@ -73,12 +83,37 @@ describe('GET /api/slack/callback', () => {
     );
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:13000/setup?step=slack&slack=connected',
+    const location = new URL(response.headers.get('location')!);
+    expect(location.hostname).not.toBe('0.0.0.0');
+    expect(`${location.pathname}${location.search}`).toBe(
+      '/setup?step=slack&slack=connected',
     );
   });
 
-  it('keeps link-account redirects on the safe encoded path', async () => {
+  it('keeps link-account redirects on the safe signed path', async () => {
+    const state = await createSignedSlackLinkAccountState({
+      userId: 'user-1',
+      redirectPath: '/settings/profile',
+    });
+
+    const response = await GET(
+      new NextRequest(
+        `http://localhost:13000/api/slack/callback?code=oauth-code&state=${encodeURIComponent(state)}`,
+      ),
+    );
+
+    expect(response.status).toBe(307);
+    expect(redirectPathAndSearch(response)).toBe(
+      '/settings/profile?slack=connected',
+    );
+    expect(mockFinishAuthenticateAccount).toHaveBeenCalledWith({
+      code: 'oauth-code',
+      state,
+    });
+    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsigned link-account state', async () => {
     const state = encodeRecord({
       mode: 'link_account',
       redirect: '/settings/profile',
@@ -91,13 +126,10 @@ describe('GET /api/slack/callback', () => {
     );
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:13000/settings/profile?slack=connected',
+    expect(redirectPathAndSearch(response)).toBe(
+      '/settings?error=invalid_callback',
     );
-    expect(mockFinishAuthenticateAccount).toHaveBeenCalledWith({
-      code: 'oauth-code',
-    });
-    expect(mockExchangeOAuthCode).not.toHaveBeenCalled();
+    expect(mockCreateServerCaller).not.toHaveBeenCalled();
   });
 
   it('rejects legacy JSON state instead of trusting its redirect path', async () => {
@@ -112,8 +144,8 @@ describe('GET /api/slack/callback', () => {
     );
 
     expect(response.status).toBe(307);
-    expect(response.headers.get('location')).toBe(
-      'http://localhost:13000/settings?error=invalid_callback',
+    expect(redirectPathAndSearch(response)).toBe(
+      '/settings?error=invalid_callback',
     );
     expect(mockCreateServerCaller).not.toHaveBeenCalled();
   });

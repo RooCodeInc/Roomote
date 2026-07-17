@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { launchCodingHarnesses, REASONING_EFFORT_VALUES } from './task-runs';
 import { computeProviders } from './compute-providers';
 import { ALL_REPOSITORIES } from './constants';
+import { gitBranchNameSchema } from './git-ref';
 import {
   appendEnvironmentDefinitionGuidance,
   buildCreateEnvironmentDefinitionPrompt,
@@ -103,7 +104,7 @@ export const standardTaskBootstrapSchema = z
 export const taskLaunchRequestSchema = z.object({
   prompt: z.string().trim().optional(),
   repo: z.string().trim().optional(),
-  branch: z.string().trim().optional(),
+  branch: gitBranchNameSchema.optional(),
   sha: z
     .string()
     .trim()

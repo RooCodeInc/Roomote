@@ -17,7 +17,13 @@ const ISSUER = 'rcc';
 export const DEFAULT_USER_AUTH_TOKEN_TIMEOUT_MS = 60_000;
 export const DEFAULT_AUTH_TOKEN_EXPIRATION_GRACE_PERIOD_MS = 5 * 60 * 1000;
 export const PUBLIC_USER_AUTH_TOKEN_EXPIRATION_GRACE_PERIOD_MS = 0;
-export const publicAuthTokenTimeoutMsSchema = z.number().int().positive();
+/** Cap for caller-supplied public auth-token TTLs (1 hour). */
+export const MAX_PUBLIC_USER_AUTH_TOKEN_TIMEOUT_MS = 60 * 60 * 1000;
+export const publicAuthTokenTimeoutMsSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(MAX_PUBLIC_USER_AUTH_TOKEN_TIMEOUT_MS);
 
 export const createAuthTokenOptionsSchema = z.object({
   userId: z.string(),

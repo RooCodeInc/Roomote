@@ -13,6 +13,33 @@ import {
 
 import { decodeRecord } from '@/lib';
 
+function decodeOAuthState(
+  encodedState: string | null | undefined,
+): Record<string, string> | undefined {
+  if (!encodedState) {
+    return undefined;
+  }
+
+  const fromRecord = decodeRecord<Record<string, string>>(encodedState);
+  if (fromRecord) {
+    return fromRecord;
+  }
+
+  // Signed {payload}.{signature} form used by account-link OAuth.
+  const [encodedPayload] = encodedState.split('.');
+  if (!encodedPayload) {
+    return undefined;
+  }
+
+  try {
+    const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(atob(padded)) as Record<string, string>;
+  } catch {
+    return undefined;
+  }
+}
+
 import { useUser } from '@/hooks/useUser';
 import { useRedirectToSignIn } from '@/hooks/useSignInRedirect';
 import {
@@ -38,9 +65,7 @@ export default function Page() {
   useRedirectToSignIn(authStatus === 'signed-out');
 
   const encodedCallbackState = params.get('state');
-  const decodedCallbackState = encodedCallbackState
-    ? decodeRecord<Record<string, string>>(encodedCallbackState)
-    : undefined;
+  const decodedCallbackState = decodeOAuthState(encodedCallbackState);
   // Failures here are usually bad saved GitHub App credentials, so route the
   // user back to where those can be fixed instead of dead-ending on the error.
   const cameFromSetup =
@@ -51,10 +76,7 @@ export default function Page() {
 
   const navigateFromState = () => {
     const encodedState = params.get('state');
-
-    const decodedState = encodedState
-      ? decodeRecord<Record<string, string>>(encodedState)
-      : undefined;
+    const decodedState = decodeOAuthState(encodedState);
 
     const redirect = decodedState?.redirect;
 
@@ -145,10 +167,7 @@ export default function Page() {
     const setupAction = params.get('setup_action');
     const code = params.get('code');
     const encodedState = params.get('state');
-
-    const decodedState = encodedState
-      ? decodeRecord<Record<string, string>>(encodedState)
-      : undefined;
+    const decodedState = decodeOAuthState(encodedState);
 
     const isAuthenticationFlow = decodedState?.mode === 'auth';
     const isAppManifestFlow = decodedState?.mode === 'github-app-manifest';
@@ -174,11 +193,11 @@ export default function Page() {
         finishInstall.mutate(code);
       }
     } else if (isAuthenticationFlow) {
-      if (!code) {
+      if (!code || !encodedState) {
         setIsLoading(false);
         setError('Missing OAuth code. Please try again.');
       } else {
-        finishAuthentication.mutate(code);
+        finishAuthentication.mutate({ code, state: encodedState });
       }
     } else {
       // TODO: This path works for both `install` and `update` setup actions,

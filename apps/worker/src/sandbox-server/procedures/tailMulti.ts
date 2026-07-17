@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
+import path from 'node:path';
 import { z } from 'zod';
 
 import type { TaggedStreamChunk } from '../types';
@@ -13,6 +14,13 @@ function validateFilePath(filePath: string): void {
     throw new TRPCError({
       code: 'BAD_REQUEST',
       message: 'Path cannot be empty',
+    });
+  }
+
+  if (path.isAbsolute(filePath)) {
+    throw new TRPCError({
+      code: 'BAD_REQUEST',
+      message: 'Absolute paths are not allowed',
     });
   }
 

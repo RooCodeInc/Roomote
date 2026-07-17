@@ -30,9 +30,9 @@ import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
 import {
   createSignedSlackInstallState,
+  createSignedSlackLinkAccountState,
   decodeSlackOAuthState,
 } from '@/lib/server/slack-oauth-state';
-import { encodeRecord } from '@/lib/url-coder';
 
 export { createSlackAppFromManifestCommand } from './create-app-from-manifest';
 
@@ -296,16 +296,12 @@ async function upsertSlackUserMapping({
     });
     status = 'created';
   } else if (userMapping.userId !== userId) {
-    await db
-      .update(slackUserMappings)
-      .set({ userId, updatedAt: new Date() })
-      .where(
-        and(
-          eq(slackUserMappings.slackUserId, slackUserId),
-          eq(slackUserMappings.slackTeamId, slackTeamId),
-        ),
-      );
-    status = 'relinked';
+    // Refuse re-link of existing mappings owned by another user. Silent
+    // takeover enables OAuth CSRF / account takeover when a victim completes
+    // an attacker's callback URL.
+    throw new Error(
+      'This Slack account is already linked to another Roomote user. Unlink it there before reconnecting.',
+    );
   }
 
   userMapping = await db.query.slackUserMappings.findFirst({
@@ -629,12 +625,16 @@ export async function startAuthenticateSlackAccountCommand(
   try {
     const slackOAuthConfig = await resolveSlackOAuthConfig();
     const nonce = crypto.randomUUID();
+    const signedState = await createSignedSlackLinkAccountState({
+      userId: auth.userId,
+      redirectPath: state?.redirect,
+    });
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: slackOAuthConfig.clientId,
       scope: 'openid profile',
       redirect_uri: getSlackRedirectUri(),
-      state: encodeRecord({ ...(state ?? {}), mode: 'link_account' }),
+      state: signedState,
       nonce,
     });
 
@@ -657,12 +657,24 @@ export async function startAuthenticateSlackAccountCommand(
 
 export async function finishAuthenticateSlackAccountCommand(
   auth: UserAuthSuccess,
-  input: { code: string },
+  input: { code: string; state: string },
 ): Promise<
   | { success: true; slackUserId: string; teamName: string | null }
   | { success: false; error: string }
 > {
   try {
+    const decodedState = await decodeSlackOAuthState(input.state);
+    if (
+      !decodedState ||
+      decodedState.mode !== 'link_account' ||
+      decodedState.userId !== auth.userId
+    ) {
+      return {
+        success: false,
+        error: 'Invalid or expired Slack link state for this session',
+      };
+    }
+
     const slackOAuthConfig = await resolveSlackOAuthConfig();
     const tokenParams = new URLSearchParams({
       client_id: slackOAuthConfig.clientId,

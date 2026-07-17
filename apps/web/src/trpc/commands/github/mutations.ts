@@ -7,6 +7,7 @@ import { createClient } from '@roomote/sdk/client';
 import { isLoopbackHostname } from '@roomote/types';
 import {
   db,
+  eq,
   githubInstallations,
   githubPendingInstallations,
   githubUserMappings,
@@ -20,6 +21,10 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server';
 import { encodeRecord } from '@/lib';
+import {
+  createSignedGitHubAuthState,
+  decodeSignedGitHubAuthState,
+} from '@/lib/server/github-oauth-state';
 import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 
 type GitHubOAuthUser = Endpoints['GET /user']['response']['data'];
@@ -428,6 +433,16 @@ async function upsertGitHubUserMapping({
       ? new Date(Date.now() + githubOAuthToken.expires_in * 1000)
       : null;
 
+  const existing = await db.query.githubUserMappings.findFirst({
+    where: eq(githubUserMappings.githubUserId, githubUser.id),
+    columns: { userId: true },
+  });
+  if (existing && existing.userId !== userId) {
+    throw new Error(
+      'This GitHub account is already linked to another Roomote user. Unlink it there before reconnecting.',
+    );
+  }
+
   await db
     .insert(githubUserMappings)
     .values({
@@ -440,14 +455,16 @@ async function upsertGitHubUserMapping({
     })
     .onConflictDoUpdate({
       target: githubUserMappings.githubUserId,
+      // Never re-assign ownership on conflict; only refresh credentials when
+      // the existing owner is this same Roomote user.
       set: {
-        userId,
         githubLogin: githubUser.login,
         accessToken: githubOAuthToken.access_token,
         refreshToken: githubOAuthToken.refresh_token ?? null,
         tokenExpiresAt,
         updatedAt: new Date(),
       },
+      setWhere: eq(githubUserMappings.userId, userId),
     });
 }
 
@@ -814,15 +831,20 @@ export async function startAuthenticateGitHubAccountCommand(
     }
 
     const baseUrl = Env.R_APP_URL;
+    const callbackBackground = state?.bg;
+    const signedState = createSignedGitHubAuthState({
+      userId: auth.userId,
+      redirect: state?.redirect,
+      bg: callbackBackground,
+    });
     const params = new URLSearchParams({
       client_id: clientId,
       scope: 'read:user',
-      state: encodeRecord({ ...(state ?? {}), mode: 'auth' }),
+      state: signedState,
     });
 
     if (baseUrl) {
       const redirectUri = new URL('/github/callback', baseUrl);
-      const callbackBackground = state?.bg;
 
       if (
         callbackBackground === 'accent' ||
@@ -853,11 +875,19 @@ export async function startAuthenticateGitHubAccountCommand(
 
 export async function finishAuthenticateGitHubAccountCommand(
   auth: UserAuthSuccess,
-  input: { code: string },
+  input: { code: string; state: string },
 ): Promise<
   { success: true; githubLogin: string } | { success: false; error: string }
 > {
   try {
+    const decodedState = decodeSignedGitHubAuthState(input.state);
+    if (!decodedState || decodedState.userId !== auth.userId) {
+      return {
+        success: false,
+        error: 'Invalid or expired GitHub link state for this session',
+      };
+    }
+
     const githubUserResult = await getGitHubOAuthUser({
       code: input.code,
       context: 'finishAuthenticateGitHubAccountCommand',
@@ -868,6 +898,7 @@ export async function finishAuthenticateGitHubAccountCommand(
     }
 
     const { githubUser, githubOAuthToken } = githubUserResult;
+
     await upsertGitHubUserMapping({
       userId: auth.userId,
       githubUser,

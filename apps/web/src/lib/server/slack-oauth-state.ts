@@ -1,21 +1,27 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { decodeRecord } from '@/lib/url-coder';
-
 import { resolveSlackSigningSecret } from '@roomote/db/server';
 
 const DEFAULT_SLACK_OAUTH_REDIRECT_PATH = '/settings';
-const SIGNED_INSTALL_STATE_VERSION = 1;
-const SIGNED_INSTALL_STATE_MAX_AGE_MS = 60 * 60 * 1000;
+const SIGNED_STATE_VERSION = 1;
+const SIGNED_STATE_MAX_AGE_MS = 60 * 60 * 1000;
 
 type SignedSlackInstallStatePayload = {
-  version: typeof SIGNED_INSTALL_STATE_VERSION;
+  version: typeof SIGNED_STATE_VERSION;
   mode: 'install';
   redirectPath: string;
   issuedAt: number;
 };
 
-type DecodedSlackOAuthState =
+type SignedSlackLinkStatePayload = {
+  version: typeof SIGNED_STATE_VERSION;
+  mode: 'link_account';
+  redirectPath: string;
+  userId: string;
+  issuedAt: number;
+};
+
+export type DecodedSlackOAuthState =
   | {
       mode: 'install';
       redirectPath: string;
@@ -23,6 +29,7 @@ type DecodedSlackOAuthState =
   | {
       mode: 'link_account';
       redirectPath: string;
+      userId: string;
     };
 
 function normalizeSlackOAuthRedirectPath(redirectPath?: string | null): string {
@@ -38,12 +45,12 @@ function normalizeSlackOAuthRedirectPath(redirectPath?: string | null): string {
   return DEFAULT_SLACK_OAUTH_REDIRECT_PATH;
 }
 
-async function signSlackInstallStatePayload(payload: string): Promise<string> {
+async function signSlackStatePayload(payload: string): Promise<string> {
   const signingSecret = await resolveSlackSigningSecret();
 
   if (!signingSecret) {
     throw new Error(
-      'Slack signing secret is not configured; cannot sign install state.',
+      'Slack signing secret is not configured; cannot sign OAuth state.',
     );
   }
 
@@ -63,33 +70,59 @@ function signaturesMatch(expected: string, actual: string): boolean {
   return timingSafeEqual(expectedBuffer, actualBuffer);
 }
 
+async function createSignedSlackState(
+  payload: SignedSlackInstallStatePayload | SignedSlackLinkStatePayload,
+): Promise<string> {
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
+    'base64url',
+  );
+
+  return `${encodedPayload}.${await signSlackStatePayload(encodedPayload)}`;
+}
+
 export async function createSignedSlackInstallState({
   redirectPath,
 }: {
   redirectPath?: string | null;
 }): Promise<string> {
-  const payload = Buffer.from(
-    JSON.stringify({
-      version: SIGNED_INSTALL_STATE_VERSION,
-      mode: 'install',
-      redirectPath: normalizeSlackOAuthRedirectPath(redirectPath),
-      issuedAt: Date.now(),
-    } satisfies SignedSlackInstallStatePayload),
-  ).toString('base64url');
-
-  return `${payload}.${await signSlackInstallStatePayload(payload)}`;
+  return createSignedSlackState({
+    version: SIGNED_STATE_VERSION,
+    mode: 'install',
+    redirectPath: normalizeSlackOAuthRedirectPath(redirectPath),
+    issuedAt: Date.now(),
+  } satisfies SignedSlackInstallStatePayload);
 }
 
-async function decodeSignedSlackInstallState(
+export async function createSignedSlackLinkAccountState({
+  userId,
+  redirectPath,
+}: {
+  userId: string;
+  redirectPath?: string | null;
+}): Promise<string> {
+  if (!userId) {
+    throw new Error('userId is required to sign Slack link-account state.');
+  }
+
+  return createSignedSlackState({
+    version: SIGNED_STATE_VERSION,
+    mode: 'link_account',
+    redirectPath: normalizeSlackOAuthRedirectPath(redirectPath),
+    userId,
+    issuedAt: Date.now(),
+  } satisfies SignedSlackLinkStatePayload);
+}
+
+async function decodeSignedSlackState(
   state: string,
-): Promise<Extract<DecodedSlackOAuthState, { mode: 'install' }> | null> {
+): Promise<DecodedSlackOAuthState | null> {
   const [encodedPayload, signature, ...rest] = state.split('.');
 
   if (!encodedPayload || !signature || rest.length > 0) {
     return null;
   }
 
-  const expectedSignature = await signSlackInstallStatePayload(encodedPayload);
+  const expectedSignature = await signSlackStatePayload(encodedPayload);
   if (!signaturesMatch(expectedSignature, signature)) {
     return null;
   }
@@ -97,11 +130,12 @@ async function decodeSignedSlackInstallState(
   try {
     const payload = JSON.parse(
       Buffer.from(encodedPayload, 'base64url').toString('utf8'),
-    ) as Partial<SignedSlackInstallStatePayload>;
+    ) as Partial<
+      SignedSlackInstallStatePayload | SignedSlackLinkStatePayload
+    > & { mode?: string };
 
     if (
-      payload.version !== SIGNED_INSTALL_STATE_VERSION ||
-      payload.mode !== 'install' ||
+      payload.version !== SIGNED_STATE_VERSION ||
       typeof payload.redirectPath !== 'string' ||
       typeof payload.issuedAt !== 'number' ||
       !Number.isFinite(payload.issuedAt)
@@ -109,7 +143,7 @@ async function decodeSignedSlackInstallState(
       return null;
     }
 
-    if (Date.now() - payload.issuedAt > SIGNED_INSTALL_STATE_MAX_AGE_MS) {
+    if (Date.now() - payload.issuedAt > SIGNED_STATE_MAX_AGE_MS) {
       return null;
     }
 
@@ -120,10 +154,26 @@ async function decodeSignedSlackInstallState(
       return null;
     }
 
-    return {
-      mode: 'install',
-      redirectPath,
-    };
+    if (payload.mode === 'install') {
+      return {
+        mode: 'install',
+        redirectPath,
+      };
+    }
+
+    if (
+      payload.mode === 'link_account' &&
+      typeof (payload as SignedSlackLinkStatePayload).userId === 'string' &&
+      (payload as SignedSlackLinkStatePayload).userId.length > 0
+    ) {
+      return {
+        mode: 'link_account',
+        redirectPath,
+        userId: (payload as SignedSlackLinkStatePayload).userId,
+      };
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -136,18 +186,5 @@ export async function decodeSlackOAuthState(
     return null;
   }
 
-  const installState = await decodeSignedSlackInstallState(state);
-  if (installState) {
-    return installState;
-  }
-
-  const decoded = decodeRecord<Record<string, string>>(state);
-  if (decoded?.mode === 'link_account') {
-    return {
-      mode: 'link_account',
-      redirectPath: normalizeSlackOAuthRedirectPath(decoded.redirect),
-    };
-  }
-
-  return null;
+  return decodeSignedSlackState(state);
 }

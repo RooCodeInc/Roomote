@@ -24,6 +24,7 @@ export * from './s3-client';
 export * from './sentry-context';
 export * from './setup-token';
 export * from './slack-oauth-state';
+export * from './github-oauth-state';
 export * from './source-control';
 export * from './sync-internal';
 export * from './task-messages';

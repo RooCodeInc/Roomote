@@ -2,7 +2,7 @@ import type { Context, Next } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
 import { validateRunToken, validateAuthToken } from '@roomote/auth';
-import { db, deploymentSettings, eq } from '@roomote/db/server';
+import { db, deploymentSettings, eq, users } from '@roomote/db/server';
 
 import type { Variables } from '../types';
 
@@ -82,7 +82,15 @@ export const tokenAuthMiddleware = () =>
       try {
         const authContext = await validateAuthToken(token);
         if (await deploymentAllowsTokenAuth()) {
-          c.set('authContext', authContext);
+          const user = await db.query.users.findFirst({
+            where: eq(users.id, authContext.userId),
+            columns: { id: true, deletedAt: true },
+          });
+
+          // Removed users keep no standing access: their API tokens die with them.
+          if (user && user.deletedAt == null) {
+            c.set('authContext', authContext);
+          }
         }
       } catch (error) {
         console.error(

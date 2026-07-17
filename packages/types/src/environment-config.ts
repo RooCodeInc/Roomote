@@ -2,6 +2,7 @@ import YAML from 'yaml';
 import { z } from 'zod';
 
 import { PRODUCT_NAME } from './constants';
+import { gitBranchNameSchema } from './git-ref';
 
 /**
  * Command
@@ -257,7 +258,7 @@ export const environmentRepositoryConfigSchema = z.object({
    * @example 'main'
    * @example 'feature/my-feature'
    */
-  branch: z.string().min(1).optional(),
+  branch: gitBranchNameSchema.optional(),
   /**
    * Repo-local tool-version fallbacks to install via mise for this repository.
    * Checked-in repo tool config stays authoritative; these entries only fill

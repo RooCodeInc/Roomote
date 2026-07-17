@@ -18,9 +18,13 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       deploymentSettings: { findFirst: mockFindDeployment },
+      users: {
+        findFirst: vi.fn(async () => ({ id: 'user-1', deletedAt: null })),
+      },
     },
   },
   deploymentSettings: { id: 'id' },
+  users: { id: 'id', deletedAt: 'deletedAt' },
   eq: vi.fn(),
 }));
 
