@@ -107,7 +107,7 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    if (environments.isPending) {
+    if (environments.isPending || !environments.isSuccess) {
       return;
     }
 
@@ -116,13 +116,10 @@ export const SelectEnvironmentOrRepository = ({
       return;
     }
 
-    // Keep non-Auto allowAuto selections. When homepage starts on Auto with
-    // exactly one environment, fall through and default to that environment.
-    if (
-      allowAuto &&
-      repository &&
-      (repository !== AUTO_WORKSPACE_VALUE || sortedEnvironments.length !== 1)
-    ) {
+    // Keep intentional non-Auto allowAuto selections (e.g. a repository).
+    // When homepage is still on Auto, keep going so a sole environment can
+    // become the default — including when it appears after setup.
+    if (allowAuto && repository && repository !== AUTO_WORKSPACE_VALUE) {
       setHasAppliedDefaultWorkspace(true);
       return;
     }
@@ -134,6 +131,16 @@ export const SelectEnvironmentOrRepository = ({
       sortedEnvironments.length === 1;
 
     if (!shouldAutoSelect) {
+      // Stay open while Auto has zero environments so the sole environment
+      // created right after setup can still become the default.
+      if (
+        allowAuto &&
+        sortedEnvironments.length === 0 &&
+        (!repository || repository === AUTO_WORKSPACE_VALUE)
+      ) {
+        return;
+      }
+
       setHasAppliedDefaultWorkspace(true);
       return;
     }
@@ -154,6 +161,7 @@ export const SelectEnvironmentOrRepository = ({
     allowAuto,
     repositoryFilter,
     environments.isPending,
+    environments.isSuccess,
     environmentId,
     repository,
     sortedEnvironments,
@@ -192,6 +200,8 @@ export const SelectEnvironmentOrRepository = ({
       setValue('repository', AUTO_WORKSPACE_VALUE);
       setValue('branch', '');
       setWorkspace({ workspace: { type: 'auto' } });
+      // Allow the sole remaining environment (if any) to become the default.
+      setHasAppliedDefaultWorkspace(false);
       return;
     }
 

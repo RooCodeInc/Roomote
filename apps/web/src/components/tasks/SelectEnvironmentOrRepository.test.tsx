@@ -107,11 +107,12 @@ const WorkspaceValuesProbe = ({
 
 const SelectEnvironmentOrRepositoryHarness = ({
   allowAuto = false,
-  repositoryFilter = REPOSITORY,
+  repositoryFilter,
   defaultValues,
   onValuesChange,
 }: {
   allowAuto?: boolean;
+  /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
   onValuesChange: (values: WorkspaceSelectionValues) => void;
@@ -182,6 +183,7 @@ describe('SelectEnvironmentOrRepository', () => {
 
     render(
       <SelectEnvironmentOrRepositoryHarness
+        repositoryFilter={REPOSITORY}
         defaultValues={{ repository: REPOSITORY }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -209,6 +211,7 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
+        repositoryFilter={REPOSITORY}
         defaultValues={{ repository: REPOSITORY }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -234,7 +237,6 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
-        repositoryFilter={undefined}
         defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -253,6 +255,73 @@ describe('SelectEnvironmentOrRepository', () => {
     });
     expect(setWorkspace).toHaveBeenCalledWith({
       workspace: { type: 'environment', id: 'env_123' },
+    });
+  });
+
+  it('defaults Auto to the sole environment after the list goes from empty to one', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    mockedUseEnvironments.mockReturnValue({
+      data: [] as Array<{
+        id: string;
+        name: string;
+        config: { repositories: Array<{ repository: string }> };
+      }>,
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useEnvironments>);
+
+    const { rerender } = render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.repository).toBe(AUTO_WORKSPACE_VALUE);
+      expect(latestValues?.environmentId).toBeUndefined();
+    });
+    expect(setWorkspace).not.toHaveBeenCalled();
+
+    mockedUseEnvironments.mockReturnValue({
+      data: [
+        {
+          id: 'env_after_setup',
+          name: 'Roomote',
+          config: {
+            repositories: [{ repository: REPOSITORY }],
+          },
+        },
+      ],
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useEnvironments>);
+
+    rerender(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_after_setup');
+    });
+
+    expect(latestValues).toMatchObject({
+      environmentId: 'env_after_setup',
+      repository: 'env_after_setup',
+      branch: '',
+    });
+    expect(setWorkspace).toHaveBeenCalledWith({
+      workspace: { type: 'environment', id: 'env_after_setup' },
     });
   });
 
@@ -283,7 +352,6 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
-        repositoryFilter={undefined}
         defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -311,6 +379,7 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
+        repositoryFilter={REPOSITORY}
         defaultValues={{}}
         onValuesChange={vi.fn()}
       />,

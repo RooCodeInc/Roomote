@@ -4,6 +4,7 @@ const replaceMock = vi.fn();
 const setQueryDataMock = vi.fn();
 const invalidateQueriesMock = vi.fn().mockResolvedValue(undefined);
 const removeQueriesMock = vi.fn();
+const fetchQueryMock = vi.fn();
 const mutationOptionsMock = vi.fn((options) => options);
 const environmentState = vi.hoisted(() => ({
   environments: [{ id: 'env-1' }],
@@ -46,6 +47,7 @@ vi.mock('@tanstack/react-query', async () => {
       setQueryData: setQueryDataMock,
       invalidateQueries: invalidateQueriesMock,
       removeQueries: removeQueriesMock,
+      fetchQuery: fetchQueryMock,
     }),
   };
 });
@@ -68,6 +70,11 @@ vi.mock('@/trpc/client', () => ({
     github: {
       installations: {
         queryKey: () => queryKeys.githubInstallations,
+      },
+    },
+    environments: {
+      list: {
+        queryOptions: () => ({ queryKey: ['environments.list'] }),
       },
     },
   }),
@@ -118,6 +125,9 @@ describe('Onboarding StepInvoke', () => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
     environmentState.environments = [{ id: 'env-1' }];
+    fetchQueryMock.mockImplementation(
+      async () => environmentState.environments,
+    );
   });
 
   it('optimistically completes onboarding before routing away', async () => {

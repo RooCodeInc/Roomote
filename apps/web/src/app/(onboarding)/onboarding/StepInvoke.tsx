@@ -55,7 +55,20 @@ export function StepInvoke({
           queryKey: trpc.github.installations.queryKey(),
         });
 
-        const envs = environments.data;
+        // Environment may have just been created; refresh so Home can default
+        // to the sole environment via environmentId immediately after setup.
+        let envs = environments.data;
+        try {
+          const refreshed = await queryClient.fetchQuery(
+            trpc.environments.list.queryOptions(undefined, { staleTime: 0 }),
+          );
+          if (Array.isArray(refreshed)) {
+            envs = refreshed;
+          }
+        } catch {
+          // Fall back to whatever is already cached.
+        }
+
         const targetEnv = envs?.[0];
 
         if (targetEnv) {
