@@ -249,7 +249,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const existingSettings = await getBackgroundAgentSettingsForDeployment();
   const shouldUpdateChannelAutoStart =
     input.savingAutomation === 'channelAutoStart';
-  const shouldUpdateSuggester = input.savingAutomation === 'suggester';
   const destinationDescriptors = listAutomationDestinationDescriptors();
   const submittedDestinations = Object.fromEntries(
     destinationDescriptors.map((descriptor) => [

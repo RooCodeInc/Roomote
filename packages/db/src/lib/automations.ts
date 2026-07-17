@@ -674,7 +674,6 @@ export function normalizeBackgroundAgentSettings(
   const announcer = automationMap.get('announcer');
   const channelAutoStart = automationMap.get('slack_channel_auto_start');
   const managerStats = automationMap.get('manager_stats');
-  const platformIssueAlerts = automationMap.get('platform_issue_alerts');
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
   const codeqlTriage = automationMap.get('codeql_triage');
