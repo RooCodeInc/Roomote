@@ -188,6 +188,13 @@ function ProviderCredentialsDialog({
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
+  const [discoveredModels, setDiscoveredModels] = useState<
+    Array<{ modelId: string; displayName: string | null }>
+  >([]);
+  const trpc = useTRPC();
+  const discoverProviderModels = useMutation(
+    trpc.taskModels.discoverProviderModels.mutationOptions(),
+  );
 
   useEffect(() => {
     if (!open) {
@@ -198,6 +205,7 @@ function ProviderCredentialsDialog({
     setSelectedProviderId(provider?.id ?? null);
     setApiKey('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
+    setDiscoveredModels([]);
   }, [open, providers]);
 
   useEffect(() => {
@@ -245,6 +253,21 @@ function ProviderCredentialsDialog({
         apiKey.trim(),
         additionalEnvFields.length > 0 ? additionalEnvValues : undefined,
       );
+      if (selectedProvider.authKind === 'endpoint') {
+        const result = await discoverProviderModels.mutateAsync({
+          provider: selectedProvider.id as 'ollama' | 'vllm' | 'litellm',
+          baseUrl: apiKey.trim() || undefined,
+          apiKey:
+            additionalEnvValues[
+              `${selectedProvider.id.toUpperCase()}_API_KEY`
+            ]?.trim() || undefined,
+        });
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          setDiscoveredModels(result.models);
+        }
+      }
       setApiKey('');
       setAdditionalEnvValues({});
     } catch {
@@ -378,6 +401,19 @@ function ProviderCredentialsDialog({
                       />
                     </div>
                   ))}
+                  {selectedProvider.authKind === 'endpoint' &&
+                  discoveredModels.length > 0 ? (
+                    <div className={PROVIDER_GRID_ROW_CLASS}>
+                      <span className="text-sm font-medium">
+                        Discovered models
+                      </span>
+                      <p className="text-sm text-muted-foreground">
+                        {discoveredModels
+                          .map((model) => model.displayName ?? model.modelId)
+                          .join(', ')}
+                      </p>
+                    </div>
+                  ) : null}
                 </>
               )}
             </>
