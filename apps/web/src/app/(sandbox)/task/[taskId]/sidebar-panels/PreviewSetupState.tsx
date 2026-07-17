@@ -134,12 +134,14 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
             ? 'Once it finishes, new tasks in this environment will include a live preview.'
             : 'Live previews become available once the environment is ready.'}
         </p>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/task/${status.setupTask.taskId}`}>
-            View setup task
-            <ArrowRight />
-          </Link>
-        </Button>
+        {status.setupTask.taskId ? (
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/task/${status.setupTask.taskId}`}>
+              View setup task
+              <ArrowRight />
+            </Link>
+          </Button>
+        ) : null}
       </CenteredMessage>
     );
   }

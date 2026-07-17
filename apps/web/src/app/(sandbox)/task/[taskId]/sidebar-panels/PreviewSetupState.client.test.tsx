@@ -18,7 +18,7 @@ const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
       } | null;
       runHasPreviewDomains: boolean;
       setupTask: {
-        taskId: string;
+        taskId: string | null;
         status: string;
         kind: 'preview' | 'environment';
       } | null;
@@ -164,6 +164,23 @@ describe('PreviewSetupState', () => {
     expect(
       screen.getByRole('link', { name: /view setup task/i }),
     ).toHaveAttribute('href', '/task/setup-task-9');
+  });
+
+  it('shows setup progress without a task link when the id is withheld', async () => {
+    statusState.data = buildStatus({
+      setupTask: { taskId: null, status: 'running', kind: 'preview' },
+    });
+
+    renderSetupState(taskRun);
+
+    expect(
+      await screen.findByText(
+        'An agent is setting up live previews for Web App',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /view setup task/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('explains ongoing environment setup without claiming a preview agent', async () => {

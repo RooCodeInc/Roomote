@@ -16,7 +16,7 @@ const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
       },
       runHasPreviewDomains: true,
       setupTask: null as {
-        taskId: string;
+        taskId: string | null;
         status: string;
         kind: 'preview' | 'environment';
       } | null,
@@ -146,6 +146,24 @@ describe('PreviewHelpDialog', () => {
     ).toHaveAttribute('href', '/task/fix-task-9');
     expect(
       screen.queryByRole('button', { name: /fix previews with an agent/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('shows the in-flight message without a task link when the id is withheld', async () => {
+    statusState.data = {
+      ...statusState.data,
+      setupTask: { taskId: null, status: 'running', kind: 'preview' },
+    };
+
+    renderDialog();
+
+    expect(
+      await screen.findByText(
+        'An agent is already working on live previews for Web App.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('link', { name: /view agent task/i }),
     ).not.toBeInTheDocument();
   });
 

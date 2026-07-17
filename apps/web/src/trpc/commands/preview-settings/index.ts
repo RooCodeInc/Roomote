@@ -424,9 +424,14 @@ export interface TaskPreviewStatus {
    * Active agent task for the environment. Kind 'preview' is a preview
    * setup/repair agent launched from the preview pane; 'environment' is any
    * other environment agent (initial creation, verification retry).
+   *
+   * `taskId` is null for non-admin viewers: these tasks embed the full
+   * environment YAML (including secret-capable fields) in their description,
+   * so linking members to them would bypass the admin-only environment
+   * settings boundary.
    */
   setupTask: {
-    taskId: string;
+    taskId: string | null;
     status: RunStatus;
     kind: 'preview' | 'environment';
   } | null;
@@ -490,7 +495,7 @@ async function loadDeploymentEnvironment(environmentId: string) {
  * infrastructure details stay behind `getPreviewSettingsCommand`.
  */
 export async function getTaskPreviewStatusCommand(
-  _auth: UserAuthSuccess,
+  auth: UserAuthSuccess,
   input: { taskId: string },
 ): Promise<TaskPreviewStatus> {
   const [taskRun, runtimeReady] = await Promise.all([
@@ -530,7 +535,7 @@ export async function getTaskPreviewStatusCommand(
     runHasPreviewDomains,
     setupTask: activeAgentTask
       ? {
-          taskId: activeAgentTask.taskId,
+          taskId: auth.isAdmin ? activeAgentTask.taskId : null,
           status: activeAgentTask.status,
           kind: activeAgentTask.isPreviewSetupTask ? 'preview' : 'environment',
         }

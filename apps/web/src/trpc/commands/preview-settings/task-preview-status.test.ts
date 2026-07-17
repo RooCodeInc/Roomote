@@ -176,7 +176,7 @@ describe('getTaskPreviewStatusCommand', () => {
     });
     const setupTask = await createActiveSetupTask(environment.id);
 
-    const status = await getTaskPreviewStatusCommand(auth, {
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
       taskId: task.id,
     });
 
@@ -198,12 +198,32 @@ describe('getTaskPreviewStatusCommand', () => {
       runsInEnvironment: true,
     });
 
-    const status = await getTaskPreviewStatusCommand(auth, {
+    const status = await getTaskPreviewStatusCommand(adminAuth, {
       taskId: task.id,
     });
 
     expect(status.setupTask).toEqual({
       taskId: setupTask.id,
+      status: RunStatus.Running,
+      kind: 'preview',
+    });
+  });
+
+  it('omits the agent task id for non-admin viewers', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    await createActiveSetupTask(environment.id, { runsInEnvironment: true });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: null,
       status: RunStatus.Running,
       kind: 'preview',
     });

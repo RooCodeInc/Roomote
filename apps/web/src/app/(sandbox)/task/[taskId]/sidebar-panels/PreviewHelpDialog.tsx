@@ -86,17 +86,20 @@ export function PreviewHelpDialog({
                 ? `An agent is already working on live previews${environmentName ? ` for ${environmentName}` : ''}.`
                 : `${environmentName ?? 'This environment'} is still being set up. Previews may not work until setup completes.`}
             </p>
-            <Button asChild variant="outline" size="sm">
-              <Link href={`/task/${setupTask.taskId}`}>
-                View agent task
-                <ArrowRight />
-              </Link>
-            </Button>
+            {setupTask.taskId ? (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/task/${setupTask.taskId}`}>
+                  View agent task
+                  <ArrowRight />
+                </Link>
+              </Button>
+            ) : null}
           </div>
         ) : isAdmin ? (
           <p className="text-sm text-muted-foreground">
-            An agent can start this environment, reproduce the problem, and fix
-            the environment or app configuration so the preview works.
+            An agent can reproduce the problem in this environment and fix its
+            configuration. If the app itself needs changes, it reports exactly
+            what is needed.
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">
