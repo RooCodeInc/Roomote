@@ -3905,79 +3905,33 @@ If unclear, send to manager channel.`}
                       </div>
                     </div>
 
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <p
-                          id="reviewer-author-scope-label"
-                          className="text-sm font-medium"
-                        >
-                          Which PRs get automatic reviews?
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Choose whether automatic reviews stay limited to PRs
-                          created by {PRODUCT_NAME}, or include PRs from
-                          everyone.
-                        </p>
-                      </div>
-                      <RadioGroup
-                        aria-labelledby="reviewer-author-scope-label"
-                        value={
-                          formState.reviewerReviewAllPullRequestAuthors
-                            ? 'all_authors'
-                            : 'roomote_only'
-                        }
-                        onValueChange={(value) =>
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        aria-label="Review PRs from other authors"
+                        checked={formState.reviewerReviewAllPullRequestAuthors}
+                        onCheckedChange={(
+                          reviewerReviewAllPullRequestAuthors,
+                        ) =>
                           setFormState((prev) =>
                             prev
                               ? {
                                   ...prev,
-                                  reviewerReviewAllPullRequestAuthors:
-                                    value === 'all_authors',
+                                  reviewerReviewAllPullRequestAuthors,
                                 }
                               : prev,
                           )
                         }
-                        className="space-y-3"
-                      >
-                        <div className="flex items-start gap-2">
-                          <RadioGroupItem
-                            className="mt-1"
-                            id="reviewer-scope-roomote-only"
-                            value="roomote_only"
-                          />
-                          <div className="space-y-1">
-                            <Label
-                              htmlFor="reviewer-scope-roomote-only"
-                              className="text-sm font-medium cursor-pointer"
-                            >
-                              Only PRs created by {PRODUCT_NAME}
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              Automatic reviews stay limited to pull requests
-                              opened by {PRODUCT_NAME}.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2">
-                          <RadioGroupItem
-                            className="mt-1"
-                            id="reviewer-scope-all-authors"
-                            value="all_authors"
-                          />
-                          <div className="space-y-1">
-                            <Label
-                              htmlFor="reviewer-scope-all-authors"
-                              className="text-sm font-medium cursor-pointer"
-                            >
-                              PRs from everyone
-                            </Label>
-                            <p className="text-xs text-muted-foreground">
-                              Include pull requests opened by people or bots
-                              outside {PRODUCT_NAME}.
-                            </p>
-                          </div>
-                        </div>
-                      </RadioGroup>
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Review PRs from other authors
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Include pull requests opened by people or bots outside
+                          {` ${PRODUCT_NAME}`} in automatic reviews.
+                        </p>
+                      </div>
                     </div>
 
                     <div className="flex items-start gap-2">
