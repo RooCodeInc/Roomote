@@ -165,12 +165,18 @@ export function StepSourceControlConnect({
   const githubPendingInstallations = useGitHubPendingInstallations({
     enabled: provider === 'github' && !alreadyConnected,
   });
-  const githubInstallPending =
+  const githubInstallRequestPending =
     provider === 'github' &&
     !alreadyConnected &&
     githubPendingInstallations.data?.pending === true;
 
+  const advancedAfterApprovalRef = useRef(false);
   const handleGitHubInstallApproved = useCallback(async () => {
+    if (advancedAfterApprovalRef.current) {
+      return;
+    }
+    advancedAfterApprovalRef.current = true;
+
     await queryClient.invalidateQueries({
       queryKey: trpc.setupNew.status.queryKey(),
     });
@@ -180,6 +186,39 @@ export function StepSourceControlConnect({
 
     onContinue();
   }, [onContinue, queryClient, trpc]);
+
+  // The parent and `GitHubInstallRequestPending` share one pending-install
+  // query, so when polling flips `pending` to false the parent would unmount
+  // the child before its approval effect could advance the wizard. Latch that
+  // we saw a pending request and own the pending -> approved transition here so
+  // approval reliably continues instead of snapping back to "Connect to GitHub".
+  const [sawInstallRequestPending, setSawInstallRequestPending] =
+    useState(false);
+  useEffect(() => {
+    if (githubInstallRequestPending) {
+      setSawInstallRequestPending(true);
+    }
+  }, [githubInstallRequestPending]);
+
+  useEffect(() => {
+    if (
+      sawInstallRequestPending &&
+      provider === 'github' &&
+      githubPendingInstallations.data?.pending === false
+    ) {
+      void handleGitHubInstallApproved();
+    }
+  }, [
+    githubPendingInstallations.data?.pending,
+    handleGitHubInstallApproved,
+    provider,
+    sawInstallRequestPending,
+  ]);
+
+  const showGitHubInstallPending =
+    provider === 'github' &&
+    !alreadyConnected &&
+    (githubInstallRequestPending || sawInstallRequestPending);
   const adoAuthMode = providerStatus?.fields.find(
     (field) => field.envVarName === 'ADO_AUTH_MODE',
   )?.savedValue;
@@ -379,7 +418,7 @@ export function StepSourceControlConnect({
             )}
           </SetupFooter>
         </div>
-      ) : provider === 'github' && githubInstallPending ? (
+      ) : provider === 'github' && showGitHubInstallPending ? (
         <div className="space-y-4">
           <GitHubInstallRequestPending
             onApproved={handleGitHubInstallApproved}

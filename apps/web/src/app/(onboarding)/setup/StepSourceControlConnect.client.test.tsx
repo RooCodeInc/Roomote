@@ -277,6 +277,38 @@ describe('StepSourceControlConnect', () => {
     await waitFor(() => expect(onContinue).toHaveBeenCalled());
   });
 
+  it('advances when a pending request transitions to approved without falling back to the connect CTA', async () => {
+    pendingInstallationsDataRef.current = { pending: true };
+    const onContinue = vi.fn();
+
+    const { rerender } = render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: /Connect to GitHub/i }),
+    ).not.toBeInTheDocument();
+
+    // Polling reports the org owner approved: the shared query flips to
+    // pending:false. The step must advance rather than unmount the pending UI
+    // and snap back to the connect CTA.
+    pendingInstallationsDataRef.current = { pending: false };
+    rerender(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={onContinue}
+      />,
+    );
+
+    await waitFor(() => expect(onContinue).toHaveBeenCalled());
+    expect(
+      screen.queryByRole('button', { name: /Connect to GitHub/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('keeps the connect CTA when no GitHub install request is pending', () => {
     pendingInstallationsDataRef.current = { pending: false };
 
