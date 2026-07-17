@@ -122,6 +122,12 @@ export function buildOpenCodeCliEnv(
     delete env[envVarName];
   }
 
+  // OPENCODE_COMMAND may route through `bash -lc`. An inherited BASH_ENV is
+  // sourced after Bash receives this sanitized environment and could restore
+  // credentials from a stale shared env file. Helper launches already receive
+  // an explicit environment, so they must not source ambient shell state.
+  delete env.BASH_ENV;
+
   return env;
 }
 

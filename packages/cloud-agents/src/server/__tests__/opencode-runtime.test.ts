@@ -8,6 +8,7 @@ import {
   buildOpenCodeCliEnv,
   killOpenCodeSdkServerProcessesForShutdown,
   leaseOpenCodeSdkServer,
+  readOpenCodeDebugConfig,
 } from '../opencode-runtime';
 
 describe('buildOpenCodeCliEnv', () => {
@@ -19,6 +20,8 @@ describe('buildOpenCodeCliEnv', () => {
     'R_SMALL_MODEL_REASONING_EFFORT',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'MISTRAL_API_KEY',
+    'BASH_ENV',
+    'OPENCODE_COMMAND',
   ] as const;
   const originalValues = new Map<string, string | undefined>();
 
@@ -172,6 +175,38 @@ describe('buildOpenCodeCliEnv', () => {
     expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     expect(env.MISTRAL_API_KEY).toBeUndefined();
     expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
+  });
+
+  it('prevents inherited BASH_ENV from restoring disabled credentials through a shell wrapper', () => {
+    const fixtureDir = mkdtempSync(
+      path.join(tmpdir(), 'opencode-bash-env-test-'),
+    );
+    const bashEnvPath = path.join(fixtureDir, 'shared-env.sh');
+    const commandPath = path.join(fixtureDir, 'print-env.cjs');
+
+    writeFileSync(
+      bashEnvPath,
+      [
+        "export GOOGLE_APPLICATION_CREDENTIALS='/stale/vertex.json'",
+        "export MISTRAL_API_KEY='stale-mistral-key'",
+      ].join('\n'),
+    );
+    writeFileSync(
+      commandPath,
+      `process.stdout.write(JSON.stringify({
+        googleCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+        mistralApiKey: process.env.MISTRAL_API_KEY,
+      }));`,
+    );
+
+    process.env.BASH_ENV = bashEnvPath;
+    process.env.OPENCODE_COMMAND = `${process.execPath} ${commandPath}`;
+
+    try {
+      expect(JSON.parse(readOpenCodeDebugConfig())).toEqual({});
+    } finally {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    }
   });
 });
 
