@@ -534,6 +534,7 @@ describe('redactControlPlaneEnvVars', () => {
         // Teams bot secret (hand-listed bot integration).
         R_TEAMS_BOT_APP_PASSWORD: 'teams',
         GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+        MISTRAL_API_KEY: 'mistral-key',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',

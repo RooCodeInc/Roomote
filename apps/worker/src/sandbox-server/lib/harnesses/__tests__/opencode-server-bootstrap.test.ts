@@ -1597,7 +1597,7 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
   });
 
-  it('strips disabled Vertex credentials after sourcing the shared BASH_ENV', async () => {
+  it('strips disabled-provider credentials after sourcing the shared BASH_ENV', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1609,7 +1609,11 @@ describe('opencode-server bootstrap', () => {
     const sharedBashEnvPath = path.join(homeDir, 'roomote-env.sh');
     fs.writeFileSync(
       sharedBashEnvPath,
-      `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'\n`,
+      [
+        `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'`,
+        "export MISTRAL_API_KEY='mistral-key'",
+        '',
+      ].join('\n'),
     );
     const credentialsPath = path.join(
       homeDir,
@@ -1626,12 +1630,14 @@ describe('opencode-server bootstrap', () => {
         ...createDirectHarnessRuntimeEnv(homeDir),
         BASH_ENV: sharedBashEnvPath,
         GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
+        MISTRAL_API_KEY: 'mistral-key',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
     });
 
     expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
     expect(fs.existsSync(credentialsPath)).toBe(false);
     const openCodeBashEnvPath = commandEnv.BASH_ENV;
     expect(openCodeBashEnvPath).toBe(
@@ -1652,16 +1658,22 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
       'unset GOOGLE_APPLICATION_CREDENTIALS',
     );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset MISTRAL_API_KEY',
+    );
     expect(
       execFileSync(
         'bash',
-        ['-lc', 'printf %s "$GOOGLE_APPLICATION_CREDENTIALS"'],
+        [
+          '-lc',
+          'printf "%s|%s" "$GOOGLE_APPLICATION_CREDENTIALS" "$MISTRAL_API_KEY"',
+        ],
         {
           env: commandEnv,
           encoding: 'utf8',
         },
       ),
-    ).toBe('');
+    ).toBe('|');
   });
 
   it('strips a GOOGLE_APPLICATION_CREDENTIALS file path', async () => {
@@ -1674,11 +1686,13 @@ describe('opencode-server bootstrap', () => {
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
         GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
+        MISTRAL_API_KEY: 'mistral-key',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
     });
 
     expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
   });
 });

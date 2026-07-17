@@ -9,15 +9,16 @@ import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
   DEFAULT_BEDROCK_MANTLE_REGION,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   type InferenceGatewayProvider,
+  isTaskModelIdDisabled,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
@@ -1325,7 +1326,7 @@ function loadOperatorOpenCodeConfig({
 function resolveConfiguredPromptModel(model?: string): string | undefined {
   const resolvedModel = model?.trim();
 
-  if (!resolvedModel) {
+  if (!resolvedModel || isTaskModelIdDisabled(resolvedModel)) {
     return undefined;
   }
 
@@ -1383,7 +1384,7 @@ export function generateOpenCodeConfig({
     OPENCODE_CONFIG_DIR_NAME,
   );
   fs.mkdirSync(openCodeConfigDir, { recursive: true });
-  removeDisabledGoogleVertexCredentials(runtimeEnv, homeDir);
+  removeDisabledProviderConfiguration(runtimeEnv, homeDir);
   const resolvedModel = resolveConfiguredPromptModel(model);
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
@@ -1611,16 +1612,32 @@ export function rematerializeOpenCodeCredentialFiles(options: {
 }
 
 /**
- * Vertex is disabled until its service-account authentication can remain on
- * the control plane. Remove both the env var and any credential file left by a
- * pre-disable snapshot before OpenCode starts. File removal fails closed so a
- * stale long-lived service account can never survive into a task.
+ * Remove disabled provider models and credentials before OpenCode starts.
+ * Also delete any Vertex credential file left by a pre-disable snapshot. File
+ * removal fails closed so a stale long-lived service account can never survive
+ * into a task.
  */
-function removeDisabledGoogleVertexCredentials(
+function removeDisabledProviderConfiguration(
   runtimeEnv: Record<string, string>,
   homeDir: string,
 ): void {
-  delete runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
+  for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    delete runtimeEnv[envVarName];
+  }
+  for (const modelEnvVarName of [
+    'R_MODEL',
+    'R_SMALL_MODEL',
+    'R_VISION_MODEL',
+    'R_CODE_REVIEW_MODEL',
+    'R_EXPLORE_MODEL',
+    'R_PLANNING_MODEL',
+  ] as const) {
+    const modelId = runtimeEnv[modelEnvVarName];
+
+    if (modelId && isTaskModelIdDisabled(modelId)) {
+      delete runtimeEnv[modelEnvVarName];
+    }
+  }
   const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
   const credentialsFilePath = path.join(
     openCodeDataDir,

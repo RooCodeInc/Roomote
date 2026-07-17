@@ -1,8 +1,9 @@
 import { Env } from '@roomote/env';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
@@ -10,7 +11,15 @@ import type { BuildWorkerEnvOptions } from './types';
 
 const BLOCKED_WORKER_ENV_KEYS = new Set([
   'JOB_AUTH_PRIVATE_KEY',
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+]);
+const MODEL_ROLE_ENV_VAR_NAMES = new Set<string>([
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_PLANNING_MODEL',
 ]);
 
 function filterWorkerExtraEnv(
@@ -22,7 +31,9 @@ function filterWorkerExtraEnv(
 
   return Object.fromEntries(
     Object.entries(extraEnv).filter(
-      ([key]) => !BLOCKED_WORKER_ENV_KEYS.has(key),
+      ([key, value]) =>
+        !BLOCKED_WORKER_ENV_KEYS.has(key) &&
+        (!MODEL_ROLE_ENV_VAR_NAMES.has(key) || !isTaskModelIdDisabled(value)),
     ),
   );
 }
@@ -37,35 +48,13 @@ function buildOperatorModelProviderEnv(
   inferenceGatewayEnabled: boolean,
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  const model = process.env.R_MODEL?.trim();
-  const smallModel = process.env.R_SMALL_MODEL?.trim();
-  const visionModel = process.env.R_VISION_MODEL?.trim();
-  const codeReviewModel = process.env.R_CODE_REVIEW_MODEL?.trim();
-  const exploreModel = process.env.R_EXPLORE_MODEL?.trim();
-  const planningModel = process.env.R_PLANNING_MODEL?.trim();
 
-  if (model) {
-    env.R_MODEL = model;
-  }
+  for (const key of MODEL_ROLE_ENV_VAR_NAMES) {
+    const modelId = process.env[key]?.trim();
 
-  if (smallModel) {
-    env.R_SMALL_MODEL = smallModel;
-  }
-
-  if (visionModel) {
-    env.R_VISION_MODEL = visionModel;
-  }
-
-  if (codeReviewModel) {
-    env.R_CODE_REVIEW_MODEL = codeReviewModel;
-  }
-
-  if (exploreModel) {
-    env.R_EXPLORE_MODEL = exploreModel;
-  }
-
-  if (planningModel) {
-    env.R_PLANNING_MODEL = planningModel;
+    if (modelId && !isTaskModelIdDisabled(modelId)) {
+      env[key] = modelId;
+    }
   }
 
   for (const key of [

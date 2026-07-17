@@ -18,6 +18,7 @@ describe('buildOpenCodeCliEnv', () => {
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
     'GOOGLE_APPLICATION_CREDENTIALS',
+    'MISTRAL_API_KEY',
   ] as const;
   const originalValues = new Map<string, string | undefined>();
 
@@ -143,7 +144,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('strips disabled Google Vertex credentials', () => {
+  it('strips disabled-provider credentials', () => {
     const credentialsJson = JSON.stringify({
       type: 'service_account',
       project_id: 'my-project',
@@ -151,21 +152,25 @@ describe('buildOpenCodeCliEnv', () => {
 
     const env = buildOpenCodeCliEnv({
       GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
+      MISTRAL_API_KEY: 'mistral-key',
     });
 
     expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.MISTRAL_API_KEY).toBeUndefined();
   });
 
-  it('strips disabled Vertex model role overrides', () => {
+  it('strips disabled model role overrides', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'google-vertex/gemini-3.5-flash',
-      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
+      R_SMALL_MODEL: 'mistral/mistral-large-latest',
+      MISTRAL_API_KEY: 'mistral-key',
       GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
     });
 
     expect(env.R_MODEL).toBeUndefined();
     expect(env.R_SMALL_MODEL).toBeUndefined();
     expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.MISTRAL_API_KEY).toBeUndefined();
     expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
   });
 });

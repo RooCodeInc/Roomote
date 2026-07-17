@@ -2,10 +2,10 @@ import { eq } from 'drizzle-orm';
 import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
@@ -28,6 +28,9 @@ import {
 } from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET = new Set<string>(
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+);
 
 async function loadPersistedDeploymentEnvVars(
   executor: DatabaseOrTransaction = db,
@@ -112,7 +115,7 @@ function resolveProviderKeyNames({
   const configuredProviderKeys = parseModelProviderEnvKeys(
     runtimeRoomoteModelEnvKeys,
   ).filter(
-    (envVarName) => envVarName !== GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+    (envVarName) => !DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET.has(envVarName),
   );
 
   if (configuredProviderKeys.length > 0) {

@@ -65,9 +65,10 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     }
   });
 
-  it('includes the disabled Vertex service-account credential', () => {
+  it('includes disabled-provider credentials', () => {
     expect(
       CONTROL_PLANE_ENV_VAR_NAMES.has('GOOGLE_APPLICATION_CREDENTIALS'),
     ).toBe(true);
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('MISTRAL_API_KEY')).toBe(true);
   });
 });

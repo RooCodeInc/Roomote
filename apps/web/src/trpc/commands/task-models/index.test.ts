@@ -254,15 +254,18 @@ describe('lookupTaskModelCommand', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('rejects disabled Google Vertex model ids', async () => {
-    await expect(
-      lookupTaskModelCommand(buildMockAuth(), {
-        modelId: 'google-vertex/gemini-3.5-flash',
-      }),
-    ).rejects.toThrow('Google Vertex AI models are currently disabled.');
+  it.each(['google-vertex/gemini-3.5-flash', 'mistral/mistral-large-latest'])(
+    'rejects disabled direct-provider model id %s',
+    async (modelId) => {
+      await expect(
+        lookupTaskModelCommand(buildMockAuth(), {
+          modelId,
+        }),
+      ).rejects.toThrow('This direct model provider is currently disabled.');
 
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('normalizes bare author/model input and uses OpenRouter lookup when available', async () => {
     process.env.OPENROUTER_API_KEY = 'openrouter-test-key';

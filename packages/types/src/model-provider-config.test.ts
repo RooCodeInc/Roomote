@@ -193,17 +193,19 @@ describe('normalizeDeploymentModelConfig', () => {
     });
   });
 
-  it('clears model roles that still reference disabled Google Vertex', () => {
+  it('clears model roles that still reference disabled providers', () => {
     expect(
       normalizeDeploymentModelConfig({
         roomoteModel: 'google-vertex/claude-sonnet-5@default',
         roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
         roomoteVisionModel: 'google/gemini-3.5-flash',
+        roomoteCodeReviewModel: 'mistral/mistral-large-latest',
       }),
     ).toMatchObject({
       roomoteModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: 'google/gemini-3.5-flash',
+      roomoteCodeReviewModel: null,
     });
   });
 });
@@ -573,6 +575,9 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'google-vertex' }),
     ).toEqual([]);
+    expect(getModelProviderEnvKeyCandidates({ providerId: 'mistral' })).toEqual(
+      [],
+    );
   });
 
   it('merges catalog and extra env keys for the google provider', () => {
@@ -603,6 +608,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'GOOGLE_VERTEX_LOCATION',
     );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('MISTRAL_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;

@@ -4,7 +4,7 @@ import { createServer } from 'node:net';
 
 import {
   collectOpenRouterVariantModelAlias,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
@@ -116,10 +116,11 @@ export function buildOpenCodeCliEnv(
     }
   }
 
-  // Vertex is disabled until its service-account authentication stays on the
-  // control plane. Do not inherit or accept this credential in helper model
+  // Do not inherit or accept disabled-provider credentials in helper model
   // processes, including callers that bypass the task dequeue path.
-  delete env[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
+  for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    delete env[envVarName];
+  }
 
   return env;
 }

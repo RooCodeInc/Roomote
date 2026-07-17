@@ -1125,7 +1125,7 @@ export async function lookupTaskModelCommand(
   const modelId = normalizeTaskModelId(input.modelId);
 
   if (isTaskModelIdDisabled(modelId)) {
-    throw new Error('Google Vertex AI models are currently disabled.');
+    throw new Error('This direct model provider is currently disabled.');
   }
 
   const existingCatalogModel =

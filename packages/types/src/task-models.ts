@@ -35,7 +35,10 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
  * shape while support is disabled. They are excluded from setup, model
  * availability, and runtime selection.
  */
-export const DISABLED_TASK_MODEL_PROVIDER_IDS = ['google-vertex'] as const;
+export const DISABLED_TASK_MODEL_PROVIDER_IDS = [
+  'google-vertex',
+  'mistral',
+] as const;
 
 export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
   ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,

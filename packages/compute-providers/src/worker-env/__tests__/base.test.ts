@@ -29,6 +29,7 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     delete process.env.R_MODEL_ENV_KEYS;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
+    delete process.env.MISTRAL_API_KEY;
   });
 
   afterEach(() => {
@@ -92,18 +93,26 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.SAFE_CONTEXT).toBe('safe-value');
   });
 
-  it('blocks disabled Vertex credentials from operator and extra env', () => {
-    process.env.R_MODEL_ENV_KEYS = 'GOOGLE_APPLICATION_CREDENTIALS';
+  it('blocks disabled-provider credentials from operator and extra env', () => {
+    process.env.R_MODEL = 'mistral/mistral-large-latest';
+    process.env.R_MODEL_ENV_KEYS =
+      'GOOGLE_APPLICATION_CREDENTIALS,MISTRAL_API_KEY';
     process.env.GOOGLE_APPLICATION_CREDENTIALS = '{"type":"service_account"}';
+    process.env.MISTRAL_API_KEY = 'mistral-operator-key';
 
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
       extraEnv: {
         GOOGLE_APPLICATION_CREDENTIALS: '/run/secrets/google.json',
+        MISTRAL_API_KEY: 'mistral-extra-key',
+        R_SMALL_MODEL: 'mistral/mistral-small-latest',
       },
     });
 
     expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.MISTRAL_API_KEY).toBeUndefined();
+    expect(env.R_MODEL).toBeUndefined();
+    expect(env.R_SMALL_MODEL).toBeUndefined();
   });
 
   it('forwards deployment model config and provider keys to workers', () => {

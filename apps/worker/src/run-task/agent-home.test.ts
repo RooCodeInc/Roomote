@@ -57,6 +57,23 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('ignores a disabled launch-time model override', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      MISTRAL_API_KEY: 'mistral-key',
+    };
+
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+      model: 'mistral/mistral-large-latest',
+    });
+
+    expect(result.model).toBeUndefined();
+    expect(result.configContent).not.toContain('mistral/');
+    expect(runtimeEnv.MISTRAL_API_KEY).toBeUndefined();
+  });
+
   it('leaves a model override without reasoning options when no per-task effort is set', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -261,7 +278,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
   });
 
-  it('strips disabled Google Vertex credentials and removes a stale file', () => {
+  it('strips disabled-provider credentials and removes a stale Vertex file', () => {
     const homeDir = createHomeDir();
     const credentialsPath = join(
       homeDir,
@@ -281,15 +298,25 @@ describe('generateOpenCodeConfig provider support', () => {
       client_email: 'roomote@vertex-project.iam.gserviceaccount.com',
     });
     const runtimeEnv = {
-      R_MODEL: 'google-vertex/gemini-3.5-flash',
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'mistral/mistral-large-latest',
+      R_VISION_MODEL: 'google-vertex/gemini-3.5-flash',
       GOOGLE_APPLICATION_CREDENTIALS: `  ${credentialsJson}\n`,
+      MISTRAL_API_KEY: 'mistral-key',
       GOOGLE_VERTEX_PROJECT: 'vertex-project',
       GOOGLE_VERTEX_LOCATION: 'global',
     };
 
-    generateOpenCodeConfig({ homeDir, runtimeEnv });
+    const result = generateOpenCodeConfig({ homeDir, runtimeEnv });
 
     expect(runtimeEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(runtimeEnv.MISTRAL_API_KEY).toBeUndefined();
+    expect(result.configContent).toContain('openrouter/openai/gpt-5.6-terra');
+    expect(result.configContent).not.toContain('mistral/');
+    expect(result.configContent).not.toContain('google-vertex/');
+    expect(runtimeEnv.R_MODEL).toBeUndefined();
+    expect(runtimeEnv.R_SMALL_MODEL).toBeUndefined();
+    expect(runtimeEnv.R_VISION_MODEL).toBeUndefined();
     expect(existsSync(credentialsPath)).toBe(false);
   });
 

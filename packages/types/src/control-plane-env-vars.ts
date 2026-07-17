@@ -2,7 +2,7 @@ import { COMMS_PROVIDER_ENV_VAR_NAMES } from './setup-auth-config';
 import { COMPUTE_PROVIDER_ENV_VAR_NAMES } from './setup-compute-config';
 import { SETUP_SOURCE_CONTROL_PROVIDER_CATALOG } from './setup-source-control-config';
 import { OPENCODE_AUTH_CONTENT_ENV_VAR_NAME } from './chatgpt-subscription';
-import { GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME } from './model-provider-config';
+import { DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES } from './model-provider-config';
 
 /**
  * Per-repo source-control access tokens. A task legitimately receives the
@@ -134,7 +134,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
-    GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+    ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   ],
 );
 

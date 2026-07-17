@@ -420,7 +420,6 @@ const EXTRA_MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER = {
   'bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION'],
   gemini: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
   google: ['GOOGLE_GENERATIVE_AI_API_KEY'],
-  mistral: ['MISTRAL_API_KEY'],
 } as const satisfies Record<string, readonly string[]>;
 
 /**
@@ -872,8 +871,17 @@ export function isConfiguredEnvValue(
 }
 
 /** Legacy Google Vertex credential name, reserved and stripped while the provider is disabled. */
-export const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
+const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
   'GOOGLE_APPLICATION_CREDENTIALS';
+
+/** Legacy direct Mistral credential name, reserved and stripped while support is disabled. */
+const MISTRAL_API_KEY_ENV_VAR_NAME = 'MISTRAL_API_KEY';
+
+/** Credentials belonging to providers Roomote currently refuses to run. */
+export const DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES = [
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  MISTRAL_API_KEY_ENV_VAR_NAME,
+] as const;
 
 /**
  * Validates and collects the env values to persist when connecting an
