@@ -252,6 +252,25 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe(true);
   });
 
+  it('handles thousands of sequential valid thread_activity blocks without stack overflow', () => {
+    const blocks = Array.from(
+      { length: 2000 },
+      (_, i) =>
+        `<thread_activity>\nUser ${i}: passive note\n</thread_activity>`,
+    );
+    const activityOnly = blocks.join('\n\n');
+    const withMessage = `${activityOnly}\n\n<slack_message>\nlatest question\n</slack_message>`;
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: activityOnly }],
+      }),
+    ).toBe(false);
+    expect(normalizeTranscriptUserText(activityOnly)).toBe(activityOnly);
+    expect(normalizeTranscriptUserText(withMessage)).toBe('latest question');
+  });
+
   it('strips thread_activity that appears after thread_context', () => {
     expect(
       normalizeTranscriptUserText(
