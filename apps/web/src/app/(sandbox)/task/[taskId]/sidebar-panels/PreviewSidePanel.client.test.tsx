@@ -555,4 +555,81 @@ describe('PreviewSidePanel', () => {
       screen.queryByRole('button', { name: 'Show preview widget' }),
     ).not.toBeInTheDocument();
   });
+
+  it('shows a services-starting notice while environment setup is running', () => {
+    render(
+      <PreviewSidePanel
+        taskRun={
+          {
+            id: 123,
+            taskId: 'task-1',
+            environmentSetupState: 'running',
+          } as never
+        }
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Environment services are still starting/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Dismiss preview starting notice' }),
+    );
+
+    expect(
+      screen.queryByText(/Environment services are still starting/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('hides the services-starting notice once the preview reports loading', () => {
+    render(
+      <PreviewSidePanel
+        taskRun={
+          {
+            id: 123,
+            taskId: 'task-1',
+            environmentSetupState: 'running',
+          } as never
+        }
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByText(/Environment services are still starting/),
+    ).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { type: 'roomote-load-complete' },
+        }),
+      );
+    });
+
+    expect(
+      screen.queryByText(/Environment services are still starting/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not show the services-starting notice when setup has completed', () => {
+    render(
+      <PreviewSidePanel
+        taskRun={
+          {
+            id: 123,
+            taskId: 'task-1',
+            environmentSetupState: 'completed',
+          } as never
+        }
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByText(/Environment services are still starting/),
+    ).not.toBeInTheDocument();
+  });
 });
