@@ -7,6 +7,7 @@ import type {
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SetupModelStatus } from '@roomote/types';
+import { toast } from 'sonner';
 
 const { mutateAsyncMock } = vi.hoisted(() => ({
   mutateAsyncMock: vi.fn(),
@@ -318,6 +319,71 @@ describe('StepInferenceProvider configured API key display', () => {
     expect(
       screen.queryByRole('combobox', { name: 'Discovered model' }),
     ).not.toBeInTheDocument();
+  });
+
+  it('explains the minimum model requirements when no local model is eligible', async () => {
+    mutateAsyncMock.mockResolvedValueOnce({
+      error: null,
+      modelCount: 2,
+      recommendedModels: [],
+    });
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Found 2 models, but none that can power Roomote. It needs tool calling and at least 7B parameters.',
+      );
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a tool-calling failure separately from model eligibility', async () => {
+    mutateAsyncMock
+      .mockResolvedValueOnce({
+        error: null,
+        modelCount: 1,
+        recommendedModels: [{ modelId: 'ollama/qwen3:8b' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'The provider requires a tool-call parser.',
+      });
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Found 1 model that meets Roomote's 7B minimum, but none support the required tool calling. The provider requires a tool-call parser.",
+      );
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
   });
 });
 

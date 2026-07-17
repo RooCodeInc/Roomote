@@ -115,7 +115,13 @@ export function StepInferenceProvider({
   }, [modelSetup.preselectedProvider]);
 
   useEffect(() => {
-    setApiKey('');
+    setApiKey(
+      selectedProvider === 'ollama'
+        ? 'http://localhost:11434'
+        : selectedProvider === 'vllm'
+          ? 'http://localhost:8000/v1'
+          : '',
+    );
     setAdditionalEnvValues({});
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
@@ -190,6 +196,7 @@ export function StepInferenceProvider({
   const handleContinue = async () => {
     let modelId: string | undefined;
     let endpointConnectionMessage: string | undefined;
+    let qualificationError: string | undefined;
     const submittedCredential = shouldShowConfiguredMask
       ? undefined
       : apiKey.trim() || undefined;
@@ -224,11 +231,14 @@ export function StepInferenceProvider({
           modelId = candidate.modelId;
           break;
         }
+        qualificationError = result.error;
       }
 
       if (!modelId) {
         toast.error(
-          `Connected to ${selectedProviderStatus?.label ?? 'the provider'} and found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model' : 'models'}, but none can be used as Roomote's default. Add a capable tool-calling model, then try again.`,
+          discovery.recommendedModels.length === 0
+            ? `Found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model' : 'models'}, but none that can power Roomote. It needs tool calling and at least 7B parameters.`
+            : `Found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model that meets' : 'models that meet'} Roomote's 7B minimum, but none support the required tool calling. ${qualificationError ?? 'Check the provider tool-calling configuration.'}`,
         );
         return;
       }
