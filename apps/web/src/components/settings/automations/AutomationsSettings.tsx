@@ -2181,22 +2181,14 @@ export function AutomationsSettings() {
     commsStatus.data?.invocationIdentities.find(
       (identity) => identity.provider === 'slack',
     ) ?? null;
-  const githubInvocationIdentity =
-    commsStatus.data?.invocationIdentities.find(
-      (identity) => identity.provider === 'github',
-    ) ?? null;
   const slackAppMention =
     slackInvocationIdentity?.mentionText ??
     slackInvocationIdentity?.nativeMention ??
     'the Slack app';
-  const githubAppMention =
-    githubInvocationIdentity?.mentionText ?? 'the GitHub app';
   const channelAutoStartLaunchModeOptions =
     CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS;
   const showChannelAutoStartLaunchModePicker = false;
   const reviewerIsEnabled = formState?.reviewerEnabled ?? false;
-  const reviewerReviewsAllPrs =
-    formState?.reviewerReviewAllPullRequestAuthors ?? false;
   const conflictResolverIsEnabled =
     formState?.conflictResolverFrequency !== 'off';
   const channelAutoStartIsEnabled = hasConfiguredChannelAutoStartRows(
@@ -3806,114 +3798,75 @@ If unclear, send to manager channel.`}
                   }
                 />
                 <Label htmlFor="reviewer-enabled" className="text-sm">
-                  Enable Code Reviews
+                  Allow {PRODUCT_NAME} to review PRs
                 </Label>
               </div>
 
               {reviewerIsEnabled ? (
-                <div className="space-y-5">
-                  <Alert variant="light" className="md:max-w-160">
-                    <Info className="mt-0.5 size-4 shrink-0 text-foreground" />
-                    <AlertTitle>Which PRs get reviewed?</AlertTitle>
-                    <AlertDescription>
-                      <div className="space-y-2 text-muted-foreground">
-                        <p>
-                          When background auto-review is on, reviews run on{' '}
-                          {reviewerReviewsAllPrs
-                            ? 'all pull requests in connected repositories'
-                            : `pull requests opened by ${PRODUCT_NAME}`}
-                          {formState.reviewerReviewOnCommit
-                            ? ' as they open or receive new commits.'
-                            : '. Right now, Review Code only runs when someone mentions it on a PR.'}
-                        </p>
-                        {formState.reviewerReviewOnCommit ? (
-                          <p>
-                            {formState.reviewerReviewDraftPrs
-                              ? 'Draft PRs are included in automatic reviews.'
-                              : 'Draft PRs wait until they are marked ready for review.'}
-                          </p>
-                        ) : null}
-                        <p>
-                          {reviewerReviewsAllPrs
-                            ? 'You can also comment'
-                            : 'For PRs outside that scope, comment'}{' '}
-                          <span className="font-medium text-foreground">
-                            {githubAppMention} review this PR
-                          </span>{' '}
-                          to request an on-demand review.
-                        </p>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-
-                  <div className="space-y-6 pt-3">
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        checked={formState.reviewerReviewOnCommit}
-                        onCheckedChange={(reviewerReviewOnCommit) =>
-                          setFormState((prev) =>
-                            prev ? { ...prev, reviewerReviewOnCommit } : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">
-                          Auto-review on open and new commits
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Turn this off to keep Review Code background work
-                          disabled.
-                        </p>
-                      </div>
+                <div className="space-y-6 pt-1">
+                  <div className="flex items-start gap-2">
+                    <Switch
+                      className="mt-1"
+                      checked={formState.reviewerReviewOnCommit}
+                      onCheckedChange={(reviewerReviewOnCommit) =>
+                        setFormState((prev) =>
+                          prev ? { ...prev, reviewerReviewOnCommit } : prev,
+                        )
+                      }
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">
+                        Automatically review any new PRs and follow-up commits.
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Disable to only get reviews by asking @-mentioning{' '}
+                        {PRODUCT_NAME}
+                      </p>
                     </div>
+                  </div>
 
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        aria-label="Review PRs from other authors"
-                        checked={formState.reviewerReviewAllPullRequestAuthors}
-                        onCheckedChange={(
-                          reviewerReviewAllPullRequestAuthors,
-                        ) =>
-                          setFormState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  reviewerReviewAllPullRequestAuthors,
-                                }
-                              : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">
-                          Review PRs from other authors
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Include pull requests opened by people or bots outside
-                          {` ${PRODUCT_NAME}`} in automatic reviews.
-                        </p>
-                      </div>
+                  <div className="flex items-start gap-2">
+                    <Switch
+                      className="mt-1"
+                      aria-label={`Review PRs not created by ${PRODUCT_NAME}`}
+                      checked={formState.reviewerReviewAllPullRequestAuthors}
+                      onCheckedChange={(reviewerReviewAllPullRequestAuthors) =>
+                        setFormState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                reviewerReviewAllPullRequestAuthors,
+                              }
+                            : prev,
+                        )
+                      }
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">
+                        Review PRs not created by {PRODUCT_NAME}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Include pull requests opened by people or others
+                      </p>
                     </div>
+                  </div>
 
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        checked={formState.reviewerReviewDraftPrs}
-                        onCheckedChange={(reviewerReviewDraftPrs) =>
-                          setFormState((prev) =>
-                            prev ? { ...prev, reviewerReviewDraftPrs } : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">Review draft PRs</p>
-                        <p className="text-xs text-muted-foreground">
-                          Keep draft pull requests in scope before they are
-                          marked ready for review when Review Code is enabled.
-                        </p>
-                      </div>
+                  <div className="flex items-start gap-2">
+                    <Switch
+                      className="mt-1"
+                      checked={formState.reviewerReviewDraftPrs}
+                      onCheckedChange={(reviewerReviewDraftPrs) =>
+                        setFormState((prev) =>
+                          prev ? { ...prev, reviewerReviewDraftPrs } : prev,
+                        )
+                      }
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Review draft PRs</p>
+                      <p className="text-xs text-muted-foreground">
+                        Turn off to only review PRs marked as ready (and save
+                        tokens)
+                      </p>
                     </div>
                   </div>
                 </div>
