@@ -12,14 +12,15 @@
 #
 # Installation modes:
 #
-#   Vercel Sandbox (production + local dev):
+#   Hosted sandbox (production + local dev):
 #     - Controller uploads this script + archive to /sandbox/worker.tar.gz
 #     - This script installs from the uploaded worker release archive
 #
-#   Vercel Sandbox (snapshot resume):
+#   Hosted sandbox (snapshot resume):
 #     - Environment snapshot launches restore a cached sandbox first, then run
 #       this script to refresh the shipped Roomote worker/runtime in place
-#     - Task snapshot launches preserve exact state and skip this script
+#     - Task snapshot launches also refresh the shipped worker/runtime while
+#       preserving repositories, harness sessions, and other snapshot state
 #
 # Build worker release archive: ./scripts/build-worker-release.sh <version>
 
