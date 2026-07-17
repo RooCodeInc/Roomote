@@ -103,6 +103,24 @@ describe('CommandExecutor', () => {
       ).toThrow('Path traversal not allowed');
     });
 
+    it('should allow absolute paths under /tmp', () => {
+      const handle = CommandExecutor.tailStream('/tmp/harness.log', {
+        cwd: testCwd,
+        onChunk: () => {},
+      });
+
+      handle.kill();
+    });
+
+    it('should reject absolute paths outside /tmp', () => {
+      expect(() =>
+        CommandExecutor.tailStream('/etc/passwd', {
+          cwd: testCwd,
+          onChunk: () => {},
+        }),
+      ).toThrow('Absolute paths outside /tmp are not allowed');
+    });
+
     it('should reject shell metacharacters in path', () => {
       expect(() =>
         CommandExecutor.tailStream('file;rm -rf /', {

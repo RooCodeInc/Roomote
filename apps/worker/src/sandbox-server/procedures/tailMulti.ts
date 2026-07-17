@@ -1,6 +1,5 @@
 import { TRPCError } from '@trpc/server';
 import { observable } from '@trpc/server/observable';
-import path from 'node:path';
 import { z } from 'zod';
 
 import type { TaggedStreamChunk } from '../types';
@@ -8,41 +7,17 @@ import type { TaggedStreamChunk } from '../types';
 import { publicProcedure } from '../trpc';
 
 import { CommandExecutor, type StreamHandle } from '../lib/command-executor';
+import { resolveSafeTailFilePath } from '../lib/tail-file-path';
 
 function validateFilePath(filePath: string): void {
-  if (!filePath || filePath.trim() === '') {
+  try {
+    // Validate only; CommandExecutor.tailStream resolves again immediately
+    // before spawn so the checked path matches the path passed to `tail`.
+    resolveSafeTailFilePath(filePath);
+  } catch (error) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
-      message: 'Path cannot be empty',
-    });
-  }
-
-  if (path.isAbsolute(filePath)) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Absolute paths are not allowed',
-    });
-  }
-
-  if (filePath.includes('..')) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Path traversal not allowed',
-    });
-  }
-
-  if (/[;|&$`"'\\<>(){}[\]*?!#~]/.test(filePath)) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Invalid characters in path',
-    });
-  }
-
-  // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f]/.test(filePath)) {
-    throw new TRPCError({
-      code: 'BAD_REQUEST',
-      message: 'Control characters not allowed in path',
+      message: error instanceof Error ? error.message : 'Invalid path',
     });
   }
 }

@@ -5,6 +5,7 @@ import { execa, type ExecaError } from 'execa';
 import type { CommandExecutionResult, StreamChunk } from '../types';
 
 import { DEFAULT_COMMAND_TIMEOUT } from '../trpc';
+import { resolveSafeTailFilePath } from './tail-file-path';
 
 interface ExecuteOptions {
   /** Working directory */
@@ -101,25 +102,11 @@ export class CommandExecutor {
     filePath: string,
     options: ExecuteStreamOptions,
   ): StreamHandle {
-    if (!filePath) {
-      throw new Error('Path cannot be empty');
-    }
+    // Resolve absolute /tmp paths (and their symlink targets) before tailing so
+    // the check and the stream use the same path.
+    const safePath = resolveSafeTailFilePath(filePath);
 
-    // Confine tails to paths under the working directory. Absolute paths
-    // would otherwise bypass the ".."-only check and read host files.
-    if (path.isAbsolute(filePath)) {
-      throw new Error('Absolute paths are not allowed');
-    }
-
-    if (filePath.includes('..')) {
-      throw new Error('Path traversal not allowed');
-    }
-
-    if (/[;`$|&<>(){}]/.test(filePath)) {
-      throw new Error('Invalid characters in path');
-    }
-
-    return this.runCommandStream(['tail', '-f', '--', filePath], options);
+    return this.runCommandStream(['tail', '-f', '--', safePath], options);
   }
 
   /**
