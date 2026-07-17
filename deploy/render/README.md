@@ -248,7 +248,7 @@ Notes:
   explicit env values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
-  configured in **Settings → Live Previews** until set.
+  configured in the task page's preview pane until set.
 
 ## The artifact bucket
 
@@ -338,8 +338,9 @@ Live previews need a wildcard domain, which requires a domain you control:
    `PREVIEW_DOMAINS=previews.<your-domain>` to the `roomote-shared`
    environment group. The `NEXT_PUBLIC_` variant is what the web client uses
    to build preview links, so the `roomote-web` service must have it.
-4. Opt in from **Settings → Live Previews**, which validates the wildcard
-   hostname and enables previews per deployment and environment.
+4. Open any task's preview pane as an admin to validate the wildcard
+   hostname. Previews are always enabled and publish for every environment
+   that defines preview ports.
 
 ## Upgrades, backups, and costs
 

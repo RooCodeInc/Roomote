@@ -129,7 +129,20 @@ export function StepInvoke({
           return;
         }
 
-        const envs = environments.data;
+        // Environment setup may have just written the first environment. Refresh
+        // before redirecting so Home can select it via environmentId.
+        let envs = environments.data;
+        try {
+          const refreshed = await queryClient.fetchQuery(
+            trpc.environments.list.queryOptions(undefined, { staleTime: 0 }),
+          );
+          if (Array.isArray(refreshed)) {
+            envs = refreshed;
+          }
+        } catch {
+          // Fall back to whatever is already cached.
+        }
+
         const params = new URLSearchParams();
         const targetEnv = envs?.[0];
 

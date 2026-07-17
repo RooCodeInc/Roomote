@@ -45,6 +45,7 @@ function buildTaskSidePanelContext({
     previewServiceName: null,
     previewPath: null,
     openPreviewView: vi.fn(),
+    openPreviewSetupView: vi.fn(),
     openArtifactsBrowser: vi.fn(),
     openDiffView: vi.fn(),
     openArtifactDetail: vi.fn(),

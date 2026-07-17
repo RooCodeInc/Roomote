@@ -1,9 +1,7 @@
 import {
   analyzePreviewRuntimeConfig,
   buildExamplePreviewHostname,
-  hasAdvancedPreviewConfig,
   hasConfiguredPreviewPorts,
-  isEnvironmentPreviewEnabledInConfig,
   isLocalPreviewDomain,
 } from '../live-previews';
 
@@ -78,16 +76,7 @@ describe('live previews helpers', () => {
     expect(
       hasConfiguredPreviewPorts({ ports: [{ name: 'WEB', port: 3000 }] }),
     ).toBe(true);
-    expect(
-      isEnvironmentPreviewEnabledInConfig({ previews_enabled: false }),
-    ).toBe(false);
-    expect(
-      hasAdvancedPreviewConfig({
-        name: 'WEB',
-        port: 3000,
-        proxied: false,
-      }),
-    ).toBe(true);
+    expect(hasConfiguredPreviewPorts({ ports: [] })).toBe(false);
     expect(buildExamplePreviewHostname('preview.roomote.example.com')).toBe(
       'abc123def4567-web.preview.roomote.example.com',
     );

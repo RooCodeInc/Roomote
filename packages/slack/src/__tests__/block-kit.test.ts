@@ -3,7 +3,6 @@ import {
   buildRoutingConfirmBlocks,
   buildStartedBlocks,
   buildTaskFailedBlocks,
-  getSlackRoutingAutoConfirmDelayMs,
   postSlackAccountLinkThreadReply,
 } from '../block-kit';
 import type { SlackNotifier } from '../slack-notifier';
@@ -309,56 +308,6 @@ describe('Slack routing blocks', () => {
         }),
       }),
     ]);
-  });
-
-  it('skips the Slack auto-confirm wait for very high-confidence routes', () => {
-    expect(
-      getSlackRoutingAutoConfirmDelayMs({
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.95,
-        workspaceRemapped: false,
-      }),
-    ).toBe(0);
-  });
-
-  it('keeps the Slack auto-confirm wait for all-repositories routes', () => {
-    expect(
-      getSlackRoutingAutoConfirmDelayMs(
-        {
-          phase: 'direct',
-          toolsUsed: [],
-          needsExternalLookup: false,
-          confidence: 0.99,
-          workspaceRemapped: false,
-        },
-        'all_repositories',
-      ),
-    ).toBeUndefined();
-  });
-
-  it('keeps the Slack auto-confirm wait below the high-confidence threshold', () => {
-    expect(
-      getSlackRoutingAutoConfirmDelayMs({
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.949,
-      }),
-    ).toBeUndefined();
-  });
-
-  it('keeps the Slack auto-confirm wait when the final workspace was remapped', () => {
-    expect(
-      getSlackRoutingAutoConfirmDelayMs({
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.99,
-        workspaceRemapped: true,
-      }),
-    ).toBeUndefined();
   });
 });
 

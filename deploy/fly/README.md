@@ -183,7 +183,7 @@ Notes:
   explicit values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
-  configured in **Settings → Live Previews** until set.
+  configured in the task page's preview pane until set.
 - Changing secrets on a deployed app restarts its Machines; `fly secrets
 set --stage` defers that to the next deploy.
 
@@ -305,8 +305,9 @@ previews.<your-domain>` and `fly certs add -a <app>-previews
    `https://previews.<your-domain>` (the `NEXT_PUBLIC_` variant is what the
    web client uses to build preview links), add the same three values to the
    previews app, and redeploy both.
-4. Opt in from **Settings → Live Previews**, which validates the wildcard
-   hostname and enables previews per deployment and environment.
+4. Open any task's preview pane as an admin to validate the wildcard
+   hostname. Previews are always enabled and publish for every environment
+   that defines preview ports.
 
 ## Upgrades, backups, and costs
 
