@@ -347,6 +347,22 @@ describe('resolveDefaultComputeProvider', () => {
     expect(provider).toBe('modal');
   });
 
+  it('skips catalog readiness scans for non-docker env defaults', async () => {
+    const executor = makeExecutor([]);
+
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'modal',
+      },
+      executor,
+    });
+
+    expect(provider).toBe('modal');
+    // listConfiguredComputeProviders is the only caller path that hits
+    // environment_variables selects for every catalog provider.
+    expect(executor.select).not.toHaveBeenCalled();
+  });
+
   it('falls back to docker when only Local Docker is configured', async () => {
     const provider = await resolveDefaultComputeProvider({
       runtimeEnv: {

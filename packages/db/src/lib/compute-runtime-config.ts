@@ -118,12 +118,12 @@ export async function listConfiguredComputeProviders(
 /**
  * Resolves the deployment default compute provider. Order of preference:
  * 1. Persisted setup/admin default (explicit deployment choice).
- * 2. DEFAULT_COMPUTE_PROVIDER env when it is a non-docker provider, or when
- *    docker is the env default and no cloud provider is configured. Compose
- *    stacks often inject DEFAULT_COMPUTE_PROVIDER=docker; a configured cloud
- *    provider still wins over that barrier default.
- * 3. Last catalog-ordered configured cloud provider when one or more clouds
- *    are ready (prefer cloud over Local Docker).
+ * 2. DEFAULT_COMPUTE_PROVIDER env when it is a non-docker provider (direct
+ *    return — no catalog readiness scan on hot dispatch paths).
+ * 3. When the env default is docker or unset: scan configured providers and
+ *    prefer the last catalog-ordered configured cloud over Local Docker.
+ *    Compose stacks often inject DEFAULT_COMPUTE_PROVIDER=docker; a ready
+ *    cloud provider outranks that barrier default.
  * 4. Local Docker / remaining availability fallback.
  */
 export async function resolveDefaultComputeProvider(
@@ -150,54 +150,42 @@ export async function resolveDefaultComputeProvider(
     return persistedComputeConfig.defaultProvider;
   }
 
-  const configuredProviders = await listConfiguredComputeProviders({
-    runtimeEnv,
-    executor,
-  });
-  const configuredCloudProviders = configuredProviders.filter(
-    (provider) => provider !== 'docker',
-  );
-  const preferredConfigured =
-    pickPreferredConfiguredComputeProvider(configuredProviders);
-
   const runtimeDefault = runtimeEnv.DEFAULT_COMPUTE_PROVIDER?.trim();
   if (
     runtimeDefault &&
     isComputeProvider(runtimeDefault) &&
+    !excludedProviders.has(runtimeDefault) &&
+    runtimeDefault !== 'docker'
+  ) {
+    // Authoritative non-Docker env defaults skip the catalog readiness scan
+    // used by enqueue/retry/dequeue paths.
+    return runtimeDefault;
+  }
+
+  // Docker env default or unset: resolve cloud-vs-Local Docker from readiness.
+  const configuredProviders = await listConfiguredComputeProviders({
+    runtimeEnv,
+    executor,
+  });
+  const preferredConfigured =
+    pickPreferredConfiguredComputeProvider(configuredProviders);
+
+  if (
+    runtimeDefault === 'docker' &&
+    isComputeProvider(runtimeDefault) &&
     !excludedProviders.has(runtimeDefault)
   ) {
-    // Env docker is a barrier default for stacks that also ship Local Docker.
-    // When a cloud provider is already configured, prefer that cloud instead.
-    if (runtimeDefault === 'docker' && configuredCloudProviders.length > 0) {
-      return (
-        preferredConfigured ??
-        configuredCloudProviders[configuredCloudProviders.length - 1]!
-      );
+    if (preferredConfigured && preferredConfigured !== 'docker') {
+      return preferredConfigured;
     }
-
-    return runtimeDefault;
+    return 'docker';
   }
 
   if (preferredConfigured) {
     return preferredConfigured;
   }
 
-  const availableProviders = await Promise.all(
-    SETUP_COMPUTE_PROVIDER_CATALOG.map(async ({ provider }) => ({
-      provider,
-      configSatisfied:
-        !excludedProviders.has(provider) &&
-        (await isComputeProviderConfigured(provider, {
-          runtimeEnv,
-          executor,
-        })),
-    })),
-  );
-
-  return getDefaultAvailableComputeProvider(
-    excludedProviders,
-    availableProviders,
-  );
+  return getDefaultAvailableComputeProvider(excludedProviders);
 }
 
 /**
