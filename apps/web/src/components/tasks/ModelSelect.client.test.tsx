@@ -6,6 +6,7 @@ const launchModelsData = vi.hoisted(() => ({
   current: null as {
     defaultModelId: string;
     chatgptConnected: boolean;
+    openaiConnected?: boolean;
     models: Array<{
       id: string;
       displayName: string;
@@ -89,6 +90,33 @@ describe('ModelSelect', () => {
     ).toEqual(['OpenRouter', 'ChatGPT (subscription)']);
     expect(screen.getByText('Grok 4.5 (Default)')).toBeTruthy();
     expect(screen.getByText('GPT 5.6 Terra')).toBeTruthy();
+  });
+
+  it('shows OpenAI when both OpenAI and ChatGPT are connected', () => {
+    launchModelsData.current = {
+      defaultModelId: 'openai/gpt-5.6-terra',
+      chatgptConnected: true,
+      openaiConnected: true,
+      models: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          isDefault: true,
+        },
+        {
+          id: 'openrouter/x-ai/grok-4.5',
+          displayName: 'Grok 4.5',
+        },
+      ],
+    };
+
+    render(
+      <ModelSelect value="openai/gpt-5.6-terra" onValueChange={vi.fn()} />,
+    );
+
+    expect(
+      screen.getAllByTestId('select-label').map((node) => node.textContent),
+    ).toEqual(['OpenRouter', 'OpenAI']);
   });
 
   it('omits provider headers when only one provider group is present', () => {

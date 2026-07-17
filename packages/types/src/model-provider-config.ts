@@ -715,15 +715,17 @@ export function getModelProviderLabel(
 
 /**
  * Display/grouping provider for a model id. ChatGPT subscription models retain
- * the runtime `openai/` prefix, but when a subscription is connected those
- * requests authenticate through the ChatGPT path (which wins over an OpenAI
- * API key). UI lists should therefore group `openai/` models under ChatGPT
- * while ChatGPT is connected, without changing the stored model id.
+ * the runtime `openai/` prefix. When a subscription is the only OpenAI-facing
+ * connection, UI lists group those models under ChatGPT. When an OpenAI API
+ * key is also present, keep the native OpenAI group so that connected provider
+ * remains visible in model settings lists. Callers that only care about which
+ * auth path wins at runtime can omit `openaiConnected` so ChatGPT still wins.
  */
 export function getDisplayModelProviderId(
   modelId: string | null | undefined,
   options?: {
     chatgptConnected?: boolean;
+    openaiConnected?: boolean;
   },
 ): string | null {
   const normalizedModelId = normalizeOptionalString(modelId);
@@ -734,7 +736,11 @@ export function getDisplayModelProviderId(
 
   const runtimeProviderId = getTaskModelProviderId(normalizedModelId);
 
-  if (runtimeProviderId === 'openai' && options?.chatgptConnected) {
+  if (
+    runtimeProviderId === 'openai' &&
+    options?.chatgptConnected &&
+    !options?.openaiConnected
+  ) {
     return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   }
 
@@ -759,6 +765,7 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
   items: T[],
   options?: {
     chatgptConnected?: boolean;
+    openaiConnected?: boolean;
   },
 ): DisplayModelProviderGroup<T>[] {
   const groups = new Map<string, T[]>();
@@ -767,6 +774,7 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
     const providerId =
       getDisplayModelProviderId(item.id, {
         chatgptConnected: options?.chatgptConnected,
+        openaiConnected: options?.openaiConnected,
       }) ?? 'other';
     const groupItems = groups.get(providerId) ?? [];
     groupItems.push(item);

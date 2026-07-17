@@ -1124,6 +1124,72 @@ describe('ModelSettingsSection', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('keeps openai/ models under OpenAI when both OpenAI and ChatGPT are connected', () => {
+    settingsData.current = {
+      ...buildSettingsData(),
+      models: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+          metadata: {
+            contextWindow: 1_000_000,
+            inputPricePerToken: 0.00001,
+            outputPricePerToken: 0.00003,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: true,
+        },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+          metadata: {
+            contextWindow: 200_000,
+            inputPricePerToken: 0.000003,
+            outputPricePerToken: 0.000015,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: false,
+        },
+      ],
+      defaultModelId: 'openai/gpt-5.6-terra',
+      runtimeModels: {
+        ...buildSettingsData().runtimeModels,
+        codingModel: {
+          ...buildSettingsData().runtimeModels.codingModel,
+          effectiveModelId: 'openai/gpt-5.6-terra',
+          persistedModelId: 'openai/gpt-5.6-terra',
+        },
+      },
+      helperModelOptions: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+        },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['openai', 'chatgpt'],
+    });
+
+    renderModelSettingsSection();
+
+    const availableSection = screen.getByTestId('section-Available Models');
+    // Connected OpenAI keeps the native provider heading even though ChatGPT
+    // is also connected (and still selectable when adding a model).
+    expect(
+      within(availableSection).getByText('OpenAI', { selector: 'p' }),
+    ).toBeInTheDocument();
+    expect(availableSection).toHaveTextContent('GPT 5.6 Terra');
+    expect(availableSection).toHaveTextContent('Anthropic');
+  });
+
   it('hides the add-model flow when no provider is connected', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({

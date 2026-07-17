@@ -704,16 +704,30 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
-  const [settings, chatgptConnected] = await Promise.all([
+  const [settings, chatgptConnected, persistedEnvVarNames] = await Promise.all([
     getDeploymentTaskModelSettings(),
     isChatGptSubscriptionConnected(),
+    getPersistedEnvironmentVariableNames(),
   ]);
+  const providerSetup = buildSetupModelStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+  });
+  const openaiConnected = Boolean(
+    providerSetup.providers.find(
+      (provider) =>
+        provider.id === 'openai' &&
+        (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+    ),
+  );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
 
   return {
     defaultModelId: defaultModel.id,
     chatgptConnected,
+    openaiConnected,
     models: enabledModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,
