@@ -35,6 +35,7 @@ export async function getSandboxAuthTokenCommand(
   return createRunToken({
     runId: input.runId,
     userId,
-    timeoutMs: input.timeoutMs ?? 6 * 60 * 60 * 1000,
+    // Default/cap align with SANDBOX_TIMEOUT_MS / MAX_RUN_TOKEN_TIMEOUT_MS.
+    timeoutMs: input.timeoutMs ?? 5 * 60 * 60 * 1000,
   });
 }

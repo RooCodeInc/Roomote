@@ -48,8 +48,8 @@ export default function SlackCallbackPage() {
   });
 
   const linkAccountMutation = useMutation({
-    mutationFn: (code: string) =>
-      trpcClient.slack.finishAuthenticateAccount.mutate({ code }),
+    mutationFn: (args: { code: string; state: string }) =>
+      trpcClient.slack.finishAuthenticateAccount.mutate(args),
     onSuccess: (result, _variables, _context) => {
       setIsSuccess(result.success);
       setIsLoading(false);
@@ -90,23 +90,48 @@ export default function SlackCallbackPage() {
       return;
     }
 
-    const decodedState = decodeRecord<Record<string, string>>(state);
+    const decodedRecord = decodeRecord<Record<string, string>>(state);
+    let decodedState = decodedRecord as
+      | { mode?: string; redirectPath?: string; redirect?: string }
+      | undefined;
+
+    if (!decodedState && state.includes('.')) {
+      try {
+        const [encodedPayload] = state.split('.');
+        if (encodedPayload) {
+          const base64 = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+          decodedState = JSON.parse(atob(padded)) as {
+            mode?: string;
+            redirectPath?: string;
+            redirect?: string;
+          };
+        }
+      } catch {
+        decodedState = undefined;
+      }
+    }
+
     const isLinkAccountFlow = decodedState?.mode === 'link_account';
 
     if (isLinkAccountFlow) {
-      linkAccountMutation.mutate(code, {
-        onSuccess: (result) => {
-          if (result.success) {
-            const redirect = decodedState?.redirect;
-            const isValidRedirect =
-              redirect &&
-              redirect.startsWith('/') &&
-              !redirect.startsWith('//') &&
-              !redirect.includes('://');
-            router.push(isValidRedirect ? redirect : '/settings');
-          }
+      linkAccountMutation.mutate(
+        { code, state },
+        {
+          onSuccess: (result) => {
+            if (result.success) {
+              const redirect =
+                decodedState?.redirectPath ?? decodedState?.redirect;
+              const isValidRedirect =
+                redirect &&
+                redirect.startsWith('/') &&
+                !redirect.startsWith('//') &&
+                !redirect.includes('://');
+              router.push(isValidRedirect ? redirect : '/settings');
+            }
+          },
         },
-      });
+      );
     } else {
       installMutation.mutate({ code, state });
     }

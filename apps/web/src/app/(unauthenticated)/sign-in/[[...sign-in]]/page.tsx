@@ -1,6 +1,9 @@
+import type { Metadata } from 'next';
+
 import { canVisitorSignUp } from '@/lib/server/access-policy';
 import { getSignedInAuthContext } from '@/lib/server/auth-context';
 import { resolveAuthProviderConfig } from '@/lib/server/auth-provider-config';
+import { PAGE_METADATA } from '@/lib/metadata';
 
 import { type AuthProvider } from '../../auth-form';
 import { SignInPageClient } from './page.client';
@@ -8,6 +11,28 @@ import { SignInPageClient } from './page.client';
 async function getConfiguredAuthProviders(): Promise<AuthProvider[]> {
   const config = await resolveAuthProviderConfig();
   return config.enabledProviders;
+}
+
+function hasInvitedParam(invited: string | string[] | undefined): boolean {
+  if (Array.isArray(invited)) {
+    return invited.some((value) => value.length > 0);
+  }
+  return typeof invited === 'string' && invited.length > 0;
+}
+
+export async function generateMetadata(props: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const searchParams = await props.searchParams;
+  // Bootstrap web runtime env the same way the page does before asking
+  // whether this visitor is allowed to create an account.
+  await getConfiguredAuthProviders();
+  const canSignUp = await canVisitorSignUp();
+  // Match auth-form defaultMode: sign-up only when the form can show it
+  // and the visitor arrived with a non-empty `invited` query.
+  return canSignUp && hasInvitedParam(searchParams.invited)
+    ? PAGE_METADATA.signUp
+    : PAGE_METADATA.logIn;
 }
 
 export default async function Page() {

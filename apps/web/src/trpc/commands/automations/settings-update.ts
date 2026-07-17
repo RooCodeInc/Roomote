@@ -43,6 +43,12 @@ import {
   syncSlackAutoStartChannelCache,
 } from './channel-auto-start';
 import {
+  getPersistedDiscordChannelForDestination,
+  getPersistedSlackChannelForDestination,
+  getSubmittedDestinationChannels,
+  listAutomationDestinationDescriptors,
+} from './destination-fields';
+import {
   assertAdmin,
   maskSlackChannelAutoStartSettings,
 } from './feature-gates';
@@ -65,6 +71,7 @@ import type {
   DiscordChannelFieldErrorKey,
   ResolvedChannelAutoStartRow,
   SlackChannelDisplayNames,
+  SlackChannelFieldErrorKey,
   UpdateBackgroundAgentSettingsInput,
 } from './types';
 
@@ -242,21 +249,16 @@ export async function updateBackgroundAgentSettingsCommand(
   const existingSettings = await getBackgroundAgentSettingsForDeployment();
   const shouldUpdateChannelAutoStart =
     input.savingAutomation === 'channelAutoStart';
-  const shouldUpdateManagerStats = input.savingAutomation === 'managerStats';
-  const shouldUpdateSentryTriage = input.savingAutomation === 'sentryTriage';
-  const shouldUpdateDependabotTriage =
-    input.savingAutomation === 'dependabotTriage';
-  const shouldUpdateCodeqlTriage = input.savingAutomation === 'codeqlTriage';
-  const shouldUpdateSuggester = input.savingAutomation === 'suggester';
-  const shouldUpdateAnnouncer = input.savingAutomation === 'announcer';
-  const shouldUpdatePlatformIssueAlerts =
-    input.savingAutomation === 'platformIssueAlerts';
-  const shouldUpdateSecurityAuditor =
-    input.savingAutomation === 'securityAuditor';
-  const shouldUpdateCodeQualityAuditor =
-    input.savingAutomation === 'codeQualityAuditor';
-  const shouldUpdateCiFailureTriage =
-    input.savingAutomation === 'ciFailureTriage';
+  const destinationDescriptors = listAutomationDestinationDescriptors();
+  const submittedDestinations = Object.fromEntries(
+    destinationDescriptors.map((descriptor) => [
+      descriptor.automationId,
+      getSubmittedDestinationChannels(descriptor, input),
+    ]),
+  ) as Record<
+    (typeof destinationDescriptors)[number]['automationId'],
+    ReturnType<typeof getSubmittedDestinationChannels>
+  >;
 
   const conflictResolverLabel =
     input.conflictResolverLabel.trim() || DEFAULT_CONFLICT_RESOLVER_LABEL;
@@ -354,96 +356,6 @@ export async function updateBackgroundAgentSettingsCommand(
     ? submittedManagerSlackChannel
     : null;
   const managerStatsFrequency = input.managerStatsFrequency ?? 'off';
-  // One-of destination semantics for the automation being saved: the picker
-  // submits either a Slack or a Discord channel. The UI clears the other
-  // provider on selection; as the server-side backstop, when both somehow
-  // arrive we prefer the Discord value and drop Slack.
-  const managerStatsDiscordChannel = shouldUpdateManagerStats
-    ? normalizeOptionalText(input.managerStatsDiscordChannel)
-    : null;
-  const sentryTriageDiscordChannel = shouldUpdateSentryTriage
-    ? normalizeOptionalText(input.sentryTriageDiscordChannel)
-    : null;
-  const dependabotTriageDiscordChannel = shouldUpdateDependabotTriage
-    ? normalizeOptionalText(input.dependabotTriageDiscordChannel)
-    : null;
-  const codeqlTriageDiscordChannel = shouldUpdateCodeqlTriage
-    ? normalizeOptionalText(input.codeqlTriageDiscordChannel)
-    : null;
-  const securityAuditorDiscordChannel = shouldUpdateSecurityAuditor
-    ? normalizeOptionalText(input.securityAuditorDiscordChannel)
-    : null;
-  const codeQualityAuditorDiscordChannel = shouldUpdateCodeQualityAuditor
-    ? normalizeOptionalText(input.codeQualityAuditorDiscordChannel)
-    : null;
-  const ciFailureTriageDiscordChannel = shouldUpdateCiFailureTriage
-    ? normalizeOptionalText(input.ciFailureTriageDiscordChannel)
-    : null;
-  // These three Discord fields are optional in the API for deploy
-  // compatibility: an older client that never sends them must preserve the
-  // persisted target, not clear it — UNLESS that client explicitly selected
-  // a Slack channel, which is a destination choice and must clear the
-  // Discord target it cannot see (otherwise both targets persist and a later
-  // current-client save would silently flip routing back to Discord). An
-  // empty Slack value expresses no choice and preserves the Discord target.
-  const suggesterDiscordProvided =
-    input.suggesterDiscordChannel !== undefined ||
-    normalizeOptionalText(input.suggesterSlackChannel) !== null;
-  const announcerDiscordProvided =
-    input.announcerDiscordChannel !== undefined ||
-    normalizeOptionalText(input.announcerSlackChannel) !== null;
-  const platformIssueDiscordProvided =
-    input.platformIssueDiscordChannel !== undefined ||
-    normalizeOptionalText(input.platformIssueSlackChannel) !== null;
-  const suggesterDiscordChannel = shouldUpdateSuggester
-    ? normalizeOptionalText(input.suggesterDiscordChannel)
-    : null;
-  const announcerDiscordChannel = shouldUpdateAnnouncer
-    ? normalizeOptionalText(input.announcerDiscordChannel)
-    : null;
-  const platformIssueDiscordChannel = shouldUpdatePlatformIssueAlerts
-    ? normalizeOptionalText(input.platformIssueDiscordChannel)
-    : null;
-  const managerStatsSlackChannel =
-    shouldUpdateManagerStats && !managerStatsDiscordChannel
-      ? normalizeOptionalText(input.managerStatsSlackChannel)
-      : null;
-  const sentryTriageSlackChannel =
-    shouldUpdateSentryTriage && !sentryTriageDiscordChannel
-      ? normalizeOptionalText(input.sentryTriageSlackChannel)
-      : null;
-  const dependabotTriageSlackChannel =
-    shouldUpdateDependabotTriage && !dependabotTriageDiscordChannel
-      ? normalizeOptionalText(input.dependabotTriageSlackChannel)
-      : null;
-  const codeqlTriageSlackChannel =
-    shouldUpdateCodeqlTriage && !codeqlTriageDiscordChannel
-      ? normalizeOptionalText(input.codeqlTriageSlackChannel)
-      : null;
-  const suggesterSlackChannel =
-    shouldUpdateSuggester && !suggesterDiscordChannel
-      ? normalizeOptionalText(input.suggesterSlackChannel)
-      : null;
-  const announcerSlackChannel =
-    shouldUpdateAnnouncer && !announcerDiscordChannel
-      ? normalizeOptionalText(input.announcerSlackChannel)
-      : null;
-  const platformIssueSlackChannel =
-    shouldUpdatePlatformIssueAlerts && !platformIssueDiscordChannel
-      ? normalizeOptionalText(input.platformIssueSlackChannel)
-      : null;
-  const securityAuditorSlackChannel =
-    shouldUpdateSecurityAuditor && !securityAuditorDiscordChannel
-      ? normalizeOptionalText(input.securityAuditorSlackChannel)
-      : null;
-  const codeQualityAuditorSlackChannel =
-    shouldUpdateCodeQualityAuditor && !codeQualityAuditorDiscordChannel
-      ? normalizeOptionalText(input.codeQualityAuditorSlackChannel)
-      : null;
-  const ciFailureTriageSlackChannel =
-    shouldUpdateCiFailureTriage && !ciFailureTriageDiscordChannel
-      ? normalizeOptionalText(input.ciFailureTriageSlackChannel)
-      : null;
   const suggesterRoutingRequiresSlackInstallation =
     shouldValidateSuggesterRoutingPreview &&
     Boolean(effectiveSuggesterRoutingInstructions);
@@ -454,16 +366,9 @@ export async function updateBackgroundAgentSettingsCommand(
   const requiresSlackInstallation =
     channelAutoStartRequiresSlackInstallation ||
     Boolean(managerSlackChannel) ||
-    Boolean(managerStatsSlackChannel) ||
-    Boolean(sentryTriageSlackChannel) ||
-    Boolean(dependabotTriageSlackChannel) ||
-    Boolean(codeqlTriageSlackChannel) ||
-    Boolean(suggesterSlackChannel) ||
-    Boolean(announcerSlackChannel) ||
-    Boolean(platformIssueSlackChannel) ||
-    Boolean(securityAuditorSlackChannel) ||
-    Boolean(codeQualityAuditorSlackChannel) ||
-    Boolean(ciFailureTriageSlackChannel) ||
+    destinationDescriptors.some((descriptor) =>
+      Boolean(submittedDestinations[descriptor.automationId].slackChannel),
+    ) ||
     suggesterRoutingRequiresSlackInstallation;
 
   const slackInstallation = requiresSlackInstallation
@@ -481,16 +386,7 @@ export async function updateBackgroundAgentSettingsCommand(
   const [
     channelAutoStartChannelResults,
     managerChannelResult,
-    managerStatsChannelResult,
-    sentryTriageChannelResult,
-    dependabotTriageChannelResult,
-    codeqlTriageChannelResult,
-    suggesterChannelResult,
-    announcerChannelResult,
-    platformIssueChannelResult,
-    securityAuditorChannelResult,
-    codeQualityAuditorChannelResult,
-    ciFailureTriageChannelResult,
+    ...destinationResolutionEntries
   ] = await Promise.all([
     Promise.all(
       channelAutoStartRows.map((row) =>
@@ -516,220 +412,88 @@ export async function updateBackgroundAgentSettingsCommand(
           existingSettings?.managerSlackChannelId ??
             normalizeSlackChannelIdInput(submittedManagerSlackChannel),
         ),
-    shouldUpdateManagerStats
-      ? resolveChannelId({
-          field: 'managerStatsSlackChannel',
-          input: managerStatsSlackChannel,
-          notifier,
-        })
-      : // The persisted per-automation Slack ids include the manager-channel
-        // fallback. When the automation's own destination is a Discord
-        // channel, keeping that fallback would write it back as an own Slack
-        // target and override the Discord destination, so drop it.
-        keepPersistedSlackChannel(
-          existingSettings?.managerStatsDiscordChannelId
-            ? null
-            : existingSettings?.managerStatsSlackChannelId,
-        ),
-    shouldUpdateSentryTriage
-      ? resolveChannelId({
-          field: 'sentryTriageSlackChannel',
-          input: sentryTriageSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.sentryTriageDiscordChannelId
-            ? null
-            : existingSettings?.sentryTriageSlackChannelId,
-        ),
-    shouldUpdateDependabotTriage
-      ? resolveChannelId({
-          field: 'dependabotTriageSlackChannel',
-          input: dependabotTriageSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.dependabotTriageDiscordChannelId
-            ? null
-            : existingSettings?.dependabotTriageSlackChannelId,
-        ),
-    shouldUpdateCodeqlTriage
-      ? resolveChannelId({
-          field: 'codeqlTriageSlackChannel',
-          input: codeqlTriageSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.codeqlTriageDiscordChannelId
-            ? null
-            : existingSettings?.codeqlTriageSlackChannelId,
-        ),
-    shouldUpdateSuggester
-      ? resolveChannelId({
-          field: 'suggesterSlackChannel',
-          input: suggesterSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(existingSettings?.suggesterSlackChannelId),
-    shouldUpdateAnnouncer
-      ? resolveChannelId({
-          field: 'announcerSlackChannel',
-          input: announcerSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(existingSettings?.announcerSlackChannelId),
-    shouldUpdatePlatformIssueAlerts
-      ? resolveChannelId({
-          field: 'platformIssueSlackChannel',
-          input: platformIssueSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.platformIssueSlackChannelId,
-        ),
-    shouldUpdateSecurityAuditor
-      ? resolveChannelId({
-          field: 'securityAuditorSlackChannel',
-          input: securityAuditorSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.securityAuditorDiscordChannelId
-            ? null
-            : existingSettings?.securityAuditorSlackChannelId,
-        ),
-    shouldUpdateCodeQualityAuditor
-      ? resolveChannelId({
-          field: 'codeQualityAuditorSlackChannel',
-          input: codeQualityAuditorSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.codeQualityAuditorDiscordChannelId
-            ? null
-            : existingSettings?.codeQualityAuditorSlackChannelId,
-        ),
-    shouldUpdateCiFailureTriage
-      ? resolveChannelId({
-          field: 'ciFailureTriageSlackChannel',
-          input: ciFailureTriageSlackChannel,
-          notifier,
-        })
-      : keepPersistedSlackChannel(
-          existingSettings?.ciFailureTriageDiscordChannelId
-            ? null
-            : existingSettings?.ciFailureTriageSlackChannelId,
-        ),
+    ...destinationDescriptors.map(async (descriptor) => {
+      const shouldUpdate = input.savingAutomation === descriptor.automationId;
+      const submitted = submittedDestinations[descriptor.automationId];
+      const [slack, discord] = await Promise.all([
+        shouldUpdate
+          ? resolveChannelId({
+              field: descriptor.slackField as SlackChannelFieldErrorKey,
+              input: submitted.slackChannel,
+              notifier,
+            })
+          : keepPersistedSlackChannel(
+              getPersistedSlackChannelForDestination(
+                descriptor,
+                existingSettings,
+              ),
+            ),
+        shouldUpdate && submitted.resolveDiscord
+          ? resolveDiscordChannelId({
+              field: descriptor.discordField as DiscordChannelFieldErrorKey,
+              input: submitted.discordChannel,
+            })
+          : keepPersistedDiscordChannel(
+              getPersistedDiscordChannelForDestination(
+                descriptor,
+                existingSettings,
+              ),
+            ),
+      ]);
+
+      return [descriptor.automationId, { slack, discord }] as const;
+    }),
   ]);
 
-  const [
-    managerStatsDiscordResult,
-    sentryTriageDiscordResult,
-    dependabotTriageDiscordResult,
-    codeqlTriageDiscordResult,
-    securityAuditorDiscordResult,
-    codeQualityAuditorDiscordResult,
-    ciFailureTriageDiscordResult,
-    suggesterDiscordResult,
-    announcerDiscordResult,
-    platformIssueDiscordResult,
-  ] = await Promise.all([
-    shouldUpdateManagerStats
-      ? resolveDiscordChannelId({
-          field: 'managerStatsDiscordChannel',
-          input: managerStatsDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.managerStatsDiscordChannelId,
-        ),
-    shouldUpdateSentryTriage
-      ? resolveDiscordChannelId({
-          field: 'sentryTriageDiscordChannel',
-          input: sentryTriageDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.sentryTriageDiscordChannelId,
-        ),
-    shouldUpdateDependabotTriage
-      ? resolveDiscordChannelId({
-          field: 'dependabotTriageDiscordChannel',
-          input: dependabotTriageDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.dependabotTriageDiscordChannelId,
-        ),
-    shouldUpdateCodeqlTriage
-      ? resolveDiscordChannelId({
-          field: 'codeqlTriageDiscordChannel',
-          input: codeqlTriageDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.codeqlTriageDiscordChannelId,
-        ),
-    shouldUpdateSecurityAuditor
-      ? resolveDiscordChannelId({
-          field: 'securityAuditorDiscordChannel',
-          input: securityAuditorDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.securityAuditorDiscordChannelId,
-        ),
-    shouldUpdateCodeQualityAuditor
-      ? resolveDiscordChannelId({
-          field: 'codeQualityAuditorDiscordChannel',
-          input: codeQualityAuditorDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.codeQualityAuditorDiscordChannelId,
-        ),
-    shouldUpdateCiFailureTriage
-      ? resolveDiscordChannelId({
-          field: 'ciFailureTriageDiscordChannel',
-          input: ciFailureTriageDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.ciFailureTriageDiscordChannelId,
-        ),
-    shouldUpdateSuggester && suggesterDiscordProvided
-      ? resolveDiscordChannelId({
-          field: 'suggesterDiscordChannel',
-          input: suggesterDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.suggesterDiscordChannelId,
-        ),
-    shouldUpdateAnnouncer && announcerDiscordProvided
-      ? resolveDiscordChannelId({
-          field: 'announcerDiscordChannel',
-          input: announcerDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.announcerDiscordChannelId,
-        ),
-    shouldUpdatePlatformIssueAlerts && platformIssueDiscordProvided
-      ? resolveDiscordChannelId({
-          field: 'platformIssueDiscordChannel',
-          input: platformIssueDiscordChannel,
-        })
-      : keepPersistedDiscordChannel(
-          existingSettings?.platformIssueDiscordChannelId,
-        ),
-  ]);
+  type DestinationResolution = {
+    slack: Awaited<ReturnType<typeof resolveChannelId>>;
+    discord: DiscordChannelResolution;
+  };
 
-  for (const result of [
-    managerStatsDiscordResult,
-    sentryTriageDiscordResult,
-    dependabotTriageDiscordResult,
-    codeqlTriageDiscordResult,
-    securityAuditorDiscordResult,
-    codeQualityAuditorDiscordResult,
-    ciFailureTriageDiscordResult,
-    suggesterDiscordResult,
-    announcerDiscordResult,
-    platformIssueDiscordResult,
-  ]) {
-    if (result.error) {
-      fieldErrors[result.error.field] = result.error.message;
+  const destinationResults = Object.fromEntries(
+    destinationResolutionEntries as Array<
+      readonly [
+        (typeof destinationDescriptors)[number]['automationId'],
+        DestinationResolution,
+      ]
+    >,
+  ) as Record<
+    (typeof destinationDescriptors)[number]['automationId'],
+    DestinationResolution
+  >;
+
+  const managerStatsChannelResult = destinationResults.managerStats.slack;
+  const sentryTriageChannelResult = destinationResults.sentryTriage.slack;
+  const dependabotTriageChannelResult =
+    destinationResults.dependabotTriage.slack;
+  const codeqlTriageChannelResult = destinationResults.codeqlTriage.slack;
+  const suggesterChannelResult = destinationResults.suggester.slack;
+  const announcerChannelResult = destinationResults.announcer.slack;
+  const platformIssueChannelResult =
+    destinationResults.platformIssueAlerts.slack;
+  const securityAuditorChannelResult = destinationResults.securityAuditor.slack;
+  const codeQualityAuditorChannelResult =
+    destinationResults.codeQualityAuditor.slack;
+  const ciFailureTriageChannelResult = destinationResults.ciFailureTriage.slack;
+  const managerStatsDiscordResult = destinationResults.managerStats.discord;
+  const sentryTriageDiscordResult = destinationResults.sentryTriage.discord;
+  const dependabotTriageDiscordResult =
+    destinationResults.dependabotTriage.discord;
+  const codeqlTriageDiscordResult = destinationResults.codeqlTriage.discord;
+  const securityAuditorDiscordResult =
+    destinationResults.securityAuditor.discord;
+  const codeQualityAuditorDiscordResult =
+    destinationResults.codeQualityAuditor.discord;
+  const ciFailureTriageDiscordResult =
+    destinationResults.ciFailureTriage.discord;
+  const suggesterDiscordResult = destinationResults.suggester.discord;
+  const announcerDiscordResult = destinationResults.announcer.discord;
+  const platformIssueDiscordResult =
+    destinationResults.platformIssueAlerts.discord;
+
+  for (const result of Object.values(destinationResults)) {
+    if (result.discord.error) {
+      fieldErrors[result.discord.error.field] = result.discord.error.message;
     }
   }
 
@@ -1077,6 +841,29 @@ export async function updateBackgroundAgentSettingsCommand(
     approvePr: false,
   } satisfies PrReviewSettings;
 
+  function destinationUpsertFields(
+    automationId: (typeof destinationDescriptors)[number]['automationId'],
+    extraTargets: AutomationTarget[] = [],
+  ) {
+    const descriptor = destinationDescriptors.find(
+      (entry) => entry.automationId === automationId,
+    );
+    if (!descriptor) {
+      throw new Error(`Missing destination descriptor for ${automationId}`);
+    }
+    const result = destinationResults[automationId];
+    return {
+      targets: [
+        ...buildDestinationChannelTargets(
+          result.slack.channelId,
+          result.discord.channelId,
+        ),
+        ...extraTargets,
+      ],
+      managedTargetKinds: [...descriptor.managedTargetKinds],
+    };
+  }
+
   await db.transaction(async (tx) => {
     await tx
       .insert(deploymentSettings)
@@ -1142,11 +929,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'manager_stats',
       enabled: effectiveManagerStatsFrequency !== 'off',
       schedule: { mode: effectiveManagerStatsFrequency },
-      targets: buildDestinationChannelTargets(
-        managerStatsChannelResult.channelId,
-        managerStatsDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('managerStats'),
       updatedAt: now,
     });
 
@@ -1154,24 +937,16 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'sentry_triage',
       enabled: sentryTriageFrequency !== 'off',
       schedule: { mode: sentryTriageFrequency },
-      targets: [
-        ...buildDestinationChannelTargets(
-          sentryTriageChannelResult.channelId,
-          sentryTriageDiscordResult.channelId,
-        ),
-        ...parseSentryProjectSlugs(sentryTriageProjectSlugs).map(
+      ...destinationUpsertFields(
+        'sentryTriage',
+        parseSentryProjectSlugs(sentryTriageProjectSlugs).map(
           (projectSlug): AutomationTarget => ({
             provider: 'sentry',
             targetKind: 'sentry_project',
             externalRef: projectSlug,
           }),
         ),
-      ],
-      managedTargetKinds: [
-        'slack_channel',
-        'discord_channel',
-        'sentry_project',
-      ],
+      ),
       updatedAt: now,
     });
 
@@ -1179,11 +954,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'dependabot_triage',
       enabled: dependabotTriageFrequency !== 'off',
       schedule: { mode: dependabotTriageFrequency },
-      targets: buildDestinationChannelTargets(
-        dependabotTriageChannelResult.channelId,
-        dependabotTriageDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('dependabotTriage'),
       updatedAt: now,
     });
 
@@ -1191,11 +962,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'codeql_triage',
       enabled: codeqlTriageFrequency !== 'off',
       schedule: { mode: codeqlTriageFrequency },
-      targets: buildDestinationChannelTargets(
-        codeqlTriageChannelResult.channelId,
-        codeqlTriageDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('codeqlTriage'),
       updatedAt: now,
     });
 
@@ -1203,11 +970,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'security_auditor',
       enabled: securityAuditorFrequency !== 'off',
       schedule: { mode: securityAuditorFrequency },
-      targets: buildDestinationChannelTargets(
-        securityAuditorChannelResult.channelId,
-        securityAuditorDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('securityAuditor'),
       updatedAt: now,
     });
 
@@ -1215,11 +978,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'code_quality_auditor',
       enabled: codeQualityAuditorFrequency !== 'off',
       schedule: { mode: codeQualityAuditorFrequency },
-      targets: buildDestinationChannelTargets(
-        codeQualityAuditorChannelResult.channelId,
-        codeQualityAuditorDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('codeQualityAuditor'),
       updatedAt: now,
     });
 
@@ -1227,11 +986,7 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'ci_failure_triage',
       enabled: ciFailureTriageFrequency !== 'off',
       schedule: { mode: ciFailureTriageFrequency },
-      targets: buildDestinationChannelTargets(
-        ciFailureTriageChannelResult.channelId,
-        ciFailureTriageDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('ciFailureTriage'),
       updatedAt: now,
     });
 
@@ -1243,11 +998,7 @@ export async function updateBackgroundAgentSettingsCommand(
       },
       instructions: effectiveSuggesterInstructions,
       settings: suggesterAutomationSettings,
-      targets: buildDestinationChannelTargets(
-        suggesterChannelResult.channelId,
-        suggesterDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('suggester'),
       updatedAt: now,
     });
 
@@ -1258,11 +1009,7 @@ export async function updateBackgroundAgentSettingsCommand(
         mode: effectiveAnnouncerFrequency,
       },
       instructions: normalizeOptionalText(input.announcerInstructions),
-      targets: buildDestinationChannelTargets(
-        announcerChannelResult.channelId,
-        announcerDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('announcer'),
       updatedAt: now,
     });
 
@@ -1271,11 +1018,7 @@ export async function updateBackgroundAgentSettingsCommand(
       enabled:
         platformIssueChannelResult.channelId != null ||
         platformIssueDiscordResult.channelId != null,
-      targets: buildDestinationChannelTargets(
-        platformIssueChannelResult.channelId,
-        platformIssueDiscordResult.channelId,
-      ),
-      managedTargetKinds: ['slack_channel', 'discord_channel'],
+      ...destinationUpsertFields('platformIssueAlerts'),
       updatedAt: now,
     });
   });
@@ -1293,16 +1036,13 @@ export async function updateBackgroundAgentSettingsCommand(
     );
   const hasSavedSlackMetadataTargets =
     updatedChannelAutoStartSlackChannelIds.length > 0 ||
-    Boolean(updatedSettings.managerStatsSlackChannelId) ||
-    Boolean(updatedSettings.suggesterSlackChannelId) ||
-    Boolean(updatedSettings.announcerSlackChannelId) ||
-    Boolean(updatedSettings.platformIssueSlackChannelId) ||
-    Boolean(updatedSettings.sentryTriageSlackChannelId) ||
-    Boolean(updatedSettings.dependabotTriageSlackChannelId) ||
-    Boolean(updatedSettings.codeqlTriageSlackChannelId) ||
-    Boolean(updatedSettings.securityAuditorSlackChannelId) ||
-    Boolean(updatedSettings.codeQualityAuditorSlackChannelId) ||
-    Boolean(updatedSettings.ciFailureTriageSlackChannelId);
+    destinationDescriptors.some((descriptor) =>
+      Boolean(
+        updatedSettings[
+          descriptor.slackSettingsKey as keyof typeof updatedSettings
+        ],
+      ),
+    );
   const postSaveSlackInstallation =
     notifier || !hasSavedSlackMetadataTargets
       ? null

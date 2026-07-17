@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server';
 
 import { Env } from './env';
+import { getPublicAppUrl } from './get-public-app-url';
 
 // Hostnames the server may see on incoming requests that are not reachable
 // from the user's browser: loopback hosts in local dev behind ngrok, and the
@@ -23,7 +24,7 @@ export function getCallbackHost(request: NextRequest) {
   // https://localhost:13000 or http://0.0.0.0:3000. Prefer R_PUBLIC_URL when
   // R_APP_URL is intentionally left at its local development default.
   if (INTERNAL_HOSTNAMES.has(url.hostname)) {
-    const publicUrl = Env.R_PUBLIC_URL ?? Env.R_APP_URL;
+    const publicUrl = getPublicAppUrl(Env);
     return `${publicUrl}${url.pathname}${url.search}`;
   }
 

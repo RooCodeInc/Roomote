@@ -946,7 +946,9 @@ export function startMultiplexAuthProxy(config: {
       const location = proxyRes.headers['location'];
       if (typeof location === 'string' && location.includes(rewrittenHost)) {
         const newLocation = location.replace(
-          new RegExp(`https?://${rewrittenHost.replace(/\./g, '\\.')}`),
+          new RegExp(
+            `https?://${rewrittenHost.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+          ),
           originalOrigin,
         );
         proxyRes.headers['location'] = newLocation;

@@ -468,9 +468,17 @@ describe('startAuthenticateGitHubAccountCommand', () => {
     expect(url.searchParams.get('redirect_uri')).toBe(
       'https://roomote.example.com/github/callback',
     );
-    expect(decodeRecord(url.searchParams.get('state') ?? '')).toEqual({
-      redirect: '/settings?tab=account',
+    const rawState = url.searchParams.get('state') ?? '';
+    const [encodedPayload, signature] = rawState.split('.');
+    expect(encodedPayload).toBeTruthy();
+    expect(signature).toBeTruthy();
+    const payload = JSON.parse(
+      Buffer.from(encodedPayload!, 'base64url').toString('utf8'),
+    ) as Record<string, unknown>;
+    expect(payload).toMatchObject({
       mode: 'auth',
+      redirect: '/settings?tab=account',
+      userId: expect.any(String),
     });
   });
 

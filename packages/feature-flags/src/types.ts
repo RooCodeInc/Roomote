@@ -8,7 +8,6 @@ export enum FeatureFlag {
   SlackProofAutoPost = 'SlackProofAutoPost',
   SuggestionRouting = 'SuggestionRouting',
   VisualProofAutoScreencast = 'VisualProofAutoScreencast',
-  AuthorshipRules = 'AuthorshipRules',
   BackgroundSubagents = 'BackgroundSubagents',
   CodeMode = 'CodeMode',
 }
@@ -94,7 +93,6 @@ export interface MetadataRecord {
   queue_parallel_task_limit?: boolean | number | string;
   suggestion_routing?: boolean;
   visual_proof_auto_screencast?: boolean;
-  authorship_rules?: boolean;
   background_subagents?: boolean;
   opencode_code_mode?: boolean;
   previews_enabled?: boolean;

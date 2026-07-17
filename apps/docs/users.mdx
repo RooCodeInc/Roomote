@@ -60,10 +60,15 @@ A Roomote deployment is free for up to 10 users. Every registered user
 account in the deployment counts toward the limit, whichever sign-in path or
 surface they use. Removed users free their seat.
 
-To add more than 10 users, an admin enters a license key from the Roomote
-maintainers in **Settings > Users > License**. The License section shows the
-current seat usage, license status, and licensee. Keys are verified offline;
-the deployment never contacts a license server.
+To add more than 10 users, apply a license key from the Roomote maintainers in
+either of these ways:
+
+- enter it in **Settings > Users > License** as an admin, or
+- set `R_LICENSE_KEY` on the deployment (for example in Compose / `.env.production`);
+  when that env var is set, it takes precedence over any key stored in Settings
+
+The License section shows the current seat usage, license status, and licensee.
+Keys are verified offline; the deployment never contacts a license server.
 
 When all seats are in use, existing users keep working normally — only new
 sign-ups are blocked until a seat is freed by removing a user or a license key

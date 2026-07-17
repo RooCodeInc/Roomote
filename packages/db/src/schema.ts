@@ -65,8 +65,6 @@ import type {
   TrackedMessageSurface,
   TrackedMessageKind,
   McpConnectionRole,
-  CompiledAuthorshipRule,
-  AuthorshipRuleIssue,
   SourceControlProvider,
   TaskModelSettings,
   UserRole,
@@ -168,19 +166,23 @@ export const deploymentSettings = pgTable('deployment_settings', {
     | 'completed'
   >(),
   // Deployment-wide Roomote agent settings (folded in from the former
-  // background_agent_settings table): manager channel, global/authorship
-  // instructions, and compiled authorship rules. The flat settings view
-  // consumed across the product layers a per-automation projection (built
-  // from the automations table) on top.
+  // background_agent_settings table): manager channel and global instructions.
+  // The flat settings view consumed across the product layers a per-automation
+  // projection (built from the automations table) on top.
   managerSlackChannelId: text('manager_slack_channel_id'),
   globalAgentInstructions: text('global_agent_instructions'),
+  // N-1 rollback compatibility for the previous release's authorship-rules
+  // feature. This product no longer reads or writes these columns, but the
+  // prior release still selects them after a one-release code rollback.
+  // Remove the physical columns only after the next release becomes the
+  // supported rollback target.
   authorshipInstructions: text('authorship_instructions'),
   compiledAuthorshipRules: jsonb('compiled_authorship_rules')
-    .$type<CompiledAuthorshipRule[]>()
+    .$type<unknown[]>()
     .notNull()
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipIssues: jsonb('compiled_authorship_issues')
-    .$type<AuthorshipRuleIssue[]>()
+    .$type<unknown[]>()
     .notNull()
     .default(sql`'[]'::jsonb`),
   compiledAuthorshipAt: timestamp('compiled_authorship_at'),

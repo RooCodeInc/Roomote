@@ -6,6 +6,7 @@ import {
 } from '@roomote/sdk/server';
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
   OPENROUTER_OAUTH_COOKIE_MAX_AGE_SECONDS,
   OPENROUTER_OAUTH_COOKIE_PATH,
@@ -33,19 +34,22 @@ function withSetupRedirect(
 
 export async function GET() {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.R_APP_URL;
+  const publicAppUrl = getPublicAppUrl(webEnv);
 
   const authResult = await authorize();
   if (!authResult.success || !authResult.isAdmin) {
     return NextResponse.redirect(
-      withSetupRedirect(webUrl, 'error', 'unauthorized'),
+      withSetupRedirect(publicAppUrl, 'error', 'unauthorized'),
     );
   }
 
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const authorizationUrl = buildOpenRouterAuthorizationUrl({
-    callbackUrl: `${webUrl}/api/openrouter-oauth/callback`,
+    callbackUrl: new URL(
+      '/api/openrouter-oauth/callback',
+      publicAppUrl,
+    ).toString(),
     codeChallenge,
   });
 
@@ -53,7 +57,7 @@ export async function GET() {
   response.cookies.set(OPENROUTER_OAUTH_VERIFIER_COOKIE, codeVerifier, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: webUrl.startsWith('https://'),
+    secure: publicAppUrl.startsWith('https://'),
     path: OPENROUTER_OAUTH_COOKIE_PATH,
     maxAge: OPENROUTER_OAUTH_COOKIE_MAX_AGE_SECONDS,
   });

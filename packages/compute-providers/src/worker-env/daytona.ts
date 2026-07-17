@@ -16,7 +16,11 @@ export function buildDaytonaWorkerEnv({
   snapshotName: string;
 }): Record<string, string> {
   return {
-    ...buildBaseWorkerEnv({ authToken, sandboxExpiresAtMs, extraEnv }),
+    ...buildBaseWorkerEnv({
+      authToken,
+      sandboxExpiresAtMs,
+      extraEnv,
+    }),
     ...buildWorkerContextEnv({
       provider: 'daytona',
       fingerprint: snapshotName,

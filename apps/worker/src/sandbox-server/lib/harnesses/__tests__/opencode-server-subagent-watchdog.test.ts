@@ -97,7 +97,7 @@ async function connectHarness(
   await connectPromise;
 }
 
-// Mirrors the real OpenCode 1.17.8 shape observed live: subagent spawns
+// Mirrors the real OpenCode 1.17.18 shape observed live: subagent spawns
 // arrive as `task` tool parts on the parent session; state.input carries
 // subagent_type and state.metadata.sessionId points at the child session once
 // it exists.

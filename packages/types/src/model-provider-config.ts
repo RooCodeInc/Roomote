@@ -10,8 +10,9 @@ import {
 } from './recommended-task-models';
 import {
   DEFAULT_TASK_MODEL_ID,
-  DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   getTaskModelProviderId,
+  isTaskModelIdDisabled,
 } from './task-models';
 
 /**
@@ -22,13 +23,13 @@ import {
  * id prefix (opencode's Codex plugin registers OAuth auth under provider id
  * `openai`), so this id is a configuration/connect surface only — it is not
  * a model-id prefix and is intentionally not in
- * `DIRECT_TASK_MODEL_PROVIDER_IDS`.
+ * `ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS`.
  */
 export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
-  ...DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
 ] as const;
 
@@ -67,6 +68,20 @@ export type RecommendedRoleModels = Partial<
   Record<Exclude<TaskModelRole, 'coding'>, string>
 >;
 
+export type RecommendedPresetRole = {
+  modelId: string;
+  displayName?: string;
+  family?: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
+export type RecommendedModelPreset = {
+  id: string;
+  label: string;
+  default?: boolean;
+  roles: Partial<Record<TaskModelRole, RecommendedPresetRole>>;
+};
+
 /**
  * An additional credential value a provider needs beyond its primary API-key
  * env var (`envVarName`), such as an AWS region or a GCP project id. The
@@ -91,7 +106,7 @@ export type SetupModelProviderDescriptor = {
   envVarName?: string;
   /**
    * Human label for the primary credential when "API key" is not accurate
-   * (e.g. Vertex takes a service account JSON). Defaults to "API key".
+   * for the provider. Defaults to "API key".
    */
   envVarLabel?: string;
   /** Optional guidance rendered below the primary credential input. */
@@ -117,14 +132,9 @@ export type SetupModelProviderDescriptor = {
    * unaffected.
    */
   hidden?: boolean;
-  /**
-   * Recommended per-role default models, applied when the provider is
-   * connected during setup and by the models settings page's
-   * "Use recommended" action (see
-   * `buildRecommendedDeploymentModelConfig`). Providers without a mapping
-   * recommend `defaultRoomoteModel` for coding and "same as coding" for
-   * every other role.
-   */
+  /** Provider-local role mappings shown by the settings preset picker. */
+  recommendedPresets?: readonly RecommendedModelPreset[];
+  /** Legacy single-mapping shape used to synthesize a default preset. */
   recommendedRoleModels?: RecommendedRoleModels;
 };
 
@@ -143,14 +153,58 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels(
       OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
     ),
-    // Vision is unset: the recommended coding model is multimodal, so image
-    // work follows the coding model ("same as coding").
-    recommendedRoleModels: {
-      helper: 'openrouter/google/gemini-3.5-flash',
-      codeReview: 'openrouter/anthropic/claude-opus-4.8',
-      explore: 'openrouter/google/gemini-3.5-flash',
-      planning: 'openrouter/anthropic/claude-opus-4.8',
-    },
+    recommendedPresets: [
+      {
+        id: 'balanced',
+        label: 'Balanced',
+        default: true,
+        roles: {
+          coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'high',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'high',
+          },
+        },
+      },
+      {
+        id: 'quick-turnaround',
+        label: 'Quick turnaround',
+        roles: {
+          coding: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          helper: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'medium',
+          },
+          explore: {
+            modelId: 'openrouter/google/gemini-3.5-flash',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'openrouter/anthropic/claude-opus-4.8',
+            reasoningEffort: 'medium',
+          },
+        },
+      },
+    ],
   },
   {
     id: 'vercel',
@@ -365,54 +419,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
-    // Provider id matches the models.dev/opencode `google-vertex` provider.
-    // The primary credential accepts either pasted service-account JSON
-    // (materialized to a file before opencode starts) or a file path on the
-    // host for env-managed deployments.
-    id: 'google-vertex',
-    label: 'Google Vertex AI',
-    envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
-    envVarLabel: 'Service account JSON',
-    credentialHelp: {
-      text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
-      href: 'https://console.cloud.google.com/vertex-ai/model-garden',
-      linkLabel: 'Open Vertex AI Model Garden',
-    },
-    additionalEnvFields: [
-      {
-        envVarName: 'GOOGLE_VERTEX_PROJECT',
-        label: 'Project ID',
-        secret: false,
-        required: true,
-        placeholder: 'my-gcp-project',
-      },
-      {
-        envVarName: 'GOOGLE_VERTEX_LOCATION',
-        label: 'Location',
-        secret: false,
-        required: false,
-        placeholder: 'us-central1',
-      },
-    ],
-    defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
-    authKind: 'api-key',
-    suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-haiku-4-5': 'google-vertex/claude-haiku-4-5@20251001',
-      'claude-opus-4-8': 'google-vertex/claude-opus-4-8@default',
-      'claude-sonnet-5': 'google-vertex/claude-sonnet-5@default',
-      'gemini-3-1-pro': 'google-vertex/gemini-3.1-pro-preview',
-      'gemini-3-5-flash': 'google-vertex/gemini-3.5-flash',
-    }),
-    // Mirrors the Anthropic/Bedrock split. Claude models on Vertex may
-    // require Model Garden enablement in the GCP project.
-    recommendedRoleModels: {
-      helper: 'google-vertex/claude-haiku-4-5@20251001',
-      codeReview: 'google-vertex/claude-opus-4-8@default',
-      explore: 'google-vertex/claude-haiku-4-5@20251001',
-      planning: 'google-vertex/claude-opus-4-8@default',
-    },
-  },
-  {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
     // API / AI Studio keys).
     id: 'google',
@@ -467,7 +473,6 @@ const EXTRA_MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER = {
   'bedrock-mantle': ['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION'],
   gemini: ['GOOGLE_GENERATIVE_AI_API_KEY', 'GEMINI_API_KEY'],
   google: ['GOOGLE_GENERATIVE_AI_API_KEY'],
-  mistral: ['MISTRAL_API_KEY'],
 } as const satisfies Record<string, readonly string[]>;
 
 /**
@@ -532,6 +537,24 @@ export const DEFAULT_MODEL_PROVIDER_ENV_KEYS: readonly string[] = [
   ...new Set([...MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER.values()].flat()),
 ];
 
+const MODEL_PROVIDER_NON_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set(
+  SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) =>
+    getSetupModelProviderAdditionalEnvFields(provider)
+      .filter((field) => !field.secret)
+      .map((field) => field.envVarName),
+  ),
+);
+
+/**
+ * Provider credentials that must only enter a task through the selected model
+ * runtime resolver. Non-secret provider configuration such as AWS_REGION is
+ * excluded so it remains available to unrelated task code.
+ */
+export const DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES: readonly string[] =
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS.filter(
+    (name) => !MODEL_PROVIDER_NON_SECRET_ENV_VAR_NAMES.has(name),
+  );
+
 export const REASONING_EFFORT_LABELS = {
   low: 'Low',
   medium: 'Medium',
@@ -580,6 +603,47 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   explore: 'low',
   planning: 'high',
 } as const satisfies Record<TaskModelRole, ReasoningEffort>;
+
+const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
+
+export function getRecommendedModelPresets(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+  >,
+): readonly RecommendedModelPreset[] {
+  if (provider.recommendedPresets?.length) {
+    return provider.recommendedPresets;
+  }
+
+  const roleModels = provider.recommendedRoleModels ?? {};
+  return [
+    {
+      id: DEFAULT_RECOMMENDED_PRESET_ID,
+      label: 'Recommended',
+      default: true,
+      roles: {
+        coding: { modelId: provider.defaultRoomoteModel },
+        ...Object.fromEntries(
+          Object.entries(roleModels).map(([role, modelId]) => [
+            role,
+            { modelId },
+          ]),
+        ),
+      },
+    },
+  ];
+}
+
+export function getDefaultRecommendedModelPreset(
+  provider: Pick<
+    SetupModelProviderDescriptor,
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
+  >,
+): RecommendedModelPreset {
+  const presets = getRecommendedModelPresets(provider);
+  return presets.find((preset) => preset.default) ?? presets[0]!;
+}
 
 export type SetupModelProviderStatus = SetupModelProviderDescriptor & {
   runtimeApiKeySatisfied: boolean;
@@ -633,15 +697,25 @@ export function createEmptyDeploymentModelConfig(): DeploymentModelConfig {
 export function normalizeDeploymentModelConfig(
   value: Partial<DeploymentModelConfig> | null | undefined,
 ): DeploymentModelConfig {
+  const normalizeEnabledModel = (
+    model: string | null | undefined,
+  ): string | null => {
+    const normalizedModel = normalizeOptionalString(model);
+
+    return normalizedModel && !isTaskModelIdDisabled(normalizedModel)
+      ? normalizedModel
+      : null;
+  };
+
   return {
-    roomoteModel: normalizeOptionalString(value?.roomoteModel),
-    roomoteSmallModel: normalizeOptionalString(value?.roomoteSmallModel),
-    roomoteVisionModel: normalizeOptionalString(value?.roomoteVisionModel),
-    roomoteCodeReviewModel: normalizeOptionalString(
+    roomoteModel: normalizeEnabledModel(value?.roomoteModel),
+    roomoteSmallModel: normalizeEnabledModel(value?.roomoteSmallModel),
+    roomoteVisionModel: normalizeEnabledModel(value?.roomoteVisionModel),
+    roomoteCodeReviewModel: normalizeEnabledModel(
       value?.roomoteCodeReviewModel,
     ),
-    roomoteExploreModel: normalizeOptionalString(value?.roomoteExploreModel),
-    roomotePlanningModel: normalizeOptionalString(value?.roomotePlanningModel),
+    roomoteExploreModel: normalizeEnabledModel(value?.roomoteExploreModel),
+    roomotePlanningModel: normalizeEnabledModel(value?.roomotePlanningModel),
     roomoteModelReasoningEffort: normalizeOptionalReasoningEffort(
       value?.roomoteModelReasoningEffort,
     ),
@@ -675,18 +749,29 @@ export function normalizeDeploymentModelConfig(
 export function buildRecommendedDeploymentModelConfig(
   provider: Pick<
     SetupModelProviderDescriptor,
-    'defaultRoomoteModel' | 'recommendedRoleModels'
+    'defaultRoomoteModel' | 'recommendedPresets' | 'recommendedRoleModels'
   >,
+  presetId?: string,
 ): DeploymentModelConfig {
-  const roleModels = provider.recommendedRoleModels ?? {};
+  const presets = getRecommendedModelPresets(provider);
+  const preset = presetId
+    ? presets.find((candidate) => candidate.id === presetId)
+    : getDefaultRecommendedModelPreset(provider);
+  const roles = preset?.roles ?? {};
 
   return normalizeDeploymentModelConfig({
-    roomoteModel: provider.defaultRoomoteModel,
-    roomoteSmallModel: roleModels.helper,
-    roomoteVisionModel: roleModels.vision,
-    roomoteCodeReviewModel: roleModels.codeReview,
-    roomoteExploreModel: roleModels.explore,
-    roomotePlanningModel: roleModels.planning,
+    roomoteModel: roles.coding?.modelId ?? provider.defaultRoomoteModel,
+    roomoteSmallModel: roles.helper?.modelId,
+    roomoteVisionModel: roles.vision?.modelId,
+    roomoteCodeReviewModel: roles.codeReview?.modelId,
+    roomoteExploreModel: roles.explore?.modelId,
+    roomotePlanningModel: roles.planning?.modelId,
+    roomoteModelReasoningEffort: roles.coding?.reasoningEffort,
+    roomoteSmallModelReasoningEffort: roles.helper?.reasoningEffort,
+    roomoteVisionModelReasoningEffort: roles.vision?.reasoningEffort,
+    roomoteCodeReviewModelReasoningEffort: roles.codeReview?.reasoningEffort,
+    roomoteExploreModelReasoningEffort: roles.explore?.reasoningEffort,
+    roomotePlanningModelReasoningEffort: roles.planning?.reasoningEffort,
   });
 }
 
@@ -735,15 +820,17 @@ export function getModelProviderLabel(
 
 /**
  * Display/grouping provider for a model id. ChatGPT subscription models retain
- * the runtime `openai/` prefix, but when a subscription is connected those
- * requests authenticate through the ChatGPT path (which wins over an OpenAI
- * API key). UI lists should therefore group `openai/` models under ChatGPT
- * while ChatGPT is connected, without changing the stored model id.
+ * the runtime `openai/` prefix. When a subscription is the only OpenAI-facing
+ * connection, UI lists group those models under ChatGPT. When an OpenAI API
+ * key is also present, keep the native OpenAI group so that connected provider
+ * remains visible in model settings lists. Callers that only care about which
+ * auth path wins at runtime can omit `openaiConnected` so ChatGPT still wins.
  */
 export function getDisplayModelProviderId(
   modelId: string | null | undefined,
   options?: {
     chatgptConnected?: boolean;
+    openaiConnected?: boolean;
   },
 ): string | null {
   const normalizedModelId = normalizeOptionalString(modelId);
@@ -754,7 +841,11 @@ export function getDisplayModelProviderId(
 
   const runtimeProviderId = getTaskModelProviderId(normalizedModelId);
 
-  if (runtimeProviderId === 'openai' && options?.chatgptConnected) {
+  if (
+    runtimeProviderId === 'openai' &&
+    options?.chatgptConnected &&
+    !options?.openaiConnected
+  ) {
     return CHATGPT_SUBSCRIPTION_PROVIDER_ID;
   }
 
@@ -779,6 +870,7 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
   items: T[],
   options?: {
     chatgptConnected?: boolean;
+    openaiConnected?: boolean;
   },
 ): DisplayModelProviderGroup<T>[] {
   const groups = new Map<string, T[]>();
@@ -787,6 +879,7 @@ export function groupModelsByDisplayProvider<T extends { id: string }>(
     const providerId =
       getDisplayModelProviderId(item.id, {
         chatgptConnected: options?.chatgptConnected,
+        openaiConnected: options?.openaiConnected,
       }) ?? 'other';
     const groupItems = groups.get(providerId) ?? [];
     groupItems.push(item);
@@ -908,25 +1001,18 @@ export function isConfiguredEnvValue(
   return normalizeOptionalString(value) !== null;
 }
 
-/**
- * Env var Google's auth library reads as a *file path* to service-account
- * credentials. Roomote also accepts pasted JSON contents in this variable
- * (the Vertex connect UI collects it that way); runtimes that spawn opencode
- * detect inline JSON with `isInlineGoogleCredentialsValue` and materialize
- * it to a file before the auth library reads the variable.
- */
-export const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
+/** Legacy Google Vertex credential name, reserved and stripped while the provider is disabled. */
+const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
   'GOOGLE_APPLICATION_CREDENTIALS';
 
-/**
- * Whether a `GOOGLE_APPLICATION_CREDENTIALS` value is inline service-account
- * JSON rather than a file path.
- */
-export function isInlineGoogleCredentialsValue(
-  value: string | null | undefined,
-): value is string {
-  return normalizeOptionalString(value)?.startsWith('{') ?? false;
-}
+/** Legacy direct Mistral credential name, reserved and stripped while support is disabled. */
+const MISTRAL_API_KEY_ENV_VAR_NAME = 'MISTRAL_API_KEY';
+
+/** Credentials belonging to providers Roomote currently refuses to run. */
+export const DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES = [
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  MISTRAL_API_KEY_ENV_VAR_NAME,
+] as const;
 
 /**
  * Validates and collects the env values to persist when connecting an
@@ -1055,7 +1141,7 @@ export function buildSetupModelStatus(input: {
         };
       }
 
-      // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
+      // Providers with multiple credential fields (e.g. Bedrock) are satisfied only
       // when every required env var is configured. Runtime satisfaction is
       // runtime-env-only; saved satisfaction allows mixed sources (the
       // effective model runtime env resolves each key runtime-first with a DB

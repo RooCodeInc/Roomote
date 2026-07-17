@@ -18,6 +18,7 @@ import {
   type SentryTriageFrequency,
   type SuggesterFrequency,
   type SuggesterRoutingMode,
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   AUTO_RESOLVE_CONFLICTS_LABEL,
   BACKGROUND_AUTOMATION_KEYS,
   DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
@@ -673,7 +674,6 @@ export function normalizeBackgroundAgentSettings(
   const announcer = automationMap.get('announcer');
   const channelAutoStart = automationMap.get('slack_channel_auto_start');
   const managerStats = automationMap.get('manager_stats');
-  const platformIssueAlerts = automationMap.get('platform_issue_alerts');
   const sentryTriage = automationMap.get('sentry_triage');
   const dependabotTriage = automationMap.get('dependabot_triage');
   const codeqlTriage = automationMap.get('codeql_triage');
@@ -693,10 +693,6 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
-    authorshipInstructions: row?.authorshipInstructions ?? null,
-    compiledAuthorshipRules: row?.compiledAuthorshipRules ?? [],
-    compiledAuthorshipIssues: row?.compiledAuthorshipIssues ?? [],
-    compiledAuthorshipAt: row?.compiledAuthorshipAt ?? null,
     createdAt: row?.createdAt ?? now,
     updatedAt: row?.updatedAt ?? now,
 
@@ -718,8 +714,6 @@ export function normalizeBackgroundAgentSettings(
       suggester,
       isFrequencyOf(SUGGESTER_FREQUENCIES),
     ),
-    suggesterSlackChannelId: getAutomationSlackChannelTarget(suggester),
-    suggesterDiscordChannelId: getAutomationDiscordChannelTarget(suggester),
     suggesterInstructions: suggester?.instructions ?? null,
     suggesterRoutingMode: getSuggesterRoutingMode(suggester),
     suggesterRoutingInstructions: getAutomationSettingText(
@@ -732,8 +726,6 @@ export function normalizeBackgroundAgentSettings(
       announcer,
       isFrequencyOf(ANNOUNCER_FREQUENCIES),
     ),
-    announcerSlackChannelId: getAutomationSlackChannelTarget(announcer),
-    announcerDiscordChannelId: getAutomationDiscordChannelTarget(announcer),
     announcerInstructions: announcer?.instructions ?? null,
     announcerLastRunAt: announcer?.lastRunAt ?? null,
 
@@ -746,33 +738,16 @@ export function normalizeBackgroundAgentSettings(
     channelAutoStartInstructions:
       channelAutoStartTargets[0]?.instructions ?? null,
 
-    platformIssueSlackChannelId:
-      getAutomationSlackChannelTarget(platformIssueAlerts),
-    platformIssueDiscordChannelId:
-      getAutomationDiscordChannelTarget(platformIssueAlerts),
-
     managerStatsFrequency: getAutomationFrequency(
       managerStats,
       isFrequencyOf(MANAGER_STATS_FREQUENCIES),
     ),
-    managerStatsSlackChannelId: resolveAutomationSlackChannelId(
-      managerStats,
-      managerSlackChannelId,
-    ),
-    managerStatsDiscordChannelId:
-      getAutomationDiscordChannelTarget(managerStats),
     managerStatsLastRunAt: managerStats?.lastRunAt ?? null,
 
     sentryTriageFrequency: getAutomationFrequency(
       sentryTriage,
       isFrequencyOf(SENTRY_TRIAGE_FREQUENCIES),
     ),
-    sentryTriageSlackChannelId: resolveAutomationSlackChannelId(
-      sentryTriage,
-      managerSlackChannelId,
-    ),
-    sentryTriageDiscordChannelId:
-      getAutomationDiscordChannelTarget(sentryTriage),
     sentryTriageProjectSlugs:
       sentryProjectSlugs.length > 0 ? sentryProjectSlugs.join('\n') : null,
     sentryTriageLastRunAt: sentryTriage?.lastRunAt ?? null,
@@ -781,36 +756,18 @@ export function normalizeBackgroundAgentSettings(
       dependabotTriage,
       isFrequencyOf(DEPENDABOT_TRIAGE_FREQUENCIES),
     ),
-    dependabotTriageSlackChannelId: resolveAutomationSlackChannelId(
-      dependabotTriage,
-      managerSlackChannelId,
-    ),
-    dependabotTriageDiscordChannelId:
-      getAutomationDiscordChannelTarget(dependabotTriage),
     dependabotTriageLastRunAt: dependabotTriage?.lastRunAt ?? null,
 
     codeqlTriageFrequency: getAutomationFrequency(
       codeqlTriage,
       isFrequencyOf(CODEQL_TRIAGE_FREQUENCIES),
     ),
-    codeqlTriageSlackChannelId: resolveAutomationSlackChannelId(
-      codeqlTriage,
-      managerSlackChannelId,
-    ),
-    codeqlTriageDiscordChannelId:
-      getAutomationDiscordChannelTarget(codeqlTriage),
     codeqlTriageLastRunAt: codeqlTriage?.lastRunAt ?? null,
 
     securityAuditorFrequency: getAutomationFrequency(
       securityAuditor,
       isFrequencyOf(SECURITY_AUDITOR_FREQUENCIES),
     ),
-    securityAuditorSlackChannelId: resolveAutomationSlackChannelId(
-      securityAuditor,
-      managerSlackChannelId,
-    ),
-    securityAuditorDiscordChannelId:
-      getAutomationDiscordChannelTarget(securityAuditor),
     securityAuditorLastRunAt: securityAuditor?.lastRunAt ?? null,
     securityAuditorScanCursor: securityAuditor?.scanCursor ?? null,
 
@@ -818,12 +775,6 @@ export function normalizeBackgroundAgentSettings(
       codeQualityAuditor,
       isFrequencyOf(CODE_QUALITY_AUDITOR_FREQUENCIES),
     ),
-    codeQualityAuditorSlackChannelId: resolveAutomationSlackChannelId(
-      codeQualityAuditor,
-      managerSlackChannelId,
-    ),
-    codeQualityAuditorDiscordChannelId:
-      getAutomationDiscordChannelTarget(codeQualityAuditor),
     codeQualityAuditorLastRunAt: codeQualityAuditor?.lastRunAt ?? null,
     codeQualityAuditorScanCursor: codeQualityAuditor?.scanCursor ?? null,
 
@@ -831,15 +782,24 @@ export function normalizeBackgroundAgentSettings(
       ciFailureTriage,
       isFrequencyOf(['off', 'daily'] as const),
     ),
-    ciFailureTriageSlackChannelId: resolveAutomationSlackChannelId(
-      ciFailureTriage,
-      managerSlackChannelId,
-    ),
-    ciFailureTriageDiscordChannelId:
-      getAutomationDiscordChannelTarget(ciFailureTriage),
     ciFailureTriageLastRunAt: ciFailureTriage?.lastRunAt ?? null,
     ciFailureTriageScanCursor: ciFailureTriage?.scanCursor ?? null,
-  };
+
+    ...Object.fromEntries(
+      AUTOMATION_DESTINATION_DESCRIPTORS.flatMap((descriptor) => {
+        const automation = automationMap.get(descriptor.automationKey);
+        const slackChannelId = descriptor.slackSettingsIncludesManagerFallback
+          ? resolveAutomationSlackChannelId(automation, managerSlackChannelId)
+          : getAutomationSlackChannelTarget(automation);
+        const discordChannelId = getAutomationDiscordChannelTarget(automation);
+
+        return [
+          [descriptor.slackSettingsKey, slackChannelId],
+          [descriptor.discordSettingsKey, discordChannelId],
+        ];
+      }),
+    ),
+  } as BackgroundAgentSettings;
 }
 
 export async function getBackgroundAgentSettings(): Promise<BackgroundAgentSettings> {

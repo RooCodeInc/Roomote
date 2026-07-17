@@ -83,9 +83,6 @@ const PROVIDER_ENV_VAR_NAMES = [
   'OPENCODE_API_KEY',
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_REGION',
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'GOOGLE_VERTEX_PROJECT',
-  'GOOGLE_VERTEX_LOCATION',
   'GEMINI_API_KEY',
   'R_MODEL',
 ] as const;
@@ -256,6 +253,19 @@ describe('lookupTaskModelCommand', () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it.each(['google-vertex/gemini-3.5-flash', 'mistral/mistral-large-latest'])(
+    'rejects disabled direct-provider model id %s',
+    async (modelId) => {
+      await expect(
+        lookupTaskModelCommand(buildMockAuth(), {
+          modelId,
+        }),
+      ).rejects.toThrow('This direct model provider is currently disabled.');
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('normalizes bare author/model input and uses OpenRouter lookup when available', async () => {
     process.env.OPENROUTER_API_KEY = 'openrouter-test-key';
@@ -1244,8 +1254,6 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
-      'GOOGLE_VERTEX_PROJECT',
-      'GOOGLE_VERTEX_LOCATION',
     ]);
     expect(
       result.providerSetup.providers.find(
@@ -1460,17 +1468,6 @@ describe('task model provider commands', () => {
         }),
       }),
     );
-  });
-
-  it('rejects saving Google Vertex AI without its required project ID', async () => {
-    await expect(
-      saveTaskModelProviderCommand(buildMockAuth(), {
-        provider: 'google-vertex',
-        apiKey: '{"type":"service_account"}',
-      }),
-    ).rejects.toThrow('Enter the Project ID for Google Vertex AI to save it.');
-
-    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
   it('rejects additional env values the provider does not declare', async () => {

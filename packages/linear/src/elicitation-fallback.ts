@@ -138,9 +138,31 @@ export function stripEmojiPrefix(str: string): string {
  * "[roomote.example](<http://roomote.example>)" → "roomote.example".
  */
 function stripMarkdownLinks(str: string): string {
-  return str
-    .replace(/\[([^\]]+)\]\(<[^>]+>\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  let result = '';
+  let index = 0;
+
+  while (index < str.length) {
+    if (str[index] === '[') {
+      const closeBracket = str.indexOf(']', index + 1);
+      if (
+        closeBracket !== -1 &&
+        closeBracket + 1 < str.length &&
+        str[closeBracket + 1] === '('
+      ) {
+        const closeParen = str.indexOf(')', closeBracket + 2);
+        if (closeParen !== -1) {
+          result += str.slice(index + 1, closeBracket);
+          index = closeParen + 1;
+          continue;
+        }
+      }
+    }
+
+    result += str[index];
+    index += 1;
+  }
+
+  return result;
 }
 
 /**

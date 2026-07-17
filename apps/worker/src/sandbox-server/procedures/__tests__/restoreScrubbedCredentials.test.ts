@@ -92,15 +92,15 @@ describe('restoreScrubbedCredentials procedure', () => {
         homeDir: '/workspace/.roomote-runtime-home',
         runtimeEnv: {
           XDG_DATA_HOME: '/task/data',
-          // Bootstrap already rewrote this to a file path; the fresh
-          // deployment value must win in the merged env.
-          GOOGLE_APPLICATION_CREDENTIALS: '/task/data/opencode/google.json',
+          OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"old"}}',
         },
       },
     });
     mockApplyDeploymentEnvVarsReload.mockResolvedValue({
-      names: ['GOOGLE_APPLICATION_CREDENTIALS'],
-      envVars: { GOOGLE_APPLICATION_CREDENTIALS: '{"type":"sa"}' },
+      names: ['OPENCODE_AUTH_CONTENT'],
+      envVars: {
+        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"fresh"}}',
+      },
     });
 
     const result = await caller.commands.restoreScrubbedCredentials();
@@ -117,7 +117,7 @@ describe('restoreScrubbedCredentials procedure', () => {
       homeDir: '/workspace/.roomote-runtime-home',
       runtimeEnv: {
         XDG_DATA_HOME: '/task/data',
-        GOOGLE_APPLICATION_CREDENTIALS: '{"type":"sa"}',
+        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth","access":"fresh"}}',
       },
       logger: console,
     });
@@ -125,12 +125,12 @@ describe('restoreScrubbedCredentials procedure', () => {
 
   it('fails when rewriting OpenCode credential files fails', async () => {
     mockRematerializeOpenCodeCredentialFiles.mockReturnValue({
-      failedSteps: ['rewrite Google application credentials file'],
+      failedSteps: ['rewrite OpenCode auth file'],
     });
     const caller = createCaller();
 
     await expect(caller.commands.restoreScrubbedCredentials()).rejects.toThrow(
-      'rewrite Google application credentials file',
+      'rewrite OpenCode auth file',
     );
     expect(isCredentialWriteBarrierEngaged()).toBe(false);
   });

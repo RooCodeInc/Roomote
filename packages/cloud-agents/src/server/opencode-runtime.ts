@@ -1,14 +1,11 @@
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 
 import {
   collectOpenRouterVariantModelAlias,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
-  isInlineGoogleCredentialsValue,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  isTaskModelIdDisabled,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
@@ -37,7 +34,7 @@ function buildModelBackedOpenCodeConfigContent(
 ): string | undefined {
   const rawModel = env.R_MODEL?.trim();
 
-  if (!rawModel) {
+  if (!rawModel || isTaskModelIdDisabled(rawModel)) {
     return undefined;
   }
 
@@ -48,9 +45,10 @@ function buildModelBackedOpenCodeConfigContent(
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
   const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
   const rawSmallModel = env.R_SMALL_MODEL?.trim();
-  const smallModel = rawSmallModel
-    ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
-    : undefined;
+  const smallModel =
+    rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
+      ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
+      : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
   );
@@ -93,43 +91,6 @@ function buildModelBackedOpenCodeConfigContent(
   });
 }
 
-/**
- * When `GOOGLE_APPLICATION_CREDENTIALS` carries inline service-account JSON
- * (the Vertex connect flow stores pasted JSON contents as a deployment env
- * var), write it to a content-addressed temp file and point the env var at
- * that path — Google's auth library only accepts a file path. Path values
- * are left untouched, and failures fall through so Vertex requests surface
- * the library's own credential error.
- */
-function materializeInlineGoogleCredentials(env: NodeJS.ProcessEnv): void {
-  const credentialsValue = env[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
-
-  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
-    return;
-  }
-
-  try {
-    const digest = createHash('sha256')
-      .update(credentialsValue)
-      .digest('hex')
-      .slice(0, 16);
-    const credentialsDir = path.join(tmpdir(), 'roomote-opencode');
-    mkdirSync(credentialsDir, { recursive: true, mode: 0o700 });
-    const credentialsFilePath = path.join(
-      credentialsDir,
-      `google-application-credentials-${digest}.json`,
-    );
-    writeFileSync(credentialsFilePath, credentialsValue, { mode: 0o600 });
-    env[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] = credentialsFilePath;
-  } catch (error) {
-    console.warn(
-      `[OpenCodeRuntime] Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
-}
-
 export function buildOpenCodeCliEnv(
   extraEnv?: Partial<Record<string, string>>,
 ): NodeJS.ProcessEnv {
@@ -139,6 +100,14 @@ export function buildOpenCodeCliEnv(
     NO_COLOR: process.env.NO_COLOR ?? '1',
   };
 
+  for (const modelEnvVarName of ['R_MODEL', 'R_SMALL_MODEL'] as const) {
+    const modelId = env[modelEnvVarName]?.trim();
+
+    if (modelId && isTaskModelIdDisabled(modelId)) {
+      delete env[modelEnvVarName];
+    }
+  }
+
   if (!env.OPENCODE_CONFIG_CONTENT) {
     const modelBackedConfigContent = buildModelBackedOpenCodeConfigContent(env);
 
@@ -147,7 +116,17 @@ export function buildOpenCodeCliEnv(
     }
   }
 
-  materializeInlineGoogleCredentials(env);
+  // Do not inherit or accept disabled-provider credentials in helper model
+  // processes, including callers that bypass the task dequeue path.
+  for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    delete env[envVarName];
+  }
+
+  // OPENCODE_COMMAND may route through `bash -lc`. An inherited BASH_ENV is
+  // sourced after Bash receives this sanitized environment and could restore
+  // credentials from a stale shared env file. Helper launches already receive
+  // an explicit environment, so they must not source ambient shell state.
+  delete env.BASH_ENV;
 
   return env;
 }

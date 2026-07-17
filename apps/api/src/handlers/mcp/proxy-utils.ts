@@ -243,7 +243,7 @@ function buildProxyRequestHeaders(
   return headers;
 }
 
-function buildProxyResponseHeaders(upstreamHeaders: Headers): Headers {
+export function buildProxyResponseHeaders(upstreamHeaders: Headers): Headers {
   const headers = new Headers();
 
   const excludedHeaders = new Set([

@@ -1,6 +1,14 @@
 import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
+  buildInferenceGatewayUrl,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  isTaskModelIdDisabled,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  parseInferenceGatewayKeys,
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
@@ -640,6 +648,73 @@ export const runTask = async ({
         ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
+    // Strip credentials for disabled providers as defense in depth, even if a
+    // stale worker/dequeue payload still contains them.
+    for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+      delete runtimeEnv[envVarName];
+    }
+    for (const modelEnvVarName of [
+      'R_MODEL',
+      'R_SMALL_MODEL',
+      'R_VISION_MODEL',
+      'R_CODE_REVIEW_MODEL',
+      'R_EXPLORE_MODEL',
+      'R_PLANNING_MODEL',
+    ] as const) {
+      const modelId = runtimeEnv[modelEnvVarName];
+
+      if (modelId && isTaskModelIdDisabled(modelId)) {
+        delete runtimeEnv[modelEnvVarName];
+      }
+    }
+
+    // Inference gateway: dequeue advertises the served provider keys by name
+    // (R_INFERENCE_GATEWAY_KEYS) rather than the gateway URL, so the URL is
+    // built here from the worker's own platform URL — already rewritten to be
+    // container-reachable per compute provider (Docker host.docker.internal,
+    // etc.). The served keys are stripped from the harness env even though
+    // dequeue withheld them, because buildOpenCodeHarnessEnv re-adds provider
+    // keys from the worker daemon's process env (present on sandboxes spawned
+    // before the flag was enabled); this keeps the withheld set out of the
+    // harness env and env.sh regardless of daemon state.
+    const inferenceGatewayServedKeys = parseInferenceGatewayKeys(
+      unsanitizedEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+    );
+    // A connected ChatGPT subscription served through the gateway carries no
+    // env key; dequeue signals it with a marker instead and omits the OAuth
+    // record, which the gateway holds and injects server-side.
+    const inferenceGatewayChatGpt =
+      unsanitizedEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+
+    if (inferenceGatewayServedKeys.length > 0 || inferenceGatewayChatGpt) {
+      for (const servedKey of inferenceGatewayServedKeys) {
+        delete runtimeEnv[servedKey];
+      }
+
+      runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME] = buildInferenceGatewayUrl(
+        workerEnv.trpcUrl,
+      );
+
+      if (inferenceGatewayServedKeys.length > 0) {
+        runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME] =
+          inferenceGatewayServedKeys.join(',');
+      } else {
+        delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
+      }
+
+      if (inferenceGatewayChatGpt) {
+        runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] = '1';
+        // Gateway mode holds the OAuth record; it must never reach the sandbox.
+        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+      } else {
+        delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
+      }
+    } else {
+      delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
+      delete runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME];
+      delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
+    }
+
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';
 
     if (workerHomeDir) {

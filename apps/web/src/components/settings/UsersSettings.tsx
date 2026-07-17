@@ -322,41 +322,52 @@ export function UsersSettings() {
             </p>
           ) : null}
 
-          <form
-            className="flex flex-col gap-3 md:flex-row md:items-end items-start max-w-2xl"
-            onSubmit={handleSaveLicenseKey}
-          >
-            <div className="flex-1 space-y-2">
-              <Label htmlFor="license-key">License key</Label>
-              <Input
-                id="license-key"
-                value={licenseKeyInput}
-                placeholder="RMLK1.…"
-                onChange={(event) => setLicenseKeyInput(event.target.value)}
-                disabled={setLicenseKey.isPending}
-              />
-            </div>
-            <Button
-              type="submit"
-              disabled={setLicenseKey.isPending || !licenseKeyInput.trim()}
+          {license.fromEnv ? (
+            <p className="text-sm text-muted-foreground">
+              License key is provided by the{' '}
+              <span className="font-mono">R_LICENSE_KEY</span> environment
+              variable. Update or remove that env var and restart the deployment
+              to change it.
+            </p>
+          ) : (
+            <form
+              className="flex flex-col gap-3 md:flex-row md:items-end items-start max-w-2xl"
+              onSubmit={handleSaveLicenseKey}
             >
-              {setLicenseKey.isPending ? <Spinner /> : null}
-              Save key
-            </Button>
-            {license.status !== 'unlicensed' ? (
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="license-key">License key</Label>
+                <Input
+                  id="license-key"
+                  value={licenseKeyInput}
+                  placeholder="RMLK1.…"
+                  onChange={(event) => setLicenseKeyInput(event.target.value)}
+                  disabled={setLicenseKey.isPending}
+                />
+              </div>
               <Button
-                type="button"
-                variant="outline"
-                onClick={() => setLicenseKey.mutate({ licenseKey: null })}
-                disabled={setLicenseKey.isPending}
+                type="submit"
+                disabled={setLicenseKey.isPending || !licenseKeyInput.trim()}
               >
-                Remove key
+                {setLicenseKey.isPending ? <Spinner /> : null}
+                Save key
               </Button>
-            ) : null}
-          </form>
+              {license.status !== 'unlicensed' ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setLicenseKey.mutate({ licenseKey: null })}
+                  disabled={setLicenseKey.isPending}
+                >
+                  Remove key
+                </Button>
+              ) : null}
+            </form>
+          )}
           <p className="text-sm text-muted-foreground">
             Deployments are free for up to {license.freeSeatLimit} users. A
-            license key from the Roomote maintainers unlocks more seats.
+            license key from the Roomote maintainers unlocks more seats. You can
+            also set <span className="font-mono">R_LICENSE_KEY</span> in the
+            deployment environment.
           </p>
         </div>
       </Section>

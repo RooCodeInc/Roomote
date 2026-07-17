@@ -19,6 +19,7 @@ import {
   FREE_SEAT_LIMIT,
   getDeploymentAccessPolicy,
   getDeploymentLicenseState,
+  getEnvLicenseKey,
   isInviteUsable,
   listInvites,
   removeUser,
@@ -107,6 +108,8 @@ type LicenseSummary = {
   freeSeatLimit: number;
   licensee: string | null;
   expiresAt: Date | null;
+  /** True when `R_LICENSE_KEY` supplies the active key (UI cannot override). */
+  fromEnv: boolean;
 };
 
 export async function getAccessPolicySettingsCommand(
@@ -138,6 +141,7 @@ export async function getAccessPolicySettingsCommand(
       freeSeatLimit: FREE_SEAT_LIMIT,
       licensee: 'licensee' in licenseState ? licenseState.licensee : null,
       expiresAt: 'expiresAt' in licenseState ? licenseState.expiresAt : null,
+      fromEnv: getEnvLicenseKey() != null,
     },
     slackTeamId: policy?.slackTeamId ?? null,
     hasSlackSignIn: Boolean(
@@ -169,6 +173,12 @@ export async function setLicenseKeyCommand(
   input: { licenseKey: string | null },
 ): Promise<{ saved: true }> {
   assertAdmin(auth);
+
+  if (getEnvLicenseKey() != null) {
+    throw new Error(
+      'A license key is already set via the R_LICENSE_KEY environment variable. Update or remove that env var and restart the deployment instead of changing the key here.',
+    );
+  }
 
   const licenseKey = input.licenseKey?.trim() || null;
 

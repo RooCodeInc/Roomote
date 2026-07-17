@@ -15,7 +15,11 @@ export function buildDockerWorkerEnv({
   image?: string;
 }): Record<string, string> {
   return {
-    ...buildBaseWorkerEnv({ authToken, sandboxExpiresAtMs, extraEnv }),
+    ...buildBaseWorkerEnv({
+      authToken,
+      sandboxExpiresAtMs,
+      extraEnv,
+    }),
     ...buildWorkerContextEnv({
       provider: 'docker',
       fingerprint: image,

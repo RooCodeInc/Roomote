@@ -55,6 +55,19 @@ describe('opencode-server bootstrap', () => {
     );
   }
 
+  function readOpenCodeChatGptGatewayPlugin(homeDir: string): string {
+    return fs.readFileSync(
+      path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'plugins',
+        'roomote-chatgpt-gateway.js',
+      ),
+      'utf8',
+    );
+  }
+
   function createDirectHarnessRuntimeEnv(
     homeDir: string,
   ): Record<string, string> {
@@ -518,6 +531,51 @@ describe('opencode-server bootstrap', () => {
       'Start from the shipped diff, the plan, and the validation state',
     );
   });
+
+  it.each(['github_pr_review', 'github_pr_review_sync'] as const)(
+    'does not configure a judge subagent for %s code-reviewer tasks',
+    async (taskType) => {
+      const { prepareOpenCodeCommandEnv } =
+        await import('../opencode-server/bootstrap');
+
+      const homeDir = createTempHome();
+
+      const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
+        runtimeEnv: {
+          ...createDirectHarnessRuntimeEnv(homeDir),
+          ROOMOTE_TASK_TYPE: taskType,
+          R_CODE_REVIEW_MODEL: 'test-provider/review-model',
+        },
+        workspacePath: '/tmp/workspace',
+        logger: createLogger(),
+      });
+
+      const baseConfig = JSON.parse(readOpenCodeConfig(homeDir)) as {
+        agent?: Record<string, unknown>;
+      };
+      const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
+        agent?: Record<string, unknown>;
+        instructions?: string[];
+      };
+      const judgeModelInstructionsPath = path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-judge-model-instructions.md',
+      );
+      const advisorModelInstructionsPath = path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-advisor-model-instructions.md',
+      );
+
+      expect(baseConfig.agent?.judge).toBeUndefined();
+      expect(config.agent?.judge).toBeUndefined();
+      expect(fs.existsSync(judgeModelInstructionsPath)).toBe(false);
+      expect(config.instructions).toEqual([advisorModelInstructionsPath]);
+    },
+  );
 
   it('registers the architect primary agent unconditionally with the plan-mode permission matrix', async () => {
     const { prepareOpenCodeCommandEnv } =
@@ -1381,6 +1439,24 @@ describe('opencode-server bootstrap', () => {
     ).toBe(false);
   });
 
+  it('installs the ChatGPT gateway model metadata plugin', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv: createDirectHarnessRuntimeEnv(homeDir),
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    const pluginContent = readOpenCodeChatGptGatewayPlugin(homeDir);
+
+    expect(pluginContent).toContain('RoomoteChatGptGatewayModels');
+    expect(pluginContent).toContain('R_INFERENCE_GATEWAY_CHATGPT');
+  });
+
   it('enables Slack hook debug logs only when Slack reply satisfaction is configured', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -1475,6 +1551,73 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(authPath, 'utf8')).toBe(authContent);
   });
 
+  it('removes stale auth.json before ChatGPT gateway mode starts', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const authPath = path.join(
+      homeDir,
+      '.local',
+      'share',
+      'opencode',
+      'auth.json',
+    );
+    fs.mkdirSync(path.dirname(authPath), { recursive: true });
+    fs.writeFileSync(
+      authPath,
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'stale-refresh-token' },
+        'github-copilot': { type: 'oauth', refresh: 'other-token' },
+      }),
+      'utf8',
+    );
+
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        R_INFERENCE_GATEWAY_CHATGPT: '1',
+        OPENCODE_AUTH_CONTENT: JSON.stringify({
+          openai: { type: 'oauth', refresh: 'conflicting-token' },
+        }),
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.OPENCODE_AUTH_CONTENT).toBeUndefined();
+    expect(fs.existsSync(authPath)).toBe(false);
+  });
+
+  it('fails closed when stale auth.json cannot be removed in gateway mode', async () => {
+    const { prepareOpenCodeCommandEnv } =
+      await import('../opencode-server/bootstrap');
+
+    const homeDir = createTempHome();
+    const authPath = path.join(
+      homeDir,
+      '.local',
+      'share',
+      'opencode',
+      'auth.json',
+    );
+    fs.mkdirSync(authPath, { recursive: true });
+    fs.writeFileSync(path.join(authPath, 'stale-token'), 'secret', 'utf8');
+
+    await expect(
+      prepareOpenCodeCommandEnv({
+        runtimeEnv: {
+          ...createDirectHarnessRuntimeEnv(homeDir),
+          R_INFERENCE_GATEWAY_CHATGPT: '1',
+        },
+        workspacePath: '/tmp/workspace',
+        logger: createLogger(),
+      }),
+    ).rejects.toThrow(
+      'Failed to remove OpenCode auth.json for ChatGPT gateway mode',
+    );
+  });
+
   it('leaves OPENCODE_AUTH_CONTENT set when auth.json cannot be written', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
@@ -1499,7 +1642,7 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
   });
 
-  it('materializes inline GOOGLE_APPLICATION_CREDENTIALS JSON to a file path', async () => {
+  it('strips disabled-provider credentials after sourcing the shared BASH_ENV', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1511,19 +1654,12 @@ describe('opencode-server bootstrap', () => {
     const sharedBashEnvPath = path.join(homeDir, 'roomote-env.sh');
     fs.writeFileSync(
       sharedBashEnvPath,
-      `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'\n`,
+      [
+        `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'`,
+        "export MISTRAL_API_KEY='mistral-key'",
+        '',
+      ].join('\n'),
     );
-
-    const { commandEnv } = await prepareOpenCodeCommandEnv({
-      runtimeEnv: {
-        ...createDirectHarnessRuntimeEnv(homeDir),
-        BASH_ENV: sharedBashEnvPath,
-        GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
-      },
-      workspacePath: '/tmp/workspace',
-      logger: createLogger(),
-    });
-
     const credentialsPath = path.join(
       homeDir,
       '.local',
@@ -1531,8 +1667,23 @@ describe('opencode-server bootstrap', () => {
       'opencode',
       'google-application-credentials.json',
     );
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentialsPath);
-    expect(fs.readFileSync(credentialsPath, 'utf8')).toBe(credentialsJson);
+    fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+    fs.writeFileSync(credentialsPath, credentialsJson);
+
+    const { commandEnv } = await prepareOpenCodeCommandEnv({
+      runtimeEnv: {
+        ...createDirectHarnessRuntimeEnv(homeDir),
+        BASH_ENV: sharedBashEnvPath,
+        GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
+        MISTRAL_API_KEY: 'mistral-key',
+      },
+      workspacePath: '/tmp/workspace',
+      logger: createLogger(),
+    });
+
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
+    expect(fs.existsSync(credentialsPath)).toBe(false);
     const openCodeBashEnvPath = commandEnv.BASH_ENV;
     expect(openCodeBashEnvPath).toBe(
       path.join(
@@ -1549,19 +1700,28 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).not.toContain(
       credentialsJson,
     );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset GOOGLE_APPLICATION_CREDENTIALS',
+    );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset MISTRAL_API_KEY',
+    );
     expect(
       execFileSync(
         'bash',
-        ['-lc', 'printf %s "$GOOGLE_APPLICATION_CREDENTIALS"'],
+        [
+          '-lc',
+          'printf "%s|%s" "$GOOGLE_APPLICATION_CREDENTIALS" "$MISTRAL_API_KEY"',
+        ],
         {
           env: commandEnv,
           encoding: 'utf8',
         },
       ),
-    ).toBe(credentialsPath);
+    ).toBe('|');
   });
 
-  it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', async () => {
+  it('strips a GOOGLE_APPLICATION_CREDENTIALS file path', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1571,13 +1731,13 @@ describe('opencode-server bootstrap', () => {
       runtimeEnv: {
         ...createDirectHarnessRuntimeEnv(homeDir),
         GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
+        MISTRAL_API_KEY: 'mistral-key',
       },
       workspacePath: '/tmp/workspace',
       logger: createLogger(),
     });
 
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-      '/etc/roomote/service-account.json',
-    );
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(commandEnv.MISTRAL_API_KEY).toBeUndefined();
   });
 });

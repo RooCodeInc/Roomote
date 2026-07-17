@@ -186,7 +186,9 @@ function buildPrBodyAttributionLine({
   escapeDoubleQuotes?: boolean;
 }) {
   const escapeValue = (value: string) =>
-    escapeDoubleQuotes ? value.replace(/"/g, '\\"') : value;
+    escapeDoubleQuotes
+      ? value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+      : value;
   const safeTaskUrl = taskUrl ? escapeValue(taskUrl) : undefined;
   const resolvedSlackConversationUrl =
     slackConversationUrl?.trim() ||
@@ -640,15 +642,108 @@ export function getMarkdownChecklist(markdown: string): string | undefined {
   const checklistLines = markdown
     .split('\n')
     .map((line) => line.trim())
-    .filter(
-      (line) =>
-        /^[-*]\s+\[\s*\]\s+.+$/.test(line) ||
-        /^[-*]\s+\[[xX]\]\s+.+$/.test(line) ||
-        /^[-*]\s+~~.+~~(?:\s+[—-]\s+.+)?$/.test(line),
-    )
+    .filter((line) => isMarkdownChecklistLine(line))
     .map((line) => line.replace(/^[-*]\s+/, '- '));
 
-  return checklistLines.length > 0 ? checklistLines.join('\n') : undefined;
+  if (checklistLines.length === 0) {
+    return undefined;
+  }
+
+  return checklistLines.join('\n');
+}
+
+function isMarkdownChecklistLine(line: string): boolean {
+  if (!(line.startsWith('-') || line.startsWith('*'))) {
+    return false;
+  }
+
+  let index = 1;
+  if (index >= line.length || (line[index] !== ' ' && line[index] !== '\t')) {
+    return false;
+  }
+  while (index < line.length && (line[index] === ' ' || line[index] === '\t')) {
+    index += 1;
+  }
+
+  const rest = line.slice(index);
+
+  if (isOpenOrClosedCheckbox(rest)) {
+    return true;
+  }
+
+  return isStruckThroughChecklistLine(rest);
+}
+
+function isOpenOrClosedCheckbox(rest: string): boolean {
+  if (!rest.startsWith('[')) {
+    return false;
+  }
+
+  let index = 1;
+  while (index < rest.length && (rest[index] === ' ' || rest[index] === '\t')) {
+    index += 1;
+  }
+
+  const marker = rest[index];
+  if (marker === ']') {
+    // open checkbox: [ ]
+  } else if (marker === 'x' || marker === 'X') {
+    index += 1;
+    if (rest[index] !== ']') {
+      return false;
+    }
+  } else {
+    return false;
+  }
+
+  if (rest[index] !== ']') {
+    return false;
+  }
+  index += 1;
+
+  if (index >= rest.length || (rest[index] !== ' ' && rest[index] !== '\t')) {
+    return false;
+  }
+  while (index < rest.length && (rest[index] === ' ' || rest[index] === '\t')) {
+    index += 1;
+  }
+
+  return index < rest.length;
+}
+
+function isStruckThroughChecklistLine(rest: string): boolean {
+  if (!rest.startsWith('~~')) {
+    return false;
+  }
+
+  const closeIndex = rest.indexOf('~~', 2);
+  if (closeIndex <= 2) {
+    return false;
+  }
+
+  if (closeIndex + 2 === rest.length) {
+    return true;
+  }
+
+  let index = closeIndex + 2;
+  while (index < rest.length && (rest[index] === ' ' || rest[index] === '\t')) {
+    index += 1;
+  }
+
+  const separator = rest[index];
+  if (separator !== '—' && separator !== '-') {
+    return false;
+  }
+  index += 1;
+
+  if (index >= rest.length || (rest[index] !== ' ' && rest[index] !== '\t')) {
+    return false;
+  }
+  while (index < rest.length && (rest[index] === ' ' || rest[index] === '\t')) {
+    index += 1;
+  }
+
+  return index < rest.length;
 }
 
 export function escapeTaskContextText(value: string): string {
