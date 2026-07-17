@@ -3,6 +3,7 @@ import {
   buildSetupModelStatus,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
   getDisplayModelProviderId,
@@ -616,6 +617,18 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('AWS_ACCESS_KEY_ID');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'AWS_SECRET_ACCESS_KEY',
+    );
+  });
+
+  it('distinguishes provider credentials from non-secret configuration', () => {
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'AWS_BEARER_TOKEN_BEDROCK',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'ANTHROPIC_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'AWS_REGION',
     );
   });
 });

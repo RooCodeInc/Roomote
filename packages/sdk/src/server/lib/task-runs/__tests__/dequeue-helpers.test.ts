@@ -623,11 +623,15 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     const envVars = await fetchResolvedRuntimeEnvVars({
       ANTHROPIC_API_KEY: 'sk-ant',
       OPENAI_API_KEY: 'sk-openai',
+      AWS_BEARER_TOKEN_BEDROCK: 'bedrock-token',
+      AWS_REGION: 'us-west-2',
       STRIPE_API_KEY: 'sk-stripe',
     });
 
     expect(envVars.ANTHROPIC_API_KEY).toBe('sk-ant');
     expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+    expect(envVars.AWS_REGION).toBe('us-west-2');
     expect(envVars.STRIPE_API_KEY).toBe('sk-stripe');
     expect(envVars).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
   });

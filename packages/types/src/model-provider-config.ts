@@ -484,6 +484,24 @@ export const DEFAULT_MODEL_PROVIDER_ENV_KEYS: readonly string[] = [
   ...new Set([...MODEL_PROVIDER_ENV_KEYS_BY_PROVIDER.values()].flat()),
 ];
 
+const MODEL_PROVIDER_NON_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set(
+  SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) =>
+    getSetupModelProviderAdditionalEnvFields(provider)
+      .filter((field) => !field.secret)
+      .map((field) => field.envVarName),
+  ),
+);
+
+/**
+ * Provider credentials that must only enter a task through the selected model
+ * runtime resolver. Non-secret provider configuration such as AWS_REGION is
+ * excluded so it remains available to unrelated task code.
+ */
+export const DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES: readonly string[] =
+  DEFAULT_MODEL_PROVIDER_ENV_KEYS.filter(
+    (name) => !MODEL_PROVIDER_NON_SECRET_ENV_VAR_NAMES.has(name),
+  );
+
 export const REASONING_EFFORT_LABELS = {
   low: 'Low',
   medium: 'Medium',

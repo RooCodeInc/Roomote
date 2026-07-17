@@ -299,9 +299,9 @@ export async function resolveEffectiveModelRuntimeEnv(
     )
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
       : undefined);
-  const runtimeRoomoteModelEnvKeys = normalizeConfiguredValue(
-    runtimeEnv.R_MODEL_ENV_KEYS,
-  );
+  const configuredRoomoteModelEnvKeys =
+    normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
+    normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
   const resolvedRoleModels = [
     resolvedRoomoteModel,
     resolvedRoomoteSmallModel,
@@ -311,7 +311,7 @@ export async function resolveEffectiveModelRuntimeEnv(
     resolvedRoomotePlanningModel,
   ];
   const providerKeyNames = resolveProviderKeyNames({
-    runtimeRoomoteModelEnvKeys,
+    runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
     resolvedRoomoteModels: resolvedRoleModels,
   });
   // A running OpenCode task can switch to any enabled catalog model without
@@ -426,13 +426,9 @@ export async function resolveEffectiveModelRuntimeEnv(
       R_PLANNING_MODEL_REASONING_EFFORT:
         resolvedRoomotePlanningModelReasoningEffort,
     }),
-    ...(runtimeRoomoteModelEnvKeys && {
-      R_MODEL_ENV_KEYS: runtimeRoomoteModelEnvKeys,
+    ...(providerKeyNames.length > 0 && {
+      R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
-    ...(!runtimeRoomoteModelEnvKeys &&
-      providerKeyNames.length > 0 && {
-        R_MODEL_ENV_KEYS: providerKeyNames.join(','),
-      }),
     ...resolvedProviderKeyValues,
     ...(gatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),

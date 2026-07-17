@@ -120,6 +120,28 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
+  it('uses persisted custom provider key names when no runtime override exists', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'custom/test-model',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+        CUSTOM_LLM_TOKEN: 'saved-token',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'custom/test-model',
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'saved-token',
+    });
+  });
+
   it('falls back to persisted roomoteSmallModel when the env var is absent', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
