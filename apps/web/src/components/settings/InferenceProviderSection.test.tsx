@@ -42,6 +42,9 @@ vi.mock('@/trpc/client', () => ({
       deleteProvider: {
         mutationOptions: () => ({ mutationKey: ['deleteProvider'] }),
       },
+      discoverProviderModels: {
+        mutationOptions: () => ({ mutationKey: ['discoverProviderModels'] }),
+      },
     },
     chatgptSubscription: {
       status: {

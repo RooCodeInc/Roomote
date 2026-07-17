@@ -601,7 +601,12 @@ export function InferenceProviderSection({
             ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
             : `Saved the ${providerLabel} API key.`,
         );
-        setProviderDialog(null);
+        const savedProvider = providerSetup?.providers.find(
+          (provider) => provider.id === variables.provider,
+        );
+        if (savedProvider?.authKind !== 'endpoint') {
+          setProviderDialog(null);
+        }
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
