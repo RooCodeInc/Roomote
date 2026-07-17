@@ -2,8 +2,10 @@ import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
   buildInferenceGatewayUrl,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   RunStatus,
   TaskPayloadKind,
@@ -656,20 +658,39 @@ export const runTask = async ({
     const inferenceGatewayServedKeys = parseInferenceGatewayKeys(
       unsanitizedEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
     );
+    // A connected ChatGPT subscription served through the gateway carries no
+    // env key; dequeue signals it with a marker instead and omits the OAuth
+    // record, which the gateway holds and injects server-side.
+    const inferenceGatewayChatGpt =
+      unsanitizedEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
 
-    if (inferenceGatewayServedKeys.length > 0) {
+    if (inferenceGatewayServedKeys.length > 0 || inferenceGatewayChatGpt) {
       for (const servedKey of inferenceGatewayServedKeys) {
         delete runtimeEnv[servedKey];
       }
 
-      runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME] =
-        inferenceGatewayServedKeys.join(',');
       runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME] = buildInferenceGatewayUrl(
         workerEnv.trpcUrl,
       );
+
+      if (inferenceGatewayServedKeys.length > 0) {
+        runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME] =
+          inferenceGatewayServedKeys.join(',');
+      } else {
+        delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
+      }
+
+      if (inferenceGatewayChatGpt) {
+        runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] = '1';
+        // Gateway mode holds the OAuth record; it must never reach the sandbox.
+        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+      } else {
+        delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
+      }
     } else {
       delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
       delete runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME];
+      delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

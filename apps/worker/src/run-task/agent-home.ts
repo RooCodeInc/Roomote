@@ -5,15 +5,19 @@ import {
   BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
   buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
   DEFAULT_BEDROCK_MANTLE_REGION,
+  getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  type InferenceGatewayProvider,
   isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
@@ -32,6 +36,7 @@ import { SLACK_SILENCE_HOOK_SCRIPT } from './slack-silence-hook-script';
 import { SLACK_POSTING_TOOL_EXCLUSIONS } from './slack-posting-tools';
 import { SLACK_STOP_HOOK_SCRIPT } from './slack-stop-hook-script';
 import { OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT } from './opencode-slack-hooks-plugin-script';
+import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gateway-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
   createProofRunnerAgentPrompt,
@@ -163,6 +168,9 @@ const ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME =
 const ROOMOTE_OPENCODE_PLUGINS_DIR_NAME = 'plugins';
 
 const ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME = 'roomote-slack-hooks.js';
+
+const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
+  'roomote-chatgpt-gateway.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -530,14 +538,18 @@ function createOpenCodeMcpConfig(
   );
 }
 
-function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
+function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   const pluginsDir = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_PLUGINS_DIR_NAME,
   );
-  const pluginPath = path.join(
+  const slackPluginPath = path.join(
     pluginsDir,
     ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME,
+  );
+  const chatGptGatewayPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME,
   );
   const silenceHookPath = path.join(
     openCodeConfigDir,
@@ -549,7 +561,12 @@ function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
   );
 
   fs.mkdirSync(pluginsDir, { recursive: true });
-  fs.writeFileSync(pluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(slackPluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(
+    chatGptGatewayPluginPath,
+    OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT,
+    'utf8',
+  );
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -641,8 +658,13 @@ function mergeInferenceGatewayProviderConfig(
   const servedKeyNames = parseInferenceGatewayKeys(
     runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
   );
+  const routeChatGptThroughGateway =
+    runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
 
-  if (!gatewayUrl || servedKeyNames.length === 0) {
+  if (
+    !gatewayUrl ||
+    (servedKeyNames.length === 0 && !routeChatGptThroughGateway)
+  ) {
     return providerConfig;
   }
 
@@ -662,7 +684,7 @@ function mergeInferenceGatewayProviderConfig(
   for (const [providerId, gatewayProvider] of gatewayProviders) {
     // ChatGPT-subscription OAuth authenticates through opencode's Codex
     // plugin directly; leave the openai provider on its default base URL
-    // when a subscription record is present.
+    // when a subscription record is present in the sandbox (non-gateway mode).
     if (
       providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
       runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
@@ -670,26 +692,59 @@ function mergeInferenceGatewayProviderConfig(
       continue;
     }
 
-    const existingProvider = asRecord(merged[providerId]);
-    const existingOptions = asRecord(existingProvider.options);
+    merged = rebaseProviderOntoGateway(
+      merged,
+      providerId,
+      gatewayUrl,
+      gatewayProvider,
+    );
+  }
 
-    merged = {
-      ...merged,
-      [providerId]: {
-        ...existingProvider,
-        options: {
-          ...existingOptions,
-          baseURL: buildInferenceGatewayOpenCodeBaseUrl(
-            gatewayUrl,
-            gatewayProvider,
-          ),
-          apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
-        },
-      },
-    };
+  // ChatGPT subscription served by the gateway: rebase the OpenCode `openai`
+  // provider onto the gateway's ChatGPT segment. The gateway mints the OAuth
+  // access token and rewrites to the Codex backend, so the sandbox holds only
+  // the run token and never the OAuth record.
+  if (routeChatGptThroughGateway) {
+    const chatGptProvider = getInferenceGatewayProvider(
+      CHATGPT_GATEWAY_PROVIDER_ID,
+    );
+
+    if (chatGptProvider) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        CHATGPT_OPENCODE_PROVIDER_ID,
+        gatewayUrl,
+        chatGptProvider,
+      );
+    }
   }
 
   return merged;
+}
+
+function rebaseProviderOntoGateway(
+  providerConfig: Record<string, unknown>,
+  openCodeProviderId: string,
+  gatewayUrl: string,
+  gatewayProvider: InferenceGatewayProvider,
+): Record<string, unknown> {
+  const existingProvider = asRecord(providerConfig[openCodeProviderId]);
+  const existingOptions = asRecord(existingProvider.options);
+
+  return {
+    ...providerConfig,
+    [openCodeProviderId]: {
+      ...existingProvider,
+      options: {
+        ...existingOptions,
+        baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+          gatewayUrl,
+          gatewayProvider,
+        ),
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    },
+  };
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -1346,7 +1401,7 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  writeOpenCodeSlackHookFiles(openCodeConfigDir);
+  writeOpenCodeManagedFiles(openCodeConfigDir);
 
   if (developerInstructionsContent) {
     const developerInstructionsPath = path.join(

@@ -593,6 +593,44 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.OPENCODE_AUTH_CONTENT).toContain('"type":"oauth"');
   });
 
+  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+      }),
+    );
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      inferenceGateway: true,
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    // The OAuth record must stay on the control plane; the marker tells the
+    // worker to rebase the openai provider onto the gateway instead.
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+  });
+
+  it('does not emit the ChatGPT gateway marker when no subscription is connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      inferenceGateway: true,
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_CHATGPT');
+  });
+
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
@@ -668,6 +706,62 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
       expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
       expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    });
+
+    it('withholds credentials for every enabled switchable model provider', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: {
+          roomoteModel: 'openrouter/openai/gpt-5.6-terra',
+          roomotePlanningModel: 'openrouter/anthropic/claude-opus-4.8',
+        },
+        taskModelSettings: {
+          models: [
+            {
+              id: 'openrouter/openai/gpt-5.6-terra',
+              displayName: 'GPT 5.6 Terra',
+              family: 'GPT',
+            },
+            {
+              id: 'anthropic/claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              family: 'Sonnet',
+            },
+            {
+              id: 'openai/gpt-5.6-luna',
+              displayName: 'GPT 5.6 Luna',
+              family: 'GPT',
+            },
+          ],
+          allowedModelIds: [
+            'openrouter/openai/gpt-5.6-terra',
+            'anthropic/claude-sonnet-5',
+            'openai/gpt-5.6-luna',
+          ],
+          defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+        },
+      });
+      mockResolveOpenCodeAuthContent.mockResolvedValue(
+        JSON.stringify({
+          openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+        }),
+      );
+
+      const env = await resolveEffectiveModelRuntimeEnv({
+        inferenceGateway: true,
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          OPENROUTER_API_KEY: 'sk-openrouter',
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+        },
+      });
+
+      expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+      );
+      expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+      expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
     });
 
     it('withholds Bedrock but keeps Vertex, which the gateway cannot serve', async () => {

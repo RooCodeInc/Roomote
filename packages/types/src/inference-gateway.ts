@@ -32,28 +32,72 @@ export const INFERENCE_GATEWAY_REGION_PATTERN =
 /** Default AWS region for the Bedrock Mantle Anthropic-compatible endpoint. */
 export const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
 
+/**
+ * Gateway path segment for the ChatGPT-subscription provider. Distinct from
+ * the key-authenticated `openai` entry: the OpenCode provider id stays
+ * `openai` (the model prefix), but its baseURL points at this segment so the
+ * gateway can hold the OAuth record and rewrite to the Codex backend.
+ */
+export const CHATGPT_GATEWAY_PROVIDER_ID = 'openai-chatgpt';
+
+/** The ChatGPT Codex backend the OpenCode Codex plugin targets. */
+export const CHATGPT_CODEX_UPSTREAM_BASE_URL = 'https://chatgpt.com';
+export const CHATGPT_CODEX_UPSTREAM_PATH = '/backend-api/codex/responses';
+
+/** Account-scoping header the Codex backend requires alongside the bearer. */
+export const CHATGPT_ACCOUNT_ID_HEADER = 'ChatGPT-Account-Id';
+
+/**
+ * Sandbox-facing marker set at dequeue when the gateway is serving a
+ * connected ChatGPT subscription: the worker rebases the OpenCode `openai`
+ * provider onto the gateway instead of materializing `OPENCODE_AUTH_CONTENT`,
+ * so the subscription OAuth record never enters the sandbox.
+ */
+export const INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME =
+  'R_INFERENCE_GATEWAY_CHATGPT';
+
 interface InferenceGatewayAuthHeader {
   name: string;
   scheme?: 'bearer';
 }
 
+/**
+ * How the gateway authenticates upstream for a provider:
+ * - `api-key`: inject a static deployment key (the default).
+ * - `chatgpt-oauth`: mint a fresh ChatGPT-subscription access token
+ *   server-side and add the account-id header; the sandbox holds no key.
+ */
+export type InferenceGatewayAuthStrategy = 'api-key' | 'chatgpt-oauth';
+
 export interface InferenceGatewayProvider {
   /**
-   * Provider id, used both as the gateway path segment and as the OpenCode
-   * provider id (they match for every supported provider).
+   * Provider id, used as the gateway path segment. It also matches the
+   * OpenCode provider id for key-authenticated providers; the
+   * ChatGPT-subscription entry is the exception (its OpenCode id is `openai`).
    */
-  id: SetupModelProviderId | typeof BEDROCK_MANTLE_OPENCODE_PROVIDER_ID;
+  id:
+    | SetupModelProviderId
+    | typeof BEDROCK_MANTLE_OPENCODE_PROVIDER_ID
+    | typeof CHATGPT_GATEWAY_PROVIDER_ID;
   name: string;
   /**
    * Deployment env vars holding the provider API key the gateway injects,
-   * in precedence order.
+   * in precedence order. Empty for non-key auth strategies.
    */
   envVarNames: readonly string[];
+  /** How the gateway authenticates upstream. Defaults to `api-key`. */
+  authStrategy?: InferenceGatewayAuthStrategy;
   /**
    * Upstream API base. May contain a `{region}` placeholder resolved
    * per-request from `region` below.
    */
   upstreamBaseUrl: string;
+  /**
+   * When set, every allowed request path is rewritten to this fixed upstream
+   * path (the ChatGPT Codex backend collapses `/responses` and
+   * `/chat/completions` to a single endpoint).
+   */
+  collapseToPath?: string;
   /**
    * Region resolution for `{region}`-templated upstreams: the deployment env
    * var to read and the fallback when it is unset.
@@ -247,6 +291,28 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       },
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      // ChatGPT subscription: the gateway holds the OAuth record, mints a
+      // fresh access token per request, adds the account-id header, and
+      // collapses the request to the Codex backend — mirroring the OpenCode
+      // Codex plugin, but server-side so the OAuth record stays out of the
+      // sandbox. The Codex plugin forwards the request body unchanged, so no
+      // body translation is needed here.
+      id: CHATGPT_GATEWAY_PROVIDER_ID,
+      name: 'ChatGPT Subscription',
+      authStrategy: 'chatgpt-oauth',
+      envVarNames: [],
+      upstreamBaseUrl: CHATGPT_CODEX_UPSTREAM_BASE_URL,
+      collapseToPath: CHATGPT_CODEX_UPSTREAM_PATH,
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        '/responses',
+        '/v1/responses',
+        '/chat/completions',
+        '/v1/chat/completions',
+      ],
       openCodeBaseUrlSuffix: '/v1',
     },
   ];

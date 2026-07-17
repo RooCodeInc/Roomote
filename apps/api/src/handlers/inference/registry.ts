@@ -1,14 +1,99 @@
 import {
+  CHATGPT_ACCOUNT_ID_HEADER,
   getInferenceGatewayProvider,
   INFERENCE_GATEWAY_REGION_PATTERN,
   type InferenceGatewayProvider,
 } from '@roomote/types';
-import { resolveModelProviderEnvValue } from '@roomote/db/server';
+import {
+  getFreshChatGptAccessToken,
+  resolveModelProviderEnvValue,
+} from '@roomote/db/server';
 
 export function getInferenceProvider(
   providerId: string,
 ): InferenceGatewayProvider | undefined {
   return getInferenceGatewayProvider(providerId);
+}
+
+/** The upstream URL and auth headers the gateway forwards for one request. */
+export interface ResolvedGatewayUpstream {
+  upstreamUrl: string;
+  headers: Record<string, string>;
+}
+
+export type GatewayUpstreamResolution =
+  | { ok: true; resolved: ResolvedGatewayUpstream }
+  | { ok: false; status: 404 | 500; error: string };
+
+/**
+ * Resolve the upstream URL and auth headers for a gateway request, per the
+ * provider's auth strategy:
+ * - `api-key`: inject the deployment's static key at the request path.
+ * - `chatgpt-oauth`: mint a fresh subscription access token, add the
+ *   account-id header, and collapse the request onto the Codex backend.
+ */
+export async function resolveGatewayUpstream(
+  provider: InferenceGatewayProvider,
+  upstreamPath: string,
+  search: string,
+): Promise<GatewayUpstreamResolution> {
+  if (provider.authStrategy === 'chatgpt-oauth') {
+    return resolveChatGptUpstream(provider);
+  }
+
+  const [apiKey, upstreamBaseUrl] = await Promise.all([
+    resolveModelProviderEnvValue(provider.envVarNames),
+    resolveProviderUpstreamBaseUrl(provider),
+  ]);
+
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 404,
+      error: `No ${provider.name} API key is configured for this deployment`,
+    };
+  }
+
+  return {
+    ok: true,
+    resolved: {
+      upstreamUrl: `${upstreamBaseUrl}${upstreamPath}${search}`,
+      headers: {
+        [provider.authHeader.name]: formatProviderAuthHeaderValue(
+          provider,
+          apiKey,
+        ),
+      },
+    },
+  };
+}
+
+async function resolveChatGptUpstream(
+  provider: InferenceGatewayProvider,
+): Promise<GatewayUpstreamResolution> {
+  const token = await getFreshChatGptAccessToken();
+
+  if (!token) {
+    return {
+      ok: false,
+      status: 404,
+      error: 'No connected ChatGPT subscription is available',
+    };
+  }
+
+  const upstreamUrl = `${provider.upstreamBaseUrl}${provider.collapseToPath ?? ''}`;
+  const headers: Record<string, string> = {
+    [provider.authHeader.name]: formatProviderAuthHeaderValue(
+      provider,
+      token.access,
+    ),
+  };
+
+  if (token.accountId) {
+    headers[CHATGPT_ACCOUNT_ID_HEADER] = token.accountId;
+  }
+
+  return { ok: true, resolved: { upstreamUrl, headers } };
 }
 
 /**
@@ -62,7 +147,7 @@ function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
  * placeholder from the deployment's region env var (falling back to the
  * provider default) for region-templated upstreams like Bedrock.
  */
-export async function resolveProviderUpstreamBaseUrl(
+async function resolveProviderUpstreamBaseUrl(
   provider: InferenceGatewayProvider,
 ): Promise<string> {
   if (!provider.region) {
@@ -82,7 +167,7 @@ export async function resolveProviderUpstreamBaseUrl(
   return provider.upstreamBaseUrl.replace('{region}', region);
 }
 
-export function formatProviderAuthHeaderValue(
+function formatProviderAuthHeaderValue(
   provider: InferenceGatewayProvider,
   apiKey: string,
 ): string {

@@ -2,8 +2,10 @@ import { eq } from 'drizzle-orm';
 import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
@@ -80,6 +82,7 @@ async function loadPersistedRuntimeModelConfig(
       deployment?.runtimeModelConfig,
     ),
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
+    enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
   };
 }
 
@@ -186,14 +189,16 @@ export async function resolveEffectiveModelRuntimeEnv(
 ): Promise<Record<string, string>> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
-  const [persistedEnvVars, { runtimeModelConfig, catalogModels }] =
-    await Promise.all([
-      resolveEffectiveDeploymentEnvVars({
-        deploymentEnvVars: options.deploymentEnvVars,
-        executor,
-      }),
-      loadPersistedRuntimeModelConfig(executor),
-    ]);
+  const [
+    persistedEnvVars,
+    { runtimeModelConfig, catalogModels, enabledCatalogModels },
+  ] = await Promise.all([
+    resolveEffectiveDeploymentEnvVars({
+      deploymentEnvVars: options.deploymentEnvVars,
+      executor,
+    }),
+    loadPersistedRuntimeModelConfig(executor),
+  ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
   const resolvedRoomoteModel =
     normalizeConfiguredValue(runtimeEnv.R_MODEL) ??
@@ -283,28 +288,48 @@ export async function resolveEffectiveModelRuntimeEnv(
   const runtimeRoomoteModelEnvKeys = normalizeConfiguredValue(
     runtimeEnv.R_MODEL_ENV_KEYS,
   );
+  const resolvedRoleModels = [
+    resolvedRoomoteModel,
+    resolvedRoomoteSmallModel,
+    resolvedRoomoteVisionModel,
+    resolvedRoomoteCodeReviewModel,
+    resolvedRoomoteExploreModel,
+    resolvedRoomotePlanningModel,
+  ];
   const providerKeyNames = resolveProviderKeyNames({
     runtimeRoomoteModelEnvKeys,
-    resolvedRoomoteModels: [
-      resolvedRoomoteModel,
-      resolvedRoomoteSmallModel,
-      resolvedRoomoteVisionModel,
-      resolvedRoomoteCodeReviewModel,
-      resolvedRoomoteExploreModel,
-      resolvedRoomotePlanningModel,
-    ],
+    resolvedRoomoteModels: resolvedRoleModels,
   });
+  // A running OpenCode task can switch to any enabled catalog model without
+  // another dequeue, while configured role agents can select their own
+  // providers. Gateway coverage must therefore include both sets up front;
+  // otherwise a later model switch either sees a missing key or uses a raw
+  // provider credential that was already written into the sandbox.
+  const gatewaySwitchableModelIds = options.inferenceGateway
+    ? enabledCatalogModels.map((model) => model.id)
+    : [];
+  const gatewayProviderKeyNames = [
+    ...new Set([
+      ...providerKeyNames,
+      ...resolveProviderKeyNames({
+        resolvedRoomoteModels: gatewaySwitchableModelIds,
+      }),
+    ]),
+  ];
   // When the gateway is active, the configured provider keys it can serve
   // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
   // the control plane and are advertised to the worker by name via
   // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
   // gateway URL from its own platform URL and rebases exactly these providers.
-  // Only configured keys are withheld, so a provider key the deployment set
-  // for its own code (not used by any configured model) still reaches the
-  // sandbox. Providers the gateway cannot serve (Vertex signing, ChatGPT
-  // subscription OAuth) are never covered and always flow through.
+  // Only configured keys are withheld. Providers the gateway cannot serve
+  // (such as Vertex request signing) continue to flow through.
   const gatewayServedKeyNames = options.inferenceGateway
-    ? providerKeyNames.filter((name) => isInferenceGatewayCoveredEnvVar(name))
+    ? gatewayProviderKeyNames.filter(
+        (name) =>
+          isInferenceGatewayCoveredEnvVar(name) &&
+          (normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
+            normalizeConfiguredValue(persistedEnvVars[name]) !== undefined),
+      )
     : [];
   const gatewayServedKeyNameSet = new Set(gatewayServedKeyNames);
 
@@ -323,21 +348,21 @@ export async function resolveEffectiveModelRuntimeEnv(
   );
 
   // ChatGPT subscription coverage: when a connected subscription exists and
-  // any resolved role model uses the `openai/` prefix, inject the OAuth
-  // record as `OPENCODE_AUTH_CONTENT`. opencode's Codex plugin prefers OAuth
-  // auth when present, so the subscription wins over `OPENAI_API_KEY` at
-  // runtime even when both are configured. This single choke point covers
-  // both task launches (dequeue-helpers) and routing/title/summary calls
-  // (non-task-provider-usage).
-  const resolvedRoleModels = [
-    resolvedRoomoteModel,
-    resolvedRoomoteSmallModel,
-    resolvedRoomoteVisionModel,
-    resolvedRoomoteCodeReviewModel,
-    resolvedRoomoteExploreModel,
-    resolvedRoomotePlanningModel,
-  ];
-  const usesOpenAiModel = resolvedRoleModels.some(
+  // any resolved role or gateway-switchable model uses the `openai/` prefix,
+  // inject the OAuth record as `OPENCODE_AUTH_CONTENT`. opencode's Codex
+  // plugin prefers OAuth auth when present, so the subscription wins over
+  // `OPENAI_API_KEY` at runtime even when both are configured. This single
+  // choke point covers both task launches (dequeue-helpers) and
+  // routing/title/summary calls (non-task-provider-usage).
+  //
+  // In sandbox gateway mode the OAuth record must stay on the control plane,
+  // so instead of shipping OPENCODE_AUTH_CONTENT the resolver emits the
+  // R_INFERENCE_GATEWAY_CHATGPT marker; the worker rebases the `openai`
+  // provider onto the gateway, which mints and injects the access token.
+  const usesOpenAiModel = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
     (modelId) =>
       typeof modelId === 'string' &&
       modelId.startsWith(`${CHATGPT_OPENCODE_PROVIDER_ID}/`),
@@ -345,6 +370,8 @@ export async function resolveEffectiveModelRuntimeEnv(
   const injectedOpenCodeAuthContent = usesOpenAiModel
     ? await resolveOpenCodeAuthContent({ executor })
     : null;
+  const routeChatGptThroughGateway =
+    options.inferenceGateway === true && injectedOpenCodeAuthContent != null;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -396,8 +423,10 @@ export async function resolveEffectiveModelRuntimeEnv(
     ...(gatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
     }),
-    ...(injectedOpenCodeAuthContent && {
-      OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,
-    }),
+    ...(routeChatGptThroughGateway
+      ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
+      : injectedOpenCodeAuthContent
+        ? { OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent }
+        : {}),
   };
 }

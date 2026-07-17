@@ -6,10 +6,12 @@ import type { Variables } from '../../../types';
 const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
+  mockGetFreshChatGptAccessToken,
   mockIsInferenceGatewayEnabledForDeployment,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
+  mockGetFreshChatGptAccessToken: vi.fn(),
   mockIsInferenceGatewayEnabledForDeployment: vi.fn(
     async (_redis?: unknown, _prefix?: string) => true,
   ),
@@ -24,6 +26,7 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: { id: 'id' },
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
+  getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
 }));
 
 vi.mock('@roomote/feature-flags/server', () => ({
@@ -341,6 +344,87 @@ describe('inference gateway', () => {
 
     expect(response.status).toBe(500);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe('ChatGPT subscription (chatgpt-oauth strategy)', () => {
+    async function postChatGpt(
+      app: Hono<{ Variables: Variables }>,
+      path = '/api/inference/openai-chatgpt/v1/responses',
+      headers: Record<string, string> = {},
+    ) {
+      return app.request(path, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer run-token-value',
+          ...headers,
+        },
+        body: JSON.stringify({ model: 'gpt-5-codex', input: 'hi' }),
+      });
+    }
+
+    it('mints a token, rewrites to the Codex backend, and injects account id', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshChatGptAccessToken.mockResolvedValue({
+        access: 'oauth-access-token',
+        refresh: 'oauth-refresh',
+        expires: Date.now() + 3_600_000,
+        accountId: 'acct_123',
+      });
+
+      const response = await postChatGpt(createApp(createRunToken()));
+
+      expect(response.status).toBe(200);
+      // The API key resolver must not be consulted for OAuth providers.
+      expect(mockResolveModelProviderEnvValue).not.toHaveBeenCalled();
+
+      const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      expect(url).toBe('https://chatgpt.com/backend-api/codex/responses');
+
+      const headers = new Headers(init.headers);
+      expect(headers.get('authorization')).toBe('Bearer oauth-access-token');
+      expect(headers.get('ChatGPT-Account-Id')).toBe('acct_123');
+    });
+
+    it('strips the run token and any smuggled account id from the sandbox', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshChatGptAccessToken.mockResolvedValue({
+        access: 'oauth-access-token',
+        refresh: 'oauth-refresh',
+        expires: Date.now() + 3_600_000,
+        accountId: 'acct_real',
+      });
+
+      await postChatGpt(createApp(createRunToken()), undefined, {
+        'chatgpt-account-id': 'acct_attacker',
+      });
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const headers = new Headers(init.headers);
+      expect(headers.get('ChatGPT-Account-Id')).toBe('acct_real');
+      expect(headers.get('authorization')).toBe('Bearer oauth-access-token');
+    });
+
+    it('returns 404 when no ChatGPT subscription is connected', async () => {
+      const fetchMock = stubUpstreamFetch();
+      mockGetFreshChatGptAccessToken.mockResolvedValue(null);
+
+      const response = await postChatGpt(createApp(createRunToken()));
+
+      expect(response.status).toBe(404);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-inference paths on the ChatGPT segment', async () => {
+      const fetchMock = stubUpstreamFetch();
+      const response = await postChatGpt(
+        createApp(createRunToken()),
+        '/api/inference/openai-chatgpt/v1/account',
+      );
+
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   it('returns 404 when the provider key is not configured', async () => {
