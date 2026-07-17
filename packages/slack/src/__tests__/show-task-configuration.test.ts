@@ -64,6 +64,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: enqueueTaskMock,
   classifyFollowUp: classifyFollowUpMock,
   detectSlackMcpSetupRequirement: vi.fn().mockResolvedValue(null),
+  getRoutingAutoConfirmDelayMs: vi.fn(() => 0),
   getTaskUrl: getTaskUrlMock,
 }));
 
