@@ -5,7 +5,7 @@ import { execa, type ExecaError } from 'execa';
 import type { CommandExecutionResult, StreamChunk } from '../types';
 
 import { DEFAULT_COMMAND_TIMEOUT } from '../trpc';
-import { assertSafeTailFilePath } from './tail-file-path';
+import { resolveSafeTailFilePath } from './tail-file-path';
 
 interface ExecuteOptions {
   /** Working directory */
@@ -102,9 +102,11 @@ export class CommandExecutor {
     filePath: string,
     options: ExecuteStreamOptions,
   ): StreamHandle {
-    assertSafeTailFilePath(filePath);
+    // Resolve absolute /tmp paths (and their symlink targets) before tailing so
+    // the check and the stream use the same path.
+    const safePath = resolveSafeTailFilePath(filePath);
 
-    return this.runCommandStream(['tail', '-f', '--', filePath], options);
+    return this.runCommandStream(['tail', '-f', '--', safePath], options);
   }
 
   /**

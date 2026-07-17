@@ -7,11 +7,13 @@ import type { TaggedStreamChunk } from '../types';
 import { publicProcedure } from '../trpc';
 
 import { CommandExecutor, type StreamHandle } from '../lib/command-executor';
-import { assertSafeTailFilePath } from '../lib/tail-file-path';
+import { resolveSafeTailFilePath } from '../lib/tail-file-path';
 
 function validateFilePath(filePath: string): void {
   try {
-    assertSafeTailFilePath(filePath);
+    // Validate only; CommandExecutor.tailStream resolves again immediately
+    // before spawn so the checked path matches the path passed to `tail`.
+    resolveSafeTailFilePath(filePath);
   } catch (error) {
     throw new TRPCError({
       code: 'BAD_REQUEST',
