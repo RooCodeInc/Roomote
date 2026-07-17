@@ -2,6 +2,17 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.8.1 (2026-07-17)
+
+### Patch changes
+
+- Clarify Review Code wording and section ordering on the Automations settings page so source-code, Slack, manager, and meta automations are easier to scan.
+- Create account and other credential fields no longer block password managers, so 1Password can offer to generate and save passwords on signup.
+- Task log tails again allow intentional `/tmp` paths such as harness and environment log files, while still blocking absolute paths outside that boundary.
+- Spell cancel buttons as **Never mind** (two words) on Slack, Discord, and Telegram task and workspace pickers.
+- Recover from bounded model-provider turn errors, including safety-policy refusals, without immediately aborting the Roomote task.
+- Slack transcript decoding no longer crashes with a stack overflow when a thread contains a long sequence of thread-activity blocks.
+
 ## 0.8.0 (2026-07-17)
 
 ### Minor changes
