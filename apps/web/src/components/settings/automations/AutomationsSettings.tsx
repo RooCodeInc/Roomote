@@ -341,7 +341,7 @@ const TRIGGERABLE_AUTOMATION_SCHEDULE_LABELS = {
  * configured. Shown only when more than one provider of that kind is
  * connected and the automation does not cover every configured one.
  */
-export function formatConfiguredProviderOnlyBadge(
+function formatConfiguredProviderOnlyBadge(
   labels: readonly string[],
 ): string | undefined {
   if (labels.length === 0) {
@@ -355,7 +355,7 @@ export function formatConfiguredProviderOnlyBadge(
   return `For ${labels.join(' + ')} only`;
 }
 
-export function getAutomationCapabilityBadges(
+function getAutomationCapabilityBadges(
   automationKey: BackgroundAutomationKey,
   options: {
     configuredCommunicationProviders: readonly CommunicationProvider[];
