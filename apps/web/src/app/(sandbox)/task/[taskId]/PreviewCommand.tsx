@@ -44,7 +44,7 @@ export function PreviewCommand({ taskRun, asleep }: PreviewCommandProps) {
 
     const commands: Parameters<typeof useRegisterCommands>[0] = [];
 
-    if (taskRun?.id) {
+    if (taskRun?.id && taskRun.payload?.environmentId) {
       commands.push({
         id: 'task-live-preview',
         icon: AppWindow,

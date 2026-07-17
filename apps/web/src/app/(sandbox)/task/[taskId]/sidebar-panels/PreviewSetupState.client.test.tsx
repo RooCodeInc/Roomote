@@ -131,15 +131,18 @@ describe('PreviewSetupState', () => {
     expect(screen.queryByText('Create an environment')).not.toBeInTheDocument();
   });
 
-  it('offers admins an environment-creation link for repo-only tasks', async () => {
+  it('shows no environment-creation CTA for repo-only tasks, even for admins', async () => {
     authState.isAdmin = true;
     statusState.data = buildStatus({ environment: null });
 
     renderSetupState(taskRun);
 
     expect(
-      await screen.findByText('Create an environment'),
+      await screen.findByText(
+        'Live previews are available for tasks that run in an environment',
+      ),
     ).toBeInTheDocument();
+    expect(screen.queryByText('Create an environment')).not.toBeInTheDocument();
   });
 
   it('links to an in-flight setup task', async () => {

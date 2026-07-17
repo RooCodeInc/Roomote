@@ -95,7 +95,9 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
 
   const status: TaskPreviewStatus = statusQuery.data;
 
-  // Repo-only tasks have no environment to preview.
+  // Repo-only tasks have no environment to preview. The Live Preview button
+  // is hidden for these tasks, so this state is only reachable via a direct
+  // /previews URL.
   if (!status.environment) {
     return (
       <CenteredMessage>
@@ -110,14 +112,6 @@ export function PreviewSetupState({ taskRun }: { taskRun?: TaskRun }) {
           This task runs directly against the repository, so there is no running
           app to preview.
         </p>
-        {isAdmin ? (
-          <Button asChild variant="outline" size="sm">
-            <Link href={SETTINGS_PATHS.newEnvironment}>
-              Create an environment
-              <ArrowRight />
-            </Link>
-          </Button>
-        ) : null}
       </CenteredMessage>
     );
   }

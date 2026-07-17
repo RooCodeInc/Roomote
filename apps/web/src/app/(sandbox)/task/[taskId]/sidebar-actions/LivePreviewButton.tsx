@@ -57,6 +57,12 @@ function LivePreviewButtonBase({
     primaryPortName,
   });
 
+  // Repo-only tasks have no environment to preview, so the button is hidden
+  // entirely rather than opening a pane with nothing actionable in it.
+  if (!taskRun?.payload?.environmentId) {
+    return null;
+  }
+
   const asleep = isTaskRunAsleep(taskRun);
   const canWakeForPreview =
     asleep && !!taskRun?.snapshotId && !!resolvedPreviewUrl;

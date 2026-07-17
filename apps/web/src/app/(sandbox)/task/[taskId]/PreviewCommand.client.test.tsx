@@ -96,7 +96,12 @@ describe('PreviewCommand', () => {
   });
 
   it('registers the Live Preview command when a preview URL is available', () => {
-    render(<PreviewCommand taskRun={{ id: 123 } as never} asleep={false} />);
+    render(
+      <PreviewCommand
+        taskRun={{ id: 123, payload: { environmentId: 'env-1' } } as never}
+        asleep={false}
+      />,
+    );
 
     expect(useRegisterCommandsMock).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -108,6 +113,17 @@ describe('PreviewCommand', () => {
     );
   });
 
+  it('does not register the command for repo-only tasks', () => {
+    render(
+      <PreviewCommand
+        taskRun={{ id: 123, payload: {} } as never}
+        asleep={false}
+      />,
+    );
+
+    expect(useRegisterCommandsMock).toHaveBeenCalledWith([]);
+  });
+
   it('reuses the remembered preview target when running the command', () => {
     useTaskSidePanelMock.mockReturnValue({
       openPreviewView: openPreviewViewMock,
@@ -115,7 +131,12 @@ describe('PreviewCommand', () => {
       previewServiceName: 'API',
     });
 
-    render(<PreviewCommand taskRun={{ id: 123 } as never} asleep={false} />);
+    render(
+      <PreviewCommand
+        taskRun={{ id: 123, payload: { environmentId: 'env-1' } } as never}
+        asleep={false}
+      />,
+    );
 
     const livePreviewCommand = useRegisterCommandsMock.mock.calls[0]?.[0]?.find(
       (command: { id: string }) => command.id === 'task-live-preview',
