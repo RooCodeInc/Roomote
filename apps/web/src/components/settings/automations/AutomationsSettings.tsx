@@ -2269,9 +2269,6 @@ export function AutomationsSettings() {
         slackChannelAccessWarnings.channelAutoStartSlackChannels,
       isDirty: isDirty.channelAutoStart,
     });
-  const slackWorkflowLaunchUrl = buildSlackWorkflowLaunchUrl(
-    capabilities?.slackWorkspaceDomain,
-  );
   const showManagerChannelMigrationNote =
     !formState?.managerSlackChannel &&
     new Set(
@@ -4239,45 +4236,6 @@ If unclear, send to manager channel.`}
               })}
             </div>
           </AutomationCard>
-
-          {!slackAutomationsDisabled ? (
-            <Alert variant="light">
-              <Lightbulb className="mt-0.5 size-5 shrink-0 text-foreground" />
-              <AlertTitle>Wanna automate even more?</AlertTitle>
-              <AlertDescription>
-                <div>
-                  <p className="text-muted-foreground">
-                    Just use Slack&apos;s own{' '}
-                    <a
-                      href={slackWorkflowLaunchUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-foreground underline underline-offset-4 hover:text-foreground/80"
-                    >
-                      workflows
-                    </a>
-                    , finishing with{' '}
-                    <span className="font-medium text-foreground">
-                      {slackAppMention}
-                    </span>{' '}
-                    mentions, to get it working on whatever you want. Some
-                    ideas:
-                  </p>
-                  <ul className="list-disc space-y-1 pl-5 pt-1 text-sm text-muted-foreground">
-                    <li>
-                      Pipe operational requests from a ticketing system into
-                      Roomote tasks
-                    </li>
-                    <li>
-                      Get diagnostics (or PRs) for bugs posted onto a bugs
-                      channel
-                    </li>
-                    <li>Enable feature flags as requests come in</li>
-                  </ul>
-                </div>
-              </AlertDescription>
-            </Alert>
-          ) : null}
         </div>
       )}
     </div>
