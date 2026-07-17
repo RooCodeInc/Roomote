@@ -25,16 +25,18 @@ describe('getFeatureFlagDescriptionByMetadataKey', () => {
     });
   });
 
-  it('returns descriptions for active boolean metadata controls outside the typed flag enum', () => {
+  it('treats the retired previews_enabled deployment control as legacy', () => {
     expect(getFeatureFlagDescriptionByMetadataKey('previews_enabled')).toBe(
-      'Allow human-facing live preview ports to publish when runtime preview infrastructure is configured',
+      null,
     );
     expect(getBooleanMetadataDescriptorByKey('previews_enabled')).toEqual({
-      kind: 'deployment-control',
-      description:
-        'Allow human-facing live preview ports to publish when runtime preview infrastructure is configured',
+      kind: 'legacy',
+      description: null,
       group: null,
     });
+  });
+
+  it('returns descriptions for active boolean metadata controls outside the typed flag enum', () => {
     expect(getFeatureFlagDescriptionByMetadataKey('deployment_disabled')).toBe(
       'Disable Roomote access and new task launches for this deployment',
     );

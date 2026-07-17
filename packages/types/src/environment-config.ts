@@ -691,11 +691,9 @@ export const environmentConfigSchema = z
       )
       .optional(),
     /**
-     * Controls whether human-facing live previews should publish for this
-     * environment without deleting the stored port definitions.
-     *
-     * When omitted, legacy behavior is preserved and preview availability
-     * depends on the deployment-level setting plus configured ports.
+     * @deprecated Ignored. Live previews are always enabled; availability is
+     * determined by the preview runtime configuration and `ports`. Kept
+     * parseable so stored configs that still contain it remain valid.
      */
     previews_enabled: z.boolean().optional(),
     /**

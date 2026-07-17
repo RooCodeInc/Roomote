@@ -76,12 +76,6 @@ export const DEPLOYMENT_METADATA_BOOLEAN_CONFIG: Record<
   string,
   MetadataBooleanDescriptor
 > = {
-  previews_enabled: {
-    kind: 'deployment-control',
-    group: null,
-    description:
-      'Allow human-facing live preview ports to publish when runtime preview infrastructure is configured',
-  },
   deployment_disabled: {
     kind: 'deployment-control',
     group: null,

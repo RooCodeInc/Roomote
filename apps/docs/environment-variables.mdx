@@ -31,7 +31,7 @@ The exact order depends on the setting. A few important cases:
 - Model role env vars such as `R_MODEL` override the same role selected
   in **Settings > Models**.
 - Preview env vars such as `PREVIEW_PROXY_BASE_URL` override values saved from
-  **Settings > Live Previews**.
+  the preview pane's admin setup on the task page.
 - Sandbox provider credentials resolve as process env first, then saved
   deployment env vars. The default sandbox provider is special: an explicit
   admin selection saved in Roomote wins over `DEFAULT_COMPUTE_PROVIDER` because
@@ -331,7 +331,7 @@ apply semantics.
 
 | Env var                     | Required        | Used for                                                                                                     |
 | --------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| `PREVIEW_PROXY_BASE_URL`    | Preview support | Public preview-proxy origin. Overrides **Settings > Live Previews** when set.                                |
+| `PREVIEW_PROXY_BASE_URL`    | Preview support | Public preview-proxy origin. Overrides the origin saved from the preview pane's admin setup when set.        |
 | `PREVIEW_DOMAINS`           | Optional        | Comma-separated preview domains allowed by the preview proxy. Usually derived from `PREVIEW_PROXY_BASE_URL`. |
 | `ROOMOTE_PREVIEW_DOMAIN`    | Optional        | Roomote preview domain override used by preview runtime analysis.                                            |
 | `PREVIEW_TOKEN_TTL_SECONDS` | Optional        | Preview auth token lifetime. Defaults to 3600 seconds.                                                       |

@@ -13,7 +13,6 @@ import {
   buildPreviewProxyUrl,
   getPrimaryPortFromConfig,
   hasConfiguredPreviewPorts,
-  isEnvironmentPreviewEnabledInConfig,
   portNameToSlug,
 } from '@roomote/types';
 
@@ -93,9 +92,8 @@ export async function resolveThreadReplyLinkedPr(params: {
  * Resolves the shareable live-preview URL for an environment-backed task.
  *
  * Returns the preview-proxy URL for the environment's primary named port, or
- * `null` for repo-only tasks, environments without configured ports,
- * environments with previews disabled, or deployments without a resolvable
- * preview-proxy base URL.
+ * `null` for repo-only tasks, environments without configured ports, or
+ * deployments without a resolvable preview-proxy base URL.
  */
 export async function resolveThreadReplyLivePreviewUrl(
   taskId: string | null | undefined,
@@ -128,10 +126,7 @@ export async function resolveThreadReplyLivePreviewUrl(
     where: eq(environments.id, environmentId),
   });
 
-  if (
-    !hasConfiguredPreviewPorts(environment?.config) ||
-    !isEnvironmentPreviewEnabledInConfig(environment?.config)
-  ) {
+  if (!hasConfiguredPreviewPorts(environment?.config)) {
     return null;
   }
 

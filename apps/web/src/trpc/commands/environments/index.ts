@@ -858,8 +858,25 @@ async function getActiveVerificationTaskId(
   dbOrTx: DatabaseOrTransaction,
   environmentId: string,
 ): Promise<string | null> {
+  return (
+    (await getActiveEnvironmentAgentTask(dbOrTx, environmentId))?.taskId ?? null
+  );
+}
+
+/**
+ * Find the active agent task working on the given environment, if any: either
+ * a retry-launched verification task (`verifiesEnvironmentId`) or a
+ * setup/definition task (workflow `setup_onboarding` with
+ * `environmentDefinitionId`). Shared by the verification-retry guard and the
+ * preview-setup CTA so neither launches a duplicate agent while one is
+ * in flight.
+ */
+export async function getActiveEnvironmentAgentTask(
+  dbOrTx: DatabaseOrTransaction,
+  environmentId: string,
+): Promise<{ taskId: string; status: RunStatus } | null> {
   const [job] = await dbOrTx
-    .select({ taskId: taskRuns.taskId })
+    .select({ taskId: taskRuns.taskId, status: taskRuns.status })
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
@@ -877,7 +894,7 @@ async function getActiveVerificationTaskId(
     .orderBy(desc(taskRuns.createdAt), desc(taskRuns.id))
     .limit(1);
 
-  return job?.taskId ?? null;
+  return job ?? null;
 }
 
 /**

@@ -95,7 +95,6 @@ export interface MetadataRecord {
   visual_proof_auto_screencast?: boolean;
   background_subagents?: boolean;
   opencode_code_mode?: boolean;
-  previews_enabled?: boolean;
   deployment_disabled?: boolean;
   anonymous_analytics_enabled?: boolean;
   [key: string]: unknown;

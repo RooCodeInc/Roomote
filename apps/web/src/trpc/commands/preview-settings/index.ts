@@ -1,40 +1,38 @@
 import { Env } from '@/lib/server';
 import type { UserAuthSuccess } from '@/types';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
+  and,
   db,
-  deploymentSettings,
+  environments,
   eq,
+  isNull,
   resolveEffectivePreviewRuntimeConfig,
+  taskRuns,
+  withEnvironmentVerificationRetryLock,
 } from '@roomote/db/server';
 import {
-  areDeploymentPreviewsEnabled,
-  normalizeMetadataRecord,
-  setDeploymentPreviewsEnabled,
-} from '@roomote/feature-flags';
-import {
   analyzePreviewRuntimeConfig,
+  appendEnvironmentDefinitionGuidance,
+  buildEnvironmentDefinitionWorkspacePayload,
   buildExamplePreviewHostname,
   deriveRoomotePreviewDomain,
-  hasAdvancedPreviewConfig,
+  ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
   hasConfiguredPreviewPorts,
-  isEnvironmentPreviewEnabledInConfig,
+  INTERNAL_PORTS,
   isLocalPreviewDomain,
-  type EnvironmentConfig,
-  type NamedPort,
   PREVIEW_DOMAIN_ENV_VAR,
   PREVIEW_PROXY_BASE_URL_ENV_VAR,
+  TaskPayloadKind,
+  type EnvironmentConfig,
   type PreviewRuntimeConfigFields,
+  type RunStatus,
 } from '@roomote/types';
 
-import {
-  getEnvironmentByIdCommand,
-  getEnvironmentsCommand,
-  updateEnvironmentCommand,
-  type EnvironmentWithMeta,
-} from '../environments';
-import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
+import { buildUpdateEnvironmentDefinitionPrompt } from '@/lib/environment-definition';
 
-const DEFAULT_DEPLOYMENT_ID = 'default';
+import { getActiveEnvironmentAgentTask } from '../environments';
+import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 
 function assertAdmin(auth: UserAuthSuccess) {
   if (!auth.isAdmin) {
@@ -55,36 +53,15 @@ type RuntimePreviewValidation = {
 };
 
 export type PreviewSettingsStatus =
-  | 'disabled'
-  | 'configured_but_off'
   | 'missing_runtime_config'
   | 'ready'
   | 'validation_failed';
 
-export interface PreviewSettingsEnvironmentSummary {
-  id: string;
-  name: string;
-  description: string | null;
-  config: Pick<EnvironmentConfig, 'ports' | 'previews_enabled'>;
-  previewState: {
-    status:
-      | 'ready'
-      | 'deployment_disabled'
-      | 'runtime_unavailable'
-      | 'environment_disabled'
-      | 'not_configured';
-    label: string;
-  };
-  hasAdvancedPreviewConfig: boolean;
-  primaryPortName: string | null;
-}
-
 export interface PreviewSettingsSnapshot {
-  deployment: {
-    previewsEnabled: boolean;
+  runtime: {
     status: PreviewSettingsStatus;
     statusLabel: string;
-    effectiveAvailability: boolean;
+    ready: boolean;
   };
   persistedConfig: {
     previewProxyBaseUrl: string;
@@ -109,10 +86,16 @@ export interface PreviewSettingsSnapshot {
     previewOrigin: 'env' | 'deployment' | 'default' | 'missing';
     previewOriginManagedByEnv: boolean;
   };
-  environments: PreviewSettingsEnvironmentSummary[];
 }
 
 const REMOTE_PREVIEW_UI_MOCK_ENV_VAR = 'MOCK_LIVE_PREVIEWS_REMOTE_DOMAIN';
+
+function isPreviewRuntimeUiMockActive(): boolean {
+  return (
+    process.env.NODE_ENV !== 'production' &&
+    Boolean(process.env[REMOTE_PREVIEW_UI_MOCK_ENV_VAR]?.trim())
+  );
+}
 
 export function applyPreviewRuntimeUiMock(
   runtime: PreviewSettingsSnapshot['effectiveConfig'],
@@ -143,40 +126,6 @@ export function applyPreviewRuntimeUiMock(
       checkedHostname: null,
     },
   };
-}
-
-function buildEnvironmentPreviewState(params: {
-  environment: EnvironmentWithMeta;
-  deploymentEnabled: boolean;
-  runtimeReady: boolean;
-}): PreviewSettingsEnvironmentSummary['previewState'] {
-  const { environment, deploymentEnabled, runtimeReady } = params;
-
-  if (!hasConfiguredPreviewPorts(environment.config)) {
-    return { status: 'not_configured', label: 'Not configured' };
-  }
-
-  if (!deploymentEnabled) {
-    return { status: 'deployment_disabled', label: 'Configured but off' };
-  }
-
-  if (!runtimeReady) {
-    return { status: 'runtime_unavailable', label: 'Unavailable' };
-  }
-
-  if (!isEnvironmentPreviewEnabledInConfig(environment.config)) {
-    return { status: 'environment_disabled', label: 'Disabled' };
-  }
-
-  return { status: 'ready', label: 'Ready' };
-}
-
-function buildPrimaryPortName(ports: NamedPort[] | undefined): string | null {
-  if (!ports?.length) {
-    return null;
-  }
-
-  return ports.find((port) => port.primary)?.name ?? ports[0]?.name ?? null;
 }
 
 async function probePreviewHostname(
@@ -289,37 +238,20 @@ async function validateRuntimePreviewConfig(): Promise<
   });
 }
 
-function buildDeploymentStatus(params: {
-  deploymentEnabled: boolean;
-  runtimeValidation: RuntimePreviewValidation;
-}): { status: PreviewSettingsStatus; statusLabel: string } {
-  const { deploymentEnabled, runtimeValidation } = params;
-
-  if (!deploymentEnabled) {
-    if (runtimeValidation.status === 'pass') {
-      return {
-        status: 'configured_but_off',
-        statusLabel: 'Configured but off',
-      };
-    }
-
-    return { status: 'disabled', statusLabel: 'Disabled' };
+function buildRuntimeStatus(validation: RuntimePreviewValidation): {
+  status: PreviewSettingsStatus;
+  statusLabel: string;
+} {
+  if (validation.status === 'pass') {
+    return { status: 'ready', statusLabel: 'Ready' };
   }
 
-  if (runtimeValidation.status === 'fail') {
-    return {
-      status:
-        runtimeValidation.reason === 'missing_runtime_config'
-          ? 'missing_runtime_config'
-          : 'validation_failed',
-      statusLabel:
-        runtimeValidation.reason === 'missing_runtime_config'
-          ? 'Missing runtime config'
-          : 'Validation failed',
-    };
-  }
-
-  return { status: 'ready', statusLabel: 'Ready' };
+  return validation.reason === 'missing_runtime_config'
+    ? {
+        status: 'missing_runtime_config',
+        statusLabel: 'Missing runtime config',
+      }
+    : { status: 'validation_failed', statusLabel: 'Validation failed' };
 }
 
 export async function getPreviewSettingsCommand(
@@ -327,35 +259,22 @@ export async function getPreviewSettingsCommand(
 ): Promise<PreviewSettingsSnapshot> {
   assertAdmin(auth);
 
-  const [deployment, environmentList, resolvedConfig, effectiveConfig] =
-    await Promise.all([
-      db.query.deploymentSettings.findFirst({
-        where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-        columns: { metadata: true },
-      }),
-      getEnvironmentsCommand(auth),
-      resolveEffectivePreviewRuntimeConfig({
-        runtimeEnv: process.env,
-        defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
-        defaultPreviewDomains: Env.PREVIEW_DOMAINS,
-      }),
-      validateRuntimePreviewConfig(),
-    ]);
+  const [resolvedConfig, effectiveConfig] = await Promise.all([
+    resolveEffectivePreviewRuntimeConfig({
+      runtimeEnv: process.env,
+      defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
+      defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+    }),
+    validateRuntimePreviewConfig(),
+  ]);
 
-  const metadata = normalizeMetadataRecord(deployment?.metadata);
-  const deploymentEnabled = areDeploymentPreviewsEnabled(metadata);
-  const deploymentStatus = buildDeploymentStatus({
-    deploymentEnabled,
-    runtimeValidation: effectiveConfig.validation,
-  });
-  const runtimeReady = effectiveConfig.validation.status === 'pass';
+  const runtimeStatus = buildRuntimeStatus(effectiveConfig.validation);
 
   return {
-    deployment: {
-      previewsEnabled: deploymentEnabled,
-      status: deploymentStatus.status,
-      statusLabel: deploymentStatus.statusLabel,
-      effectiveAvailability: deploymentEnabled && runtimeReady,
+    runtime: {
+      status: runtimeStatus.status,
+      statusLabel: runtimeStatus.statusLabel,
+      ready: effectiveConfig.validation.status === 'pass',
     },
     persistedConfig: {
       previewProxyBaseUrl: resolvedConfig.persisted.previewProxyBaseUrl ?? '',
@@ -373,59 +292,7 @@ export async function getPreviewSettingsCommand(
       previewOriginManagedByEnv:
         resolvedConfig.sourceState.previewProxyBaseUrlManagedByRuntimeEnv,
     },
-    environments: environmentList.map((environment) => ({
-      id: environment.id,
-      name: environment.name,
-      description: environment.description,
-      config: {
-        ports: environment.config.ports,
-        previews_enabled: environment.config.previews_enabled,
-      },
-      previewState: buildEnvironmentPreviewState({
-        environment,
-        deploymentEnabled,
-        runtimeReady,
-      }),
-      hasAdvancedPreviewConfig: (environment.config.ports ?? []).some((port) =>
-        hasAdvancedPreviewConfig(port),
-      ),
-      primaryPortName: buildPrimaryPortName(environment.config.ports),
-    })),
   };
-}
-
-export async function setDeploymentPreviewEnabledCommand(
-  auth: UserAuthSuccess,
-  input: { enabled: boolean },
-) {
-  assertAdmin(auth);
-
-  const existing = await db.query.deploymentSettings.findFirst({
-    where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
-    columns: { metadata: true },
-  });
-
-  const metadata = setDeploymentPreviewsEnabled(
-    existing?.metadata,
-    input.enabled,
-  );
-
-  await db
-    .insert(deploymentSettings)
-    .values({
-      id: DEFAULT_DEPLOYMENT_ID,
-      metadata,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
-        metadata,
-        updatedAt: new Date(),
-      },
-    });
-
-  return getPreviewSettingsCommand(auth);
 }
 
 type PreviewRuntimeConfigFieldErrors = Partial<
@@ -543,34 +410,182 @@ export async function updatePreviewRuntimeConfigCommand(
   };
 }
 
-export async function updateEnvironmentPreviewCommand(
-  auth: UserAuthSuccess,
-  input: {
-    environmentId: string;
-    previewsEnabled?: boolean;
-    ports?: NamedPort[];
-  },
-) {
-  assertAdmin(auth);
+export interface TaskPreviewStatus {
+  runtimeReady: boolean;
+  environment: {
+    id: string;
+    name: string;
+    hasConfiguredPorts: boolean;
+    portNames: string[];
+  } | null;
+  runHasPreviewDomains: boolean;
+  setupTask: { taskId: string; status: RunStatus } | null;
+}
 
-  const environment = await getEnvironmentByIdCommand(auth, {
-    id: input.environmentId,
+async function resolveLatestTaskRunForTask(taskId: string) {
+  return db.query.taskRuns.findFirst({
+    columns: { payload: true, machineDomains: true },
+    where: eq(taskRuns.taskId, taskId),
+    orderBy: (table, { desc }) => [desc(table.createdAt)],
   });
+}
 
-  if (!environment) {
-    return { success: false as const, error: 'Environment not found' };
+function getEnvironmentIdFromPayload(payload: unknown): string | null {
+  const environmentId = (payload as { environmentId?: unknown } | undefined)
+    ?.environmentId;
+
+  return typeof environmentId === 'string' && environmentId.length > 0
+    ? environmentId
+    : null;
+}
+
+/**
+ * Whether preview infrastructure is ready, matching the controller-side gate
+ * that decides if environment ports publish preview domains. Deliberately skips
+ * the DNS probe so this stays cheap enough to poll from the task page.
+ */
+async function isPreviewRuntimeReady(): Promise<boolean> {
+  if (isPreviewRuntimeUiMockActive()) {
+    return true;
   }
 
-  const nextConfig: EnvironmentConfig = {
-    ...environment.config,
-    ...(input.previewsEnabled !== undefined
-      ? { previews_enabled: input.previewsEnabled }
-      : {}),
-    ...(input.ports !== undefined ? { ports: input.ports } : {}),
-  };
+  const resolvedConfig = await resolveEffectivePreviewRuntimeConfig({
+    runtimeEnv: process.env,
+    defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
+    defaultPreviewDomains: Env.PREVIEW_DOMAINS,
+  });
 
-  return updateEnvironmentCommand(auth, {
-    id: input.environmentId,
-    config: nextConfig,
+  return resolvedConfig.analysis.isReady;
+}
+
+async function loadDeploymentEnvironment(environmentId: string) {
+  const [environment] = await db
+    .select({
+      id: environments.id,
+      name: environments.name,
+      config: environments.config,
+    })
+    .from(environments)
+    .where(and(eq(environments.id, environmentId), isNull(environments.userId)))
+    .limit(1);
+
+  return environment
+    ? { ...environment, config: environment.config as EnvironmentConfig }
+    : null;
+}
+
+/**
+ * Preview availability for a task, safe for non-admin viewers: exposes only
+ * the environment id/name, port names, and readiness booleans. Admin-only
+ * infrastructure details stay behind `getPreviewSettingsCommand`.
+ */
+export async function getTaskPreviewStatusCommand(
+  _auth: UserAuthSuccess,
+  input: { taskId: string },
+): Promise<TaskPreviewStatus> {
+  const [taskRun, runtimeReady] = await Promise.all([
+    resolveLatestTaskRunForTask(input.taskId),
+    isPreviewRuntimeReady(),
+  ]);
+
+  const environmentId = getEnvironmentIdFromPayload(taskRun?.payload);
+  const runHasPreviewDomains = Object.keys(taskRun?.machineDomains ?? {}).some(
+    (portName) => !INTERNAL_PORTS.has(portName),
+  );
+
+  if (!environmentId) {
+    return {
+      runtimeReady,
+      environment: null,
+      runHasPreviewDomains,
+      setupTask: null,
+    };
+  }
+
+  const [environment, setupTask] = await Promise.all([
+    loadDeploymentEnvironment(environmentId),
+    getActiveEnvironmentAgentTask(db, environmentId),
+  ]);
+
+  return {
+    runtimeReady,
+    environment: environment
+      ? {
+          id: environment.id,
+          name: environment.name,
+          hasConfiguredPorts: hasConfiguredPreviewPorts(environment.config),
+          portNames: (environment.config.ports ?? []).map((port) => port.name),
+        }
+      : null,
+    runHasPreviewDomains,
+    setupTask,
+  };
+}
+
+/**
+ * Launch an environment-setup agent focused on getting live previews working
+ * for the task's environment. The environment id is derived server-side from
+ * the task run, so callers cannot target arbitrary environments. If an agent
+ * is already working on the environment, returns that task instead of
+ * launching a duplicate.
+ */
+export async function startPreviewSetupTaskCommand(
+  auth: UserAuthSuccess,
+  input: { taskId: string },
+): Promise<{ taskId: string; alreadyRunning: boolean }> {
+  const taskRun = await resolveLatestTaskRunForTask(input.taskId);
+  const environmentId = getEnvironmentIdFromPayload(taskRun?.payload);
+
+  if (!environmentId) {
+    throw new Error(
+      'Live preview setup is only available for environment-backed tasks.',
+    );
+  }
+
+  const environment = await loadDeploymentEnvironment(environmentId);
+
+  if (!environment) {
+    throw new Error('Environment not found');
+  }
+
+  const repositoryFullNames = environment.config.repositories.map(
+    (repository) => repository.repository,
+  );
+
+  const prompt = appendEnvironmentDefinitionGuidance(
+    buildUpdateEnvironmentDefinitionPrompt({
+      environmentId: environment.id,
+      environmentName: environment.name,
+      repositoryFullNames,
+      config: environment.config,
+    }),
+    ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
+    'Requested changes from the user:',
+  );
+
+  return withEnvironmentVerificationRetryLock(environment.id, async (tx) => {
+    const activeTask = await getActiveEnvironmentAgentTask(tx, environment.id);
+
+    if (activeTask) {
+      return { taskId: activeTask.taskId, alreadyRunning: true };
+    }
+
+    const launchResult = await enqueueTask({
+      title: `Set up live previews: ${environment.name}`,
+      task: {
+        type: TaskPayloadKind.StandardTask,
+        payload: {
+          ...buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames),
+          environmentDefinitionId: environment.id,
+          description: prompt,
+        },
+      },
+      initiator: { kind: 'user', userId: auth.userId },
+      workflow: 'setup_onboarding',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    return { taskId: launchResult.taskId, alreadyRunning: false };
   });
 }

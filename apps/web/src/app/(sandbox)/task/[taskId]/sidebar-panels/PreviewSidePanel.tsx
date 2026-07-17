@@ -41,6 +41,7 @@ import { usePreviewUrls } from '../hooks/use-preview-urls';
 import { useTaskSidePanel } from '../hooks/use-task-side-panel';
 import { shouldIncludeInPreviewServiceList } from '../preview-port-utils';
 
+import { PreviewSetupState } from './PreviewSetupState';
 import { SidePanelHeader } from './SidePanelHeader';
 
 interface PreviewEntry {
@@ -836,9 +837,7 @@ export function PreviewSidePanel({
             ) : null}
           </div>
         ) : (
-          <div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            Live Preview is not available for this task.
-          </div>
+          <PreviewSetupState taskRun={taskRun} />
         )}
       </div>
     </div>

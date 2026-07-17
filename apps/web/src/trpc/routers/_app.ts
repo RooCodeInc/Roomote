@@ -11,7 +11,6 @@ import {
   computeProviders,
   environmentConfigSchema,
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
-  namedPortSchema,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_IDS,
@@ -154,9 +153,9 @@ import {
 } from '../commands/environments';
 import {
   getPreviewSettingsCommand,
-  setDeploymentPreviewEnabledCommand,
+  getTaskPreviewStatusCommand,
+  startPreviewSetupTaskCommand,
   updatePreviewRuntimeConfigCommand,
-  updateEnvironmentPreviewCommand,
 } from '../commands/preview-settings';
 import {
   getAuthTokenCommand,
@@ -1212,12 +1211,6 @@ export const appRouter = createRouter({
       getPreviewSettingsCommand(auth),
     ),
 
-    setDeploymentEnabled: protectedProcedure
-      .input(z.object({ enabled: z.boolean() }))
-      .mutation(({ ctx: { auth }, input }) =>
-        setDeploymentPreviewEnabledCommand(auth, input),
-      ),
-
     updateRuntimeConfig: protectedProcedure
       .input(
         z.object({
@@ -1228,16 +1221,16 @@ export const appRouter = createRouter({
         updatePreviewRuntimeConfigCommand(auth, input),
       ),
 
-    updateEnvironmentPreview: protectedProcedure
-      .input(
-        z.object({
-          environmentId: z.string().uuid(),
-          previewsEnabled: z.boolean().optional(),
-          ports: z.array(namedPortSchema).optional(),
-        }),
-      )
+    taskStatus: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
+      .query(({ ctx: { auth }, input }) =>
+        getTaskPreviewStatusCommand(auth, input),
+      ),
+
+    startSetupTask: protectedProcedure
+      .input(z.object({ taskId: z.string() }))
       .mutation(({ ctx: { auth }, input }) =>
-        updateEnvironmentPreviewCommand(auth, input),
+        startPreviewSetupTaskCommand(auth, input),
       ),
   }),
   snapshots: createRouter({

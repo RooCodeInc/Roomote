@@ -1,0 +1,211 @@
+import {
+  db,
+  environmentFactory,
+  runFactory,
+  taskFactory,
+  taskRuns,
+  eq,
+} from '@roomote/db/server';
+import { RunStatus } from '@roomote/types';
+
+import type { UserAuthSuccess } from '@/types';
+
+import {
+  getTaskPreviewStatusCommand,
+  startPreviewSetupTaskCommand,
+} from './index';
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  enqueueTask: vi.fn(() => {
+    throw new Error('enqueueTask should not be called in these tests');
+  }),
+}));
+
+const auth = { userId: 'test-user', isAdmin: false } as UserAuthSuccess;
+
+async function createEnvironmentBackedTask(params: {
+  environmentId: string;
+  machineDomains?: Record<string, string>;
+}) {
+  const task = await taskFactory.create({ workflow: 'standard' });
+  const run = await runFactory.create({
+    taskId: task.id,
+    payload: {
+      repo: 'test/repo',
+      environmentId: params.environmentId,
+      description: 'work',
+    } as never,
+  });
+
+  if (params.machineDomains) {
+    await db
+      .update(taskRuns)
+      .set({ machineDomains: params.machineDomains })
+      .where(eq(taskRuns.id, run.id));
+  }
+
+  return task;
+}
+
+async function createActiveSetupTask(environmentId: string) {
+  const task = await taskFactory.create({ workflow: 'setup_onboarding' });
+  const run = await runFactory.create({
+    taskId: task.id,
+    payload: {
+      repo: 'test/repo',
+      environmentDefinitionId: environmentId,
+      description: 'setup',
+    } as never,
+  });
+  await db
+    .update(taskRuns)
+    .set({ status: RunStatus.Running })
+    .where(eq(taskRuns.id, run.id));
+  return task;
+}
+
+describe('getTaskPreviewStatusCommand', () => {
+  it('returns a null environment for repo-only tasks', async () => {
+    const task = await taskFactory.create({ workflow: 'standard' });
+    await runFactory.create({
+      taskId: task.id,
+      payload: { repo: 'test/repo', description: 'work' } as never,
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.environment).toBeNull();
+    expect(status.runHasPreviewDomains).toBe(false);
+    expect(status.setupTask).toBeNull();
+  });
+
+  it('reports configured ports and their names for environment-backed tasks', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+      config: {
+        name: 'Env',
+        repositories: [{ repository: 'test/repo' }],
+        ports: [{ name: 'WEB', port: 3000, primary: true }],
+      } as never,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.environment).toMatchObject({
+      id: environment.id,
+      hasConfiguredPorts: true,
+      portNames: ['WEB'],
+    });
+  });
+
+  it('reports missing ports without leaking environment config', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.environment?.hasConfiguredPorts).toBe(false);
+    expect(status.environment?.portNames).toEqual([]);
+    expect(status.environment).not.toHaveProperty('config');
+  });
+
+  it('ignores internal-only machine domains when reporting preview domains', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+      machineDomains: { SANDBOX_SERVER: 'internal.example.com' },
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.runHasPreviewDomains).toBe(false);
+  });
+
+  it('reports preview domains when the run exposes a user-facing port', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+      machineDomains: {
+        SANDBOX_SERVER: 'internal.example.com',
+        WEB: 'task-web.preview.example.com',
+      },
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.runHasPreviewDomains).toBe(true);
+  });
+
+  it('surfaces an active setup task for the environment', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id);
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: setupTask.id,
+      status: RunStatus.Running,
+    });
+  });
+});
+
+describe('startPreviewSetupTaskCommand', () => {
+  it('rejects repo-only tasks', async () => {
+    const task = await taskFactory.create({ workflow: 'standard' });
+    await runFactory.create({
+      taskId: task.id,
+      payload: { repo: 'test/repo', description: 'work' } as never,
+    });
+
+    await expect(
+      startPreviewSetupTaskCommand(auth, { taskId: task.id }),
+    ).rejects.toThrow(
+      'Live preview setup is only available for environment-backed tasks.',
+    );
+  });
+
+  it('returns the in-flight setup task instead of launching a duplicate', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id);
+
+    await expect(
+      startPreviewSetupTaskCommand(auth, { taskId: task.id }),
+    ).resolves.toEqual({
+      taskId: setupTask.id,
+      alreadyRunning: true,
+    });
+  });
+});
