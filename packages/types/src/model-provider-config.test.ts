@@ -10,6 +10,7 @@ import {
   groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
+  getRecommendedModelPresets,
   getSetupModelProvider,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
@@ -264,22 +265,35 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('only recommends role models from the provider suggested catalog', () => {
+  it('keeps preset models under the provider prefix and supplies metadata outside the suggested catalog', () => {
     const providers: readonly SetupModelProviderDescriptor[] =
       SETUP_MODEL_PROVIDER_CATALOG;
 
     for (const provider of providers) {
+      if (provider.dynamicModels) {
+        continue;
+      }
+
+      const expectedPrefix =
+        provider.id === 'chatgpt'
+          ? 'openai/'
+          : provider.id === 'amazon-bedrock'
+            ? 'bedrock-mantle/'
+            : `${provider.id}/`;
       const suggestedModelIds = new Set(
         provider.suggestedTaskModels.map((suggestion) => suggestion.id),
       );
 
-      for (const [role, modelId] of Object.entries(
-        provider.recommendedRoleModels ?? {},
-      )) {
-        expect(
-          modelId !== undefined && suggestedModelIds.has(modelId),
-          `${provider.id} recommends ${modelId} for ${role}, which is not in its suggestedTaskModels`,
-        ).toBe(true);
+      for (const preset of getRecommendedModelPresets(provider)) {
+        for (const role of Object.values(preset.roles)) {
+          expect(role.modelId.startsWith(expectedPrefix)).toBe(true);
+          if (!suggestedModelIds.has(role.modelId)) {
+            expect(
+              role.displayName?.length ||
+                role.modelId.split('/').at(-1)?.length,
+            ).toBeGreaterThan(0);
+          }
+        }
       }
     }
   });
@@ -537,6 +551,77 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteCodeReviewModelReasoningEffort: null,
       roomoteExploreModelReasoningEffort: null,
       roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
+  it('synthesizes a default preset from the legacy role mapping', () => {
+    const presets = getRecommendedModelPresets({
+      defaultRoomoteModel: 'example/coding',
+      recommendedRoleModels: { helper: 'example/helper' },
+    });
+
+    expect(presets).toEqual([
+      {
+        id: 'default',
+        label: 'Recommended',
+        default: true,
+        roles: {
+          coding: { modelId: 'example/coding' },
+          helper: { modelId: 'example/helper' },
+        },
+      },
+    ]);
+  });
+
+  it('resolves arbitrary preset ids and labels with role reasoning efforts', () => {
+    const provider = {
+      defaultRoomoteModel: 'example/default',
+      recommendedPresets: [
+        {
+          id: 'ship-it',
+          label: 'Ship it',
+          default: true,
+          roles: {
+            coding: {
+              modelId: 'example/coding',
+              reasoningEffort: 'high' as const,
+            },
+            helper: {
+              modelId: 'example/helper',
+              reasoningEffort: 'low' as const,
+            },
+          },
+        },
+        {
+          id: 'careful-review',
+          label: 'Careful review',
+          roles: {
+            coding: {
+              modelId: 'example/review',
+              reasoningEffort: 'xhigh' as const,
+            },
+            codeReview: {
+              modelId: 'example/reviewer',
+              reasoningEffort: 'xhigh' as const,
+            },
+          },
+        },
+      ],
+    };
+
+    expect(buildRecommendedDeploymentModelConfig(provider)).toMatchObject({
+      roomoteModel: 'example/coding',
+      roomoteSmallModel: 'example/helper',
+      roomoteModelReasoningEffort: 'high',
+      roomoteSmallModelReasoningEffort: 'low',
+    });
+    expect(
+      buildRecommendedDeploymentModelConfig(provider, 'careful-review'),
+    ).toMatchObject({
+      roomoteModel: 'example/review',
+      roomoteCodeReviewModel: 'example/reviewer',
+      roomoteModelReasoningEffort: 'xhigh',
+      roomoteCodeReviewModelReasoningEffort: 'xhigh',
     });
   });
 });

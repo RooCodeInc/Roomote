@@ -131,7 +131,7 @@ Notes:
   explicit env values, they take precedence over the persisted keypairs.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
-  configured in **Settings → Live Previews** until set.
+  configured in the task page's preview pane until set.
 
 ## Task execution
 
@@ -215,9 +215,10 @@ wildcard-capable TLS setup on the Coolify proxy:
    Coolify server and route them to the preview-proxy service. Wildcard
    HTTPS certificates require a DNS-01 challenge in Coolify's proxy
    configuration (see Coolify's wildcard/custom-proxy docs); this is the
-   advanced part and the reason previews stay off by default.
-3. Opt in from **Settings → Live Previews**, which validates the wildcard
-   hostname and enables previews per deployment and environment.
+   advanced part and the reason previews stay unconfigured by default.
+3. Open any task's preview pane as an admin to validate the wildcard
+   hostname. Previews are always enabled and publish for every environment
+   that defines preview ports.
 
 ## Upgrades, backups, and costs
 

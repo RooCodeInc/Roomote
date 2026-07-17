@@ -205,6 +205,33 @@ export function parseExcludedComputeProviders(
   );
 }
 
+/**
+ * Preferring a configured cloud provider over Local Docker when both are
+ * available. When multiple clouds are available, prefer the last one in
+ * setup-catalog order (latest cloud option among those that are ready).
+ */
+export function pickPreferredConfiguredComputeProvider(
+  providers: readonly ComputeProvider[],
+): ComputeProvider | undefined {
+  if (providers.length === 0) {
+    return undefined;
+  }
+
+  const available = new Set(providers);
+  const catalogOrdered = SETUP_COMPUTE_PROVIDER_CATALOG.map(
+    (descriptor) => descriptor.provider,
+  ).filter((provider) => available.has(provider));
+  const cloudProviders = catalogOrdered.filter(
+    (provider) => provider !== DEFAULT_SETUP_COMPUTE_PROVIDER_ID,
+  );
+
+  if (cloudProviders.length > 0) {
+    return cloudProviders[cloudProviders.length - 1];
+  }
+
+  return catalogOrdered[0];
+}
+
 export function getDefaultAvailableComputeProvider(
   excludedProviders: ReadonlySet<ComputeProvider> = new Set(),
   availableProviders?: Iterable<{
@@ -212,24 +239,41 @@ export function getDefaultAvailableComputeProvider(
     configSatisfied: boolean;
   }>,
 ): ComputeProvider {
-  if (!excludedProviders.has(DEFAULT_SETUP_COMPUTE_PROVIDER_ID)) {
+  if (availableProviders !== undefined) {
+    const satisfiedProviders = Array.from(availableProviders)
+      .filter(
+        (provider) =>
+          !excludedProviders.has(provider.provider) &&
+          provider.configSatisfied !== false,
+      )
+      .map((provider) => provider.provider);
+
+    const preferred =
+      pickPreferredConfiguredComputeProvider(satisfiedProviders);
+    if (preferred) {
+      return preferred;
+    }
+
+    // Nothing reported as ready (or everything excluded from the live set):
+    // keep Local Docker as the last-resort default id even when excluded from
+    // the operator-facing catalog.
     return DEFAULT_SETUP_COMPUTE_PROVIDER_ID;
   }
 
+  if (!excludedProviders.has(DEFAULT_SETUP_COMPUTE_PROVIDER_ID)) {
+    // No live readiness: Local Docker is the barrier default for setup when
+    // it is still allowed. Callers that know which providers are configured
+    // pass `availableProviders` so cloud can outrank docker.
+    return DEFAULT_SETUP_COMPUTE_PROVIDER_ID;
+  }
+
+  // Docker excluded and no live readiness: first catalog entry that could be
+  // operator-configured.
   return (
-    Array.from(
-      availableProviders ??
-        SETUP_COMPUTE_PROVIDER_CATALOG.map((provider) => ({
-          provider: provider.provider,
-          // Without live status, deployment-managed providers (no
-          // operator-editable fields, e.g. Roomote Cloud) cannot be assumed
-          // satisfiable: only their runtime env can configure them.
-          configSatisfied: provider.fields.some(isComputeOperatorEditableField),
-        })),
-    ).find(
+    SETUP_COMPUTE_PROVIDER_CATALOG.find(
       (provider) =>
         !excludedProviders.has(provider.provider) &&
-        provider.configSatisfied !== false,
+        provider.fields.some(isComputeOperatorEditableField),
     )?.provider ?? DEFAULT_SETUP_COMPUTE_PROVIDER_ID
   );
 }
@@ -888,16 +932,27 @@ export function buildSetupComputeStatus(input: {
           !excludedProviders.has(persistedComputeConfig.defaultProvider)
         ? persistedComputeConfig.defaultProvider
         : null;
+  const providerReadiness = providers.map((provider) => ({
+    provider: provider.provider,
+    configSatisfied: provider.configSatisfied,
+  }));
+  const configuredCloudReady = providers.some(
+    (provider) =>
+      provider.provider !== DEFAULT_SETUP_COMPUTE_PROVIDER_ID &&
+      provider.configSatisfied &&
+      !excludedProviders.has(provider.provider),
+  );
+  // Compose stacks often inject DEFAULT_COMPUTE_PROVIDER=docker. When a cloud
+  // provider is already configured, ignore that barrier default for preselect.
+  const effectiveRuntimeDefaultProvider =
+    runtimeDefaultProvider === DEFAULT_SETUP_COMPUTE_PROVIDER_ID &&
+    configuredCloudReady
+      ? null
+      : runtimeDefaultProvider;
   const preselectedProvider =
     selectedProvider ??
-    runtimeDefaultProvider ??
-    getDefaultAvailableComputeProvider(
-      excludedProviders,
-      providers.map((provider) => ({
-        provider: provider.provider,
-        configSatisfied: provider.configSatisfied,
-      })),
-    );
+    effectiveRuntimeDefaultProvider ??
+    getDefaultAvailableComputeProvider(excludedProviders, providerReadiness);
 
   const selectedProviderStatus = selectedProvider
     ? providers.find((candidate) => candidate.provider === selectedProvider)

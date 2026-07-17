@@ -7,10 +7,6 @@ import {
   resolveComputeProviderTarget,
 } from '@roomote/types';
 import {
-  areDeploymentPreviewsEnabled,
-  normalizeMetadataRecord,
-} from '@roomote/feature-flags';
-import {
   type TaskRun,
   type DatabaseOrTransaction,
   db,
@@ -33,10 +29,6 @@ interface NamedPortsResult {
   environmentConfig?: EnvironmentConfig;
 }
 
-interface DeploymentRuntimeFlags {
-  livePreviewsEnabled: boolean;
-}
-
 type ShouldEnableAuthBypassForTaskRunParams = {
   environmentConfig?: EnvironmentConfig;
   namedPorts: NamedPort[];
@@ -56,25 +48,14 @@ function configuredPreviewPortNeedsAuthBypass(port: NamedPort): boolean {
   return requiresPreviewAuth(port) && port.proxied !== false;
 }
 
-async function resolveDeploymentRuntimeFlags(): Promise<DeploymentRuntimeFlags> {
-  const settings = await db.query.deploymentSettings.findFirst({
-    columns: {
-      metadata: true,
-    },
-  });
-
-  const metadata = normalizeMetadataRecord(settings?.metadata);
+async function isPreviewRuntimeReady(): Promise<boolean> {
   const previewRuntimeConfig = await resolveEffectivePreviewRuntimeConfig({
     runtimeEnv: process.env,
     defaultPreviewProxyBaseUrl: Env.PREVIEW_PROXY_BASE_URL,
     defaultPreviewDomains: Env.PREVIEW_DOMAINS,
   });
 
-  return {
-    livePreviewsEnabled:
-      areDeploymentPreviewsEnabled(metadata) &&
-      previewRuntimeConfig.analysis.isReady,
-  };
+  return previewRuntimeConfig.analysis.isReady;
 }
 
 export function shouldEnableAuthBypassForTaskRun({
@@ -122,14 +103,10 @@ export async function getNamedPortsForTaskRun(
 
     if (environment) {
       environmentConfig = environment.config;
-      const deploymentRuntimeFlags = await resolveDeploymentRuntimeFlags();
+      const previewRuntimeReady = await isPreviewRuntimeReady();
 
       namedPorts = getNamedPortsForEnvironment({
-        ports:
-          deploymentRuntimeFlags.livePreviewsEnabled &&
-          environmentConfig.previews_enabled !== false
-            ? environmentConfig.ports
-            : undefined,
+        ports: previewRuntimeReady ? environmentConfig.ports : undefined,
       });
 
       // Check if environment has a ready snapshot we can use.

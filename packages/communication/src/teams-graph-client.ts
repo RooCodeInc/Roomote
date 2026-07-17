@@ -85,18 +85,44 @@ async function readResponseText(response: Response): Promise<string> {
  * returns rich HTML for Teams messages; this keeps mentions and line breaks
  * legible without pulling in a full HTML parser.
  */
+function stripHtmlTagsRepeatedly(value: string): string {
+  let result = value;
+  let previous: string;
+  do {
+    previous = result;
+    result = result.replace(/<[^>]*>/g, '');
+  } while (result !== previous);
+  return result;
+}
+
+function decodeHtmlEntitiesOnce(value: string): string {
+  return value.replace(/&(?:amp|lt|gt|quot|#39|nbsp);/gi, (entity) => {
+    switch (entity.slice(1, -1).toLowerCase()) {
+      case 'amp':
+        return '&';
+      case 'lt':
+        return '<';
+      case 'gt':
+        return '>';
+      case 'quot':
+        return '"';
+      case '#39':
+        return "'";
+      case 'nbsp':
+        return ' ';
+      default:
+        return entity;
+    }
+  });
+}
+
 export function teamsGraphHtmlToText(content: string): string {
-  return content
+  const withBreaks = content
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
-    .replace(/<at[^>]*>([^<]*)<\/at>/gi, '@$1')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+    .replace(/<at\b[^>]*>([^<]*)<\/at>/gi, '@$1');
+
+  return decodeHtmlEntitiesOnce(stripHtmlTagsRepeatedly(withBreaks))
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();

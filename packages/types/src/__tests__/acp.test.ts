@@ -105,6 +105,18 @@ describe('normalizeTranscriptUserText', () => {
       ),
     ).toBe('latest question');
   });
+
+  it('strips leading whitespace with an out_of_band_context block so Slack wrappers stay at offset 0', () => {
+    const block = wrapOutOfBandContext([
+      { sentAtMs: 1_700_000_000_000, text: 'notification text' },
+    ]);
+
+    expect(
+      normalizeTranscriptUserText(
+        `  \n${block}\n\n<slack_message>\nlatest question\n</slack_message>`,
+      ),
+    ).toBe('latest question');
+  });
   it('extracts only the slack_message content when thread context and reply target are present', () => {
     expect(
       normalizeTranscriptUserText(
@@ -238,6 +250,25 @@ describe('normalizeTranscriptUserText', () => {
         contentBlocks: [{ type: 'text', text: crafted }],
       }),
     ).toBe(true);
+  });
+
+  it('handles thousands of sequential valid thread_activity blocks without stack overflow', () => {
+    const blocks = Array.from(
+      { length: 2000 },
+      (_, i) =>
+        `<thread_activity>\nUser ${i}: passive note\n</thread_activity>`,
+    );
+    const activityOnly = blocks.join('\n\n');
+    const withMessage = `${activityOnly}\n\n<slack_message>\nlatest question\n</slack_message>`;
+
+    expect(
+      resolveAcpTranscriptVisibility({
+        eventType: 'roomote_runtime.user_prompt',
+        contentBlocks: [{ type: 'text', text: activityOnly }],
+      }),
+    ).toBe(false);
+    expect(normalizeTranscriptUserText(activityOnly)).toBe(activityOnly);
+    expect(normalizeTranscriptUserText(withMessage)).toBe('latest question');
   });
 
   it('strips thread_activity that appears after thread_context', () => {
@@ -418,6 +449,30 @@ describe('normalizeTranscriptUserText', () => {
         ].join('\n'),
       ),
     ).toBe('Again');
+  });
+
+  it('preserves incomplete quoted markup that only closes later with an unrelated slash', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<communication_message provider="teams">',
+          '<quoted x>user text/>keep this',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('<quoted x>user text/>keep this');
+  });
+
+  it('preserves Teams text that only looks like a quoted prefix without a tag boundary', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<communication_message provider="teams">',
+          '<quotedly/>keep this',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('<quotedly/>keep this');
   });
 
   it('returns the original text when no Slack XML blocks are present', () => {

@@ -11,6 +11,7 @@ import {
   type ComputeProvider,
   ALL_REPOSITORIES,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
@@ -86,7 +87,10 @@ function resolveInitialComputeProvider(
     return defaultComputeProvider;
   }
 
-  return availableComputeProviders[0] ?? defaultComputeProvider;
+  return (
+    pickPreferredConfiguredComputeProvider(availableComputeProviders) ??
+    defaultComputeProvider
+  );
 }
 
 type HomeProps = {
@@ -290,20 +294,52 @@ export function Home({
       | WorkspaceSelection['workspace']
       | undefined;
 
-    if (!restoredWorkspace || restoredWorkspace.type === 'auto') {
+    if (restoredWorkspace?.type === 'repository') {
+      form.setValue('repository', restoredWorkspace.value);
+      form.setValue('environmentId', undefined);
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    if (restoredWorkspace?.type === 'environment') {
+      form.setValue('repository', restoredWorkspace.id);
+      form.setValue('environmentId', restoredWorkspace.id);
+      hasRestoredWorkspace.current = true;
+      return;
+    }
+
+    // Auto (or unset) stored preference: wait for environments so we can
+    // default the sole environment instead of writing Auto over the selector.
+    if (environments.isPending || !environments.isSuccess) {
+      return;
+    }
+
+    const soleEnvironment =
+      environments.data?.length === 1 ? environments.data[0] : undefined;
+
+    if (soleEnvironment) {
+      form.setValue('repository', soleEnvironment.id);
+      form.setValue('environmentId', soleEnvironment.id);
+      form.setValue('branch', '');
+      setWorkspace({
+        workspace: { type: 'environment', id: soleEnvironment.id },
+      });
+    } else {
       form.setValue('repository', AUTO_WORKSPACE_VALUE);
       form.setValue('environmentId', undefined);
       form.setValue('branch', '');
-    } else if (restoredWorkspace.type === 'repository') {
-      form.setValue('repository', restoredWorkspace.value);
-      form.setValue('environmentId', undefined);
-    } else if (restoredWorkspace.type === 'environment') {
-      form.setValue('repository', restoredWorkspace.id);
-      form.setValue('environmentId', restoredWorkspace.id);
     }
 
     hasRestoredWorkspace.current = true;
-  }, [environmentIdParam, form, setWorkspace, workspace]);
+  }, [
+    environmentIdParam,
+    environments.data,
+    environments.isPending,
+    environments.isSuccess,
+    form,
+    setWorkspace,
+    workspace,
+  ]);
 
   const wiggleWorkspace = useCallback(() => {
     const el = workspaceRef.current;

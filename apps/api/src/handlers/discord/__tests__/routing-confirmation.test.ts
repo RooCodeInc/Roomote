@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   getAvailableEnvironments: vi.fn(),
+  getRoutingAutoConfirmDelayMs: vi.fn(),
   getTaskUrl: vi.fn(),
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
@@ -14,7 +15,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getAvailableEnvironments: mocks.getAvailableEnvironments,
+  getRoutingAutoConfirmDelayMs: mocks.getRoutingAutoConfirmDelayMs,
   getTaskUrl: mocks.getTaskUrl,
+  ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 30_000,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -51,6 +54,7 @@ describe('Discord routing confirmation', () => {
       { id: 'env-1', name: 'Sunny Acres', repositoryNames: ['acme/game'] },
       { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
     ]);
+    mocks.getRoutingAutoConfirmDelayMs.mockReturnValue(30_000);
     mocks.redisSet.mockResolvedValue('OK');
     mocks.reserveAnchoredThread.mockResolvedValue(null);
     mocks.forgetPendingTaskThread.mockResolvedValue(undefined);
@@ -71,6 +75,11 @@ describe('Discord routing confirmation', () => {
   });
 
   it('auto-confirms only high-confidence, unremapped routes', () => {
+    mocks.getRoutingAutoConfirmDelayMs
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(30_000)
+      .mockReturnValueOnce(30_000);
+
     expect(
       shouldAutoConfirmDiscordRoute({
         status: 'routed',
@@ -101,6 +110,26 @@ describe('Discord routing confirmation', () => {
         },
       }),
     ).toBe(false);
+    expect(
+      shouldAutoConfirmDiscordRoute({
+        status: 'routed',
+        result: {
+          workspace: { type: 'all_repositories' },
+          reasoning: 'broad match',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.99,
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(mocks.getRoutingAutoConfirmDelayMs).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ confidence: 0.99 }),
+      'all_repositories',
+    );
   });
 
   it('persists a pending route and posts workspace buttons', async () => {
@@ -349,6 +378,400 @@ describe('Discord routing confirmation', () => {
     });
   });
 
+  it('auto-confirms the suggestion when the card goes unanswered', async () => {
+    // Slack and Telegram both auto-confirm; without this a Discord card just
+    // expires with its TTL and the request is silently lost.
+    vi.useFakeTimers();
+    try {
+      mocks.reserveAnchoredThread.mockResolvedValue({
+        channelId: 'message-1',
+        parentChannelId: 'channel-1',
+        name: 'Fix matchmaking',
+        kind: 'thread',
+        messageId: 'message-1',
+      });
+      mocks.reply.mockResolvedValue({ messageId: 'card-1' });
+
+      await requestDiscordRoutingConfirmation({
+        provider: {} as never,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+          communicationAnchorMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      // The card names the workspace it will fall back to, and says when.
+      expect(mocks.reply.mock.lastCall?.[0]?.text).toBe(
+        'Where should I run this? The best match is **Sunny Acres** — starting in ~30s.',
+      );
+      // The card id is only knowable after posting, so the route is re-stored.
+      const stored = JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string);
+      expect(stored).toMatchObject({
+        suggestedIndex: 0,
+        cardMessageId: 'card-1',
+      });
+      expect(mocks.launchTask).not.toHaveBeenCalled();
+
+      mocks.redisGetdel.mockResolvedValue(JSON.stringify(stored));
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      // No interaction — nobody clicked — so the card is replaced by id.
+      expect(mocks.launchTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          replaceMessage: {
+            channel: expect.objectContaining({ channelId: 'message-1' }),
+            messageId: 'card-1',
+          },
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('finalizes an auto-confirmed routing card outside the task thread', async () => {
+    vi.useFakeTimers();
+    try {
+      const editMessage = vi.fn().mockResolvedValue(undefined);
+      const provider = { editMessage } as never;
+      mocks.reserveAnchoredThread.mockResolvedValue(null);
+      mocks.reply.mockResolvedValue({ messageId: 'card-1' });
+      mocks.launchTask.mockResolvedValue({
+        createdThread: null,
+        taskUrl: 'https://roomote.example/task/task-1',
+        launchResult: { id: 42, taskId: 'task-1' },
+      });
+
+      await requestDiscordRoutingConfirmation({
+        provider,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'dm-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'dm-1',
+          channelName: 'Direct message',
+          channelType: 1,
+          isDirectMessage: true,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      const stored = JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string);
+      mocks.redisGetdel.mockResolvedValue(JSON.stringify(stored));
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mocks.launchTask).toHaveBeenCalledWith(
+        expect.not.objectContaining({ replaceMessage: expect.anything() }),
+      );
+      expect(editMessage).toHaveBeenCalledWith({
+        channelId: 'dm-1',
+        messageId: 'card-1',
+        text: 'Started in **Sunny Acres**.',
+        buttons: [
+          [
+            {
+              text: 'Follow Task',
+              url: 'https://roomote.example/task/task-1',
+            },
+          ],
+        ],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('restores the route when an auto-confirm launch fails', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.reserveAnchoredThread.mockResolvedValue(null);
+      mocks.reply.mockResolvedValue({ messageId: 'card-1' });
+
+      await requestDiscordRoutingConfirmation({
+        provider: {} as never,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      const routeKey = mocks.redisSet.mock.lastCall?.[0] as string;
+      const stored = JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string);
+      mocks.redisGetdel.mockResolvedValue(JSON.stringify(stored));
+      mocks.launchTask.mockRejectedValueOnce(new Error('queue unavailable'));
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mocks.redisSet.mock.lastCall).toEqual([
+        routeKey,
+        JSON.stringify(stored),
+        'EX',
+        900,
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not resurrect a route claimed while the card was still posting', async () => {
+    // The card id is only knowable after posting, so the route is written a
+    // second time. A Nevermind landing in that window has already claimed the
+    // route; an unconditional write would bring it back and the timer would
+    // then launch the request the user just canceled.
+    mocks.reserveAnchoredThread.mockResolvedValue(null);
+
+    await requestDiscordRoutingConfirmation({
+      provider: {} as never,
+      applicationId: 'app-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix matchmaking',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      routingDecision: {
+        status: 'routed',
+        result: {
+          workspace: { type: 'environment', id: 'env-1', name: 'Sunny Acres' },
+          reasoning: 'likely',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.7,
+          },
+        },
+      },
+    });
+
+    expect(mocks.redisSet).toHaveBeenCalledTimes(2);
+    expect(mocks.redisSet.mock.calls[0]).not.toContain('XX');
+    expect(mocks.redisSet.mock.calls[1]).toContain('XX');
+  });
+
+  it('never auto-confirms a card the router had no suggestion for', async () => {
+    // A fallback card is a plain menu. Auto-confirming its first option would
+    // launch an alphabetical accident nobody chose.
+    vi.useFakeTimers();
+    try {
+      await requestDiscordRoutingConfirmation({
+        provider: {} as never,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        routingDecision: { status: 'fallback', reason: 'ambiguous' },
+      });
+
+      expect(mocks.reply.mock.lastCall?.[0]?.text).toBe(
+        'Where should I run this?',
+      );
+      expect(
+        JSON.parse(mocks.redisSet.mock.lastCall?.[1] as string).suggestedIndex,
+      ).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(mocks.launchTask).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not auto-confirm a route the requester already answered', async () => {
+    // The click claims the route atomically, so the timer finds nothing.
+    vi.useFakeTimers();
+    try {
+      mocks.reserveAnchoredThread.mockResolvedValue(null);
+      await requestDiscordRoutingConfirmation({
+        provider: {} as never,
+        applicationId: 'app-1',
+        requesterDiscordUserId: 'discord-user-1',
+        launchOwnerUserId: 'user-1',
+        queuedMessage: {
+          provider: 'discord',
+          text: 'Fix matchmaking',
+          user: 'Matt',
+          userId: 'user-1',
+          ts: 'message-1',
+        },
+        metadata: {
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationMessageId: 'message-1',
+        },
+        channel: {
+          channelId: 'channel-1',
+          channelName: 'general',
+          channelType: 0,
+          guildId: 'guild-1',
+          isDirectMessage: false,
+          isThread: false,
+        },
+        routingDecision: {
+          status: 'routed',
+          result: {
+            workspace: {
+              type: 'environment',
+              id: 'env-1',
+              name: 'Sunny Acres',
+            },
+            reasoning: 'likely',
+            debug: {
+              phase: 'direct',
+              toolsUsed: [],
+              needsExternalLookup: false,
+              confidence: 0.7,
+            },
+          },
+        },
+      });
+
+      mocks.redisGetdel.mockResolvedValue(null);
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(mocks.launchTask).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps every stored route visible within Discord action-row limits', async () => {
     mocks.getAvailableEnvironments.mockResolvedValue(
       Array.from({ length: 6 }, (_, index) => ({
@@ -394,7 +817,7 @@ describe('Discord routing confirmation', () => {
       'All repositories',
     );
     expect(buttons.at(-1)).toEqual([
-      expect.objectContaining({ text: 'Nevermind' }),
+      expect.objectContaining({ text: 'Never mind' }),
     ]);
   });
 

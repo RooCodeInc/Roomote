@@ -101,7 +101,11 @@ export function buildSignedArtifactRawUrl(input: {
   signingKey: string;
 }): string {
   const signature = signWithKey(input.signingKey, input.artifactId, input.ts);
-  const normalizedBaseUrl = input.apiBaseUrl.replace(/\/+$/, '');
+  let end = input.apiBaseUrl.length;
+  while (end > 0 && input.apiBaseUrl.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  const normalizedBaseUrl = input.apiBaseUrl.slice(0, end);
 
   return `${normalizedBaseUrl}/api/artifacts/${input.artifactId}/raw?sig=${signature}&ts=${input.ts}`;
 }

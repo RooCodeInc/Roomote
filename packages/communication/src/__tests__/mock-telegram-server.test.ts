@@ -328,7 +328,7 @@ describe('MockTelegramServer', () => {
       text: 'Okay — where should I run this?',
       buttons: [
         [{ text: 'web-app', callbackData: 'route_pick:def456UVW012:0' }],
-        [{ text: '✖️ Nevermind', callbackData: 'route_no:def456UVW012' }],
+        [{ text: '✖️ Never mind', callbackData: 'route_no:def456UVW012' }],
       ],
     });
 
@@ -339,7 +339,7 @@ describe('MockTelegramServer', () => {
     expect(message?.reply_markup).toEqual({
       inline_keyboard: [
         [{ text: 'web-app', callback_data: 'route_pick:def456UVW012:0' }],
-        [{ text: '✖️ Nevermind', callback_data: 'route_no:def456UVW012' }],
+        [{ text: '✖️ Never mind', callback_data: 'route_no:def456UVW012' }],
       ],
     });
 

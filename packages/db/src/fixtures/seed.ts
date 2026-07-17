@@ -18,23 +18,13 @@ function normalizeMetadataRecord(metadata: unknown): Record<string, unknown> {
     : {};
 }
 
-function setDeploymentPreviewsEnabled(
-  metadata: Record<string, unknown>,
-  enabled: boolean,
-) {
-  return {
-    ...normalizeMetadataRecord(metadata),
-    previews_enabled: enabled,
-  };
-}
-
 async function seed() {
   console.log('Seeding local Roomote database...');
 
   const now = new Date();
   const settings: CreateDeploymentSettings = {
     id: deploymentSettingsId,
-    metadata: setDeploymentPreviewsEnabled(deploymentMetadata, false),
+    metadata: deploymentMetadata,
   };
 
   const existingSettings = await db.query.deploymentSettings.findFirst({

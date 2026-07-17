@@ -18,6 +18,7 @@ const {
   envMock,
   getAvailableEnvironmentsMock,
   getBotInfoMock,
+  getRoutingAutoConfirmDelayMsMock,
   getTaskUrlMock,
   insertMock,
   insertOnConflictDoNothingMock,
@@ -52,6 +53,7 @@ const {
   environmentsFindFirstMock: vi.fn(),
   getAvailableEnvironmentsMock: vi.fn(),
   getBotInfoMock: vi.fn(),
+  getRoutingAutoConfirmDelayMsMock: vi.fn(),
   envMock: {
     R_APP_URL: 'https://app.example.com',
     R_TELEGRAM_BOT_TOKEN: 'bot-token' as string | undefined,
@@ -280,6 +282,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildTelegramRoutingContext: buildTelegramRoutingContextMock,
   enqueueTask: enqueueTaskMock,
   getAvailableEnvironments: getAvailableEnvironmentsMock,
+  getRoutingAutoConfirmDelayMs: getRoutingAutoConfirmDelayMsMock,
   getTaskUrl: getTaskUrlMock,
   routeTask: routeTaskMock,
 }));
@@ -369,6 +372,7 @@ describe('Telegram webhook handler', () => {
     redisGetdelMock.mockResolvedValue(null);
     environmentsFindFirstMock.mockResolvedValue(undefined);
     getAvailableEnvironmentsMock.mockResolvedValue([]);
+    getRoutingAutoConfirmDelayMsMock.mockReturnValue(30_000);
     editMessageTextMock.mockResolvedValue(undefined);
     setLatestInboundMessageIdMock.mockResolvedValue(undefined);
     authUsersFindFirstMock.mockResolvedValue(null);
@@ -1707,7 +1711,7 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        text: expect.stringContaining('Planning to run this in **Web App**'),
+        text: 'Planning to run this in **Web App** — starting in ~30s.',
         // Compact Yes/Nope card — the workspace list only appears after Nope.
         buttons: [
           [
@@ -1758,7 +1762,7 @@ describe('Telegram webhook handler', () => {
         buttons: [
           [expect.objectContaining({ text: 'Web App' })],
           [expect.objectContaining({ text: 'All repositories' })],
-          [expect.objectContaining({ text: '✖️ Nevermind' })],
+          [expect.objectContaining({ text: '✖️ Never mind' })],
         ],
       }),
     );
@@ -1766,6 +1770,7 @@ describe('Telegram webhook handler', () => {
 
   it('launches immediately from a captioned photo when routing confidence is high', async () => {
     mockTelegramLinkedSender('launch-owner-22');
+    getRoutingAutoConfirmDelayMsMock.mockReturnValueOnce(0);
     getAvailableEnvironmentsMock.mockResolvedValue([
       { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
       { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
@@ -1976,7 +1981,7 @@ describe('Telegram webhook handler', () => {
           ],
           [
             expect.objectContaining({
-              text: '✖️ Nevermind',
+              text: '✖️ Never mind',
               callbackData: expect.stringMatching(/^route_no:[\w-]+$/),
             }),
           ],
@@ -2079,7 +2084,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('dismisses the confirmation without launching when Nevermind is clicked', async () => {
+  it('dismisses the confirmation without launching when Never mind is clicked', async () => {
     mockTelegramLinkedSender('launch-owner-25');
     const pending = JSON.stringify({
       launchOwnerUserId: 'launch-owner-25',

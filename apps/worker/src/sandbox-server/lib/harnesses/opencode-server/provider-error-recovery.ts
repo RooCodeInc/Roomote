@@ -1,0 +1,200 @@
+import { asFiniteNumber, asRecord, asString } from '@roomote/types';
+
+const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 1;
+const DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES = 2;
+
+const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT = [
+  'Continue. The previous model request failed due to a provider error and was automatically retried.',
+  'Resume from where you left off without restating the provider error.',
+].join(' ');
+
+const OPENCODE_POLICY_REFUSAL_RETRY_PROMPT_TEXT = [
+  'Continue the legitimate task. The previous model request was declined by the provider safety policy.',
+  'Do not attempt to bypass the policy or reproduce sensitive payloads, exploit strings, or operational instructions that may have triggered it.',
+  'Use a high-level summary or safer abstraction where needed, then resume from where you left off.',
+].join(' ');
+
+export type OpenCodeProviderErrorRecovery = {
+  kind: 'policy_refusal' | 'provider_error';
+  maxRetries: number;
+  promptText: string;
+};
+
+const POLICY_CODES = new Set([
+  'cyber_policy',
+  'content_policy',
+  'content_policy_violation',
+  'safety_policy',
+]);
+
+const TERMINAL_CODES = new Set([
+  'authentication_error',
+  'billing_error',
+  'context_length_exceeded',
+  'forbidden',
+  'insufficient_quota',
+  'invalid_api_key',
+  'invalid_model',
+  'model_not_found',
+  'permission_denied',
+  'unauthorized',
+]);
+
+const TERMINAL_STATUS_CODES = new Set([400, 401, 403, 404, 422]);
+
+function collectProviderErrorValues(error: unknown): unknown[] {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const collected: unknown[] = [];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+
+    if (!current || current.depth > 4) {
+      continue;
+    }
+
+    const { value, depth } = current;
+    collected.push(value);
+
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value) as unknown, depth: depth + 1 });
+      } catch {
+        // Not JSON; the raw text is still useful for marker detection below.
+      }
+      continue;
+    }
+
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+
+    for (const nested of Object.values(value)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return collected;
+}
+
+function normalizeCode(value: unknown): string | undefined {
+  const code = asString(value)?.trim().toLowerCase();
+  return code || undefined;
+}
+
+function isPolicyRefusal(values: unknown[]): boolean {
+  for (const value of values) {
+    const record = asRecord(value);
+    const code = normalizeCode(record?.code);
+    const name = normalizeCode(record?.name);
+
+    if ((code && POLICY_CODES.has(code)) || name === 'contentfiltererror') {
+      return true;
+    }
+
+    if (typeof value === 'string') {
+      const lower = value.toLowerCase();
+
+      if (
+        lower.includes('cyber_policy') ||
+        lower.includes('content_policy_violation') ||
+        lower.includes('flagged for possible cybersecurity risk') ||
+        lower.includes("blocked by the provider's content filter") ||
+        lower.includes('declined by the provider safety policy')
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function isExplicitlyTerminal(values: unknown[]): boolean {
+  for (const value of values) {
+    const record = asRecord(value);
+
+    if (record?.isRetryable === false) {
+      return true;
+    }
+
+    const statusCode =
+      asFiniteNumber(record?.statusCode) ?? asFiniteNumber(record?.status);
+
+    if (statusCode !== undefined && TERMINAL_STATUS_CODES.has(statusCode)) {
+      return true;
+    }
+
+    const code = normalizeCode(record?.code);
+
+    if (code && TERMINAL_CODES.has(code)) {
+      return true;
+    }
+
+    if (typeof value === 'string') {
+      const lower = value.toLowerCase();
+
+      if (
+        lower.includes('api key is missing') ||
+        lower.includes('invalid api key') ||
+        lower.includes('authentication failed') ||
+        lower.includes('model is not available') ||
+        lower.includes('model not found') ||
+        lower.includes('maximum context length') ||
+        lower.includes('insufficient quota')
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Provider session errors are recoverable by default because they normally
+ * invalidate one model turn, not the OpenCode session or Roomote task. Keep a
+ * small bounded retry budget, while explicit auth/configuration failures fail
+ * immediately instead of burning requests that cannot succeed.
+ */
+export function getOpenCodeProviderErrorRecovery(
+  error: unknown,
+): OpenCodeProviderErrorRecovery | null {
+  const values = collectProviderErrorValues(error);
+
+  if (isPolicyRefusal(values)) {
+    return {
+      kind: 'policy_refusal',
+      maxRetries: DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES,
+      promptText: OPENCODE_POLICY_REFUSAL_RETRY_PROMPT_TEXT,
+    };
+  }
+
+  if (isExplicitlyTerminal(values)) {
+    return null;
+  }
+
+  return {
+    kind: 'provider_error',
+    maxRetries: DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES,
+    promptText: OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT,
+  };
+}
+
+export function formatOpenCodeProviderErrorRetryNoticeText(options: {
+  kind: OpenCodeProviderErrorRecovery['kind'];
+  attemptNumber: number;
+  maxAttempts: number;
+}): string {
+  const label =
+    options.kind === 'policy_refusal'
+      ? 'Provider safety refusal'
+      : 'Provider error';
+
+  return `${label}; automatically retrying the turn (attempt ${options.attemptNumber}/${options.maxAttempts}).`;
+}

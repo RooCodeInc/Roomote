@@ -88,6 +88,13 @@ Use localhost or the environment's initial URL to confirm the expected service r
 When you have a clear outcome, record it by calling the ${PRODUCT_NAME} MCP tool \`manage_environments\` with \`action: "record_verification"\`, \`environmentId: "${input.environmentId}"\`, and \`success: true\` when the environment looks ready or \`success: false\` with a short, user-safe \`error\` describing what failed. Do not include secrets or the full environment YAML in the error text.`;
 }
 
+/**
+ * Canned change request for the preview pane's "set up previews with an agent"
+ * CTA. Appended to the update-environment prompt so the environment-setup
+ * skill focuses on publishing live preview ports.
+ */
+export const ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST = `Get live previews working for this environment. You are running inside the environment, so its commands and services have already started. Identify the human-facing web UI surface(s), validate that each one serves HTTP on localhost, and add a matching top-level \`ports\` entry for each: short uppercase \`name\`, the validated port, \`initial_path\` when a specific landing path is better than \`/\`, and \`primary: true\` on the main surface. If the config contains \`previews_enabled: false\`, remove it; that flag is deprecated and ignored. Keep every other environment setting unchanged unless it blocks the app from starting.`;
+
 export function appendEnvironmentDefinitionGuidance(
   prompt: string,
   guidance: string | null | undefined,

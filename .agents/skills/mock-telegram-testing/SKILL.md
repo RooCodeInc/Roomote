@@ -160,7 +160,7 @@ See `references/scenarios.md` for the full user-journey catalog. Common picks:
 - **`unlinked-sender`** — message from an unmapped Telegram user is nudged and dropped
 - **`long-reply-chunking`** — worker reply over 4096 chars splits into multiple messages
 - **`cancel-button`** — callback_query cancels the running job
-- **`routing-confirmation`** — low-confidence route posts a workspace picker; Nevermind is the zero-side-effect live-test path
+- **`routing-confirmation`** — low-confidence route posts a workspace picker; Never mind is the zero-side-effect live-test path
 
 LLM-judged eval scenarios live in `packages/communication/evals/scenarios/` and run via `pnpm --filter @roomote/communication eval:telegram-scenario`.
 

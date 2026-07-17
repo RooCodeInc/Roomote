@@ -235,9 +235,10 @@ directly to MinIO for presigned artifact uploads and downloads, and sends all
 other paths, including web auth, browser tRPC, Slack OAuth, and UI routes, to
 `web:3000`.
 
-After those values are in place, use the admin **Settings → Live Previews**
-page to confirm the detected runtime config, validate the wildcard preview
-hostname, and opt previews in at the deployment and environment levels.
+After those values are in place, open any task's preview pane as an admin to
+confirm the detected runtime config and validate the wildcard preview
+hostname. Live previews are always enabled: they publish for every environment
+that defines preview ports once the runtime config is ready.
 
 ## Model Provider
 
@@ -522,7 +523,7 @@ the queue workers keep running.
 
 `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` no longer block startup when
 unset: live previews simply report as not configured until you set the values
-via env or from **Settings → Live Previews**.
+via env or from the preview pane's admin setup on any task page.
 
 `SETUP_TOKEN` protects the pre-auth `/setup` bootstrap wizard, which admits the
 deployment's first admin. Until initial setup completes, the wizard rejects

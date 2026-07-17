@@ -15,14 +15,14 @@ import {
   type DiscordCommunicationProvider,
   type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
-import type {
-  DiscordEventCommunicationMetadata,
-  DiscordInteraction,
-} from '@roomote/communication/discord-event';
+import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
-import { replyToDiscordEvent } from './replies.js';
+import {
+  replaceOrPostDiscordMessage,
+  type DiscordMessageToReplace,
+} from './replies.js';
 import {
   discordTaskAcknowledgementText,
   discordTaskButtons,
@@ -261,12 +261,7 @@ export async function launchDiscordTask(input: {
    * started message rather than being followed by an identical one. Only pass
    * a message that lives where the acknowledgement would have gone.
    */
-  replaceMessage?: {
-    applicationId: string;
-    interaction: DiscordInteraction;
-    interactionDeferred: boolean;
-    channel: DiscordChannelContext;
-  };
+  replaceMessage?: DiscordMessageToReplace;
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
@@ -361,14 +356,9 @@ export async function launchDiscordTask(input: {
   // Replacing already falls back to posting when the original message cannot
   // be edited, so the task is acknowledged either way.
   const acknowledgement = input.replaceMessage
-    ? await replyToDiscordEvent({
+    ? await replaceOrPostDiscordMessage({
         provider: input.provider,
-        applicationId: input.replaceMessage.applicationId,
-        channel: input.replaceMessage.channel,
-        interaction: {
-          interaction: input.replaceMessage.interaction,
-          interactionDeferred: input.replaceMessage.interactionDeferred,
-        },
+        replace: input.replaceMessage,
         ...acknowledgementMessage,
       })
     : await input.provider.postMessage({

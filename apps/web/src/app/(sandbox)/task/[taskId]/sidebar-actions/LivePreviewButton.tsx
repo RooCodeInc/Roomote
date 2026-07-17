@@ -34,8 +34,13 @@ function LivePreviewButtonBase({
   const [showWakeDialog, setShowWakeDialog] = useState(false);
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
     usePreviewUrls(taskRun ?? {});
-  const { isViewActive, openPreviewView, previewPath, previewServiceName } =
-    useTaskSidePanel();
+  const {
+    isViewActive,
+    openPreviewSetupView,
+    openPreviewView,
+    previewPath,
+    previewServiceName,
+  } = useTaskSidePanel();
   const { openPreviewPane } = usePreviewPane();
   const restoreSnapshot = useRestoreTaskRunSnapshot({
     onSuccess: () => setShowWakeDialog(false),
@@ -52,6 +57,12 @@ function LivePreviewButtonBase({
     primaryPortName,
   });
 
+  // Repo-only tasks have no environment to preview, so the button is hidden
+  // entirely rather than opening a pane with nothing actionable in it.
+  if (!taskRun?.payload?.environmentId) {
+    return null;
+  }
+
   const asleep = isTaskRunAsleep(taskRun);
   const canWakeForPreview =
     asleep && !!taskRun?.snapshotId && !!resolvedPreviewUrl;
@@ -59,20 +70,15 @@ function LivePreviewButtonBase({
     resolvedPreviewUrl && taskRun
       ? buildPreviewIframeUrl(resolvedPreviewUrl, taskRun.id)
       : null;
-  const disabled =
-    disabledUntilReady ||
-    !taskRun ||
-    !resolvedPreviewUrl ||
-    (asleep && !canWakeForPreview);
+  const hasPreviewUrl = Boolean(resolvedPreviewUrl);
+  const disabled = disabledUntilReady || !taskRun;
   const tooltip = disabledUntilReady
     ? undefined
     : canWakeForPreview
       ? 'Wake up Roomote to use Live Preview'
-      : asleep
-        ? 'Live Preview is only available when Roomote is awake'
-        : !resolvedPreviewUrl
-          ? 'Live Preview is not available'
-          : 'Live Preview';
+      : !hasPreviewUrl
+        ? 'Set up Live Preview'
+        : 'Live Preview';
 
   const handleWakeConfirm = async () => {
     if (!taskRun?.snapshotId || restoreSnapshot.isPending) {
@@ -123,18 +129,28 @@ function LivePreviewButtonBase({
             ? 'Wake this task so live preview becomes available'
             : disabled
               ? undefined
-              : "Preview this task's app"
+              : hasPreviewUrl
+                ? "Preview this task's app"
+                : 'Set up live previews for this task'
         }
         active={!disabled && !canWakeForPreview && isViewActive('preview')}
         disabled={disabled}
         href={
-          canWakeForPreview || disabled ? undefined : (openUrl ?? undefined)
+          canWakeForPreview || disabled || !hasPreviewUrl
+            ? undefined
+            : (openUrl ?? undefined)
         }
         useNativeLink={true}
-        onClick={canWakeForPreview ? () => setShowWakeDialog(true) : undefined}
+        onClick={
+          canWakeForPreview
+            ? () => setShowWakeDialog(true)
+            : !hasPreviewUrl
+              ? openPreviewSetupView
+              : undefined
+        }
         icon={AppWindow}
         linkProps={
-          disabled || canWakeForPreview
+          disabled || canWakeForPreview || !hasPreviewUrl
             ? undefined
             : {
                 rel: 'noreferrer',

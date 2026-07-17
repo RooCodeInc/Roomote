@@ -2,6 +2,52 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.9.0 (2026-07-17)
+
+### Minor changes
+
+- Live previews are always available when the preview runtime is ready and the environment defines ports. The preview pane stays open for setup (runtime, ports, and broken-preview help) instead of being gated behind an enable/disable setting.
+
+### Patch changes
+
+- Unanswered Discord routing suggestion cards now auto-confirm after 30 seconds, matching Slack, so a suggested environment still launches if nobody clicks. Fallback cards without a real suggestion no longer claim a best match or auto-launch.
+- On deployments with only one environment, the homepage workspace control defaults to that environment instead of remaining on Auto.
+- When Local Docker and a cloud sandbox provider are both configured, the default sandbox provider now prefers the ready cloud provider so homepage and launch defaults no longer stick on Local Docker.
+- Telegram routing confirmation cards use the same 30-second auto-confirm window as Slack and Discord, so there is one consistent correction window across chat providers.
+
+## 0.8.1 (2026-07-17)
+
+### Patch changes
+
+- Clarify Review Code wording and section ordering on the Automations settings page so source-code, Slack, manager, and meta automations are easier to scan.
+- Create account and other credential fields no longer block password managers, so 1Password can offer to generate and save passwords on signup.
+- Task log tails again allow intentional `/tmp` paths such as harness and environment log files, while still blocking absolute paths outside that boundary.
+- Spell cancel buttons as **Never mind** (two words) on Slack, Discord, and Telegram task and workspace pickers.
+- Recover from bounded model-provider turn errors, including safety-policy refusals, without immediately aborting the Roomote task.
+- Slack transcript decoding no longer crashes with a stack overflow when a thread contains a long sequence of thread-activity blocks.
+
+## 0.8.0 (2026-07-17)
+
+### Minor changes
+
+- Route task-sandbox inference through a control-plane gateway for every deployment: provider API keys and ChatGPT subscription auth stay server-side, sandboxes call `/api/inference` with a run-scoped token, and the InferenceGateway feature flag is removed so this is always on.
+- Allow self-hosted operators to set the paid-seat license key via the `R_LICENSE_KEY` environment variable (takes precedence over Settings → Users).
+- Add provider-local model mapping presets in Settings so operators can choose labeled mapping sets (including OpenRouter Balanced and Quick turnaround), confirm the selected mapping before it applies, and automatically add or enable referenced models.
+- Remove the authorship-rules feature (settings UI, compiler, and enqueue-time evaluation). Task commit authors and PR assignees now always use default attribution.
+
+### Patch changes
+
+- Automation labels spell the CodeQL brand correctly, so `codeql_triage` surfaces as “CodeQL Triage” instead of “Codeql Triage” in task filters, analytics, and attribution.
+- Temporarily disable Google Vertex AI and remove legacy direct Mistral execution. Model-provider credentials now enter task sandboxes only through the selected runtime provider allowlist, while unrelated task environment variables remain available.
+- Clarify the Discord install flow (including dropping the permissions integer from operator-facing guidance) and recover the Discord gateway when a deployment never received a gateway secret instead of staying stuck offline.
+- When both an OpenAI API key and a ChatGPT subscription are connected, Settings again shows a separate OpenAI provider section instead of folding every `openai/` model under ChatGPT (subscription).
+- Tasks no longer abort when OpenCode surfaces a provider rate-limit as a terminal session error; the worker treats those limits as retryable and continues the run after backoff.
+- OpenRouter Connect works for self-hosted deployments whose public app URL is a loopback address, instead of failing the OAuth handoff in that configuration.
+- Refresh the shipped worker runtime when restoring task snapshots so snapshots created by an older release remain compatible with current runtime protocols such as the inference gateway.
+- Shared links into the product app now resolve to short static page titles and one-line descriptions (task, settings, history, sign-in, setup, onboarding) instead of the generic global fallback.
+- Harden high-confidence security gaps: shell-escape untrusted git and GitHub CLI arguments, tighten OAuth account linking, and strengthen run-token authentication used by sandbox runtime traffic.
+- Slack transcript decoding no longer hangs when thread activity contains crafted or pathological input.
+
 ## 0.7.1 (2026-07-16)
 
 ### Patch changes

@@ -150,11 +150,6 @@ describe('getNamedPortsForTaskRun', () => {
   });
 
   it('exposes configured preview ports', async () => {
-    mockDeploymentSettingsFindFirst.mockResolvedValueOnce({
-      metadata: {
-        previews_enabled: true,
-      },
-    });
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
       id: 'env-123',
       config: mockEnvironmentConfig({
@@ -183,10 +178,68 @@ describe('getNamedPortsForTaskRun', () => {
     ]);
   });
 
-  it('does not expose configured preview ports when deployment previews are disabled', async () => {
+  it('exposes configured preview ports even when stale deployment metadata disables previews', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValueOnce({
       metadata: {
         previews_enabled: false,
+      },
+    });
+    vi.mocked(db.query.environments.findFirst).mockResolvedValue({
+      id: 'env-123',
+      config: mockEnvironmentConfig({
+        ports: [{ name: 'WEB', port: 3000 }],
+      }),
+      snapshotId: null,
+      snapshotStatus: null,
+      snapshotExpiresAt: null,
+    } as unknown as Awaited<
+      ReturnType<typeof db.query.environments.findFirst>
+    >);
+
+    const taskRun = {
+      id: 123,
+      payload: { environmentId: 'env-123' },
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
+
+    const result = await getNamedPortsForTaskRun(taskRun);
+
+    expect(result.namedPorts).toEqual([
+      SANDBOX_SERVER_NAMED_PORT,
+      { name: 'WEB', port: 3000 },
+    ]);
+  });
+
+  it('exposes configured preview ports even when the environment config contains the deprecated previews_enabled: false', async () => {
+    vi.mocked(db.query.environments.findFirst).mockResolvedValue({
+      id: 'env-123',
+      config: mockEnvironmentConfig({
+        previews_enabled: false,
+        ports: [{ name: 'WEB', port: 3000 }],
+      }),
+      snapshotId: null,
+      snapshotStatus: null,
+      snapshotExpiresAt: null,
+    } as unknown as Awaited<
+      ReturnType<typeof db.query.environments.findFirst>
+    >);
+
+    const taskRun = {
+      id: 123,
+      payload: { environmentId: 'env-123' },
+    } as Parameters<typeof getNamedPortsForTaskRun>[0];
+
+    const result = await getNamedPortsForTaskRun(taskRun);
+
+    expect(result.namedPorts).toEqual([
+      SANDBOX_SERVER_NAMED_PORT,
+      { name: 'WEB', port: 3000 },
+    ]);
+  });
+
+  it('does not expose configured preview ports when the preview runtime config is not ready', async () => {
+    mockResolveEffectivePreviewRuntimeConfig.mockResolvedValueOnce({
+      analysis: {
+        isReady: false,
       },
     });
     vi.mocked(db.query.environments.findFirst).mockResolvedValue({
@@ -212,34 +265,6 @@ describe('getNamedPortsForTaskRun', () => {
     expect(result.environmentConfig?.ports).toEqual([
       { name: 'WEB', port: 3000 },
     ]);
-  });
-
-  it('does not expose configured preview ports when the environment disables previews', async () => {
-    vi.mocked(db.query.environments.findFirst).mockResolvedValue({
-      id: 'env-123',
-      config: mockEnvironmentConfig({
-        previews_enabled: false,
-        ports: [{ name: 'WEB', port: 3000 }],
-      }),
-      snapshotId: null,
-      snapshotStatus: null,
-      snapshotExpiresAt: null,
-    } as unknown as Awaited<
-      ReturnType<typeof db.query.environments.findFirst>
-    >);
-
-    const taskRun = {
-      id: 123,
-      payload: { environmentId: 'env-123' },
-    } as Parameters<typeof getNamedPortsForTaskRun>[0];
-
-    const result = await getNamedPortsForTaskRun(taskRun);
-
-    expect(result.namedPorts).toEqual([SANDBOX_SERVER_NAMED_PORT]);
-    expect(result.environmentConfig?.ports).toEqual([
-      { name: 'WEB', port: 3000 },
-    ]);
-    expect(result.environmentConfig?.previews_enabled).toBe(false);
   });
 
   it('does not expose callback ports from loopback controller URLs', async () => {

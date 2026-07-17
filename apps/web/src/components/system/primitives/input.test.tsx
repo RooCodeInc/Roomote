@@ -12,6 +12,44 @@ describe('Input', () => {
     expect(input).toHaveAttribute('data-op-ignore', 'true');
   });
 
+  it('keeps password-manager overlays off for secret inputs without credential autocomplete', () => {
+    render(<Input secret aria-label="API key" defaultValue="sk-test" />);
+
+    const input = screen.getByLabelText('API key');
+
+    expect(input).toHaveAttribute('autocomplete', 'new-password');
+    expect(input).toHaveAttribute('data-1p-ignore');
+    expect(input).toHaveAttribute('data-op-ignore', 'true');
+  });
+
+  it.each([
+    ['new-password', 'Password', true],
+    ['current-password', 'Password', true],
+    ['email', 'Email', false],
+    ['name', 'Name', false],
+    ['username', 'Username', false],
+    ['nickname', 'Nickname', false],
+    ['one-time-code', 'OTP', false],
+    ['section-signup new-password', 'Password', true],
+  ] as const)(
+    'allows password managers for explicit %s autocomplete',
+    (autoComplete, label, secret) => {
+      render(
+        <Input
+          secret={secret}
+          autoComplete={autoComplete}
+          aria-label={label}
+        />,
+      );
+
+      const input = screen.getByLabelText(label);
+
+      expect(input).toHaveAttribute('autocomplete', autoComplete);
+      expect(input).not.toHaveAttribute('data-1p-ignore');
+      expect(input).not.toHaveAttribute('data-op-ignore');
+    },
+  );
+
   it('renders a built-in show and hide control for secret inputs', () => {
     render(<Input secret aria-label="API key" defaultValue="sk-test" />);
 

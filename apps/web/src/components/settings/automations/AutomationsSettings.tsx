@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { FeatureFlag } from '@roomote/feature-flags';
 import {
+  AUTOMATION_DESTINATION_DESCRIPTORS,
   type BackgroundAutomationKey,
   type CommunicationProvider,
   communicationProviders,
@@ -178,76 +179,38 @@ type SlackChannelAccessWarnings = {
 };
 
 type AutomationSlackDestinationField =
-  | 'managerStatsSlackChannel'
-  | 'sentryTriageSlackChannel'
-  | 'dependabotTriageSlackChannel'
-  | 'codeqlTriageSlackChannel'
-  | 'securityAuditorSlackChannel'
-  | 'codeQualityAuditorSlackChannel'
-  | 'ciFailureTriageSlackChannel'
-  | 'suggesterSlackChannel'
-  | 'announcerSlackChannel'
-  | 'platformIssueSlackChannel';
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['slackField'];
 
-const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = {
-  managerStatsSlackChannel: 'manager_stats',
-  sentryTriageSlackChannel: 'sentry_triage',
-  dependabotTriageSlackChannel: 'dependabot_triage',
-  codeqlTriageSlackChannel: 'codeql_triage',
-  securityAuditorSlackChannel: 'security_auditor',
-  codeQualityAuditorSlackChannel: 'code_quality_auditor',
-  ciFailureTriageSlackChannel: 'ci_failure_triage',
-  suggesterSlackChannel: 'suggester',
-  announcerSlackChannel: 'announcer',
-  platformIssueSlackChannel: 'platform_issue_alerts',
-} as const satisfies Record<
-  AutomationSlackDestinationField,
-  BackgroundAutomationKey
->;
+const SLACK_DESTINATION_FIELD_AUTOMATION_KEYS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.automationKey,
+  ]),
+) as {
+  [K in AutomationSlackDestinationField]: Extract<
+    BackgroundAutomationKey,
+    (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['automationKey']
+  >;
+};
 
-const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = {
-  managerStatsSlackChannel: 'managerStats',
-  sentryTriageSlackChannel: 'sentryTriage',
-  dependabotTriageSlackChannel: 'dependabotTriage',
-  codeqlTriageSlackChannel: 'codeqlTriage',
-  securityAuditorSlackChannel: 'securityAuditor',
-  codeQualityAuditorSlackChannel: 'codeQualityAuditor',
-  ciFailureTriageSlackChannel: 'ciFailureTriage',
-  suggesterSlackChannel: 'suggester',
-  announcerSlackChannel: 'announcer',
-  platformIssueSlackChannel: 'platformIssueAlerts',
-} as const satisfies Record<AutomationSlackDestinationField, AutomationId>;
+const SLACK_DESTINATION_FIELD_AUTOMATION_IDS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.automationId,
+  ]),
+) as Record<AutomationSlackDestinationField, AutomationId>;
 
 type AutomationDiscordDestinationField =
-  | 'managerStatsDiscordChannel'
-  | 'sentryTriageDiscordChannel'
-  | 'dependabotTriageDiscordChannel'
-  | 'codeqlTriageDiscordChannel'
-  | 'securityAuditorDiscordChannel'
-  | 'codeQualityAuditorDiscordChannel'
-  | 'ciFailureTriageDiscordChannel'
-  | 'suggesterDiscordChannel'
-  | 'announcerDiscordChannel'
-  | 'platformIssueDiscordChannel';
+  (typeof AUTOMATION_DESTINATION_DESCRIPTORS)[number]['discordField'];
 
 // The form field holding the same automation's Discord destination; the
 // destination picker is one-of, so selecting one provider clears the other.
-const SLACK_TO_DISCORD_DESTINATION_FIELDS = {
-  managerStatsSlackChannel: 'managerStatsDiscordChannel',
-  sentryTriageSlackChannel: 'sentryTriageDiscordChannel',
-  dependabotTriageSlackChannel: 'dependabotTriageDiscordChannel',
-  codeqlTriageSlackChannel: 'codeqlTriageDiscordChannel',
-  securityAuditorSlackChannel: 'securityAuditorDiscordChannel',
-  codeQualityAuditorSlackChannel: 'codeQualityAuditorDiscordChannel',
-  ciFailureTriageSlackChannel: 'ciFailureTriageDiscordChannel',
-  suggesterSlackChannel: 'suggesterDiscordChannel',
-  announcerSlackChannel: 'announcerDiscordChannel',
-  platformIssueSlackChannel: 'platformIssueDiscordChannel',
-} as const satisfies Record<
-  AutomationSlackDestinationField,
-  AutomationDiscordDestinationField
->;
-
+const SLACK_TO_DISCORD_DESTINATION_FIELDS = Object.fromEntries(
+  AUTOMATION_DESTINATION_DESCRIPTORS.map((descriptor) => [
+    descriptor.slackField,
+    descriptor.discordField,
+  ]),
+) as Record<AutomationSlackDestinationField, AutomationDiscordDestinationField>;
 /**
  * Discord options share the Slack destination combobox, so their option ids
  * are prefixed to distinguish them from (unprefixed) Slack channel ids.
@@ -2218,22 +2181,14 @@ export function AutomationsSettings() {
     commsStatus.data?.invocationIdentities.find(
       (identity) => identity.provider === 'slack',
     ) ?? null;
-  const githubInvocationIdentity =
-    commsStatus.data?.invocationIdentities.find(
-      (identity) => identity.provider === 'github',
-    ) ?? null;
   const slackAppMention =
     slackInvocationIdentity?.mentionText ??
     slackInvocationIdentity?.nativeMention ??
     'the Slack app';
-  const githubAppMention =
-    githubInvocationIdentity?.mentionText ?? 'the GitHub app';
   const channelAutoStartLaunchModeOptions =
     CHANNEL_AUTO_START_LAUNCH_MODE_OPTIONS;
   const showChannelAutoStartLaunchModePicker = false;
   const reviewerIsEnabled = formState?.reviewerEnabled ?? false;
-  const reviewerReviewsAllPrs =
-    formState?.reviewerReviewAllPullRequestAuthors ?? false;
   const conflictResolverIsEnabled =
     formState?.conflictResolverFrequency !== 'off';
   const channelAutoStartIsEnabled = hasConfiguredChannelAutoStartRows(
@@ -2314,9 +2269,6 @@ export function AutomationsSettings() {
         slackChannelAccessWarnings.channelAutoStartSlackChannels,
       isDirty: isDirty.channelAutoStart,
     });
-  const slackWorkflowLaunchUrl = buildSlackWorkflowLaunchUrl(
-    capabilities?.slackWorkspaceDomain,
-  );
   const showManagerChannelMigrationNote =
     !formState?.managerSlackChannel &&
     new Set(
@@ -2597,6 +2549,711 @@ export function AutomationsSettings() {
         <div className="space-y-4">
           <div className="space-y-3">
             <h2 className="text-base font-semibold text-foreground">
+              Source Code automations
+            </h2>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.reviewer}
+              isOpen={openAutomationIds.has('reviewer')}
+              onOpenChange={(open) => setAutomationOpen('reviewer', open)}
+              iconEnabled={iconEnabled.reviewer}
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.reviewer}
+                  isPending={
+                    updateMutation.isPending && savingAutomation === 'reviewer'
+                  }
+                  onSave={() => saveAgent('reviewer')}
+                  onReset={() => resetAgent('reviewer')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <div className="flex items-center gap-2">
+                  <Switch
+                    id="reviewer-enabled"
+                    checked={formState.reviewerEnabled}
+                    onCheckedChange={(reviewerEnabled) =>
+                      setFormState((prev) =>
+                        prev ? { ...prev, reviewerEnabled } : prev,
+                      )
+                    }
+                  />
+                  <Label htmlFor="reviewer-enabled" className="text-sm">
+                    Allow {PRODUCT_NAME} to review PRs
+                  </Label>
+                </div>
+
+                {reviewerIsEnabled ? (
+                  <div className="space-y-6 pt-1">
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        checked={formState.reviewerReviewOnCommit}
+                        onCheckedChange={(reviewerReviewOnCommit) =>
+                          setFormState((prev) =>
+                            prev ? { ...prev, reviewerReviewOnCommit } : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Automatically review new PRs and follow-up commits.
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Disable to only get reviews by asking @-mentioning{' '}
+                          {PRODUCT_NAME}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        checked={formState.reviewerReviewDraftPrs}
+                        onCheckedChange={(reviewerReviewDraftPrs) =>
+                          setFormState((prev) =>
+                            prev ? { ...prev, reviewerReviewDraftPrs } : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Review draft PRs</p>
+                        <p className="text-xs text-muted-foreground">
+                          Turn off to only automatically review PRs marked as
+                          ready (and save tokens)
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        aria-label={`Review PRs not created by ${PRODUCT_NAME}`}
+                        checked={formState.reviewerReviewAllPullRequestAuthors}
+                        onCheckedChange={(
+                          reviewerReviewAllPullRequestAuthors,
+                        ) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  reviewerReviewAllPullRequestAuthors,
+                                }
+                              : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">
+                          Review PRs not created by {PRODUCT_NAME}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Include pull requests opened by people or others
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            <AutomationCard
+              automation={AUTOMATION_DEFINITIONS.conflictResolver}
+              isOpen={openAutomationIds.has('conflictResolver')}
+              onOpenChange={(open) =>
+                setAutomationOpen('conflictResolver', open)
+              }
+              iconEnabled={iconEnabled.conflictResolver}
+              debugSection={renderDebugRunsSection('conflictResolver')}
+              runAction={
+                <BasicTooltip
+                  content={getRunTooltip(
+                    'conflictResolver',
+                    conflictResolverIsEnabled,
+                  )}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() =>
+                      triggerMutation.mutate({
+                        automationKey: 'conflict_resolver',
+                      })
+                    }
+                    disabled={isRunDisabled(
+                      'conflictResolver',
+                      conflictResolverIsEnabled,
+                    )}
+                  >
+                    <Play />
+                  </Button>
+                </BasicTooltip>
+              }
+              footer={
+                <AutomationFooter
+                  isDirty={isDirty.conflictResolver}
+                  isPending={
+                    updateMutation.isPending &&
+                    savingAutomation === 'conflictResolver'
+                  }
+                  onSave={() => saveAgent('conflictResolver')}
+                  onReset={() => resetAgent('conflictResolver')}
+                />
+              }
+            >
+              <div className="space-y-5">
+                <Select
+                  value={formState.conflictResolverFrequency}
+                  onValueChange={(value) =>
+                    setFormState((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            conflictResolverFrequency:
+                              value as ConflictResolverFrequency,
+                          }
+                        : prev,
+                    )
+                  }
+                >
+                  <SelectTrigger
+                    id="conflict-resolver-frequency"
+                    aria-label="Resolve PR Conflicts schedule"
+                    className="w-full md:w-56"
+                  >
+                    <SelectValue placeholder="Select a schedule" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CONFLICT_RESOLVER_FREQUENCY_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                {conflictResolverIsEnabled ? (
+                  <div className="space-y-5">
+                    <div className="space-y-2">
+                      <Label htmlFor="conflict-resolver-max-pr-age">
+                        PR age cap
+                      </Label>
+                      <Select
+                        value={String(formState.conflictResolverMaxPrAgeDays)}
+                        onValueChange={(value) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  conflictResolverMaxPrAgeDays: Number(
+                                    value,
+                                  ) as ConflictResolverMaxPrAgeDays,
+                                }
+                              : prev,
+                          )
+                        }
+                      >
+                        <SelectTrigger
+                          id="conflict-resolver-max-pr-age"
+                          aria-label="Resolve PR Conflicts PR age cap"
+                          className="w-full md:w-56"
+                        >
+                          <SelectValue placeholder="Select a cap" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS.map(
+                            (option) => (
+                              <SelectItem
+                                key={option.value}
+                                value={String(option.value)}
+                              >
+                                {option.label}
+                              </SelectItem>
+                            ),
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground md:max-w-120">
+                        Sets the maximum PR age that Resolve PR Conflicts will
+                        consider. Labeled PRs older than this are skipped.
+                      </p>
+                      {fieldErrors.conflictResolverMaxPrAgeDays ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.conflictResolverMaxPrAgeDays}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="conflict-label">Auto-resolve label</Label>
+                      <Input
+                        id="conflict-label"
+                        value={formState.conflictResolverLabel}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  conflictResolverLabel: event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        placeholder="roomote:auto-resolve-conflicts"
+                        className="max-w-80"
+                      />
+                      <p className="text-xs text-muted-foreground md:max-w-120">
+                        Make sure this label exists in your repos. It will be
+                        added automatically to all new agent PRs. Remove it
+                        whenever you do not want conflicts resolved.
+                      </p>
+                      {fieldErrors.conflictResolverLabel ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.conflictResolverLabel}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="conflict-resolver-instructions">
+                        Additional instructions
+                      </Label>
+                      <Textarea
+                        id="conflict-resolver-instructions"
+                        value={formState.conflictResolverInstructions}
+                        onChange={(event) =>
+                          setFormState((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  conflictResolverInstructions:
+                                    event.target.value,
+                                }
+                              : prev,
+                          )
+                        }
+                        rows={4}
+                        placeholder="Optional guidance for conflict resolution strategy and priorities"
+                      />
+                      {fieldErrors.conflictResolverInstructions ? (
+                        <p className="text-xs text-destructive">
+                          {fieldErrors.conflictResolverInstructions}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </AutomationCard>
+
+            {(
+              [
+                'ciFailureTriage',
+              ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
+            ).map((automationId) => {
+              const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+              const automationUi =
+                SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
+              const frequency = formState[automation.frequencyField];
+              const isEnabled =
+                scheduleOnlyAutomationEnabledState[automation.id];
+              const blockedReason =
+                scheduleOnlyAutomationBlockedReasons[automation.id];
+              const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
+
+              return (
+                <AutomationCard
+                  key={automation.id}
+                  automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isOpen={openAutomationIds.has(automation.id)}
+                  onOpenChange={(open) =>
+                    setAutomationOpen(automation.id, open)
+                  }
+                  iconEnabled={iconEnabled[automation.id]}
+                  debugSection={renderDebugRunsSection(automation.id)}
+                  runAction={
+                    <BasicTooltip
+                      content={getRunTooltip(
+                        automation.id,
+                        isEnabled,
+                        blockedReason,
+                      )}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          triggerMutation.mutate({
+                            automationKey: automation.automationKey,
+                          })
+                        }
+                        disabled={isRunDisabled(
+                          automation.id,
+                          isEnabled,
+                          blockedReason != null,
+                        )}
+                      >
+                        <Play />
+                      </Button>
+                    </BasicTooltip>
+                  }
+                  footer={
+                    <AutomationFooter
+                      isDirty={isDirty[automation.id]}
+                      isPending={
+                        updateMutation.isPending &&
+                        savingAutomation === automation.id
+                      }
+                      onSave={() => saveAgent(automation.id)}
+                      onReset={() => resetAgent(automation.id)}
+                    />
+                  }
+                >
+                  <ScheduleOnlyAutomationContent
+                    automationLabel={automation.label}
+                    control={
+                      automationUi.control.kind === 'schedule'
+                        ? {
+                            ...automationUi.control,
+                            scheduleOptions:
+                              SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS,
+                          }
+                        : automationUi.control
+                    }
+                    details={automationUi.details}
+                    frequency={frequency}
+                    isEnabled={isEnabled}
+                    disabled={false}
+                    fieldId={fieldId}
+                    onFrequencyChange={(nextFrequency) =>
+                      setScheduleOnlyAutomationFrequency(
+                        automation.id,
+                        nextFrequency,
+                      )
+                    }
+                  >
+                    {renderSlackDestinationField({
+                      field:
+                        automation.id === 'securityAuditor'
+                          ? 'securityAuditorSlackChannel'
+                          : automation.id === 'codeQualityAuditor'
+                            ? 'codeQualityAuditorSlackChannel'
+                            : 'ciFailureTriageSlackChannel',
+                      inputId: `${automation.id}-slack-channel`,
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        automation.id === 'ciFailureTriage'
+                          ? 'Choose where Roomote should post CI failure triage work.'
+                          : 'Choose where Roomote should post actionable follow-up work.',
+                      savedChannelId:
+                        automation.id === 'securityAuditor'
+                          ? (settingsQuery.data?.settings
+                              .securityAuditorSlackChannelId ?? null)
+                          : automation.id === 'codeQualityAuditor'
+                            ? (settingsQuery.data?.settings
+                                .codeQualityAuditorSlackChannelId ?? null)
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageSlackChannelId ?? null),
+                      savedDiscordChannelId:
+                        automation.id === 'securityAuditor'
+                          ? (settingsQuery.data?.settings
+                              .securityAuditorDiscordChannelId ?? null)
+                          : automation.id === 'codeQualityAuditor'
+                            ? (settingsQuery.data?.settings
+                                .codeQualityAuditorDiscordChannelId ?? null)
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageDiscordChannelId ?? null),
+                      warningChannelId:
+                        automation.id === 'securityAuditor'
+                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
+                          : automation.id === 'codeQualityAuditor'
+                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
+                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                    })}
+                  </ScheduleOnlyAutomationContent>
+                </AutomationCard>
+              );
+            })}
+
+            <ScheduledAutomationCard
+              automation={AUTOMATION_DEFINITIONS.dependabotTriage}
+              isOpen={openAutomationIds.has('dependabotTriage')}
+              onOpenChange={(open) =>
+                setAutomationOpen('dependabotTriage', open)
+              }
+              iconEnabled={iconEnabled.dependabotTriage}
+              debugSection={renderDebugRunsSection('dependabotTriage')}
+              runTooltip={getRunTooltip(
+                'dependabotTriage',
+                dependabotTriageIsEnabled,
+                dependabotTriageBlockedReason,
+              )}
+              runDisabled={isRunDisabled(
+                'dependabotTriage',
+                dependabotTriageIsEnabled,
+                dependabotTriageBlockedReason != null,
+              )}
+              onRun={() =>
+                triggerMutation.mutate({ automationKey: 'dependabot_triage' })
+              }
+              isDirty={isDirty.dependabotTriage}
+              isPending={
+                updateMutation.isPending &&
+                savingAutomation === 'dependabotTriage'
+              }
+              onSave={() => saveAgent('dependabotTriage')}
+              onReset={() => resetAgent('dependabotTriage')}
+              frequency={formState.dependabotTriageFrequency}
+              onFrequencyChange={(frequency) =>
+                setFormState((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        dependabotTriageFrequency: frequency,
+                      }
+                    : prev,
+                )
+              }
+              scheduleOptions={
+                SENTRY_TRIAGE_FREQUENCY_OPTIONS as Array<{
+                  value: DependabotTriageFrequency;
+                  label: string;
+                }>
+              }
+              selectId="dependabot-triage-frequency"
+              selectAriaLabel="Triage Dependabot Alerts schedule"
+            >
+              <div className="space-y-5">
+                {dependabotTriageIsEnabled
+                  ? renderSlackDestinationField({
+                      field: 'dependabotTriageSlackChannel',
+                      inputId: 'dependabot-triage-slack-channel',
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post actionable Dependabot follow-up work.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .dependabotTriageSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .dependabotTriageDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.dependabotTriageSlackChannel,
+                    })
+                  : null}
+
+                <p className="text-xs text-muted-foreground md:max-w-160">
+                  Scans current open Dependabot alerts across active
+                  repositories and suggests tightly scoped dependency update
+                  tasks instead of opening PRs directly.
+                </p>
+              </div>
+            </ScheduledAutomationCard>
+
+            <ScheduledAutomationCard
+              automation={AUTOMATION_DEFINITIONS.codeqlTriage}
+              isOpen={openAutomationIds.has('codeqlTriage')}
+              onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
+              iconEnabled={iconEnabled.codeqlTriage}
+              debugSection={renderDebugRunsSection('codeqlTriage')}
+              runTooltip={getRunTooltip(
+                'codeqlTriage',
+                codeqlTriageIsEnabled,
+                codeqlTriageBlockedReason,
+              )}
+              runDisabled={isRunDisabled(
+                'codeqlTriage',
+                codeqlTriageIsEnabled,
+                codeqlTriageBlockedReason != null,
+              )}
+              onRun={() =>
+                triggerMutation.mutate({ automationKey: 'codeql_triage' })
+              }
+              isDirty={isDirty.codeqlTriage}
+              isPending={
+                updateMutation.isPending && savingAutomation === 'codeqlTriage'
+              }
+              onSave={() => saveAgent('codeqlTriage')}
+              onReset={() => resetAgent('codeqlTriage')}
+              frequency={formState.codeqlTriageFrequency}
+              onFrequencyChange={(frequency) =>
+                setFormState((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        codeqlTriageFrequency: frequency,
+                      }
+                    : prev,
+                )
+              }
+              scheduleOptions={
+                SENTRY_TRIAGE_FREQUENCY_OPTIONS as Array<{
+                  value: CodeqlTriageFrequency;
+                  label: string;
+                }>
+              }
+              selectId="codeql-triage-frequency"
+              selectAriaLabel="Triage CodeQL Alerts schedule"
+            >
+              <div className="space-y-5">
+                {codeqlTriageIsEnabled
+                  ? renderSlackDestinationField({
+                      field: 'codeqlTriageSlackChannel',
+                      inputId: 'codeql-triage-slack-channel',
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        'Choose where Roomote should post actionable CodeQL follow-up work.',
+                      savedChannelId:
+                        settingsQuery.data?.settings
+                          .codeqlTriageSlackChannelId ?? null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .codeqlTriageDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.codeqlTriageSlackChannel,
+                    })
+                  : null}
+
+                <p className="text-xs text-muted-foreground md:max-w-160">
+                  Scans current open code-scanning/CodeQL alerts across active
+                  repositories and launches implement-changes follow-up tasks
+                  instead of opening PRs in the scan itself.
+                </p>
+              </div>
+            </ScheduledAutomationCard>
+
+            {(
+              [
+                'codeQualityAuditor',
+                'securityAuditor',
+              ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
+            ).map((automationId) => {
+              const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+              const automationUi =
+                SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
+              const frequency = formState[automation.frequencyField];
+              const isEnabled =
+                scheduleOnlyAutomationEnabledState[automation.id];
+              const blockedReason =
+                scheduleOnlyAutomationBlockedReasons[automation.id];
+              const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
+
+              return (
+                <AutomationCard
+                  key={automation.id}
+                  automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isOpen={openAutomationIds.has(automation.id)}
+                  onOpenChange={(open) =>
+                    setAutomationOpen(automation.id, open)
+                  }
+                  iconEnabled={iconEnabled[automation.id]}
+                  debugSection={renderDebugRunsSection(automation.id)}
+                  runAction={
+                    <BasicTooltip
+                      content={getRunTooltip(
+                        automation.id,
+                        isEnabled,
+                        blockedReason,
+                      )}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          triggerMutation.mutate({
+                            automationKey: automation.automationKey,
+                          })
+                        }
+                        disabled={isRunDisabled(
+                          automation.id,
+                          isEnabled,
+                          blockedReason != null,
+                        )}
+                      >
+                        <Play />
+                      </Button>
+                    </BasicTooltip>
+                  }
+                  footer={
+                    <AutomationFooter
+                      isDirty={isDirty[automation.id]}
+                      isPending={
+                        updateMutation.isPending &&
+                        savingAutomation === automation.id
+                      }
+                      onSave={() => saveAgent(automation.id)}
+                      onReset={() => resetAgent(automation.id)}
+                    />
+                  }
+                >
+                  <ScheduleOnlyAutomationContent
+                    automationLabel={automation.label}
+                    control={
+                      automationUi.control.kind === 'schedule'
+                        ? {
+                            ...automationUi.control,
+                            scheduleOptions:
+                              SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS,
+                          }
+                        : automationUi.control
+                    }
+                    details={automationUi.details}
+                    frequency={frequency}
+                    isEnabled={isEnabled}
+                    disabled={false}
+                    fieldId={fieldId}
+                    onFrequencyChange={(nextFrequency) =>
+                      setScheduleOnlyAutomationFrequency(
+                        automation.id,
+                        nextFrequency,
+                      )
+                    }
+                  >
+                    {renderSlackDestinationField({
+                      field:
+                        automation.id === 'securityAuditor'
+                          ? 'securityAuditorSlackChannel'
+                          : automation.id === 'codeQualityAuditor'
+                            ? 'codeQualityAuditorSlackChannel'
+                            : 'ciFailureTriageSlackChannel',
+                      inputId: `${automation.id}-slack-channel`,
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        automation.id === 'ciFailureTriage'
+                          ? 'Choose where Roomote should post CI failure triage work.'
+                          : 'Choose where Roomote should post actionable follow-up work.',
+                      savedChannelId:
+                        automation.id === 'securityAuditor'
+                          ? (settingsQuery.data?.settings
+                              .securityAuditorSlackChannelId ?? null)
+                          : automation.id === 'codeQualityAuditor'
+                            ? (settingsQuery.data?.settings
+                                .codeQualityAuditorSlackChannelId ?? null)
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageSlackChannelId ?? null),
+                      savedDiscordChannelId:
+                        automation.id === 'securityAuditor'
+                          ? (settingsQuery.data?.settings
+                              .securityAuditorDiscordChannelId ?? null)
+                          : automation.id === 'codeQualityAuditor'
+                            ? (settingsQuery.data?.settings
+                                .codeQualityAuditorDiscordChannelId ?? null)
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageDiscordChannelId ?? null),
+                      warningChannelId:
+                        automation.id === 'securityAuditor'
+                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
+                          : automation.id === 'codeQualityAuditor'
+                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
+                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                    })}
+                  </ScheduleOnlyAutomationContent>
+                </AutomationCard>
+              );
+            })}
+
+            <h2 className="pt-2 text-base font-semibold text-foreground">
               Slack automations
             </h2>
 
@@ -2960,454 +3617,181 @@ export function AutomationsSettings() {
             </div>
           </AutomationCard>
 
-          <>
-            <AutomationCard
-              automation={AUTOMATION_DEFINITIONS.sentryTriage}
-              isOpen={openAutomationIds.has('sentryTriage')}
-              onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
-              iconEnabled={iconEnabled.sentryTriage}
-              debugSection={renderDebugRunsSection('sentryTriage')}
-              runAction={
-                <BasicTooltip
-                  content={getRunTooltip(
+          <AutomationCard
+            automation={AUTOMATION_DEFINITIONS.sentryTriage}
+            isOpen={openAutomationIds.has('sentryTriage')}
+            onOpenChange={(open) => setAutomationOpen('sentryTriage', open)}
+            iconEnabled={iconEnabled.sentryTriage}
+            debugSection={renderDebugRunsSection('sentryTriage')}
+            runAction={
+              <BasicTooltip
+                content={getRunTooltip(
+                  'sentryTriage',
+                  sentryTriageIsEnabled,
+                  sentryTriageBlockedReason,
+                )}
+              >
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() =>
+                    triggerMutation.mutate({ automationKey: 'sentry_triage' })
+                  }
+                  disabled={isRunDisabled(
                     'sentryTriage',
                     sentryTriageIsEnabled,
-                    sentryTriageBlockedReason,
+                    sentryTriageBlockedReason != null,
                   )}
                 >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() =>
-                      triggerMutation.mutate({ automationKey: 'sentry_triage' })
-                    }
-                    disabled={isRunDisabled(
-                      'sentryTriage',
-                      sentryTriageIsEnabled,
-                      sentryTriageBlockedReason != null,
-                    )}
-                  >
-                    <Play />
-                  </Button>
-                </BasicTooltip>
-              }
-              footer={
-                <AutomationFooter
-                  isDirty={isDirty.sentryTriage}
-                  isPending={
-                    updateMutation.isPending &&
-                    savingAutomation === 'sentryTriage'
-                  }
-                  saveDisabled={sentryTriageSaveDisabled}
-                  onSave={() => saveAgent('sentryTriage')}
-                  onReset={() => resetAgent('sentryTriage')}
-                />
-              }
-            >
-              <div className="space-y-5">
-                <Select
-                  value={formState.sentryTriageFrequency}
-                  onValueChange={(value) => {
-                    const frequency = value as SentryTriageFrequency;
+                  <Play />
+                </Button>
+              </BasicTooltip>
+            }
+            footer={
+              <AutomationFooter
+                isDirty={isDirty.sentryTriage}
+                isPending={
+                  updateMutation.isPending &&
+                  savingAutomation === 'sentryTriage'
+                }
+                saveDisabled={sentryTriageSaveDisabled}
+                onSave={() => saveAgent('sentryTriage')}
+                onReset={() => resetAgent('sentryTriage')}
+              />
+            }
+          >
+            <div className="space-y-5">
+              <Select
+                value={formState.sentryTriageFrequency}
+                onValueChange={(value) => {
+                  const frequency = value as SentryTriageFrequency;
 
-                    if (
-                      !canSelectSentryTriageFrequency({
-                        sentryConnected: sentryConnected,
-                        frequency,
-                      })
-                    ) {
-                      toast.error(
-                        'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
-                      );
-                      return;
-                    }
-
-                    setFormState((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            sentryTriageFrequency: frequency,
-                          }
-                        : prev,
+                  if (
+                    !canSelectSentryTriageFrequency({
+                      sentryConnected: sentryConnected,
+                      frequency,
+                    })
+                  ) {
+                    toast.error(
+                      'Configure Sentry in Settings > Integrations before enabling Triage Sentry Issues.',
                     );
-                  }}
-                >
-                  <SelectTrigger
-                    id="sentry-triage-frequency"
-                    aria-label="Triage Sentry Issues schedule"
-                    className="w-full md:w-56"
-                  >
-                    <SelectValue placeholder="Select a schedule" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value}
-                        disabled={
-                          !canSelectSentryTriageFrequency({
-                            sentryConnected: sentryConnected,
-                            frequency: option.value,
-                          })
-                        }
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                {!sentryConnected ? (
-                  <Alert variant="light" className="md:max-w-160">
-                    <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                    <AlertTitle>Connect Sentry first</AlertTitle>
-                    <AlertDescription>
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        <span>
-                          Connect the workspace Sentry integration before
-                          enabling scheduled Sentry triage.
-                        </span>
-                        <Button asChild size="sm" variant="outline">
-                          <a
-                            href={`${SETTINGS_PATHS.integrations}?highlight=sentry-mcp`}
-                          >
-                            Configure Sentry
-                          </a>
-                        </Button>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-
-                {sentryTriageIsEnabled ? (
-                  <div className="space-y-5">
-                    {renderSlackDestinationField({
-                      field: 'sentryTriageSlackChannel',
-                      inputId: 'sentry-triage-slack-channel',
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        'Choose where Roomote should post actionable Sentry follow-up work.',
-                      savedChannelId:
-                        settingsQuery.data?.settings
-                          .sentryTriageSlackChannelId ?? null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .sentryTriageDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.sentryTriageSlackChannel,
-                    })}
-
-                    <p className="text-xs text-muted-foreground md:max-w-160">
-                      Requires Sentry to be configured in Settings &gt;
-                      Integrations.
-                    </p>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="sentry-triage-projects">
-                        Project slugs
-                      </Label>
-                      <Textarea
-                        id="sentry-triage-projects"
-                        value={formState.sentryTriageProjectSlugs}
-                        onChange={(event) =>
-                          setFormState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  sentryTriageProjectSlugs: event.target.value,
-                                }
-                              : prev,
-                          )
-                        }
-                        rows={3}
-                        placeholder="Optional, one Sentry project slug per line"
-                      />
-                      <p className="text-xs text-muted-foreground md:max-w-160">
-                        Leave blank to scan all projects available to the Sentry
-                        token.
-                      </p>
-                      {fieldErrors.sentryTriageProjectSlugs ? (
-                        <p className="text-xs text-destructive">
-                          {fieldErrors.sentryTriageProjectSlugs}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            </AutomationCard>
-
-            <ScheduledAutomationCard
-              automation={AUTOMATION_DEFINITIONS.dependabotTriage}
-              isOpen={openAutomationIds.has('dependabotTriage')}
-              onOpenChange={(open) =>
-                setAutomationOpen('dependabotTriage', open)
-              }
-              iconEnabled={iconEnabled.dependabotTriage}
-              debugSection={renderDebugRunsSection('dependabotTriage')}
-              runTooltip={getRunTooltip(
-                'dependabotTriage',
-                dependabotTriageIsEnabled,
-                dependabotTriageBlockedReason,
-              )}
-              runDisabled={isRunDisabled(
-                'dependabotTriage',
-                dependabotTriageIsEnabled,
-                dependabotTriageBlockedReason != null,
-              )}
-              onRun={() =>
-                triggerMutation.mutate({ automationKey: 'dependabot_triage' })
-              }
-              isDirty={isDirty.dependabotTriage}
-              isPending={
-                updateMutation.isPending &&
-                savingAutomation === 'dependabotTriage'
-              }
-              onSave={() => saveAgent('dependabotTriage')}
-              onReset={() => resetAgent('dependabotTriage')}
-              frequency={formState.dependabotTriageFrequency}
-              onFrequencyChange={(frequency) =>
-                setFormState((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        dependabotTriageFrequency: frequency,
-                      }
-                    : prev,
-                )
-              }
-              scheduleOptions={
-                SENTRY_TRIAGE_FREQUENCY_OPTIONS as Array<{
-                  value: DependabotTriageFrequency;
-                  label: string;
-                }>
-              }
-              selectId="dependabot-triage-frequency"
-              selectAriaLabel="Triage Dependabot Alerts schedule"
-            >
-              <div className="space-y-5">
-                {dependabotTriageIsEnabled
-                  ? renderSlackDestinationField({
-                      field: 'dependabotTriageSlackChannel',
-                      inputId: 'dependabot-triage-slack-channel',
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        'Choose where Roomote should post actionable Dependabot follow-up work.',
-                      savedChannelId:
-                        settingsQuery.data?.settings
-                          .dependabotTriageSlackChannelId ?? null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .dependabotTriageDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.dependabotTriageSlackChannel,
-                    })
-                  : null}
-
-                <p className="text-xs text-muted-foreground md:max-w-160">
-                  Scans current open Dependabot alerts across active
-                  repositories and suggests tightly scoped dependency update
-                  tasks instead of opening PRs directly.
-                </p>
-              </div>
-            </ScheduledAutomationCard>
-
-            <ScheduledAutomationCard
-              automation={AUTOMATION_DEFINITIONS.codeqlTriage}
-              isOpen={openAutomationIds.has('codeqlTriage')}
-              onOpenChange={(open) => setAutomationOpen('codeqlTriage', open)}
-              iconEnabled={iconEnabled.codeqlTriage}
-              debugSection={renderDebugRunsSection('codeqlTriage')}
-              runTooltip={getRunTooltip(
-                'codeqlTriage',
-                codeqlTriageIsEnabled,
-                codeqlTriageBlockedReason,
-              )}
-              runDisabled={isRunDisabled(
-                'codeqlTriage',
-                codeqlTriageIsEnabled,
-                codeqlTriageBlockedReason != null,
-              )}
-              onRun={() =>
-                triggerMutation.mutate({ automationKey: 'codeql_triage' })
-              }
-              isDirty={isDirty.codeqlTriage}
-              isPending={
-                updateMutation.isPending && savingAutomation === 'codeqlTriage'
-              }
-              onSave={() => saveAgent('codeqlTriage')}
-              onReset={() => resetAgent('codeqlTriage')}
-              frequency={formState.codeqlTriageFrequency}
-              onFrequencyChange={(frequency) =>
-                setFormState((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        codeqlTriageFrequency: frequency,
-                      }
-                    : prev,
-                )
-              }
-              scheduleOptions={
-                SENTRY_TRIAGE_FREQUENCY_OPTIONS as Array<{
-                  value: CodeqlTriageFrequency;
-                  label: string;
-                }>
-              }
-              selectId="codeql-triage-frequency"
-              selectAriaLabel="Triage CodeQL Alerts schedule"
-            >
-              <div className="space-y-5">
-                {codeqlTriageIsEnabled
-                  ? renderSlackDestinationField({
-                      field: 'codeqlTriageSlackChannel',
-                      inputId: 'codeql-triage-slack-channel',
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        'Choose where Roomote should post actionable CodeQL follow-up work.',
-                      savedChannelId:
-                        settingsQuery.data?.settings
-                          .codeqlTriageSlackChannelId ?? null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .codeqlTriageDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.codeqlTriageSlackChannel,
-                    })
-                  : null}
-
-                <p className="text-xs text-muted-foreground md:max-w-160">
-                  Scans current open code-scanning/CodeQL alerts across active
-                  repositories and launches implement-changes follow-up tasks
-                  instead of opening PRs in the scan itself.
-                </p>
-              </div>
-            </ScheduledAutomationCard>
-
-            {SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => {
-              const automationUi =
-                SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
-              const frequency = formState[automation.frequencyField];
-              const isEnabled =
-                scheduleOnlyAutomationEnabledState[automation.id];
-              const blockedReason =
-                scheduleOnlyAutomationBlockedReasons[automation.id];
-              const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
-
-              return (
-                <AutomationCard
-                  key={automation.id}
-                  automation={AUTOMATION_DEFINITIONS[automation.id]}
-                  isOpen={openAutomationIds.has(automation.id)}
-                  onOpenChange={(open) =>
-                    setAutomationOpen(automation.id, open)
+                    return;
                   }
-                  iconEnabled={iconEnabled[automation.id]}
-                  debugSection={renderDebugRunsSection(automation.id)}
-                  runAction={
-                    <BasicTooltip
-                      content={getRunTooltip(
-                        automation.id,
-                        isEnabled,
-                        blockedReason,
-                      )}
+
+                  setFormState((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          sentryTriageFrequency: frequency,
+                        }
+                      : prev,
+                  );
+                }}
+              >
+                <SelectTrigger
+                  id="sentry-triage-frequency"
+                  aria-label="Triage Sentry Issues schedule"
+                  className="w-full md:w-56"
+                >
+                  <SelectValue placeholder="Select a schedule" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SENTRY_TRIAGE_FREQUENCY_OPTIONS.map((option) => (
+                    <SelectItem
+                      key={option.value}
+                      value={option.value}
+                      disabled={
+                        !canSelectSentryTriageFrequency({
+                          sentryConnected: sentryConnected,
+                          frequency: option.value,
+                        })
+                      }
                     >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          triggerMutation.mutate({
-                            automationKey: automation.automationKey,
-                          })
-                        }
-                        disabled={isRunDisabled(
-                          automation.id,
-                          isEnabled,
-                          blockedReason != null,
-                        )}
-                      >
-                        <Play />
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {!sentryConnected ? (
+                <Alert variant="light" className="md:max-w-160">
+                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                  <AlertTitle>Connect Sentry first</AlertTitle>
+                  <AlertDescription>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <span>
+                        Connect the workspace Sentry integration before enabling
+                        scheduled Sentry triage.
+                      </span>
+                      <Button asChild size="sm" variant="outline">
+                        <a
+                          href={`${SETTINGS_PATHS.integrations}?highlight=sentry-mcp`}
+                        >
+                          Configure Sentry
+                        </a>
                       </Button>
-                    </BasicTooltip>
-                  }
-                  footer={
-                    <AutomationFooter
-                      isDirty={isDirty[automation.id]}
-                      isPending={
-                        updateMutation.isPending &&
-                        savingAutomation === automation.id
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+
+              {sentryTriageIsEnabled ? (
+                <div className="space-y-5">
+                  {renderSlackDestinationField({
+                    field: 'sentryTriageSlackChannel',
+                    inputId: 'sentry-triage-slack-channel',
+                    label: 'Post follow-up work to this Slack channel',
+                    helperText:
+                      'Choose where Roomote should post actionable Sentry follow-up work.',
+                    savedChannelId:
+                      settingsQuery.data?.settings.sentryTriageSlackChannelId ??
+                      null,
+                    savedDiscordChannelId:
+                      settingsQuery.data?.settings
+                        .sentryTriageDiscordChannelId ?? null,
+                    warningChannelId:
+                      slackChannelAccessWarnings.sentryTriageSlackChannel,
+                  })}
+
+                  <p className="text-xs text-muted-foreground md:max-w-160">
+                    Requires Sentry to be configured in Settings &gt;
+                    Integrations.
+                  </p>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="sentry-triage-projects">
+                      Project slugs
+                    </Label>
+                    <Textarea
+                      id="sentry-triage-projects"
+                      value={formState.sentryTriageProjectSlugs}
+                      onChange={(event) =>
+                        setFormState((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                sentryTriageProjectSlugs: event.target.value,
+                              }
+                            : prev,
+                        )
                       }
-                      onSave={() => saveAgent(automation.id)}
-                      onReset={() => resetAgent(automation.id)}
+                      rows={3}
+                      placeholder="Optional, one Sentry project slug per line"
                     />
-                  }
-                >
-                  <ScheduleOnlyAutomationContent
-                    automationLabel={automation.label}
-                    control={
-                      automationUi.control.kind === 'schedule'
-                        ? {
-                            ...automationUi.control,
-                            scheduleOptions:
-                              SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS,
-                          }
-                        : automationUi.control
-                    }
-                    details={automationUi.details}
-                    frequency={frequency}
-                    isEnabled={isEnabled}
-                    disabled={false}
-                    fieldId={fieldId}
-                    onFrequencyChange={(nextFrequency) =>
-                      setScheduleOnlyAutomationFrequency(
-                        automation.id,
-                        nextFrequency,
-                      )
-                    }
-                  >
-                    {renderSlackDestinationField({
-                      field:
-                        automation.id === 'securityAuditor'
-                          ? 'securityAuditorSlackChannel'
-                          : automation.id === 'codeQualityAuditor'
-                            ? 'codeQualityAuditorSlackChannel'
-                            : 'ciFailureTriageSlackChannel',
-                      inputId: `${automation.id}-slack-channel`,
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        automation.id === 'ciFailureTriage'
-                          ? 'Choose where Roomote should post CI failure triage work.'
-                          : 'Choose where Roomote should post actionable follow-up work.',
-                      savedChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorSlackChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
-                            ? (settingsQuery.data?.settings
-                                .codeQualityAuditorSlackChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageSlackChannelId ?? null),
-                      savedDiscordChannelId:
-                        automation.id === 'securityAuditor'
-                          ? (settingsQuery.data?.settings
-                              .securityAuditorDiscordChannelId ?? null)
-                          : automation.id === 'codeQualityAuditor'
-                            ? (settingsQuery.data?.settings
-                                .codeQualityAuditorDiscordChannelId ?? null)
-                            : (settingsQuery.data?.settings
-                                .ciFailureTriageDiscordChannelId ?? null),
-                      warningChannelId:
-                        automation.id === 'securityAuditor'
-                          ? slackChannelAccessWarnings.securityAuditorSlackChannel
-                          : automation.id === 'codeQualityAuditor'
-                            ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
-                    })}
-                  </ScheduleOnlyAutomationContent>
-                </AutomationCard>
-              );
-            })}
-          </>
+                    <p className="text-xs text-muted-foreground md:max-w-160">
+                      Leave blank to scan all projects available to the Sentry
+                      token.
+                    </p>
+                    {fieldErrors.sentryTriageProjectSlugs ? (
+                      <p className="text-xs text-destructive">
+                        {fieldErrors.sentryTriageProjectSlugs}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </AutomationCard>
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.suggester}
@@ -3812,336 +4196,8 @@ If unclear, send to manager channel.`}
           </AutomationCard>
 
           <h2 className="pt-2 text-base font-semibold text-foreground">
-            Other automations
+            Meta automations
           </h2>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.reviewer}
-            isOpen={openAutomationIds.has('reviewer')}
-            onOpenChange={(open) => setAutomationOpen('reviewer', open)}
-            iconEnabled={iconEnabled.reviewer}
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.reviewer}
-                isPending={
-                  updateMutation.isPending && savingAutomation === 'reviewer'
-                }
-                onSave={() => saveAgent('reviewer')}
-                onReset={() => resetAgent('reviewer')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <div className="flex items-center gap-2">
-                <Switch
-                  id="reviewer-enabled"
-                  checked={formState.reviewerEnabled}
-                  onCheckedChange={(reviewerEnabled) =>
-                    setFormState((prev) =>
-                      prev ? { ...prev, reviewerEnabled } : prev,
-                    )
-                  }
-                />
-                <Label htmlFor="reviewer-enabled" className="text-sm">
-                  Enable Code Reviews
-                </Label>
-              </div>
-
-              {reviewerIsEnabled ? (
-                <div className="space-y-5">
-                  <Alert variant="light" className="md:max-w-160">
-                    <Info className="mt-0.5 size-4 shrink-0 text-foreground" />
-                    <AlertTitle>Which PRs get reviewed?</AlertTitle>
-                    <AlertDescription>
-                      <div className="space-y-2 text-muted-foreground">
-                        <p>
-                          When background auto-review is on, reviews run on{' '}
-                          {reviewerReviewsAllPrs
-                            ? 'all pull requests in connected repositories'
-                            : `pull requests opened by ${PRODUCT_NAME}`}
-                          {formState.reviewerReviewOnCommit
-                            ? ' as they open or receive new commits.'
-                            : '. Right now, Review Code only runs when someone mentions it on a PR.'}
-                        </p>
-                        {formState.reviewerReviewOnCommit ? (
-                          <p>
-                            {formState.reviewerReviewDraftPrs
-                              ? 'Draft PRs are included in automatic reviews.'
-                              : 'Draft PRs wait until they are marked ready for review.'}
-                          </p>
-                        ) : null}
-                        <p>
-                          {reviewerReviewsAllPrs
-                            ? 'You can also comment'
-                            : 'For PRs outside that scope, comment'}{' '}
-                          <span className="font-medium text-foreground">
-                            {githubAppMention} review this PR
-                          </span>{' '}
-                          to request an on-demand review.
-                        </p>
-                      </div>
-                    </AlertDescription>
-                  </Alert>
-
-                  <div className="space-y-6 pt-3">
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        checked={formState.reviewerReviewOnCommit}
-                        onCheckedChange={(reviewerReviewOnCommit) =>
-                          setFormState((prev) =>
-                            prev ? { ...prev, reviewerReviewOnCommit } : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">
-                          Auto-review on open and new commits
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Turn this off to keep Review Code background work
-                          disabled.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        aria-label="Review PRs from other authors"
-                        checked={formState.reviewerReviewAllPullRequestAuthors}
-                        onCheckedChange={(
-                          reviewerReviewAllPullRequestAuthors,
-                        ) =>
-                          setFormState((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  reviewerReviewAllPullRequestAuthors,
-                                }
-                              : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">
-                          Review PRs from other authors
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Include pull requests opened by people or bots outside
-                          {` ${PRODUCT_NAME}`} in automatic reviews.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        checked={formState.reviewerReviewDraftPrs}
-                        onCheckedChange={(reviewerReviewDraftPrs) =>
-                          setFormState((prev) =>
-                            prev ? { ...prev, reviewerReviewDraftPrs } : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">Review draft PRs</p>
-                        <p className="text-xs text-muted-foreground">
-                          Keep draft pull requests in scope before they are
-                          marked ready for review when Review Code is enabled.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
-
-          <AutomationCard
-            automation={AUTOMATION_DEFINITIONS.conflictResolver}
-            isOpen={openAutomationIds.has('conflictResolver')}
-            onOpenChange={(open) => setAutomationOpen('conflictResolver', open)}
-            iconEnabled={iconEnabled.conflictResolver}
-            debugSection={renderDebugRunsSection('conflictResolver')}
-            runAction={
-              <BasicTooltip
-                content={getRunTooltip(
-                  'conflictResolver',
-                  conflictResolverIsEnabled,
-                )}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() =>
-                    triggerMutation.mutate({
-                      automationKey: 'conflict_resolver',
-                    })
-                  }
-                  disabled={isRunDisabled(
-                    'conflictResolver',
-                    conflictResolverIsEnabled,
-                  )}
-                >
-                  <Play />
-                </Button>
-              </BasicTooltip>
-            }
-            footer={
-              <AutomationFooter
-                isDirty={isDirty.conflictResolver}
-                isPending={
-                  updateMutation.isPending &&
-                  savingAutomation === 'conflictResolver'
-                }
-                onSave={() => saveAgent('conflictResolver')}
-                onReset={() => resetAgent('conflictResolver')}
-              />
-            }
-          >
-            <div className="space-y-5">
-              <Select
-                value={formState.conflictResolverFrequency}
-                onValueChange={(value) =>
-                  setFormState((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          conflictResolverFrequency:
-                            value as ConflictResolverFrequency,
-                        }
-                      : prev,
-                  )
-                }
-              >
-                <SelectTrigger
-                  id="conflict-resolver-frequency"
-                  aria-label="Resolve PR Conflicts schedule"
-                  className="w-full md:w-56"
-                >
-                  <SelectValue placeholder="Select a schedule" />
-                </SelectTrigger>
-                <SelectContent>
-                  {CONFLICT_RESOLVER_FREQUENCY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {conflictResolverIsEnabled ? (
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <Label htmlFor="conflict-resolver-max-pr-age">
-                      PR age cap
-                    </Label>
-                    <Select
-                      value={String(formState.conflictResolverMaxPrAgeDays)}
-                      onValueChange={(value) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                conflictResolverMaxPrAgeDays: Number(
-                                  value,
-                                ) as ConflictResolverMaxPrAgeDays,
-                              }
-                            : prev,
-                        )
-                      }
-                    >
-                      <SelectTrigger
-                        id="conflict-resolver-max-pr-age"
-                        aria-label="Resolve PR Conflicts PR age cap"
-                        className="w-full md:w-56"
-                      >
-                        <SelectValue placeholder="Select a cap" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CONFLICT_RESOLVER_MAX_PR_AGE_OPTIONS.map((option) => (
-                          <SelectItem
-                            key={option.value}
-                            value={String(option.value)}
-                          >
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground md:max-w-120">
-                      Sets the maximum PR age that Resolve PR Conflicts will
-                      consider. Labeled PRs older than this are skipped.
-                    </p>
-                    {fieldErrors.conflictResolverMaxPrAgeDays ? (
-                      <p className="text-xs text-destructive">
-                        {fieldErrors.conflictResolverMaxPrAgeDays}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="conflict-label">Auto-resolve label</Label>
-                    <Input
-                      id="conflict-label"
-                      value={formState.conflictResolverLabel}
-                      onChange={(event) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                conflictResolverLabel: event.target.value,
-                              }
-                            : prev,
-                        )
-                      }
-                      placeholder="roomote:auto-resolve-conflicts"
-                      className="max-w-80"
-                    />
-                    <p className="text-xs text-muted-foreground md:max-w-120">
-                      Make sure this label exists in your repos. It will be
-                      added automatically to all new agent PRs. Remove it
-                      whenever you do not want conflicts resolved.
-                    </p>
-                    {fieldErrors.conflictResolverLabel ? (
-                      <p className="text-xs text-destructive">
-                        {fieldErrors.conflictResolverLabel}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="conflict-resolver-instructions">
-                      Additional instructions
-                    </Label>
-                    <Textarea
-                      id="conflict-resolver-instructions"
-                      value={formState.conflictResolverInstructions}
-                      onChange={(event) =>
-                        setFormState((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                conflictResolverInstructions:
-                                  event.target.value,
-                              }
-                            : prev,
-                        )
-                      }
-                      rows={4}
-                      placeholder="Optional guidance for conflict resolution strategy and priorities"
-                    />
-                    {fieldErrors.conflictResolverInstructions ? (
-                      <p className="text-xs text-destructive">
-                        {fieldErrors.conflictResolverInstructions}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </AutomationCard>
 
           <AutomationCard
             automation={AUTOMATION_DEFINITIONS.platformIssueAlerts}
@@ -4180,45 +4236,6 @@ If unclear, send to manager channel.`}
               })}
             </div>
           </AutomationCard>
-
-          {!slackAutomationsDisabled ? (
-            <Alert variant="light">
-              <Lightbulb className="mt-0.5 size-5 shrink-0 text-foreground" />
-              <AlertTitle>Wanna automate even more?</AlertTitle>
-              <AlertDescription>
-                <div>
-                  <p className="text-muted-foreground">
-                    Just use Slack&apos;s own{' '}
-                    <a
-                      href={slackWorkflowLaunchUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-foreground underline underline-offset-4 hover:text-foreground/80"
-                    >
-                      workflows
-                    </a>
-                    , finishing with{' '}
-                    <span className="font-medium text-foreground">
-                      {slackAppMention}
-                    </span>{' '}
-                    mentions, to get it working on whatever you want. Some
-                    ideas:
-                  </p>
-                  <ul className="list-disc space-y-1 pl-5 pt-1 text-sm text-muted-foreground">
-                    <li>
-                      Pipe operational requests from a ticketing system into
-                      Roomote tasks
-                    </li>
-                    <li>
-                      Get diagnostics (or PRs) for bugs posted onto a bugs
-                      channel
-                    </li>
-                    <li>Enable feature flags as requests come in</li>
-                  </ul>
-                </div>
-              </AlertDescription>
-            </Alert>
-          ) : null}
         </div>
       )}
     </div>

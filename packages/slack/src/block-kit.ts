@@ -51,6 +51,7 @@ import {
   routeTask,
   classifyFollowUp,
   buildSlackRoutingContext,
+  getRoutingAutoConfirmDelayMs,
 } from '@roomote/cloud-agents/server';
 
 import type {
@@ -292,8 +293,6 @@ export async function postSlackAccountLinkThreadReply({
     thread_ts: threadTs,
   });
 }
-const SLACK_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE = 0.95;
-
 /**
  * Lua script to atomically HGET + HDEL a hash field.
  * Returns the value if it existed and, when provided, the stored initiating
@@ -375,18 +374,6 @@ interface RoutingConfirmActionValue {
 
 interface RetryFailedTaskActionValue {
   runId: number;
-}
-
-export function getSlackRoutingAutoConfirmDelayMs(
-  routingDebug?: RoutingDebugInfo,
-  workspaceType?: 'environment' | 'all_repositories',
-): number | undefined {
-  return typeof routingDebug?.confidence === 'number' &&
-    routingDebug.confidence >= SLACK_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE &&
-    routingDebug.workspaceRemapped !== true &&
-    workspaceType !== 'all_repositories'
-    ? 0
-    : undefined;
 }
 
 /**
@@ -1059,7 +1046,7 @@ export async function showTaskConfiguration({
 
       const agentName = AGENT_DISPLAY_NAME;
       const workspaceOnly = routingResult.workspaceOnly === true;
-      const autoConfirmDelayMs = getSlackRoutingAutoConfirmDelayMs(
+      const autoConfirmDelayMs = getRoutingAutoConfirmDelayMs(
         routingResult.debug,
         routingResult.workspace.type,
       );
@@ -1385,7 +1372,7 @@ export async function showTaskConfiguration({
         },
         {
           type: 'button',
-          text: { type: 'plain_text', text: 'Nevermind', emoji: true },
+          text: { type: 'plain_text', text: 'Never mind', emoji: true },
           action_id: 'nevermind_task',
         },
       ],
@@ -2630,7 +2617,7 @@ export async function handleSlackRoutingCorrection({
         autoConfirmData: {
           threadId,
           confirmNonce: correctionNonce,
-          autoConfirmDelayMs: getSlackRoutingAutoConfirmDelayMs(
+          autoConfirmDelayMs: getRoutingAutoConfirmDelayMs(
             result.debug,
             result.workspace.type,
           ),
@@ -2952,7 +2939,7 @@ export async function handleRoutingRejectNo(payload: SlackInteractivePayload) {
 }
 
 /**
- * Handles the "Nevermind" button click on the manual selection UI.
+ * Handles the "Never mind" button click on the manual selection UI.
  * Cleans up pending state and replaces the selection message with
  * a cancellation confirmation so the user knows the task was dropped.
  */

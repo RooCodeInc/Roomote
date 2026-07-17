@@ -23,6 +23,7 @@ let currentGitHubInstallationsFetching = false;
 let currentGitHubInstallationsSuccess = true;
 let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-1', name: 'Primary Env' },
+  { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
 
@@ -96,6 +97,7 @@ vi.mock('@/hooks/environments', () => ({
   useEnvironments: () => ({
     data: currentEnvironments,
     isPending: currentEnvironmentsPending,
+    isSuccess: !currentEnvironmentsPending,
   }),
 }));
 
@@ -341,7 +343,10 @@ describe('Home', () => {
     currentGitHubInstallationsPending = false;
     currentGitHubInstallationsFetching = false;
     currentGitHubInstallationsSuccess = true;
-    currentEnvironments = [{ id: 'env-1', name: 'Primary Env' }];
+    currentEnvironments = [
+      { id: 'env-1', name: 'Primary Env' },
+      { id: 'env-2', name: 'Secondary Env' },
+    ];
     currentEnvironmentsPending = false;
     localStorage.clear();
     vi.clearAllMocks();
@@ -869,20 +874,19 @@ describe('Home', () => {
     });
   });
 
-  it('falls back to the first catalog-ordered available provider', async () => {
+  it('falls back to the last catalog-ordered available cloud provider', async () => {
     render(
       <Home
         initialPlaceholderIndex={0}
         defaultComputeProvider="daytona"
         // Server may return providers in a non-catalog order; Home should
-        // still prefer setup-catalog display order for the initial selection.
+        // still prefer configured clouds over Local Docker, using the last
+        // catalog-ordered cloud when more than one is available.
         availableComputeProviders={['docker', 'e2b', 'modal']}
       />,
     );
 
-    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
-      'Modal',
-    );
+    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent('E2B');
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Use single-repo environment' }),
@@ -892,7 +896,7 @@ describe('Home', () => {
     await waitFor(() => {
       expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'modal',
+          computeProvider: 'e2b',
         }),
       );
     });
@@ -1075,5 +1079,50 @@ describe('Home', () => {
     );
     expect(persisted).not.toHaveProperty('harness');
     expect(persisted).not.toHaveProperty('harnessPreference');
+  });
+
+  it('defaults to the sole environment on load when workspace storage is Auto', async () => {
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({ workspace: { type: 'auto' } }),
+    );
+    currentEnvironments = [{ id: 'env-sole', name: 'Only Env' }];
+    currentEnvironmentsPending = false;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent('env-sole');
+      expect(screen.getByTestId('environment')).toHaveTextContent('env-sole');
+    });
+
+    expect(
+      JSON.parse(localStorage.getItem('roomote-workspace:deployment') ?? '{}'),
+    ).toEqual(
+      expect.objectContaining({
+        workspace: { type: 'environment', id: 'env-sole' },
+      }),
+    );
+  });
+
+  it('keeps Auto on load when multiple environments exist and storage is Auto', async () => {
+    localStorage.setItem(
+      'roomote-workspace:deployment',
+      JSON.stringify({ workspace: { type: 'auto' } }),
+    );
+    currentEnvironments = [
+      { id: 'env-a', name: 'Alpha' },
+      { id: 'env-b', name: 'Beta' },
+    ];
+    currentEnvironmentsPending = false;
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('repository')).toHaveTextContent(
+        AUTO_WORKSPACE_VALUE,
+      );
+      expect(screen.getByTestId('environment')).toHaveTextContent('');
+    });
   });
 });

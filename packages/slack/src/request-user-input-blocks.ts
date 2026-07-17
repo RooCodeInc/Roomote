@@ -26,7 +26,8 @@ function questionAllowsCustomAnswer(
 }
 
 function formatDisplayedOptionLabel(label: string): string {
-  return label.replace(/\s+\(Recommended\)$/u, '');
+  const suffix = ' (Recommended)';
+  return label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
 }
 
 function buildFooterText(question: AcpRequestUserInputQuestion): string {

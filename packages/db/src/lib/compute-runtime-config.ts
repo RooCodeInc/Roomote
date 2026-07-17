@@ -2,8 +2,8 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import {
   getDefaultAvailableComputeProvider,
   getSetupComputeProvider,
+  pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
-  SETUP_COMPUTE_PROVIDER_IDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   deriveModalBaseImageRefDefault,
   resolveEffectiveDockerWorkerImage,
@@ -116,10 +116,15 @@ export async function listConfiguredComputeProviders(
 }
 
 /**
- * Resolves the deployment default compute provider. The persisted setup
- * choice wins over the DEFAULT_COMPUTE_PROVIDER env value because compose and
- * PM2 stacks always inject an env default; the admin's explicit setup choice
- * is the stronger signal.
+ * Resolves the deployment default compute provider. Order of preference:
+ * 1. Persisted setup/admin default (explicit deployment choice).
+ * 2. DEFAULT_COMPUTE_PROVIDER env when it is a non-docker provider (direct
+ *    return — no catalog readiness scan on hot dispatch paths).
+ * 3. When the env default is docker or unset: scan configured providers and
+ *    prefer the last catalog-ordered configured cloud over Local Docker.
+ *    Compose stacks often inject DEFAULT_COMPUTE_PROVIDER=docker; a ready
+ *    cloud provider outranks that barrier default.
+ * 4. Local Docker / remaining availability fallback.
  */
 export async function resolveDefaultComputeProvider(
   options: {
@@ -128,9 +133,9 @@ export async function resolveDefaultComputeProvider(
   } = {},
 ): Promise<ComputeProvider> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
-  const persistedComputeConfig = await loadPersistedRuntimeComputeConfig(
-    options.executor ?? db,
-  );
+  const executor = options.executor ?? db;
+  const persistedComputeConfig =
+    await loadPersistedRuntimeComputeConfig(executor);
   const excludedProviders = parseExcludedComputeProviders(
     runtimeEnv.EXCLUDED_COMPUTE_PROVIDERS,
   );
@@ -149,29 +154,38 @@ export async function resolveDefaultComputeProvider(
   if (
     runtimeDefault &&
     isComputeProvider(runtimeDefault) &&
-    !excludedProviders.has(runtimeDefault)
+    !excludedProviders.has(runtimeDefault) &&
+    runtimeDefault !== 'docker'
   ) {
+    // Authoritative non-Docker env defaults skip the catalog readiness scan
+    // used by enqueue/retry/dequeue paths.
     return runtimeDefault;
   }
 
-  const availableProviders = await Promise.all(
-    SETUP_COMPUTE_PROVIDER_IDS.filter(
-      (provider) => !excludedProviders.has(provider),
-    )
-      .filter((provider) => provider !== 'docker')
-      .map(async (provider) => ({
-        provider,
-        configSatisfied: await isComputeProviderConfigured(provider, {
-          runtimeEnv,
-          executor: options.executor ?? db,
-        }),
-      })),
-  );
+  // Docker env default or unset: resolve cloud-vs-Local Docker from readiness.
+  const configuredProviders = await listConfiguredComputeProviders({
+    runtimeEnv,
+    executor,
+  });
+  const preferredConfigured =
+    pickPreferredConfiguredComputeProvider(configuredProviders);
 
-  return getDefaultAvailableComputeProvider(
-    excludedProviders,
-    availableProviders,
-  );
+  if (
+    runtimeDefault === 'docker' &&
+    isComputeProvider(runtimeDefault) &&
+    !excludedProviders.has(runtimeDefault)
+  ) {
+    if (preferredConfigured && preferredConfigured !== 'docker') {
+      return preferredConfigured;
+    }
+    return 'docker';
+  }
+
+  if (preferredConfigured) {
+    return preferredConfigured;
+  }
+
+  return getDefaultAvailableComputeProvider(excludedProviders);
 }
 
 /**

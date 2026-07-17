@@ -89,6 +89,11 @@ vi.mock('@/trpc/client', () => ({
         queryKey: () => queryKeys.githubInstallations,
       },
     },
+    environments: {
+      list: {
+        queryOptions: () => ({ queryKey: ['environments.list'] }),
+      },
+    },
   }),
 }));
 
@@ -175,9 +180,17 @@ describe('Setup StepInvoke', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     invalidateQueriesMock.mockResolvedValue(undefined);
-    fetchQueryMock.mockResolvedValue({
-      setupNewState: { onboardingTaskId: null },
-    });
+    fetchQueryMock.mockImplementation(
+      async (options: { queryKey?: unknown[] }) => {
+        const key = options?.queryKey?.[0];
+        if (key === 'environments.list') {
+          return environmentState.environments;
+        }
+        return {
+          setupNewState: { onboardingTaskId: null },
+        };
+      },
+    );
     environmentState.environments = [{ id: 'env-1' }];
     environmentState.commsProviders = [];
     userState.user = null;

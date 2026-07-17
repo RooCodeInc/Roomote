@@ -489,6 +489,59 @@ function parseSingleQuestionRequestUserInputReply(
   };
 }
 
+function parseNumberedAnswerLine(
+  line: string,
+): { questionIndex: number; answer: string } | null {
+  let index = 0;
+  if (line[index] === '#') {
+    index += 1;
+  }
+  while (index < line.length && (line[index] === ' ' || line[index] === '\t')) {
+    index += 1;
+  }
+
+  const numberStart = index;
+  while (index < line.length && line[index]! >= '0' && line[index]! <= '9') {
+    index += 1;
+  }
+  if (index === numberStart) {
+    return null;
+  }
+
+  const questionNumber = Number.parseInt(line.slice(numberStart, index), 10);
+  let hadSeparator = false;
+  while (index < line.length) {
+    const ch = line[index]!;
+    if (
+      ch === ')' ||
+      ch === '.' ||
+      ch === ']' ||
+      ch === ':' ||
+      ch === '-' ||
+      ch === ' ' ||
+      ch === '\t'
+    ) {
+      hadSeparator = true;
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  if (!hadSeparator || index >= line.length) {
+    return null;
+  }
+
+  const answer = line.slice(index).trim();
+  if (!answer || Number.isNaN(questionNumber)) {
+    return null;
+  }
+
+  return {
+    questionIndex: questionNumber - 1,
+    answer,
+  };
+}
+
 function parseMultiQuestionRequestUserInputReply(
   questions: AcpRequestUserInputQuestion[],
   responseText: string,
@@ -505,15 +558,15 @@ function parseMultiQuestionRequestUserInputReply(
   const numberedAnswers = new Map<number, string>();
 
   for (const line of lines) {
-    const numberedMatch = line.match(/^#?\s*(\d+)[).\]:\-\s]+(.+)$/);
+    const numberedMatch = parseNumberedAnswerLine(line);
 
     if (!numberedMatch) {
       numberedAnswers.clear();
       break;
     }
 
-    const questionIndex = Number.parseInt(numberedMatch[1] ?? '', 10) - 1;
-    const answer = (numberedMatch[2] ?? '').trim();
+    const questionIndex = numberedMatch.questionIndex;
+    const answer = numberedMatch.answer;
 
     if (
       questionIndex < 0 ||
@@ -725,9 +778,25 @@ export function extractAcpMessageText(
   return undefined;
 }
 
-const ACP_SYSTEM_INJECTED_PROMPT_BLOCK_REGEX =
-  /<(environment-instructions|workflow)>[\s\S]*?<\/\1>/g;
-const ACP_REQUEST_TAG_REGEX = /<\/?request>/g;
+function stripXmlBlocksByTagName(text: string, tagName: string): string {
+  const open = `<${tagName}>`;
+  const close = `</${tagName}>`;
+  let result = text;
+
+  for (;;) {
+    const start = result.indexOf(open);
+    if (start === -1) {
+      break;
+    }
+    const end = result.indexOf(close, start + open.length);
+    if (end === -1) {
+      break;
+    }
+    result = result.slice(0, start) + result.slice(end + close.length);
+  }
+
+  return result;
+}
 
 /**
  * Detect prompt text that includes wrapper blocks injected by Roomote.
@@ -743,9 +812,12 @@ export function isSystemInjectedAcpPromptText(text: string): boolean {
  * request text for downstream consumers such as task-title generation.
  */
 export function extractVisibleAcpPromptText(text: string): string {
-  return text
-    .replace(ACP_SYSTEM_INJECTED_PROMPT_BLOCK_REGEX, '')
-    .replace(ACP_REQUEST_TAG_REGEX, '')
+  return stripXmlBlocksByTagName(
+    stripXmlBlocksByTagName(text, 'environment-instructions'),
+    'workflow',
+  )
+    .replaceAll('<request>', '')
+    .replaceAll('</request>', '')
     .trim();
 }
 
@@ -1111,15 +1183,25 @@ function parseAcpClaudeMcpToolName(
     return null;
   }
 
-  const match = /^mcp__([^_].*?)__(.+)$/.exec(value);
+  const rest = value.slice('mcp__'.length);
+  if (!rest || rest[0] === '_') {
+    return null;
+  }
 
-  if (!match?.[1] || !match?.[2]) {
+  const separatorIndex = rest.indexOf('__');
+  if (separatorIndex <= 0) {
+    return null;
+  }
+
+  const mcpServerName = rest.slice(0, separatorIndex);
+  const mcpToolName = rest.slice(separatorIndex + 2);
+  if (!mcpServerName || !mcpToolName) {
     return null;
   }
 
   return {
-    mcpServerName: match[1],
-    mcpToolName: match[2],
+    mcpServerName,
+    mcpToolName,
   };
 }
 
@@ -1264,206 +1346,547 @@ function findStructuralClose(
 }
 
 function matchesThreadActivityOnlyFrom(text: string, index: number): boolean {
-  if (index === text.length) {
-    return true;
+  const openTag = '<thread_activity>';
+  const closeTag = '</thread_activity>';
+
+  // Iterative DFS with explicit close backtracking so long sequences of valid
+  // thread_activity blocks cannot overflow the call stack.
+  const alternateCloseFrom: number[] = [];
+  let pos = index;
+
+  while (true) {
+    if (pos === text.length) {
+      return true;
+    }
+
+    if (!text.startsWith(openTag, pos)) {
+      if (!advanceToNextCloseAlternate()) {
+        return false;
+      }
+      continue;
+    }
+
+    const closeIndex = text.indexOf(closeTag, pos + openTag.length);
+    if (closeIndex === -1) {
+      if (!advanceToNextCloseAlternate()) {
+        return false;
+      }
+      continue;
+    }
+
+    alternateCloseFrom.push(closeIndex + 1);
+    pos = skipAsciiWhitespace(text, closeIndex + closeTag.length);
   }
 
-  const openTag = '<thread_activity>';
-  if (!text.startsWith(openTag, index)) {
+  function advanceToNextCloseAlternate(): boolean {
+    while (alternateCloseFrom.length > 0) {
+      const nextFrom = alternateCloseFrom[alternateCloseFrom.length - 1]!;
+      const closeIndex = text.indexOf(closeTag, nextFrom);
+      if (closeIndex === -1) {
+        alternateCloseFrom.pop();
+        continue;
+      }
+
+      alternateCloseFrom[alternateCloseFrom.length - 1] = closeIndex + 1;
+      pos = skipAsciiWhitespace(text, closeIndex + closeTag.length);
+      return true;
+    }
+
     return false;
   }
-
-  const afterOpen = index + openTag.length;
-  const closeTag = '</thread_activity>';
-  const found = findStructuralClose(
-    text,
-    afterOpen,
-    closeTag,
-    (_close, afterClose) => matchesThreadActivityOnlyFrom(text, afterClose),
-  );
-
-  return found !== null;
 }
 
 function isSlackThreadActivityOnlyBlock(text: string): boolean {
   return text.length > 0 && matchesThreadActivityOnlyFrom(text, 0);
 }
 
-type SlackTranscriptParseStage =
-  | 'leading_activity'
-  | 'thread_context'
-  | 'trailing_activity'
-  | 'replying_to'
-  | 'slack_turn_policy'
-  | 'slack_message';
+/**
+ * Extract slack_message content from:
+ *   thread_activity* thread_context? thread_activity*
+ *   replying_to? slack_turn_policy? slack_message
+ *
+ * Implemented as the original recursive descent with per-(pos, phase) memoization,
+ * executed on an explicit heap stack so thousands of sequential activity blocks
+ * neither overflow the call stack nor O(n^2) re-scan.
+ */
+function extractSlackTranscriptMessageContent(text: string): string | null {
+  return parseSlackTranscriptFrom(text, 0);
+}
 
-function consumeNewlineWrappedBlockForStage(
-  text: string,
-  index: number,
-  tagName: string,
-  allowAttributes: boolean,
-  continueFrom: (afterClose: number) => string | null,
-): string | null {
-  const afterOpen = matchOpenTag(text, index, tagName, allowAttributes);
-  if (afterOpen === null || text[afterOpen] !== '\n') {
+function extractSlackMessageAt(text: string, index: number): string | null {
+  const afterOpen = matchOpenTag(text, index, 'slack_message', true);
+  if (afterOpen === null) {
     return null;
   }
 
-  const closeMarker = `\n</${tagName}>`;
+  let contentStart = afterOpen;
+  if (text[contentStart] === '\n') {
+    contentStart += 1;
+  }
+
+  const closeTag = '</slack_message>';
   const found = findStructuralClose(
     text,
-    afterOpen + 1,
-    closeMarker,
-    (_close, afterClose) => continueFrom(afterClose) !== null,
+    contentStart,
+    closeTag,
+    (_close, afterClose) => afterClose === text.length,
   );
   if (found === null) {
     return null;
   }
 
-  return continueFrom(found.afterClose);
+  let contentEnd = found.closeIndex;
+  if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
+    contentEnd -= 1;
+  }
+
+  return text.slice(contentStart, contentEnd);
 }
 
-function parseSlackTranscriptMessage(
-  text: string,
-  index: number,
-  stage: SlackTranscriptParseStage,
-): string | null {
-  switch (stage) {
-    case 'leading_activity': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_activity',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'leading_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'thread_context');
+function parseSlackRestFrom(text: string, index: number): string | null {
+  const afterReplyingOpen = matchOpenTag(text, index, 'replying_to', true);
+  if (afterReplyingOpen !== null && text[afterReplyingOpen] === '\n') {
+    const closeMarker = '\n</replying_to>';
+    const found = findStructuralClose(
+      text,
+      afterReplyingOpen + 1,
+      closeMarker,
+      (_close, afterClose) => parseSlackRestAfterReplying(afterClose) !== null,
+    );
+    if (found !== null) {
+      return parseSlackRestAfterReplying(found.afterClose);
     }
+  }
 
-    case 'thread_context': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_context',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
+  return parseSlackRestAfterReplying(index);
 
-      return parseSlackTranscriptMessage(text, index, 'trailing_activity');
-    }
-
-    case 'trailing_activity': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_activity',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'replying_to');
-    }
-
-    case 'replying_to': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'replying_to',
-        true,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'slack_turn_policy'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'slack_turn_policy');
-    }
-
-    case 'slack_turn_policy': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'slack_turn_policy',
-        true,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'slack_message'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'slack_message');
-    }
-
-    case 'slack_message': {
-      const afterOpen = matchOpenTag(text, index, 'slack_message', true);
-      if (afterOpen === null) {
-        return null;
-      }
-
-      let contentStart = afterOpen;
-      if (text[contentStart] === '\n') {
-        contentStart += 1;
-      }
-
-      const closeTag = '</slack_message>';
+  function parseSlackRestAfterReplying(at: number): string | null {
+    const afterPolicyOpen = matchOpenTag(text, at, 'slack_turn_policy', true);
+    if (afterPolicyOpen !== null && text[afterPolicyOpen] === '\n') {
+      const closeMarker = '\n</slack_turn_policy>';
       const found = findStructuralClose(
         text,
-        contentStart,
-        closeTag,
-        (_close, afterClose) => afterClose === text.length,
+        afterPolicyOpen + 1,
+        closeMarker,
+        (_close, afterClose) =>
+          extractSlackMessageAt(text, afterClose) !== null,
       );
-      if (found === null) {
-        return null;
+      if (found !== null) {
+        return extractSlackMessageAt(text, found.afterClose);
       }
-
-      let contentEnd = found.closeIndex;
-      if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
-        contentEnd -= 1;
-      }
-
-      return text.slice(contentStart, contentEnd);
     }
+
+    return extractSlackMessageAt(text, at);
   }
 }
 
-function extractSlackTranscriptMessageContent(text: string): string | null {
-  return parseSlackTranscriptMessage(text, 0, 'leading_activity');
+function parseSlackTranscriptFrom(text: string, start: number): string | null {
+  // phase: 0 = pre-context (leading activities), 1 = post-context (trailing + rest)
+  type Frame = {
+    pos: number;
+    phase: 0 | 1;
+    /** 0 init/activity; 1 scanning activity closes; 2 after child (activity or post); 3 scanning context closes; 4 rest */
+    mode: 0 | 1 | 2 | 3 | 4;
+    scanFrom: number;
+    childPos: number;
+    childPhase: 0 | 1;
+  };
+
+  const stride = text.length + 1;
+  const memo = new Map<number, string | null>();
+  const keyOf = (pos: number, phase: 0 | 1) => phase * stride + pos;
+
+  const stack: Frame[] = [
+    {
+      pos: start,
+      phase: 0,
+      mode: 0,
+      scanFrom: 0,
+      childPos: 0,
+      childPhase: 0,
+    },
+  ];
+  let lastResult: string | null = null;
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    const key = keyOf(frame.pos, frame.phase);
+
+    if (frame.mode === 0) {
+      if (memo.has(key)) {
+        lastResult = memo.get(key)!;
+        stack.pop();
+        continue;
+      }
+
+      // Prefer one thread_activity whose remainder solves in the same phase.
+      const afterOpen = matchOpenTag(text, frame.pos, 'thread_activity', false);
+      if (afterOpen !== null && text[afterOpen] === '\n') {
+        frame.scanFrom = afterOpen + 1;
+        frame.mode = 1;
+        continue;
+      }
+
+      // No activity open at this pos.
+      if (frame.phase === 0) {
+        // Optional thread_context, else post phase at same pos.
+        const ctxOpen = matchOpenTag(text, frame.pos, 'thread_context', false);
+        if (ctxOpen !== null && text[ctxOpen] === '\n') {
+          frame.scanFrom = ctxOpen + 1;
+          frame.mode = 3;
+          continue;
+        }
+        frame.childPos = frame.pos;
+        frame.childPhase = 1;
+        frame.mode = 2;
+        const childKey = keyOf(frame.childPos, 1);
+        if (memo.has(childKey)) {
+          lastResult = memo.get(childKey)!;
+        } else {
+          stack.push({
+            pos: frame.childPos,
+            phase: 1,
+            mode: 0,
+            scanFrom: 0,
+            childPos: 0,
+            childPhase: 0,
+          });
+        }
+        continue;
+      }
+
+      // phase post: fall through to rest.
+      frame.mode = 4;
+      continue;
+    }
+
+    if (frame.mode === 1) {
+      const closeMarker = '\n</thread_activity>';
+      const closeIndex = text.indexOf(closeMarker, frame.scanFrom);
+      if (closeIndex === -1) {
+        // No more activity closes — fall through like mode 0 without activity.
+        if (frame.phase === 0) {
+          const ctxOpen = matchOpenTag(
+            text,
+            frame.pos,
+            'thread_context',
+            false,
+          );
+          if (ctxOpen !== null && text[ctxOpen] === '\n') {
+            frame.scanFrom = ctxOpen + 1;
+            frame.mode = 3;
+            continue;
+          }
+          frame.childPos = frame.pos;
+          frame.childPhase = 1;
+          frame.mode = 2;
+          const childKey = keyOf(frame.childPos, 1);
+          if (memo.has(childKey)) {
+            lastResult = memo.get(childKey)!;
+          } else {
+            stack.push({
+              pos: frame.childPos,
+              phase: 1,
+              mode: 0,
+              scanFrom: 0,
+              childPos: 0,
+              childPhase: 0,
+            });
+          }
+          continue;
+        }
+        frame.mode = 4;
+        continue;
+      }
+
+      frame.childPos = skipAsciiWhitespace(
+        text,
+        closeIndex + closeMarker.length,
+      );
+      frame.childPhase = frame.phase;
+      frame.scanFrom = closeIndex + 1;
+      frame.mode = 2;
+
+      const childKey = keyOf(frame.childPos, frame.childPhase);
+      if (memo.has(childKey)) {
+        lastResult = memo.get(childKey)!;
+      } else {
+        stack.push({
+          pos: frame.childPos,
+          phase: frame.childPhase,
+          mode: 0,
+          scanFrom: 0,
+          childPos: 0,
+          childPhase: 0,
+        });
+      }
+      continue;
+    }
+
+    if (frame.mode === 2) {
+      // Child finished in lastResult.
+      if (lastResult !== null) {
+        memo.set(key, lastResult);
+        stack.pop();
+        continue;
+      }
+
+      // Child failed. If we were probing activity closes, try next close;
+      // if we were probing context, try next context close; if post-at-pos failed, done.
+      // Distinguish via childPhase and whether scan is activity vs context:
+      // activity probe uses childPhase === frame.phase and scan on activity closes.
+      // We need a flag: use mode transitions carefully.
+
+      // Heuristic: if scanFrom was activity (mode came from 1), resume mode 1.
+      // If from context (mode 3), resume mode 3.
+      // If from post-at-pos fallback (childPos === pos && childPhase === 1 && phase === 0), fail.
+      if (
+        frame.phase === 0 &&
+        frame.childPhase === 1 &&
+        frame.childPos === frame.pos
+      ) {
+        memo.set(key, null);
+        lastResult = null;
+        stack.pop();
+        continue;
+      }
+
+      if (frame.childPhase === frame.phase) {
+        // activity child failed — next activity close
+        frame.mode = 1;
+        continue;
+      }
+
+      // context child failed — next context close
+      frame.mode = 3;
+      continue;
+    }
+
+    if (frame.mode === 3) {
+      const closeMarker = '\n</thread_context>';
+      const closeIndex = text.indexOf(closeMarker, frame.scanFrom);
+      if (closeIndex === -1) {
+        // No more context — post at same position.
+        frame.childPos = frame.pos;
+        frame.childPhase = 1;
+        frame.mode = 2;
+        const childKey = keyOf(frame.childPos, 1);
+        if (memo.has(childKey)) {
+          lastResult = memo.get(childKey)!;
+        } else {
+          stack.push({
+            pos: frame.childPos,
+            phase: 1,
+            mode: 0,
+            scanFrom: 0,
+            childPos: 0,
+            childPhase: 0,
+          });
+        }
+        continue;
+      }
+
+      frame.childPos = skipAsciiWhitespace(
+        text,
+        closeIndex + closeMarker.length,
+      );
+      frame.childPhase = 1;
+      frame.scanFrom = closeIndex + 1;
+      frame.mode = 2;
+
+      const childKey = keyOf(frame.childPos, 1);
+      if (memo.has(childKey)) {
+        lastResult = memo.get(childKey)!;
+      } else {
+        stack.push({
+          pos: frame.childPos,
+          phase: 1,
+          mode: 0,
+          scanFrom: 0,
+          childPos: 0,
+          childPhase: 0,
+        });
+      }
+      continue;
+    }
+
+    // mode 4: rest
+    {
+      const result = parseSlackRestFrom(text, frame.pos);
+      memo.set(key, result);
+      lastResult = result;
+      stack.pop();
+    }
+  }
+
+  return memo.get(keyOf(start, 0)) ?? null;
 }
 
-const COMMUNICATION_TRANSCRIPT_MESSAGE_BLOCK_PATTERN =
-  /^<communication_message(?:\s+[^>]*)?>\n?([\s\S]*?)\n?<\/communication_message>\s*$/;
-const COMMUNICATION_QUOTED_MESSAGE_PREFIX_PATTERN =
-  /^\s*<quoted(?:\s+[^>]*)?\/>\s*/i;
-const GITHUB_FOLLOW_UP_TRANSCRIPT_MESSAGE_BLOCK_PATTERN =
-  /^<github-pr-follow-up>\s*[\s\S]*?<(?:requested-follow-up|requested_follow_up)>\n?([\s\S]*?)\n?<\/(?:requested-follow-up|requested_follow_up)>[\s\S]*?<\/github-pr-follow-up>\s*(?:<github_message_instructions>\s*[\s\S]*?<\/github_message_instructions>\s*)?$/;
+function extractCommunicationTranscriptMessage(text: string): string | null {
+  const openPrefix = '<communication_message';
+  if (!text.startsWith(openPrefix)) {
+    return null;
+  }
+
+  const openEnd = text.indexOf('>');
+  if (openEnd === -1) {
+    return null;
+  }
+
+  const openInner = text.slice(openPrefix.length, openEnd);
+  if (openInner.length > 0 && openInner[0] !== ' ' && openInner[0] !== '\t') {
+    return null;
+  }
+
+  let contentStart = openEnd + 1;
+  if (text[contentStart] === '\n') {
+    contentStart += 1;
+  }
+
+  const closeTag = '</communication_message>';
+  const closeIndex = text.indexOf(closeTag, contentStart);
+  if (closeIndex === -1) {
+    return null;
+  }
+
+  if (text.slice(closeIndex + closeTag.length).trim() !== '') {
+    return null;
+  }
+
+  let contentEnd = closeIndex;
+  if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
+    contentEnd -= 1;
+  }
+
+  return text.slice(contentStart, contentEnd);
+}
+
+function extractGithubFollowUpTranscriptMessage(text: string): string | null {
+  const openTag = '<github-pr-follow-up>';
+  const closeTag = '</github-pr-follow-up>';
+  if (!text.startsWith(openTag)) {
+    return null;
+  }
+
+  const closeIndex = text.indexOf(closeTag, openTag.length);
+  if (closeIndex === -1) {
+    return null;
+  }
+
+  const body = text.slice(openTag.length, closeIndex);
+  const remainder = text.slice(closeIndex + closeTag.length).trim();
+  if (remainder.length > 0) {
+    const instructionsOpen = '<github_message_instructions>';
+    const instructionsClose = '</github_message_instructions>';
+    if (
+      !remainder.startsWith(instructionsOpen) ||
+      !remainder.endsWith(instructionsClose)
+    ) {
+      return null;
+    }
+  }
+
+  for (const tag of ['requested-follow-up', 'requested_follow_up'] as const) {
+    const requestOpen = `<${tag}>`;
+    const requestClose = `</${tag}>`;
+    const requestStart = body.indexOf(requestOpen);
+    if (requestStart === -1) {
+      continue;
+    }
+    let contentStart = requestStart + requestOpen.length;
+    if (body[contentStart] === '\n') {
+      contentStart += 1;
+    }
+    const requestEnd = body.indexOf(requestClose, contentStart);
+    if (requestEnd === -1) {
+      continue;
+    }
+    let contentEnd = requestEnd;
+    if (contentEnd > contentStart && body[contentEnd - 1] === '\n') {
+      contentEnd -= 1;
+    }
+    return body.slice(contentStart, contentEnd);
+  }
+
+  return null;
+}
 
 export function decodeWrappedMessageEntities(value: string): string {
-  return value
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&amp;', '&');
+  return value.replace(/&(?:amp|lt|gt);/g, (entity) => {
+    switch (entity.slice(1, -1)) {
+      case 'amp':
+        return '&';
+      case 'lt':
+        return '<';
+      case 'gt':
+        return '>';
+      default:
+        return entity;
+    }
+  });
+}
+
+function stripQuotedCommunicationPrefix(value: string): string {
+  let index = 0;
+  while (
+    index < value.length &&
+    (value[index] === ' ' ||
+      value[index] === '\t' ||
+      value[index] === '\n' ||
+      value[index] === '\r')
+  ) {
+    index += 1;
+  }
+  const open = '<quoted';
+  if (!value.toLowerCase().startsWith(open, index)) {
+    return value;
+  }
+
+  // Match the previous pattern: <quoted(?:\s+[^>]*)?\/>
+  // The tag itself must end with "/>" — no bare ">" is allowed earlier.
+  let cursor = index + open.length;
+  const afterTagName = value[cursor];
+  if (afterTagName === '/') {
+    if (value[cursor + 1] !== '>') {
+      return value;
+    }
+    cursor += 2;
+  } else if (
+    afterTagName === ' ' ||
+    afterTagName === '\t' ||
+    afterTagName === '\n' ||
+    afterTagName === '\r'
+  ) {
+    const closeIndex = value.indexOf('/>', cursor);
+    if (closeIndex === -1) {
+      return value;
+    }
+    const bareClose = value.indexOf('>', cursor);
+    if (bareClose !== -1 && bareClose < closeIndex + 1) {
+      // bareClose == closeIndex + 1 is the ">" of "/>"; anything earlier rejects.
+      if (bareClose < closeIndex) {
+        return value;
+      }
+    }
+    cursor = closeIndex + 2;
+  } else {
+    return value;
+  }
+
+  while (
+    cursor < value.length &&
+    (value[cursor] === ' ' ||
+      value[cursor] === '\t' ||
+      value[cursor] === '\n' ||
+      value[cursor] === '\r')
+  ) {
+    cursor += 1;
+  }
+  return value.slice(cursor);
 }
 
 function normalizeCommunicationTranscriptContent(value: string): string {
-  return decodeWrappedMessageEntities(value).replace(
-    COMMUNICATION_QUOTED_MESSAGE_PREFIX_PATTERN,
-    '',
-  );
+  return stripQuotedCommunicationPrefix(decodeWrappedMessageEntities(value));
 }
 
 /**
@@ -1473,8 +1896,40 @@ function normalizeCommunicationTranscriptContent(value: string): string {
  * Stripped from user-visible transcript text by
  * {@link normalizeTranscriptUserText}.
  */
-const LEADING_OUT_OF_BAND_CONTEXT_BLOCK_PATTERN =
-  /^\s*<out_of_band_context>\n[\s\S]*?\n<\/out_of_band_context>\s*/;
+function stripLeadingOutOfBandContextBlock(text: string): string {
+  let index = 0;
+  while (
+    index < text.length &&
+    (text[index] === ' ' ||
+      text[index] === '\t' ||
+      text[index] === '\n' ||
+      text[index] === '\r')
+  ) {
+    index += 1;
+  }
+  const open = '<out_of_band_context>\n';
+  const close = '\n</out_of_band_context>';
+  if (!text.startsWith(open, index)) {
+    return text;
+  }
+  const closeIndex = text.indexOf(close, index + open.length);
+  if (closeIndex === -1) {
+    return text;
+  }
+  let end = closeIndex + close.length;
+  while (
+    end < text.length &&
+    (text[end] === ' ' ||
+      text[end] === '\t' ||
+      text[end] === '\n' ||
+      text[end] === '\r')
+  ) {
+    end += 1;
+  }
+  // Drop any leading whitespace that only preceded the OOB block so the
+  // remaining user prompt stays at offset 0 for downstream wrapper parsers.
+  return text.slice(end);
+}
 
 function escapeOutOfBandMessageContent(value: string): string {
   return value
@@ -1519,16 +1974,47 @@ export function wrapOutOfBandContext(
  * the user's own message remains.
  */
 export function stripLeadingOutOfBandContext(text: string): string {
-  return text.replace(LEADING_OUT_OF_BAND_CONTEXT_BLOCK_PATTERN, '');
+  return stripLeadingOutOfBandContextBlock(text);
 }
 
-const LINKED_REVIEW_RESULTS_PATTERN =
-  /^<(review_result|code-review-results)(?:\s+[^>]*)?\s*>\s*([\s\S]*?)\s*<\/\1>$/;
+function matchLinkedReviewResults(text: string): { body: string } | null {
+  const trimmed = text.trim();
+  for (const tag of ['review_result', 'code-review-results'] as const) {
+    const openPrefix = `<${tag}`;
+    if (!trimmed.startsWith(openPrefix)) {
+      continue;
+    }
+    const afterTag = trimmed[openPrefix.length];
+    if (
+      afterTag !== undefined &&
+      afterTag !== '>' &&
+      afterTag !== ' ' &&
+      afterTag !== '\t' &&
+      afterTag !== '\n' &&
+      afterTag !== '\r'
+    ) {
+      continue;
+    }
+    const openEnd = trimmed.indexOf('>');
+    if (openEnd === -1) {
+      continue;
+    }
+    const close = `</${tag}>`;
+    if (!trimmed.endsWith(close)) {
+      continue;
+    }
+    const body = trimmed
+      .slice(openEnd + 1, trimmed.length - close.length)
+      .trim();
+    return { body };
+  }
+  return null;
+}
 
 export function isLinkedReviewResultsMessage(
   text: string | null | undefined,
 ): boolean {
-  return !!text && LINKED_REVIEW_RESULTS_PATTERN.test(text.trim());
+  return !!text && matchLinkedReviewResults(text) !== null;
 }
 
 export interface ParsedLinkedReviewResults {
@@ -1545,15 +2031,28 @@ export interface ParsedLinkedReviewResults {
 }
 
 function getWrappedTagValue(body: string, tag: string): string | null {
-  const match = body.match(new RegExp(`<${tag}>([\\s\\S]*?)<\\/${tag}>`));
-  return match?.[1]?.trim() || null;
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const start = body.indexOf(open);
+  if (start === -1) {
+    return null;
+  }
+  const contentStart = start + open.length;
+  const end = body.indexOf(close, contentStart);
+  if (end === -1) {
+    return null;
+  }
+  return body.slice(contentStart, end).trim() || null;
 }
 
 function stripInlineXmlTags(value: string): string {
-  return value
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  let result = value;
+  let previous: string;
+  do {
+    previous = result;
+    result = result.replace(/<[^>]*>/g, ' ');
+  } while (result !== previous);
+  return result.replace(/\s+/g, ' ').trim();
 }
 
 function parseOptionalIntegerTag(body: string, tag: string): number | null {
@@ -1575,13 +2074,13 @@ export function parseLinkedReviewResults(
     return null;
   }
 
-  const wrapped = text.trim().match(LINKED_REVIEW_RESULTS_PATTERN);
+  const wrapped = matchLinkedReviewResults(text);
 
   if (!wrapped) {
     return null;
   }
 
-  const raw = wrapped[2]?.trim() ?? '';
+  const raw = wrapped.body;
   const reviewKindTag = getWrappedTagValue(raw, 'review_kind');
   const approvalStatusTag = getWrappedTagValue(raw, 'approval_status');
   const summary =
@@ -1642,22 +2141,16 @@ export function normalizeTranscriptUserText(
     return decodeWrappedMessageEntities(wrapped);
   }
 
-  const githubWrapped = text.match(
-    GITHUB_FOLLOW_UP_TRANSCRIPT_MESSAGE_BLOCK_PATTERN,
-  );
+  const githubWrapped = extractGithubFollowUpTranscriptMessage(text);
 
-  if (githubWrapped) {
-    return decodeWrappedMessageEntities(githubWrapped[1] ?? '');
+  if (githubWrapped !== null) {
+    return decodeWrappedMessageEntities(githubWrapped);
   }
 
-  const communicationWrapped = text.match(
-    COMMUNICATION_TRANSCRIPT_MESSAGE_BLOCK_PATTERN,
-  );
+  const communicationWrapped = extractCommunicationTranscriptMessage(text);
 
-  if (communicationWrapped) {
-    return normalizeCommunicationTranscriptContent(
-      communicationWrapped[1] ?? '',
-    );
+  if (communicationWrapped !== null) {
+    return normalizeCommunicationTranscriptContent(communicationWrapped);
   }
 
   const decodedText = decodeWrappedMessageEntities(text);
@@ -1669,21 +2162,19 @@ export function normalizeTranscriptUserText(
       return decodeWrappedMessageEntities(decodedWrapped);
     }
 
-    const decodedGithubWrapped = decodedText.match(
-      GITHUB_FOLLOW_UP_TRANSCRIPT_MESSAGE_BLOCK_PATTERN,
-    );
+    const decodedGithubWrapped =
+      extractGithubFollowUpTranscriptMessage(decodedText);
 
-    if (decodedGithubWrapped) {
-      return decodeWrappedMessageEntities(decodedGithubWrapped[1] ?? '');
+    if (decodedGithubWrapped !== null) {
+      return decodeWrappedMessageEntities(decodedGithubWrapped);
     }
 
-    const decodedCommunicationWrapped = decodedText.match(
-      COMMUNICATION_TRANSCRIPT_MESSAGE_BLOCK_PATTERN,
-    );
+    const decodedCommunicationWrapped =
+      extractCommunicationTranscriptMessage(decodedText);
 
-    if (decodedCommunicationWrapped) {
+    if (decodedCommunicationWrapped !== null) {
       return normalizeCommunicationTranscriptContent(
-        decodedCommunicationWrapped[1] ?? '',
+        decodedCommunicationWrapped,
       );
     }
   }

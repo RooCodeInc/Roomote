@@ -695,15 +695,17 @@ describe('launchDiscordTask', () => {
       },
       workspace: { repoForPayload: 'acme/repo', workspaceDisplayName: 'Acme' },
       replaceMessage: {
-        applicationId: 'app-1',
         interaction: {
-          id: 'interaction-1',
-          application_id: 'app-1',
-          type: 3,
-          token: 'token-1',
-          channel_id: 'message-1',
-        } as never,
-        interactionDeferred: true,
+          applicationId: 'app-1',
+          interaction: {
+            id: 'interaction-1',
+            application_id: 'app-1',
+            type: 3,
+            token: 'token-1',
+            channel_id: 'message-1',
+          } as never,
+          interactionDeferred: true,
+        },
         channel: {
           channelId: 'message-1',
           channelName: 'Fix tests',
@@ -788,15 +790,17 @@ describe('launchDiscordTask', () => {
       },
       workspace: { repoForPayload: 'acme/repo', workspaceDisplayName: 'Acme' },
       replaceMessage: {
-        applicationId: 'app-1',
         interaction: {
-          id: 'interaction-1',
-          application_id: 'app-1',
-          type: 3,
-          token: 'token-1',
-          channel_id: 'message-1',
-        } as never,
-        interactionDeferred: true,
+          applicationId: 'app-1',
+          interaction: {
+            id: 'interaction-1',
+            application_id: 'app-1',
+            type: 3,
+            token: 'token-1',
+            channel_id: 'message-1',
+          } as never,
+          interactionDeferred: true,
+        },
         channel: {
           channelId: 'message-1',
           channelName: 'Fix tests',

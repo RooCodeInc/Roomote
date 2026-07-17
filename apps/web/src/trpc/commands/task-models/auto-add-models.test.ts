@@ -151,6 +151,78 @@ describe('buildAutoAddedTaskModelSettings', () => {
       GOOGLE.defaultRoomoteModel,
     );
   });
+
+  it('adds default-preset models without adding models unique to another preset', () => {
+    const provider = {
+      ...ANTHROPIC,
+      recommendedPresets: [
+        {
+          id: 'standard',
+          label: 'Standard',
+          default: true,
+          roles: {
+            coding: { modelId: 'anthropic/claude-sonnet-5' },
+            helper: { modelId: 'anthropic/claude-haiku-4-5' },
+          },
+        },
+        {
+          id: 'review-heavy',
+          label: 'Review heavy',
+          roles: {
+            coding: { modelId: 'anthropic/experimental-reviewer' },
+            codeReview: {
+              modelId: 'anthropic/experimental-reviewer',
+              displayName: 'Experimental reviewer',
+            },
+          },
+        },
+      ],
+    };
+
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['anthropic']),
+    });
+
+    expect(result?.addedModels.map((model) => model.id)).toContain(
+      'anthropic/claude-haiku-4-5',
+    );
+    expect(result?.addedModels.map((model) => model.id)).not.toContain(
+      'anthropic/experimental-reviewer',
+    );
+  });
+
+  it('uses the model display name for a preset model family fallback', () => {
+    const provider = {
+      ...ANTHROPIC,
+      recommendedPresets: [
+        {
+          id: 'experimental',
+          label: 'Experimental',
+          default: true,
+          roles: {
+            coding: {
+              modelId: 'anthropic/experimental-reviewer',
+              displayName: 'Experimental reviewer',
+            },
+          },
+        },
+      ],
+    };
+
+    const result = buildAutoAddedTaskModelSettings({
+      provider,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['anthropic']),
+    });
+
+    expect(
+      result?.addedModels.find(
+        (model) => model.id === 'anthropic/experimental-reviewer',
+      ),
+    ).toMatchObject({ family: 'Experimental' });
+  });
 });
 
 describe('appendRecommendedTaskModels', () => {
