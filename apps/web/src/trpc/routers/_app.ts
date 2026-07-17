@@ -295,10 +295,12 @@ import {
 } from '../commands/access-policy';
 import {
   deleteTaskModelProviderCommand,
+  discoverProviderModelsCommand,
   getLaunchTaskModelsCommand,
   getTaskModelProviderSetupCommand,
   getTaskModelSettingsCommand,
   lookupTaskModelCommand,
+  qualifyProviderModelCommand,
   refreshTaskModelMetadataCommand,
   saveTaskModelProviderCommand,
   suggestTaskModelsCommand,
@@ -1673,6 +1675,31 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         deleteTaskModelProviderCommand(auth, input),
+      ),
+
+    discoverProviderModels: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          baseUrl: z.string().trim().optional(),
+          apiKey: z.string().trim().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        discoverProviderModelsCommand(auth, input),
+      ),
+
+    qualifyProviderModel: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(['ollama', 'vllm', 'litellm']),
+          modelId: z.string().trim().min(1),
+          baseUrl: z.string().trim().optional(),
+          apiKey: z.string().trim().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        qualifyProviderModelCommand(auth, input),
       ),
 
     lookup: protectedProcedure

@@ -204,7 +204,7 @@ describe('recordTaskInferenceUsage', () => {
       providerId: 'litellm',
       modelId: 'gpt-4o',
       costMicroUsd: 123,
-      costSource: 'litellm_response',
+      costSource: 'litellm_gateway',
     });
 
     const [event] = await db
@@ -214,7 +214,7 @@ describe('recordTaskInferenceUsage', () => {
 
     expect(event).toMatchObject({
       costMicroUsd: 123,
-      costSource: 'litellm_response',
+      costSource: 'litellm_gateway',
     });
   });
 

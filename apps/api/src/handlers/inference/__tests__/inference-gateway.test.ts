@@ -7,10 +7,12 @@ const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
+  mockRecordLlmUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
+  mockRecordLlmUsage: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -23,6 +25,10 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  recordLlmUsage: mockRecordLlmUsage,
 }));
 
 import { inference } from '../index';
@@ -327,6 +333,47 @@ describe('inference gateway', () => {
     );
   });
 
+  it('records a positive LiteLLM response cost without delaying the proxy', async () => {
+    stubUpstreamFetch(
+      new Response('data: [DONE]\n\n', {
+        headers: {
+          'content-type': 'text/event-stream',
+          'x-litellm-response-cost': '0.000321',
+          'x-litellm-model-group': 'coding',
+        },
+      }),
+    );
+    mockFindTaskRun.mockResolvedValue({ taskId: 'task-1' });
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        return nameList.includes('LITELLM_BASE_URL')
+          ? 'http://litellm.internal:4000'
+          : 'litellm-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/litellm/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventKey: expect.stringMatching(/^inference-gateway:/u),
+          taskId: 'task-1',
+          runId: 42,
+          providerId: 'litellm',
+          modelId: 'litellm/coding',
+          costMicroUsd: 321,
+          costSource: 'litellm_gateway',
+        }),
+      );
+    });
+  });
+
   it('proxies a configured Ollama endpoint without an API key', async () => {
     const fetchMock = stubUpstreamFetch();
     mockResolveModelProviderEnvValue.mockImplementation(
@@ -356,7 +403,7 @@ describe('inference gateway', () => {
       async (names: string | readonly string[]) => {
         const nameList = typeof names === 'string' ? [names] : names;
 
-        return nameList.includes('LMSTUDIO_BASE_URL')
+        return nameList.includes('VLLM_BASE_URL')
           ? 'https://token@example.test?redirect=https://evil.test'
           : undefined;
       },
@@ -364,7 +411,7 @@ describe('inference gateway', () => {
 
     const response = await postMessages(
       createApp(createRunToken()),
-      '/api/inference/lmstudio/v1/chat/completions',
+      '/api/inference/vllm/v1/chat/completions',
     );
 
     expect(response.status).toBe(500);

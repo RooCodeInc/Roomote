@@ -64,6 +64,52 @@ import type { UserAuthSuccess } from '@/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const MODEL_METADATA_FETCH_TIMEOUT_MS = 10_000;
+const LOCAL_PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
+
+export const LOCAL_TASK_MODEL_PROVIDER_IDS = [
+  'ollama',
+  'vllm',
+  'litellm',
+] as const;
+export type LocalTaskModelProviderId =
+  (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number];
+
+type LocalProviderConnectionInput = {
+  baseUrl?: string;
+  apiKey?: string;
+};
+
+type LocalProviderConnection = {
+  baseUrl: string;
+  apiKey: string | null;
+};
+
+type LocalProviderModelResponse = {
+  data?: Array<{
+    id?: string;
+    name?: string;
+    model?: string;
+    model_name?: string;
+    model_info?: Record<string, unknown>;
+  }>;
+  models?: Array<{
+    id?: string;
+    name?: string;
+    model?: string;
+    model_name?: string;
+    model_info?: Record<string, unknown>;
+  }>;
+  model_info?: Record<string, Record<string, unknown>>;
+};
+
+const LOCAL_PROVIDER_CONNECTION_ENV: Record<
+  LocalTaskModelProviderId,
+  { baseUrl: string; apiKey?: string }
+> = {
+  ollama: { baseUrl: 'OLLAMA_BASE_URL' },
+  vllm: { baseUrl: 'VLLM_BASE_URL', apiKey: 'VLLM_API_KEY' },
+  litellm: { baseUrl: 'LITELLM_BASE_URL', apiKey: 'LITELLM_API_KEY' },
+};
 
 function assertAdmin(auth: UserAuthSuccess): asserts auth is UserAuthSuccess {
   if (!auth.isAdmin) {
@@ -371,11 +417,14 @@ export async function getTaskModelProviderSetupCommand(
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues(
-      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) =>
-        getSetupModelProviderAdditionalEnvFields(provider)
+      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => [
+        ...(provider.authKind === 'endpoint' && provider.envVarName
+          ? [provider.envVarName]
+          : []),
+        ...getSetupModelProviderAdditionalEnvFields(provider)
           .filter((field) => !field.secret)
           .map((field) => field.envVarName),
-      ),
+      ]),
     ),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
@@ -1088,6 +1137,380 @@ type TaskModelLookupResult = {
   metadata: TaskModelMetadata | null;
 };
 
+type LocalProviderDiscoveryResult = {
+  models: TaskModelLookupResult[];
+  error: string | null;
+};
+
+function getLocalProviderBaseUrl(baseUrl: string, path: string) {
+  const normalized = baseUrl.replace(/\/+$/u, '');
+  const withoutV1 = normalized.endsWith('/v1')
+    ? normalized.slice(0, -'/v1'.length)
+    : normalized;
+
+  return path.startsWith('/v1/')
+    ? `${normalized.endsWith('/v1') ? normalized : `${normalized}/v1`}${path.slice('/v1'.length)}`
+    : `${withoutV1}${path}`;
+}
+
+function getLocalProviderError(
+  provider: LocalTaskModelProviderId,
+  response: Response,
+) {
+  const label =
+    provider === 'vllm'
+      ? 'vLLM'
+      : provider === 'litellm'
+        ? 'LiteLLM'
+        : 'Ollama';
+
+  if (response.status === 401 || response.status === 403) {
+    return `${label} rejected the API key. Check the saved credentials.`;
+  }
+  if (response.status === 404) {
+    return `${label} did not recognize this endpoint. Check the endpoint URL and API compatibility.`;
+  }
+  if (response.status === 429) {
+    return `${label} is rate limiting requests. Try again shortly.`;
+  }
+  if (response.status >= 500) {
+    return `${label} returned a server error (${response.status}). Check that the provider is healthy.`;
+  }
+  return `${label} returned HTTP ${response.status}.`;
+}
+
+function getLocalProviderNetworkError(provider: LocalTaskModelProviderId) {
+  const label =
+    provider === 'vllm'
+      ? 'vLLM'
+      : provider === 'litellm'
+        ? 'LiteLLM'
+        : 'Ollama';
+  return `Could not reach ${label}. Check the endpoint URL and network access from Roomote.`;
+}
+
+async function getQualificationError(
+  provider: LocalTaskModelProviderId,
+  response: Response,
+) {
+  const baseError = getLocalProviderError(provider, response);
+  if (response.status !== 400 && response.status !== 422) {
+    return baseError;
+  }
+
+  try {
+    const body = (await response.text()).trim();
+    if (!body) {
+      return baseError;
+    }
+    const parsed = JSON.parse(body) as {
+      error?: { message?: unknown };
+      detail?: unknown;
+    };
+    const detail =
+      (typeof parsed.error?.message === 'string' && parsed.error.message) ||
+      (typeof parsed.detail === 'string' && parsed.detail) ||
+      body;
+    return `${baseError} ${detail.slice(0, 300)}`;
+  } catch {
+    return baseError;
+  }
+}
+
+async function resolveLocalProviderConnection(
+  provider: LocalTaskModelProviderId,
+  input?: LocalProviderConnectionInput,
+): Promise<LocalProviderConnection | null> {
+  const envNames = LOCAL_PROVIDER_CONNECTION_ENV[provider];
+  const persisted = await getPersistedEnvironmentVariableValues([
+    envNames.baseUrl,
+    ...(envNames.apiKey ? [envNames.apiKey] : []),
+  ]);
+  const baseUrl = input?.baseUrl?.trim() || persisted[envNames.baseUrl]?.trim();
+
+  if (!baseUrl) {
+    return null;
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  return {
+    baseUrl,
+    apiKey:
+      input?.apiKey?.trim() ||
+      (envNames.apiKey ? persisted[envNames.apiKey] : null) ||
+      null,
+  };
+}
+
+function buildLocalProviderHeaders(connection: LocalProviderConnection) {
+  return connection.apiKey
+    ? { Authorization: `Bearer ${connection.apiKey}` }
+    : undefined;
+}
+
+function getNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+function buildLocalProviderModel(
+  provider: LocalTaskModelProviderId,
+  slug: string,
+  displayName?: string,
+  info?: Record<string, unknown>,
+): TaskModelLookupResult {
+  const metadataPatch = {
+    contextWindow:
+      getNumber(info?.max_input_tokens) ??
+      getNumber(info?.max_tokens) ??
+      getNumber(info?.context_window),
+    inputPricePerToken: getNumber(info?.input_cost_per_token),
+    outputPricePerToken: getNumber(info?.output_cost_per_token),
+  };
+  const hasMetadata = Object.values(metadataPatch).some(
+    (value) => value !== null,
+  );
+  const model = buildTaskModelOption({
+    id: `${provider}/${slug}`,
+    displayName: displayName?.trim() || slug,
+    metadata: hasMetadata ? mergeMetadata(null, metadataPatch) : null,
+  });
+
+  return {
+    modelId: model.id,
+    displayName: model.displayName,
+    family: model.family,
+    metadata: model.metadata ?? null,
+  };
+}
+
+async function fetchLocalProviderModels(
+  provider: LocalTaskModelProviderId,
+  connection: LocalProviderConnection,
+): Promise<LocalProviderDiscoveryResult> {
+  const paths =
+    provider === 'ollama' ? ['/api/tags', '/v1/models'] : ['/v1/models'];
+  let lastError: string | null = null;
+
+  for (const path of paths) {
+    try {
+      const response = await fetch(
+        getLocalProviderBaseUrl(connection.baseUrl, path),
+        {
+          headers: buildLocalProviderHeaders(connection),
+          signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+        },
+      );
+      if (!response.ok) {
+        lastError = getLocalProviderError(provider, response);
+        continue;
+      }
+
+      const payload = (await response.json()) as LocalProviderModelResponse;
+      let litellmModelInfo = payload.model_info;
+      if (provider === 'litellm') {
+        try {
+          const infoResponse = await fetch(
+            getLocalProviderBaseUrl(connection.baseUrl, '/model/info'),
+            {
+              headers: buildLocalProviderHeaders(connection),
+              signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+            },
+          );
+          if (infoResponse.ok) {
+            const infoPayload =
+              (await infoResponse.json()) as LocalProviderModelResponse;
+            const infoEntries = Object.fromEntries(
+              (infoPayload.data ?? []).flatMap((entry) => {
+                const modelName = entry.model_name ?? entry.id;
+                return modelName && entry.model_info
+                  ? [[modelName, entry.model_info]]
+                  : [];
+              }),
+            );
+            litellmModelInfo = {
+              ...litellmModelInfo,
+              ...infoPayload.model_info,
+              ...infoEntries,
+            };
+          }
+        } catch {
+          // LiteLLM's metadata endpoint is optional; model discovery still works.
+        }
+      }
+      const entries = path === '/api/tags' ? payload.models : payload.data;
+      const models = (entries ?? [])
+        .map((entry) => {
+          const slug =
+            entry.id?.trim() ||
+            entry.name?.trim() ||
+            entry.model?.trim() ||
+            entry.model_name?.trim();
+          return slug
+            ? buildLocalProviderModel(
+                provider,
+                slug,
+                entry.model_name ?? entry.name,
+                entry.model_info ?? litellmModelInfo?.[slug],
+              )
+            : null;
+        })
+        .filter((model): model is TaskModelLookupResult => model !== null)
+        .sort((left, right) => left.modelId.localeCompare(right.modelId));
+
+      return { models, error: null };
+    } catch {
+      lastError = getLocalProviderNetworkError(provider);
+    }
+  }
+
+  return {
+    models: [],
+    error: lastError ?? getLocalProviderNetworkError(provider),
+  };
+}
+
+export async function discoverProviderModelsCommand(
+  auth: UserAuthSuccess,
+  input: { provider: LocalTaskModelProviderId } & LocalProviderConnectionInput,
+): Promise<LocalProviderDiscoveryResult> {
+  assertAdmin(auth);
+  const connection = await resolveLocalProviderConnection(
+    input.provider,
+    input,
+  );
+
+  if (!connection) {
+    return {
+      models: [],
+      error: 'Save a valid endpoint URL before discovering models.',
+    };
+  }
+
+  return fetchLocalProviderModels(input.provider, connection);
+}
+
+export async function qualifyProviderModelCommand(
+  auth: UserAuthSuccess,
+  input: {
+    provider: LocalTaskModelProviderId;
+    modelId: string;
+  } & LocalProviderConnectionInput,
+): Promise<{ success: true } | { success: false; error: string }> {
+  assertAdmin(auth);
+  const connection = await resolveLocalProviderConnection(
+    input.provider,
+    input,
+  );
+  const modelId = input.modelId.trim();
+
+  if (!connection) {
+    return {
+      success: false,
+      error: 'Save a valid endpoint URL before qualifying a model.',
+    };
+  }
+  if (!modelId) {
+    return { success: false, error: 'Choose a model before qualifying it.' };
+  }
+
+  try {
+    const response = await fetch(
+      getLocalProviderBaseUrl(connection.baseUrl, '/v1/chat/completions'),
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...buildLocalProviderHeaders(connection),
+        },
+        body: JSON.stringify({
+          model: modelId.replace(`${input.provider}/`, ''),
+          messages: [{ role: 'user', content: 'Reply with pong.' }],
+          stream: true,
+          tool_choice: {
+            type: 'function',
+            function: { name: 'ping' },
+          },
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'ping',
+                description: 'Returns a short health-check response.',
+                parameters: { type: 'object', properties: {} },
+              },
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(LOCAL_PROVIDER_REQUEST_TIMEOUT_MS),
+      },
+    );
+    if (!response.ok) {
+      return {
+        success: false,
+        error: await getQualificationError(input.provider, response),
+      };
+    }
+
+    if (!response.headers.get('content-type')?.includes('text/event-stream')) {
+      return {
+        success: false,
+        error:
+          'The provider returned a non-streaming response. Check OpenAI-compatible streaming support.',
+      };
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) {
+      return {
+        success: false,
+        error:
+          'The provider accepted the request but did not return a streaming response body.',
+      };
+    }
+
+    const decoder = new TextDecoder();
+    let streamText = '';
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          break;
+        }
+        streamText += decoder.decode(chunk.value, { stream: true });
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    if (
+      !streamText.includes('"tool_calls"') ||
+      !streamText.includes('"ping"')
+    ) {
+      return {
+        success: false,
+        error:
+          'The model streamed a response but did not call the required tool. Choose a model with OpenAI-compatible tool calling.',
+      };
+    }
+    return { success: true };
+  } catch {
+    return {
+      success: false,
+      error: getLocalProviderNetworkError(input.provider),
+    };
+  }
+}
+
 /**
  * Providers without a single-model lookup endpoint (Vercel AI Gateway and
  * direct labs such as Anthropic or OpenAI) resolve display name and pricing
@@ -1153,6 +1576,27 @@ export async function lookupTaskModelCommand(
       family: catalogModel.family,
       metadata: catalogModel.metadata ?? null,
     };
+  }
+
+  const localProvider = LOCAL_TASK_MODEL_PROVIDER_IDS.find((provider) =>
+    modelId.startsWith(`${provider}/`),
+  );
+  if (localProvider) {
+    const discovery = await discoverProviderModelsCommand(auth, {
+      provider: localProvider,
+    });
+    const discoveredModel = discovery.models.find(
+      (model) => model.modelId === modelId,
+    );
+
+    return (
+      discoveredModel ?? {
+        modelId,
+        displayName: null,
+        family: null,
+        metadata: null,
+      }
+    );
   }
 
   // Only the OpenRouter model API supports single-model lookup; every other

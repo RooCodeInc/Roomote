@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import { formatSingleLineLog } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
+import { recordLlmUsage } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
@@ -48,6 +49,59 @@ const REQUEST_HEADER_DENYLIST = new Set([
   'x-forwarded-proto',
   'x-real-ip',
 ]);
+
+function recordLiteLlmResponseCost(options: {
+  requestId: string;
+  runId: number;
+  headers: Headers;
+}): void {
+  const cost = Number(options.headers.get('x-litellm-response-cost'));
+
+  if (!Number.isFinite(cost) || cost <= 0) {
+    return;
+  }
+
+  const modelGroup = options.headers.get('x-litellm-model-group')?.trim();
+
+  void db.query.taskRuns
+    .findFirst({
+      where: eq(taskRuns.id, options.runId),
+      columns: { taskId: true },
+    })
+    .then((run) => {
+      if (!run?.taskId) {
+        return undefined;
+      }
+
+      return recordLlmUsage({
+        eventKey: `inference-gateway:${options.requestId}`,
+        source: 'inference-gateway',
+        usageType: 'inference',
+        taskId: run.taskId,
+        runId: options.runId,
+        providerId: 'litellm',
+        modelId: modelGroup ? `litellm/${modelGroup}` : null,
+        inputTokens: null,
+        outputTokens: null,
+        reasoningTokens: null,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        totalTokens: null,
+        contextTokens: null,
+        costMicroUsd: Math.round(cost * 1_000_000),
+        costSource: 'litellm_gateway',
+      });
+    })
+    .catch((error) => {
+      console.warn(
+        formatSingleLineLog('Failed to record LiteLLM response cost', {
+          requestId: options.requestId,
+          runId: options.runId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    });
+}
 
 function buildUpstreamRequestHeaders(
   requestHeaders: Headers,
@@ -187,6 +241,14 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
         ...(c.req.raw.body ? { duplex: 'half' as const } : {}),
       },
     );
+
+    if (providerId === 'litellm') {
+      recordLiteLlmResponseCost({
+        requestId,
+        runId: auth.runId,
+        headers: upstreamResponse.headers,
+      });
+    }
 
     if (!upstreamResponse.ok) {
       console.warn(

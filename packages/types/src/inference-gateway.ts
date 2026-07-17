@@ -85,6 +85,12 @@ export interface InferenceGatewayProvider {
    * in precedence order. Empty for non-key auth strategies.
    */
   envVarNames: readonly string[];
+  /**
+   * Deployment variables withheld from sandboxes when this provider is served
+   * through the gateway. Endpoint providers include their base URL here even
+   * when they have no API key, so the endpoint topology stays server-side.
+   */
+  gatewayEnvVarNames?: readonly string[];
   /** How the gateway authenticates upstream. Defaults to `api-key`. */
   authStrategy?: InferenceGatewayAuthStrategy;
   /**
@@ -302,9 +308,9 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       id: 'litellm',
       name: 'LiteLLM',
       envVarNames: ['LITELLM_API_KEY'],
+      gatewayEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
       upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
       authHeader: { name: 'authorization', scheme: 'bearer' },
-      optionalApiKey: true,
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
     },
@@ -312,16 +318,22 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       id: 'ollama',
       name: 'Ollama',
       envVarNames: [],
+      gatewayEnvVarNames: ['OLLAMA_BASE_URL'],
       upstreamBaseUrlEnvVarName: 'OLLAMA_BASE_URL',
       optionalApiKey: true,
-      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        '/api/tags',
+        '/api/ps',
+      ],
       openCodeBaseUrlSuffix: '/v1',
     },
     {
-      id: 'lmstudio',
-      name: 'LM Studio',
-      envVarNames: ['LMSTUDIO_API_KEY'],
-      upstreamBaseUrlEnvVarName: 'LMSTUDIO_BASE_URL',
+      id: 'vllm',
+      name: 'vLLM',
+      envVarNames: ['VLLM_API_KEY'],
+      gatewayEnvVarNames: ['VLLM_BASE_URL', 'VLLM_API_KEY'],
+      upstreamBaseUrlEnvVarName: 'VLLM_BASE_URL',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       optionalApiKey: true,
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
@@ -357,7 +369,9 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
  * env vars.
  */
 export const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES: readonly string[] =
-  INFERENCE_GATEWAY_PROVIDERS.flatMap((provider) => provider.envVarNames);
+  INFERENCE_GATEWAY_PROVIDERS.flatMap(
+    (provider) => provider.gatewayEnvVarNames ?? provider.envVarNames,
+  );
 
 export function getInferenceGatewayProvider(
   providerId: string,
@@ -385,7 +399,7 @@ export function getInferenceGatewayProviderByEnvVarName(
   envVarName: string,
 ): InferenceGatewayProvider | undefined {
   return INFERENCE_GATEWAY_PROVIDERS.find((provider) =>
-    provider.envVarNames.includes(envVarName),
+    (provider.gatewayEnvVarNames ?? provider.envVarNames).includes(envVarName),
   );
 }
 

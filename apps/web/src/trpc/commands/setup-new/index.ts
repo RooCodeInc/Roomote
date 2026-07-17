@@ -64,6 +64,8 @@ import {
   getSetupComputeProvider,
   getComputeFieldValidationError,
   getSetupModelProvider,
+  getSetupModelProviderAdditionalEnvFields,
+  SETUP_MODEL_PROVIDER_CATALOG,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -1313,6 +1315,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretAuthEnvValues,
+    nonSecretModelEnvValues,
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
@@ -1323,6 +1326,16 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    getPersistedEnvironmentVariableValues(
+      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => [
+        ...(provider.authKind === 'endpoint' && provider.envVarName
+          ? [provider.envVarName]
+          : []),
+        ...getSetupModelProviderAdditionalEnvFields(provider)
+          .filter((field) => !field.secret)
+          .map((field) => field.envVarName),
+      ]),
+    ),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
@@ -1415,6 +1428,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     runtimeEnv: process.env,
     persistedModelConfig: persistedRuntimeModelConfig,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretModelEnvValues,
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
   });

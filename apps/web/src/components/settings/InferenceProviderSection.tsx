@@ -88,7 +88,11 @@ function ConnectedProviderRow({
   const runtimeKeyLabel = provider.envVarName
     ? `${provider.label} API key is managed by ${provider.envVarName}`
     : `${provider.label} API key is managed by an environment variable`;
-  const inputValue = MASKED_VALUE;
+  const inputValue =
+    provider.authKind === 'endpoint'
+      ? (provider.additionalEnvValues[provider.envVarName ?? ''] ??
+        'Configured endpoint')
+      : MASKED_VALUE;
 
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
@@ -323,7 +327,7 @@ function ProviderCredentialsDialog({
                     </span>
                     <div className="space-y-1.5">
                       <Input
-                        secret
+                        secret={selectedProvider.authKind !== 'endpoint'}
                         className="font-mono"
                         value={apiKey}
                         onChange={(event) => setApiKey(event.target.value)}

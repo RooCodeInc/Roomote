@@ -1,0 +1,81 @@
+---
+title: LiteLLM
+icon: route
+description: Route Roomote model calls through a LiteLLM gateway.
+---
+
+LiteLLM is an OpenAI-compatible inference gateway. Use it when you want one
+deployment-owned endpoint to route Roomote tasks to different model vendors,
+apply gateway policies, or centralize model credentials and spend controls.
+
+## Configure LiteLLM
+
+In **Settings > Models**, add LiteLLM and provide its endpoint URL and API key.
+You can instead manage both values as deployment environment variables:
+
+```sh
+LITELLM_BASE_URL=https://litellm.example.com/v1
+LITELLM_API_KEY=...
+```
+
+`LITELLM_API_KEY` is required. The endpoint must be reachable from the Roomote
+deployment. For a Compose deployment, use a service DNS name such as
+`http://litellm:4000/v1` when LiteLLM runs on the same private network. Do not
+use `localhost` unless LiteLLM runs in the same network namespace as the
+Roomote service that proxies inference requests.
+
+After saving the provider, Roomote discovers the models exposed by the gateway.
+Enable the models you want and select a default coding model and any specialized
+roles. Model IDs use the `litellm/<model-id>` form, where `<model-id>` is the
+name configured by your gateway.
+
+### LiteLLM proxy flags
+
+Start LiteLLM with the configuration and network settings appropriate for your
+deployment. A typical proxy command supplies a config file and listen port:
+
+```sh
+litellm --config /path/to/config.yaml --port 4000
+```
+
+Use LiteLLM's master-key configuration to require the same key supplied as
+`LITELLM_API_KEY`, and configure model aliases and pricing in the LiteLLM config
+file. Keep the proxy bound to a private interface unless Roomote reaches it
+through a protected ingress.
+
+## Secure the gateway
+
+Keep LiteLLM private to Roomote whenever possible. Put it on an internal network
+or behind a private ingress, require its API key, and use TLS when traffic
+crosses an untrusted network. Store `LITELLM_API_KEY` in your deployment secret
+manager or as an encrypted Roomote deployment variable, not in an environment's
+task variables or repository files.
+
+Roomote proxies model traffic through its inference gateway, so task sandboxes
+do not need direct network access to LiteLLM or the gateway key. Restrict the
+gateway key to the model access and spend limits Roomote needs.
+
+## Cost behavior
+
+LiteLLM can calculate and return usage costs for requests it routes. When your
+LiteLLM model catalog has pricing configured, Roomote can show that
+gateway-reported cost alongside task usage. LiteLLM remains the source of truth
+for its budgets, rate limits, provider billing, and any model-specific pricing
+overrides.
+
+## Verify setup
+
+1. save the endpoint URL and API key
+2. confirm models appear in **Settings > Models**
+3. enable one model and make it the default coding model
+4. start a small Roomote task and confirm it completes through the gateway
+5. check LiteLLM logs and usage data for the request
+
+## Common issues
+
+- **No models appear.** Confirm the endpoint URL includes the LiteLLM `/v1`
+  API path and that the API key can list models.
+- **Tasks cannot reach LiteLLM.** Check DNS, container networking, firewall
+  rules, and whether the endpoint is reachable from the Roomote deployment.
+- **Costs are missing or unexpected.** Check LiteLLM's model pricing and
+  routing configuration; local gateway settings can override upstream defaults.

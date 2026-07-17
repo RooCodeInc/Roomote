@@ -17,7 +17,8 @@ Configure models from **Settings > Models**.
 An inference provider is the service that hosts or routes model calls. Roomote
 supports providers such as OpenRouter, Vercel AI Gateway, Baseten,
 Together AI, OpenAI, Anthropic, Moonshot AI, MiniMax, OpenCode, Amazon Bedrock,
-Google Gemini, xAI, and ChatGPT subscriptions.
+Google Gemini, xAI, ChatGPT subscriptions, and OpenAI-compatible endpoints such
+as LiteLLM, Ollama, and vLLM.
 
 You can connect more than one inference provider in the same deployment. That
 lets you mix and match models by provider instead of betting the whole
@@ -37,14 +38,34 @@ in the setup wizard and from **Settings > Models**. You stay in control: you
 can disable or remove any of the added models, add more later, and reconnecting
 a provider never re-adds models you removed.
 
+### Self-hosted and gateway providers
+
+LiteLLM, Ollama, and vLLM let you bring an endpoint that you operate or host on
+your own infrastructure. Their models are discovered from the configured
+endpoint instead of Roomote's recommended catalog. Connect the provider in
+**Settings > Models**, then select from the discovered models and choose the
+defaults and role mappings that fit your deployment.
+
+| Provider | Best for | Setup |
+| --- | --- | --- |
+| [LiteLLM](/providers/inference/litellm) | A single gateway that routes to one or more model vendors | Endpoint URL and required API key |
+| [Ollama](/providers/inference/ollama) | Local or private model serving without provider API keys | Endpoint URL |
+| [vLLM](/providers/inference/vllm) | Serving OpenAI-compatible models on your own GPU infrastructure | Endpoint URL and optional API key |
+
+These endpoints must be reachable from the Roomote deployment, not merely from
+your laptop or an individual task sandbox. See the provider page for the
+expected URL, network, security, and cost behavior.
+
 The recommended set is a single curated list of models that ships with each
-Roomote release, so it is predictable for a given version. Every provider
-draws from the same list: a provider offers the subset it serves, under its
-own model ids, with the same names everywhere. **Available Models** always lists the
-full recommended set for every connected provider: recommendations you have
-not enabled appear toggled off, and they cannot be deleted while their
-provider stays connected — turn a model off to stop using it. To go beyond the
-recommended set, add any model by its slug from the add-model field.
+Roomote release, so it is predictable for a given version. Every catalog-backed
+provider draws from the same list: a provider offers the subset it serves, under
+its own model ids, with the same names everywhere. Endpoint providers that
+discover models dynamically use the model list returned by their endpoint.
+**Available Models** always lists the full recommended set for every connected
+catalog-backed provider: recommendations you have not enabled appear toggled
+off, and they cannot be deleted while their provider stays connected — turn a
+model off to stop using it. To go beyond the recommended set, add any model by
+its slug from the add-model field.
 
 ### Recommended default models
 

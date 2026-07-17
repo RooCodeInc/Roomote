@@ -110,6 +110,8 @@ export type SetupModelProviderDescriptor = {
   defaultRoomoteModel: string;
   authKind: SetupModelProviderAuthKind;
   suggestedTaskModels: readonly SuggestedTaskModel[];
+  /** Models are discovered from the configured endpoint, not a static catalog. */
+  dynamicModels?: boolean;
   /**
    * Hides the provider from the setup wizard and settings connect surfaces
    * unless it is already connected (saved or runtime env). The catalog entry
@@ -406,38 +408,41 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         envVarName: 'LITELLM_API_KEY',
         label: 'API key',
         secret: true,
-        required: false,
+        required: true,
       },
     ],
-    defaultRoomoteModel: 'litellm/gpt-4o',
+    defaultRoomoteModel: '',
     authKind: 'endpoint',
     suggestedTaskModels: [],
+    dynamicModels: true,
   },
   {
     id: 'ollama',
     label: 'Ollama',
     envVarName: 'OLLAMA_BASE_URL',
     envVarLabel: 'Endpoint URL',
-    defaultRoomoteModel: 'ollama/qwen3-coder',
+    defaultRoomoteModel: '',
     authKind: 'endpoint',
     suggestedTaskModels: [],
+    dynamicModels: true,
   },
   {
-    id: 'lmstudio',
-    label: 'LM Studio',
-    envVarName: 'LMSTUDIO_BASE_URL',
+    id: 'vllm',
+    label: 'vLLM',
+    envVarName: 'VLLM_BASE_URL',
     envVarLabel: 'Endpoint URL',
     additionalEnvFields: [
       {
-        envVarName: 'LMSTUDIO_API_KEY',
+        envVarName: 'VLLM_API_KEY',
         label: 'API key',
         secret: true,
         required: false,
       },
     ],
-    defaultRoomoteModel: 'lmstudio/local-model',
+    defaultRoomoteModel: '',
     authKind: 'endpoint',
     suggestedTaskModels: [],
+    dynamicModels: true,
   },
   {
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -1091,7 +1096,17 @@ export function buildSetupModelStatus(input: {
         isConfiguredEnvValue(runtimeEnv[name]);
       const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
       const additionalEnvValues = Object.fromEntries(
-        getSetupModelProviderAdditionalEnvFields(provider)
+        [
+          ...(provider.authKind === 'endpoint' && provider.envVarName
+            ? [
+                {
+                  envVarName: provider.envVarName,
+                  secret: false,
+                },
+              ]
+            : []),
+          ...getSetupModelProviderAdditionalEnvFields(provider),
+        ]
           .filter((field) => !field.secret)
           .map((field) => {
             const runtimeValue = normalizeOptionalString(

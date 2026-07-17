@@ -30,7 +30,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'xai',
   'litellm',
   'ollama',
-  'lmstudio',
+  'vllm',
 ] as const;
 
 /**

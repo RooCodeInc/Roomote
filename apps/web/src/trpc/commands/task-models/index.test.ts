@@ -68,7 +68,9 @@ import {
   getTaskModelProviderSetupCommand,
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
+  discoverProviderModelsCommand,
   lookupTaskModelCommand,
+  qualifyProviderModelCommand,
   refreshTaskModelMetadataCommand,
   saveTaskModelProviderCommand,
   updateTaskModelSettingsCommand,
@@ -146,6 +148,7 @@ describe('lookupTaskModelCommand', () => {
     delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     mockIsChatGptSubscriptionConnected.mockResolvedValue(false);
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({});
     mockFindDeploymentSettings.mockImplementation(async (options) => {
       const columns = (options as { columns?: Record<string, boolean> })
         ?.columns;
@@ -252,6 +255,197 @@ describe('lookupTaskModelCommand', () => {
     });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('discovers Ollama models from /api/tags and prefixes their IDs', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ models: [{ name: 'qwen3:8b' }] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+      }),
+    ).resolves.toMatchObject({
+      error: null,
+      models: [
+        {
+          modelId: 'ollama/qwen3:8b',
+          displayName: 'qwen3:8b',
+        },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://ollama.example/api/tags',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('falls back to the OpenAI models endpoint when Ollama tags are unavailable', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ id: 'llama3.3' }] }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example/v1',
+      }),
+    ).resolves.toMatchObject({
+      error: null,
+      models: [{ modelId: 'ollama/llama3.3' }],
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'http://ollama.example/v1/models',
+      expect.anything(),
+    );
+  });
+
+  it('uses saved LiteLLM credentials and metadata when discovering models', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      LITELLM_BASE_URL: 'https://litellm.example/v1',
+      LITELLM_API_KEY: 'saved-key',
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: [{ id: 'azure/gpt-4o' }] }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                model_name: 'azure/gpt-4o',
+                model_info: { max_input_tokens: 128_000 },
+              },
+            ],
+          }),
+          { headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    await expect(
+      discoverProviderModelsCommand(buildMockAuth(), { provider: 'litellm' }),
+    ).resolves.toMatchObject({
+      models: [
+        {
+          modelId: 'litellm/azure/gpt-4o',
+          metadata: expect.objectContaining({ contextWindow: 128_000 }),
+        },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://litellm.example/v1/models',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer saved-key' },
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://litellm.example/model/info',
+      expect.objectContaining({
+        headers: { Authorization: 'Bearer saved-key' },
+      }),
+    );
+  });
+
+  it('qualifies a provider model with a streaming tool request', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        'data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"ping"}}]}}]}\n\n',
+        {
+          headers: { 'content-type': 'text/event-stream' },
+        },
+      ),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example/v1',
+        apiKey: 'submitted-key',
+        modelId: 'vllm/qwen3',
+      }),
+    ).resolves.toEqual({ success: true });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://vllm.example/v1/chat/completions',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer submitted-key',
+        }),
+        body: expect.stringContaining('"stream":true'),
+      }),
+    );
+  });
+
+  it('rejects streams that do not call the qualification tool', async () => {
+    fetchMock.mockResolvedValue(
+      new Response('data: {"choices":[{"delta":{"content":"pong"}}]}\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+        modelId: 'ollama/qwen3',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining('did not call the required tool'),
+    });
+  });
+
+  it('returns provider compatibility details from qualification errors', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({ detail: 'tools are unsupported for this model' }),
+        {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+
+    await expect(
+      qualifyProviderModelCommand(buildMockAuth(), {
+        provider: 'vllm',
+        baseUrl: 'https://vllm.example',
+        modelId: 'vllm/qwen3',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: expect.stringContaining('tools are unsupported for this model'),
+    });
+  });
+
+  it('uses discovery data when looking up a local provider model', async () => {
+    mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
+      VLLM_BASE_URL: 'https://vllm.example/v1',
+    });
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ id: 'llama3.3' }] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'vllm/llama3.3',
+      }),
+    ).resolves.toMatchObject({ modelId: 'vllm/llama3.3' });
   });
 
   it.each(['google-vertex/gemini-3.5-flash', 'mistral/mistral-large-latest'])(

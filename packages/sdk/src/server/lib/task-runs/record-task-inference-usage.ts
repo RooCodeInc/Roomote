@@ -184,9 +184,12 @@ export async function recordLlmUsage(
     totalTokens,
     contextTokens,
     costMicroUsd: clampOptionalCostMicroUsd(input.costMicroUsd),
-    // The database column is a text column; its generated type predates
-    // LiteLLM response accounting, while this contract accepts that source.
-    costSource: costSource as 'opencode_message' | 'missing',
+    // The database column is a text column; its generated type can lag this
+    // forward-compatible usage contract.
+    costSource: costSource as
+      | 'opencode_message'
+      | 'litellm_gateway'
+      | 'missing',
     messageCreatedAt: input.messageCreatedAt ?? null,
     messageCompletedAt: input.messageCompletedAt ?? null,
     pricingMetadata: input.pricingMetadata ? { ...input.pricingMetadata } : {},

@@ -137,6 +137,7 @@ export function StepInferenceProvider({
   const isChatGptProvider =
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
@@ -155,6 +156,7 @@ export function StepInferenceProvider({
     [modelSetup.providers],
   );
   const shouldShowSavedValueMask =
+    !isEndpointProvider &&
     !hasRuntimeProviderKey &&
     hasSavedProviderKey &&
     apiKey.length === 0 &&
@@ -213,7 +215,7 @@ export function StepInferenceProvider({
 
         {isChatGptProvider ? null : (
           <Input
-            secret={!hasRuntimeProviderKey}
+            secret={!isEndpointProvider && !hasRuntimeProviderKey}
             value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
             onFocus={() => {
               if (shouldShowSavedValueMask) {

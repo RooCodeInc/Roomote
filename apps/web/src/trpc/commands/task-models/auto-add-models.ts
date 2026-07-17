@@ -127,6 +127,12 @@ export function buildAutoAddedTaskModelSettings(options: {
   taskModelSettings: TaskModelSettings;
   addedModels: TaskModelOption[];
 } | null {
+  // Endpoint-backed providers are populated by explicit discovery. Never seed
+  // a guessed model id when the endpoint itself is the source of truth.
+  if (options.provider.dynamicModels) {
+    return null;
+  }
+
   const parsed = taskModelSettingsSchema.safeParse(
     options.persistedTaskModelSettings,
   );

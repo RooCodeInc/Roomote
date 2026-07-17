@@ -73,7 +73,7 @@ const OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
     name: 'Ollama',
     baseUrlEnvVarName: 'OLLAMA_BASE_URL',
     fallbackBaseUrl: 'http://127.0.0.1:11434/v1',
-    apiKeyEnvVarName: 'OLLAMA_API_KEY',
+    apiKeyEnvVarName: undefined,
     keyless: true,
   },
   vllm: {
@@ -702,7 +702,9 @@ function mergeOpenAiCompatibleProviderConfig(
     const existingProvider = asRecord(merged[providerId]);
     const existingOptions = asRecord(existingProvider.options);
     const existingModels = asRecord(existingProvider.models);
-    const directApiKey = runtimeEnv[provider.apiKeyEnvVarName]?.trim();
+    const directApiKey = provider.apiKeyEnvVarName
+      ? runtimeEnv[provider.apiKeyEnvVarName]?.trim()
+      : undefined;
 
     merged = {
       ...merged,
@@ -716,12 +718,12 @@ function mergeOpenAiCompatibleProviderConfig(
             runtimeEnv[provider.baseUrlEnvVarName]?.trim() ||
             (!provider.keyless ? runtimeEnv.OPENAI_BASE_URL?.trim() : '') ||
             provider.fallbackBaseUrl,
-          // Ollama accepts unauthenticated local requests. Do not require a
-          // missing key in direct mode, but let the gateway add its run token.
+          // OpenAI-compatible clients require an API key even though Ollama
+          // itself accepts unauthenticated requests.
           ...(directApiKey
             ? { apiKey: `{env:${provider.apiKeyEnvVarName}}` }
             : provider.keyless
-              ? {}
+              ? { apiKey: 'ollama' }
               : runtimeEnv.OPENAI_API_KEY?.trim()
                 ? { apiKey: '{env:OPENAI_API_KEY}' }
                 : {}),
