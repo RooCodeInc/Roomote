@@ -7,6 +7,10 @@ import {
   waitFor,
 } from '@testing-library/react';
 import { FeatureFlag } from '@roomote/feature-flags';
+import type {
+  CommunicationProvider,
+  SourceControlProvider,
+} from '@roomote/types';
 
 const groupedRoutingPlaceholder =
   /Ideas about incidents, reliability, alerts, and monitoring/;
@@ -37,6 +41,12 @@ const state = vi.hoisted(() => ({
         missingScopes: [],
         slackWorkspaceDomain: 'acme',
         sentryConnected: false,
+        connectedCommunicationProviders: ['slack'] as CommunicationProvider[],
+        connectedSourceControlProviders: [
+          'github',
+          'gitlab',
+          'ado',
+        ] as SourceControlProvider[],
       },
       settings: {
         reviewer: {
@@ -381,6 +391,14 @@ describe('AutomationsSettings', () => {
     mutations.latestSettingsOptions = null;
     mutations.latestTriggerOptions = null;
     state.settingsQuery.data.capabilities.discordConnected = false;
+    state.settingsQuery.data.capabilities.connectedCommunicationProviders = [
+      'slack',
+    ];
+    state.settingsQuery.data.capabilities.connectedSourceControlProviders = [
+      'github',
+      'gitlab',
+      'ado',
+    ];
     state.discordChannelsQuery.data.channels = [];
     state.settingsQuery.data.settings.managerStatsDiscordChannelId = null;
     state.settingsQuery.data.settings.suggesterDiscordChannelId = null;
@@ -572,21 +590,48 @@ describe('AutomationsSettings', () => {
   it('shows exception-only capability badges from the shared descriptors', async () => {
     render(<AutomationsSettings />);
 
-    // Dependabot, CodeQL, and CI failure triage stay GitHub-only; manager
-    // stats is provider-neutral now and shows no source-control badge.
-    expect((await screen.findAllByText('GitHub only')).length).toBe(3);
-    // The suggester supports Slack and Discord destinations; the other
-    // manager automations post to all configured communication providers.
-    expect(screen.queryByText('Slack only')).toBeNull();
-    expect(screen.getAllByText('Slack · Discord only').length).toBe(1);
-    // conflict_resolver supports GitHub, GitLab, and Azure DevOps (no
-    // Gitea/Bitbucket conflict signal).
+    // Deployment runs multi-SCM; Dependabot/CodeQL/CI stay GitHub-only among
+    // the configured providers, so they share "For GitHub only".
+    expect((await screen.findAllByText('For GitHub only')).length).toBe(3);
+    // Only Slack is configured for comms in the default fixture, so no comms
+    // capability badge is needed (including for the Slack+Discord suggester).
+    expect(screen.queryByText('For Slack only')).toBeNull();
+    expect(screen.queryByText('For Slack + Discord only')).toBeNull();
+    // conflict_resolver covers all three configured SCM providers → no badge.
     expect(
-      screen.getAllByText('GitHub · GitLab · Azure DevOps only').length,
-    ).toBe(1);
+      screen.queryByText('For GitHub + GitLab + Azure DevOps only'),
+    ).toBeNull();
     // Full coverage shows nothing — absence of a warning is the signal.
     expect(screen.queryByText('All chat channels')).toBeNull();
     expect(screen.queryByText('All source control')).toBeNull();
+  });
+
+  it('shows communication provider badges only when multiple are configured', async () => {
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.settingsQuery.data.capabilities.connectedCommunicationProviders = [
+      'slack',
+      'discord',
+      'teams',
+    ];
+
+    render(<AutomationsSettings />);
+
+    // Suggest Ideas only targets Slack + Discord destinations among the three
+    // connected chat providers.
+    expect(
+      await screen.findByText('For Slack + Discord only'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('For Slack only')).toBeNull();
+  });
+
+  it('renders the Source Code and Meta automation sections', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText('Source Code automations'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Meta automations')).toBeInTheDocument();
+    expect(screen.queryByText('Other automations')).toBeNull();
   });
 
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
@@ -598,13 +643,15 @@ describe('AutomationsSettings', () => {
     await openReviewerCard();
 
     expect(
-      screen.getByRole('switch', { name: /review prs from other authors/i }),
+      screen.getByRole('switch', { name: /review prs not created by/i }),
     ).toBeChecked();
     expect(
-      screen.getByText(/all pull requests in connected repositories/),
+      screen.getByText(
+        /Automatically review any new PRs and follow-up commits/i,
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/pull requests opened by Roomote/),
+      screen.queryByText(/Which PRs get reviewed/i),
     ).not.toBeInTheDocument();
   });
 

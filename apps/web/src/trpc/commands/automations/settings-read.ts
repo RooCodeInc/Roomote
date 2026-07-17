@@ -1,7 +1,9 @@
 import {
   USER_FACING_AUTOMATION_KEYS,
   type BackgroundAutomationKey,
+  type CommunicationProvider,
   type PrReviewSettings,
+  type SourceControlProvider,
   type TaskTrigger,
   type TaskState,
 } from '@roomote/types';
@@ -14,7 +16,9 @@ import {
   getBackgroundAgentSettingsForDeployment,
   inArray,
   listAutomations,
+  resolveInvocationIdentities,
   tasks,
+  teamsInstallations,
 } from '@roomote/db/server';
 import {
   findDiscordDestinationByChannelId,
@@ -26,6 +30,8 @@ import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { SlackNotifier } from '@roomote/slack';
 
 import type { UserAuthSuccess } from '@/types';
+
+import { getSourceControlConnectionSummary } from '@/lib/server/source-control';
 
 import { hasActiveSentryIntegration } from './automation-requirements';
 import {
@@ -261,6 +267,8 @@ export async function getBackgroundAgentSettingsCommand(
     requiredScopes: string[];
     requiresSlackReconnect: boolean;
     slackWorkspaceDomain: string | null;
+    connectedCommunicationProviders: CommunicationProvider[];
+    connectedSourceControlProviders: SourceControlProvider[];
   };
   slackChannelAccessWarnings: {
     channelAutoStartSlackChannels: string[];
@@ -290,6 +298,9 @@ export async function getBackgroundAgentSettingsCommand(
     settings,
     slackInstallation,
     discordInstallation,
+    teamsInstallation,
+    invocationIdentities,
+    sourceControlConnection,
     sentryConnected,
     recentRuns,
     status,
@@ -300,6 +311,12 @@ export async function getBackgroundAgentSettingsCommand(
       where: eq(discordInstallations.isActive, true),
       columns: { id: true },
     }),
+    db.query.teamsInstallations.findFirst({
+      where: eq(teamsInstallations.isActive, true),
+      columns: { id: true, botName: true },
+    }),
+    resolveInvocationIdentities(),
+    getSourceControlConnectionSummary(),
     hasActiveSentryIntegration(),
     listRecentAutomationTasks(),
     buildAutomationStatus(),
@@ -393,6 +410,25 @@ export async function getBackgroundAgentSettingsCommand(
       slackWorkspaceDomain: slackInstallation?.isActive
         ? slackInstallation.teamDomain
         : null,
+      connectedCommunicationProviders: [
+        ...(slackInstallation?.isActive
+          ? (['slack'] as const satisfies readonly CommunicationProvider[])
+          : []),
+        ...(teamsInstallation
+          ? (['teams'] as const satisfies readonly CommunicationProvider[])
+          : []),
+        ...(invocationIdentities.some(
+          (identity) => identity.provider === 'telegram' && identity.configured,
+        )
+          ? (['telegram'] as const satisfies readonly CommunicationProvider[])
+          : []),
+        ...(discordInstallation
+          ? (['discord'] as const satisfies readonly CommunicationProvider[])
+          : []),
+      ],
+      connectedSourceControlProviders: [
+        ...sourceControlConnection.connectedProviders,
+      ],
     },
     slackChannelAccessWarnings,
     slackChannelDisplayNames,
