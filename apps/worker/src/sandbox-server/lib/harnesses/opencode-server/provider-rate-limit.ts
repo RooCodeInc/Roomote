@@ -9,9 +9,6 @@ export const DEFAULT_OPENCODE_RATE_LIMIT_BASE_DELAY_MS = 5_000;
 /** Cap for exponential backoff between rate-limit continue prompts (ms). */
 export const DEFAULT_OPENCODE_RATE_LIMIT_MAX_DELAY_MS = 60_000;
 
-export const OPENCODE_RATE_LIMIT_RETRY_PROMPT_SOURCE =
-  'opencode-rate-limit-retry';
-
 export const OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT = [
   'Continue. The previous model request failed due to a temporary provider rate limit and was automatically retried.',
   'Resume from where you left off without restating the rate-limit error.',
