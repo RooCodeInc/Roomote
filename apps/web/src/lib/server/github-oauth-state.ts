@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
-import { getBetterAuthSecret } from '@roomote/env';
+import { getBetterAuthSecret } from '@/lib/server/env';
 
 const SIGNED_STATE_VERSION = 1;
 const SIGNED_STATE_MAX_AGE_MS = 60 * 60 * 1000;

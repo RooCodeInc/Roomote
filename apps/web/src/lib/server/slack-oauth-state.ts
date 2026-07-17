@@ -21,7 +21,7 @@ type SignedSlackLinkStatePayload = {
   issuedAt: number;
 };
 
-export type DecodedSlackOAuthState =
+type DecodedSlackOAuthState =
   | {
       mode: 'install';
       redirectPath: string;
