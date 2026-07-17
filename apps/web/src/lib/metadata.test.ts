@@ -47,3 +47,13 @@ describe('PAGE_METADATA', () => {
     expect(PAGE_METADATA.signUp.description).not.toContain('task');
   });
 });
+
+describe('sign-in metadata eligibility', () => {
+  it('documents that sign-up titles require form eligibility plus invite', () => {
+    // Contract reminder for page generateMetadata: invited alone is not enough.
+    // Keep the static strings available; route wiring gates them with
+    // canVisitorSignUp() && invited.
+    expect(PAGE_METADATA.signUp.title).toBe('Roomote Sign up');
+    expect(PAGE_METADATA.logIn.title).toBe('Roomote Log In');
+  });
+});
