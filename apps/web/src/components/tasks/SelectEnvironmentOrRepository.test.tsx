@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { FormProvider, useForm, useFormContext } from 'react-hook-form';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 
 import type { CreateTaskFormValues } from '@/types';
 
@@ -107,11 +107,12 @@ const WorkspaceValuesProbe = ({
 
 const SelectEnvironmentOrRepositoryHarness = ({
   allowAuto = false,
-  repositoryFilter = REPOSITORY,
+  repositoryFilter,
   defaultValues,
   onValuesChange,
 }: {
   allowAuto?: boolean;
+  /** Omit for no filter (homepage Auto). Pass a repo full name to filter. */
   repositoryFilter?: string;
   defaultValues: Partial<CreateTaskFormValues>;
   onValuesChange: (values: WorkspaceSelectionValues) => void;
@@ -182,6 +183,7 @@ describe('SelectEnvironmentOrRepository', () => {
 
     render(
       <SelectEnvironmentOrRepositoryHarness
+        repositoryFilter={REPOSITORY}
         defaultValues={{ repository: REPOSITORY }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -209,6 +211,7 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
+        repositoryFilter={REPOSITORY}
         defaultValues={{ repository: REPOSITORY }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -234,7 +237,6 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
-        repositoryFilter={undefined}
         defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -253,6 +255,148 @@ describe('SelectEnvironmentOrRepository', () => {
     });
     expect(setWorkspace).toHaveBeenCalledWith({
       workspace: { type: 'environment', id: 'env_123' },
+    });
+  });
+
+  it('re-defaults to the sole environment after a programmatic reset backs out to Auto', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+    let setFormValues:
+      | ((values: Partial<CreateTaskFormValues>) => void)
+      | undefined;
+
+    const FormControlHarness = ({
+      onValuesChange,
+    }: {
+      onValuesChange: (values: WorkspaceSelectionValues) => void;
+    }) => {
+      const form = useForm<CreateTaskFormValues>({
+        defaultValues: {
+          ...DEFAULT_VALUES,
+          repository: AUTO_WORKSPACE_VALUE,
+        },
+      });
+
+      setFormValues = (values) => {
+        if (values.repository !== undefined) {
+          form.setValue('repository', values.repository);
+        }
+        if (values.environmentId !== undefined) {
+          form.setValue('environmentId', values.environmentId);
+        }
+        if (values.branch !== undefined) {
+          form.setValue('branch', values.branch);
+        }
+        if (
+          values.environmentId === undefined &&
+          Object.prototype.hasOwnProperty.call(values, 'environmentId')
+        ) {
+          form.setValue('environmentId', undefined);
+        }
+      };
+
+      return (
+        <FormProvider {...form}>
+          <WorkspaceValuesProbe onChange={onValuesChange} />
+          <SelectEnvironmentOrRepository
+            allowAuto
+            onCreate={vi.fn()}
+            onEdit={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </FormProvider>
+      );
+    };
+
+    render(
+      <FormControlHarness
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_123');
+    });
+
+    act(() => {
+      setFormValues?.({
+        repository: AUTO_WORKSPACE_VALUE,
+        environmentId: undefined,
+        branch: '',
+      });
+    });
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_123');
+      expect(latestValues?.repository).toBe('env_123');
+    });
+  });
+
+  it('defaults Auto to the sole environment after the list goes from empty to one', async () => {
+    let latestValues: WorkspaceSelectionValues | undefined;
+
+    mockedUseEnvironments.mockReturnValue({
+      data: [] as Array<{
+        id: string;
+        name: string;
+        config: { repositories: Array<{ repository: string }> };
+      }>,
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useEnvironments>);
+
+    const { rerender } = render(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.repository).toBe(AUTO_WORKSPACE_VALUE);
+      expect(latestValues?.environmentId).toBeUndefined();
+    });
+    expect(setWorkspace).not.toHaveBeenCalled();
+
+    mockedUseEnvironments.mockReturnValue({
+      data: [
+        {
+          id: 'env_after_setup',
+          name: 'Roomote',
+          config: {
+            repositories: [{ repository: REPOSITORY }],
+          },
+        },
+      ],
+      isPending: false,
+      isSuccess: true,
+    } as ReturnType<typeof useEnvironments>);
+
+    rerender(
+      <SelectEnvironmentOrRepositoryHarness
+        allowAuto
+        defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
+        onValuesChange={(values) => {
+          latestValues = values;
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(latestValues?.environmentId).toBe('env_after_setup');
+    });
+
+    expect(latestValues).toMatchObject({
+      environmentId: 'env_after_setup',
+      repository: 'env_after_setup',
+      branch: '',
+    });
+    expect(setWorkspace).toHaveBeenCalledWith({
+      workspace: { type: 'environment', id: 'env_after_setup' },
     });
   });
 
@@ -283,7 +427,6 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
-        repositoryFilter={undefined}
         defaultValues={{ repository: AUTO_WORKSPACE_VALUE }}
         onValuesChange={(values) => {
           latestValues = values;
@@ -311,6 +454,7 @@ describe('SelectEnvironmentOrRepository', () => {
     render(
       <SelectEnvironmentOrRepositoryHarness
         allowAuto
+        repositoryFilter={REPOSITORY}
         defaultValues={{}}
         onValuesChange={vi.fn()}
       />,
