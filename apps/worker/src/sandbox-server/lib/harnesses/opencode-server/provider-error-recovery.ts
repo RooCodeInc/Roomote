@@ -91,8 +91,9 @@ function isPolicyRefusal(values: unknown[]): boolean {
   for (const value of values) {
     const record = asRecord(value);
     const code = normalizeCode(record?.code);
+    const name = normalizeCode(record?.name);
 
-    if (code && POLICY_CODES.has(code)) {
+    if ((code && POLICY_CODES.has(code)) || name === 'contentfiltererror') {
       return true;
     }
 
@@ -103,6 +104,7 @@ function isPolicyRefusal(values: unknown[]): boolean {
         lower.includes('cyber_policy') ||
         lower.includes('content_policy_violation') ||
         lower.includes('flagged for possible cybersecurity risk') ||
+        lower.includes("blocked by the provider's content filter") ||
         lower.includes('declined by the provider safety policy')
       ) {
         return true;

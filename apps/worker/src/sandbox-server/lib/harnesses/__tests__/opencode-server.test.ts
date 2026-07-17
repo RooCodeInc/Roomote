@@ -1971,6 +1971,16 @@ describe('OpenCodeServerHarness', () => {
         },
       });
 
+      // OpenCode reports the error before the failed runner reaches idle. The
+      // retry must remain queued until that boundary or it can be appended to
+      // the dying run without starting a fresh model loop.
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
       await vi.waitFor(() => {
         expect(client.promptAsync).toHaveBeenCalledTimes(2);
       });
@@ -2042,6 +2052,13 @@ describe('OpenCodeServerHarness', () => {
       await client.emit({
         type: 'session.error',
         properties: { sessionID: 'ses_1', error: providerError },
+      });
+
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
       });
 
       await vi.waitFor(() => {

@@ -35,6 +35,18 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     ).toMatchObject({ kind: 'provider_error', maxRetries: 1 });
   });
 
+  it('classifies native ContentFilterError payloads as policy refusals', () => {
+    const recovery = getOpenCodeProviderErrorRecovery({
+      name: 'ContentFilterError',
+      data: {
+        message: "The response was blocked by the provider's content filter",
+      },
+    });
+
+    expect(recovery).toMatchObject({ kind: 'policy_refusal', maxRetries: 2 });
+    expect(recovery?.promptText).toContain('Continue the legitimate task');
+  });
+
   it('does not retry explicit non-retryable configuration errors', () => {
     expect(
       getOpenCodeProviderErrorRecovery({
