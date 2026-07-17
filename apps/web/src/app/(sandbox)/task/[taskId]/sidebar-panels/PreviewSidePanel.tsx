@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
   ExternalLink,
   Input,
+  LifeBuoyIcon,
   Lock,
   Loader2,
   RectangleHorizontal,
@@ -32,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
   DropdownMenuLabel,
+  X,
 } from '@/components/system';
 
 import { buildPreviewIframeUrl } from '../preview-iframe-url';
@@ -41,6 +43,7 @@ import { usePreviewUrls } from '../hooks/use-preview-urls';
 import { useTaskSidePanel } from '../hooks/use-task-side-panel';
 import { shouldIncludeInPreviewServiceList } from '../preview-port-utils';
 
+import { PreviewHelpDialog } from './PreviewHelpDialog';
 import { PreviewSetupState } from './PreviewSetupState';
 import { SidePanelHeader } from './SidePanelHeader';
 
@@ -166,6 +169,9 @@ export function PreviewSidePanel({
     height: MOBILE_HEIGHT,
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+  const [isLoadWarningDismissed, setIsLoadWarningDismissed] = useState(false);
 
   const resolvedPrimaryPortName = useMemo(
     () =>
@@ -324,6 +330,7 @@ export function PreviewSidePanel({
       if (event.data?.type === 'roomote-load-complete') {
         setIsNavigating(false);
         setIsWidgetHidden(false);
+        setLoadTimedOut(false);
         hasInitiallyLoadedRef.current = true;
 
         if (navigatingTimeoutRef.current) {
@@ -393,6 +400,8 @@ export function PreviewSidePanel({
     setCurrentUrl(null);
     setIsNavigating(false);
     setIsWidgetHidden(false);
+    setLoadTimedOut(false);
+    setIsLoadWarningDismissed(false);
     hasInitiallyLoadedRef.current = false;
     pendingIframeNavigationUrlRef.current = null;
     retryCountRef.current = 0;
@@ -573,7 +582,11 @@ export function PreviewSidePanel({
         }
       }, delay);
     } else {
+      // The retry window is exhausted without the injected widget reporting a
+      // successful load. The app may still be visible (some apps block the
+      // widget), so surface a dismissible warning rather than an error state.
       hasInitiallyLoadedRef.current = true;
+      setLoadTimedOut(true);
     }
   }, []);
 
@@ -615,6 +628,22 @@ export function PreviewSidePanel({
 
   const headerActions = activeEntry ? (
     <>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Preview not working?"
+              onClick={() => setIsHelpOpen(true)}
+            >
+              <LifeBuoyIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Preview not working?</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <Button
         asChild
         variant="ghost"
@@ -835,11 +864,44 @@ export function PreviewSidePanel({
                 {Math.round(mobileSize.width)} × {Math.round(mobileSize.height)}
               </div>
             ) : null}
+
+            {loadTimedOut && !isLoadWarningDismissed ? (
+              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+                <span className="text-sm text-muted-foreground">
+                  The preview hasn&apos;t reported loading. It may still be
+                  starting, or something may be blocking it.
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsHelpOpen(true)}
+                  >
+                    Get help
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    aria-label="Dismiss preview loading warning"
+                    onClick={() => setIsLoadWarningDismissed(true)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
           <PreviewSetupState taskRun={taskRun} />
         )}
       </div>
+
+      <PreviewHelpDialog
+        taskId={taskRun?.taskId ?? null}
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

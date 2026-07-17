@@ -1228,7 +1228,12 @@ export const appRouter = createRouter({
       ),
 
     startSetupTask: protectedProcedure
-      .input(z.object({ taskId: z.string() }))
+      .input(
+        z.object({
+          taskId: z.string(),
+          mode: z.enum(['configure', 'repair']).optional(),
+        }),
+      )
       .mutation(({ ctx: { auth }, input }) =>
         startPreviewSetupTaskCommand(auth, input),
       ),

@@ -6,7 +6,12 @@ import {
   taskRuns,
   eq,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import {
+  ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
+  ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
+  RunStatus,
+} from '@roomote/types';
+import { enqueueTask } from '@roomote/cloud-agents/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -221,5 +226,60 @@ describe('startPreviewSetupTaskCommand', () => {
       taskId: setupTask.id,
       alreadyRunning: true,
     });
+  });
+
+  it('launches with the repair change request in repair mode', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    vi.mocked(enqueueTask).mockResolvedValueOnce({
+      taskId: 'launched-task',
+      id: 999,
+    } as never);
+
+    await expect(
+      startPreviewSetupTaskCommand(adminAuth, {
+        taskId: task.id,
+        mode: 'repair',
+      }),
+    ).resolves.toEqual({ taskId: 'launched-task', alreadyRunning: false });
+
+    const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
+      title: string;
+      task: { payload: { description: string } };
+    };
+    expect(enqueueInput.title).toMatch(/^Fix live previews: /);
+    expect(enqueueInput.task.payload.description).toContain(
+      ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
+    );
+  });
+
+  it('launches with the setup change request by default', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    vi.mocked(enqueueTask).mockResolvedValueOnce({
+      taskId: 'launched-task-2',
+      id: 1000,
+    } as never);
+
+    await expect(
+      startPreviewSetupTaskCommand(adminAuth, { taskId: task.id }),
+    ).resolves.toEqual({ taskId: 'launched-task-2', alreadyRunning: false });
+
+    const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
+      title: string;
+      task: { payload: { description: string } };
+    };
+    expect(enqueueInput.title).toMatch(/^Set up live previews: /);
+    expect(enqueueInput.task.payload.description).toContain(
+      ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
+    );
   });
 });

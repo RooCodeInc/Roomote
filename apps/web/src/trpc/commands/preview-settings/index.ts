@@ -17,6 +17,7 @@ import {
   buildEnvironmentDefinitionWorkspacePayload,
   buildExamplePreviewHostname,
   deriveRoomotePreviewDomain,
+  ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
   ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
   hasConfiguredPreviewPorts,
   INTERNAL_PORTS,
@@ -522,6 +523,8 @@ export async function getTaskPreviewStatusCommand(
   };
 }
 
+type PreviewSetupTaskMode = 'configure' | 'repair';
+
 /**
  * Launch an environment-setup agent focused on getting live previews working
  * for the task's environment. Admin-only, matching the rest of environment
@@ -529,12 +532,18 @@ export async function getTaskPreviewStatusCommand(
  * callers cannot target arbitrary environments. If an agent is already
  * working on the environment, returns that task instead of launching a
  * duplicate.
+ *
+ * Mode 'configure' (default) adds preview ports to an environment without
+ * them; mode 'repair' diagnoses a configured preview that does not load or
+ * work correctly behind the preview proxy.
  */
 export async function startPreviewSetupTaskCommand(
   auth: UserAuthSuccess,
-  input: { taskId: string },
+  input: { taskId: string; mode?: PreviewSetupTaskMode },
 ): Promise<{ taskId: string; alreadyRunning: boolean }> {
   assertAdmin(auth);
+
+  const mode: PreviewSetupTaskMode = input.mode ?? 'configure';
 
   const taskRun = await resolveLatestTaskRunForTask(input.taskId);
   const environmentId = getEnvironmentIdFromPayload(taskRun?.payload);
@@ -562,7 +571,9 @@ export async function startPreviewSetupTaskCommand(
       repositoryFullNames,
       config: environment.config,
     }),
-    ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
+    mode === 'repair'
+      ? ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST
+      : ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
     'Requested changes from the user:',
   );
 
@@ -574,7 +585,10 @@ export async function startPreviewSetupTaskCommand(
     }
 
     const launchResult = await enqueueTask({
-      title: `Set up live previews: ${environment.name}`,
+      title:
+        mode === 'repair'
+          ? `Fix live previews: ${environment.name}`
+          : `Set up live previews: ${environment.name}`,
       task: {
         type: TaskPayloadKind.StandardTask,
         payload: {

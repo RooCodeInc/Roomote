@@ -77,8 +77,10 @@ vi.mock('@/components/system', () => ({
   ) {
     return <input ref={ref} {...props} />;
   }),
+  LifeBuoyIcon: () => <span aria-hidden="true">help</span>,
   Lock: () => <span aria-hidden="true">lock</span>,
   Loader2: (props: Record<string, unknown>) => <span {...props}>loading</span>,
+  X: () => <span aria-hidden="true">x</span>,
   RectangleHorizontal: () => <span aria-hidden="true">mobile</span>,
   ArrowLeft: () => <span aria-hidden="true">left</span>,
   ArrowRight: () => <span aria-hidden="true">right</span>,
@@ -105,6 +107,10 @@ vi.mock('../hooks/use-preview-urls', () => ({
 
 vi.mock('../hooks/use-task-side-panel', () => ({
   useTaskSidePanel: useTaskSidePanelMock,
+}));
+
+vi.mock('./PreviewHelpDialog', () => ({
+  PreviewHelpDialog: () => null,
 }));
 
 vi.mock('./SidePanelHeader', () => ({
