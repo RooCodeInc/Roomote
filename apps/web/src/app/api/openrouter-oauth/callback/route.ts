@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 import { authorize } from '@/lib/server';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
+import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
   OPENROUTER_OAUTH_COOKIE_PATH,
   OPENROUTER_OAUTH_VERIFIER_COOKIE,
@@ -40,7 +41,7 @@ function withSetupRedirect(
 
 export async function GET(request: NextRequest) {
   const webEnv = await bootstrapWebRuntimeEnv();
-  const webUrl = webEnv.R_APP_URL;
+  const webUrl = getPublicAppUrl(webEnv);
 
   const code = request.nextUrl.searchParams.get('code');
   const oauthError = request.nextUrl.searchParams.get('error');
