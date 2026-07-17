@@ -31,6 +31,8 @@ type DiscordGatewaySessionDependencies = {
   createRest?: (botToken: string) => REST;
   createManager?: (options: CreateWebSocketManagerOptions) => GatewayManager;
   createResumeStore?: (tokenFingerprint: string) => DiscordGatewayResumeStore;
+  /** Membership check for configured auto-respond channels. */
+  isAutoStartChannel?: (channelId: string) => boolean;
 };
 
 type RawBotIdentity = {
@@ -184,6 +186,9 @@ export class DiscordGatewaySession {
           getBotUserId: () => this.botUserId,
           getCachedChannel: (channelId) => this.channelCache.get(channelId),
           enqueueUnknownGuildChannel,
+          ...(this.dependencies.isAutoStartChannel
+            ? { isAutoStartChannel: this.dependencies.isAutoStartChannel }
+            : {}),
           enqueue: async (envelope) => {
             const enqueued = await enqueueDiscordInboundWithRetry({
               enqueue: () => this.queue.enqueue(envelope),

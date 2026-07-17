@@ -439,15 +439,19 @@ type StoredBackgroundAgentSettings = Pick<
   | 'updatedAt'
 >;
 
+export type ChannelAutoStartChannelSettings = {
+  channelId: string;
+  instructions: string | null;
+  launchMode: ChannelAutoStartLaunchMode;
+  launchCriteria: string | null;
+};
+
 export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
-  channelAutoStartSlackChannels: Array<{
-    channelId: string;
-    instructions: string | null;
-    launchMode: ChannelAutoStartLaunchMode;
-    launchCriteria: string | null;
-  }>;
+  channelAutoStartSlackChannels: ChannelAutoStartChannelSettings[];
+  channelAutoStartDiscordChannels: ChannelAutoStartChannelSettings[];
   channelAutoStartEnabled: boolean;
   channelAutoStartSlackChannelIds: string[];
+  channelAutoStartDiscordChannelIds: string[];
   channelAutoStartInstructions: string | null;
   reviewCodeSettings: PrReviewSettings;
   conflictResolverFrequency: ConflictResolverFrequency;

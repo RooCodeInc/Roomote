@@ -66,6 +66,7 @@ const AUTO_RESPOND_CHANNEL_TEMPLATES: readonly AutoRespondChannelTemplate[] = [
 
 function createEmptyChannelAutoStartRow(): ChannelAutoStartFormRow {
   return {
+    provider: 'slack',
     channelId: null,
     slackChannel: '',
     instructions: '',
@@ -78,6 +79,7 @@ export function createChannelAutoStartRowFromTemplate(
   template: Pick<AutoRespondChannelTemplate, 'channel' | 'instructions'>,
 ): ChannelAutoStartFormRow {
   return {
+    provider: 'slack',
     channelId: null,
     slackChannel: template.channel,
     instructions: template.instructions,
@@ -124,8 +126,11 @@ type ChannelAutoStartEditorProps = {
   isEnabled: boolean;
   slackChannelOptions?: SlackChannelOption[];
   slackConnected?: boolean;
+  discordConnected?: boolean;
+  discordChannelOptions?: SlackChannelOption[];
   warning?: ReactNode;
   channelFieldError?: string;
+  discordChannelFieldError?: string;
   instructionsFieldError?: string;
   onRowsChange: (rows: ChannelAutoStartFormRow[]) => void;
 };
@@ -139,8 +144,11 @@ export function ChannelAutoStartEditor({
   isEnabled: _isEnabled,
   slackChannelOptions,
   slackConnected = true,
+  discordConnected = false,
+  discordChannelOptions,
   warning,
   channelFieldError,
+  discordChannelFieldError,
   instructionsFieldError,
   onRowsChange,
 }: ChannelAutoStartEditorProps) {
@@ -161,18 +169,28 @@ export function ChannelAutoStartEditor({
     updateRow(rowIndex, { slackChannel, channelId: null });
   };
 
+  // Switching provider clears the channel identity: Slack rows resolve by
+  // name, Discord rows carry a catalog id — neither survives the switch.
+  const changeRowProvider = (
+    rowIndex: number,
+    provider: ChannelAutoStartFormRow['provider'],
+  ) => {
+    updateRow(rowIndex, { provider, channelId: null, slackChannel: '' });
+  };
+
   const addRow = (row: ChannelAutoStartFormRow) => {
     onRowsChange([...rows, row]);
   };
   const useSlackChannelSelect = Boolean(slackChannelOptions?.length);
+  const showProviderPicker = Boolean(discordConnected);
 
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2 justify-between border-b pb-3">
         <p className="text-muted-foreground">
           {showLaunchModePicker
-            ? `Add as many channels as you want, choose whether each one always starts a task or lets Roomote decide, and make sure ${slackAppMention} is in each one.`
-            : `Add as many channels as you want. Just make sure ${slackAppMention} is in each one.`}
+            ? `Add as many channels as you want, choose whether each one always starts a task or lets Roomote decide, and make sure ${slackAppMention} is in each Slack channel.`
+            : `Add as many channels as you want. Just make sure ${slackAppMention} is in each Slack channel.`}
         </p>
 
         <Button
@@ -193,6 +211,7 @@ export function ChannelAutoStartEditor({
               row.launchMode,
               launchModeOptions,
             );
+            const rowUsesDiscord = row.provider === 'discord';
 
             return (
               <div
@@ -200,11 +219,46 @@ export function ChannelAutoStartEditor({
                 className="space-y-4 pb-6"
               >
                 <div className="space-y-2">
+                  {showProviderPicker || rowUsesDiscord ? (
+                    <Tabs
+                      value={row.provider}
+                      onValueChange={(value) =>
+                        changeRowProvider(
+                          index,
+                          value === 'discord' ? 'discord' : 'slack',
+                        )
+                      }
+                    >
+                      <TabsList>
+                        <TabsTrigger value="slack">Slack</TabsTrigger>
+                        <TabsTrigger value="discord">Discord</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  ) : null}
+
                   <Label htmlFor={`channel-auto-start-slack-channel-${index}`}>
-                    Monitor this Slack channel
+                    {rowUsesDiscord
+                      ? 'Monitor this Discord channel'
+                      : 'Monitor this Slack channel'}
                   </Label>
                   <div className="flex gap-2 items-center justify-between">
-                    {useSlackChannelSelect ? (
+                    {rowUsesDiscord ? (
+                      <SlackChannelSelect
+                        id={`channel-auto-start-slack-channel-${index}`}
+                        value={row.channelId}
+                        onChange={(value) =>
+                          updateRow(index, { channelId: value ?? null })
+                        }
+                        options={discordChannelOptions ?? []}
+                        disabled={!discordConnected}
+                        className="w-md"
+                        placeholder={
+                          discordConnected
+                            ? 'Select a Discord channel'
+                            : 'Connect Discord to choose a channel'
+                        }
+                      />
+                    ) : useSlackChannelSelect ? (
                       <SlackChannelSelect
                         id={`channel-auto-start-slack-channel-${index}`}
                         value={row.slackChannel || null}
@@ -369,6 +423,9 @@ export function ChannelAutoStartEditor({
       {warning}
       {channelFieldError ? (
         <p className="text-xs text-destructive">{channelFieldError}</p>
+      ) : null}
+      {discordChannelFieldError ? (
+        <p className="text-xs text-destructive">{discordChannelFieldError}</p>
       ) : null}
       {instructionsFieldError ? (
         <p className="text-xs text-destructive">{instructionsFieldError}</p>

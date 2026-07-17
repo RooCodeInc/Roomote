@@ -2,6 +2,7 @@ import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
+  type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -248,7 +249,20 @@ export async function reserveDiscordAnchoredThread(input: {
 
 export async function launchDiscordTask(input: {
   provider: DiscordCommunicationProvider;
-  launchOwnerUserId: string;
+  /** Required unless an explicit `initiator` carries the attribution. */
+  launchOwnerUserId?: string;
+  /**
+   * Overrides the default `{ kind: 'user', userId: launchOwnerUserId }`
+   * initiator — channel auto-start passes richer user shapes and
+   * automation-owned launches for bot-authored messages.
+   */
+  initiator?: TaskInitiator;
+  /**
+   * Agent-facing prompt override (e.g. auto-respond channel instructions
+   * prepended to the message); the queued message text stays the
+   * user-visible task description.
+   */
+  agentPromptText?: string;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
@@ -304,6 +318,9 @@ export async function launchDiscordTask(input: {
           ? { environmentId: input.workspace.environmentId }
           : {}),
         description: input.queuedMessage.text,
+        ...(input.agentPromptText?.trim()
+          ? { agentPromptText: input.agentPromptText.trim() }
+          : {}),
         ...(input.queuedMessage.images?.length
           ? { images: input.queuedMessage.images }
           : {}),
@@ -319,16 +336,31 @@ export async function launchDiscordTask(input: {
       },
     };
 
+  const initiator: TaskInitiator | null =
+    input.initiator ??
+    (input.launchOwnerUserId
+      ? { kind: 'user', userId: input.launchOwnerUserId }
+      : null);
+  if (!initiator) {
+    throw new Error(
+      'launchDiscordTask requires an initiator or a launch owner.',
+    );
+  }
+
   const launchResult = await enqueueTask(
     {
       task,
-      initiator: { kind: 'user', userId: input.launchOwnerUserId },
+      initiator,
       workflow: 'standard',
       surface: 'discord',
       trigger: 'message',
     },
     {
-      launchClass: 'human',
+      // Automation initiators derive the 'automation' launch class; forcing
+      // 'human' would misclassify bot-authored auto-respond launches.
+      ...(initiator.kind === 'automation'
+        ? {}
+        : { launchClass: 'human' as const }),
       ...(createdThread
         ? {
             onEarlyTitleGenerated: async ({ title }: { title: string }) => {

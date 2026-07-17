@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   getChannel: vi.fn(),
   addReaction: vi.fn(),
+  channelAutoStart: vi.fn(),
 }));
 
 vi.mock('../event-gate.js', () => ({
@@ -62,6 +63,10 @@ vi.mock('../../tasks/communication-task-run-lookup.js', () => ({
 
 vi.mock('../attachments.js', () => ({
   processDiscordAttachments: mocks.processAttachments,
+}));
+
+vi.mock('../channel-auto-start.js', () => ({
+  maybeHandleDiscordChannelAutoStart: mocks.channelAutoStart,
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -178,6 +183,7 @@ describe('Discord Gateway event handler', () => {
     });
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.component.mockResolvedValue('handled');
+    mocks.channelAutoStart.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -439,6 +445,64 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({ text: expect.stringContaining('/link') }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('lets channel auto-start consume a message before mention gating', async () => {
+    mocks.channelAutoStart.mockResolvedValue(true);
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'bugs',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: 'The login page 500s on refresh',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ ok: true, channelAutoStart: true }),
+    );
+    expect(mocks.channelAutoStart).toHaveBeenCalledWith(
+      expect.objectContaining({ botUserId: 'bot-1' }),
+    );
+    // Consumed entirely by auto-start: no mention gating, no reply, no launch.
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.reply).not.toHaveBeenCalled();
+  });
+
+  it('offers bot-authored messages to channel auto-start instead of dropping them outright', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'alerts',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: 'Deploy failed for api@1.2.3',
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    // The auto-start hook saw it (and declined) before the bot early-return.
+    expect(mocks.channelAutoStart).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ ignored: 'bot_or_missing_sender' }),
+    );
   });
 
   it('invalidates stale destination state when the configured bot identity changed', async () => {

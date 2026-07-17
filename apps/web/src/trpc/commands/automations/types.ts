@@ -26,6 +26,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'conflictResolverMaxPrAgeDays'
   | 'conflictResolverInstructions'
   | 'channelAutoStartSlackChannels'
+  | 'channelAutoStartDiscordChannels'
   | 'channelAutoStartInstructions'
   | 'channelAutoStartLaunchCriteria'
   | 'managerSlackChannel'
@@ -179,6 +180,18 @@ export interface ChannelAutoStartInputRow {
   launchCriteria?: string | null;
 }
 
+/**
+ * Discord auto-respond rows always carry the catalog channel id directly (the
+ * picker only offers cataloged channels), so there is no name-resolution
+ * variant of this shape.
+ */
+export interface ChannelAutoStartDiscordInputRow {
+  channelId: string | null;
+  instructions: string | null;
+  launchMode?: ChannelAutoStartLaunchMode | null;
+  launchCriteria?: string | null;
+}
+
 type ScheduleOnlyAutomationInputFields = Partial<
   Record<
     ScheduleOnlyBackgroundAutomationFrequencyField,
@@ -189,6 +202,13 @@ type ScheduleOnlyAutomationInputFields = Partial<
 export interface ResolvedChannelAutoStartRow {
   channelId: string;
   channelName: string | null;
+  instructions: string | null;
+  launchMode: ChannelAutoStartLaunchMode;
+  launchCriteria: string | null;
+}
+
+export interface ResolvedChannelAutoStartDiscordRow {
+  channelId: string;
   instructions: string | null;
   launchMode: ChannelAutoStartLaunchMode;
   launchCriteria: string | null;
@@ -224,6 +244,11 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   conflictResolverLabel: string;
   conflictResolverInstructions: string | null;
   channelAutoStartSlackChannels?: ChannelAutoStartInputRow[];
+  /**
+   * Optional with no default: older clients never send it, and their saves
+   * must preserve persisted Discord auto-respond targets untouched.
+   */
+  channelAutoStartDiscordChannels?: ChannelAutoStartDiscordInputRow[];
   channelAutoStartEnabled?: boolean;
   channelAutoStartSlackChannel?: string | null;
   channelAutoStartInstructions?: string | null;

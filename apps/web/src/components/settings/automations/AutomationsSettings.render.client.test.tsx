@@ -60,6 +60,7 @@ const state = vi.hoisted(() => ({
             launchMode: 'always_start' as const,
           },
         ],
+        channelAutoStartDiscordChannels: [],
         managerSlackChannelId: 'C123MANAGER',
         managerStatsFrequency: 'off' as const,
         managerStatsSlackChannelId: null,
@@ -534,7 +535,7 @@ describe('AutomationsSettings', () => {
     render(<AutomationsSettings />);
 
     const expandButton = await screen.findByRole('button', {
-      name: 'Expand Auto-respond to Slack channels',
+      name: 'Expand Auto-respond to channels',
     });
     fireEvent.click(expandButton);
 

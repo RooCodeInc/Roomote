@@ -48,7 +48,7 @@ const baseFormState: FormState = {
   conflictResolverMaxPrAgeDays: 7 as const,
   conflictResolverLabel: 'roomote:auto-resolve-conflicts',
   conflictResolverInstructions: '',
-  channelAutoStartSlackChannels: [],
+  channelAutoStartChannels: [],
   managerSlackChannel: '',
   managerStatsFrequency: 'off' as const,
   managerStatsSlackChannel: '',
@@ -238,8 +238,9 @@ describe('Automations selection helpers', () => {
   it('builds a save state that only applies the channel auto-start changes', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      channelAutoStartSlackChannels: [
+      channelAutoStartChannels: [
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
@@ -261,8 +262,9 @@ describe('Automations selection helpers', () => {
       'channelAutoStart',
     );
 
-    expect(saveState.channelAutoStartSlackChannels).toEqual([
+    expect(saveState.channelAutoStartChannels).toEqual([
       {
+        provider: 'slack',
         channelId: null,
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
@@ -276,10 +278,11 @@ describe('Automations selection helpers', () => {
   it('sends the persisted channel id for an untouched channel auto-start row so the server resolves it by id instead of by name', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      channelAutoStartSlackChannels: [
+      channelAutoStartChannels: [
         // Hydrated from the server: a channel the user is not editing. Its name
         // may no longer resolve (archived/renamed), but its id still does.
         {
+          provider: 'slack' as const,
           channelId: 'C0DEEP',
           slackChannel: '#deepstrike-roo',
           instructions: 'Handle deep strike reports.',
@@ -302,6 +305,54 @@ describe('Automations selection helpers', () => {
         instructions: 'Handle deep strike reports.',
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
         launchCriteria: null,
+      },
+    ]);
+  });
+
+  it('splits merged auto-respond rows into Slack and Discord API arrays', () => {
+    const saveInput = buildAutomationSettingsSaveInput(
+      {
+        ...baseFormState,
+        channelAutoStartChannels: [
+          {
+            provider: 'slack' as const,
+            channelId: 'C0BUGS',
+            slackChannel: '#bugs',
+            instructions: 'Bug triage.',
+            launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+            launchCriteria: '',
+          },
+          {
+            provider: 'discord' as const,
+            channelId: '400000000000000001',
+            slackChannel: '',
+            instructions: 'Alert triage.',
+            launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+            launchCriteria: '  Only launch on new alerts.  ',
+          },
+        ],
+      },
+      baseFormState,
+      'channelAutoStart',
+    );
+
+    expect(saveInput.channelAutoStartSlackChannels).toEqual([
+      {
+        channelId: 'C0BUGS',
+        slackChannel: '#bugs',
+        instructions: 'Bug triage.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: null,
+      },
+    ]);
+    // Always present (only legacy clients omit the field, which the API reads
+    // as "preserve persisted Discord rows").
+    expect(saveInput.channelAutoStartDiscordChannels).toEqual([
+      {
+        channelId: '400000000000000001',
+        instructions: 'Alert triage.',
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+        launchCriteria: 'Only launch on new alerts.',
       },
     ]);
   });
@@ -382,6 +433,7 @@ describe('Automations selection helpers', () => {
         instructions: 'Treat each message as a bug report.',
       }),
     ).toEqual({
+      provider: 'slack',
       channelId: null,
       slackChannel: '#bugs',
       instructions: 'Treat each message as a bug report.',
@@ -394,6 +446,7 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
@@ -408,6 +461,7 @@ describe('Automations selection helpers', () => {
     expect(
       getAvailableAutoRespondChannelTemplates([
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
@@ -415,6 +469,7 @@ describe('Automations selection helpers', () => {
           launchCriteria: '',
         },
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#support-inbound',
           instructions: 'Treat each message as a support request.',
@@ -422,6 +477,7 @@ describe('Automations selection helpers', () => {
           launchCriteria: '',
         },
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#ask-engineering',
           instructions: 'Treat each message as a technical question.',
@@ -429,6 +485,7 @@ describe('Automations selection helpers', () => {
           launchCriteria: '',
         },
         {
+          provider: 'slack' as const,
           channelId: null,
           slackChannel: '#ops-requests',
           instructions: 'Treat each message as an operational request.',
@@ -442,8 +499,9 @@ describe('Automations selection helpers', () => {
   it('builds a save state that clears a previously saved channel auto-start prompt', () => {
     const currentFormState: FormState = {
       ...baseFormState,
-      channelAutoStartSlackChannels: [
+      channelAutoStartChannels: [
         {
+          provider: 'slack' as const,
           channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: '',
@@ -455,8 +513,9 @@ describe('Automations selection helpers', () => {
 
     const currentSavedState: FormState = {
       ...baseFormState,
-      channelAutoStartSlackChannels: [
+      channelAutoStartChannels: [
         {
+          provider: 'slack' as const,
           channelId: 'C0BUGS',
           slackChannel: '#bugs',
           instructions: 'Treat each message as a bug report.',
@@ -472,8 +531,9 @@ describe('Automations selection helpers', () => {
       'channelAutoStart',
     );
 
-    expect(saveState.channelAutoStartSlackChannels).toEqual([
+    expect(saveState.channelAutoStartChannels).toEqual([
       {
+        provider: 'slack',
         channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: '',

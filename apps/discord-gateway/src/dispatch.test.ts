@@ -210,6 +210,133 @@ describe('handleGatewayDispatch', () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
+  it('forwards unmentioned guild messages from a monitored auto-start channel', async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const payload = {
+      id: 'message-auto-1',
+      channel_id: 'channel-bugs',
+      guild_id: 'guild-1',
+      content: 'the login page 500s on refresh',
+      author: { id: 'user-1' },
+      mentions: [],
+    };
+
+    await expect(
+      handleGatewayDispatch(
+        { t: 'MESSAGE_CREATE', d: payload },
+        {
+          enqueue,
+          rest: { post: vi.fn() },
+          now,
+          getBotUserId: () => 'bot-1',
+          getCachedChannel: () => ({
+            id: 'channel-bugs',
+            type: 0,
+            guildId: 'guild-1',
+            name: 'bugs',
+            isThread: false,
+          }),
+          isAutoStartChannel: (channelId) => channelId === 'channel-bugs',
+        },
+      ),
+    ).resolves.toBe('enqueued');
+
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards bot- and webhook-authored messages only from monitored channels', async () => {
+    const enqueue = vi.fn().mockResolvedValue(true);
+    const dependencies = {
+      enqueue,
+      rest: { post: vi.fn() },
+      now,
+      getBotUserId: () => 'bot-1',
+      getCachedChannel: () => ({
+        id: 'channel-alerts',
+        type: 0,
+        guildId: 'guild-1',
+        name: 'alerts',
+        isThread: false,
+      }),
+      isAutoStartChannel: (channelId: string) => channelId === 'channel-alerts',
+    };
+
+    // Bot author in the monitored channel forwards.
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-bot-1',
+            channel_id: 'channel-alerts',
+            guild_id: 'guild-1',
+            content: 'Deploy failed for api@1.2.3',
+            author: { id: 'alert-bot', bot: true },
+            mentions: [],
+          },
+        },
+        dependencies,
+      ),
+    ).resolves.toBe('enqueued');
+
+    // Webhook author (no author.bot flag) in the monitored channel forwards.
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-webhook-1',
+            channel_id: 'channel-alerts',
+            guild_id: 'guild-1',
+            content: 'New Sentry issue: TypeError',
+            author: { id: 'webhook-user' },
+            webhook_id: 'webhook-1',
+            mentions: [],
+          },
+        },
+        dependencies,
+      ),
+    ).resolves.toBe('enqueued');
+
+    // The same bot author outside any monitored channel still drops.
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-bot-2',
+            channel_id: 'channel-other',
+            guild_id: 'guild-1',
+            content: 'Deploy failed for api@1.2.3',
+            author: { id: 'alert-bot', bot: true },
+            mentions: [],
+          },
+        },
+        dependencies,
+      ),
+    ).resolves.toBe('ignored');
+
+    // Roomote's own messages never forward, even from monitored channels.
+    await expect(
+      handleGatewayDispatch(
+        {
+          t: 'MESSAGE_CREATE',
+          d: {
+            id: 'message-own-1',
+            channel_id: 'channel-alerts',
+            guild_id: 'guild-1',
+            content: 'Started a task for this alert.',
+            author: { id: 'bot-1', bot: true },
+            mentions: [],
+          },
+        },
+        dependencies,
+      ),
+    ).resolves.toBe('ignored');
+
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
   it('treats an unknown guild channel conservatively until metadata is fetched', async () => {
     const enqueue = vi.fn();
 

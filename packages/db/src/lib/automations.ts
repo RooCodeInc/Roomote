@@ -274,10 +274,12 @@ export function resolveAutomationDestination(
 
 function getChannelAutoStartTargets(
   automation: Automation | undefined,
+  provider: BackgroundAutomationProvider,
+  targetKind: BackgroundAutomationTargetKind,
 ): BackgroundAgentSettings['channelAutoStartSlackChannels'] {
   const targets = (automation?.targets ?? []).filter(
     (target) =>
-      target.provider === 'slack' && target.targetKind === 'slack_channel',
+      target.provider === provider && target.targetKind === targetKind,
   );
   const orderedTargets = [...targets].sort((left, right) => {
     const leftOrder = asNumber(asObject(left.metadata).order);
@@ -682,7 +684,16 @@ export function normalizeBackgroundAgentSettings(
   const ciFailureTriage = automationMap.get('ci_failure_triage');
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
-  const channelAutoStartTargets = getChannelAutoStartTargets(channelAutoStart);
+  const channelAutoStartTargets = getChannelAutoStartTargets(
+    channelAutoStart,
+    'slack',
+    'slack_channel',
+  );
+  const channelAutoStartDiscordTargets = getChannelAutoStartTargets(
+    channelAutoStart,
+    'discord',
+    'discord_channel',
+  );
   const sentryProjectSlugs = getAutomationTargetRefs(
     sentryTriage,
     'sentry',
@@ -730,9 +741,15 @@ export function normalizeBackgroundAgentSettings(
     announcerLastRunAt: announcer?.lastRunAt ?? null,
 
     channelAutoStartSlackChannels: channelAutoStartTargets,
+    channelAutoStartDiscordChannels: channelAutoStartDiscordTargets,
     channelAutoStartEnabled:
-      channelAutoStart?.enabled === true && channelAutoStartTargets.length > 0,
+      channelAutoStart?.enabled === true &&
+      channelAutoStartTargets.length + channelAutoStartDiscordTargets.length >
+        0,
     channelAutoStartSlackChannelIds: channelAutoStartTargets.map(
+      ({ channelId }) => channelId,
+    ),
+    channelAutoStartDiscordChannelIds: channelAutoStartDiscordTargets.map(
       ({ channelId }) => channelId,
     ),
     channelAutoStartInstructions:
@@ -814,6 +831,24 @@ export async function getBackgroundAgentSettings(): Promise<BackgroundAgentSetti
 export async function getBackgroundAgentSettingsForDeployment(): Promise<BackgroundAgentSettings> {
   await ensureDeploymentSettingsRow();
   return getBackgroundAgentSettings();
+}
+
+/**
+ * Discord channel ids configured for channel auto-start, for consumers that
+ * only need the monitored-channel set (e.g. the Discord Gateway's forwarding
+ * filter) without the full settings projection.
+ */
+export async function getDiscordAutoStartChannelIds(): Promise<string[]> {
+  const automation = await db.query.automations.findFirst({
+    columns: { enabled: true, targets: true },
+    where: eq(automations.key, 'slack_channel_auto_start'),
+  });
+
+  if (!automation?.enabled) {
+    return [];
+  }
+
+  return getAutomationTargetRefs(automation, 'discord', 'discord_channel');
 }
 
 export async function getReviewCodeAutomationSettings(): Promise<PrReviewSettings> {

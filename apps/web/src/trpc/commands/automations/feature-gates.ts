@@ -21,5 +21,10 @@ export function maskSlackChannelAutoStartSettings(
         launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
       }),
     ),
+    channelAutoStartDiscordChannels:
+      settings.channelAutoStartDiscordChannels.map((row) => ({
+        ...row,
+        launchMode: DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+      })),
   };
 }
