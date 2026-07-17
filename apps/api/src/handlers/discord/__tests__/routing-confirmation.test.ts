@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   getAvailableEnvironments: vi.fn(),
+  getRoutingAutoConfirmDelayMs: vi.fn(),
   getTaskUrl: vi.fn(),
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   getAvailableEnvironments: mocks.getAvailableEnvironments,
+  getRoutingAutoConfirmDelayMs: mocks.getRoutingAutoConfirmDelayMs,
   getTaskUrl: mocks.getTaskUrl,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 30_000,
 }));
@@ -52,6 +54,7 @@ describe('Discord routing confirmation', () => {
       { id: 'env-1', name: 'Sunny Acres', repositoryNames: ['acme/game'] },
       { id: 'env-2', name: 'API', repositoryNames: ['acme/api'] },
     ]);
+    mocks.getRoutingAutoConfirmDelayMs.mockReturnValue(30_000);
     mocks.redisSet.mockResolvedValue('OK');
     mocks.reserveAnchoredThread.mockResolvedValue(null);
     mocks.forgetPendingTaskThread.mockResolvedValue(undefined);
@@ -72,6 +75,11 @@ describe('Discord routing confirmation', () => {
   });
 
   it('auto-confirms only high-confidence, unremapped routes', () => {
+    mocks.getRoutingAutoConfirmDelayMs
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(30_000)
+      .mockReturnValueOnce(30_000);
+
     expect(
       shouldAutoConfirmDiscordRoute({
         status: 'routed',
@@ -102,6 +110,26 @@ describe('Discord routing confirmation', () => {
         },
       }),
     ).toBe(false);
+    expect(
+      shouldAutoConfirmDiscordRoute({
+        status: 'routed',
+        result: {
+          workspace: { type: 'all_repositories' },
+          reasoning: 'broad match',
+          debug: {
+            phase: 'direct',
+            toolsUsed: [],
+            needsExternalLookup: false,
+            confidence: 0.99,
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(mocks.getRoutingAutoConfirmDelayMs).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ confidence: 0.99 }),
+      'all_repositories',
+    );
   });
 
   it('persists a pending route and posts workspace buttons', async () => {

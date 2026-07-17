@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import {
   getAvailableEnvironments,
+  getRoutingAutoConfirmDelayMs,
   getTaskUrl,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   type RoutingDecision,
@@ -28,7 +29,6 @@ import {
   type DiscordChannelContext,
 } from './task-launch.js';
 
-const DISCORD_IMMEDIATE_CONFIRM_CONFIDENCE = 0.95;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT = 5;
 const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
 const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
@@ -325,9 +325,10 @@ export function shouldAutoConfirmDiscordRoute(
 ): boolean {
   return (
     decision.status === 'routed' &&
-    decision.result.debug?.workspaceRemapped !== true &&
-    (decision.result.debug?.confidence ?? 0) >=
-      DISCORD_IMMEDIATE_CONFIRM_CONFIDENCE
+    getRoutingAutoConfirmDelayMs(
+      decision.result.debug,
+      decision.result.workspace.type,
+    ) === 0
   );
 }
 

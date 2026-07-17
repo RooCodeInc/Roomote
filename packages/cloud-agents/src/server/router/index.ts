@@ -31,6 +31,8 @@ export type {
 } from './slack-mcp-setup';
 
 export {
+  getRoutingAutoConfirmDelayMs,
+  ROUTING_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   LINEAR_AUTO_CONFIRM_TIMEOUT_MS,
   R_SMALL_MODEL_LABEL,

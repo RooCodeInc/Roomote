@@ -4,11 +4,11 @@ import type {
   TaskModelSettings,
 } from '@roomote/types';
 
-/**
- * Time in milliseconds to wait for the user to confirm or correct
- * the routing suggestion before auto-accepting it (Slack).
- */
+/** Time to wait before auto-accepting a routed workspace suggestion. */
 export const ROUTING_AUTO_CONFIRM_TIMEOUT_MS = 30_000;
+
+/** Confidence required to skip the correction window entirely. */
+export const ROUTING_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE = 0.95;
 
 /**
  * Time in milliseconds to wait for the user to confirm or correct
@@ -174,6 +174,25 @@ export interface RoutingDebugInfo {
   confidence?: number | null;
   workspaceRemapped?: boolean;
   selectedTaskModel?: RoutingTaskModelSelection;
+}
+
+/**
+ * Shared integration policy for routed workspace suggestions.
+ *
+ * High-confidence environment matches may start immediately. Broad
+ * all-repository routes, remapped workspaces, and lower-confidence matches
+ * retain the normal correction window.
+ */
+export function getRoutingAutoConfirmDelayMs(
+  routingDebug?: Pick<RoutingDebugInfo, 'confidence' | 'workspaceRemapped'>,
+  workspaceType?: RoutingWorkspace['type'],
+): number {
+  return typeof routingDebug?.confidence === 'number' &&
+    routingDebug.confidence >= ROUTING_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE &&
+    routingDebug.workspaceRemapped !== true &&
+    workspaceType === 'environment'
+    ? 0
+    : ROUTING_AUTO_CONFIRM_TIMEOUT_MS;
 }
 
 export interface RoutingResult {
