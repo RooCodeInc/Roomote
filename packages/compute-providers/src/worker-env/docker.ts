@@ -6,7 +6,6 @@ export function buildDockerWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
-  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   image,
@@ -20,7 +19,6 @@ export function buildDockerWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
-      inferenceGatewayEnabled,
     }),
     ...buildWorkerContextEnv({
       provider: 'docker',

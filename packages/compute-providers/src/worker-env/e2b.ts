@@ -7,7 +7,6 @@ export function buildE2bWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
-  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   templateId,
@@ -21,7 +20,6 @@ export function buildE2bWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
-      inferenceGatewayEnabled,
     }),
     ...buildWorkerContextEnv({
       provider: 'e2b',

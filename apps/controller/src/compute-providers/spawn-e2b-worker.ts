@@ -20,7 +20,6 @@ import {
   resolveAuthBypassHeaderName,
   resolveAuthBypassValue,
 } from '@roomote/compute-providers';
-import { isInferenceGatewayEnabledForWorkerEnv } from './inference-gateway-flag';
 
 import { primeEnvironmentOidcForMachine } from '../sandbox-oidc';
 import {
@@ -327,7 +326,6 @@ export async function spawnE2bWorker(
       args,
       env: buildE2bWorkerEnv({
         authToken,
-        inferenceGatewayEnabled: await isInferenceGatewayEnabledForWorkerEnv(),
         sandboxExpiresAtMs: Date.now() + e2bTimeoutMs,
         deploymentSlug,
         environmentId,

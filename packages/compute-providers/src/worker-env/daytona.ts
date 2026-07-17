@@ -7,7 +7,6 @@ export function buildDaytonaWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
-  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   snapshotName,
@@ -21,7 +20,6 @@ export function buildDaytonaWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
-      inferenceGatewayEnabled,
     }),
     ...buildWorkerContextEnv({
       provider: 'daytona',

@@ -177,21 +177,39 @@ export async function resolveModelProviderEnvValue(
   return undefined;
 }
 
+type ModelRuntimeEnvOptions = {
+  runtimeEnv?: Partial<Record<string, string | undefined>>;
+  deploymentEnvVars?: Record<string, string>;
+  executor?: DatabaseOrTransaction;
+};
+
+/**
+ * Resolve model runtime env for control-plane inference (routing, titles,
+ * summaries): raw provider keys are returned because control-plane calls
+ * hold no run token to present to the inference gateway.
+ */
 export async function resolveEffectiveModelRuntimeEnv(
-  options: {
-    runtimeEnv?: Partial<Record<string, string | undefined>>;
-    deploymentEnvVars?: Record<string, string>;
-    executor?: DatabaseOrTransaction;
-    /**
-     * Route sandbox inference through the gateway: the configured provider
-     * keys the gateway can serve stay on the control plane and their names
-     * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Callers
-     * resolving env for the sandbox pass the evaluated InferenceGateway
-     * feature flag; control-plane callers (routing, titles, summaries) omit it
-     * because that inference holds no run token to present to the gateway.
-     */
-    inferenceGateway?: boolean;
-  } = {},
+  options: ModelRuntimeEnvOptions = {},
+): Promise<Record<string, string>> {
+  return resolveModelRuntimeEnv(options, { inferenceGateway: false });
+}
+
+/**
+ * Resolve model runtime env for a task sandbox: the configured provider keys
+ * the inference gateway can serve stay on the control plane and their names
+ * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead, and a connected
+ * ChatGPT subscription is routed through the gateway rather than
+ * materializing `OPENCODE_AUTH_CONTENT` in the sandbox.
+ */
+export async function resolveSandboxModelRuntimeEnv(
+  options: ModelRuntimeEnvOptions = {},
+): Promise<Record<string, string>> {
+  return resolveModelRuntimeEnv(options, { inferenceGateway: true });
+}
+
+async function resolveModelRuntimeEnv(
+  options: ModelRuntimeEnvOptions,
+  { inferenceGateway }: { inferenceGateway: boolean },
 ): Promise<Record<string, string>> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
@@ -319,7 +337,7 @@ export async function resolveEffectiveModelRuntimeEnv(
   // providers. Gateway coverage must therefore include both sets up front;
   // otherwise a later model switch either sees a missing key or uses a raw
   // provider credential that was already written into the sandbox.
-  const gatewaySwitchableModelIds = options.inferenceGateway
+  const gatewaySwitchableModelIds = inferenceGateway
     ? enabledCatalogModels.map((model) => model.id)
     : [];
   const gatewayProviderKeyNames = [
@@ -337,7 +355,7 @@ export async function resolveEffectiveModelRuntimeEnv(
   // gateway URL from its own platform URL and rebases exactly these providers.
   // Only configured keys are withheld; credentials for disabled providers are
   // filtered before this point and never flow to the task runtime.
-  const gatewayServedKeyNames = options.inferenceGateway
+  const gatewayServedKeyNames = inferenceGateway
     ? gatewayProviderKeyNames.filter(
         (name) =>
           isInferenceGatewayCoveredEnvVar(name) &&
@@ -385,7 +403,7 @@ export async function resolveEffectiveModelRuntimeEnv(
     ? await resolveOpenCodeAuthContent({ executor })
     : null;
   const routeChatGptThroughGateway =
-    options.inferenceGateway === true && injectedOpenCodeAuthContent != null;
+    inferenceGateway && injectedOpenCodeAuthContent != null;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
