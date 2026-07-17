@@ -577,7 +577,9 @@ export class WorkspaceManager {
           name: 'Git clone',
           // Use git transport directly so clone works with the worker's
           // file-backed credential helper and avoids gh's extra API lookup.
-          run: `git clone ${cloneUrl} '${shellEscape(fullName)}'`,
+          // Escape both args: cloneUrl is provider-synced and may include
+          // shell metacharacters from a hostile self-hosted origin.
+          run: `git clone '${shellEscape(cloneUrl)}' '${shellEscape(fullName)}'`,
           // Allow brief auth and repository visibility propagation delays.
           retries: 4,
           timeout: 300,
@@ -786,15 +788,17 @@ export class WorkspaceManager {
         },
         {
           // Use -B flag to create branch if it doesn't exist, or reset it if it does.
+          // Quote/escape all interpolated refs: branch names are
+          // attacker-controlled via webhooks and launch APIs and reach bash.
           name: 'Git checkout branch',
-          run: `git checkout -B ${checkoutBranch} ${remoteBranchRef}`,
+          run: `git checkout -B '${shellEscape(checkoutBranch)}' '${shellEscape(remoteBranchRef)}'`,
           timeout: REPOSITORY_WORKTREE_SYNC_TIMEOUT,
           continue_on_error: false,
         },
         {
           // Final reset to ensure exact match with remote (redundant but safe).
           name: 'Git reset to remote',
-          run: `git reset --hard ${remoteBranchRef}`,
+          run: `git reset --hard '${shellEscape(remoteBranchRef)}'`,
           timeout: REPOSITORY_WORKTREE_SYNC_TIMEOUT,
           continue_on_error: false,
         },
@@ -802,7 +806,7 @@ export class WorkspaceManager {
           ? [
               {
                 name: 'Git pin to sha',
-                run: `git reset --hard ${sha}`,
+                run: `git reset --hard '${shellEscape(sha)}'`,
                 timeout: REPOSITORY_WORKTREE_SYNC_TIMEOUT,
                 continue_on_error: false,
               },
@@ -812,7 +816,7 @@ export class WorkspaceManager {
           ? [
               {
                 name: 'Set default remote repo.',
-                run: `gh repo set-default ${repoFullName}`,
+                run: `gh repo set-default '${shellEscape(repoFullName)}'`,
                 timeout: 60,
                 continue_on_error: true,
               },

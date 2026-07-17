@@ -14,6 +14,10 @@ const settingsData = vi.hoisted(() => ({
 const providerSetupData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const suggestionData = vi.hoisted(() => ({
+  current: undefined as Record<string, unknown> | null | undefined,
+}));
+const suggestionQueryError = vi.hoisted(() => ({ current: false }));
 const lookupMutateAsyncMock = vi.hoisted(() => vi.fn());
 const updateMutateAsyncMock = vi.hoisted(() => vi.fn());
 const refreshMutateAsyncMock = vi.hoisted(() => vi.fn());
@@ -23,13 +27,18 @@ vi.mock('@tanstack/react-query', () => ({
     const isProviderSetup =
       Array.isArray(options?.queryKey) &&
       options.queryKey[1] === 'providerSetup';
+    const isSuggestions =
+      Array.isArray(options?.queryKey) && options.queryKey[1] === 'suggest';
     const data = isProviderSetup
       ? providerSetupData.current
-      : settingsData.current;
+      : isSuggestions && suggestionData.current !== undefined
+        ? suggestionData.current
+        : settingsData.current;
 
     return {
       data,
       isPending: data === null,
+      isError: isSuggestions && suggestionQueryError.current,
     };
   },
   useMutation: (options?: { mutationKey?: unknown[] }) => {
@@ -103,6 +112,7 @@ vi.mock('@/components/settings', () => ({
 
 import type {
   ReasoningEffort,
+  RecommendedModelPreset,
   RecommendedRoleModels,
   SetupModelProviderId,
   TaskModelMetadata,
@@ -130,6 +140,8 @@ function buildSettingsData(
     codeReviewEffectiveModelId?: string | null;
     exploreEffectiveModelId?: string | null;
     planningEffectiveModelId?: string | null;
+    codingReasoningEffort?: ReasoningEffort | null;
+    helperReasoningEffort?: ReasoningEffort | null;
   } = {},
 ) {
   return {
@@ -173,7 +185,7 @@ function buildSettingsData(
         persistedModelId: 'openrouter/openai/gpt-5.4',
         source: 'database',
         managedByEnv: overrides.codingManagedByEnv ?? false,
-        reasoningEffort: null as ReasoningEffort | null,
+        reasoningEffort: overrides.codingReasoningEffort ?? null,
         reasoningManagedByEnv: overrides.codingReasoningManagedByEnv ?? false,
       },
       helperModel: {
@@ -181,7 +193,7 @@ function buildSettingsData(
         persistedModelId: null,
         source: 'same-as-coding',
         managedByEnv: overrides.helperManagedByEnv ?? false,
-        reasoningEffort: null as ReasoningEffort | null,
+        reasoningEffort: overrides.helperReasoningEffort ?? null,
         reasoningManagedByEnv: overrides.helperReasoningManagedByEnv ?? false,
       },
       visionModel: {
@@ -255,6 +267,7 @@ function buildProviderSetupData(
       Array<{ id: string; displayName: string }>
     >;
     recommendedRoleModelsByProvider?: Record<string, RecommendedRoleModels>;
+    recommendedPresetsByProvider?: Record<string, RecommendedModelPreset[]>;
   } = {},
 ) {
   const connectedProviderIds = overrides.connectedProviderIds ?? [
@@ -265,6 +278,8 @@ function buildProviderSetupData(
     overrides.suggestedTaskModelsByProvider ?? {};
   const recommendedRoleModelsByProvider =
     overrides.recommendedRoleModelsByProvider ?? {};
+  const recommendedPresetsByProvider =
+    overrides.recommendedPresetsByProvider ?? {};
   const buildProvider = (
     id: SetupModelProviderId,
     label: string,
@@ -277,6 +292,7 @@ function buildProviderSetupData(
     authKind: 'api-key' as const,
     suggestedTaskModels: suggestedTaskModelsByProvider[id] ?? [],
     recommendedRoleModels: recommendedRoleModelsByProvider[id],
+    recommendedPresets: recommendedPresetsByProvider[id],
     runtimeApiKeySatisfied: false,
     savedApiKeySatisfied: connectedProviderIds.includes(id),
     additionalEnvValues: {},
@@ -334,6 +350,8 @@ describe('ModelSettingsSection', () => {
     refreshMutateAsyncMock.mockReset();
     settingsData.current = null;
     providerSetupData.current = buildProviderSetupData();
+    suggestionData.current = undefined;
+    suggestionQueryError.current = false;
     // cmdk scrolls the highlighted command item into view; jsdom does not
     // implement scrollIntoView.
     window.HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -597,7 +615,7 @@ describe('ModelSettingsSection', () => {
     ).toHaveTextContent('Anthropic');
   });
 
-  it('shows provider-scoped suggestions after two characters and lets keyboard selection fill the slug', async () => {
+  it('shows provider-scoped suggestions after one character and lets keyboard selection fill the slug', async () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -609,7 +627,7 @@ describe('ModelSettingsSection', () => {
 
     try {
       const input = screen.getByLabelText('New model slug');
-      fireEvent.change(input, { target: { value: 'cl' } });
+      fireEvent.change(input, { target: { value: 'c' } });
 
       await act(async () => {
         vi.advanceTimersByTime(500);
@@ -622,7 +640,112 @@ describe('ModelSettingsSection', () => {
     }
   });
 
-  it('does not show suggestions before two characters', () => {
+  it('keeps suggestions visible while a replacement query is loading', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears suggestions when a replacement query fails', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    suggestionData.current = {
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      const input = screen.getByLabelText('New model slug');
+      fireEvent.change(input, { target: { value: 'c' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+
+      suggestionData.current = null;
+      suggestionQueryError.current = true;
+      fireEvent.change(input, { target: { value: 'cl' } });
+      await act(async () => {
+        vi.advanceTimersByTime(150);
+      });
+
+      expect(screen.queryByText('Claude Sonnet 4')).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('hides lookup errors while matching suggestions are open', async () => {
+    const data = buildSettingsData();
+    settingsData.current = {
+      ...data,
+      suggestions: [
+        { slug: 'claude-sonnet-4', displayName: 'Claude Sonnet 4' },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+    lookupMutateAsyncMock.mockRejectedValue(new Error('Not found'));
+    vi.useFakeTimers();
+
+    try {
+      renderModelSettingsSection();
+
+      fireEvent.change(screen.getByLabelText('New model slug'), {
+        target: { value: 'cl' },
+      });
+
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+
+      expect(screen.getByText('Claude Sonnet 4')).toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          'Could not resolve this model from the provider. Check the slug.',
+        ),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not show suggestions before a character is entered', () => {
     settingsData.current = buildSettingsData();
     providerSetupData.current = buildProviderSetupData({
       connectedProviderIds: ['anthropic'],
@@ -631,7 +754,7 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     fireEvent.change(screen.getByLabelText('New model slug'), {
-      target: { value: 'c' },
+      target: { value: '' },
     });
 
     expect(screen.queryByText('Suggestions')).not.toBeInTheDocument();
@@ -738,9 +861,15 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
     expect(
-      screen.getByRole('heading', { name: 'Apply Anthropic preset' }),
+      screen.getByRole('heading', {
+        name: 'Apply Anthropic Recommended preset',
+      }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
@@ -794,7 +923,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'OpenRouter' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'OpenRouter: Recommended (default)',
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
@@ -809,6 +942,134 @@ describe('ModelSettingsSection', () => {
         codeReviewModelId: null,
         exploreModelId: null,
         planningModelId: null,
+      }),
+    );
+  });
+
+  it('applies a named preset with models outside the suggested catalog and preserves env-managed reasoning', async () => {
+    settingsData.current = buildSettingsData({
+      helperReasoningManagedByEnv: true,
+      helperReasoningEffort: 'high',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'steady',
+            label: 'Steady',
+            default: true,
+            roles: {
+              coding: { modelId: 'anthropic/default-model' },
+            },
+          },
+          {
+            id: 'careful-review',
+            label: 'Careful review',
+            roles: {
+              coding: {
+                modelId: 'anthropic/claude-sonnet-5',
+                displayName: 'Claude Sonnet 5',
+                family: 'Claude',
+                reasoningEffort: 'high',
+              },
+              helper: {
+                modelId: 'anthropic/claude-haiku-4-5',
+                reasoningEffort: 'low',
+              },
+              codeReview: {
+                modelId: 'anthropic/claude-opus-4-8',
+                displayName: 'Claude Opus 4.8',
+                family: 'Claude',
+                reasoningEffort: 'xhigh',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Anthropic: Careful review' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'anthropic/claude-sonnet-5',
+        codeReviewModelId: 'anthropic/claude-opus-4-8',
+        codingModelReasoningEffort: 'high',
+        helperModelReasoningEffort: 'high',
+        codeReviewModelReasoningEffort: 'xhigh',
+      }),
+    );
+    const payload = updateMutateAsyncMock.mock.calls[0]![0] as {
+      models: Array<{ id: string; displayName: string; family?: string }>;
+      allowedModelIds: string[];
+    };
+    expect(payload.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'anthropic/claude-opus-4-8',
+          displayName: 'Claude Opus 4.8',
+          family: 'Claude',
+        }),
+      ]),
+    );
+    expect(payload.allowedModelIds).toContain('anthropic/claude-opus-4-8');
+  });
+
+  it('applies preset reasoning when only the role model is env-managed', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'reasoned',
+            label: 'Reasoned',
+            default: true,
+            roles: {
+              coding: { modelId: 'anthropic/default-model' },
+              helper: {
+                modelId: 'anthropic/claude-haiku-4-5',
+                reasoningEffort: 'low',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Reasoned (default)',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        helperModelId: null,
+        helperModelReasoningEffort: 'low',
       }),
     );
   });
@@ -838,7 +1099,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
 
     const dialog = screen.getByRole('dialog');
     expect(
@@ -855,6 +1120,95 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('previews inherited roles with the effective env-managed coding model', async () => {
+    settingsData.current = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(6);
+  });
+
+  it('previews inherited roles with the selected coding preset when it is not env-managed', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('default-model')).toHaveLength(6);
+  });
+
+  it('matches preset display metadata to the resolved preview model', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/acme/env-model',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'named-models',
+            label: 'Named models',
+            default: true,
+            roles: {
+              coding: {
+                modelId: 'anthropic/claude-sonnet-6',
+                displayName: 'Claude Sonnet 6',
+              },
+              helper: {
+                modelId: 'anthropic/claude-haiku-6',
+                displayName: 'Claude Haiku 6',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Named models (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(5);
+    expect(within(dialog).getByText('env-model')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText('Claude Haiku 6'),
+    ).not.toBeInTheDocument();
   });
 
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
@@ -884,7 +1238,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
@@ -1006,6 +1364,72 @@ describe('ModelSettingsSection', () => {
     expect(
       within(availableSection).queryByText('OpenAI'),
     ).not.toBeInTheDocument();
+  });
+
+  it('keeps openai/ models under OpenAI when both OpenAI and ChatGPT are connected', () => {
+    settingsData.current = {
+      ...buildSettingsData(),
+      models: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+          metadata: {
+            contextWindow: 1_000_000,
+            inputPricePerToken: 0.00001,
+            outputPricePerToken: 0.00003,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: true,
+        },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Claude',
+          metadata: {
+            contextWindow: 200_000,
+            inputPricePerToken: 0.000003,
+            outputPricePerToken: 0.000015,
+            inputTypes: ['text'],
+            lastRefreshedAt: null,
+          },
+          enabled: true,
+          isDefault: false,
+        },
+      ],
+      defaultModelId: 'openai/gpt-5.6-terra',
+      runtimeModels: {
+        ...buildSettingsData().runtimeModels,
+        codingModel: {
+          ...buildSettingsData().runtimeModels.codingModel,
+          effectiveModelId: 'openai/gpt-5.6-terra',
+          persistedModelId: 'openai/gpt-5.6-terra',
+        },
+      },
+      helperModelOptions: [
+        {
+          id: 'openai/gpt-5.6-terra',
+          displayName: 'GPT 5.6 Terra',
+          family: 'GPT',
+        },
+      ],
+    };
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['openai', 'chatgpt'],
+    });
+
+    renderModelSettingsSection();
+
+    const availableSection = screen.getByTestId('section-Available Models');
+    // Connected OpenAI keeps the native provider heading even though ChatGPT
+    // is also connected (and still selectable when adding a model).
+    expect(
+      within(availableSection).getByText('OpenAI', { selector: 'p' }),
+    ).toBeInTheDocument();
+    expect(availableSection).toHaveTextContent('GPT 5.6 Terra');
+    expect(availableSection).toHaveTextContent('Anthropic');
   });
 
   it('hides the add-model flow when no provider is connected', () => {

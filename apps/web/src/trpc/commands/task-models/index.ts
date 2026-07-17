@@ -24,6 +24,7 @@ import {
   getTaskModelProviderId,
   getEnabledTaskModels,
   isConfiguredEnvValue,
+  isTaskModelIdDisabled,
   normalizeOptionalReasoningEffort,
   normalizeSetupNewState,
   normalizeTaskModelId,
@@ -703,16 +704,30 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
-  const [settings, chatgptConnected] = await Promise.all([
+  const [settings, chatgptConnected, persistedEnvVarNames] = await Promise.all([
     getDeploymentTaskModelSettings(),
     isChatGptSubscriptionConnected(),
+    getPersistedEnvironmentVariableNames(),
   ]);
+  const providerSetup = buildSetupModelStatus({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected,
+  });
+  const openaiConnected = Boolean(
+    providerSetup.providers.find(
+      (provider) =>
+        provider.id === 'openai' &&
+        (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+    ),
+  );
   const enabledModels = getEnabledTaskModels(settings);
   const defaultModel = getDefaultTaskModel(settings);
 
   return {
     defaultModelId: defaultModel.id,
     chatgptConnected,
+    openaiConnected,
     models: enabledModels.map((option) => ({
       ...option,
       isDefault: option.id === defaultModel.id,
@@ -1122,6 +1137,11 @@ export async function lookupTaskModelCommand(
   assertAdmin(auth);
 
   const modelId = normalizeTaskModelId(input.modelId);
+
+  if (isTaskModelIdDisabled(modelId)) {
+    throw new Error('This direct model provider is currently disabled.');
+  }
+
   const existingCatalogModel =
     TASK_MODEL_CATALOG.find((option) => option.id === modelId) ?? null;
 
@@ -1242,7 +1262,7 @@ export async function suggestTaskModelsCommand(
   const provider = getSetupModelProvider(input.providerId);
   const query = input.query.trim();
 
-  if (query.length < 2) {
+  if (query.length < 1) {
     return { suggestions: [] };
   }
 
@@ -1311,6 +1331,7 @@ export async function refreshTaskModelMetadataCommand(
 
   const catalog = await fetchModelsDevCatalog(
     AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+    { forceRefresh: true },
   );
   if (!catalog) {
     return {

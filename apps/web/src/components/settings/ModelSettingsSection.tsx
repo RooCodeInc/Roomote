@@ -58,6 +58,7 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   REASONING_EFFORT_OPTIONS,
   buildRecommendedDeploymentModelConfig,
+  getRecommendedModelPresets,
   groupModelsByDisplayProvider,
   getSetupModelProvider,
   normalizeOptionalReasoningEffort,
@@ -67,6 +68,7 @@ import type {
   ReasoningEffort,
   SetupModelProviderId,
   SetupModelProviderStatus,
+  RecommendedModelPreset,
   TaskModelMetadata,
   TaskModelRole,
 } from '@roomote/types';
@@ -401,7 +403,10 @@ function UseRecommendedDefaultsAction({
   onSelect,
 }: {
   providers: SetupModelProviderStatus[];
-  onSelect: (provider: SetupModelProviderStatus) => void;
+  onSelect: (
+    provider: SetupModelProviderStatus,
+    preset: RecommendedModelPreset,
+  ) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -420,20 +425,24 @@ function UseRecommendedDefaultsAction({
       <PopoverContent align="end" className="w-64 p-0">
         <Command>
           <CommandList>
-            <CommandGroup>
-              {providers.map((provider) => (
-                <CommandItem
-                  key={provider.id}
-                  value={provider.label}
-                  onSelect={() => {
-                    setOpen(false);
-                    onSelect(provider);
-                  }}
-                >
-                  {provider.label}
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            {providers.map((provider) => (
+              <CommandGroup key={provider.id} heading={provider.label}>
+                {getRecommendedModelPresets(provider).map((preset) => (
+                  <CommandItem
+                    key={preset.id}
+                    value={`${provider.label} ${preset.label}`}
+                    aria-label={`${provider.label}: ${preset.label}${preset.default ? ' (default)' : ''}`}
+                    onSelect={() => {
+                      setOpen(false);
+                      onSelect(provider, preset);
+                    }}
+                  >
+                    {preset.label}
+                    {preset.default && ' (default)'}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -479,8 +488,12 @@ function getNewModelPlaceholder(provider: SetupModelProviderId): string {
 
 function getRecommendedRoleModelIds(
   provider: SetupModelProviderStatus,
+  preset: RecommendedModelPreset,
 ): Record<TaskModelRole, string | null> {
-  const recommended = buildRecommendedDeploymentModelConfig(provider);
+  const recommended = buildRecommendedDeploymentModelConfig(
+    provider,
+    preset.id,
+  );
 
   return {
     coding: recommended.roomoteModel,
@@ -489,6 +502,25 @@ function getRecommendedRoleModelIds(
     codeReview: recommended.roomoteCodeReviewModel,
     explore: recommended.roomoteExploreModel,
     planning: recommended.roomotePlanningModel,
+  };
+}
+
+function getRecommendedRoleReasoningEfforts(
+  provider: SetupModelProviderStatus,
+  preset: RecommendedModelPreset,
+): Record<TaskModelRole, ReasoningEffort | null> {
+  const recommended = buildRecommendedDeploymentModelConfig(
+    provider,
+    preset.id,
+  );
+
+  return {
+    coding: recommended.roomoteModelReasoningEffort,
+    helper: recommended.roomoteSmallModelReasoningEffort,
+    vision: recommended.roomoteVisionModelReasoningEffort,
+    codeReview: recommended.roomoteCodeReviewModelReasoningEffort,
+    explore: recommended.roomoteExploreModelReasoningEffort,
+    planning: recommended.roomotePlanningModelReasoningEffort,
   };
 }
 
@@ -749,6 +781,7 @@ export function ModelSettingsSection({
   );
   const lookupRequestRef = useRef(0);
   const suggestionRequestRef = useRef(0);
+  const suggestionProviderRef = useRef<SetupModelProviderId | null>(null);
   const selectedSuggestionSlugRef = useRef<string | null>(null);
   const lookupMutateAsyncRef = useRef(lookupMutation.mutateAsync);
   const saveTimeoutRef = useRef<number | null>(null);
@@ -772,8 +805,10 @@ export function ModelSettingsSection({
   const [deleteConfirmModelId, setDeleteConfirmModelId] = useState<
     string | null
   >(null);
-  const [selectedPresetProvider, setSelectedPresetProvider] =
-    useState<SetupModelProviderStatus | null>(null);
+  const [selectedPreset, setSelectedPreset] = useState<{
+    provider: SetupModelProviderStatus;
+    preset: RecommendedModelPreset;
+  } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingLookup, setPendingLookup] =
     useState<PendingLookupState>(IDLE_PENDING_LOOKUP);
@@ -793,6 +828,11 @@ export function ModelSettingsSection({
       provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
       provider.savedApiKeySatisfied,
   );
+  const openaiConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === 'openai' &&
+      (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+  );
   const activeNewModelProvider = useMemo(
     () =>
       sortedConnectedProviders.find(
@@ -803,9 +843,9 @@ export function ModelSettingsSection({
     [sortedConnectedProviders, newModelProvider],
   );
   const normalizedNewModelId = newModelId.trim();
-  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 500);
+  const debouncedSuggestionQuery = useDebouncedValue(normalizedNewModelId, 150);
   const shouldShowSuggestions =
-    suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 2;
+    suggestionState.suggestions.length > 0 && normalizedNewModelId.length >= 1;
   const suggestionsQuery = useQuery(
     trpc.taskModels.suggest.queryOptions(
       {
@@ -815,7 +855,7 @@ export function ModelSettingsSection({
       {
         enabled:
           activeNewModelProvider !== null &&
-          debouncedSuggestionQuery.length >= 2,
+          debouncedSuggestionQuery.length >= 1,
       },
     ),
   );
@@ -836,9 +876,32 @@ export function ModelSettingsSection({
   }, [lookupMutation.mutateAsync]);
 
   useEffect(() => {
-    if (!activeNewModelProvider || debouncedSuggestionQuery.length < 2) {
+    const providerId = activeNewModelProvider?.id ?? null;
+
+    if (
+      suggestionProviderRef.current !== null &&
+      suggestionProviderRef.current !== providerId
+    ) {
+      setSuggestionState(EMPTY_SUGGESTION_STATE);
+    }
+
+    suggestionProviderRef.current = providerId;
+  }, [activeNewModelProvider]);
+
+  useEffect(() => {
+    if (!activeNewModelProvider || debouncedSuggestionQuery.length < 1) {
       suggestionRequestRef.current += 1;
       setSuggestionState(EMPTY_SUGGESTION_STATE);
+      return;
+    }
+
+    if (suggestionsQuery.isError) {
+      suggestionRequestRef.current += 1;
+      setSuggestionState(EMPTY_SUGGESTION_STATE);
+      return;
+    }
+
+    if (!suggestionsQuery.data) {
       return;
     }
 
@@ -875,7 +938,8 @@ export function ModelSettingsSection({
   }, [
     activeNewModelProvider,
     debouncedSuggestionQuery,
-    suggestionsQuery.data?.suggestions,
+    suggestionsQuery.data,
+    suggestionsQuery.isError,
   ]);
 
   useEffect(() => {
@@ -1042,17 +1106,27 @@ export function ModelSettingsSection({
   }, [settingsData]);
   const codingModelGroups = useMemo(
     () =>
-      groupModelsByDisplayProvider(codingModelOptions, { chatgptConnected }),
-    [codingModelOptions, chatgptConnected],
+      groupModelsByDisplayProvider(codingModelOptions, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [codingModelOptions, chatgptConnected, openaiConnected],
   );
   const helperModelGroups = useMemo(
     () =>
-      groupModelsByDisplayProvider(helperModelOptions, { chatgptConnected }),
-    [helperModelOptions, chatgptConnected],
+      groupModelsByDisplayProvider(helperModelOptions, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [helperModelOptions, chatgptConnected, openaiConnected],
   );
   const modelGroups = useMemo(
-    () => groupModelsByDisplayProvider(models, { chatgptConnected }),
-    [models, chatgptConnected],
+    () =>
+      groupModelsByDisplayProvider(models, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [models, chatgptConnected, openaiConnected],
   );
   const roleOptionGroups: Record<
     TaskModelRole,
@@ -1501,8 +1575,18 @@ export function ModelSettingsSection({
   // A mapping preset resets the default-model
   // roles to the provider's recommended defaults (adding and enabling any
   // recommended models that are missing) through the normal draft/save flow.
-  const applyRecommendedDefaults = (provider: SetupModelProviderStatus) => {
-    const recommendedRoleModelIds = getRecommendedRoleModelIds(provider);
+  const applyRecommendedDefaults = (
+    provider: SetupModelProviderStatus,
+    preset: RecommendedModelPreset,
+  ) => {
+    const recommendedRoleModelIds = getRecommendedRoleModelIds(
+      provider,
+      preset,
+    );
+    const recommendedRoleReasoningEfforts = getRecommendedRoleReasoningEfforts(
+      provider,
+      preset,
+    );
     const suggestionsById = new Map(
       provider.suggestedTaskModels.map((suggestion) => [
         suggestion.id,
@@ -1512,18 +1596,24 @@ export function ModelSettingsSection({
     const nextModels = [...models];
     const nextEnabledModelIds = [...enabledModelIds];
 
-    for (const modelId of Object.values(recommendedRoleModelIds)) {
+    for (const [role, modelId] of Object.entries(
+      recommendedRoleModelIds,
+    ) as Array<[TaskModelRole, string | null]>) {
       if (!modelId) {
         continue;
       }
 
       if (!nextModels.some((model) => model.id === modelId)) {
+        const presetModel = preset.roles[role];
         const suggestion = suggestionsById.get(modelId);
         nextModels.push({
           id: modelId,
           displayName:
-            suggestion?.displayName || (modelId.split('/').at(-1) ?? modelId),
-          family: suggestion?.family,
+            presetModel?.displayName ??
+            suggestion?.displayName ??
+            modelId.split('/').at(-1) ??
+            modelId,
+          family: presetModel?.family ?? suggestion?.family,
           metadata: null,
         });
       }
@@ -1539,20 +1629,15 @@ export function ModelSettingsSection({
       const status =
         settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
 
-      // Env-managed selections are not editable from the UI, so the macro
-      // leaves them untouched.
-      if (status?.managedByEnv) {
-        continue;
-      }
-
       nextRoles[role] = {
-        modelId:
-          role === 'coding'
+        modelId: status?.managedByEnv
+          ? roleDrafts[role].modelId
+          : role === 'coding'
             ? (recommendedRoleModelIds.coding ?? roleDrafts.coding.modelId)
             : recommendedRoleModelIds[role],
         reasoningEffort: status?.reasoningManagedByEnv
           ? roleDrafts[role].reasoningEffort
-          : null,
+          : recommendedRoleReasoningEfforts[role],
       };
     }
 
@@ -1565,13 +1650,14 @@ export function ModelSettingsSection({
       },
       0,
     );
-    toast.success(`Applied the ${provider.label} mapping preset.`);
+    toast.success(`Applied the ${provider.label} ${preset.label} preset.`);
   };
 
-  const selectedPresetMappings = selectedPresetProvider
+  const selectedPresetMappings = selectedPreset
     ? (() => {
         const recommendedRoleModelIds = getRecommendedRoleModelIds(
-          selectedPresetProvider,
+          selectedPreset.provider,
+          selectedPreset.preset,
         );
 
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
@@ -1580,13 +1666,20 @@ export function ModelSettingsSection({
               TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
             ];
           const managedByEnv = status?.managedByEnv ?? false;
+          const codingModelId = settingsData?.runtimeModels.codingModel
+            .managedByEnv
+            ? settingsData.runtimeModels.codingModel.effectiveModelId
+            : recommendedRoleModelIds.coding;
           const modelId = managedByEnv
             ? status?.effectiveModelId
-            : (recommendedRoleModelIds[config.role] ??
-              recommendedRoleModelIds.coding);
+            : (recommendedRoleModelIds[config.role] ?? codingModelId);
+          const presetModel = Object.values(selectedPreset.preset.roles).find(
+            (roleModel) => roleModel?.modelId === modelId,
+          );
           const displayName = modelId
             ? (models.find((model) => model.id === modelId)?.displayName ??
-              selectedPresetProvider.suggestedTaskModels.find(
+              presetModel?.displayName ??
+              selectedPreset.provider.suggestedTaskModels.find(
                 (model) => model.id === modelId,
               )?.displayName ??
               modelId.split('/').at(-1) ??
@@ -1643,7 +1736,9 @@ export function ModelSettingsSection({
         action={
           <UseRecommendedDefaultsAction
             providers={sortedConnectedProviders}
-            onSelect={setSelectedPresetProvider}
+            onSelect={(provider, preset) =>
+              setSelectedPreset({ provider, preset })
+            }
           />
         }
       >
@@ -1683,17 +1778,18 @@ export function ModelSettingsSection({
       </Section>
 
       <Dialog
-        open={selectedPresetProvider !== null}
+        open={selectedPreset !== null}
         onOpenChange={(open) => {
           if (!open) {
-            setSelectedPresetProvider(null);
+            setSelectedPreset(null);
           }
         }}
       >
         <DialogContent size="md">
           <DialogHeader>
             <DialogTitle>
-              Apply {selectedPresetProvider?.label} preset
+              Apply {selectedPreset?.provider.label}{' '}
+              {selectedPreset?.preset.label} preset
             </DialogTitle>
             <DialogDescription>Set this model mapping</DialogDescription>
           </DialogHeader>
@@ -1728,17 +1824,17 @@ export function ModelSettingsSection({
             )}
           </div>
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setSelectedPresetProvider(null)}
-            >
+            <Button variant="outline" onClick={() => setSelectedPreset(null)}>
               Cancel
             </Button>
             <Button
               onClick={() => {
-                if (selectedPresetProvider) {
-                  applyRecommendedDefaults(selectedPresetProvider);
-                  setSelectedPresetProvider(null);
+                if (selectedPreset) {
+                  applyRecommendedDefaults(
+                    selectedPreset.provider,
+                    selectedPreset.preset,
+                  );
+                  setSelectedPreset(null);
                 }
               }}
             >
@@ -1944,11 +2040,13 @@ export function ModelSettingsSection({
                     </div>
                   )}
                 </div>
-                {pendingLookup.message && pendingLookup.status === 'error' && (
-                  <p className="text-xs text-destructive">
-                    {pendingLookup.message}
-                  </p>
-                )}
+                {pendingLookup.message &&
+                  pendingLookup.status === 'error' &&
+                  !shouldShowSuggestions && (
+                    <p className="text-xs text-destructive">
+                      {pendingLookup.message}
+                    </p>
+                  )}
               </>
             ) : (
               <p className="text-sm text-muted-foreground">

@@ -12,9 +12,10 @@ const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
  * instead of the `openrouter/` shorthand: direct labs plus non-OpenRouter
  * gateways such as Vercel AI Gateway. Bare `provider/model` slugs with one of
  * these prefixes are kept as-is instead of being rewritten to OpenRouter.
- * `SETUP_MODEL_PROVIDER_IDS` derives from this list plus `openrouter`.
+ * Setup providers derive from the enabled subset plus `openrouter`; disabled
+ * prefixes remain in the combined list only for persisted-id compatibility.
  */
-export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
+export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'vercel',
   'requesty',
   'baseten',
@@ -25,15 +26,33 @@ export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'minimax',
   'opencode',
   'amazon-bedrock',
-  'google-vertex',
   'google',
   'xai',
+] as const;
+
+/**
+ * Provider prefixes retained only so persisted model ids keep their original
+ * shape while support is disabled. They are excluded from setup, model
+ * availability, and runtime selection.
+ */
+export const DISABLED_TASK_MODEL_PROVIDER_IDS = [
+  'google-vertex',
+  'mistral',
+] as const;
+
+export const DIRECT_TASK_MODEL_PROVIDER_IDS = [
+  ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ...DISABLED_TASK_MODEL_PROVIDER_IDS,
 ] as const;
 
 const DIRECT_TASK_MODEL_PROVIDER_ID_SET = new Set<string>([
   ...DIRECT_TASK_MODEL_PROVIDER_IDS,
   'bedrock-mantle',
 ]);
+
+const DISABLED_TASK_MODEL_PROVIDER_ID_SET = new Set<string>(
+  DISABLED_TASK_MODEL_PROVIDER_IDS,
+);
 
 /**
  * Gateway providers route models from many labs under a single provider
@@ -180,6 +199,15 @@ export function getTaskModelProviderId(modelId: string): string | null {
   return providerId || null;
 }
 
+/** True when a model belongs to a provider Roomote currently refuses to run. */
+export function isTaskModelIdDisabled(modelId: string): boolean {
+  const providerId = getTaskModelProviderId(modelId);
+
+  return providerId
+    ? DISABLED_TASK_MODEL_PROVIDER_ID_SET.has(providerId)
+    : false;
+}
+
 export function normalizeTaskModelId(modelId: string): string {
   const trimmedModelId = modelId.trim();
 
@@ -236,10 +264,19 @@ function normalizeTaskModelCatalog(
 
   for (const model of sourceModels) {
     const normalizedModel = buildTaskModelOption(model);
+
+    if (isTaskModelIdDisabled(normalizedModel.id)) {
+      continue;
+    }
+
     byId.set(normalizedModel.id, normalizedModel);
   }
 
-  return sortTaskModelOptionsById([...byId.values()]);
+  const normalizedModels = sortTaskModelOptionsById([...byId.values()]);
+
+  return normalizedModels.length > 0
+    ? normalizedModels
+    : sortTaskModelOptionsById([...TASK_MODEL_CATALOG]);
 }
 
 export function getTaskModelCatalog(

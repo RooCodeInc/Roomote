@@ -3,14 +3,15 @@ import {
   buildSetupModelStatus,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
+  DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
   DEFAULT_TASK_MODEL_ID,
   getDisplayModelProviderId,
   groupModelsByDisplayProvider,
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
+  getRecommendedModelPresets,
   getSetupModelProvider,
-  isInlineGoogleCredentialsValue,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
@@ -193,6 +194,22 @@ describe('normalizeDeploymentModelConfig', () => {
       roomotePlanningModelReasoningEffort: null,
     });
   });
+
+  it('clears model roles that still reference disabled providers', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'google-vertex/claude-sonnet-5@default',
+        roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
+        roomoteVisionModel: 'google/gemini-3.5-flash',
+        roomoteCodeReviewModel: 'mistral/mistral-large-latest',
+      }),
+    ).toMatchObject({
+      roomoteModel: null,
+      roomoteSmallModel: null,
+      roomoteVisionModel: 'google/gemini-3.5-flash',
+      roomoteCodeReviewModel: null,
+    });
+  });
 });
 
 describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
@@ -210,7 +227,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'minimax',
         'opencode',
         'amazon-bedrock',
-        'google-vertex',
         'google',
         'xai',
         'chatgpt',
@@ -241,24 +257,51 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     }
   });
 
-  it('only recommends role models from the provider suggested catalog', () => {
+  it('keeps preset models under the provider prefix and supplies metadata outside the suggested catalog', () => {
     const providers: readonly SetupModelProviderDescriptor[] =
       SETUP_MODEL_PROVIDER_CATALOG;
 
     for (const provider of providers) {
+      const expectedPrefix =
+        provider.id === 'chatgpt'
+          ? 'openai/'
+          : provider.id === 'amazon-bedrock'
+            ? 'bedrock-mantle/'
+            : `${provider.id}/`;
       const suggestedModelIds = new Set(
         provider.suggestedTaskModels.map((suggestion) => suggestion.id),
       );
 
-      for (const [role, modelId] of Object.entries(
-        provider.recommendedRoleModels ?? {},
-      )) {
-        expect(
-          modelId !== undefined && suggestedModelIds.has(modelId),
-          `${provider.id} recommends ${modelId} for ${role}, which is not in its suggestedTaskModels`,
-        ).toBe(true);
+      for (const preset of getRecommendedModelPresets(provider)) {
+        for (const role of Object.values(preset.roles)) {
+          expect(role.modelId.startsWith(expectedPrefix)).toBe(true);
+          if (!suggestedModelIds.has(role.modelId)) {
+            expect(
+              role.displayName?.length ||
+                role.modelId.split('/').at(-1)?.length,
+            ).toBeGreaterThan(0);
+          }
+        }
       }
     }
+  });
+
+  it('recommends Kimi K3 only from supported providers', () => {
+    const kimiK3ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Kimi K3',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(kimiK3ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
+      { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
+      { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
+    ]);
   });
 
   it('maps Amazon Bedrock to a Bedrock API key plus an optional AWS region', () => {
@@ -285,33 +328,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         required: false,
         placeholder: 'us-east-1',
       },
-    ]);
-  });
-
-  it('maps Google Vertex AI to service-account credentials plus project and location', () => {
-    const vertexProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
-      (provider) => provider.id === 'google-vertex',
-    );
-
-    expect(vertexProvider).toMatchObject({
-      label: 'Google Vertex AI',
-      envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
-      envVarLabel: 'Service account JSON',
-      defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
-      credentialHelp: {
-        text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
-        href: 'https://console.cloud.google.com/vertex-ai/model-garden',
-        linkLabel: 'Open Vertex AI Model Garden',
-      },
-    });
-    expect(
-      vertexProvider?.additionalEnvFields?.map((field) => ({
-        envVarName: field.envVarName,
-        required: field.required,
-      })),
-    ).toEqual([
-      { envVarName: 'GOOGLE_VERTEX_PROJECT', required: true },
-      { envVarName: 'GOOGLE_VERTEX_LOCATION', required: false },
     ]);
   });
 
@@ -353,7 +369,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
 
-  it('groups openai/ models under ChatGPT when a subscription is connected', () => {
+  it('groups openai/ models under ChatGPT when only a subscription is connected', () => {
     expect(
       getDisplayModelProviderId('openai/gpt-5.6-terra', {
         chatgptConnected: true,
@@ -369,12 +385,21 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         chatgptConnected: true,
       }),
     ).toBe('anthropic');
-    // Subscription auth wins when both an OpenAI key and ChatGPT are present.
+    // Subscription-only callers (omit openaiConnected) still group under ChatGPT.
     expect(
       getDisplayModelProviderId('openai/gpt-5.6-terra', {
         chatgptConnected: true,
       }),
     ).toBe('chatgpt');
+  });
+
+  it('keeps openai/ models under OpenAI when an API key is also connected', () => {
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+        openaiConnected: true,
+      }),
+    ).toBe('openai');
   });
 
   it('groups model chooser options by display provider and catalog order', () => {
@@ -495,6 +520,98 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteModel: 'xai/grok-4.5',
     });
   });
+
+  it('recommends Kimi K3 for Moonshot vision, code review, and planning', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('moonshotai'),
+      ),
+    ).toEqual({
+      roomoteModel: 'moonshotai/kimi-k2.7-code',
+      roomoteSmallModel: null,
+      roomoteVisionModel: 'moonshotai/kimi-k3',
+      roomoteCodeReviewModel: 'moonshotai/kimi-k3',
+      roomoteExploreModel: null,
+      roomotePlanningModel: 'moonshotai/kimi-k3',
+      roomoteModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
+  it('synthesizes a default preset from the legacy role mapping', () => {
+    const presets = getRecommendedModelPresets({
+      defaultRoomoteModel: 'example/coding',
+      recommendedRoleModels: { helper: 'example/helper' },
+    });
+
+    expect(presets).toEqual([
+      {
+        id: 'default',
+        label: 'Recommended',
+        default: true,
+        roles: {
+          coding: { modelId: 'example/coding' },
+          helper: { modelId: 'example/helper' },
+        },
+      },
+    ]);
+  });
+
+  it('resolves arbitrary preset ids and labels with role reasoning efforts', () => {
+    const provider = {
+      defaultRoomoteModel: 'example/default',
+      recommendedPresets: [
+        {
+          id: 'ship-it',
+          label: 'Ship it',
+          default: true,
+          roles: {
+            coding: {
+              modelId: 'example/coding',
+              reasoningEffort: 'high' as const,
+            },
+            helper: {
+              modelId: 'example/helper',
+              reasoningEffort: 'low' as const,
+            },
+          },
+        },
+        {
+          id: 'careful-review',
+          label: 'Careful review',
+          roles: {
+            coding: {
+              modelId: 'example/review',
+              reasoningEffort: 'xhigh' as const,
+            },
+            codeReview: {
+              modelId: 'example/reviewer',
+              reasoningEffort: 'xhigh' as const,
+            },
+          },
+        },
+      ],
+    };
+
+    expect(buildRecommendedDeploymentModelConfig(provider)).toMatchObject({
+      roomoteModel: 'example/coding',
+      roomoteSmallModel: 'example/helper',
+      roomoteModelReasoningEffort: 'high',
+      roomoteSmallModelReasoningEffort: 'low',
+    });
+    expect(
+      buildRecommendedDeploymentModelConfig(provider, 'careful-review'),
+    ).toMatchObject({
+      roomoteModel: 'example/review',
+      roomoteCodeReviewModel: 'example/reviewer',
+      roomoteModelReasoningEffort: 'xhigh',
+      roomoteCodeReviewModelReasoningEffort: 'xhigh',
+    });
+  });
 });
 
 describe('getModelProviderEnvKeyCandidates', () => {
@@ -539,7 +656,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['OPENROUTER_API_KEY', 'CUSTOM_PROVIDER_API_KEY']);
   });
 
-  it('includes every declared env var for multi-credential providers', () => {
+  it('includes every declared env var for enabled multi-credential providers', () => {
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'amazon-bedrock' }),
     ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
@@ -548,11 +665,10 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'google-vertex' }),
-    ).toEqual([
-      'GOOGLE_APPLICATION_CREDENTIALS',
-      'GOOGLE_VERTEX_PROJECT',
-      'GOOGLE_VERTEX_LOCATION',
-    ]);
+    ).toEqual([]);
+    expect(getModelProviderEnvKeyCandidates({ providerId: 'mistral' })).toEqual(
+      [],
+    );
   });
 
   it('merges catalog and extra env keys for the google provider', () => {
@@ -574,11 +690,16 @@ describe('getModelProviderEnvKeyCandidates', () => {
       'AWS_BEARER_TOKEN_BEDROCK',
     );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AWS_REGION');
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'GOOGLE_APPLICATION_CREDENTIALS',
     );
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GOOGLE_VERTEX_PROJECT');
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GOOGLE_VERTEX_LOCATION');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
+      'GOOGLE_VERTEX_PROJECT',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
+      'GOOGLE_VERTEX_LOCATION',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('MISTRAL_API_KEY');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;
@@ -586,6 +707,18 @@ describe('getModelProviderEnvKeyCandidates', () => {
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain('AWS_ACCESS_KEY_ID');
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'AWS_SECRET_ACCESS_KEY',
+    );
+  });
+
+  it('distinguishes provider credentials from non-secret configuration', () => {
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'AWS_BEARER_TOKEN_BEDROCK',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'ANTHROPIC_API_KEY',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'AWS_REGION',
     );
   });
 });
@@ -832,35 +965,6 @@ describe('buildSetupModelStatus', () => {
 });
 
 describe('buildSetupModelStatus multi-credential providers', () => {
-  it('requires every required Vertex env var before the provider is satisfied', () => {
-    const missingProject = buildSetupModelStatus({
-      persistedEnvVarNames: ['GOOGLE_APPLICATION_CREDENTIALS'],
-    });
-
-    expect(
-      missingProject.providers.find(
-        (provider) => provider.id === 'google-vertex',
-      ),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: false,
-    });
-
-    const complete = buildSetupModelStatus({
-      persistedEnvVarNames: [
-        'GOOGLE_APPLICATION_CREDENTIALS',
-        'GOOGLE_VERTEX_PROJECT',
-      ],
-    });
-
-    expect(
-      complete.providers.find((provider) => provider.id === 'google-vertex'),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: true,
-    });
-  });
-
   it('does not require optional additional env vars for satisfaction', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
@@ -896,22 +1000,6 @@ describe('buildSetupModelStatus multi-credential providers', () => {
     ).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
   });
 
-  it('treats mixed runtime and saved credentials as a saved connection', () => {
-    const status = buildSetupModelStatus({
-      runtimeEnv: {
-        GOOGLE_VERTEX_PROJECT: 'my-project',
-      },
-      persistedEnvVarNames: ['GOOGLE_APPLICATION_CREDENTIALS'],
-    });
-
-    expect(
-      status.providers.find((provider) => provider.id === 'google-vertex'),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: true,
-    });
-  });
-
   it('treats a persisted Bedrock Mantle model with saved credentials as satisfied', () => {
     const status = buildSetupModelStatus({
       persistedModelConfig: {
@@ -928,9 +1016,6 @@ describe('buildSetupModelStatus multi-credential providers', () => {
 describe('collectSetupModelProviderCredentialValues', () => {
   const bedrockProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
     (provider) => provider.id === 'amazon-bedrock',
-  )!;
-  const vertexProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
-    (provider) => provider.id === 'google-vertex',
   )!;
   const anthropicProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
     (provider) => provider.id === 'anthropic',
@@ -983,65 +1068,7 @@ describe('collectSetupModelProviderCredentialValues', () => {
     });
   });
 
-  it('requires a missing required field unless it is already satisfied', () => {
-    expect(() =>
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        isEnvVarSatisfied: () => false,
-        action: 'continue',
-      }),
-    ).toThrow('Enter the Project ID for Google Vertex AI to continue.');
-
-    expect(
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        isEnvVarSatisfied: (name) => name === 'GOOGLE_VERTEX_PROJECT',
-        action: 'continue',
-      }),
-    ).toEqual({
-      values: [
-        {
-          name: 'GOOGLE_APPLICATION_CREDENTIALS',
-          value: '{"type":"service_account"}',
-        },
-      ],
-      clearedEnvVarNames: [],
-    });
-  });
-
-  it('does not clear a blanked required field that is satisfied elsewhere', () => {
-    expect(
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        additionalEnvValues: { GOOGLE_VERTEX_PROJECT: '' },
-        isEnvVarSatisfied: (name) => name === 'GOOGLE_VERTEX_PROJECT',
-        action: 'continue',
-      }),
-    ).toEqual({
-      values: [
-        {
-          name: 'GOOGLE_APPLICATION_CREDENTIALS',
-          value: '{"type":"service_account"}',
-        },
-      ],
-      clearedEnvVarNames: [],
-    });
-  });
-
   it('uses the provider credential label when the primary value is missing', () => {
-    expect(() =>
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        isEnvVarSatisfied: () => false,
-        action: 'continue',
-      }),
-    ).toThrow(
-      'Enter the Service account JSON for Google Vertex AI to continue.',
-    );
-
     expect(() =>
       collectSetupModelProviderCredentialValues({
         provider: anthropicProvider,
@@ -1061,21 +1088,5 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Amazon Bedrock does not accept a DATABASE_URL value.');
-  });
-});
-
-describe('isInlineGoogleCredentialsValue', () => {
-  it('detects inline service-account JSON', () => {
-    expect(isInlineGoogleCredentialsValue(' {"type":"service_account"} ')).toBe(
-      true,
-    );
-  });
-
-  it('leaves file paths and empty values alone', () => {
-    expect(
-      isInlineGoogleCredentialsValue('/etc/roomote/service-account.json'),
-    ).toBe(false);
-    expect(isInlineGoogleCredentialsValue('')).toBe(false);
-    expect(isInlineGoogleCredentialsValue(undefined)).toBe(false);
   });
 });

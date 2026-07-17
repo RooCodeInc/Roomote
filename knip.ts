@@ -75,10 +75,9 @@ const config: KnipConfig = {
       project: ['src/**/*.ts'],
     },
     'packages/cloud-agents': {
-      entry: ['evals/router/**/*.ts', 'evals/authorship/**/*.ts'],
+      entry: ['evals/router/**/*.ts'],
       project: ['src/**/*.ts'],
       ignoreBinaries: [
-        'evals/authorship/promptfooconfig.ts',
         'evals/router/promptfooconfig.ts',
         'evals/router/promptfooconfig.followup.ts',
       ],

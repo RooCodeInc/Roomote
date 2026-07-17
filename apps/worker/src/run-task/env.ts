@@ -19,6 +19,12 @@ const BLOCKED_HARNESS_ENV_KEYS = new Set([
   'PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
 ]);
 const MODEL_RUNTIME_ENV_KEYS = [
+  // The gateway URL is built worker-side (run-task) from the container-
+  // reachable platform URL, not delivered by dequeue. The served-keys list is
+  // dequeue-delivered and read from the raw dequeue env in run-task; it is
+  // allowlisted here so it survives into the harness env for config rebasing.
+  'R_INFERENCE_GATEWAY_KEYS',
+  'R_INFERENCE_GATEWAY_CHATGPT',
   'R_MODEL',
   'R_SMALL_MODEL',
   'R_VISION_MODEL',

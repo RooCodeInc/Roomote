@@ -32,7 +32,10 @@ export async function GET(request: NextRequest) {
 
     // User-level profile linking (OIDC flow)
     if (decodedState.mode === 'link_account') {
-      const result = await caller.slack.finishAuthenticateAccount({ code });
+      const result = await caller.slack.finishAuthenticateAccount({
+        code,
+        state,
+      });
       const redirectUrl = new URL(redirectPath, callbackHost);
 
       if (result.success) {

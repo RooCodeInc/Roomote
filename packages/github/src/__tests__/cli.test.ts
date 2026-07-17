@@ -40,7 +40,6 @@ describe('github cli repository content helpers', () => {
       'gh',
       ['api', 'repos/owner/repo/contents/agents.md?ref=main'],
       expect.objectContaining({
-        shell: true,
         env: { GH_TOKEN: 'ghp_test' },
       }),
     );
@@ -113,7 +112,6 @@ describe('github cli repository content helpers', () => {
       'gh',
       ['api', 'repos/owner/repo/git/trees/main?recursive=1'],
       expect.objectContaining({
-        shell: true,
         env: { GH_TOKEN: 'ghp_test' },
       }),
     );
@@ -122,7 +120,6 @@ describe('github cli repository content helpers', () => {
       'gh',
       ['api', 'repos/owner/repo/contents/.roomote/rules?ref=main'],
       expect.objectContaining({
-        shell: true,
         env: { GH_TOKEN: 'ghp_test' },
       }),
     );
@@ -131,7 +128,6 @@ describe('github cli repository content helpers', () => {
       'gh',
       ['api', 'repos/owner/repo/contents/.roomote/rules/nested?ref=main'],
       expect.objectContaining({
-        shell: true,
         env: { GH_TOKEN: 'ghp_test' },
       }),
     );

@@ -8,7 +8,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens,
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
-  mockResolveEffectiveModelRuntimeEnv,
+  mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
 } = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens: vi.fn(),
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
-  mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
 }));
@@ -54,8 +54,8 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
-  resolveEffectiveModelRuntimeEnv: (...args: unknown[]) =>
-    mockResolveEffectiveModelRuntimeEnv(...args),
+  resolveSandboxModelRuntimeEnv: (...args: unknown[]) =>
+    mockResolveSandboxModelRuntimeEnv(...args),
   inArray: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveTaskAttribution: vi.fn(),
@@ -496,7 +496,7 @@ describe('redactSourceControlProviderEnvVars', () => {
 });
 
 describe('redactControlPlaneEnvVars', () => {
-  it('strips instance/control-plane secrets but keeps task env and model keys', () => {
+  it('strips control-plane and disabled-provider secrets but keeps enabled model keys', () => {
     expect(
       redactControlPlaneEnvVars({
         // Control-plane secrets that must never reach the sandbox.
@@ -520,6 +520,8 @@ describe('redactControlPlaneEnvVars', () => {
         R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).
         R_TEAMS_BOT_APP_PASSWORD: 'teams',
+        GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+        MISTRAL_API_KEY: 'mistral-key',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',
@@ -546,7 +548,7 @@ describe('redactControlPlaneEnvVars', () => {
 
 describe('fetchResolvedRuntimeEnvVars', () => {
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       R_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
@@ -568,8 +570,8 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     });
   });
 
-  it('does not overwrite an explicitly configured legacy name', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+  it('derives legacy aliases from the resolved model env', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
     });
 
@@ -577,7 +579,66 @@ describe('fetchResolvedRuntimeEnvVars', () => {
       ROOMOTE_MODEL: 'operator/explicit',
     });
 
-    expect(envVars.ROOMOTE_MODEL).toBe('operator/explicit');
+    expect(envVars.ROOMOTE_MODEL).toBe('anthropic/claude-test');
     expect(envVars.R_MODEL).toBe('anthropic/claude-test');
+  });
+
+  it('admits no raw provider keys when the gateway is enabled', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+      R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      ANTHROPIC_API_KEY: 'sk-ant',
+      OPENAI_API_KEY: 'sk-openai',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
+    expect(envVars.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+  });
+
+  it('admits only resolver-selected provider keys when the resolver returns raw keys', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'anthropic/claude-test',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      ANTHROPIC_API_KEY: 'sk-ant',
+      OPENAI_API_KEY: 'sk-openai',
+      AWS_BEARER_TOKEN_BEDROCK: 'bedrock-token',
+      AWS_REGION: 'us-west-2',
+      STRIPE_API_KEY: 'sk-stripe',
+    });
+
+    expect(envVars.ANTHROPIC_API_KEY).toBe('sk-ant');
+    expect(envVars).not.toHaveProperty('OPENAI_API_KEY');
+    expect(envVars).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+    expect(envVars.AWS_REGION).toBe('us-west-2');
+    expect(envVars.STRIPE_API_KEY).toBe('sk-stripe');
+    expect(envVars).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
+  });
+
+  it('treats custom R_MODEL_ENV_KEYS credentials as resolver-managed', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'custom/test-model',
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'selected-token',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN,STALE_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'stored-token',
+      STALE_LLM_TOKEN: 'stale-token',
+      MY_APP_CONFIG: 'value',
+    });
+
+    expect(envVars.CUSTOM_LLM_TOKEN).toBe('selected-token');
+    expect(envVars).not.toHaveProperty('STALE_LLM_TOKEN');
+    expect(envVars.MY_APP_CONFIG).toBe('value');
   });
 });

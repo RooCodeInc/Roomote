@@ -17,6 +17,7 @@ import {
 
 import { setup } from './setup';
 import { injectEnvVars } from './utils/env-vars';
+import { scrubSandboxSecretsBeforeSnapshot } from './utils/scrub-sandbox-secrets';
 import { findRuntimeEnvironmentConfig } from './utils/workspace-config';
 
 /**
@@ -107,6 +108,12 @@ export async function snapshot({
       id: runId,
       status: RunStatus.Running,
     });
+
+    // The provider snapshots the entire filesystem, so drop credential
+    // material (env.sh exports, git tokens, OpenCode auth files) now that
+    // setup is done. Task runs launched from the snapshot re-inject env vars
+    // and tokens at startup.
+    await scrubSandboxSecretsBeforeSnapshot();
 
     // Enqueue snapshot request via SDK.
     const { enqueued } = await sdk.taskRuns.createSnapshot({

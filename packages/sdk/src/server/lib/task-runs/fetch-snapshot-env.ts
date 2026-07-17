@@ -7,7 +7,7 @@ import {
 import { db, taskRuns, eq } from '@roomote/db/server';
 
 import {
-  fetchEnvVars,
+  fetchResolvedRuntimeEnvVars,
   createSourceControlTokenForTaskRun,
 } from './dequeue-helpers';
 
@@ -36,12 +36,14 @@ export async function fetchSnapshotEnv(
     throw new Error(`${tag} Task run not found: ${runId}`);
   }
 
-  const envVars = await db.transaction(async (tx) => {
-    return fetchEnvVars(tx, {
-      sourceControlProvider: resolveSourceControlProviderFromPayload(
-        taskRun.payload,
-      ),
-    });
+  // Resolve the snapshot env through the same gateway-aware path as task
+  // dequeue so gateway-covered provider keys are withheld here too; otherwise
+  // a snapshot taken with the flag on would bake raw provider keys into the
+  // snapshot's shell env and the persisted image.
+  const envVars = await fetchResolvedRuntimeEnvVars(undefined, {
+    sourceControlProvider: resolveSourceControlProviderFromPayload(
+      taskRun.payload,
+    ),
   });
 
   const sourceControlToken = await createSourceControlTokenForTaskRun(

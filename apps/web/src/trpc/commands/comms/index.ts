@@ -5,6 +5,7 @@ import {
   discordGatewaySessions,
   invalidateDiscordRuntimeCredentialsCache,
   normalizeDiscordBotToken,
+  resolveDiscordGatewaySecret,
   resolveDiscordRuntimeCredentials,
   validateDiscordBotToken,
   resolveTelegramRuntimeCredentials,
@@ -636,6 +637,18 @@ async function registerDiscordCommandsBestEffort(
 ): Promise<DiscordRegistrationResult> {
   invalidateDiscordRuntimeCredentialsCache();
   try {
+    // Heal upgrades that configured Discord before R_DISCORD_GATEWAY_SECRET
+    // existed so Repair/register can re-enable event forwarding without a
+    // full re-save of the bot token.
+    const gatewaySecret = await resolveDiscordGatewaySecret();
+    if (!gatewaySecret) {
+      return {
+        registered: false,
+        guildCount: 0,
+        error:
+          'Could not create or load R_DISCORD_GATEWAY_SECRET for Discord event delivery.',
+      };
+    }
     const { provider, credentials } = await requireDiscordProvider();
     await provider.registerCommands({
       applicationId: credentials.applicationId!,

@@ -22,6 +22,9 @@ export { trpc } from './trpc';
 export { mcp } from './mcp';
 export { mcpRouting } from './mcp/routing';
 
+// inference gateway
+export { inference } from './inference';
+
 // task runs
 export { taskRunsRouter } from './task-runs';
 

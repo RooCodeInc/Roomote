@@ -1,12 +1,47 @@
 import { Env } from '@roomote/env';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
+  isTaskModelIdDisabled,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
 import type { BuildWorkerEnvOptions } from './types';
 
-const BLOCKED_WORKER_ENV_KEYS = new Set(['JOB_AUTH_PRIVATE_KEY']);
+const BLOCKED_WORKER_ENV_KEYS = new Set([
+  'JOB_AUTH_PRIVATE_KEY',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'ENCRYPTION_KEY',
+  'BETTER_AUTH_SECRET',
+  'DASHBOARD_PASSWORD',
+  'SETUP_TOKEN',
+  'MODAL_TOKEN_SECRET',
+  ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+]);
+
+function isBlockedWorkerEnvKey(key: string): boolean {
+  if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+    return true;
+  }
+
+  // Denylist sensitive suffixes so a typo in R_MODEL_ENV_KEYS cannot ship
+  // deployment credentials into untrusted sandboxes.
+  return (
+    /_SECRET$/i.test(key) ||
+    /_PRIVATE_KEY$/i.test(key) ||
+    /PASSWORD$/i.test(key)
+  );
+}
+const MODEL_ROLE_ENV_VAR_NAMES = new Set<string>([
+  'R_MODEL',
+  'R_SMALL_MODEL',
+  'R_VISION_MODEL',
+  'R_CODE_REVIEW_MODEL',
+  'R_EXPLORE_MODEL',
+  'R_PLANNING_MODEL',
+]);
 
 function filterWorkerExtraEnv(
   extraEnv: Record<string, string> | undefined,
@@ -17,7 +52,9 @@ function filterWorkerExtraEnv(
 
   return Object.fromEntries(
     Object.entries(extraEnv).filter(
-      ([key]) => !BLOCKED_WORKER_ENV_KEYS.has(key),
+      ([key, value]) =>
+        !isBlockedWorkerEnvKey(key) &&
+        (!MODEL_ROLE_ENV_VAR_NAMES.has(key) || !isTaskModelIdDisabled(value)),
     ),
   );
 }
@@ -30,35 +67,13 @@ function getOperatorModelProviderEnvKeys(): string[] {
 
 function buildOperatorModelProviderEnv(): Record<string, string> {
   const env: Record<string, string> = {};
-  const model = process.env.R_MODEL?.trim();
-  const smallModel = process.env.R_SMALL_MODEL?.trim();
-  const visionModel = process.env.R_VISION_MODEL?.trim();
-  const codeReviewModel = process.env.R_CODE_REVIEW_MODEL?.trim();
-  const exploreModel = process.env.R_EXPLORE_MODEL?.trim();
-  const planningModel = process.env.R_PLANNING_MODEL?.trim();
 
-  if (model) {
-    env.R_MODEL = model;
-  }
+  for (const key of MODEL_ROLE_ENV_VAR_NAMES) {
+    const modelId = process.env[key]?.trim();
 
-  if (smallModel) {
-    env.R_SMALL_MODEL = smallModel;
-  }
-
-  if (visionModel) {
-    env.R_VISION_MODEL = visionModel;
-  }
-
-  if (codeReviewModel) {
-    env.R_CODE_REVIEW_MODEL = codeReviewModel;
-  }
-
-  if (exploreModel) {
-    env.R_EXPLORE_MODEL = exploreModel;
-  }
-
-  if (planningModel) {
-    env.R_PLANNING_MODEL = planningModel;
+    if (modelId && !isTaskModelIdDisabled(modelId)) {
+      env[key] = modelId;
+    }
   }
 
   for (const key of [
@@ -80,8 +95,20 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
     env.R_MODEL_ENV_KEYS = process.env.R_MODEL_ENV_KEYS;
   }
 
+  // Gateway-covered provider keys (OpenRouter, Anthropic, OpenAI, Gemini,
+  // the aggregators, Bedrock) stay off the worker daemon process env so they
+  // never appear in the sandbox's /proc; the per-task dequeue env routes the
+  // harness through the inference gateway instead. ChatGPT subscriptions use
+  // their dedicated run-token gateway route, while disabled-provider
+  // credentials such as Vertex are blocked from the worker env entirely.
+  const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
+
   for (const key of getOperatorModelProviderEnvKeys()) {
-    if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+    if (isBlockedWorkerEnvKey(key)) {
+      continue;
+    }
+
+    if (gatewayCoveredKeys.has(key)) {
       continue;
     }
 

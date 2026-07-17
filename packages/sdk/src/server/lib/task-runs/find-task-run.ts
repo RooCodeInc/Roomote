@@ -1,4 +1,5 @@
 import type { RunTokenContext } from '@roomote/types';
+import { isExitedRunStatus } from '@roomote/types';
 import { db, taskRuns, eq } from '@roomote/db/server';
 
 export const findTaskRun = async (id: number) =>
@@ -41,14 +42,22 @@ export const findTaskRunForAccess = async (id: number) =>
  * is mint-time attribution while actingUserId is current-steering attribution
  * — web steer and follow-up delivery mutate the acting user mid-run, so the
  * two legitimately diverge and must not be compared for authorization.
+ *
+ * Terminal runs refuse the token: completion/cancel must end control-plane
+ * access (artifacts, inference gateway, run-scoped tRPC) even if the JWT
+ * has not expired yet.
  */
 export const findTaskRunByRunTokenClaims = async ({
   runId,
 }: Pick<RunTokenContext, 'runId'>) => {
   const run = await db.query.taskRuns.findFirst({
     where: eq(taskRuns.id, runId),
-    columns: { id: true },
+    columns: { id: true, status: true },
   });
 
-  return run ? { id: run.id } : null;
+  if (!run || isExitedRunStatus(run.status)) {
+    return null;
+  }
+
+  return { id: run.id };
 };

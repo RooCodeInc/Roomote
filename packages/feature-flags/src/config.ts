@@ -43,13 +43,6 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
       'Allow capture-visual-proof to auto-classify screencast-only or both when the proof claim is temporal',
   },
 
-  [FeatureFlag.AuthorshipRules]: {
-    defaultValue: () => process.env.NODE_ENV === 'development',
-    metadataKey: 'authorship_rules',
-    description:
-      'Gate the deployment-level authorship rules engine: the effective author / PR owner resolution stamped at enqueue time and the settings surface for authoring natural-language rules. When off, enqueue leaves the effective-authorship columns null so tasks keep default attribution behavior.',
-  },
-
   [FeatureFlag.BackgroundSubagents]: {
     // Off by default: proof capture runs foreground and before delivery, so
     // the judge pass and the PR ship with the screenshots already verified.

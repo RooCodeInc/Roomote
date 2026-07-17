@@ -106,8 +106,16 @@ function isQueryRequest(method?: string): boolean {
   return (method ?? 'GET').toUpperCase() === 'GET';
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 function resolveApiUrl(baseUrl: string, path: string): string {
-  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const normalizedBaseUrl = stripTrailingSlashes(baseUrl);
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
 
   return `${normalizedBaseUrl}${normalizedPath}`;

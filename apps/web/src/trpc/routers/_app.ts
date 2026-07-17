@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { publicAuthTokenTimeoutMsSchema } from '@roomote/auth';
+import {
+  publicAuthTokenTimeoutMsSchema,
+  runTokenTimeoutMsSchema,
+} from '@roomote/auth';
 import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
@@ -834,7 +837,7 @@ export const appRouter = createRouter({
       ),
 
     finishAuthenticateAccount: protectedProcedure
-      .input(z.object({ code: z.string().min(1) }))
+      .input(z.object({ code: z.string().min(1), state: z.string().min(1) }))
       .mutation(({ ctx: { auth }, input }) =>
         finishAuthenticateGitHubAccountCommand(auth, input),
       ),
@@ -950,7 +953,7 @@ export const appRouter = createRouter({
       ),
 
     finishAuthenticateAccount: protectedProcedure
-      .input(z.object({ code: z.string().min(1) }))
+      .input(z.object({ code: z.string().min(1), state: z.string().min(1) }))
       .mutation(({ ctx: { auth }, input }) =>
         finishAuthenticateSlackAccountCommand(auth, input),
       ),
@@ -1388,7 +1391,7 @@ export const appRouter = createRouter({
       .input(
         z.object({
           runId: z.number(),
-          timeoutMs: z.number().optional(),
+          timeoutMs: runTokenTimeoutMsSchema.optional(),
         }),
       )
       .query(({ ctx: { auth }, input }) =>
@@ -2094,7 +2097,6 @@ export const appRouter = createRouter({
         z
           .object({
             globalAgentInstructions: z.string().max(10_000).nullable(),
-            authorshipInstructions: z.string().max(10_000).nullable(),
           })
           .partial(),
       )

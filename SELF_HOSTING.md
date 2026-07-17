@@ -290,7 +290,6 @@ common provider keys into worker containers:
 - `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
-- `MISTRAL_API_KEY`
 - `MOONSHOT_API_KEY`
 - `MINIMAX_API_KEY`
 - `OPENCODE_API_KEY`
@@ -484,7 +483,7 @@ base64 < preview-auth-private-pkcs8.pem | tr -d '\n' # PREVIEW_AUTH_PRIVATE_KEY
 base64 < preview-auth-public.pem | tr -d '\n'        # PREVIEW_AUTH_PUBLIC_KEY
 
 openssl rand -base64 32 # ENCRYPTION_KEY
-openssl rand -base64 32 # R_DISCORD_GATEWAY_SECRET (dedicated; do not reuse ENCRYPTION_KEY)
+openssl rand -base64 32 # R_DISCORD_GATEWAY_SECRET
 openssl rand -base64 32 # ARTIFACT_SIGNING_KEY
 openssl rand -base64 24 # DASHBOARD_PASSWORD
 openssl rand -hex 16    # SETUP_TOKEN
@@ -500,7 +499,7 @@ always take precedence. The random string secrets (`ENCRYPTION_KEY`,
 `R_DISCORD_GATEWAY_SECRET`, `ARTIFACT_SIGNING_KEY`, `DASHBOARD_PASSWORD`,
 `SETUP_TOKEN`) are still required and can come from the platform's secret
 generator. API and BullMQ must share the same `R_DISCORD_GATEWAY_SECRET` value
-when Discord is enabled; that value must not be the same as `ENCRYPTION_KEY`.
+when Discord is enabled.
 
 ### Port exposure and the queue dashboard
 
@@ -790,8 +789,14 @@ registered user account counts toward the limit, whichever sign-in path or
 surface it uses. Removing a user frees their seat.
 
 To go beyond 10 users, obtain a license key from the Roomote maintainers and
-enter it in **Settings → Users → License** as an admin. Keys are verified
-offline; your deployment never phones home.
+apply it in either of these ways:
+
+- Enter it in **Settings → Users → License** as an admin, or
+- Set `R_LICENSE_KEY` in the deployment environment (for example
+  `.env.production` / Compose). When set, the env var takes precedence over
+  any key stored in Settings.
+
+Keys are verified offline; your deployment never phones home.
 
 When a deployment is at its seat limit, existing users are unaffected — only
 new sign-ups are blocked until a seat is freed (Settings → Users → remove a

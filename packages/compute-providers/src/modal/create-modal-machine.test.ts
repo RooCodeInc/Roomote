@@ -218,9 +218,20 @@ describe('createModalMachine', () => {
     );
   });
 
-  it('preserves task snapshot runtime state without reinstalling the shipped worker', async () => {
+  it('refreshes the shipped worker without replacing task snapshot state', async () => {
     const runCommand = vi.fn().mockResolvedValue({ exitCode: 0, stdout: 'ok' });
     const writeFiles = vi.fn().mockResolvedValue(undefined);
+    const resumeFromSnapshot = vi.fn().mockResolvedValue({
+      instanceId: 'modal-123',
+      domains: {},
+      sourceSnapshotId: 'snap-task-123',
+    });
+
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker-release'),
+      tag: 'worker-v1.2.3',
+      version: '1.2.3',
+    });
 
     await createModalMachine({
       modalTokenId: 'token-id',
@@ -231,20 +242,36 @@ describe('createModalMachine', () => {
       computeClient: {
         vendor: 'modal',
         createInstance: vi.fn(),
-        resumeFromSnapshot: vi.fn().mockResolvedValue({
-          instanceId: 'modal-123',
-          domains: {},
-          sourceSnapshotId: 'snap-task-123',
-        }),
+        resumeFromSnapshot,
         writeFiles,
         runCommand,
         destroyInstance: vi.fn(),
       },
     });
 
-    expect(mockGetWorkerRelease).not.toHaveBeenCalled();
-    expect(writeFiles).not.toHaveBeenCalled();
-    expect(runCommand).not.toHaveBeenCalled();
+    expect(mockGetWorkerRelease).toHaveBeenCalledTimes(1);
+    expect(resumeFromSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSnapshotId: 'snap-task-123',
+        metadata: expect.objectContaining({
+          workerReleaseTag: 'worker-v1.2.3',
+        }),
+      }),
+    );
+    expect(writeFiles).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: expect.arrayContaining([
+          expect.objectContaining({ path: '/sandbox/worker.tar.gz' }),
+        ]),
+      }),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        env: {
+          WORKER_RELEASE_ARCHIVE_PATH: '/sandbox/worker.tar.gz',
+        },
+      }),
+    );
   });
 
   it('ignores non-bootstrap files in the local Modal files directory', async () => {

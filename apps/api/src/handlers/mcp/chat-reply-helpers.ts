@@ -125,21 +125,28 @@ export function errorResponseForThreadReplyImageError(
   message: string,
 ): Response | null {
   if (message.startsWith('Unknown artifact id: ')) {
-    return new Response(JSON.stringify({ error: message }), { status: 404 });
+    return new Response(JSON.stringify({ error: 'Unknown artifact id' }), {
+      status: 404,
+    });
   }
 
   if (
     message.includes('does not belong to the current task') ||
     message.includes('does not belong to the current task run')
   ) {
-    return new Response(JSON.stringify({ error: message }), { status: 403 });
+    return new Response(
+      JSON.stringify({ error: 'Artifact does not belong to the current task' }),
+      { status: 403 },
+    );
   }
 
   if (
     message.includes('has not been uploaded yet') ||
     message.includes('is not an image attachment')
   ) {
-    return new Response(JSON.stringify({ error: message }), { status: 400 });
+    return new Response(JSON.stringify({ error: 'Invalid image artifact' }), {
+      status: 400,
+    });
   }
 
   return null;

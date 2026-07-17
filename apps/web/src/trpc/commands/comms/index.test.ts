@@ -126,6 +126,7 @@ vi.mock('@roomote/db/server', () => ({
   invalidateSlackSigningSecretCache: vi.fn(),
   invalidateTeamsBotRuntimeCredentialsCache: vi.fn(),
   resolveDiscordRuntimeCredentials: mockResolveDiscordRuntimeCredentials,
+  resolveDiscordGatewaySecret: vi.fn(async () => 'gateway-secret'),
   validateDiscordBotToken: mockValidateDiscordBotToken,
   normalizeDiscordBotToken: (value: string | null | undefined) =>
     typeof value === 'string'

@@ -113,13 +113,15 @@ export async function createE2bMachine(
 
   let tarball: Buffer | undefined;
   let version: string | undefined;
-  const shouldInstallShippedRuntime = launchMode !== 'task_snapshot';
 
-  if (shouldInstallShippedRuntime && localTarballPath) {
+  // A task snapshot owns repository and harness-session state, but its worker
+  // must speak the current API/runtime protocol (for example inference-gateway
+  // env markers). Refresh only the shipped worker directory after restore.
+  if (localTarballPath) {
     const localRelease = loadLocalWorkerReleaseWithVersion(localTarballPath);
     tarball = localRelease.archive;
     version = localRelease.version;
-  } else if (shouldInstallShippedRuntime) {
+  } else {
     const release = await getWorkerRelease();
     tarball = release.archive;
     version = release.version;
@@ -314,17 +316,6 @@ export async function createE2bMachine(
 
   if (!createdMachine) {
     throw new Error('Failed to create E2B instance');
-  }
-
-  if (!shouldInstallShippedRuntime) {
-    return {
-      machineId: createdMachine.instanceId,
-      proxyPorts,
-      ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
-      domain: (port: number) =>
-        createdMachine.domains?.[port.toString()] ??
-        fallbackDomain(createdMachine.instanceId, port),
-    };
   }
 
   // Start the bootstrap timeout only after instance creation succeeds, so cold

@@ -91,7 +91,7 @@ async function fetchDirectoryFilePaths({
     const { stdout } = await execa(
       'gh',
       ['api', getRepositoryContentsApiPath({ repo, path, ref })],
-      { shell: true, env },
+      { env },
     );
 
     const parsed = JSON.parse(stdout) as
@@ -146,7 +146,7 @@ export async function fetchFileContent({
     const { stdout } = await execa(
       'gh',
       ['api', getRepositoryContentsApiPath({ repo, path, ref })],
-      { shell: true, env },
+      { env },
     );
 
     const parsed = JSON.parse(stdout) as {
@@ -193,7 +193,7 @@ export async function fetchRepositoryTree({
     const { stdout } = await execa(
       'gh',
       ['api', `repos/${repo}/git/trees/${encodeURIComponent(ref)}?recursive=1`],
-      { shell: true, env },
+      { env },
     );
 
     const parsed = JSON.parse(stdout) as {
@@ -251,7 +251,7 @@ export async function fetchPr({
       '--json',
       'id,number,title,body,author,state,url,headRefName,baseRefName,baseRefOid,headRefOid,mergeable,isDraft,createdAt,updatedAt,closingIssuesReferences',
     ],
-    { shell: true, env },
+    { env },
   );
 
   try {
@@ -284,7 +284,7 @@ export async function fetchIssue({
         '--json',
         'number,title,body,author,state,url,createdAt,updatedAt,comments',
       ],
-      { shell: true, env },
+      { env },
     );
 
     return issueSchema.parse(JSON.parse(stdout));
@@ -311,7 +311,7 @@ export async function fetchDiff({
     const { stdout: diff } = await execa(
       'gh',
       ['pr', 'diff', prNumber.toString(), '--repo', repo, '--patch'],
-      { shell: true, env },
+      { env },
     );
 
     return { diff, changedFiles: extractDiffFiles(diff) };
@@ -341,9 +341,9 @@ export async function fetchDiffInRange({
         'api',
         `repos/${repo}/compare/${range[0]}...${range[1]}`,
         '-H',
-        '"Accept: application/vnd.github.v3.diff"',
+        'Accept: application/vnd.github.v3.diff',
       ],
-      { shell: true, env },
+      { env },
     );
 
     return { diff, changedFiles: extractDiffFiles(diff) };
@@ -366,7 +366,7 @@ export async function fetchReviewComments({
   const result = await execa(
     'gh',
     ['api', `repos/${repo}/pulls/${prNumber}/comments`],
-    { shell: true, env },
+    { env },
   );
 
   // isValidReviewComment classifies the deployment's own bot login from the
@@ -397,7 +397,7 @@ export async function fetchReviewComment({
   const result = await execa(
     'gh',
     ['api', `repos/${repo}/pulls/comments/${commentId}`],
-    { shell: true, env },
+    { env },
   );
 
   try {
@@ -422,7 +422,7 @@ export async function fetchIssueComments({
     const { stdout } = await execa(
       'gh',
       ['api', `repos/${repo}/issues/${prNumber}/comments`],
-      { shell: true, env },
+      { env },
     );
 
     // isValidIssueComment classifies the deployment's own bot login from the
@@ -452,7 +452,7 @@ export async function fetchIssueComment({
   const result = await execa(
     'gh',
     ['api', `repos/${repo}/issues/comments/${commentId}`],
-    { shell: true, env },
+    { env },
   );
 
   try {
@@ -486,9 +486,9 @@ export async function fetchCommitsInRange({
         '--json',
         'commits',
         '--jq',
-        "'[.commits[] | {sha: .oid, message: .messageHeadline}]'",
+        '[.commits[] | {sha: .oid, message: .messageHeadline}]',
       ],
-      { shell: true, env },
+      { env },
     );
 
     let commits = z.array(commitSchema).parse(JSON.parse(commitsResult.stdout));

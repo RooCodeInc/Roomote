@@ -2,9 +2,14 @@ import { eq } from 'drizzle-orm';
 import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
+  isInferenceGatewayCoveredEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
@@ -17,9 +22,15 @@ import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
-import { stringifyDecryptedEnvVarValue } from './environment-variables';
+import {
+  resolveDeploymentEnvVar,
+  stringifyDecryptedEnvVarValue,
+} from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+const DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET = new Set<string>(
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+);
 
 async function loadPersistedDeploymentEnvVars(
   executor: DatabaseOrTransaction = db,
@@ -75,6 +86,7 @@ async function loadPersistedRuntimeModelConfig(
       deployment?.runtimeModelConfig,
     ),
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
+    enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
   };
 }
 
@@ -102,6 +114,8 @@ function resolveProviderKeyNames({
 }): string[] {
   const configuredProviderKeys = parseModelProviderEnvKeys(
     runtimeRoomoteModelEnvKeys,
+  ).filter(
+    (envVarName) => !DISABLED_MODEL_PROVIDER_ENV_VAR_NAME_SET.has(envVarName),
   );
 
   if (configuredProviderKeys.length > 0) {
@@ -123,43 +137,120 @@ function resolveProviderKeyNames({
   ];
 }
 
-export async function resolveEffectiveModelRuntimeEnv(
+/**
+ * Resolve a single model-provider env value with the same precedence the task
+ * runtime uses: the runtime process env first, then the persisted (encrypted)
+ * deployment environment variables.
+ */
+export async function resolveModelProviderEnvValue(
+  envVarNames: string | readonly string[],
   options: {
     runtimeEnv?: Partial<Record<string, string | undefined>>;
-    deploymentEnvVars?: Record<string, string>;
     executor?: DatabaseOrTransaction;
   } = {},
+): Promise<string | undefined> {
+  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
+
+  for (const envVarName of names) {
+    const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
+
+    if (runtimeValue) {
+      return runtimeValue;
+    }
+  }
+
+  for (const envVarName of names) {
+    const persistedValue = await resolveDeploymentEnvVar(
+      envVarName,
+      options.executor ?? db,
+      {},
+    );
+
+    const normalizedValue = normalizeConfiguredValue(persistedValue);
+
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+
+  return undefined;
+}
+
+type ModelRuntimeEnvOptions = {
+  runtimeEnv?: Partial<Record<string, string | undefined>>;
+  deploymentEnvVars?: Record<string, string>;
+  executor?: DatabaseOrTransaction;
+};
+
+/**
+ * Resolve model runtime env for control-plane inference (routing, titles,
+ * summaries): raw provider keys are returned because control-plane calls
+ * hold no run token to present to the inference gateway.
+ */
+export async function resolveEffectiveModelRuntimeEnv(
+  options: ModelRuntimeEnvOptions = {},
+): Promise<Record<string, string>> {
+  return resolveModelRuntimeEnv(options, { inferenceGateway: false });
+}
+
+/**
+ * Resolve model runtime env for a task sandbox: the configured provider keys
+ * the inference gateway can serve stay on the control plane and their names
+ * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead, and a connected
+ * ChatGPT subscription is routed through the gateway rather than
+ * materializing `OPENCODE_AUTH_CONTENT` in the sandbox.
+ */
+export async function resolveSandboxModelRuntimeEnv(
+  options: ModelRuntimeEnvOptions = {},
+): Promise<Record<string, string>> {
+  return resolveModelRuntimeEnv(options, { inferenceGateway: true });
+}
+
+async function resolveModelRuntimeEnv(
+  options: ModelRuntimeEnvOptions,
+  { inferenceGateway }: { inferenceGateway: boolean },
 ): Promise<Record<string, string>> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
   const executor = options.executor ?? db;
-  const [persistedEnvVars, { runtimeModelConfig, catalogModels }] =
-    await Promise.all([
-      resolveEffectiveDeploymentEnvVars({
-        deploymentEnvVars: options.deploymentEnvVars,
-        executor,
-      }),
-      loadPersistedRuntimeModelConfig(executor),
-    ]);
+  const [
+    persistedEnvVars,
+    { runtimeModelConfig, catalogModels, enabledCatalogModels },
+  ] = await Promise.all([
+    resolveEffectiveDeploymentEnvVars({
+      deploymentEnvVars: options.deploymentEnvVars,
+      executor,
+    }),
+    loadPersistedRuntimeModelConfig(executor),
+  ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
+  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
+    roomoteModel: runtimeEnv.R_MODEL,
+    roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
+    roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
+    roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
+    roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
+    roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
+  });
   const resolvedRoomoteModel =
-    normalizeConfiguredValue(runtimeEnv.R_MODEL) ??
+    runtimeOverrideModelConfig.roomoteModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel);
   const resolvedRoomoteSmallModel =
-    normalizeConfiguredValue(runtimeEnv.R_SMALL_MODEL) ??
+    runtimeOverrideModelConfig.roomoteSmallModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel);
   const resolvedRoomoteVisionModel =
-    normalizeConfiguredValue(runtimeEnv.R_VISION_MODEL) ??
+    runtimeOverrideModelConfig.roomoteVisionModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel);
   const resolvedRoomoteCodeReviewModel =
-    normalizeConfiguredValue(runtimeEnv.R_CODE_REVIEW_MODEL) ??
+    runtimeOverrideModelConfig.roomoteCodeReviewModel ??
     normalizeConfiguredValue(
       persistedRuntimeModelConfig.roomoteCodeReviewModel,
     );
   const resolvedRoomoteExploreModel =
-    normalizeConfiguredValue(runtimeEnv.R_EXPLORE_MODEL) ??
+    runtimeOverrideModelConfig.roomoteExploreModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel);
   const resolvedRoomotePlanningModel =
-    normalizeConfiguredValue(runtimeEnv.R_PLANNING_MODEL) ??
+    runtimeOverrideModelConfig.roomotePlanningModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomotePlanningModel);
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
@@ -226,22 +317,60 @@ export async function resolveEffectiveModelRuntimeEnv(
     )
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
       : undefined);
-  const runtimeRoomoteModelEnvKeys = normalizeConfiguredValue(
-    runtimeEnv.R_MODEL_ENV_KEYS,
-  );
+  const configuredRoomoteModelEnvKeys =
+    normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
+    normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
+  const resolvedRoleModels = [
+    resolvedRoomoteModel,
+    resolvedRoomoteSmallModel,
+    resolvedRoomoteVisionModel,
+    resolvedRoomoteCodeReviewModel,
+    resolvedRoomoteExploreModel,
+    resolvedRoomotePlanningModel,
+  ];
   const providerKeyNames = resolveProviderKeyNames({
-    runtimeRoomoteModelEnvKeys,
-    resolvedRoomoteModels: [
-      resolvedRoomoteModel,
-      resolvedRoomoteSmallModel,
-      resolvedRoomoteVisionModel,
-      resolvedRoomoteCodeReviewModel,
-      resolvedRoomoteExploreModel,
-      resolvedRoomotePlanningModel,
-    ],
+    runtimeRoomoteModelEnvKeys: configuredRoomoteModelEnvKeys,
+    resolvedRoomoteModels: resolvedRoleModels,
   });
+  // A running OpenCode task can switch to any enabled catalog model without
+  // another dequeue, while configured role agents can select their own
+  // providers. Gateway coverage must therefore include both sets up front;
+  // otherwise a later model switch either sees a missing key or uses a raw
+  // provider credential that was already written into the sandbox.
+  const gatewaySwitchableModelIds = inferenceGateway
+    ? enabledCatalogModels.map((model) => model.id)
+    : [];
+  const gatewayProviderKeyNames = [
+    ...new Set([
+      ...providerKeyNames,
+      ...resolveProviderKeyNames({
+        resolvedRoomoteModels: gatewaySwitchableModelIds,
+      }),
+    ]),
+  ];
+  // When the gateway is active, the configured provider keys it can serve
+  // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
+  // the control plane and are advertised to the worker by name via
+  // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
+  // gateway URL from its own platform URL and rebases exactly these providers.
+  // Only configured keys are withheld; credentials for disabled providers are
+  // filtered before this point and never flow to the task runtime.
+  const gatewayServedKeyNames = inferenceGateway
+    ? gatewayProviderKeyNames.filter(
+        (name) =>
+          isInferenceGatewayCoveredEnvVar(name) &&
+          (normalizeConfiguredValue(runtimeEnv[name]) !== undefined ||
+            normalizeConfiguredValue(persistedEnvVars[name]) !== undefined),
+      )
+    : [];
+  const gatewayServedKeyNameSet = new Set(gatewayServedKeyNames);
+
   const resolvedProviderKeyValues = Object.fromEntries(
     providerKeyNames.flatMap((envVarName) => {
+      if (gatewayServedKeyNameSet.has(envVarName)) {
+        return [];
+      }
+
       const value =
         normalizeConfiguredValue(runtimeEnv[envVarName]) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
@@ -251,21 +380,21 @@ export async function resolveEffectiveModelRuntimeEnv(
   );
 
   // ChatGPT subscription coverage: when a connected subscription exists and
-  // any resolved role model uses the `openai/` prefix, inject the OAuth
-  // record as `OPENCODE_AUTH_CONTENT`. opencode's Codex plugin prefers OAuth
-  // auth when present, so the subscription wins over `OPENAI_API_KEY` at
-  // runtime even when both are configured. This single choke point covers
-  // both task launches (dequeue-helpers) and routing/title/summary calls
-  // (non-task-provider-usage).
-  const resolvedRoleModels = [
-    resolvedRoomoteModel,
-    resolvedRoomoteSmallModel,
-    resolvedRoomoteVisionModel,
-    resolvedRoomoteCodeReviewModel,
-    resolvedRoomoteExploreModel,
-    resolvedRoomotePlanningModel,
-  ];
-  const usesOpenAiModel = resolvedRoleModels.some(
+  // any resolved role or gateway-switchable model uses the `openai/` prefix,
+  // inject the OAuth record as `OPENCODE_AUTH_CONTENT`. opencode's Codex
+  // plugin prefers OAuth auth when present, so the subscription wins over
+  // `OPENAI_API_KEY` at runtime even when both are configured. This single
+  // choke point covers both task launches (dequeue-helpers) and
+  // routing/title/summary calls (non-task-provider-usage).
+  //
+  // In sandbox gateway mode the OAuth record must stay on the control plane,
+  // so instead of shipping OPENCODE_AUTH_CONTENT the resolver emits the
+  // R_INFERENCE_GATEWAY_CHATGPT marker; the worker rebases the `openai`
+  // provider onto the gateway, which mints and injects the access token.
+  const usesOpenAiModel = [
+    ...resolvedRoleModels,
+    ...gatewaySwitchableModelIds,
+  ].some(
     (modelId) =>
       typeof modelId === 'string' &&
       modelId.startsWith(`${CHATGPT_OPENCODE_PROVIDER_ID}/`),
@@ -273,6 +402,8 @@ export async function resolveEffectiveModelRuntimeEnv(
   const injectedOpenCodeAuthContent = usesOpenAiModel
     ? await resolveOpenCodeAuthContent({ executor })
     : null;
+  const routeChatGptThroughGateway =
+    inferenceGateway && injectedOpenCodeAuthContent != null;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -313,16 +444,17 @@ export async function resolveEffectiveModelRuntimeEnv(
       R_PLANNING_MODEL_REASONING_EFFORT:
         resolvedRoomotePlanningModelReasoningEffort,
     }),
-    ...(runtimeRoomoteModelEnvKeys && {
-      R_MODEL_ENV_KEYS: runtimeRoomoteModelEnvKeys,
+    ...(providerKeyNames.length > 0 && {
+      R_MODEL_ENV_KEYS: providerKeyNames.join(','),
     }),
-    ...(!runtimeRoomoteModelEnvKeys &&
-      providerKeyNames.length > 0 && {
-        R_MODEL_ENV_KEYS: providerKeyNames.join(','),
-      }),
     ...resolvedProviderKeyValues,
-    ...(injectedOpenCodeAuthContent && {
-      OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,
+    ...(gatewayServedKeyNames.length > 0 && {
+      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
     }),
+    ...(routeChatGptThroughGateway
+      ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
+      : injectedOpenCodeAuthContent
+        ? { OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent }
+        : {}),
   };
 }

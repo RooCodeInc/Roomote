@@ -91,13 +91,13 @@ function buildRepositorySyncCommands(
     },
     {
       name: 'Git checkout branch',
-      run: `git checkout -B ${branch} origin/${branch}`,
+      run: `git checkout -B '${branch}' 'origin/${branch}'`,
       timeout: COMMAND_DEFAULT_TIMEOUT,
       continue_on_error: false,
     },
     {
       name: 'Git reset to remote',
-      run: `git reset --hard origin/${branch}`,
+      run: `git reset --hard 'origin/${branch}'`,
       timeout: COMMAND_DEFAULT_TIMEOUT,
       continue_on_error: false,
     },
@@ -105,7 +105,7 @@ function buildRepositorySyncCommands(
       ? [
           {
             name: 'Set default remote repo.',
-            run: 'gh repo set-default acme/backend',
+            run: "gh repo set-default 'acme/backend'",
             timeout: 60,
             continue_on_error: true,
           },
@@ -291,7 +291,7 @@ describe('WorkspaceManager tool versions', () => {
       });
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone https://github.com/acme/backend.git 'acme/backend'",
+        run: "git clone 'https://github.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -315,7 +315,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone https://gitlab.com/acme/backend.git 'acme/backend'",
+        run: "git clone 'https://gitlab.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -363,7 +363,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone https://git.example.com/acme/backend.git 'acme/backend'",
+        run: "git clone 'https://git.example.com/acme/backend.git' 'acme/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,
@@ -409,7 +409,7 @@ describe('WorkspaceManager tool versions', () => {
 
       expect(mockExecute).toHaveBeenCalledWith({
         name: 'Git clone',
-        run: "git clone https://dev.azure.com/acme/Platform/_git/backend 'acme/Platform/backend'",
+        run: "git clone 'https://dev.azure.com/acme/Platform/_git/backend' 'acme/Platform/backend'",
         retries: 4,
         timeout: 300,
         continue_on_error: false,

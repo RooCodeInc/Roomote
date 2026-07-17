@@ -43,7 +43,10 @@ vi.mock('../schema', () => ({
   eq: vi.fn(),
 }));
 
-import { resolveEffectiveModelRuntimeEnv } from './model-runtime-config';
+import {
+  resolveEffectiveModelRuntimeEnv,
+  resolveSandboxModelRuntimeEnv,
+} from './model-runtime-config';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
   beforeEach(() => {
@@ -117,6 +120,28 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       R_PLANNING_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
       ANTHROPIC_API_KEY: 'sk-persisted',
+    });
+  });
+
+  it('uses persisted custom provider key names when no runtime override exists', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'custom/test-model',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+        CUSTOM_LLM_TOKEN: 'saved-token',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'custom/test-model',
+      R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
+      CUSTOM_LLM_TOKEN: 'saved-token',
     });
   });
 
@@ -537,11 +562,12 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
-  it('forwards every declared env var for multi-credential providers', async () => {
+  it('ignores disabled provider roles and forwards enabled provider credentials', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
         roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
+        roomoteVisionModel: 'mistral/mistral-large-latest',
       },
     });
 
@@ -552,20 +578,22 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         AWS_REGION: 'us-west-2',
         GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
         GOOGLE_VERTEX_PROJECT: 'my-project',
+        MISTRAL_API_KEY: 'mistral-key',
       },
     });
 
     expect(env).toMatchObject({
       R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
-      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
-      R_MODEL_ENV_KEYS:
-        'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,GOOGLE_VERTEX_PROJECT,GOOGLE_VERTEX_LOCATION',
+      R_MODEL_ENV_KEYS: 'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION',
       AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
       AWS_REGION: 'us-west-2',
-      GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
-      GOOGLE_VERTEX_PROJECT: 'my-project',
     });
+    expect(env).not.toHaveProperty('R_SMALL_MODEL');
+    expect(env).not.toHaveProperty('R_VISION_MODEL');
+    expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(env).not.toHaveProperty('GOOGLE_VERTEX_PROJECT');
     expect(env).not.toHaveProperty('GOOGLE_VERTEX_LOCATION');
+    expect(env).not.toHaveProperty('MISTRAL_API_KEY');
   });
 
   it('injects OPENCODE_AUTH_CONTENT when an openai/ model is used and the ChatGPT subscription is connected', async () => {
@@ -591,6 +619,42 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(mockResolveOpenCodeAuthContent).toHaveBeenCalled();
     expect(env.OPENCODE_AUTH_CONTENT).toContain('"type":"oauth"');
+  });
+
+  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+      }),
+    );
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    // The OAuth record must stay on the control plane; the marker tells the
+    // worker to rebase the openai provider onto the gateway instead.
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+  });
+
+  it('does not emit the ChatGPT gateway marker when no subscription is connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_CHATGPT');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
@@ -619,5 +683,131 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+  });
+
+  describe('inference gateway', () => {
+    beforeEach(() => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+      });
+    });
+
+    it('withholds gateway-served keys and advertises them by name when enabled', async () => {
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      // The worker builds the gateway URL from its own platform URL; the
+      // resolver only advertises which keys it is serving.
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_URL');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    });
+
+    it('keeps raw keys for control-plane resolution', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env.ANTHROPIC_API_KEY).toBe('sk-anthropic');
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
+    });
+
+    it('advertises only configured covered keys, not every set covered key', async () => {
+      // OpenAI is not a configured role model, so even though OPENAI_API_KEY is
+      // set it is neither served nor advertised — the dequeue redaction keys
+      // off the advertised set, so a stray OPENAI_API_KEY the deployment set
+      // for its own code survives into the sandbox.
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          OPENAI_API_KEY: 'sk-openai-for-user-code',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    });
+
+    it('withholds credentials for every enabled switchable model provider', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: {
+          roomoteModel: 'openrouter/openai/gpt-5.6-terra',
+          roomotePlanningModel: 'openrouter/anthropic/claude-opus-4.8',
+        },
+        taskModelSettings: {
+          models: [
+            {
+              id: 'openrouter/openai/gpt-5.6-terra',
+              displayName: 'GPT 5.6 Terra',
+              family: 'GPT',
+            },
+            {
+              id: 'anthropic/claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              family: 'Sonnet',
+            },
+            {
+              id: 'openai/gpt-5.6-luna',
+              displayName: 'GPT 5.6 Luna',
+              family: 'GPT',
+            },
+          ],
+          allowedModelIds: [
+            'openrouter/openai/gpt-5.6-terra',
+            'anthropic/claude-sonnet-5',
+            'openai/gpt-5.6-luna',
+          ],
+          defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+        },
+      });
+      mockResolveOpenCodeAuthContent.mockResolvedValue(
+        JSON.stringify({
+          openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+        }),
+      );
+
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          OPENROUTER_API_KEY: 'sk-openrouter',
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+        },
+      });
+
+      expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+      );
+      expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+      expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    });
+
+    it('drops disabled-provider credentials even when explicitly requested', async () => {
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {
+          R_MODEL_ENV_KEYS:
+            'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS,MISTRAL_API_KEY',
+        },
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+          GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+          MISTRAL_API_KEY: 'mistral-key',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+      expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+      expect(env).not.toHaveProperty('MISTRAL_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
+      );
+    });
   });
 });

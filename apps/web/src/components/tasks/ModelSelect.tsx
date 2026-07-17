@@ -45,8 +45,9 @@ export function ModelSelect({
 
     return groupModelsByDisplayProvider(sortedModels, {
       chatgptConnected: data?.chatgptConnected,
+      openaiConnected: data?.openaiConnected,
     });
-  }, [data?.chatgptConnected, data?.models]);
+  }, [data?.chatgptConnected, data?.openaiConnected, data?.models]);
   const showProviderHeaders = modelGroups.length > 1;
 
   return (

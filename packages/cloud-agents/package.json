@@ -50,7 +50,6 @@
     "test:router": "dotenvx run -f ../../.env.local -- tsx scripts/test-llm-router.ts",
     "deployment:launch-docker-task": "tsx src/server/deployment-ci-launch-task.ts",
     "clean": "rimraf .turbo",
-    "eval:authorship": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/authorship/promptfooconfig.ts --no-cache --table-cell-max-length 200",
     "eval:router": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.ts --no-cache --table-cell-max-length 200",
     "eval:router:followup": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 eval -c evals/router/promptfooconfig.followup.ts --no-cache --table-cell-max-length 200",
     "eval:router:view": "dotenvx run -f ../../.env.local -- npx promptfoo@0.115.0 view",
@@ -58,7 +57,7 @@
   },
   "dependencies": {
     "@ai-sdk/mcp": "^1.0.25",
-    "@opencode-ai/sdk": "1.17.8",
+    "@opencode-ai/sdk": "1.17.18",
     "@roomote/auth": "workspace:^",
     "@roomote/db": "workspace:^",
     "@roomote/env": "workspace:^",

@@ -14,7 +14,7 @@ import {
 } from './index';
 import { MetadataCache } from './cache';
 import {
-  FeatureFlag,
+  type FeatureFlag,
   type FeatureFlagContext,
   type FeatureFlagValues,
   type MetadataRecord,

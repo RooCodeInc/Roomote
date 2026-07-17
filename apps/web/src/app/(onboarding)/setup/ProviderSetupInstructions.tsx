@@ -8,7 +8,6 @@ import {
   SLACK_APP_INSTALL_CALLBACK_PATH,
   SLACK_SIGN_IN_CALLBACK_PATH,
 } from '@/lib/slack-callback-paths';
-import { DISCORD_INSTALL_PERMISSIONS } from '@/lib/discord-install';
 import { cn } from '@/lib/utils';
 
 type ProviderSetupInstructionsProviderId =
@@ -52,32 +51,6 @@ export function InstructionUrl({
         <CopyIconButton
           aria-label={`Copy ${heading}`}
           content={url}
-          tooltip={`Copy ${heading}`}
-        />
-      </div>
-    </div>
-  );
-}
-
-function InstructionValue({
-  heading,
-  value,
-}: {
-  heading: string;
-  value: string;
-}) {
-  return (
-    <div className="space-y-1 flex gap-2 items-center">
-      <p className="font-semibold text-foreground text-sm w-45 shrink-0">
-        {heading}
-      </p>
-      <div className="flex items-center gap-2 rounded-md border border-black px-2 py-1.5 overflow-hidden justify-end">
-        <span className="font-mono text-xs text-foreground truncate">
-          {value}
-        </span>
-        <CopyIconButton
-          aria-label={`Copy ${heading}`}
-          content={value}
           tooltip={`Copy ${heading}`}
         />
       </div>
@@ -195,14 +168,10 @@ export function ProviderSetupInstructions({
         <InstructionText heading="Installation permissions">
           Roomote needs View Channels, Send Messages, Read Message History,
           Embed Links, Attach Files, Create Public Threads, and Send Messages in
-          Threads. Add Reactions enables acknowledgements. The Add to Discord
-          button requests these automatically; if Discord asks for a permissions
-          integer, use:
+          Threads. Add Reactions enables acknowledgements. After you save the
+          bot token, the Add to Discord button appears and requests these
+          permissions automatically.
         </InstructionText>
-        <InstructionValue
-          heading="Permissions integer"
-          value={DISCORD_INSTALL_PERMISSIONS}
-        />
         <InstructionText heading="Bot token">
           Paste the token below. Roomote derives the bot and application names
           from it, so there is no separate name or application ID to enter.

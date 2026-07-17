@@ -26,6 +26,7 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'DASHBOARD_PASSWORD',
       'DATABASE_URL',
       'S3_SECRET_ACCESS_KEY',
+      'R_LICENSE_KEY',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }
@@ -62,5 +63,12 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(false);
     }
+  });
+
+  it('includes disabled-provider credentials', () => {
+    expect(
+      CONTROL_PLANE_ENV_VAR_NAMES.has('GOOGLE_APPLICATION_CREDENTIALS'),
+    ).toBe(true);
+    expect(CONTROL_PLANE_ENV_VAR_NAMES.has('MISTRAL_API_KEY')).toBe(true);
   });
 });

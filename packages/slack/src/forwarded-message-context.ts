@@ -1,8 +1,77 @@
 import type { SlackFile } from './types';
 
 const MAX_FORWARDED_MESSAGE_TEXT_LENGTH = 4_000;
-const SLACK_MARKDOWN_LINK_REGEX = /<((?:https?|mailto):[^>|]+)\|([^>]+)>/g;
-const SLACK_BARE_LINK_REGEX = /<((?:https?|mailto):[^>|]+)>/g;
+
+function isSlackLinkScheme(value: string): boolean {
+  return (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('mailto:')
+  );
+}
+
+function replaceSlackLinks(
+  text: string,
+  onMarkdown: (url: string, label: string) => string,
+  onBare: (url: string) => string,
+): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    if (text[index] === '<') {
+      const close = text.indexOf('>', index + 1);
+      if (close !== -1) {
+        const inner = text.slice(index + 1, close);
+        const pipe = inner.indexOf('|');
+        if (pipe !== -1) {
+          const url = inner.slice(0, pipe);
+          const label = inner.slice(pipe + 1);
+          if (isSlackLinkScheme(url) && label.length > 0) {
+            result += onMarkdown(url, label);
+            index = close + 1;
+            continue;
+          }
+        } else if (isSlackLinkScheme(inner)) {
+          result += onBare(inner);
+          index = close + 1;
+          continue;
+        }
+      }
+    }
+
+    result += text[index];
+    index += 1;
+  }
+
+  return result;
+}
+
+function forEachSlackMarkdownLink(
+  text: string,
+  onMatch: (url: string, label: string) => void,
+): void {
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] === '<') {
+      const close = text.indexOf('>', index + 1);
+      if (close !== -1) {
+        const inner = text.slice(index + 1, close);
+        const pipe = inner.indexOf('|');
+        if (pipe !== -1) {
+          const url = inner.slice(0, pipe);
+          const label = inner.slice(pipe + 1);
+          if (isSlackLinkScheme(url) && label.length > 0) {
+            onMatch(url, label);
+          }
+        }
+        index = close + 1;
+        continue;
+      }
+    }
+    index += 1;
+  }
+}
 
 const FORWARDED_IMAGE_URL_FIELDS = [
   'url_private_download',
@@ -90,20 +159,26 @@ function normalizeSlackLinkText(text: string | undefined): string | undefined {
 }
 
 function decodeSlackEntity(text: string): string {
-  return text
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>');
+  return text.replace(/&(?:amp|lt|gt);/g, (entity) => {
+    switch (entity.slice(1, -1)) {
+      case 'amp':
+        return '&';
+      case 'lt':
+        return '<';
+      case 'gt':
+        return '>';
+      default:
+        return entity;
+    }
+  });
 }
 
 function normalizeSlackBlockText(text: string): string {
-  return decodeSlackEntity(text)
-    .replace(SLACK_MARKDOWN_LINK_REGEX, (_match, _url, label: string) =>
-      decodeSlackEntity(label),
-    )
-    .replace(SLACK_BARE_LINK_REGEX, (_match, url: string) =>
-      decodeSlackEntity(url),
-    )
+  return replaceSlackLinks(
+    decodeSlackEntity(text),
+    (_url, label) => decodeSlackEntity(label),
+    (url) => decodeSlackEntity(url),
+  )
     .replace(/\r\n?/g, '\n')
     .trim();
 }
@@ -151,18 +226,12 @@ function collectSlackMarkdownLinks(
   links: SlackBlockLink[],
   seenKeys: Set<string>,
 ): void {
-  for (const match of text.matchAll(SLACK_MARKDOWN_LINK_REGEX)) {
-    const [, url, label] = match;
-
-    if (!url) {
-      continue;
-    }
-
+  forEachSlackMarkdownLink(text, (url, label) => {
     appendUniqueSlackBlockLink(links, seenKeys, {
       url,
       text: normalizeSlackLinkText(label),
     });
-  }
+  });
 }
 
 function getSlackTextObjectText(value: unknown): string | undefined {

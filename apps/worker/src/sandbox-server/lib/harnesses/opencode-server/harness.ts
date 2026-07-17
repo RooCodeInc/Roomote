@@ -65,6 +65,20 @@ import {
   formatOpenCodeTurnStallErrorText,
   type PendingSteerPickup,
 } from './stall-watchdogs';
+import {
+  DEFAULT_OPENCODE_RATE_LIMIT_BASE_DELAY_MS,
+  DEFAULT_OPENCODE_RATE_LIMIT_MAX_DELAY_MS,
+  DEFAULT_OPENCODE_RATE_LIMIT_MAX_RETRIES,
+  OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT,
+  formatOpenCodeRateLimitRetryNoticeText,
+  isOpenCodeProviderRateLimitError,
+  resolveOpenCodeRateLimitRetryDelayMs,
+} from './provider-rate-limit';
+import {
+  formatOpenCodeProviderErrorRetryNoticeText,
+  getOpenCodeProviderErrorRecovery,
+  type OpenCodeProviderErrorRecovery,
+} from './provider-error-recovery';
 import type {
   OpenCodeEventPayload,
   OpenCodeGlobalEvent,
@@ -98,6 +112,13 @@ interface OpenCodeServerHarnessOptions {
   turnStallTimeoutMs?: number;
   subagentSettlementGraceMs?: number;
   queuedPromptRetryDelayMs?: number;
+  /**
+   * Max automatic continue attempts after a provider rate-limit session.error
+   * (e.g. OpenRouter UnknownError with rate_limit_exceeded). Defaults to 3.
+   */
+  providerRateLimitMaxRetries?: number;
+  providerRateLimitBaseDelayMs?: number;
+  providerRateLimitMaxDelayMs?: number;
   mcpServerNames?: string[];
   /**
    * Observer-only breadcrumb for rare harness failures that need a durable
@@ -1461,6 +1482,9 @@ export class OpenCodeServerHarness
   private readonly stopHookReminderStallTimeoutMs: number;
   private readonly subagentSettlementGraceMs: number;
   private readonly queuedPromptRetryDelayMs: number;
+  private readonly providerRateLimitMaxRetries: number;
+  private readonly providerRateLimitBaseDelayMs: number;
+  private readonly providerRateLimitMaxDelayMs: number;
   private readonly streamedPartText = new Map<string, string>();
   private readonly streamedMessageIds = new Set<string>();
   private readonly streamedReasoningMessageIds = new Set<string>();
@@ -1507,6 +1531,12 @@ export class OpenCodeServerHarness
   private cancelRequestedBeforeSession = false;
   private sessionCreateAbortController = new AbortController();
   private queuedPromptRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private providerRateLimitRetryTimer: ReturnType<typeof setTimeout> | null =
+    null;
+  private providerRateLimitRetryCount = 0;
+  private providerErrorRecoveryCount = 0;
+  private providerErrorRecoveryQueuedPromptId: string | null = null;
+  private ignoreNextProviderRecoverySessionIdle = false;
   private currentWorkflowPhase: string | null = null;
   // Most recent packaged workflow skill loaded by the primary session's agent
   // via the OpenCode skill tool. Drives per-prompt agent selection so plan-mode
@@ -1563,6 +1593,15 @@ export class OpenCodeServerHarness
       options.subagentSettlementGraceMs ?? DEFAULT_SUBAGENT_SETTLEMENT_GRACE_MS;
     this.queuedPromptRetryDelayMs =
       options.queuedPromptRetryDelayMs ?? DEFAULT_QUEUED_PROMPT_RETRY_DELAY_MS;
+    this.providerRateLimitMaxRetries =
+      options.providerRateLimitMaxRetries ??
+      DEFAULT_OPENCODE_RATE_LIMIT_MAX_RETRIES;
+    this.providerRateLimitBaseDelayMs =
+      options.providerRateLimitBaseDelayMs ??
+      DEFAULT_OPENCODE_RATE_LIMIT_BASE_DELAY_MS;
+    this.providerRateLimitMaxDelayMs =
+      options.providerRateLimitMaxDelayMs ??
+      DEFAULT_OPENCODE_RATE_LIMIT_MAX_DELAY_MS;
     this.knownMcpServerNames = [
       ...new Set(
         (options.mcpServerNames ?? [])
@@ -1750,6 +1789,7 @@ export class OpenCodeServerHarness
     this.connected = false;
     this.clearReplayAbortErrorSuppression();
     this.clearQueuedPromptRetryTimer();
+    this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -1996,6 +2036,7 @@ export class OpenCodeServerHarness
     command: StartNewTaskCommand,
   ): Promise<void> {
     this.prompts.clear();
+    this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -2051,7 +2092,12 @@ export class OpenCodeServerHarness
       this.currentWorkflowPhase = command.data.workflowPhase;
     }
 
-    if (command.data.queueOnly || this.inFlight) {
+    if (
+      command.data.queueOnly ||
+      this.inFlight ||
+      this.isProviderRateLimitBackoffPending() ||
+      this.providerErrorRecoveryQueuedPromptId !== null
+    ) {
       // True native steering: OpenCode accepts prompt_async on a session with
       // an active turn and the loop picks the message up between steps — no
       // abort, so in-flight work (tools, subagents, delivery) survives the
@@ -2060,6 +2106,9 @@ export class OpenCodeServerHarness
       // inside that tool's deferred, never reaches the next step, and a
       // natively injected prompt would sit unseen forever. Abort-and-replay
       // instead so the agent actually receives the message.
+      // During provider rate-limit backoff the session is not in-flight, but
+      // direct submission must still wait for the continue prompt timer so a
+      // follow-up doesn't skip ahead of the automatic retry.
       if (
         this.inFlight &&
         command.data.autoSteerWhenQueued &&
@@ -2114,7 +2163,19 @@ export class OpenCodeServerHarness
 
       if (command.data.autoSteerWhenQueued) {
         this.prompts.prioritize(queuedId);
-        await this.interruptForQueuedReplay();
+        // Steers use prioritize() so they usually jump the FIFO queue, but
+        // during rate-limit backoff the invisible continue prompt must stay
+        // first so we don't replay the user message before the automatic
+        // retry runs (and then drain a stale Continue afterward). The same
+        // ordering applies while a provider-error retry awaits session idle.
+        this.frontloadProviderRateLimitContinueIfQueued();
+        this.frontloadProviderErrorRecoveryIfQueued();
+        if (
+          !this.isProviderRateLimitBackoffPending() &&
+          this.providerErrorRecoveryQueuedPromptId === null
+        ) {
+          await this.interruptForQueuedReplay();
+        }
       }
 
       return;
@@ -2141,14 +2202,22 @@ export class OpenCodeServerHarness
       this.inFlight = false;
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
+      this.clearProviderErrorRecoveryState();
       this.pendingUserInputRequests.clear();
       this.clearAllExecuteToolProgress();
       return;
     }
 
     const cancelledBy = command?.data?.cancelledBy;
-    const hadActiveTurn =
+    const hadInFlightOrPendingQuestion =
       this.inFlight || this.pendingUserInputRequests.size > 0;
+    // Also treat rate-limit backoff as an active recoverable turn so an
+    // explicit user cancel during the wait still leaves a cancel marker and
+    // clears the automatic retry instead of silently dropping it.
+    const hadActiveTurn =
+      hadInFlightOrPendingQuestion ||
+      this.isProviderRateLimitBackoffPending() ||
+      this.providerErrorRecoveryQueuedPromptId !== null;
 
     // Aborting an in-flight turn makes OpenCode emit a MessageAbortedError on the
     // session.error event. For an explicit cancel that's expected, not a failure
@@ -2164,7 +2233,7 @@ export class OpenCodeServerHarness
     // cancel point, then drop the trailing finalize/part events OpenCode
     // emits for the aborted message — without this, that content re-emerges
     // in the transcript after the cancel.
-    if (hadActiveTurn) {
+    if (hadInFlightOrPendingQuestion) {
       await this.flushAssistantMessageForCancel(sessionId);
     }
     this.suppressAssistantOutputUntilNextPrompt = true;
@@ -2172,6 +2241,7 @@ export class OpenCodeServerHarness
     this.finalizedAssistantTurn = null;
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
+    this.clearProviderErrorRecoveryState();
     // Abandoned questions get an explicit cancelled response so surfaces
     // that clear pending state on request_user_input_response (Slack,
     // Linear, the web store) drop them, and late answers are rejected via
@@ -2921,13 +2991,19 @@ export class OpenCodeServerHarness
       resolution,
     });
 
-    if (this.inFlight) {
+    if (this.inFlight || this.providerErrorRecoveryQueuedPromptId !== null) {
       const queuedId = this.prompts.enqueue({
         text: responseText,
         visibleInTranscript: false,
         userId: command.data.userId,
       });
       this.prompts.prioritize(queuedId);
+
+      if (this.providerErrorRecoveryQueuedPromptId !== null) {
+        this.frontloadProviderErrorRecoveryIfQueued();
+        return;
+      }
+
       await this.interruptForQueuedReplay();
       return;
     }
@@ -3115,6 +3191,7 @@ export class OpenCodeServerHarness
     this.inFlight = false;
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
+    this.clearProviderErrorRecoveryState();
     this.pendingUserInputRequests.clear();
     this.clearAllExecuteToolProgress();
     this.runtimeEvents.taskStarted(sessionId);
@@ -3431,6 +3508,9 @@ export class OpenCodeServerHarness
     const statusType = asString(status?.type);
 
     if (statusType === 'busy' || statusType === 'retry') {
+      // If OpenCode omitted the paired session.idle event, do not let a stale
+      // guard consume the retry's eventual idle transition.
+      this.ignoreNextProviderRecoverySessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3441,6 +3521,10 @@ export class OpenCodeServerHarness
     }
 
     if (statusType === 'idle') {
+      if (await this.drainProviderErrorRecoveryAfterIdle('session_status')) {
+        return;
+      }
+
       await this.finishCurrentTurn();
     }
   }
@@ -3468,6 +3552,15 @@ export class OpenCodeServerHarness
       this.sessionId = sessionId;
     }
 
+    if (this.ignoreNextProviderRecoverySessionIdle) {
+      this.ignoreNextProviderRecoverySessionIdle = false;
+      return;
+    }
+
+    if (await this.drainProviderErrorRecoveryAfterIdle('session_idle')) {
+      return;
+    }
+
     await this.finishCurrentTurn();
   }
 
@@ -3492,6 +3585,23 @@ export class OpenCodeServerHarness
       return;
     }
 
+    const isProviderRateLimit =
+      !!sessionId && isOpenCodeProviderRateLimitError(error);
+
+    if (sessionId && isProviderRateLimit) {
+      if (this.providerRateLimitRetryCount < this.providerRateLimitMaxRetries) {
+        await this.recoverProviderRateLimit(sessionId, error);
+        return;
+      }
+    } else if (sessionId) {
+      const recovery = getOpenCodeProviderErrorRecovery(error);
+
+      if (recovery && this.providerErrorRecoveryCount < recovery.maxRetries) {
+        await this.recoverProviderSessionError(sessionId, error, recovery);
+        return;
+      }
+    }
+
     if (sessionId) {
       this.logger.error(
         `OpenCode session error sessionId=${sessionId}: ${JSON.stringify(error ?? {})}`,
@@ -3502,6 +3612,7 @@ export class OpenCodeServerHarness
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
+      this.clearProviderErrorRecoveryState();
       this.pendingUserInputRequests.clear();
       this.clearAllExecuteToolProgress();
       this.runtimeEvents.taskAborted(sessionId);
@@ -3509,6 +3620,175 @@ export class OpenCodeServerHarness
 
     await this.cleanupVisualAttachmentDirectories();
     this.inFlight = false;
+  }
+
+  /**
+   * Most provider session errors invalidate one model turn rather than the
+   * OpenCode session. Retry them in-place with a bounded invisible continue so
+   * a transient provider response cannot abort the enclosing Roomote task.
+   */
+  private async recoverProviderSessionError(
+    sessionId: string,
+    error: unknown,
+    recovery: OpenCodeProviderErrorRecovery,
+  ): Promise<void> {
+    this.providerErrorRecoveryCount += 1;
+    const attemptNumber = this.providerErrorRecoveryCount;
+
+    this.logger.warn(
+      `OpenCode recoverable provider error kind=${recovery.kind} sessionId=${sessionId} attempt=${attemptNumber}/${recovery.maxRetries}: ${JSON.stringify(error ?? {})}`,
+    );
+
+    this.runtimeEvents.assistantMessage({
+      sessionId,
+      text: formatOpenCodeProviderErrorRetryNoticeText({
+        kind: recovery.kind,
+        attemptNumber,
+        maxAttempts: recovery.maxRetries,
+      }),
+    });
+
+    // Keep partial output and visible queued follow-ups, but suppress trailing
+    // events from the rejected assistant message before submitting the
+    // invisible recovery prompt at the front of the queue.
+    this.suppressAssistantOutputUntilNextPrompt = true;
+    this.inFlight = false;
+    this.finalizedAssistantTurn = null;
+    this.clearAllExecuteToolProgress();
+
+    const queuedId = this.prompts.enqueue({
+      text: recovery.promptText,
+      visibleInTranscript: false,
+    });
+    this.prompts.prioritize(queuedId);
+    this.providerErrorRecoveryQueuedPromptId = queuedId;
+  }
+
+  /**
+   * OpenCode can surface provider 429s as UnknownError JSON (for example
+   * OpenRouter `rate_limit_exceeded`) that skip its internal APIError retry
+   * loop and emit session.error. Recover by backing off, keeping the queue,
+   * and submitting an invisible continue prompt instead of aborting the task.
+   */
+  private async recoverProviderRateLimit(
+    sessionId: string,
+    error: unknown,
+  ): Promise<void> {
+    this.providerRateLimitRetryCount += 1;
+    const attemptNumber = this.providerRateLimitRetryCount;
+    const delayMs = resolveOpenCodeRateLimitRetryDelayMs({
+      error,
+      attemptNumber,
+      baseDelayMs: this.providerRateLimitBaseDelayMs,
+      maxDelayMs: this.providerRateLimitMaxDelayMs,
+    });
+
+    this.logger.warn(
+      `OpenCode provider rate limit sessionId=${sessionId} attempt=${attemptNumber}/${this.providerRateLimitMaxRetries} delayMs=${delayMs}: ${JSON.stringify(error ?? {})}`,
+    );
+
+    this.runtimeEvents.assistantMessage({
+      sessionId,
+      text: formatOpenCodeRateLimitRetryNoticeText({
+        attemptNumber,
+        maxAttempts: this.providerRateLimitMaxRetries,
+        delayMs,
+      }),
+    });
+
+    // Keep whatever partial output already streamed, drop trailing residual
+    // from the failed message, and leave queued follow-ups in place.
+    this.suppressAssistantOutputUntilNextPrompt = true;
+    this.inFlight = false;
+    this.finalizedAssistantTurn = null;
+    this.clearAllExecuteToolProgress();
+    this.clearProviderRateLimitRetryTimer();
+
+    const queuedId = this.prompts.enqueue({
+      text: OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT,
+      visibleInTranscript: false,
+    });
+    this.prompts.prioritize(queuedId);
+
+    this.providerRateLimitRetryTimer = setTimeout(() => {
+      this.providerRateLimitRetryTimer = null;
+      void this.drainQueuedPrompts().catch((drainError: unknown) => {
+        this.logger.error(
+          `Failed to drain OpenCode rate-limit continue prompt: ${
+            drainError instanceof Error
+              ? drainError.message
+              : String(drainError)
+          }`,
+        );
+      });
+    }, delayMs);
+    this.providerRateLimitRetryTimer.unref?.();
+  }
+
+  private clearProviderRateLimitRetryTimer(): void {
+    if (!this.providerRateLimitRetryTimer) {
+      return;
+    }
+
+    clearTimeout(this.providerRateLimitRetryTimer);
+    this.providerRateLimitRetryTimer = null;
+  }
+
+  private clearProviderErrorRecoveryState(): void {
+    this.clearProviderRateLimitRetryTimer();
+    this.providerRateLimitRetryCount = 0;
+    this.providerErrorRecoveryCount = 0;
+    this.providerErrorRecoveryQueuedPromptId = null;
+    this.ignoreNextProviderRecoverySessionIdle = false;
+  }
+
+  private async drainProviderErrorRecoveryAfterIdle(
+    source: 'session_status' | 'session_idle',
+  ): Promise<boolean> {
+    const queuedPromptId = this.providerErrorRecoveryQueuedPromptId;
+
+    if (!queuedPromptId) {
+      return false;
+    }
+
+    // OpenCode emits session.error before the failed runner reaches idle. Do
+    // not submit the retry until that idle boundary or prompt_async can append
+    // it to the dying run without starting a fresh model loop.
+    this.providerErrorRecoveryQueuedPromptId = null;
+    // OpenCode 1.17 emits session.status(idle) followed by session.idle for a
+    // single transition. Consume that paired legacy event exactly once so it
+    // cannot finish the recovery turn that is about to start.
+    this.ignoreNextProviderRecoverySessionIdle = source === 'session_status';
+    this.inFlight = false;
+    this.prompts.prioritize(queuedPromptId);
+    await this.drainQueuedPrompts();
+    return true;
+  }
+
+  private frontloadProviderRateLimitContinueIfQueued(): void {
+    const continueQueuedId = this.prompts
+      .snapshot()
+      .find(
+        (message) =>
+          message.text === OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT &&
+          message.visibleInTranscript === false,
+      )?.id;
+
+    if (!continueQueuedId) {
+      return;
+    }
+
+    this.prompts.prioritize(continueQueuedId);
+  }
+
+  private frontloadProviderErrorRecoveryIfQueued(): void {
+    if (this.providerErrorRecoveryQueuedPromptId) {
+      this.prompts.prioritize(this.providerErrorRecoveryQueuedPromptId);
+    }
+  }
+
+  private isProviderRateLimitBackoffPending(): boolean {
+    return this.providerRateLimitRetryTimer !== null;
   }
 
   private handleMessagePartUpdated(payload: OpenCodeEventPayload): void {
@@ -3874,6 +4154,13 @@ export class OpenCodeServerHarness
       return;
     }
 
+    // A late session.idle during rate-limit backoff must not complete the turn
+    // or drain the continue prompt before the intended delay elapses.
+    if (this.isProviderRateLimitBackoffPending()) {
+      this.inFlight = false;
+      return;
+    }
+
     const finalized =
       (await this.finalizeLatestAssistantMessage()) ??
       this.finalizedAssistantTurn;
@@ -3881,6 +4168,11 @@ export class OpenCodeServerHarness
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
+    // A completed turn means the model recovered past any prior rate-limit
+    // or provider-error hop; reset so a later failure gets a fresh bounded
+    // automatic-retry budget.
+    this.providerRateLimitRetryCount = 0;
+    this.providerErrorRecoveryCount = 0;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
     if (sessionId) {
@@ -4162,7 +4454,12 @@ export class OpenCodeServerHarness
   }
 
   private async drainQueuedPrompts(): Promise<void> {
-    if (this.inFlight || this.disposed) {
+    if (
+      this.inFlight ||
+      this.disposed ||
+      this.isProviderRateLimitBackoffPending() ||
+      this.providerErrorRecoveryQueuedPromptId !== null
+    ) {
       return;
     }
 

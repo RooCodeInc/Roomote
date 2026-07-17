@@ -2,17 +2,32 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
+  buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_GATEWAY_PROVIDER_ID,
+  CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
-  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  DEFAULT_BEDROCK_MANTLE_REGION,
+  DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  getInferenceGatewayProvider,
+  getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
-  isInlineGoogleCredentialsValue,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_REGION_PATTERN,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
+  type InferenceGatewayProvider,
+  isTaskModelIdDisabled,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
+  OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
   type ReasoningEffort,
@@ -22,6 +37,7 @@ import { SLACK_SILENCE_HOOK_SCRIPT } from './slack-silence-hook-script';
 import { SLACK_POSTING_TOOL_EXCLUSIONS } from './slack-posting-tools';
 import { SLACK_STOP_HOOK_SCRIPT } from './slack-stop-hook-script';
 import { OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT } from './opencode-slack-hooks-plugin-script';
+import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gateway-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
   createProofRunnerAgentPrompt,
@@ -48,13 +64,9 @@ const OPENCODE_CONFIG_DIR_NAME = 'opencode';
 const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
   'google-application-credentials.json';
 
+export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
+
 const OPENROUTER_PROVIDER_ID = 'openrouter';
-
-const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
-
-const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
-
-const AWS_REGION_PATTERN = /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -157,6 +169,9 @@ const ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME =
 const ROOMOTE_OPENCODE_PLUGINS_DIR_NAME = 'plugins';
 
 const ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME = 'roomote-slack-hooks.js';
+
+const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
+  'roomote-chatgpt-gateway.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -524,14 +539,18 @@ function createOpenCodeMcpConfig(
   );
 }
 
-function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
+function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   const pluginsDir = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_PLUGINS_DIR_NAME,
   );
-  const pluginPath = path.join(
+  const slackPluginPath = path.join(
     pluginsDir,
     ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME,
+  );
+  const chatGptGatewayPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME,
   );
   const silenceHookPath = path.join(
     openCodeConfigDir,
@@ -543,7 +562,12 @@ function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
   );
 
   fs.mkdirSync(pluginsDir, { recursive: true });
-  fs.writeFileSync(pluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(slackPluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(
+    chatGptGatewayPluginPath,
+    OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT,
+    'utf8',
+  );
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -564,7 +588,7 @@ function mergeBedrockMantleProviderConfig(
   const mantleModelIds = [
     ...new Set(
       modelIds.flatMap((modelId) => {
-        const prefix = `${BEDROCK_MANTLE_PROVIDER_ID}/`;
+        const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`;
         const normalized = modelId?.trim();
 
         return normalized?.startsWith(prefix)
@@ -580,13 +604,15 @@ function mergeBedrockMantleProviderConfig(
 
   const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
 
-  if (!AWS_REGION_PATTERN.test(region)) {
+  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
     throw new Error(
       `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
     );
   }
 
-  const existingProvider = asRecord(providerConfig[BEDROCK_MANTLE_PROVIDER_ID]);
+  const existingProvider = asRecord(
+    providerConfig[BEDROCK_MANTLE_OPENCODE_PROVIDER_ID],
+  );
   const existingOptions = asRecord(existingProvider.options);
   const existingModels = asRecord(existingProvider.models);
   const models = Object.fromEntries(
@@ -601,7 +627,7 @@ function mergeBedrockMantleProviderConfig(
 
   return {
     ...providerConfig,
-    [BEDROCK_MANTLE_PROVIDER_ID]: {
+    [BEDROCK_MANTLE_OPENCODE_PROVIDER_ID]: {
       ...existingProvider,
       npm: '@ai-sdk/anthropic',
       name: 'Amazon Bedrock',
@@ -613,6 +639,110 @@ function mergeBedrockMantleProviderConfig(
       models: {
         ...existingModels,
         ...models,
+      },
+    },
+  };
+}
+
+/**
+ * When the dequeue env carries an inference gateway URL, rebase each
+ * gateway-covered provider that a selected model uses onto the gateway. The
+ * SDK authenticates with the run token (already in the harness env), which
+ * the gateway exchanges for the deployment's provider key server-side, so
+ * the raw key never enters the sandbox.
+ */
+function mergeInferenceGatewayProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+): Record<string, unknown> {
+  const gatewayUrl = runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]?.trim();
+  const servedKeyNames = parseInferenceGatewayKeys(
+    runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+  );
+  const routeChatGptThroughGateway =
+    runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+
+  if (
+    !gatewayUrl ||
+    (servedKeyNames.length === 0 && !routeChatGptThroughGateway)
+  ) {
+    return providerConfig;
+  }
+
+  // Rebase exactly the providers whose keys the gateway is serving (the same
+  // set dequeue withheld from the sandbox), so the withheld set and the
+  // rebased set stay identical regardless of which models reference them.
+  const gatewayProviders = new Map(
+    servedKeyNames.flatMap((keyName) => {
+      const provider = getInferenceGatewayProviderByEnvVarName(keyName);
+
+      return provider ? [[provider.id, provider] as const] : [];
+    }),
+  );
+
+  let merged = providerConfig;
+
+  for (const [providerId, gatewayProvider] of gatewayProviders) {
+    // ChatGPT-subscription OAuth authenticates through opencode's Codex
+    // plugin directly; leave the openai provider on its default base URL
+    // when a subscription record is present in the sandbox (non-gateway mode).
+    if (
+      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
+      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
+    ) {
+      continue;
+    }
+
+    merged = rebaseProviderOntoGateway(
+      merged,
+      providerId,
+      gatewayUrl,
+      gatewayProvider,
+    );
+  }
+
+  // ChatGPT subscription served by the gateway: rebase the OpenCode `openai`
+  // provider onto the gateway's ChatGPT segment. The gateway mints the OAuth
+  // access token and rewrites to the Codex backend, so the sandbox holds only
+  // the run token and never the OAuth record.
+  if (routeChatGptThroughGateway) {
+    const chatGptProvider = getInferenceGatewayProvider(
+      CHATGPT_GATEWAY_PROVIDER_ID,
+    );
+
+    if (chatGptProvider) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        CHATGPT_OPENCODE_PROVIDER_ID,
+        gatewayUrl,
+        chatGptProvider,
+      );
+    }
+  }
+
+  return merged;
+}
+
+function rebaseProviderOntoGateway(
+  providerConfig: Record<string, unknown>,
+  openCodeProviderId: string,
+  gatewayUrl: string,
+  gatewayProvider: InferenceGatewayProvider,
+): Record<string, unknown> {
+  const existingProvider = asRecord(providerConfig[openCodeProviderId]);
+  const existingOptions = asRecord(existingProvider.options);
+
+  return {
+    ...providerConfig,
+    [openCodeProviderId]: {
+      ...existingProvider,
+      options: {
+        ...existingOptions,
+        baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+          gatewayUrl,
+          gatewayProvider,
+        ),
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
       },
     },
   };
@@ -842,13 +972,15 @@ function createVisualModelInstructions(): string {
 
 function createJudgeModelInstructions(): string {
   return [
-    `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is always configured for implementation review support.`,
+    `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is configured for implementation completion checks only.`,
     '',
     'When `R_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
     '',
     `After implementation and validation, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
     '',
     'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, and the validation state instead of asking for an open-ended repo review.',
+    '',
+    'Do not spawn the judge subagent when the current task is itself a pull-request or workspace code review (`review-code`, PR review, or PR re-review). Those workflows are already the review pass and must produce findings directly.',
     '',
     'Keep judge tool use minimal and targeted. Prefer the supplied diff, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
     '',
@@ -858,6 +990,21 @@ function createJudgeModelInstructions(): string {
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
   ].join('\n');
+}
+
+/**
+ * PR review/re-review tasks already run as the code-reviewer on the review
+ * model. Configuring and instructing a nested judge pass would double the
+ * review cost without adding a useful second role.
+ */
+function shouldConfigureJudgeSubagent(
+  runtimeEnv: Record<string, string>,
+): boolean {
+  const taskType = runtimeEnv.ROOMOTE_TASK_TYPE?.trim();
+  return (
+    taskType !== TaskPayloadKind.GithubPrReview &&
+    taskType !== TaskPayloadKind.GithubPrReviewSync
+  );
 }
 
 function createAdvisorModelInstructions(): string {
@@ -1009,17 +1156,19 @@ function resolveModelBackedOpenCodeConfig(
         }
       : undefined;
   const judgeModel = codeReviewModel ?? effectiveCodingModel;
-  const judgeAgent = {
-    [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: createJudgeAgentConfig(
-      judgeModel,
-      codeReviewModel && codeReviewModelReasoningEffort
-        ? buildOpenCodeModelReasoningOptions(
-            codeReviewModel,
-            codeReviewModelReasoningEffort,
-          )
-        : null,
-    ),
-  };
+  const judgeAgent = shouldConfigureJudgeSubagent(runtimeEnv)
+    ? {
+        [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: createJudgeAgentConfig(
+          judgeModel,
+          codeReviewModel && codeReviewModelReasoningEffort
+            ? buildOpenCodeModelReasoningOptions(
+                codeReviewModel,
+                codeReviewModelReasoningEffort,
+              )
+            : null,
+        ),
+      }
+    : undefined;
   // The advisor subagent shares the planning/advisor model role. It defaults
   // to the coding model when no advisor model is configured, and the advisor
   // reasoning level (default high) applies in either case so consultations
@@ -1080,7 +1229,7 @@ function resolveModelBackedOpenCodeConfig(
   };
   const agent = {
     ...(visualAgent ?? {}),
-    ...judgeAgent,
+    ...(judgeAgent ?? {}),
     ...advisorAgent,
     ...(exploreAgent ?? {}),
     ...architectAgent,
@@ -1132,18 +1281,25 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeBedrockMantleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+  const configuredModelIds = [
+    effectiveCodingModel,
+    model,
+    smallModel,
+    visionModel,
+    codeReviewModel,
+    exploreModel,
+    planningModel,
+  ];
+  const providerConfig = mergeInferenceGatewayProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeOpenRouterVariantAliasModels(
+        providerReasoningConfig,
+        variantAliases,
+      ),
+      runtimeEnv,
+      configuredModelIds,
+    ),
     runtimeEnv,
-    [
-      effectiveCodingModel,
-      model,
-      smallModel,
-      visionModel,
-      codeReviewModel,
-      exploreModel,
-      planningModel,
-    ],
   );
 
   return {
@@ -1190,7 +1346,7 @@ function loadOperatorOpenCodeConfig({
 function resolveConfiguredPromptModel(model?: string): string | undefined {
   const resolvedModel = model?.trim();
 
-  if (!resolvedModel) {
+  if (!resolvedModel || isTaskModelIdDisabled(resolvedModel)) {
     return undefined;
   }
 
@@ -1248,7 +1404,7 @@ export function generateOpenCodeConfig({
     OPENCODE_CONFIG_DIR_NAME,
   );
   fs.mkdirSync(openCodeConfigDir, { recursive: true });
-  materializeInlineGoogleCredentials(runtimeEnv, homeDir);
+  removeDisabledProviderConfiguration(runtimeEnv, homeDir);
   const resolvedModel = resolveConfiguredPromptModel(model);
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
@@ -1265,7 +1421,7 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  writeOpenCodeSlackHookFiles(openCodeConfigDir);
+  writeOpenCodeManagedFiles(openCodeConfigDir);
 
   if (developerInstructionsContent) {
     const developerInstructionsPath = path.join(
@@ -1408,7 +1564,7 @@ export function generateOpenCodeConfig({
  */
 export function resolveOpenCodeDataDir(
   homeDir: string,
-  runtimeEnv: Record<string, string>,
+  runtimeEnv: Record<string, string | undefined>,
 ): string {
   const xdgDataHome = runtimeEnv.XDG_DATA_HOME?.trim();
 
@@ -1419,23 +1575,89 @@ export function resolveOpenCodeDataDir(
 }
 
 /**
- * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
- * file path. Roomote accepts pasted JSON, so materialize it at the common
- * config-generation boundary before any provider process can observe it.
- * Throw on write failures rather than forwarding raw credentials to OpenCode,
- * whose file-not-found errors may echo the credential value.
+ * Credential files under the OpenCode data dir. The ChatGPT subscription
+ * `auth.json` is active only outside gateway mode; the Google service-account
+ * path is retained here solely to scrub files left by snapshots created while
+ * Vertex was enabled.
  */
-function materializeInlineGoogleCredentials(
+export function resolveOpenCodeCredentialFilePaths(
+  homeDir: string,
+  runtimeEnv: Record<string, string | undefined>,
+): string[] {
+  const dataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
+
+  return [
+    path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
+    path.join(dataDir, GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME),
+  ];
+}
+
+/**
+ * Rewrite the OpenCode auth file the pre-snapshot scrub removed, for
+ * a sandbox that survived an abandoned snapshot attempt. Normally these files
+ * are materialized once during harness bootstrap and OpenCode persists OAuth
+ * refreshes back to auth.json, so restoring the same path from the
+ * deployment's current env value heals the live harness without a restart.
+ */
+export function rematerializeOpenCodeCredentialFiles(options: {
+  homeDir: string;
+  runtimeEnv: Record<string, string>;
+  logger: { info(message: string): void; warn(message: string): void };
+}): { failedSteps: string[] } {
+  const failedSteps: string[] = [];
+  const env = { ...options.runtimeEnv };
+
+  const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+
+  if (authContent) {
+    try {
+      const dataDir = resolveOpenCodeDataDir(options.homeDir, env);
+      fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(
+        path.join(dataDir, OPENCODE_AUTH_FILE_NAME),
+        authContent,
+        { encoding: 'utf8', mode: 0o600 },
+      );
+    } catch (error) {
+      options.logger.warn(
+        `[rematerializeOpenCodeCredentialFiles] Failed to rewrite OpenCode auth file: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      failedSteps.push('rewrite OpenCode auth file');
+    }
+  }
+
+  return { failedSteps };
+}
+
+/**
+ * Remove disabled provider models and credentials before OpenCode starts.
+ * Also delete any Vertex credential file left by a pre-disable snapshot. File
+ * removal fails closed so a stale long-lived service account can never survive
+ * into a task.
+ */
+function removeDisabledProviderConfiguration(
   runtimeEnv: Record<string, string>,
   homeDir: string,
 ): void {
-  const credentialsValue =
-    runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
-
-  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
-    return;
+  for (const envVarName of DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES) {
+    delete runtimeEnv[envVarName];
   }
+  for (const modelEnvVarName of [
+    'R_MODEL',
+    'R_SMALL_MODEL',
+    'R_VISION_MODEL',
+    'R_CODE_REVIEW_MODEL',
+    'R_EXPLORE_MODEL',
+    'R_PLANNING_MODEL',
+  ] as const) {
+    const modelId = runtimeEnv[modelEnvVarName];
 
+    if (modelId && isTaskModelIdDisabled(modelId)) {
+      delete runtimeEnv[modelEnvVarName];
+    }
+  }
   const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
   const credentialsFilePath = path.join(
     openCodeDataDir,
@@ -1443,22 +1665,25 @@ function materializeInlineGoogleCredentials(
   );
 
   try {
-    fs.mkdirSync(openCodeDataDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(credentialsFilePath, credentialsValue, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
+    fs.rmSync(credentialsFilePath, { force: true });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+    ) {
+      return;
+    }
+
     const message =
       error instanceof Error
         ? error.message
-        : 'Unknown credentials write error';
+        : 'Unknown credentials remove error';
     throw new Error(
-      `Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} before starting OpenCode: ${message}`,
+      `Failed to remove disabled Google Vertex credentials before starting OpenCode: ${message}`,
+      { cause: error },
     );
   }
-
-  runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] = credentialsFilePath;
 }
 
 function normalizePackagedFolderName(

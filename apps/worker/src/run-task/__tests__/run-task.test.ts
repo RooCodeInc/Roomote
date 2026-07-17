@@ -3442,9 +3442,12 @@ describe('runTask', () => {
         buildOpenCodeHarnessEnv: vi.fn(() => ({
           R_MODEL: 'openrouter/openai/gpt-5.4',
           R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
+          R_VISION_MODEL: 'mistral/pixtral-large-latest',
           R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
           OPENROUTER_API_KEY: 'openrouter-key',
           CUSTOM_PROVIDER_API_KEY: 'custom-key',
+          GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+          MISTRAL_API_KEY: 'mistral-key',
           JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
         })),
       } as never,
@@ -3465,6 +3468,15 @@ describe('runTask', () => {
     expect(
       createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
     ).not.toHaveProperty('JOB_AUTH_PRIVATE_KEY');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('MISTRAL_API_KEY');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('R_VISION_MODEL');
   });
 
   it('isolates the task runtime HOME while keeping packaged skill sourcing on the worker HOME', async () => {

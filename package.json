@@ -1,6 +1,6 @@
 {
   "name": "roomote",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "license": "FCL-1.0-ALv2",
   "packageManager": "pnpm@10.29.3",
   "engines": {
@@ -36,8 +36,7 @@
     "dev": "pnpm --silent --filter @roomote/dev dev",
     "doctor": "pnpm --filter @roomote/dev run doctor",
     "storybook": "pnpm --filter @roomote/web storybook",
-    "evals": "pnpm eval:router && pnpm eval:router:followup && pnpm eval:authorship",
-    "eval:authorship": "pnpm --filter @roomote/cloud-agents eval:authorship",
+    "evals": "pnpm eval:router && pnpm eval:router:followup",
     "eval:router": "pnpm --filter @roomote/cloud-agents eval:router",
     "eval:router:followup": "pnpm --filter @roomote/cloud-agents eval:router:followup",
     "eval:router:view": "pnpm --filter @roomote/cloud-agents eval:router:view",

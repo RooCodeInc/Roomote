@@ -5,6 +5,7 @@ import {
   getEnabledTaskModels,
   getTaskModelCatalog,
   getTaskModelProviderId,
+  isTaskModelIdDisabled,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
 } from './task-models';
@@ -45,6 +46,9 @@ describe('normalizeTaskModelId', () => {
     expect(normalizeTaskModelId('google-vertex/gemini-3.5-flash')).toBe(
       'google-vertex/gemini-3.5-flash',
     );
+    expect(normalizeTaskModelId('mistral/mistral-large-latest')).toBe(
+      'mistral/mistral-large-latest',
+    );
     expect(normalizeTaskModelId('google/gemini-3.5-flash')).toBe(
       'google/gemini-3.5-flash',
     );
@@ -66,6 +70,15 @@ describe('getTaskModelProviderId', () => {
       'anthropic',
     );
     expect(getTaskModelProviderId('')).toBeNull();
+  });
+
+  it('identifies disabled direct-provider model ids', () => {
+    expect(isTaskModelIdDisabled('google-vertex/gemini-3.5-flash')).toBe(true);
+    expect(isTaskModelIdDisabled('mistral/mistral-large-latest')).toBe(true);
+    expect(isTaskModelIdDisabled('openrouter/mistralai/mistral-large')).toBe(
+      false,
+    );
+    expect(isTaskModelIdDisabled('google/gemini-3.5-flash')).toBe(false);
   });
 });
 
@@ -133,5 +146,31 @@ describe('task model settings', () => {
     expect(getEnabledTaskModels(settings).map((model) => model.id)).toEqual([
       'openrouter/openai/gpt-5.6',
     ]);
+  });
+
+  it('removes disabled direct-provider models from persisted settings', () => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        buildTaskModelOption({
+          id: 'google-vertex/gemini-3.5-flash',
+          displayName: 'Gemini 3.5 Flash on Vertex',
+        }),
+        buildTaskModelOption({
+          id: 'mistral/mistral-large-latest',
+          displayName: 'Mistral Large',
+        }),
+      ],
+      allowedModelIds: [
+        'google-vertex/gemini-3.5-flash',
+        'mistral/mistral-large-latest',
+      ],
+      defaultModelId: 'google-vertex/gemini-3.5-flash',
+    });
+
+    expect(settings.models).toEqual(DEFAULT_TASK_MODEL_SETTINGS.models);
+    expect(settings.allowedModelIds).toHaveLength(1);
+    expect(settings.allowedModelIds[0]).not.toMatch(/^google-vertex\//u);
+    expect(settings.allowedModelIds[0]).not.toMatch(/^mistral\//u);
+    expect(settings.defaultModelId).not.toMatch(/^google-vertex\//u);
   });
 });
