@@ -20,7 +20,7 @@ import {
   taskRuns,
   tasks,
   markTaskStartParallelCountEndedAt,
-  resolveEffectiveModelRuntimeEnv,
+  resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
   stringifyDecryptedEnvVarValue,
   syncTaskStateFromRuns,
@@ -216,7 +216,7 @@ function withLegacySnapshotModelEnvAliases(
 /**
  * Removes model-runtime values from the generic deployment env stream. Model
  * configuration and provider credentials are reintroduced exclusively from
- * resolveEffectiveModelRuntimeEnv below, making that resolver the allowlist
+ * resolveSandboxModelRuntimeEnv below, making that resolver the allowlist
  * boundary while preserving unrelated task variables from the shared table.
  *
  * R_MODEL_ENV_KEYS may name a custom provider credential that is not in the
@@ -248,11 +248,8 @@ export async function fetchResolvedRuntimeEnvVars(
 ): Promise<Record<string, string>> {
   const envVars =
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
-  const resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv({
+  const resolvedModelRuntimeEnv = await resolveSandboxModelRuntimeEnv({
     deploymentEnvVars: envVars,
-    // Sandbox-bound env always routes inference through the gateway so
-    // provider keys stay on the control plane.
-    inferenceGateway: true,
   });
 
   return redactControlPlaneEnvVars(

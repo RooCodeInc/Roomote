@@ -8,7 +8,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens,
   mockCreateTaskRunGiteaCredentials,
   mockCreateTaskRunAdoCredentials,
-  mockResolveEffectiveModelRuntimeEnv,
+  mockResolveSandboxModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
 } = vi.hoisted(() => ({
@@ -18,7 +18,7 @@ const {
   mockCreateTaskRunScopedGitLabTokens: vi.fn(),
   mockCreateTaskRunGiteaCredentials: vi.fn(),
   mockCreateTaskRunAdoCredentials: vi.fn(),
-  mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  mockResolveSandboxModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
 }));
@@ -54,8 +54,8 @@ vi.mock('@roomote/db/server', () => ({
   // fall through to the GitHub default. Provider-stamped payloads never reach
   // it. Individual tests override with mockResolvedValueOnce when needed.
   resolveWorkspaceSourceControlProvider: vi.fn(async () => undefined),
-  resolveEffectiveModelRuntimeEnv: (...args: unknown[]) =>
-    mockResolveEffectiveModelRuntimeEnv(...args),
+  resolveSandboxModelRuntimeEnv: (...args: unknown[]) =>
+    mockResolveSandboxModelRuntimeEnv(...args),
   inArray: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
   resolveTaskAttribution: vi.fn(),
@@ -548,7 +548,7 @@ describe('redactControlPlaneEnvVars', () => {
 
 describe('fetchResolvedRuntimeEnvVars', () => {
   it('mirrors resolved model env to legacy ROOMOTE_* aliases for pre-rename snapshot workers', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       R_MODEL_REASONING_EFFORT: 'high',
       R_MODEL_ENV_KEYS: 'ANTHROPIC_API_KEY',
@@ -571,7 +571,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   });
 
   it('derives legacy aliases from the resolved model env', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
     });
 
@@ -584,7 +584,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   });
 
   it('admits no raw provider keys when the gateway is enabled', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY',
     });
@@ -602,7 +602,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   });
 
   it('admits only resolver-selected provider keys when the resolver returns raw keys', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       ANTHROPIC_API_KEY: 'sk-ant',
     });
@@ -624,7 +624,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
   });
 
   it('treats custom R_MODEL_ENV_KEYS credentials as resolver-managed', async () => {
-    mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'custom/test-model',
       R_MODEL_ENV_KEYS: 'CUSTOM_LLM_TOKEN',
       CUSTOM_LLM_TOKEN: 'selected-token',

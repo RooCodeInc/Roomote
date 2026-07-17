@@ -43,7 +43,10 @@ vi.mock('../schema', () => ({
   eq: vi.fn(),
 }));
 
-import { resolveEffectiveModelRuntimeEnv } from './model-runtime-config';
+import {
+  resolveEffectiveModelRuntimeEnv,
+  resolveSandboxModelRuntimeEnv,
+} from './model-runtime-config';
 
 describe('resolveEffectiveModelRuntimeEnv', () => {
   beforeEach(() => {
@@ -628,8 +631,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       }),
     );
 
-    const env = await resolveEffectiveModelRuntimeEnv({
-      inferenceGateway: true,
+    const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
       deploymentEnvVars: {},
     });
@@ -646,8 +648,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
 
-    const env = await resolveEffectiveModelRuntimeEnv({
-      inferenceGateway: true,
+    const env = await resolveSandboxModelRuntimeEnv({
       runtimeEnv: {},
       deploymentEnvVars: {},
     });
@@ -692,8 +693,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     it('withholds gateway-served keys and advertises them by name when enabled', async () => {
-      const env = await resolveEffectiveModelRuntimeEnv({
-        inferenceGateway: true,
+      const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
         deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
       });
@@ -705,7 +705,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
     });
 
-    it('keeps raw keys when the gateway option is not passed', async () => {
+    it('keeps raw keys for control-plane resolution', async () => {
       const env = await resolveEffectiveModelRuntimeEnv({
         runtimeEnv: {},
         deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
@@ -720,8 +720,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       // set it is neither served nor advertised — the dequeue redaction keys
       // off the advertised set, so a stray OPENAI_API_KEY the deployment set
       // for its own code survives into the sandbox.
-      const env = await resolveEffectiveModelRuntimeEnv({
-        inferenceGateway: true,
+      const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
         deploymentEnvVars: {
           ANTHROPIC_API_KEY: 'sk-anthropic',
@@ -771,8 +770,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
         }),
       );
 
-      const env = await resolveEffectiveModelRuntimeEnv({
-        inferenceGateway: true,
+      const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {},
         deploymentEnvVars: {
           OPENROUTER_API_KEY: 'sk-openrouter',
@@ -790,8 +788,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
 
     it('drops disabled-provider credentials even when explicitly requested', async () => {
-      const env = await resolveEffectiveModelRuntimeEnv({
-        inferenceGateway: true,
+      const env = await resolveSandboxModelRuntimeEnv({
         runtimeEnv: {
           R_MODEL_ENV_KEYS:
             'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS,MISTRAL_API_KEY',
