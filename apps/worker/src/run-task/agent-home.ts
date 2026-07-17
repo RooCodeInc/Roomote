@@ -27,6 +27,7 @@ import {
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
   type ReasoningEffort,
@@ -971,13 +972,15 @@ function createVisualModelInstructions(): string {
 
 function createJudgeModelInstructions(): string {
   return [
-    `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is always configured for implementation review support.`,
+    `A hidden OpenCode \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent is configured for implementation completion checks only.`,
     '',
     'When `R_CODE_REVIEW_MODEL` is configured, the judge uses that review model. Otherwise it falls back to the active coding model for the task.',
     '',
     `After implementation and validation, when the task has a concrete plan, checklist, or explicit requested outcome to compare against, delegate one focused compare pass to the \`${ROOMOTE_OPENCODE_JUDGE_AGENT_NAME}\` subagent with the Task tool.`,
     '',
     'Treat the judge as a narrow completion and sanity check. Start from the shipped diff, the plan, and the validation state instead of asking for an open-ended repo review.',
+    '',
+    'Do not spawn the judge subagent when the current task is itself a pull-request or workspace code review (`review-code`, PR review, or PR re-review). Those workflows are already the review pass and must produce findings directly.',
     '',
     'Keep judge tool use minimal and targeted. Prefer the supplied diff, and only read extra files to resolve a specific ambiguity or verify an obvious risk.',
     '',
@@ -987,6 +990,21 @@ function createJudgeModelInstructions(): string {
     '',
     "Do not paste the judge's full output into chat or any user-facing reply. The judge verdict is internal review material; surface at most a brief, parent-authored summary of the actionable outcome (what was fixed or what still needs attention), never the raw review dump.",
   ].join('\n');
+}
+
+/**
+ * PR review/re-review tasks already run as the code-reviewer on the review
+ * model. Configuring and instructing a nested judge pass would double the
+ * review cost without adding a useful second role.
+ */
+function shouldConfigureJudgeSubagent(
+  runtimeEnv: Record<string, string>,
+): boolean {
+  const taskType = runtimeEnv.ROOMOTE_TASK_TYPE?.trim();
+  return (
+    taskType !== TaskPayloadKind.GithubPrReview &&
+    taskType !== TaskPayloadKind.GithubPrReviewSync
+  );
 }
 
 function createAdvisorModelInstructions(): string {
@@ -1138,17 +1156,19 @@ function resolveModelBackedOpenCodeConfig(
         }
       : undefined;
   const judgeModel = codeReviewModel ?? effectiveCodingModel;
-  const judgeAgent = {
-    [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: createJudgeAgentConfig(
-      judgeModel,
-      codeReviewModel && codeReviewModelReasoningEffort
-        ? buildOpenCodeModelReasoningOptions(
-            codeReviewModel,
-            codeReviewModelReasoningEffort,
-          )
-        : null,
-    ),
-  };
+  const judgeAgent = shouldConfigureJudgeSubagent(runtimeEnv)
+    ? {
+        [ROOMOTE_OPENCODE_JUDGE_AGENT_NAME]: createJudgeAgentConfig(
+          judgeModel,
+          codeReviewModel && codeReviewModelReasoningEffort
+            ? buildOpenCodeModelReasoningOptions(
+                codeReviewModel,
+                codeReviewModelReasoningEffort,
+              )
+            : null,
+        ),
+      }
+    : undefined;
   // The advisor subagent shares the planning/advisor model role. It defaults
   // to the coding model when no advisor model is configured, and the advisor
   // reasoning level (default high) applies in either case so consultations
@@ -1209,7 +1229,7 @@ function resolveModelBackedOpenCodeConfig(
   };
   const agent = {
     ...(visualAgent ?? {}),
-    ...judgeAgent,
+    ...(judgeAgent ?? {}),
     ...advisorAgent,
     ...(exploreAgent ?? {}),
     ...architectAgent,
