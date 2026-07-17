@@ -17,7 +17,13 @@ Configure models from **Settings > Models**.
 An inference provider is the service that hosts or routes model calls. Roomote
 supports providers such as OpenRouter, Vercel AI Gateway, Baseten,
 Together AI, OpenAI, Anthropic, Moonshot AI, MiniMax, OpenCode, Amazon Bedrock,
-Google Gemini, xAI, and ChatGPT subscriptions.
+Google Gemini, xAI, ChatGPT subscriptions, and self-hosted OpenAI-compatible
+endpoints.
+
+For self-hosted inference, see [Ollama](/providers/inference/ollama),
+[vLLM](/providers/inference/vllm), and [LiteLLM](/providers/inference/litellm).
+The Roomote services and the sandbox that runs a Roomote task must both be able
+to reach the endpoint when the model provider is used for task work.
 
 You can connect more than one inference provider in the same deployment. That
 lets you mix and match models by provider instead of betting the whole

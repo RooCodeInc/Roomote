@@ -43,7 +43,12 @@
           {
             "group": "Models and Inference",
             "root": "models",
-            "pages": []
+            "expanded": true,
+            "pages": [
+              "providers/inference/litellm",
+              "providers/inference/ollama",
+              "providers/inference/vllm"
+            ]
           },
           {
             "group": "Communications",

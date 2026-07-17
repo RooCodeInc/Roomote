@@ -1,0 +1,73 @@
+---
+title: vLLM
+icon: server
+description: Serve high-throughput OpenAI-compatible models with vLLM for Roomote deployments.
+---
+
+vLLM provides an OpenAI-compatible API for models you operate yourself. Use it
+when you need higher-throughput GPU inference, want to serve a supported model
+behind your own endpoint, or need more control over batching and GPU use than a
+desktop-focused local runner provides.
+
+## Before you connect
+
+Roomote must reach the vLLM endpoint from its services and from task workers
+that receive the model configuration. Use a stable private DNS name or service
+address rather than a laptop-only address, then test it from the same network
+as the deployment.
+
+Keep the vLLM API private. The OpenAI-compatible endpoint handles prompts and
+responses and can accept credentials, so it should sit behind private
+networking or an authenticated TLS reverse proxy.
+
+## Start an OpenAI-compatible server
+
+Start vLLM with the OpenAI-compatible API server and the model you want to
+serve. This example exposes the service on all interfaces for a private network:
+
+```sh
+vllm serve <model-id> \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --api-key <long-random-secret> \
+  --max-model-len <context-tokens> \
+  --gpu-memory-utilization 0.9
+```
+
+Use `--api-key` whenever the service is reachable beyond a tightly controlled
+local network. Set `--max-model-len` to a value that fits your GPU memory and
+task context needs; an unnecessarily large value can reduce concurrency or
+prevent the model from loading. Adjust `--gpu-memory-utilization` conservatively
+when other workloads share the GPU.
+
+For tensor-parallel deployments, add `--tensor-parallel-size <gpu-count>`. For
+models that require an explicit trust decision, use `--trust-remote-code` only
+after reviewing the model repository and its revision. Do not enable it merely
+to make an unfamiliar model start.
+
+## Configure Roomote
+
+1. add an OpenAI-compatible inference provider in **Settings > Models**
+2. enter the vLLM base URL, typically ending in `/v1`
+3. provide the same API key configured for vLLM
+4. add the served model ID and enable it
+5. select it for the default coding model or a specialized role
+
+The model ID in Roomote must match the ID vLLM exposes. If you deploy a model
+under a custom served name, use that served name rather than assuming the
+repository name.
+
+## Docker deployments
+
+As with any host service, `localhost` from a Roomote container is not the
+Docker host. Run vLLM on a private shared network, use a host-gateway address,
+or route through an internal reverse proxy. Verify the URL and API key from a
+Roomote service container and a task worker before assigning the model to users.
+
+## Security and operations
+
+- terminate TLS and require authentication before traffic leaves a trusted network
+- restrict the endpoint to Roomote services and approved operators
+- pin model revisions and review remote model code before using `--trust-remote-code`
+- monitor GPU memory, queue depth, latency, and error rates as task concurrency grows
+- set request and concurrency limits at the proxy or vLLM layer to protect other workloads on the GPU host

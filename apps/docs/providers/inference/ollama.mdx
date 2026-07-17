@@ -1,0 +1,71 @@
+---
+title: Ollama
+icon: server
+description: Run locally hosted Ollama models with Roomote while keeping model traffic in your own infrastructure.
+---
+
+Ollama is a practical option when you want to run supported models on your own
+machine or network. It is best suited to local development, trusted internal
+deployments, and workloads where the host has enough CPU, memory, or GPU
+capacity for the selected model.
+
+## Before you connect
+
+Roomote connects to Ollama over HTTP. The Roomote API and controller need a
+network route to the Ollama server, and task workers need that same route when
+they receive the model configuration. Test reachability from the actual
+Roomote deployment and from a task worker, not only from your laptop.
+
+For a self-hosted deployment, expose Ollama only on a private network or behind
+an authenticated reverse proxy. Do not publish an unauthenticated Ollama port
+directly to the internet.
+
+## Configure Ollama
+
+1. install Ollama and pull the model you plan to use
+2. make the Ollama API reachable from the Roomote deployment
+3. add Ollama in **Settings > Models** and enter its base URL
+4. add the installed model by its Ollama model name and enable it
+5. select it as the default coding model or assign it to a specialized role
+
+For example, pull a model on the host that runs Ollama:
+
+```sh
+ollama pull qwen3-coder
+```
+
+The exact model name in Roomote must match the model served by Ollama. Choose a
+model with sufficient context length and tool-use quality for coding tasks;
+small local models can be useful for helper work but may be less reliable as a
+default coding model.
+
+## Docker deployments
+
+`localhost` inside a Roomote container means that container, not the Docker
+host. When Ollama runs directly on the Docker host, configure a host-reachable
+address instead of `http://localhost:11434`.
+
+On Docker Desktop, `http://host.docker.internal:11434` usually reaches a host
+service. On Linux, add a host-gateway mapping to the Roomote Compose service or
+place Ollama and Roomote on a shared private Docker network, then use the host
+gateway address or the Ollama service name. Confirm that task worker containers
+can resolve and connect to the same address.
+
+If Ollama is bound only to `127.0.0.1`, containers cannot reach it. Bind it to a
+private interface that your Roomote services can reach, and restrict access with
+firewall rules or network policy.
+
+## Verify setup
+
+1. from the Roomote host, request the Ollama tags endpoint
+2. from a Roomote container or task worker, repeat the request against the same base URL
+3. start a small Roomote task with the Ollama model selected
+4. confirm the task starts and model usage appears in the task details
+
+## Security and capacity
+
+- keep Ollama on a private network; model endpoints can expose prompts and responses
+- restrict network access to Roomote services and trusted operators
+- use a reverse proxy with authentication when the endpoint crosses network boundaries
+- size the host for model memory, concurrent tasks, and context windows; queue or limit task concurrency before the host becomes memory-bound
+- review model licenses and data-handling requirements before serving a model to a team

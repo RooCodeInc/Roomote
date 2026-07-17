@@ -1,0 +1,63 @@
+---
+title: LiteLLM
+icon: waypoints
+description: Route Roomote model traffic through a LiteLLM Proxy for central credentials, policy, and cost controls.
+---
+
+LiteLLM Proxy provides one OpenAI-compatible endpoint in front of multiple
+model providers. Use it when you want Roomote to use centrally managed provider
+credentials, model aliases, fallback policies, budget controls, or usage
+reporting without giving every Roomote deployment direct provider keys.
+
+## Configure LiteLLM
+
+1. deploy LiteLLM Proxy on a private network or behind an authenticated TLS reverse proxy
+2. define the models, aliases, provider credentials, and any budget policies in LiteLLM
+3. create a scoped virtual key for Roomote
+4. add an OpenAI-compatible inference provider in **Settings > Models**
+5. enter the LiteLLM Proxy base URL, typically ending in `/v1`, and the virtual key
+6. add the LiteLLM model alias or model ID that Roomote should use
+
+Use a dedicated LiteLLM virtual key for Roomote rather than a provider root key.
+Give it access only to the models Roomote needs and rotate it through your
+secret manager when team membership or deployment access changes.
+
+## Keys and model names
+
+LiteLLM's proxy key is the credential Roomote sends to the proxy; it is not the
+underlying OpenAI, Anthropic, or other provider key. Store the proxy key as a
+deployment secret or save it through **Settings > Models**. Do not put it in a
+task environment or repository configuration.
+
+The model ID configured in Roomote must be a model or alias accepted by your
+LiteLLM Proxy. Aliases are often useful because you can change the underlying
+provider or model in LiteLLM without changing Roomote's model-role mappings.
+
+## Cost controls
+
+LiteLLM can apply spend limits, rate limits, model access rules, and fallback
+policies before a request reaches an upstream provider. Set those controls in
+LiteLLM and keep Roomote's enabled model list small enough that users can make
+intentional choices.
+
+Start with explicit per-key or team budgets, model allowlists, and rate limits.
+Then use LiteLLM usage reporting alongside Roomote [Cost Analytics](/cost-analytics)
+to compare task outcomes with upstream cost. Configure fallbacks carefully:
+they improve availability, but a fallback can change capability, latency, data
+handling, or price.
+
+## Reachability and Docker
+
+The Roomote deployment and task workers must be able to reach the LiteLLM
+endpoint. In Docker, `localhost` is container-local, so use a shared private
+network, service DNS name, host-gateway address, or internal reverse proxy
+instead of a host-only loopback URL. Test the configured URL and scoped key from
+a Roomote service container and a task worker.
+
+## Security
+
+- keep the proxy endpoint private or require TLS and authentication
+- use a unique, least-privilege virtual key for Roomote
+- store upstream provider credentials only in LiteLLM's secret management, not in task environments
+- restrict which model IDs and providers the Roomote key can invoke
+- review LiteLLM logs and usage data as potentially sensitive because they can include request metadata
