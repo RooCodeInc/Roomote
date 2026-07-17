@@ -42,6 +42,7 @@ import {
   verifyDiscordGatewaySecret,
 } from './auth.js';
 import { handleDiscordComponentInteraction } from './callback-actions.js';
+import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
 import {
   claimDiscordApiEvent,
   completeDiscordApiEvent,
@@ -183,6 +184,23 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       channel,
     });
     return { ok: true, component: result };
+  }
+
+  // Auto-respond channels run first, mirroring Slack: a message in a
+  // configured channel — mentioned or not, bot- or human-authored — is
+  // consumed here and never reaches the mention/task-entry gating below.
+  if (message && !interaction) {
+    const handledAsChannelAutoStart = await maybeHandleDiscordChannelAutoStart({
+      event,
+      message,
+      channel,
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      botUserId: resolved.botUserId,
+    });
+    if (handledAsChannelAutoStart) {
+      return { ok: true, channelAutoStart: true };
+    }
   }
 
   const command = getDiscordInteractionCommand(event);

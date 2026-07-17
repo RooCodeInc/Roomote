@@ -37,6 +37,7 @@ describe('ChannelAutoStartEditor', () => {
   it('updates launch criteria within the edited row while keeping every persisted channel id', () => {
     const { onRowsChange } = renderEditor([
       {
+        provider: 'slack' as const,
         channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
@@ -44,6 +45,7 @@ describe('ChannelAutoStartEditor', () => {
         launchCriteria: '',
       },
       {
+        provider: 'slack' as const,
         channelId: 'C0OPS',
         slackChannel: '#ops',
         instructions: 'Treat each message as an incident.',
@@ -63,6 +65,7 @@ describe('ChannelAutoStartEditor', () => {
     // the server keeps resolving those rows by id rather than by name.
     expect(onRowsChange).toHaveBeenCalledWith([
       {
+        provider: 'slack' as const,
         channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
@@ -70,6 +73,7 @@ describe('ChannelAutoStartEditor', () => {
         launchCriteria: 'Only launch on new production incidents.',
       },
       {
+        provider: 'slack' as const,
         channelId: 'C0OPS',
         slackChannel: '#ops',
         instructions: 'Treat each message as an incident.',
@@ -82,6 +86,7 @@ describe('ChannelAutoStartEditor', () => {
   it('clears the persisted channel id when the channel field is edited', () => {
     const { onRowsChange } = renderEditor([
       {
+        provider: 'slack' as const,
         channelId: 'C0BUGS',
         slackChannel: '#bugs',
         instructions: 'Treat each message as a bug report.',
@@ -98,6 +103,7 @@ describe('ChannelAutoStartEditor', () => {
     // re-resolved from the new name on save.
     expect(onRowsChange).toHaveBeenCalledWith([
       {
+        provider: 'slack' as const,
         channelId: null,
         slackChannel: '#bugs-triage',
         instructions: 'Treat each message as a bug report.',
@@ -114,6 +120,7 @@ describe('ChannelAutoStartEditor', () => {
 
     expect(onRowsChange).toHaveBeenCalledWith([
       {
+        provider: 'slack' as const,
         channelId: null,
         slackChannel: '',
         instructions: '',

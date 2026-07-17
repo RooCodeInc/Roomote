@@ -5,6 +5,7 @@ import {
 } from '@roomote/redis';
 
 import { DiscordApiForwarder } from './api-forwarder';
+import { DiscordAutoStartChannelTracker } from './auto-start-channels';
 import type { DiscordGatewayConfig } from './config';
 import {
   resolveDiscordGatewayApiSecret,
@@ -119,7 +120,18 @@ export class DiscordGatewayService {
       maxEntries: this.config.inboundMaxEntries,
       deadLetterMaxEntries: this.config.deadLetterMaxEntries,
     });
-    const session = new DiscordGatewaySession(queue, this.status);
+    const autoStartChannels = new DiscordAutoStartChannelTracker({
+      onError: (error) => {
+        void this.status.update({
+          lastError: `Discord auto-start channel lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      },
+    });
+    autoStartChannels.start();
+    const session = new DiscordGatewaySession(queue, this.status, {
+      isAutoStartChannel: (channelId) =>
+        autoStartChannels.isAutoStartChannel(channelId),
+    });
     this.activeSession = session;
 
     let leaseValid = true;
@@ -357,6 +369,7 @@ export class DiscordGatewayService {
     } finally {
       clearInterval(leaseTimer);
       clearInterval(statusTimer);
+      autoStartChannels.stop();
       abortDelivery();
       if (delivery.promise) {
         await delivery.promise.catch(() => undefined);

@@ -1188,6 +1188,12 @@ const standardTaskBootstrapSchema = z
 
 const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
   description: z.string().optional(),
+  /**
+   * Optional agent-facing prompt override. When set, the workflow builds the
+   * task prompt from this text (e.g. channel auto-start instructions prepended
+   * to the message) while `description` stays the user-visible task text.
+   */
+  agentPromptText: z.string().optional(),
   images: z.array(z.string()).optional(),
   blank: z.boolean().optional(),
   bootstrap: standardTaskBootstrapSchema,

@@ -195,7 +195,12 @@ export async function generatePrompt({
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.Scan:
     case TaskPayloadKind.McpRecommendations: {
-      const baseDescription = taskSpec.payload.description;
+      // agentPromptText is the agent-facing prompt override (e.g. channel
+      // auto-start instructions prepended to the message); the payload's
+      // description remains the user-visible task text.
+      const baseDescription =
+        taskSpec.payload.agentPromptText?.trim() ||
+        taskSpec.payload.description;
       if (!baseDescription) {
         throw new Error(`Description is required for ${taskSpec.type}`);
       }

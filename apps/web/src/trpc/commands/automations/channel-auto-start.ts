@@ -6,11 +6,13 @@ import { getBackgroundAgentSettingsForDeployment } from '@roomote/db/server';
 import {
   getRedis,
   REDIS_KEYS,
-  syncSlackAutoStartChannelCacheBestEffort,
+  syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 
 import type {
+  ChannelAutoStartDiscordInputRow,
   ChannelAutoStartInputRow,
+  ResolvedChannelAutoStartDiscordRow,
   ResolvedChannelAutoStartRow,
 } from './types';
 
@@ -89,21 +91,43 @@ export async function syncSlackAutoStartChannelCache(params: {
   enabled: boolean;
   channelIds: string[];
 }): Promise<void> {
+  await syncProviderAutoStartChannelCache({
+    ...params,
+    key: REDIS_KEYS.SLACK_AUTO_START_CHANNEL,
+    providerLabel: 'Slack',
+  });
+}
+
+export async function syncDiscordAutoStartChannelCache(params: {
+  shouldUpdate: boolean;
+  enabled: boolean;
+  channelIds: string[];
+}): Promise<void> {
+  await syncProviderAutoStartChannelCache({
+    ...params,
+    key: REDIS_KEYS.DISCORD_AUTO_START_CHANNEL,
+    providerLabel: 'Discord',
+  });
+}
+
+async function syncProviderAutoStartChannelCache(params: {
+  shouldUpdate: boolean;
+  enabled: boolean;
+  channelIds: string[];
+  key: string;
+  providerLabel: string;
+}): Promise<void> {
   if (!params.shouldUpdate) {
     return;
   }
 
-  const redis = getRedis();
-  const key = REDIS_KEYS.SLACK_AUTO_START_CHANNEL;
-  const channelIds = params.enabled ? params.channelIds : [];
-
-  await syncSlackAutoStartChannelCacheBestEffort({
-    redis,
-    key,
-    channelIds,
+  await syncAutoStartChannelCacheBestEffort({
+    redis: getRedis(),
+    key: params.key,
+    channelIds: params.enabled ? params.channelIds : [],
     onError: (error) => {
       console.warn(
-        `[updateBackgroundAgentSettingsCommand] Failed to sync Slack auto-start channel cache: ${error instanceof Error ? error.message : String(error)}`,
+        `[updateBackgroundAgentSettingsCommand] Failed to sync ${params.providerLabel} auto-start channel cache: ${error instanceof Error ? error.message : String(error)}`,
       );
     },
   });
@@ -143,4 +167,31 @@ export function normalizeChannelAutoStartInputRows(params: {
       launchCriteria: normalizeOptionalText(row.launchCriteria),
     }))
     .filter((row) => row.channelId || row.slackChannel || row.instructions);
+}
+
+/**
+ * Discord rows carry catalog channel ids directly (no name resolution), so
+ * normalization only trims and defaults the launch mode. Rows with neither a
+ * channel nor instructions are dropped; channel-less rows with instructions
+ * are kept so validation can surface a "needs a channel" error, mirroring the
+ * Slack normalizer.
+ */
+export function normalizeChannelAutoStartDiscordInputRows(
+  rows: ChannelAutoStartDiscordInputRow[],
+): Array<
+  Omit<ResolvedChannelAutoStartDiscordRow, 'channelId'> & {
+    channelId: string | null;
+  }
+> {
+  return rows
+    .map((row) => ({
+      channelId: normalizeOptionalText(row.channelId),
+      instructions: normalizeOptionalText(row.instructions),
+      launchMode:
+        row.launchMode && isChannelAutoStartLaunchMode(row.launchMode)
+          ? row.launchMode
+          : DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+      launchCriteria: normalizeOptionalText(row.launchCriteria),
+    }))
+    .filter((row) => row.channelId || row.instructions);
 }

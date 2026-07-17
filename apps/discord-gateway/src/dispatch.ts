@@ -16,7 +16,8 @@ type RawMessage = {
   channel_id?: string;
   guild_id?: string;
   content?: string;
-  author?: { bot?: boolean };
+  author?: { id?: string; bot?: boolean };
+  webhook_id?: string;
   mentions?: Array<{ id?: string; username?: string; bot?: boolean }>;
   mention_roles?: string[];
 };
@@ -44,6 +45,12 @@ type DispatchDependencies = {
    * channel lookup and task-thread check.
    */
   enqueueUnknownGuildChannel?: boolean;
+  /**
+   * Whether a channel is configured for channel auto-start. Messages in those
+   * channels forward without a mention — including bot- and webhook-authored
+   * ones (never Roomote's own) — so the API's auto-respond path can see them.
+   */
+  isAutoStartChannel?: (channelId: string) => boolean;
   now?: () => Date;
 };
 
@@ -191,7 +198,7 @@ export async function handleGatewayDispatch(
 
   if (eventType === 'MESSAGE_CREATE') {
     let message = packet.d as RawMessage;
-    if (!message.id || message.author?.bot) {
+    if (!message.id) {
       return 'ignored';
     }
 
@@ -199,6 +206,25 @@ export async function handleGatewayDispatch(
       ? dependencies.getCachedChannel?.(message.channel_id)
       : undefined;
     const botUserId = dependencies.getBotUserId?.();
+    // Task threads carry their own id as channel_id, so this only matches
+    // top-level messages in a monitored channel; the API re-checks
+    // authoritatively.
+    const autoStartChannel = Boolean(
+      message.channel_id &&
+      dependencies.isAutoStartChannel?.(message.channel_id) === true,
+    );
+    const botAuthored =
+      message.author?.bot === true || typeof message.webhook_id === 'string';
+    if (botAuthored) {
+      const isOwnMessage = Boolean(
+        botUserId && message.author?.id === botUserId,
+      );
+      // Bot- and webhook-authored messages (deploy feeds, alert bots) only
+      // matter to auto-respond channels; Roomote's own posts never re-enter.
+      if (!autoStartChannel || isOwnMessage) {
+        return 'ignored';
+      }
+    }
     // Discord's mention autocomplete often resolves a bot by its managed
     // role (same name as the bot), which arrives as mention_roles +
     // <@&role> content with an empty user-mention list. Normalize that form
@@ -220,11 +246,14 @@ export async function handleGatewayDispatch(
       });
     }
     // Discord sends every message from subscribed guild channels. Root
-    // channels only start Roomote work when the bot is mentioned, while DMs
-    // and task threads retain natural follow-ups without an extra mention.
+    // channels only start Roomote work when the bot is mentioned — except
+    // auto-respond channels, which forward every top-level message — while
+    // DMs and task threads retain natural follow-ups without an extra
+    // mention.
     if (
       message.guild_id &&
       botUserId &&
+      !autoStartChannel &&
       !isBotMentioned(message, botUserId) &&
       (cachedChannel?.isThread !== true ||
         cachedChannel.ownerId !== botUserId) &&

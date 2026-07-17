@@ -390,6 +390,63 @@ describe('launchDiscordTask', () => {
     );
   });
 
+  it('carries an automation initiator and agent prompt override into the task payload', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn(),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      // No launch owner: automation-owned launch for a bot-authored message.
+      initiator: {
+        kind: 'automation',
+        key: 'slack_channel_auto_start',
+        actor: { externalId: 'alert-bot', displayName: 'alerts' },
+      },
+      agentPromptText: 'Alert triage.\n\nDeploy failed for api@1.2.3',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Deploy failed for api@1.2.3',
+        user: 'alerts',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    const [launch, options] = mocks.enqueueTask.mock.calls[0] ?? [];
+    expect(launch.task.payload).toEqual(
+      expect.objectContaining({
+        description: 'Deploy failed for api@1.2.3',
+        agentPromptText: 'Alert triage.\n\nDeploy failed for api@1.2.3',
+      }),
+    );
+    expect(launch.initiator).toEqual({
+      kind: 'automation',
+      key: 'slack_channel_auto_start',
+      actor: { externalId: 'alert-bot', displayName: 'alerts' },
+    });
+    // Automation launches must not force the 'human' class.
+    expect(options).not.toHaveProperty('launchClass');
+  });
+
   it('creates a sibling thread for /new inside an existing task thread', async () => {
     const reservedThread = {
       channelId: 'new-thread',

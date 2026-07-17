@@ -41,6 +41,12 @@ export const discordMessageSchema = z
     id: z.string(),
     channel_id: z.string(),
     guild_id: z.string().optional(),
+    // Discord message type: 0 = DEFAULT, 19 = REPLY; other values are system
+    // messages (pins, joins, boosts, ...) that must not enter task flows.
+    type: z.number().int().optional(),
+    // Present when a webhook (e.g. a deploy-notification feed) authored the
+    // message; such authors do not reliably carry `author.bot`.
+    webhook_id: z.string().optional(),
     content: z.string().default(''),
     author: discordUserSchema,
     member: z
@@ -192,6 +198,12 @@ export type DiscordEventNormalizationOptions = {
   userId?: string;
   /** Set when the channel is already known to be a Roomote-owned task thread. */
   isTaskThread?: boolean;
+  /**
+   * Set when the message arrived in a configured auto-respond channel: task
+   * entry then needs no mention/DM/task-thread, and bot- or webhook-authored
+   * messages qualify (the caller has already excluded Roomote's own).
+   */
+  channelAutoStart?: boolean;
   /** Parent channel supplied by the Gateway cache when Discord omits channel data. */
   parentChannelId?: string;
   /** Safe data URLs produced after immediately downloading image attachments. */
@@ -394,13 +406,14 @@ export function isDiscordTaskEntryEvent(
 ): boolean {
   const message = getDiscordMessageCreate(event);
   if (message) {
-    if (message.author.bot) return false;
+    if (message.author.bot && options.channelAutoStart !== true) return false;
     const hasContent = Boolean(
       message.content.trim() || message.attachments.length,
     );
     return (
       hasContent &&
-      (isDirectMessage(message) ||
+      (options.channelAutoStart === true ||
+        isDirectMessage(message) ||
         options.isTaskThread === true ||
         isBotMentioned(message, options.botUserId))
     );

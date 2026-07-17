@@ -435,6 +435,18 @@ const automationsRouter = createRouter({
             }),
           )
           .default([]),
+        // Genuinely optional (no default): an older client that never sends
+        // this field must leave persisted Discord auto-respond rows untouched.
+        channelAutoStartDiscordChannels: z
+          .array(
+            z.object({
+              channelId: z.string().trim().max(64).nullable().default(null),
+              instructions: z.string().max(8_000).nullable().default(null),
+              launchMode: z.enum(['always_start']).default('always_start'),
+              launchCriteria: z.string().max(4_000).nullable().default(null),
+            }),
+          )
+          .optional(),
         managerSlackChannel: z.string().trim().min(1).max(160).nullable(),
         managerStatsFrequency: z.enum(['off', 'weekly']),
         managerStatsSlackChannel: z.string().trim().min(1).max(160).nullable(),

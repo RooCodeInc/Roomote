@@ -2,7 +2,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   evaluateChannelLaunchCriteria: vi.fn(),
 }));
 
-vi.mock('../../../logging.js', () => ({
+vi.mock('../../logging.js', () => ({
   apiLogger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -50,6 +50,9 @@ function createRedisStub(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 const baseParams = {
+  // The slack:-prefixed key assertions below double as the guarantee that the
+  // shared module kept Slack's pre-existing Redis keys byte-identical.
+  provider: 'slack' as const,
   channelId: 'CALERTS',
   channelName: 'external-alerts',
   messageText: 'Elevated 431 Errors. Status: Identified.',

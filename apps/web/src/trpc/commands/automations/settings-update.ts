@@ -38,8 +38,10 @@ import {
 } from './automation-requirements';
 import {
   mergeLegacySingleChannelAutoStartRows,
+  normalizeChannelAutoStartDiscordInputRows,
   normalizeChannelAutoStartInputRows,
   normalizeOptionalText,
+  syncDiscordAutoStartChannelCache,
   syncSlackAutoStartChannelCache,
 } from './channel-auto-start';
 import {
@@ -69,6 +71,7 @@ import {
 import type {
   BackgroundAgentFieldErrors,
   DiscordChannelFieldErrorKey,
+  ResolvedChannelAutoStartDiscordRow,
   ResolvedChannelAutoStartRow,
   SlackChannelDisplayNames,
   SlackChannelFieldErrorKey,
@@ -152,6 +155,12 @@ function buildDestinationChannelTargets(
       : []),
   ];
 }
+
+// Text (0) and announcement (5) channels — the kinds whose top-level messages
+// can anchor a task thread. Matches the picker filter in discord-channels.ts;
+// enforced again here because findDiscordDestinationByChannelId alone does not
+// check the channel type.
+const CHANNEL_AUTO_START_DISCORD_CHANNEL_TYPES: readonly number[] = [0, 5];
 
 type DiscordChannelResolution = {
   channelId: string | null;
@@ -288,10 +297,24 @@ export async function updateBackgroundAgentSettingsCommand(
         legacyInstructions: input.channelAutoStartInstructions,
       })
     : [];
+  // Null when the Discord rows are not authoritatively submitted: either an
+  // older client saving channelAutoStart without the field (its persisted
+  // targets must survive untouched) or a save of some other automation (the
+  // persisted rows are written back below so both target kinds stay managed).
+  const submittedChannelAutoStartDiscordRows =
+    shouldUpdateChannelAutoStart &&
+    input.channelAutoStartDiscordChannels !== undefined
+      ? normalizeChannelAutoStartDiscordInputRows(
+          input.channelAutoStartDiscordChannels,
+        )
+      : null;
 
   if (
     shouldUpdateChannelAutoStart &&
-    channelAutoStartRows.some((row) => (row.instructions?.length ?? 0) > 8_000)
+    [
+      ...channelAutoStartRows,
+      ...(submittedChannelAutoStartDiscordRows ?? []),
+    ].some((row) => (row.instructions?.length ?? 0) > 8_000)
   ) {
     fieldErrors.channelAutoStartInstructions =
       'Each auto-respond channel can include up to 8,000 instruction characters.';
@@ -299,9 +322,10 @@ export async function updateBackgroundAgentSettingsCommand(
 
   if (
     shouldUpdateChannelAutoStart &&
-    channelAutoStartRows.some(
-      (row) => (row.launchCriteria?.length ?? 0) > 4_000,
-    )
+    [
+      ...channelAutoStartRows,
+      ...(submittedChannelAutoStartDiscordRows ?? []),
+    ].some((row) => (row.launchCriteria?.length ?? 0) > 4_000)
   ) {
     fieldErrors.channelAutoStartLaunchCriteria =
       'Each auto-respond channel can include up to 4,000 launch criteria characters.';
@@ -385,6 +409,7 @@ export async function updateBackgroundAgentSettingsCommand(
 
   const [
     channelAutoStartChannelResults,
+    channelAutoStartDiscordDestinations,
     managerChannelResult,
     ...destinationResolutionEntries
   ] = await Promise.all([
@@ -400,6 +425,13 @@ export async function updateBackgroundAgentSettingsCommand(
             normalizeSlackChannelIdInput(row.channelId) ?? row.slackChannel,
           notifier,
         }),
+      ),
+    ),
+    Promise.all(
+      (submittedChannelAutoStartDiscordRows ?? []).map((row) =>
+        row.channelId
+          ? findDiscordDestinationByChannelId(row.channelId)
+          : Promise.resolve(null),
       ),
     ),
     shouldUpdateManagerChannel
@@ -501,6 +533,59 @@ export async function updateBackgroundAgentSettingsCommand(
     if (result.error) {
       fieldErrors[result.error.field] = result.error.message;
       break;
+    }
+  }
+
+  if (submittedChannelAutoStartDiscordRows) {
+    if (submittedChannelAutoStartDiscordRows.some((row) => !row.channelId)) {
+      fieldErrors.channelAutoStartDiscordChannels =
+        'Each auto-respond channel needs a Discord channel.';
+    }
+
+    if (!fieldErrors.channelAutoStartDiscordChannels) {
+      for (const [
+        index,
+        row,
+      ] of submittedChannelAutoStartDiscordRows.entries()) {
+        if (!row.channelId) {
+          continue;
+        }
+
+        const destination = channelAutoStartDiscordDestinations[index];
+
+        if (!destination) {
+          fieldErrors.channelAutoStartDiscordChannels =
+            'This Discord channel is not available to Roomote.';
+          break;
+        }
+
+        if (
+          !CHANNEL_AUTO_START_DISCORD_CHANNEL_TYPES.includes(
+            destination.channelType,
+          )
+        ) {
+          fieldErrors.channelAutoStartDiscordChannels =
+            'Auto-respond supports Discord text and announcement channels only.';
+          break;
+        }
+      }
+    }
+
+    if (!fieldErrors.channelAutoStartDiscordChannels) {
+      const seenDiscordChannelIds = new Set<string>();
+      for (const row of submittedChannelAutoStartDiscordRows) {
+        if (!row.channelId) {
+          continue;
+        }
+
+        if (seenDiscordChannelIds.has(row.channelId)) {
+          fieldErrors.channelAutoStartDiscordChannels =
+            'Each auto-respond channel can only be configured once.';
+          break;
+        }
+
+        seenDiscordChannelIds.add(row.channelId);
+      }
     }
   }
 
@@ -609,6 +694,36 @@ export async function updateBackgroundAgentSettingsCommand(
         launchMode: row.launchMode ?? DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
         launchCriteria: row.launchCriteria ?? null,
       }));
+  // Authoritatively submitted rows win; otherwise write back the persisted
+  // rows so the upsert can keep managing the discord_channel kind. Only an
+  // older client saving channelAutoStart without the field leaves the kind
+  // unmanaged (preserving its targets untouched).
+  const finalResolvedChannelAutoStartDiscordRows: ResolvedChannelAutoStartDiscordRow[] =
+    submittedChannelAutoStartDiscordRows !== null
+      ? submittedChannelAutoStartDiscordRows.flatMap((row) =>
+          row.channelId
+            ? [
+                {
+                  channelId: row.channelId,
+                  instructions: row.instructions,
+                  launchMode: row.launchMode,
+                  launchCriteria: row.launchCriteria,
+                },
+              ]
+            : [],
+        )
+      : (existingSettings?.channelAutoStartDiscordChannels ?? []).map(
+          (row) => ({
+            channelId: row.channelId,
+            instructions: row.instructions ?? null,
+            launchMode:
+              row.launchMode ?? DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+            launchCriteria: row.launchCriteria ?? null,
+          }),
+        );
+  const managingChannelAutoStartDiscordTargets =
+    submittedChannelAutoStartDiscordRows !== null ||
+    !shouldUpdateChannelAutoStart;
   const managerChannelChanged =
     Boolean(managerChannelResult.channelId) &&
     managerChannelResult.channelId !== existingSettings?.managerSlackChannelId;
@@ -903,25 +1018,62 @@ export async function updateBackgroundAgentSettingsCommand(
 
     await upsertAutomation(tx, {
       key: 'slack_channel_auto_start',
-      enabled: finalResolvedChannelAutoStartRows.length > 0,
+      enabled:
+        finalResolvedChannelAutoStartRows.length +
+          finalResolvedChannelAutoStartDiscordRows.length >
+        0,
       instructions:
         normalizeOptionalText(
           finalResolvedChannelAutoStartRows[0]?.instructions,
         ) ?? null,
-      targets: finalResolvedChannelAutoStartRows.map((row, index) => ({
-        provider: 'slack',
-        targetKind: 'slack_channel',
-        externalRef: row.channelId,
-        metadata: {
-          order: index,
-          ...(row.instructions ? { instructions: row.instructions } : {}),
-          ...(row.launchMode !== DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE
-            ? { launchMode: row.launchMode }
-            : {}),
-          ...(row.launchCriteria ? { launchCriteria: row.launchCriteria } : {}),
-        },
-      })),
-      managedTargetKinds: ['slack_channel'],
+      targets: [
+        ...finalResolvedChannelAutoStartRows.map(
+          (row, index): AutomationTarget => ({
+            provider: 'slack',
+            targetKind: 'slack_channel',
+            externalRef: row.channelId,
+            metadata: {
+              order: index,
+              ...(row.instructions ? { instructions: row.instructions } : {}),
+              ...(row.launchMode !== DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE
+                ? { launchMode: row.launchMode }
+                : {}),
+              ...(row.launchCriteria
+                ? { launchCriteria: row.launchCriteria }
+                : {}),
+            },
+          }),
+        ),
+        // Written only when the discord_channel kind is managed below;
+        // including them while unmanaged would duplicate the preserved rows.
+        ...(managingChannelAutoStartDiscordTargets
+          ? finalResolvedChannelAutoStartDiscordRows.map(
+              (row, index): AutomationTarget => ({
+                provider: 'discord',
+                targetKind: 'discord_channel',
+                externalRef: row.channelId,
+                metadata: {
+                  // Discord rows order after the Slack rows: the two arrays
+                  // arrive separately, so cross-provider interleaving does not
+                  // survive a save; per-provider ordering does.
+                  order: finalResolvedChannelAutoStartRows.length + index,
+                  ...(row.instructions
+                    ? { instructions: row.instructions }
+                    : {}),
+                  ...(row.launchMode !== DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE
+                    ? { launchMode: row.launchMode }
+                    : {}),
+                  ...(row.launchCriteria
+                    ? { launchCriteria: row.launchCriteria }
+                    : {}),
+                },
+              }),
+            )
+          : []),
+      ],
+      managedTargetKinds: managingChannelAutoStartDiscordTargets
+        ? ['slack_channel', 'discord_channel']
+        : ['slack_channel'],
       updatedAt: now,
     });
 
@@ -1023,11 +1175,20 @@ export async function updateBackgroundAgentSettingsCommand(
     });
   });
 
-  await syncSlackAutoStartChannelCache({
-    shouldUpdate: true,
-    enabled: finalResolvedChannelAutoStartRows.length > 0,
-    channelIds: channelAutoStartChannelIds,
-  });
+  await Promise.all([
+    syncSlackAutoStartChannelCache({
+      shouldUpdate: true,
+      enabled: finalResolvedChannelAutoStartRows.length > 0,
+      channelIds: channelAutoStartChannelIds,
+    }),
+    syncDiscordAutoStartChannelCache({
+      shouldUpdate: true,
+      enabled: finalResolvedChannelAutoStartDiscordRows.length > 0,
+      channelIds: finalResolvedChannelAutoStartDiscordRows.map(
+        ({ channelId }) => channelId,
+      ),
+    }),
+  ]);
 
   const updatedSettings = await getBackgroundAgentSettingsForDeployment();
   const updatedChannelAutoStartSlackChannelIds =
