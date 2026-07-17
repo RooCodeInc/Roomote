@@ -2,6 +2,19 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.9.0 (2026-07-17)
+
+### Minor changes
+
+- Live previews are always available when the preview runtime is ready and the environment defines ports. The preview pane stays open for setup (runtime, ports, and broken-preview help) instead of being gated behind an enable/disable setting.
+
+### Patch changes
+
+- Unanswered Discord routing suggestion cards now auto-confirm after 30 seconds, matching Slack, so a suggested environment still launches if nobody clicks. Fallback cards without a real suggestion no longer claim a best match or auto-launch.
+- On deployments with only one environment, the homepage workspace control defaults to that environment instead of remaining on Auto.
+- When Local Docker and a cloud sandbox provider are both configured, the default sandbox provider now prefers the ready cloud provider so homepage and launch defaults no longer stick on Local Docker.
+- Telegram routing confirmation cards use the same 30-second auto-confirm window as Slack and Discord, so there is one consistent correction window across chat providers.
+
 ## 0.8.1 (2026-07-17)
 
 ### Patch changes
