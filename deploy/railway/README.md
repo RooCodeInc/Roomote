@@ -45,10 +45,11 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 - **Provider credentials live in the app, not the template.** The template
   ships with zero required deploy-time inputs. Modal tokens and the model
   provider API key are entered in the `/setup` wizard (or Settings) after
-  first boot and stored encrypted in Postgres. The one optional prompt on
-  the deploy screen is `R_APP_URL`, for deployers who want a custom
-  domain from the start (see
-  [Attaching a custom domain](#attaching-a-custom-domain)).
+  first boot and stored encrypted in Postgres. Optional deploy-screen inputs
+  are `R_APP_URL`, for deployers who want a custom domain from the start (see
+  [Attaching a custom domain](#attaching-a-custom-domain)), and
+  `R_LICENSE_KEY`, for operators provisioning a paid-seat license. An env
+  license key takes precedence over a key stored through **Settings > Users**.
 - **Live previews are off by default, but the proxy ships ready.** Preview
   subdomains need a wildcard domain, and Railway-generated service domains
   are single-label. The `preview-proxy` service is part of the template and
@@ -147,6 +148,7 @@ ROOMOTE_DOCKER_LOAD_ENV_FILE=false
 R_AUTO_GENERATE_KEYS=true
 ENCRYPTION_KEY=${{secret(32)}}
 R_DISCORD_GATEWAY_SECRET=${{secret(32)}}
+R_LICENSE_KEY=
 ARTIFACT_SIGNING_KEY=${{secret(32)}}
 DASHBOARD_PASSWORD=${{secret(24)}}
 S3_SECRET_ACCESS_KEY=${{secret(32)}}
@@ -177,6 +179,7 @@ ROOMOTE_DOCKER_LOAD_ENV_FILE=${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
 R_AUTO_GENERATE_KEYS=${{api.R_AUTO_GENERATE_KEYS}}
 ENCRYPTION_KEY=${{api.ENCRYPTION_KEY}}
 R_DISCORD_GATEWAY_SECRET=${{api.R_DISCORD_GATEWAY_SECRET}}
+R_LICENSE_KEY=${{api.R_LICENSE_KEY}}
 ARTIFACT_SIGNING_KEY=${{api.ARTIFACT_SIGNING_KEY}}
 DASHBOARD_PASSWORD=${{api.DASHBOARD_PASSWORD}}
 S3_SECRET_ACCESS_KEY=${{api.S3_SECRET_ACCESS_KEY}}

@@ -132,6 +132,8 @@ services:
       ENCRYPTION_KEY: ${{secret(32)}}
       # Transport secret between BullMQ Discord Gateway and API.
       R_DISCORD_GATEWAY_SECRET: ${{secret(32)}}
+      # Optional paid-seat license key; takes precedence over Settings > Users.
+      R_LICENSE_KEY: ''
       R_DISCORD_BOT_TOKEN: '' # optional; Discord can also be configured after boot in Settings
       ARTIFACT_SIGNING_KEY: ${{secret(32)}}
       DASHBOARD_PASSWORD: ${{secret(24)}}
@@ -188,6 +190,7 @@ services:
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}
       ENCRYPTION_KEY: ${{api.ENCRYPTION_KEY}}
       R_DISCORD_GATEWAY_SECRET: ${{api.R_DISCORD_GATEWAY_SECRET}}
+      R_LICENSE_KEY: ${{api.R_LICENSE_KEY}}
       R_DISCORD_BOT_TOKEN: ${{api.R_DISCORD_BOT_TOKEN}}
       ARTIFACT_SIGNING_KEY: ${{api.ARTIFACT_SIGNING_KEY}}
       DASHBOARD_PASSWORD: ${{api.DASHBOARD_PASSWORD}}
