@@ -31,14 +31,6 @@ import {
 import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
 
-/**
- * How long the Yes/Nope card waits before auto-starting the suggestion. Kept
- * short so the normal flow feels immediate — the card is a brief veto
- * window, and the started message's cancel button covers late mis-route
- * recovery. The picker (after Nope, or on router fallback) has no timer.
- */
-const TELEGRAM_ROUTING_AUTO_CONFIRM_TIMEOUT_MS = 5_000;
-
 /** Pickers have no auto-start, so give the user a while to choose. */
 const PENDING_ROUTE_TTL_SECONDS = 15 * 60;
 
@@ -278,7 +270,10 @@ async function invalidatePreviousPendingRoute(
   }
 }
 
-function scheduleTelegramRoutingAutoConfirm(pendingRouteId: string): void {
+function scheduleTelegramRoutingAutoConfirm(
+  pendingRouteId: string,
+  delayMs: number,
+): void {
   const timer = setTimeout(() => {
     autoConfirmTelegramRouting(pendingRouteId).catch((error) => {
       apiLogger.warn(
@@ -287,7 +282,7 @@ function scheduleTelegramRoutingAutoConfirm(pendingRouteId: string): void {
         }`,
       );
     });
-  }, TELEGRAM_ROUTING_AUTO_CONFIRM_TIMEOUT_MS);
+  }, delayMs);
 
   // Like Slack's auto-confirm, the timer is in-process: a restart loses it
   // and the pending route simply expires with its Redis TTL.
@@ -345,8 +340,8 @@ async function autoConfirmTelegramRouting(
  * Post a routing-confirmation card when the router was not confident (or
  * fell back entirely) and there is more than one workspace to choose from.
  *
- * Routed suggestions get a compact Yes/Nope card that auto-starts after a
- * few seconds; Nope swaps the same message into a workspace picker. Router
+ * Routed suggestions get a compact Yes/Nope card that auto-starts after the
+ * shared correction window; Nope swaps the same message into a picker. Router
  * fallback shows the picker directly and never auto-starts.
  *
  * Returns null when the launch should proceed immediately instead: high
@@ -365,11 +360,11 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
     input.routingDecision.status === 'routed'
       ? input.routingDecision.result
       : null;
+  const autoConfirmDelayMs = routed
+    ? getRoutingAutoConfirmDelayMs(routed.debug, routed.workspace.type)
+    : null;
 
-  if (
-    routed &&
-    getRoutingAutoConfirmDelayMs(routed.debug, routed.workspace.type) === 0
-  ) {
+  if (routed && autoConfirmDelayMs === 0) {
     return null;
   }
 
@@ -401,9 +396,10 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
       chatId: input.metadata.communicationChannelId,
       threadId: input.metadata.communicationThreadId,
       replyToMessageId: input.metadata.communicationMessageId,
-      text: suggestedLabel
-        ? `Planning to run this in **${suggestedLabel}** — starting in ~${Math.round(TELEGRAM_ROUTING_AUTO_CONFIRM_TIMEOUT_MS / 1000)}s.`
-        : 'I could not confidently pick a workspace for this request. Choose where to run it:',
+      text:
+        suggestedLabel && autoConfirmDelayMs !== null
+          ? `Planning to run this in **${suggestedLabel}** — starting in ~${Math.round(autoConfirmDelayMs / 1000)}s.`
+          : 'I could not confidently pick a workspace for this request. Choose where to run it:',
       textFormat: 'markdown',
       buttons:
         suggestedIndex === null
@@ -429,8 +425,8 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
       'XX',
     );
 
-    if (suggestedIndex !== null) {
-      scheduleTelegramRoutingAutoConfirm(pendingRouteId);
+    if (suggestedIndex !== null && autoConfirmDelayMs !== null) {
+      scheduleTelegramRoutingAutoConfirm(pendingRouteId, autoConfirmDelayMs);
     }
 
     return { pendingRouteId };
