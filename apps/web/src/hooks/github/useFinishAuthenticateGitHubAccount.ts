@@ -10,7 +10,7 @@ type Data =
   | { success: true; githubLogin: string }
   | { success: false; error: string };
 
-type Variables = string;
+type Variables = { code: string; state: string };
 
 type UseFinishAuthenticateGitHubAccountOptions = Omit<
   UseMutationOptions<Data, Error, Variables>,
@@ -26,8 +26,8 @@ export const useFinishAuthenticateGitHubAccount = (
   const { onSuccess, ...restOptions } = options ?? {};
 
   return useMutation({
-    mutationFn: (code) =>
-      trpcClient.github.finishAuthenticateAccount.mutate({ code }),
+    mutationFn: (input) =>
+      trpcClient.github.finishAuthenticateAccount.mutate(input),
     onSuccess: (data, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({
         queryKey: trpc.linkedAccounts.github.queryKey(),

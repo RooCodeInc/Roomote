@@ -11,8 +11,29 @@ import type { BuildWorkerEnvOptions } from './types';
 
 const BLOCKED_WORKER_ENV_KEYS = new Set([
   'JOB_AUTH_PRIVATE_KEY',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'ENCRYPTION_KEY',
+  'BETTER_AUTH_SECRET',
+  'DASHBOARD_PASSWORD',
+  'SETUP_TOKEN',
+  'MODAL_TOKEN_SECRET',
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
+
+function isBlockedWorkerEnvKey(key: string): boolean {
+  if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+    return true;
+  }
+
+  // Denylist sensitive suffixes so a typo in R_MODEL_ENV_KEYS cannot ship
+  // deployment credentials into untrusted sandboxes.
+  return (
+    /_SECRET$/i.test(key) ||
+    /_PRIVATE_KEY$/i.test(key) ||
+    /PASSWORD$/i.test(key)
+  );
+}
 const MODEL_ROLE_ENV_VAR_NAMES = new Set<string>([
   'R_MODEL',
   'R_SMALL_MODEL',
@@ -32,7 +53,7 @@ function filterWorkerExtraEnv(
   return Object.fromEntries(
     Object.entries(extraEnv).filter(
       ([key, value]) =>
-        !BLOCKED_WORKER_ENV_KEYS.has(key) &&
+        !isBlockedWorkerEnvKey(key) &&
         (!MODEL_ROLE_ENV_VAR_NAMES.has(key) || !isTaskModelIdDisabled(value)),
     ),
   );
@@ -83,7 +104,7 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
   const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
 
   for (const key of getOperatorModelProviderEnvKeys()) {
-    if (BLOCKED_WORKER_ENV_KEYS.has(key)) {
+    if (isBlockedWorkerEnvKey(key)) {
       continue;
     }
 

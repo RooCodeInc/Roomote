@@ -195,6 +195,10 @@ export async function prepareOpenCodeCommandEnv(options: {
     reasoningEffortOverride: options.reasoningEffortOverride,
   });
   commandEnv.OPENCODE_CONFIG_CONTENT = configContent;
+  // Prevent the checked-out repo's opencode.json / .opencode plugins and MCP
+  // servers from merging into the harness. Additive repo MCP would otherwise
+  // execute at serve start with harness credentials (pre-LLM RCE).
+  commandEnv.OPENCODE_DISABLE_PROJECT_CONFIG = '1';
   commandEnv.ROOMOTE_NODE_EXECUTABLE = process.execPath;
   commandEnv.ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT = path.join(
     openCodeConfigDir,

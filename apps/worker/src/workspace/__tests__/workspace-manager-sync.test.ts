@@ -38,13 +38,13 @@ function buildCheckoutCommands(branch: string) {
     },
     {
       name: 'Git checkout branch',
-      run: `git checkout -B ${branch} origin/${branch}`,
+      run: `git checkout -B '${branch}' 'origin/${branch}'`,
       timeout: COMMAND_DEFAULT_TIMEOUT,
       continue_on_error: false,
     },
     {
       name: 'Git reset to remote',
-      run: `git reset --hard origin/${branch}`,
+      run: `git reset --hard 'origin/${branch}'`,
       timeout: COMMAND_DEFAULT_TIMEOUT,
       continue_on_error: false,
     },
@@ -278,7 +278,7 @@ describe('WorkspaceManager git fetch retry', () => {
       ...buildCheckoutCommands('main'),
       {
         name: 'Git pin to sha',
-        run: 'git reset --hard 0123456789abcdef0123456789abcdef01234567',
+        run: "git reset --hard '0123456789abcdef0123456789abcdef01234567'",
         timeout: COMMAND_DEFAULT_TIMEOUT,
         continue_on_error: false,
       },

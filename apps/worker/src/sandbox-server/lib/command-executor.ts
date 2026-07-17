@@ -105,6 +105,12 @@ export class CommandExecutor {
       throw new Error('Path cannot be empty');
     }
 
+    // Confine tails to paths under the working directory. Absolute paths
+    // would otherwise bypass the ".."-only check and read host files.
+    if (path.isAbsolute(filePath)) {
+      throw new Error('Absolute paths are not allowed');
+    }
+
     if (filePath.includes('..')) {
       throw new Error('Path traversal not allowed');
     }
@@ -113,7 +119,7 @@ export class CommandExecutor {
       throw new Error('Invalid characters in path');
     }
 
-    return this.runCommandStream(['tail', '-f', filePath], options);
+    return this.runCommandStream(['tail', '-f', '--', filePath], options);
   }
 
   /**

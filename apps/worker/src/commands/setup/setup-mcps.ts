@@ -60,6 +60,36 @@ interface IntegrationProxyConfig {
   upstreamPath?: string;
 }
 
+function isRestrictedMcpEnvVarName(name: string): boolean {
+  // Roomote runtime / control-plane secrets must not be injectable into
+  // operator-configured MCP server env via ${...} substitution.
+  if (
+    name === 'AUTH_TOKEN' ||
+    name === 'BASH_ENV' ||
+    name === 'DATABASE_URL' ||
+    name === 'REDIS_URL' ||
+    name.startsWith('ROOMOTE_') ||
+    name.startsWith('JOB_AUTH_') ||
+    name.startsWith('PREVIEW_AUTH_')
+  ) {
+    return true;
+  }
+
+  return /_SECRET$/i.test(name) || /_PRIVATE_KEY$/i.test(name);
+}
+
+function filterMcpEnvLookup(
+  lookup: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!lookup) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(lookup).filter(([key]) => !isRestrictedMcpEnvVarName(key)),
+  );
+}
+
 function resolveConfigValues(
   values: Record<string, string> | undefined,
   lookup: Record<string, string> | undefined,
@@ -68,11 +98,13 @@ function resolveConfigValues(
     return undefined;
   }
 
-  if (!lookup) {
+  const safeLookup = filterMcpEnvLookup(lookup);
+
+  if (!safeLookup) {
     return values;
   }
 
-  return substituteEnvVars(values, lookup);
+  return substituteEnvVars(values, safeLookup);
 }
 
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {

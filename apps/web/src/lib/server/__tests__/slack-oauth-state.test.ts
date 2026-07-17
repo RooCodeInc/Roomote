@@ -6,6 +6,7 @@ vi.mock('@roomote/db/server', () => ({
 
 import {
   createSignedSlackInstallState,
+  createSignedSlackLinkAccountState,
   decodeSlackOAuthState,
 } from '../slack-oauth-state';
 
@@ -51,15 +52,38 @@ describe('slack-oauth-state', () => {
     await expect(decodeSlackOAuthState(payload)).resolves.toBeNull();
   });
 
-  it('still decodes link-account state without trusting unsafe redirects', async () => {
+  it('round-trips signed link-account state bound to the initiating user', async () => {
+    const state = await createSignedSlackLinkAccountState({
+      userId: 'user-abc',
+      redirectPath: '/settings/profile',
+    });
+
+    await expect(decodeSlackOAuthState(state)).resolves.toEqual({
+      mode: 'link_account',
+      redirectPath: '/settings/profile',
+      userId: 'user-abc',
+    });
+  });
+
+  it('rejects unsigned link-account state', async () => {
     const state = encodeRecord({
       mode: 'link_account',
-      redirect: 'https://evil.example.com',
+      redirect: '/settings/profile',
+    });
+
+    await expect(decodeSlackOAuthState(state)).resolves.toBeNull();
+  });
+
+  it('normalizes unsafe link-account redirects via signing path', async () => {
+    const state = await createSignedSlackLinkAccountState({
+      userId: 'user-abc',
+      redirectPath: 'https://evil.example.com',
     });
 
     await expect(decodeSlackOAuthState(state)).resolves.toEqual({
       mode: 'link_account',
       redirectPath: '/settings',
+      userId: 'user-abc',
     });
   });
 });

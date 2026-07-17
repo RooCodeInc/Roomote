@@ -15,6 +15,14 @@ import {
 
 const ISSUER = 'rcc';
 
+/** Cap for run-token TTLs that aligns with SANDBOX_TIMEOUT_MS (5 hours). */
+export const MAX_RUN_TOKEN_TIMEOUT_MS = 5 * 60 * 60 * 1_000;
+
+export const runTokenTimeoutMsSchema = z
+  .number()
+  .positive()
+  .max(MAX_RUN_TOKEN_TIMEOUT_MS);
+
 // Private rolling-deploy parser for signed tokens minted by the previous
 // release. The exported payload contract and every newly minted token remain
 // strictly run-based; pre-deploy tokens naturally age out after their TTL.
@@ -29,7 +37,9 @@ export const createRunTokenOptionsSchema = z.object({
   // Null mints a deployment-service-principal token for runs with no human
   // driver (automation-initiated work).
   userId: z.string().nullable(),
-  timeoutMs: z.number(),
+  // Align with SANDBOX_TIMEOUT_MS (5h) so a member cannot mint near-eternal
+  // sandbox tokens via the public router.
+  timeoutMs: runTokenTimeoutMsSchema,
 });
 
 export type CreateRunTokenOptions = z.infer<typeof createRunTokenOptionsSchema>;
