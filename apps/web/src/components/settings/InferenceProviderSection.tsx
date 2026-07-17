@@ -187,28 +187,29 @@ function ProviderCredentialsDialog({
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
-  >({});
-  const [discoveredModels, setDiscoveredModels] = useState<
-    Array<{ modelId: string; displayName: string | null }>
-  >([]);
-  const trpc = useTRPC();
-  const discoverProviderModels = useMutation(
-    trpc.taskModels.discoverProviderModels.mutationOptions(),
-  );
+  >(() => getInitialAdditionalEnvValues(providers[0] ?? null));
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    const provider =
-      providers.find((candidate) => candidate.id === selectedProviderId) ??
-      providers[0] ??
-      null;
+    if (
+      selectedProviderId &&
+      providers.some((provider) => provider.id === selectedProviderId)
+    ) {
+      return;
+    }
+
+    // Saving an endpoint provider refreshes its metadata and replaces the
+    // provider objects passed to this dialog. Keep the current selection and
+    // form values when that happens; otherwise the refresh clears the endpoint
+    // while model discovery is in flight and repeatedly reinitializes the
+    // dialog. Only initialize values when the selection is no longer valid.
+    const provider = providers[0] ?? null;
     setSelectedProviderId(provider?.id ?? null);
     setApiKey('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
-    setDiscoveredModels([]);
   }, [open, providers, selectedProviderId]);
 
   useEffect(() => {
@@ -256,21 +257,6 @@ function ProviderCredentialsDialog({
         apiKey.trim(),
         additionalEnvFields.length > 0 ? additionalEnvValues : undefined,
       );
-      if (selectedProvider.authKind === 'endpoint') {
-        const result = await discoverProviderModels.mutateAsync({
-          provider: selectedProvider.id as 'ollama' | 'vllm' | 'litellm',
-          baseUrl: apiKey.trim() || undefined,
-          apiKey:
-            additionalEnvValues[
-              `${selectedProvider.id.toUpperCase()}_API_KEY`
-            ]?.trim() || undefined,
-        });
-        if (result.error) {
-          toast.error(result.error);
-        } else {
-          setDiscoveredModels(result.models);
-        }
-      }
       setApiKey('');
       setAdditionalEnvValues({});
     } catch {
@@ -404,19 +390,6 @@ function ProviderCredentialsDialog({
                       />
                     </div>
                   ))}
-                  {selectedProvider.authKind === 'endpoint' &&
-                  discoveredModels.length > 0 ? (
-                    <div className={PROVIDER_GRID_ROW_CLASS}>
-                      <span className="text-sm font-medium">
-                        Discovered models
-                      </span>
-                      <p className="text-sm text-muted-foreground">
-                        {discoveredModels
-                          .map((model) => model.displayName ?? model.modelId)
-                          .join(', ')}
-                      </p>
-                    </div>
-                  ) : null}
                 </>
               )}
             </>
@@ -598,30 +571,24 @@ export function InferenceProviderSection({
       onSuccess: async (result, variables) => {
         const providerLabel = getModelProviderLabel(variables.provider);
         const addedModelCount = result.addedRecommendedModelCount;
+        const addedDiscoveredModelCount = result.addedDiscoveredModelCount;
 
         toast.success(
-          addedModelCount > 0
-            ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
-            : `Saved the ${providerLabel} API key.`,
+          addedDiscoveredModelCount > 0
+            ? `Saved the ${providerLabel} API key and made ${addedDiscoveredModelCount} discovered ${addedDiscoveredModelCount === 1 ? 'model' : 'models'} available.`
+            : addedModelCount > 0
+              ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
+              : `Saved the ${providerLabel} API key.`,
         );
-        const savedProvider = providerSetup?.providers.find(
-          (provider) => provider.id === variables.provider,
-        );
-        const shouldDiscoverModels = savedProvider?.authKind === 'endpoint';
-
-        // Endpoint providers discover their models immediately after saving.
-        // Keep the dialog mounted while the setup query moves the provider from
-        // available to connected so the discovery result has somewhere to render.
-        setProviderDialog(
-          shouldDiscoverModels
-            ? { mode: 'add', providerId: variables.provider }
-            : null,
-        );
+        setProviderDialog(null);
+        if (result.discoveryError) {
+          toast.error(result.discoveryError);
+        }
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
           }),
-          ...(addedModelCount > 0
+          ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
                 queryClient.invalidateQueries({
                   queryKey: trpc.taskModels.get.queryKey(),
@@ -633,7 +600,7 @@ export function InferenceProviderSection({
             : []),
         ]);
 
-        if (addedModelCount > 0) {
+        if (addedModelCount > 0 || addedDiscoveredModelCount > 0) {
           onRecommendedModelsAdded?.();
         }
       },

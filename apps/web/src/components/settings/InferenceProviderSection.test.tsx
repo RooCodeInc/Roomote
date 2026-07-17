@@ -553,7 +553,7 @@ describe('InferenceProviderSection', () => {
     });
   });
 
-  it('keeps the endpoint dialog open and renders discovered models after connecting', async () => {
+  it('closes the endpoint dialog after connecting', async () => {
     const { providerSetup } = buildProviderSetup();
     providerSetup.providers = [
       {
@@ -571,14 +571,11 @@ describe('InferenceProviderSection', () => {
       },
     ];
     providerSetupData.current = { providerSetup };
-    mutateAsyncMock.mockImplementation((variables: { baseUrl?: string }) =>
-      variables.baseUrl
-        ? Promise.resolve({
-            error: null,
-            models: [{ modelId: 'ollama/qwen3-coder:30b', displayName: null }],
-          })
-        : Promise.resolve({ addedRecommendedModelCount: 0 }),
-    );
+    mutateAsyncMock.mockResolvedValue({
+      addedRecommendedModelCount: 0,
+      addedDiscoveredModelCount: 1,
+      discoveryError: null,
+    });
 
     renderInferenceProviderSection();
 
@@ -591,16 +588,58 @@ describe('InferenceProviderSection', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     });
 
-    expect(mutateAsyncMock).toHaveBeenNthCalledWith(1, {
+    expect(mutateAsyncMock).toHaveBeenCalledWith({
       provider: 'ollama',
       apiKey: 'http://ollama.example',
     });
-    expect(mutateAsyncMock).toHaveBeenNthCalledWith(2, {
-      provider: 'ollama',
-      baseUrl: 'http://ollama.example',
-      apiKey: undefined,
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('keeps endpoint credentials while provider metadata refreshes', () => {
+    const { providerSetup } = buildProviderSetup();
+    providerSetup.providers = [
+      {
+        id: 'ollama',
+        label: 'Ollama',
+        envVarName: 'OLLAMA_BASE_URL',
+        envVarLabel: 'Endpoint URL',
+        defaultRoomoteModel: '',
+        authKind: 'endpoint',
+        suggestedTaskModels: [],
+        additionalEnvFields: [],
+        runtimeApiKeySatisfied: false,
+        savedApiKeySatisfied: false,
+        additionalEnvValues: {},
+      },
+    ];
+    providerSetupData.current = { providerSetup };
+
+    const view = renderInferenceProviderSection();
+
+    fireEvent.click(screen.getByRole('button', { name: /Add provider/ }));
+    fireEvent.change(screen.getByLabelText('Endpoint URL for Ollama'), {
+      target: { value: 'http://127.0.0.1:11434' },
     });
-    expect(screen.getByText('Discovered models')).toBeInTheDocument();
-    expect(screen.getByText('ollama/qwen3-coder:30b')).toBeInTheDocument();
+
+    const refreshedProviderSetup = {
+      ...providerSetup,
+      providers: providerSetup.providers.map((provider) => ({ ...provider })),
+    };
+    const { connectedProviders, availableProviders } = splitInferenceProviders(
+      refreshedProviderSetup,
+    );
+
+    view.rerender(
+      <InferenceProviderSection
+        providerSetup={refreshedProviderSetup}
+        providerSetupPending={false}
+        connectedProviders={connectedProviders}
+        availableProviders={availableProviders}
+      />,
+    );
+
+    expect(screen.getByLabelText('Endpoint URL for Ollama')).toHaveValue(
+      'http://127.0.0.1:11434',
+    );
   });
 });

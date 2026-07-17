@@ -481,6 +481,8 @@ export async function saveTaskModelProviderCommand(
 ): Promise<{
   providerSetup: SetupModelStatus;
   addedRecommendedModelCount: number;
+  addedDiscoveredModelCount: number;
+  discoveryError: string | null;
 }> {
   assertAdmin(auth);
 
@@ -578,9 +580,85 @@ export async function saveTaskModelProviderCommand(
       });
   });
 
+  let addedDiscoveredModelCount = 0;
+  let discoveryError: string | null = null;
+
+  if (provider.dynamicModels) {
+    const discovery = await discoverProviderModelsCommand(auth, {
+      provider: provider.id as LocalTaskModelProviderId,
+    });
+    discoveryError = discovery.error;
+
+    if (!discovery.error && discovery.models.length > 0) {
+      await db.transaction(async (tx) => {
+        const persistedTaskModels = await getPersistedRawTaskModelSettings(tx);
+        const currentSettings = normalizeTaskModelSettings(persistedTaskModels);
+        const modelsById = new Map(
+          (currentSettings.models ?? []).map((model) => [model.id, model]),
+        );
+
+        for (const model of discovery.models) {
+          if (modelsById.has(model.modelId)) {
+            continue;
+          }
+
+          modelsById.set(
+            model.modelId,
+            buildTaskModelOption({
+              id: model.modelId,
+              displayName: model.displayName ?? model.modelId,
+              family: model.family ?? undefined,
+              metadata: model.metadata,
+            }),
+          );
+          addedDiscoveredModelCount += 1;
+        }
+
+        if (addedDiscoveredModelCount === 0) {
+          return;
+        }
+
+        const models = [...modelsById.values()];
+        await tx
+          .insert(deploymentSettings)
+          .values({
+            id: DEFAULT_DEPLOYMENT_ID,
+            taskModelSettings: normalizeTaskModelSettings({
+              ...currentSettings,
+              models,
+              allowedModelIds: [
+                ...new Set([
+                  ...currentSettings.allowedModelIds,
+                  ...discovery.models.map((model) => model.modelId),
+                ]),
+              ],
+            }),
+          })
+          .onConflictDoUpdate({
+            target: deploymentSettings.id,
+            set: {
+              taskModelSettings: normalizeTaskModelSettings({
+                ...currentSettings,
+                models,
+                allowedModelIds: [
+                  ...new Set([
+                    ...currentSettings.allowedModelIds,
+                    ...discovery.models.map((model) => model.modelId),
+                  ]),
+                ],
+              }),
+              updatedAt: new Date(),
+            },
+          });
+      });
+    }
+  }
+
   return {
     ...(await getTaskModelProviderSetupCommand(auth)),
     addedRecommendedModelCount,
+    addedDiscoveredModelCount,
+    discoveryError,
   };
 }
 
