@@ -708,6 +708,62 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
     });
 
+    it('withholds credentials for every enabled switchable model provider', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: {
+          roomoteModel: 'openrouter/openai/gpt-5.6-terra',
+          roomotePlanningModel: 'openrouter/anthropic/claude-opus-4.8',
+        },
+        taskModelSettings: {
+          models: [
+            {
+              id: 'openrouter/openai/gpt-5.6-terra',
+              displayName: 'GPT 5.6 Terra',
+              family: 'GPT',
+            },
+            {
+              id: 'anthropic/claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              family: 'Sonnet',
+            },
+            {
+              id: 'openai/gpt-5.6-luna',
+              displayName: 'GPT 5.6 Luna',
+              family: 'GPT',
+            },
+          ],
+          allowedModelIds: [
+            'openrouter/openai/gpt-5.6-terra',
+            'anthropic/claude-sonnet-5',
+            'openai/gpt-5.6-luna',
+          ],
+          defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+        },
+      });
+      mockResolveOpenCodeAuthContent.mockResolvedValue(
+        JSON.stringify({
+          openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+        }),
+      );
+
+      const env = await resolveEffectiveModelRuntimeEnv({
+        inferenceGateway: true,
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          OPENROUTER_API_KEY: 'sk-openrouter',
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+        },
+      });
+
+      expect(env).not.toHaveProperty('OPENROUTER_API_KEY');
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+      );
+      expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+      expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    });
+
     it('withholds Bedrock but keeps Vertex, which the gateway cannot serve', async () => {
       const env = await resolveEffectiveModelRuntimeEnv({
         inferenceGateway: true,
