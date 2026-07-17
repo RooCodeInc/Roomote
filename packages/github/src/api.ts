@@ -957,6 +957,39 @@ export async function getGitHubInstallations(options?: PaginateOptions) {
   return installations;
 }
 
+// Sync the installation for the requester recorded on this specific pending
+// row, then delete that row. Callers pass the exact row they intend to
+// complete so completion is never re-resolved by the non-unique account id.
+async function completePendingGitHubInstallationRow(
+  pendingGitHubInstallation: typeof githubPendingInstallations.$inferSelect,
+  installationId: number,
+) {
+  const { id: pendingId, requestedByUserId: userId } =
+    pendingGitHubInstallation;
+
+  const result = await syncGitHubInstallation({
+    userId,
+    installationId,
+  });
+
+  if (result.success) {
+    try {
+      // Clean up the pending GitHub installation upon successful completion.
+      await db
+        .delete(githubPendingInstallations)
+        .where(eq(githubPendingInstallations.id, pendingId));
+    } catch (error) {
+      console.error(
+        `[completePendingGitHubInstallation] Failed to delete pending GitHub installation: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return { ...result, requestedByUserId: userId };
+  }
+
+  return result;
+}
+
 export async function completePendingGitHubInstallation(
   installationId: number,
 ) {
@@ -975,27 +1008,75 @@ export async function completePendingGitHubInstallation(
     throw new Error('Pending GitHub installation not found');
   }
 
-  const { requestedByUserId: userId } = pendingGitHubInstallation;
-
-  const result = await syncGitHubInstallation({
-    userId,
+  return completePendingGitHubInstallationRow(
+    pendingGitHubInstallation,
     installationId,
-  });
+  );
+}
 
-  if (result.success) {
+/**
+ * Complete the requesting user's pending GitHub installations whose requests
+ * have since been approved on GitHub. This covers the case where the
+ * `installation.created` webhook never reached this deployment (for example a
+ * misconfigured webhook URL), leaving the requester stuck on "pending".
+ *
+ * Scoped to a single user so one user's manual re-check can never complete (or
+ * report as approved) another user's request.
+ */
+export async function resolvePendingGitHubInstallations({
+  userId,
+}: {
+  userId: string;
+}): Promise<{
+  pending: number;
+  completed: number;
+}> {
+  const pendingGitHubInstallations =
+    await db.query.githubPendingInstallations.findMany({
+      where: eq(githubPendingInstallations.requestedByUserId, userId),
+    });
+
+  if (pendingGitHubInstallations.length === 0) {
+    return { pending: 0, completed: 0 };
+  }
+
+  const installations = await getGitHubInstallations();
+
+  let completed = 0;
+
+  for (const pendingGitHubInstallation of pendingGitHubInstallations) {
+    // The pending row's `appId` holds the id of the GitHub account the
+    // installation was requested for.
+    const installation = installations.find(
+      ({ account }) => account?.id === pendingGitHubInstallation.appId,
+    );
+
+    if (!installation) {
+      continue;
+    }
+
     try {
-      // Clean up the pending GitHub installation upon successful completion.
-      await db
-        .delete(githubPendingInstallations)
-        .where(eq(githubPendingInstallations.id, pendingGitHubInstallation.id));
+      // Complete this exact row (not a re-lookup by account id), so a shared
+      // organization between two requesters can't complete the other's row.
+      const result = await completePendingGitHubInstallationRow(
+        pendingGitHubInstallation,
+        installation.id,
+      );
+
+      if (result.success) {
+        completed += 1;
+      }
     } catch (error) {
       console.error(
-        `[completePendingGitHubInstallation] Failed to delete pending GitHub installation: ${error instanceof Error ? error.message : String(error)}`,
+        `[resolvePendingGitHubInstallations] Failed to complete pending GitHub installation: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
 
-  return result;
+  return {
+    pending: pendingGitHubInstallations.length - completed,
+    completed,
+  };
 }
 
 async function suspendGitHubInstallation({
