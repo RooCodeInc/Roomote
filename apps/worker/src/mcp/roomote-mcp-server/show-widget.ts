@@ -1,15 +1,15 @@
 import { successResult, errorResult } from './tool-result.js';
 import type { ToolResult } from './types.js';
 
-export const SHOW_WIDGET_MAX_HTML_CHARS = 100_000;
-export const SHOW_WIDGET_MAX_CSS_CHARS = 50_000;
-export const SHOW_WIDGET_MAX_TITLE_CHARS = 200;
-export const SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS = 4_000;
+const SHOW_WIDGET_MAX_HTML_CHARS = 100_000;
+const SHOW_WIDGET_MAX_CSS_CHARS = 50_000;
+const SHOW_WIDGET_MAX_TITLE_CHARS = 200;
+const SHOW_WIDGET_MAX_TEXT_FALLBACK_CHARS = 4_000;
 export const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
 export const SHOW_WIDGET_MIN_HEIGHT = 120;
 export const SHOW_WIDGET_MAX_HEIGHT = 800;
 
-export type ShowWidgetInput = {
+type ShowWidgetInput = {
   html: string;
   title?: string;
   css?: string;
@@ -17,7 +17,7 @@ export type ShowWidgetInput = {
   textFallback?: string;
 };
 
-export type ShowWidgetSuccess = {
+type ShowWidgetSuccess = {
   success: true;
   shown: true;
   title: string | null;

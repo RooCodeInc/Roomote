@@ -2,9 +2,9 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 
 export const SHOW_WIDGET_TOOL_NAME = 'show_widget';
 
-export const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
-export const SHOW_WIDGET_MIN_HEIGHT = 120;
-export const SHOW_WIDGET_MAX_HEIGHT = 800;
+const SHOW_WIDGET_DEFAULT_HEIGHT = 320;
+const SHOW_WIDGET_MIN_HEIGHT = 120;
+const SHOW_WIDGET_MAX_HEIGHT = 800;
 
 export type ShowWidgetPayload = {
   title: string | null;
@@ -152,7 +152,7 @@ export function resolveShowWidgetForToolMessage(
  * Default stylesheet injected around model HTML so unstyled fragments still
  * look reasonable inside the dark/light task UI.
  */
-export const SHOW_WIDGET_DEFAULT_CSS = `
+const SHOW_WIDGET_DEFAULT_CSS = `
 :root {
   color-scheme: light dark;
   --rw-fg: #1c1917;
