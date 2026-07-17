@@ -598,14 +598,74 @@ describe('AutomationsSettings', () => {
     await openReviewerCard();
 
     expect(
-      screen.getByRole('switch', { name: /review prs from other authors/i }),
+      screen.getByRole('radio', { name: /prs from everyone/i }),
     ).toBeChecked();
+    expect(
+      screen.getByRole('radio', { name: /only prs created by roomote/i }),
+    ).not.toBeChecked();
     expect(
       screen.getByText(/all pull requests in connected repositories/),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/pull requests opened by Roomote/),
+      screen.queryByText(
+        /When background auto-review is on, reviews run on pull requests opened by Roomote/,
+      ),
     ).not.toBeInTheDocument();
+  });
+
+  it('defaults automatic review scope to only Roomote-created PRs', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = false;
+    state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    expect(
+      screen.getByRole('radio', { name: /only prs created by roomote/i }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole('radio', { name: /prs from everyone/i }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        /When background auto-review is on, reviews run on pull requests opened by Roomote/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/all pull requests in connected repositories/),
+    ).not.toBeInTheDocument();
+  });
+
+  it('updates review scope copy when switching automatic review authors', async () => {
+    state.settingsQuery.data.reviewer.enabled = true;
+    state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = false;
+    state.settingsQuery.data.settings.reviewer.reviewAllPullRequestAuthors = false;
+
+    render(<AutomationsSettings />);
+    await openReviewerCard();
+
+    fireEvent.click(screen.getByRole('radio', { name: /prs from everyone/i }));
+
+    expect(
+      screen.getByRole('radio', { name: /prs from everyone/i }),
+    ).toBeChecked();
+    expect(
+      await screen.findByText(/all pull requests in connected repositories/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(
+      screen.getByRole('radio', { name: /only prs created by roomote/i }),
+    );
+
+    expect(
+      screen.getByRole('radio', { name: /only prs created by roomote/i }),
+    ).toBeChecked();
+    expect(
+      await screen.findByText(
+        /When background auto-review is on, reviews run on pull requests opened by Roomote/,
+      ),
+    ).toBeInTheDocument();
   });
 
   it('keeps the legacy suggester textarea when grouped routing is disabled', async () => {
