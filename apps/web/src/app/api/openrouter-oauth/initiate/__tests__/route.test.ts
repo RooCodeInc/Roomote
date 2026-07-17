@@ -105,6 +105,23 @@ describe('GET /api/openrouter-oauth/initiate', () => {
     );
   });
 
+  it('avoids double slashes when R_PUBLIC_URL has a trailing slash', async () => {
+    bootstrapWebRuntimeEnvMock.mockResolvedValue({
+      R_APP_URL: 'http://localhost:13000',
+      R_PUBLIC_URL: 'https://customer.roomote.ai/',
+    });
+    buildOpenRouterAuthorizationUrlMock.mockReturnValue(
+      'https://openrouter.ai/auth?callback_url=https%3A%2F%2Fcustomer.roomote.ai%2Fapi%2Fopenrouter-oauth%2Fcallback',
+    );
+
+    await GET();
+
+    expect(buildOpenRouterAuthorizationUrlMock).toHaveBeenCalledWith({
+      callbackUrl: 'https://customer.roomote.ai/api/openrouter-oauth/callback',
+      codeChallenge: 'challenge-value',
+    });
+  });
+
   it('redirects unauthorized users to public setup with an error', async () => {
     authorizeMock.mockResolvedValue({
       success: true,

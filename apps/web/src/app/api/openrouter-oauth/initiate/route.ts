@@ -46,7 +46,10 @@ export async function GET() {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
   const authorizationUrl = buildOpenRouterAuthorizationUrl({
-    callbackUrl: `${publicAppUrl}/api/openrouter-oauth/callback`,
+    callbackUrl: new URL(
+      '/api/openrouter-oauth/callback',
+      publicAppUrl,
+    ).toString(),
     codeChallenge,
   });
 
