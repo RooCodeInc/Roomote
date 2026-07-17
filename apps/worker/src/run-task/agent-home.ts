@@ -2,14 +2,23 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import {
+  BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
+  buildInferenceGatewayOpenCodeBaseUrl,
   buildOpenCodeModelReasoningOptions,
+  CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
+  DEFAULT_BEDROCK_MANTLE_REGION,
+  getInferenceGatewayProviderByEnvVarName,
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   getMcpIntegration,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_REGION_PATTERN,
+  INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  parseInferenceGatewayKeys,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
@@ -52,12 +61,6 @@ const GOOGLE_APPLICATION_CREDENTIALS_FILE_NAME =
 export const OPENCODE_AUTH_FILE_NAME = 'auth.json';
 
 const OPENROUTER_PROVIDER_ID = 'openrouter';
-
-const BEDROCK_MANTLE_PROVIDER_ID = 'bedrock-mantle';
-
-const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
-
-const AWS_REGION_PATTERN = /^[a-z]{2}(?:-[a-z0-9]+)+-\d+$/u;
 
 /**
  * OpenRouter identifies the calling application through the `HTTP-Referer`
@@ -567,7 +570,7 @@ function mergeBedrockMantleProviderConfig(
   const mantleModelIds = [
     ...new Set(
       modelIds.flatMap((modelId) => {
-        const prefix = `${BEDROCK_MANTLE_PROVIDER_ID}/`;
+        const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`;
         const normalized = modelId?.trim();
 
         return normalized?.startsWith(prefix)
@@ -583,13 +586,15 @@ function mergeBedrockMantleProviderConfig(
 
   const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
 
-  if (!AWS_REGION_PATTERN.test(region)) {
+  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
     throw new Error(
       `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
     );
   }
 
-  const existingProvider = asRecord(providerConfig[BEDROCK_MANTLE_PROVIDER_ID]);
+  const existingProvider = asRecord(
+    providerConfig[BEDROCK_MANTLE_OPENCODE_PROVIDER_ID],
+  );
   const existingOptions = asRecord(existingProvider.options);
   const existingModels = asRecord(existingProvider.models);
   const models = Object.fromEntries(
@@ -604,7 +609,7 @@ function mergeBedrockMantleProviderConfig(
 
   return {
     ...providerConfig,
-    [BEDROCK_MANTLE_PROVIDER_ID]: {
+    [BEDROCK_MANTLE_OPENCODE_PROVIDER_ID]: {
       ...existingProvider,
       npm: '@ai-sdk/anthropic',
       name: 'Amazon Bedrock',
@@ -619,6 +624,72 @@ function mergeBedrockMantleProviderConfig(
       },
     },
   };
+}
+
+/**
+ * When the dequeue env carries an inference gateway URL, rebase each
+ * gateway-covered provider that a selected model uses onto the gateway. The
+ * SDK authenticates with the run token (already in the harness env), which
+ * the gateway exchanges for the deployment's provider key server-side, so
+ * the raw key never enters the sandbox.
+ */
+function mergeInferenceGatewayProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: Record<string, string>,
+): Record<string, unknown> {
+  const gatewayUrl = runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME]?.trim();
+  const servedKeyNames = parseInferenceGatewayKeys(
+    runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+  );
+
+  if (!gatewayUrl || servedKeyNames.length === 0) {
+    return providerConfig;
+  }
+
+  // Rebase exactly the providers whose keys the gateway is serving (the same
+  // set dequeue withheld from the sandbox), so the withheld set and the
+  // rebased set stay identical regardless of which models reference them.
+  const gatewayProviders = new Map(
+    servedKeyNames.flatMap((keyName) => {
+      const provider = getInferenceGatewayProviderByEnvVarName(keyName);
+
+      return provider ? [[provider.id, provider] as const] : [];
+    }),
+  );
+
+  let merged = providerConfig;
+
+  for (const [providerId, gatewayProvider] of gatewayProviders) {
+    // ChatGPT-subscription OAuth authenticates through opencode's Codex
+    // plugin directly; leave the openai provider on its default base URL
+    // when a subscription record is present.
+    if (
+      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
+      runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME]
+    ) {
+      continue;
+    }
+
+    const existingProvider = asRecord(merged[providerId]);
+    const existingOptions = asRecord(existingProvider.options);
+
+    merged = {
+      ...merged,
+      [providerId]: {
+        ...existingProvider,
+        options: {
+          ...existingOptions,
+          baseURL: buildInferenceGatewayOpenCodeBaseUrl(
+            gatewayUrl,
+            gatewayProvider,
+          ),
+          apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+        },
+      },
+    };
+  }
+
+  return merged;
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -1135,18 +1206,25 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
-  const providerConfig = mergeBedrockMantleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerReasoningConfig, variantAliases),
+  const configuredModelIds = [
+    effectiveCodingModel,
+    model,
+    smallModel,
+    visionModel,
+    codeReviewModel,
+    exploreModel,
+    planningModel,
+  ];
+  const providerConfig = mergeInferenceGatewayProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeOpenRouterVariantAliasModels(
+        providerReasoningConfig,
+        variantAliases,
+      ),
+      runtimeEnv,
+      configuredModelIds,
+    ),
     runtimeEnv,
-    [
-      effectiveCodingModel,
-      model,
-      smallModel,
-      visionModel,
-      codeReviewModel,
-      exploreModel,
-      planningModel,
-    ],
   );
 
   return {

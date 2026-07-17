@@ -45,6 +45,7 @@ import {
   teams,
   telegram,
   discord,
+  inference,
   mcp,
   mcpRouting,
   taskRunsRouter,
@@ -192,6 +193,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/webhooks/teams', teams);
   app.route('/api/webhooks/telegram', telegram);
   app.route('/api/internal/discord', discord);
+  app.route('/api/inference', inference);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
   app.route('/api/task-runs', taskRunsRouter);

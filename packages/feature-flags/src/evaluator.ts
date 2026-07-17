@@ -124,3 +124,30 @@ export function getFeatureFlagEvaluator(redis: Redis): FeatureFlagEvaluator {
 export function resetFeatureFlagEvaluatorForTests(): void {
   evaluatorInstance = null;
 }
+
+/**
+ * Evaluate the deployment-level InferenceGateway flag, failing closed
+ * (returns false: direct provider keys, the long-standing behavior) when flag
+ * evaluation is unavailable so a Redis outage cannot break task inference.
+ * Shared by the dequeue env resolver and every worker-spawn env builder so
+ * the two halves of the sandbox env are never gated by divergent logic.
+ */
+export async function isInferenceGatewayEnabledForDeployment(
+  redis: Redis,
+  logPrefix = '[inference-gateway]',
+): Promise<boolean> {
+  try {
+    return await getFeatureFlagEvaluator(redis).evaluate(
+      FeatureFlag.InferenceGateway,
+      { isDeploymentContext: true },
+    );
+  } catch (error) {
+    console.warn(
+      `${logPrefix} InferenceGateway flag evaluation failed; using direct provider keys: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return false;
+  }
+}

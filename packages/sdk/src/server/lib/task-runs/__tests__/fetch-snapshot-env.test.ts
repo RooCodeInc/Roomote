@@ -4,13 +4,11 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 // (vi.mock calls are hoisted above all other code by vitest).
 const {
   mockFindFirst,
-  mockTransaction,
-  mockFetchEnvVars,
+  mockFetchResolvedRuntimeEnvVars,
   mockCreateSourceControlTokenForTaskRun,
 } = vi.hoisted(() => ({
   mockFindFirst: vi.fn(),
-  mockTransaction: vi.fn(),
-  mockFetchEnvVars: vi.fn(),
+  mockFetchResolvedRuntimeEnvVars: vi.fn(),
   mockCreateSourceControlTokenForTaskRun: vi.fn(),
 }));
 
@@ -21,7 +19,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: mockFindFirst,
       },
     },
-    transaction: mockTransaction,
+    update: () => ({ set: () => ({ where: async () => undefined }) }),
   },
   taskRuns: {
     id: 'taskRuns.id',
@@ -31,7 +29,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('../dequeue-helpers', () => ({
-  fetchEnvVars: mockFetchEnvVars,
+  fetchResolvedRuntimeEnvVars: mockFetchResolvedRuntimeEnvVars,
   createSourceControlTokenForTaskRun: mockCreateSourceControlTokenForTaskRun,
 }));
 
@@ -64,11 +62,6 @@ function makeGitHubToken(token: string) {
 describe('fetchSnapshotEnv', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    // By default, db.transaction calls the callback with a fake tx.
-    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
-      cb({ fake: 'tx' }),
-    );
   });
 
   // ── Happy path: deployment-scoped env vars ───────────────────────────
@@ -82,7 +75,9 @@ describe('fetchSnapshotEnv', () => {
 
     const taskRun = makeTaskRun();
     mockFindFirst.mockResolvedValue(taskRun);
-    mockFetchEnvVars.mockResolvedValue({ MY_SECRET: 'value123' });
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({
+      MY_SECRET: 'value123',
+    });
     const token = makeGitHubToken('ghs_token_abc');
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(token);
 
@@ -98,12 +93,11 @@ describe('fetchSnapshotEnv', () => {
     // Verify db.query was called.
     expect(mockFindFirst).toHaveBeenCalledOnce();
 
-    // Verify fetchEnvVars was called inside a transaction.
-    expect(mockTransaction).toHaveBeenCalledOnce();
-    expect(mockFetchEnvVars).toHaveBeenCalledWith(
-      { fake: 'tx' },
-      { sourceControlProvider: 'github' },
-    );
+    // Verify the gateway-aware resolution was used (so snapshot env withholds
+    // gateway-served provider keys, like the task dequeue path).
+    expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
+      sourceControlProvider: 'github',
+    });
 
     // Verify createSourceControlTokenForTaskRun was called with the task run.
     expect(mockCreateSourceControlTokenForTaskRun).toHaveBeenCalledWith(
@@ -125,7 +119,7 @@ describe('fetchSnapshotEnv', () => {
 
     const taskRun = makeTaskRun();
     mockFindFirst.mockResolvedValue(taskRun);
-    mockFetchEnvVars.mockResolvedValue({});
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({});
     const token = makeGitHubToken('ghs_job_token');
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(token);
 
@@ -138,10 +132,9 @@ describe('fetchSnapshotEnv', () => {
       taskId: 'task_123',
     });
 
-    expect(mockFetchEnvVars).toHaveBeenCalledWith(
-      { fake: 'tx' },
-      { sourceControlProvider: 'github' },
-    );
+    expect(mockFetchResolvedRuntimeEnvVars).toHaveBeenCalledWith(undefined, {
+      sourceControlProvider: 'github',
+    });
   });
 
   // ── Task run not found ──────────────────────────────────────────────
@@ -160,7 +153,7 @@ describe('fetchSnapshotEnv', () => {
     );
 
     // Should not have called downstream helpers.
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockFetchResolvedRuntimeEnvVars).not.toHaveBeenCalled();
     expect(mockCreateSourceControlTokenForTaskRun).not.toHaveBeenCalled();
   });
 
@@ -174,7 +167,7 @@ describe('fetchSnapshotEnv', () => {
     };
 
     mockFindFirst.mockResolvedValue(makeTaskRun());
-    mockFetchEnvVars.mockResolvedValue({});
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({});
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(
       makeGitHubToken('ghs_token_xyz'),
     );
@@ -196,7 +189,7 @@ describe('fetchSnapshotEnv', () => {
     };
 
     mockFindFirst.mockResolvedValue(makeTaskRun());
-    mockFetchEnvVars.mockResolvedValue({ KEY: 'val' });
+    mockFetchResolvedRuntimeEnvVars.mockResolvedValue({ KEY: 'val' });
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue(null);
 
     await expect(fetchSnapshotEnv(auth, { runId: 42 })).rejects.toThrow(

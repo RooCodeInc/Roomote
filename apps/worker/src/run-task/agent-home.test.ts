@@ -136,6 +136,112 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toThrow('AWS_REGION must be a valid AWS region');
   });
 
+  it('rebases gateway-covered providers onto the inference gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        R_SMALL_MODEL: 'google/gemini-3.5-flash',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'ANTHROPIC_API_KEY,GEMINI_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.anthropic).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/anthropic/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+    expect(config.provider.google).toMatchObject({
+      options: {
+        baseURL: 'https://api.example.com/api/inference/google/v1beta',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+  });
+
+  it('keeps OpenRouter attribution headers when rebasing onto the gateway', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-sonnet-5',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENROUTER_API_KEY',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: {
+        openrouter: { options: Record<string, unknown> };
+      };
+    };
+
+    expect(config.provider.openrouter.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openrouter/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      headers: expect.objectContaining({}) as Record<string, string>,
+    });
+  });
+
+  it('rebases Bedrock Mantle onto the gateway while keeping its model config', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        AWS_REGION: 'us-west-2',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'AWS_BEARER_TOKEN_BEDROCK',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider['bedrock-mantle']).toMatchObject({
+      npm: '@ai-sdk/anthropic',
+      options: {
+        baseURL: 'https://api.example.com/api/inference/bedrock-mantle/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        'anthropic.claude-sonnet-5': {},
+      },
+    });
+  });
+
+  it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai/gpt-5.4-codex',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'OPENAI_API_KEY',
+        OPENCODE_AUTH_CONTENT: '{"openai":{"type":"oauth"}}',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, unknown>;
+    };
+
+    expect(config.provider.openai).toBeUndefined();
+  });
+
+  it('does not touch provider base URLs when no gateway URL is present', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'anthropic/claude-sonnet-5',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(result.configContent).not.toContain('baseURL');
+    expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
+  });
+
   it('materializes inline Google Vertex credentials before OpenCode starts', () => {
     const homeDir = createHomeDir();
     const credentialsJson = JSON.stringify({

@@ -1,5 +1,7 @@
 import {
   CONTROL_PLANE_ENV_VAR_NAMES,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
+  parseInferenceGatewayKeys,
   RunStatus,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
@@ -22,6 +24,8 @@ import {
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
+import { isInferenceGatewayEnabledForDeployment } from '@roomote/feature-flags/server';
+import { getRedis } from '@roomote/redis';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
@@ -208,16 +212,48 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
   const resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv({
     deploymentEnvVars: envVars,
+    inferenceGateway: await isInferenceGatewayEnabledForDeployment(
+      getRedis(),
+      '[fetchResolvedRuntimeEnvVars]',
+    ),
   });
 
   return redactControlPlaneEnvVars(
     redactSourceControlProviderEnvVars(
-      withLegacySnapshotModelEnvAliases({
-        ...envVars,
-        ...resolvedModelRuntimeEnv,
-      }),
+      redactInferenceGatewayProviderKeys(
+        withLegacySnapshotModelEnvAliases({
+          ...envVars,
+          ...resolvedModelRuntimeEnv,
+        }),
+      ),
       options?.sourceControlProvider,
     ),
+  );
+}
+
+/**
+ * When the gateway is active the resolver emits R_INFERENCE_GATEWAY_KEYS
+ * listing exactly the configured provider keys it is serving. Those raw keys
+ * are spread into the sandbox env above (from the deployment env vars), so
+ * strip precisely that set from the merged result — never a broader set, so a
+ * provider key the deployment set for its own code (not gateway-served) still
+ * reaches the sandbox.
+ */
+function redactInferenceGatewayProviderKeys(
+  envVars: Record<string, string>,
+): Record<string, string> {
+  const servedKeyNames = parseInferenceGatewayKeys(
+    envVars[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME],
+  );
+
+  if (servedKeyNames.length === 0) {
+    return envVars;
+  }
+
+  const servedKeyNameSet = new Set(servedKeyNames);
+
+  return Object.fromEntries(
+    Object.entries(envVars).filter(([key]) => !servedKeyNameSet.has(key)),
   );
 }
 

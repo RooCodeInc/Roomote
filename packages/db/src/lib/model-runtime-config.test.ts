@@ -620,4 +620,80 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
   });
+
+  describe('inference gateway', () => {
+    beforeEach(() => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+      });
+    });
+
+    it('withholds gateway-served keys and advertises them by name when enabled', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        inferenceGateway: true,
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      // The worker builds the gateway URL from its own platform URL; the
+      // resolver only advertises which keys it is serving.
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_URL');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    });
+
+    it('keeps raw keys when the gateway option is not passed', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env.ANTHROPIC_API_KEY).toBe('sk-anthropic');
+      expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_KEYS');
+    });
+
+    it('advertises only configured covered keys, not every set covered key', async () => {
+      // OpenAI is not a configured role model, so even though OPENAI_API_KEY is
+      // set it is neither served nor advertised — the dequeue redaction keys
+      // off the advertised set, so a stray OPENAI_API_KEY the deployment set
+      // for its own code survives into the sandbox.
+      const env = await resolveEffectiveModelRuntimeEnv({
+        inferenceGateway: true,
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          OPENAI_API_KEY: 'sk-openai-for-user-code',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
+    });
+
+    it('withholds Bedrock but keeps Vertex, which the gateway cannot serve', async () => {
+      const env = await resolveEffectiveModelRuntimeEnv({
+        inferenceGateway: true,
+        runtimeEnv: {
+          R_MODEL_ENV_KEYS:
+            'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK,GOOGLE_APPLICATION_CREDENTIALS',
+        },
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
+          GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
+        },
+      });
+
+      expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(env).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
+      // Vertex needs request signing, not header injection, so its
+      // credentials still flow.
+      expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
+        '{"type":"service_account"}',
+      );
+      expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
+        'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
+      );
+    });
+  });
 });

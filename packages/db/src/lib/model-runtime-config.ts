@@ -4,7 +4,9 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
+  isInferenceGatewayCoveredEnvVar,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
@@ -17,7 +19,10 @@ import { resolveOpenCodeAuthContent } from './chatgpt-subscription';
 
 import { type DatabaseOrTransaction, db } from '../db';
 import { deploymentSettings } from '../schema';
-import { stringifyDecryptedEnvVarValue } from './environment-variables';
+import {
+  resolveDeploymentEnvVar,
+  stringifyDecryptedEnvVarValue,
+} from './environment-variables';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 
@@ -123,11 +128,60 @@ function resolveProviderKeyNames({
   ];
 }
 
+/**
+ * Resolve a single model-provider env value with the same precedence the task
+ * runtime uses: the runtime process env first, then the persisted (encrypted)
+ * deployment environment variables.
+ */
+export async function resolveModelProviderEnvValue(
+  envVarNames: string | readonly string[],
+  options: {
+    runtimeEnv?: Partial<Record<string, string | undefined>>;
+    executor?: DatabaseOrTransaction;
+  } = {},
+): Promise<string | undefined> {
+  const runtimeEnv = options.runtimeEnv ?? process.env;
+  const names = typeof envVarNames === 'string' ? [envVarNames] : envVarNames;
+
+  for (const envVarName of names) {
+    const runtimeValue = normalizeConfiguredValue(runtimeEnv[envVarName]);
+
+    if (runtimeValue) {
+      return runtimeValue;
+    }
+  }
+
+  for (const envVarName of names) {
+    const persistedValue = await resolveDeploymentEnvVar(
+      envVarName,
+      options.executor ?? db,
+      {},
+    );
+
+    const normalizedValue = normalizeConfiguredValue(persistedValue);
+
+    if (normalizedValue) {
+      return normalizedValue;
+    }
+  }
+
+  return undefined;
+}
+
 export async function resolveEffectiveModelRuntimeEnv(
   options: {
     runtimeEnv?: Partial<Record<string, string | undefined>>;
     deploymentEnvVars?: Record<string, string>;
     executor?: DatabaseOrTransaction;
+    /**
+     * Route sandbox inference through the gateway: the configured provider
+     * keys the gateway can serve stay on the control plane and their names
+     * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Callers
+     * resolving env for the sandbox pass the evaluated InferenceGateway
+     * feature flag; control-plane callers (routing, titles, summaries) omit it
+     * because that inference holds no run token to present to the gateway.
+     */
+    inferenceGateway?: boolean;
   } = {},
 ): Promise<Record<string, string>> {
   const runtimeEnv = options.runtimeEnv ?? process.env;
@@ -240,8 +294,26 @@ export async function resolveEffectiveModelRuntimeEnv(
       resolvedRoomotePlanningModel,
     ],
   });
+  // When the gateway is active, the configured provider keys it can serve
+  // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay on
+  // the control plane and are advertised to the worker by name via
+  // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
+  // gateway URL from its own platform URL and rebases exactly these providers.
+  // Only configured keys are withheld, so a provider key the deployment set
+  // for its own code (not used by any configured model) still reaches the
+  // sandbox. Providers the gateway cannot serve (Vertex signing, ChatGPT
+  // subscription OAuth) are never covered and always flow through.
+  const gatewayServedKeyNames = options.inferenceGateway
+    ? providerKeyNames.filter((name) => isInferenceGatewayCoveredEnvVar(name))
+    : [];
+  const gatewayServedKeyNameSet = new Set(gatewayServedKeyNames);
+
   const resolvedProviderKeyValues = Object.fromEntries(
     providerKeyNames.flatMap((envVarName) => {
+      if (gatewayServedKeyNameSet.has(envVarName)) {
+        return [];
+      }
+
       const value =
         normalizeConfiguredValue(runtimeEnv[envVarName]) ??
         normalizeConfiguredValue(persistedEnvVars[envVarName]);
@@ -321,6 +393,9 @@ export async function resolveEffectiveModelRuntimeEnv(
         R_MODEL_ENV_KEYS: providerKeyNames.join(','),
       }),
     ...resolvedProviderKeyValues,
+    ...(gatewayServedKeyNames.length > 0 && {
+      [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
+    }),
     ...(injectedOpenCodeAuthContent && {
       OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,
     }),
