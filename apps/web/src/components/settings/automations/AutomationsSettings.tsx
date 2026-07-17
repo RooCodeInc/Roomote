@@ -3905,6 +3905,25 @@ If unclear, send to manager channel.`}
                       </div>
                     </div>
 
+                    <div className="flex items-start gap-2">
+                      <Switch
+                        className="mt-1"
+                        checked={formState.reviewerReviewDraftPrs}
+                        onCheckedChange={(reviewerReviewDraftPrs) =>
+                          setFormState((prev) =>
+                            prev ? { ...prev, reviewerReviewDraftPrs } : prev,
+                          )
+                        }
+                      />
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">Review draft PRs</p>
+                        <p className="text-xs text-muted-foreground">
+                          Keep draft pull requests in scope before they are
+                          marked ready for review when Review Code is enabled.
+                        </p>
+                      </div>
+                    </div>
+
                     <div className="space-y-3">
                       <div className="space-y-1">
                         <p
@@ -3978,25 +3997,6 @@ If unclear, send to manager channel.`}
                           </div>
                         </div>
                       </RadioGroup>
-                    </div>
-
-                    <div className="flex items-start gap-2">
-                      <Switch
-                        className="mt-1"
-                        checked={formState.reviewerReviewDraftPrs}
-                        onCheckedChange={(reviewerReviewDraftPrs) =>
-                          setFormState((prev) =>
-                            prev ? { ...prev, reviewerReviewDraftPrs } : prev,
-                          )
-                        }
-                      />
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium">Review draft PRs</p>
-                        <p className="text-xs text-muted-foreground">
-                          Keep draft pull requests in scope before they are
-                          marked ready for review when Review Code is enabled.
-                        </p>
-                      </div>
                     </div>
                   </div>
                 </div>
