@@ -278,6 +278,71 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).not.toContain('ROOMOTE_CLOUD_TOKEN');
   });
 
+  it('configures selected OpenAI-compatible providers with direct-mode fallbacks', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'ollama/qwen3-coder',
+        R_SMALL_MODEL: 'vllm/meta-llama/Llama-3.3-70B-Instruct',
+        R_VISION_MODEL: 'litellm/gpt-4.1-mini',
+        VLLM_BASE_URL: 'https://vllm.example.com/v1',
+        VLLM_API_KEY: 'vllm-key',
+        OPENAI_BASE_URL: 'https://litellm.example.com/v1',
+        OPENAI_API_KEY: 'litellm-key',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.ollama).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: { baseURL: 'http://127.0.0.1:11434/v1' },
+      models: { 'qwen3-coder': { name: 'qwen3-coder' } },
+    });
+    expect(config.provider.ollama?.options.apiKey).toBeUndefined();
+    expect(config.provider.vllm).toMatchObject({
+      options: {
+        baseURL: 'https://vllm.example.com/v1',
+        apiKey: '{env:VLLM_API_KEY}',
+      },
+    });
+    expect(config.provider.litellm).toMatchObject({
+      options: {
+        baseURL: 'https://litellm.example.com/v1',
+        apiKey: '{env:OPENAI_API_KEY}',
+      },
+    });
+  });
+
+  it('rebases gateway-backed compatible providers without an Ollama key', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'ollama/qwen3-coder',
+        R_SMALL_MODEL: 'vllm/meta-llama/Llama-3.3-70B-Instruct',
+        R_VISION_MODEL: 'litellm/gpt-4.1-mini',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.ollama?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/ollama/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(config.provider.vllm?.options).toMatchObject({
+      baseURL: 'http://127.0.0.1:8000/v1',
+    });
+    expect(config.provider.vllm?.options.apiKey).toBeUndefined();
+    expect(config.provider.litellm?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/litellm/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('strips disabled-provider credentials and removes a stale Vertex file', () => {
     const homeDir = createHomeDir();
     const credentialsPath = join(
