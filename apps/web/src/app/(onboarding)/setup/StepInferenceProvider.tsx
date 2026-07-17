@@ -82,10 +82,6 @@ export function StepInferenceProvider({
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
-  const [discoveredModels, setDiscoveredModels] = useState<
-    Array<{ modelId: string; displayName: string | null }>
-  >([]);
-  const [selectedModelId, setSelectedModelId] = useState('');
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const chatgptStatusQuery = useQuery(
@@ -121,8 +117,6 @@ export function StepInferenceProvider({
   useEffect(() => {
     setApiKey('');
     setAdditionalEnvValues({});
-    setDiscoveredModels([]);
-    setSelectedModelId('');
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
   }, [selectedProvider]);
@@ -185,51 +179,71 @@ export function StepInferenceProvider({
     );
   const isActionDisabled =
     saveModelConfig.isPending ||
+    discoverProviderModels.isPending ||
+    qualifyProviderModel.isPending ||
     hasMissingRequiredFields ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
+  const isCheckingEndpoint =
+    isEndpointProvider &&
+    (discoverProviderModels.isPending || qualifyProviderModel.isPending);
 
   const handleContinue = async () => {
+    let modelId: string | undefined;
+    let endpointConnectionMessage: string | undefined;
+    const submittedCredential = shouldShowConfiguredMask
+      ? undefined
+      : apiKey.trim() || undefined;
+
     if (isEndpointProvider) {
-      const result = await qualifyProviderModel.mutateAsync({
-        provider: selectedProvider as 'ollama' | 'vllm' | 'litellm',
-        modelId: selectedModelId,
-        baseUrl: apiKey.trim() || undefined,
+      const provider = selectedProvider as 'ollama' | 'vllm' | 'litellm';
+      const connection = {
+        baseUrl: submittedCredential,
         apiKey:
           additionalEnvValues[
             `${selectedProvider.toUpperCase()}_API_KEY`
           ]?.trim() || undefined,
+      };
+      const discovery = await discoverProviderModels.mutateAsync({
+        provider,
+        baseUrl: connection.baseUrl,
+        apiKey: connection.apiKey,
       });
-      if (!result.success) {
-        toast.error(result.error);
+      if (discovery.error) {
+        toast.error(discovery.error);
         return;
       }
+
+      for (const candidate of discovery.recommendedModels) {
+        const result = await qualifyProviderModel.mutateAsync({
+          provider,
+          modelId: candidate.modelId,
+          baseUrl: connection.baseUrl,
+          apiKey: connection.apiKey,
+        });
+        if (result.success) {
+          modelId = candidate.modelId;
+          break;
+        }
+      }
+
+      if (!modelId) {
+        toast.error(
+          `Connected to ${selectedProviderStatus?.label ?? 'the provider'} and found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model' : 'models'}, but none can be used as Roomote's default. Add a capable tool-calling model, then try again.`,
+        );
+        return;
+      }
+
+      endpointConnectionMessage = `Connected to ${selectedProviderStatus?.label ?? 'the provider'} and selected ${modelId.replace(`${provider}/`, '')} from ${discovery.modelCount} discovered ${discovery.modelCount === 1 ? 'model' : 'models'}.`;
     }
     await saveModelConfig.mutateAsync({
       provider: selectedProvider,
-      apiKey: apiKey.trim() || undefined,
+      apiKey: submittedCredential,
       ...(additionalEnvFields.length > 0 && { additionalEnvValues }),
-      ...(isEndpointProvider && { modelId: selectedModelId }),
+      ...(modelId && { modelId }),
     });
-  };
-
-  const handleDiscoverModels = async () => {
-    if (!isEndpointProvider) {
-      return;
+    if (endpointConnectionMessage) {
+      toast.success(endpointConnectionMessage);
     }
-    const result = await discoverProviderModels.mutateAsync({
-      provider: selectedProvider as 'ollama' | 'vllm' | 'litellm',
-      baseUrl: apiKey.trim() || undefined,
-      apiKey:
-        additionalEnvValues[
-          `${selectedProvider.toUpperCase()}_API_KEY`
-        ]?.trim() || undefined,
-    });
-    if (result.error) {
-      toast.error(result.error);
-      return;
-    }
-    setDiscoveredModels(result.models);
-    setSelectedModelId(result.models[0]?.modelId ?? '');
   };
 
   return (
@@ -249,7 +263,7 @@ export function StepInferenceProvider({
             setSelectedProvider(value as SetupModelProviderId)
           }
         >
-          <SelectTrigger aria-label="Model provider">
+          <SelectTrigger aria-label="Model provider" className="min-w-40">
             <SelectValue placeholder="Choose a provider" />
           </SelectTrigger>
           <SelectContent>
@@ -359,38 +373,6 @@ export function StepInferenceProvider({
           </div>
         ))}
 
-      {isEndpointProvider ? (
-        <div className="flex max-w-lg items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void handleDiscoverModels()}
-            disabled={
-              discoverProviderModels.isPending ||
-              (!apiKey.trim() && !hasRuntimeProviderKey && !hasSavedProviderKey)
-            }
-          >
-            {discoverProviderModels.isPending
-              ? 'Discovering...'
-              : 'Discover models'}
-          </Button>
-          {discoveredModels.length > 0 ? (
-            <Select value={selectedModelId} onValueChange={setSelectedModelId}>
-              <SelectTrigger aria-label="Discovered model">
-                <SelectValue placeholder="Choose a model" />
-              </SelectTrigger>
-              <SelectContent>
-                {discoveredModels.map((model) => (
-                  <SelectItem key={model.modelId} value={model.modelId}>
-                    {model.displayName ?? model.modelId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : null}
-        </div>
-      ) : null}
-
       {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">
@@ -424,13 +406,11 @@ export function StepInferenceProvider({
         <Button
           type="button"
           onClick={() => void handleContinue()}
-          disabled={
-            isActionDisabled || (isEndpointProvider && !selectedModelId)
-          }
+          disabled={isActionDisabled}
         >
-          {saveModelConfig.isPending ? (
+          {saveModelConfig.isPending || isCheckingEndpoint ? (
             <>
-              Saving...
+              {isCheckingEndpoint ? 'Checking connection...' : 'Saving...'}
               <Spinner />
             </>
           ) : (

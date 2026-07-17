@@ -69,6 +69,7 @@ import {
   getTaskModelSettingsCommand,
   deleteTaskModelProviderCommand,
   discoverProviderModelsCommand,
+  getRecommendedLocalProviderModels,
   lookupTaskModelCommand,
   qualifyProviderModelCommand,
   refreshTaskModelMetadataCommand,
@@ -113,6 +114,55 @@ function buildMockAuth(
     ...overrides,
   } as UserAuthSuccess;
 }
+
+describe('getRecommendedLocalProviderModels', () => {
+  it('prefers capable coding models and excludes tiny or specialized models', () => {
+    const recommended = getRecommendedLocalProviderModels([
+      {
+        modelId: 'ollama/tinyllama:1.1b',
+        displayName: 'tinyllama:1.1b',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/nomic-embed-text',
+        displayName: 'nomic-embed-text',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/llama3.3:70b',
+        displayName: 'llama3.3:70b',
+        family: null,
+        metadata: null,
+      },
+      {
+        modelId: 'ollama/qwen3-coder:30b',
+        displayName: 'qwen3-coder:30b',
+        family: null,
+        metadata: null,
+      },
+    ]);
+
+    expect(recommended.map((model) => model.modelId)).toEqual([
+      'ollama/qwen3-coder:30b',
+      'ollama/llama3.3:70b',
+    ]);
+  });
+
+  it('does not automatically choose unknown local model aliases', () => {
+    expect(
+      getRecommendedLocalProviderModels([
+        {
+          modelId: 'litellm/team-default',
+          displayName: 'team-default',
+          family: null,
+          metadata: null,
+        },
+      ]),
+    ).toEqual([]);
+  });
+});
 
 describe('lookupTaskModelCommand', () => {
   // Settings reads now depend on which provider env keys are configured
@@ -271,6 +321,8 @@ describe('lookupTaskModelCommand', () => {
       }),
     ).resolves.toMatchObject({
       error: null,
+      modelCount: 1,
+      recommendedModels: [{ modelId: 'ollama/qwen3:8b' }],
       models: [
         {
           modelId: 'ollama/qwen3:8b',

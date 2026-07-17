@@ -1895,6 +1895,7 @@ export const appRouter = createRouter({
           provider: z.enum(SETUP_MODEL_PROVIDER_IDS),
           apiKey: z.string().trim().optional(),
           additionalEnvValues: z.record(z.string().trim()).optional(),
+          modelId: z.string().trim().optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

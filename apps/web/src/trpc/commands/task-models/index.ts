@@ -97,6 +97,22 @@ type LocalProviderModelResponse = {
   model_info?: Record<string, Record<string, unknown>>;
 };
 
+const LOCAL_MODEL_RECOMMENDATION_FAMILIES = [
+  { pattern: /qwen(?:[\d.-]*)(?:[-_:]?(?:coder|code))?/i, score: 100 },
+  { pattern: /devstral/i, score: 98 },
+  { pattern: /gpt-oss/i, score: 96 },
+  { pattern: /glm/i, score: 92 },
+  { pattern: /mistral/i, score: 88 },
+  { pattern: /deepseek/i, score: 86 },
+  { pattern: /llama/i, score: 82 },
+  { pattern: /gemma/i, score: 76 },
+] as const;
+
+const UNSUITABLE_LOCAL_MODEL_PATTERN =
+  /(?:^|[-_:/.])(tiny|embed(?:ding)?|rerank(?:er)?|guard|moderation|vision|vl|ocr|whisper|tts|nomic|all-minilm)(?:$|[-_:/.])/i;
+const LOCAL_MODEL_PARAMETER_COUNT_PATTERN =
+  /(?:^|[-_:/.])(\d+(?:\.\d+)?)b(?:$|[-_:/.])/i;
+
 const LOCAL_PROVIDER_CONNECTION_ENV: Record<
   LocalTaskModelProviderId,
   { baseUrl: string; apiKey?: string }
@@ -1132,8 +1148,57 @@ type TaskModelLookupResult = {
   metadata: TaskModelMetadata | null;
 };
 
+function getLocalModelRecommendationScore(model: TaskModelLookupResult) {
+  const name = `${model.modelId} ${model.displayName ?? ''}`.toLowerCase();
+
+  if (UNSUITABLE_LOCAL_MODEL_PATTERN.test(name)) {
+    return null;
+  }
+
+  const family = LOCAL_MODEL_RECOMMENDATION_FAMILIES.find(({ pattern }) =>
+    pattern.test(name),
+  );
+  if (!family) {
+    return null;
+  }
+
+  const parameterCount = Number(
+    LOCAL_MODEL_PARAMETER_COUNT_PATTERN.exec(name)?.[1] ?? 0,
+  );
+  if (parameterCount > 0 && parameterCount < 7) {
+    return null;
+  }
+
+  const codingBonus = /(?:coder|code)/i.test(name) ? 8 : 0;
+  return family.score + codingBonus + Math.min(parameterCount, 100) / 100;
+}
+
+/**
+ * Endpoint providers advertise their installed models rather than a stable
+ * catalog. Keep the automatic choice deliberately conservative: only known
+ * general-purpose families are eligible, and small or specialized models are
+ * left for an operator to enable manually from Models settings.
+ */
+export function getRecommendedLocalProviderModels(
+  models: readonly TaskModelLookupResult[],
+) {
+  return models
+    .flatMap((model) => {
+      const score = getLocalModelRecommendationScore(model);
+      return score === null ? [] : [{ model, score }];
+    })
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.model.modelId.localeCompare(right.model.modelId),
+    )
+    .map(({ model }) => model);
+}
+
 type LocalProviderDiscoveryResult = {
   models: TaskModelLookupResult[];
+  modelCount: number;
+  recommendedModels: TaskModelLookupResult[];
   error: string | null;
 };
 
@@ -1366,7 +1431,12 @@ async function fetchLocalProviderModels(
         .filter((model): model is TaskModelLookupResult => model !== null)
         .sort((left, right) => left.modelId.localeCompare(right.modelId));
 
-      return { models, error: null };
+      return {
+        models,
+        modelCount: models.length,
+        recommendedModels: getRecommendedLocalProviderModels(models),
+        error: null,
+      };
     } catch {
       lastError = getLocalProviderNetworkError(provider);
     }
@@ -1374,6 +1444,8 @@ async function fetchLocalProviderModels(
 
   return {
     models: [],
+    modelCount: 0,
+    recommendedModels: [],
     error: lastError ?? getLocalProviderNetworkError(provider),
   };
 }
@@ -1391,6 +1463,8 @@ export async function discoverProviderModelsCommand(
   if (!connection) {
     return {
       models: [],
+      modelCount: 0,
+      recommendedModels: [],
       error: 'Save a valid endpoint URL before discovering models.',
     };
   }

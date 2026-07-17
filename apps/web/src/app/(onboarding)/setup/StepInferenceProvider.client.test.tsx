@@ -15,6 +15,7 @@ const { mutateAsyncMock } = vi.hoisted(() => ({
 vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
+    success: vi.fn(),
   },
 }));
 
@@ -31,6 +32,14 @@ vi.mock('@/trpc/client', () => ({
     chatgptSubscription: {
       status: {
         queryOptions: () => ({ queryKey: ['chatgptSubscription.status'] }),
+      },
+    },
+    taskModels: {
+      discoverProviderModels: {
+        mutationOptions: (options: Record<string, unknown>) => options,
+      },
+      qualifyProviderModel: {
+        mutationOptions: (options: Record<string, unknown>) => options,
       },
     },
   }),
@@ -149,6 +158,22 @@ function openrouterProviderStatus(): SetupModelStatus['providers'][number] {
   };
 }
 
+function ollamaProviderStatus(): SetupModelStatus['providers'][number] {
+  return {
+    id: 'ollama',
+    label: 'Ollama',
+    envVarName: 'OLLAMA_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: false,
+  };
+}
+
 function buildModelSetup(
   overrides: Partial<SetupModelStatus> = {},
 ): SetupModelStatus {
@@ -245,6 +270,54 @@ describe('StepInferenceProvider configured API key display', () => {
 
     fireEvent.focus(input);
     expect(input).toHaveValue('');
+  });
+
+  it('checks an endpoint and saves its recommended qualified model without showing a picker', async () => {
+    mutateAsyncMock
+      .mockResolvedValueOnce({
+        error: null,
+        modelCount: 2,
+        recommendedModels: [{ modelId: 'ollama/qwen3-coder:30b' }],
+      })
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce(undefined);
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenNthCalledWith(1, {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+        apiKey: undefined,
+      });
+    });
+    expect(mutateAsyncMock).toHaveBeenNthCalledWith(2, {
+      provider: 'ollama',
+      modelId: 'ollama/qwen3-coder:30b',
+      baseUrl: 'http://ollama.example',
+      apiKey: undefined,
+    });
+    expect(mutateAsyncMock).toHaveBeenNthCalledWith(3, {
+      provider: 'ollama',
+      apiKey: 'http://ollama.example',
+      modelId: 'ollama/qwen3-coder:30b',
+    });
+    expect(
+      screen.queryByRole('combobox', { name: 'Discovered model' }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -361,7 +434,7 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
     });
 
     // The mutation's onSuccess handler calls onContinue after invalidating.
-    const options = mockUseMutation.mock.calls.at(-1)?.[0] as
+    const options = mockUseMutation.mock.calls[0]?.[0] as
       | { onSuccess?: () => Promise<void> | void }
       | undefined;
     await options?.onSuccess?.();
