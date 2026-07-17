@@ -91,7 +91,9 @@ export interface InferenceGatewayProvider {
    * Upstream API base. May contain a `{region}` placeholder resolved
    * per-request from `region` below.
    */
-  upstreamBaseUrl: string;
+  upstreamBaseUrl?: string;
+  /** Deployment env var holding an operator-configured upstream base URL. */
+  upstreamBaseUrlEnvVarName?: string;
   /**
    * When set, every allowed request path is rewritten to this fixed upstream
    * path (the ChatGPT Codex backend collapses `/responses` and
@@ -104,7 +106,9 @@ export interface InferenceGatewayProvider {
    */
   region?: { envVarName: string; default: string };
   /** How the upstream expects its API key when the gateway forwards. */
-  authHeader: InferenceGatewayAuthHeader;
+  authHeader?: InferenceGatewayAuthHeader;
+  /** A configured upstream key is forwarded when present but is not required. */
+  optionalApiKey?: boolean;
   /**
    * Upstream inference endpoints the gateway forwards, matched exactly.
    * Everything else is rejected so a run token can only reach inference
@@ -292,6 +296,35 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       },
       authHeader: { name: 'x-api-key' },
       allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'litellm',
+      name: 'LiteLLM',
+      envVarNames: ['LITELLM_API_KEY'],
+      upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama',
+      envVarNames: [],
+      upstreamBaseUrlEnvVarName: 'OLLAMA_BASE_URL',
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'lmstudio',
+      name: 'LM Studio',
+      envVarNames: ['LMSTUDIO_API_KEY'],
+      upstreamBaseUrlEnvVarName: 'LMSTUDIO_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
     },
     {

@@ -28,6 +28,7 @@ import {
   snapshotResumeSchema,
   sourceControlProviderSchema,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  LLM_USAGE_COST_SOURCES,
   type AcpPersistedEnvelope,
 } from '@roomote/types';
 import {
@@ -430,7 +431,7 @@ export const taskRunsRouter = router({
       totalTokens: z.number().int().nonnegative().nullable().optional(),
       contextTokens: z.number().int().nonnegative().nullable().optional(),
       costMicroUsd: z.number().int().nonnegative().nullable().optional(),
-      costSource: z.enum(['opencode_message', 'missing']).nullable().optional(),
+      costSource: z.enum(LLM_USAGE_COST_SOURCES).nullable().optional(),
       messageCreatedAt: z.date().nullable().optional(),
       messageCompletedAt: z.date().nullable().optional(),
       details: z.record(z.unknown()).nullable().optional(),

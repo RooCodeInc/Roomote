@@ -40,7 +40,7 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
  * var (`envVarName`); OAuth providers are connected through a dedicated flow
  * and carry no env var.
  */
-export type SetupModelProviderAuthKind = 'api-key' | 'oauth';
+export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
 
 /**
  * The default-model roles a deployment configures: one model per kind of
@@ -395,6 +395,49 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'grok-4-5': 'xai/grok-4.5',
     }),
+  },
+  {
+    id: 'litellm',
+    label: 'LiteLLM',
+    envVarName: 'LITELLM_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'LITELLM_API_KEY',
+        label: 'API key',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: 'litellm/gpt-4o',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama',
+    envVarName: 'OLLAMA_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    defaultRoomoteModel: 'ollama/qwen3-coder',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+  },
+  {
+    id: 'lmstudio',
+    label: 'LM Studio',
+    envVarName: 'LMSTUDIO_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'LMSTUDIO_API_KEY',
+        label: 'API key',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: 'lmstudio/local-model',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
   },
   {
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,

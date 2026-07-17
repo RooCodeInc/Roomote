@@ -29,6 +29,7 @@ export * from './linear';
 export * from './llm-citation-artifacts';
 export * from './live-previews';
 export * from './logging';
+export * from './llm-usage';
 export * from './inference-gateway';
 export * from './model-provider-config';
 export * from './recommended-task-models';

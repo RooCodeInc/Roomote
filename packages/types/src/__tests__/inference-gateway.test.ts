@@ -79,6 +79,21 @@ describe('inference gateway key lookups', () => {
     expect(isInferenceGatewayCoveredEnvVar('SOME_OTHER_KEY')).toBe(false);
   });
 
+  it('registers local OpenAI-compatible endpoint providers', () => {
+    expect(getInferenceGatewayProvider('litellm')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
+      optionalApiKey: true,
+    });
+    expect(getInferenceGatewayProvider('ollama')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'OLLAMA_BASE_URL',
+      envVarNames: [],
+    });
+    expect(getInferenceGatewayProvider('lmstudio')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'LMSTUDIO_BASE_URL',
+      optionalApiKey: true,
+    });
+  });
+
   it('parses a comma-separated served-keys value', () => {
     expect(
       parseInferenceGatewayKeys('ANTHROPIC_API_KEY, OPENROUTER_API_KEY'),

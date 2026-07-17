@@ -300,6 +300,77 @@ describe('inference gateway', () => {
     );
   });
 
+  it('proxies a configured LiteLLM endpoint with its optional key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        if (nameList.includes('LITELLM_BASE_URL')) {
+          return 'http://litellm.internal:4000/v1/';
+        }
+
+        return nameList.includes('LITELLM_API_KEY') ? 'litellm-key' : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/litellm/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://litellm.internal:4000/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer litellm-key',
+    );
+  });
+
+  it('proxies a configured Ollama endpoint without an API key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('OLLAMA_BASE_URL')
+          ? 'http://ollama.internal:11434'
+          : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/ollama/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://ollama.internal:11434/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBeNull();
+  });
+
+  it('rejects malformed dynamic upstream URLs before fetching', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('LMSTUDIO_BASE_URL')
+          ? 'https://token@example.test?redirect=https://evil.test'
+          : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/lmstudio/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid Bedrock regions before building the upstream URL', async () => {
     const fetchMock = stubUpstreamFetch();
     mockResolveModelProviderEnvValue.mockImplementation(
