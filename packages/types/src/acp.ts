@@ -1646,34 +1646,48 @@ function stripQuotedCommunicationPrefix(value: string): string {
   if (!value.toLowerCase().startsWith(open, index)) {
     return value;
   }
-  const afterTagName = value[index + open.length];
-  if (
-    afterTagName !== undefined &&
-    afterTagName !== '/' &&
-    afterTagName !== ' ' &&
-    afterTagName !== '\t' &&
-    afterTagName !== '\n' &&
-    afterTagName !== '\r' &&
-    afterTagName !== '>'
+
+  // Match the previous pattern: <quoted(?:\s+[^>]*)?\/>
+  // The tag itself must end with "/>" — no bare ">" is allowed earlier.
+  let cursor = index + open.length;
+  const afterTagName = value[cursor];
+  if (afterTagName === '/') {
+    if (value[cursor + 1] !== '>') {
+      return value;
+    }
+    cursor += 2;
+  } else if (
+    afterTagName === ' ' ||
+    afterTagName === '\t' ||
+    afterTagName === '\n' ||
+    afterTagName === '\r'
   ) {
+    const closeIndex = value.indexOf('/>', cursor);
+    if (closeIndex === -1) {
+      return value;
+    }
+    const bareClose = value.indexOf('>', cursor);
+    if (bareClose !== -1 && bareClose < closeIndex + 1) {
+      // bareClose == closeIndex + 1 is the ">" of "/>"; anything earlier rejects.
+      if (bareClose < closeIndex) {
+        return value;
+      }
+    }
+    cursor = closeIndex + 2;
+  } else {
     return value;
   }
-  const close = '/>';
-  const openEnd = value.indexOf(close, index + open.length);
-  if (openEnd === -1) {
-    return value;
-  }
-  let next = openEnd + close.length;
+
   while (
-    next < value.length &&
-    (value[next] === ' ' ||
-      value[next] === '\t' ||
-      value[next] === '\n' ||
-      value[next] === '\r')
+    cursor < value.length &&
+    (value[cursor] === ' ' ||
+      value[cursor] === '\t' ||
+      value[cursor] === '\n' ||
+      value[cursor] === '\r')
   ) {
-    next += 1;
+    cursor += 1;
   }
-  return value.slice(next);
+  return value.slice(cursor);
 }
 
 function normalizeCommunicationTranscriptContent(value: string): string {

@@ -432,6 +432,18 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('Again');
   });
 
+  it('preserves incomplete quoted markup that only closes later with an unrelated slash', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<communication_message provider="teams">',
+          '<quoted x>user text/>keep this',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('<quoted x>user text/>keep this');
+  });
+
   it('preserves Teams text that only looks like a quoted prefix without a tag boundary', () => {
     expect(
       normalizeTranscriptUserText(
