@@ -19,6 +19,7 @@ import {
   isSubagentToolMessage,
   isSubagentToolPayload,
 } from './subagent-tool';
+import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 
 export type ExplorationStepKind = 'list' | 'read' | 'search';
 
@@ -682,6 +683,8 @@ function resolveMessageRenderState(
   const shouldShowInternalMessageInNarration =
     options.showInternalMessages === true &&
     (isSubagentToolMessage(msg) || isInternalDebugToolCallMessage(msg));
+  const shouldShowWidgetInNarration =
+    isToolMessage(msg) && resolveShowWidgetForToolMessage(msg) !== null;
 
   if (options.suppressedMessageIds?.has(msg.id)) {
     return {
@@ -716,6 +719,7 @@ function resolveMessageRenderState(
     options.displayMode === 'narration' &&
     isToolMessage(msg) &&
     !shouldShowInternalMessageInNarration &&
+    !shouldShowWidgetInNarration &&
     !isSubagentToolMessage(msg)
   ) {
     return {

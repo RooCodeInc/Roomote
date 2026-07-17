@@ -21,6 +21,8 @@ const {
   mockQueueLinearMessage,
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
+  mockClaimShowWidgetFallbackDelivery,
+  mockReleaseShowWidgetFallbackDelivery,
   mockUpdateTaskRun,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -36,6 +38,8 @@ const {
   mockQueueLinearMessage: vi.fn(),
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockRecordTaskInferenceUsage: vi.fn(),
+  mockClaimShowWidgetFallbackDelivery: vi.fn(),
+  mockReleaseShowWidgetFallbackDelivery: vi.fn(),
   mockUpdateTaskRun: vi.fn(),
 }));
 
@@ -103,6 +107,8 @@ vi.mock('../lib/task-runs', () => ({
   recordComputeProviderUsage: vi.fn(),
   recordTaskInferenceUsage: mockRecordTaskInferenceUsage,
   recordTaskMessageEnvelope: mockRecordTaskMessageEnvelope,
+  claimShowWidgetFallbackDelivery: mockClaimShowWidgetFallbackDelivery,
+  releaseShowWidgetFallbackDelivery: mockReleaseShowWidgetFallbackDelivery,
   refreshGitHubTokenWithMetadata: vi.fn(),
   revertPrCommit: vi.fn(),
   setTaskHarnessSessionId: vi.fn(),
@@ -178,8 +184,10 @@ describe('taskRunsRouter queue message guards', () => {
     mockGetCommunicationMessages.mockResolvedValue([]);
     mockQueueCommunicationMessage.mockResolvedValue(undefined);
     mockQueueLinearMessage.mockResolvedValue(undefined);
-    mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
+    mockRecordTaskMessageEnvelope.mockResolvedValue(null);
     mockRecordTaskInferenceUsage.mockResolvedValue({ recorded: true });
+    mockClaimShowWidgetFallbackDelivery.mockResolvedValue({ claimed: true });
+    mockReleaseShowWidgetFallbackDelivery.mockResolvedValue(undefined);
     mockUpdateTaskRun.mockResolvedValue(undefined);
   });
 
@@ -475,7 +483,7 @@ describe('taskRunsRouter queue message guards', () => {
           payload: {},
         },
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeNull();
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
       runId: 42,
@@ -490,6 +498,31 @@ describe('taskRunsRouter queue message guards', () => {
         metadata: null,
         payload: {},
       },
+    });
+  });
+
+  it('claims and releases show_widget fallback delivery for the matching run token', async () => {
+    await expect(
+      createRunCaller().claimShowWidgetFallbackDelivery({
+        runId: 42,
+        toolCallId: 'call-1',
+      }),
+    ).resolves.toEqual({ claimed: true });
+
+    await expect(
+      createRunCaller().releaseShowWidgetFallbackDelivery({
+        runId: 42,
+        toolCallId: 'call-1',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockClaimShowWidgetFallbackDelivery).toHaveBeenCalledWith({
+      runId: 42,
+      toolCallId: 'call-1',
+    });
+    expect(mockReleaseShowWidgetFallbackDelivery).toHaveBeenCalledWith({
+      runId: 42,
+      toolCallId: 'call-1',
     });
   });
 

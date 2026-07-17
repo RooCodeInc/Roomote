@@ -1,9 +1,23 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+
 import { defineConfig } from 'tsup';
+
+const nodeRequire = createRequire(import.meta.url);
+const jsdomEntry = nodeRequire.resolve('jsdom');
+const jsdomSyncWorkerEntry = join(
+  dirname(jsdomEntry),
+  'jsdom/living/xhr/xhr-sync-worker.js',
+);
 
 export default defineConfig({
   entry: {
     worker: 'scripts/worker.ts',
     'mcp/roomote-mcp-server/index': 'src/mcp/roomote-mcp-server/index.ts',
+    // JSDOM resolves and launches this helper at runtime even when consumers
+    // never make synchronous XHR requests. Bundle it beside the MCP server so
+    // packaged workers do not fail while initializing DOMPurify.
+    'mcp/roomote-mcp-server/xhr-sync-worker': jsdomSyncWorkerEntry,
   },
   format: ['esm'],
   dts: false,

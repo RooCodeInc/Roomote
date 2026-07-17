@@ -1247,6 +1247,47 @@ describe('buildAcpRenderBlocks', () => {
     expect(entries.map((entry) => entry.kind)).toEqual(['message', 'message']);
   });
 
+  it('keeps completed show_widget results visible in narration mode', () => {
+    const entries = buildAcpRenderBlocks(
+      [
+        explorationToolMessage({
+          id: 'show-widget-result',
+          ts: 1,
+          title: 'Show Widget',
+          kind: 'mcp',
+          toolName: 'show_widget',
+          text: JSON.stringify({
+            success: true,
+            shown: true,
+            title: 'Status card',
+            html: '<p>Ready</p>',
+            css: null,
+            height: 240,
+            textFallback: 'Ready',
+          }),
+        }),
+        explorationToolMessage({
+          id: 'ordinary-tool-result',
+          ts: 2,
+          title: 'Read file',
+          kind: 'mcp',
+          toolName: 'read_file',
+          text: 'file contents',
+        }),
+      ],
+      { displayMode: 'narration' },
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.kind).toBe('message');
+
+    if (entries[0]?.kind !== 'message') {
+      throw new Error('Expected show_widget result entry');
+    }
+
+    expect(entries[0].msg.id).toBe('show-widget-result');
+  });
+
   it('keeps subagent tool rows visible in narration mode', () => {
     const entries = buildAcpRenderBlocks(
       [

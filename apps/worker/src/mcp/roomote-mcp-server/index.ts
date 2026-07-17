@@ -41,6 +41,7 @@ import {
   handleUpdateEnvironment,
 } from './create-environment.js';
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
+import { handleShowWidget } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
 import {
   type ChatReplyPurpose,
@@ -112,6 +113,57 @@ roomoteMcpServer.registerTool(
         };
     }
   },
+);
+
+roomoteMcpServer.registerTool(
+  'show_widget',
+  {
+    title: 'Show Widget',
+    description:
+      'Render a presentational HTML widget in the Roomote task transcript. ' +
+      'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
+      'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
+      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked; Roomote injects default styles when css is omitted. ' +
+      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
+      'Optional textFallback is delivered by Roomote to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+    inputSchema: {
+      html: z
+        .string()
+        .min(1)
+        .describe(
+          'HTML fragment or full document to display. Scripts and nested browsing contexts are stripped.',
+        ),
+      title: z
+        .string()
+        .optional()
+        .describe('Optional short title shown above the widget card'),
+      css: z
+        .string()
+        .optional()
+        .describe(
+          'Optional extra CSS injected into the widget document after Roomote defaults',
+        ),
+      height: z
+        .number()
+        .optional()
+        .describe(
+          'Optional widget iframe height in pixels (clamped to a safe range; default 320)',
+        ),
+      textFallback: z
+        .string()
+        .optional()
+        .describe(
+          'Optional plain-text fallback posted to the originating chat surface when this task was started from chat',
+        ),
+    },
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => handleShowWidget(params),
 );
 
 roomoteMcpServer.registerTool(

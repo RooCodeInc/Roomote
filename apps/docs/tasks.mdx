@@ -29,6 +29,8 @@ Before you dive into details, check the basics:
 The task view gives you the working context for a run:
 
 - conversation history and Roomote updates
+- inline widgets for structured tables, status cards, plans, and other
+  presentational results an agent chooses to show
 - terminal and runtime logs, including individual environment setup-command
   logs when setup is still running or needs troubleshooting
 - generated artifacts
@@ -36,9 +38,11 @@ The task view gives you the working context for a run:
 - previews for running apps
 - task metadata and links back to the surface that started the task
 
-If a task started from Slack, Teams, Telegram, Discord, Linear, or source control, use
-the task view when the chat or provider thread does not show enough detail to
-review the work.
+If a task started from Slack, Teams, Telegram, Discord, Linear, or source
+control, use the task view when the chat or provider thread does not show enough
+detail to review the work. Presentational widgets remain available in the task
+transcript; when an agent provides a text fallback, Roomote also sends that
+fallback to the originating Slack, Teams, Telegram, or Discord conversation.
 
 ## Review the evidence
 

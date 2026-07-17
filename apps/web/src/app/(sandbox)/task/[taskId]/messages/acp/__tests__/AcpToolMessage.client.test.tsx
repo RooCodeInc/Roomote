@@ -410,6 +410,47 @@ describe('AcpToolMessage', () => {
     );
   });
 
+  it('renders show_widget HTML in a sandboxed iframe instead of tool details', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'show_widget',
+          isMcp: true,
+          mcpServerName: 'roomote',
+          mcpToolName: 'show_widget',
+          serverName: 'roomote',
+          toolName: 'show_widget',
+          output: JSON.stringify({
+            success: true,
+            shown: true,
+            title: 'Plan card',
+            html: '<p>Ready</p>',
+            css: null,
+            height: 240,
+            textFallback: 'Ready',
+          }),
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Used',
+        object: 'Show Widget',
+        collapsible: false,
+      }),
+    );
+    expect(toolDetailsSpy).not.toHaveBeenCalled();
+
+    const frame = screen.getByTitle('Plan card');
+    expect(frame.tagName).toBe('IFRAME');
+    expect(frame).toHaveAttribute('sandbox', '');
+    expect(frame.getAttribute('srcdoc') ?? '').toContain('<p>Ready</p>');
+    expect(frame.getAttribute('srcdoc') ?? '').toContain(
+      'color-scheme: light dark',
+    );
+  });
+
   it('opens the artifact viewer when session path is known', () => {
     mockArtifactLink.artifacts = [
       {

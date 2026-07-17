@@ -6,6 +6,7 @@ import type {
   AcpUiMessage,
 } from './types';
 import type { AcpRenderBlock } from './render-blocks';
+import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
 const COLLAPSIBLE_ACP_MESSAGE_KINDS = [
@@ -19,6 +20,8 @@ const COLLAPSIBLE_ACP_MESSAGE_KIND_SET = new Set<string>(
 );
 
 const MANAGE_ARTIFACTS_TOOL_NAME = 'manage_artifacts';
+const SHOW_WIDGET_TOOL_NAME = 'show_widget';
+const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 
 export interface AcpActivityGroupRenderBlock {
   kind: 'activity_group';
@@ -70,11 +73,33 @@ function getToolName(
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
+function getServerName(
+  msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
+): string | null {
+  const rawName = msg.data.serverName ?? msg.data.mcpServerName;
+  const normalized = rawName?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : null;
+}
+
 function isArtifactToolMessage(
   msg: AcpToolCallUiMessage | AcpToolResultUiMessage,
   artifacts: readonly TaskArtifact[] | null | undefined,
 ): boolean {
-  if (getToolName(msg) === MANAGE_ARTIFACTS_TOOL_NAME) {
+  const toolName = getToolName(msg);
+  const serverName = getServerName(msg);
+
+  if (toolName === MANAGE_ARTIFACTS_TOOL_NAME) {
+    return true;
+  }
+
+  if (
+    toolName === SHOW_WIDGET_TOOL_NAME &&
+    serverName === ROOMOTE_MCP_SERVER_NAME
+  ) {
+    return true;
+  }
+
+  if (resolveShowWidgetForToolMessage(msg) !== null) {
     return true;
   }
 
