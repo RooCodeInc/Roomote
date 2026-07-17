@@ -2684,8 +2684,7 @@ export function AutomationsSettings() {
                         />
                         <div className="space-y-1">
                           <p className="text-sm font-medium">
-                            Automatically review any new PRs and follow-up
-                            commits.
+                            Automatically review new PRs and follow-up commits.
                           </p>
                           <p className="text-xs text-muted-foreground">
                             Disable to only get reviews by asking @-mentioning{' '}
@@ -2709,8 +2708,8 @@ export function AutomationsSettings() {
                             Review draft PRs
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Turn off to only review PRs marked as ready (and
-                            save tokens)
+                            Turn off to only automatically review PRs marked as
+                            ready (and save tokens)
                           </p>
                         </div>
                       </div>
