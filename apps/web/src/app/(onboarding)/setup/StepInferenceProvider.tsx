@@ -82,6 +82,10 @@ export function StepInferenceProvider({
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
   >({});
+  const [discoveredModels, setDiscoveredModels] = useState<
+    Array<{ modelId: string; displayName: string | null }>
+  >([]);
+  const [selectedModelId, setSelectedModelId] = useState('');
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
   const chatgptStatusQuery = useQuery(
@@ -103,6 +107,9 @@ export function StepInferenceProvider({
       },
     }),
   );
+  const discoverProviderModels = useMutation(
+    trpc.taskModels.discoverProviderModels.mutationOptions(),
+  );
 
   useEffect(() => {
     setSelectedProvider(modelSetup.preselectedProvider);
@@ -111,6 +118,8 @@ export function StepInferenceProvider({
   useEffect(() => {
     setApiKey('');
     setAdditionalEnvValues({});
+    setDiscoveredModels([]);
+    setSelectedModelId('');
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
   }, [selectedProvider]);
@@ -181,7 +190,28 @@ export function StepInferenceProvider({
       provider: selectedProvider,
       apiKey: apiKey.trim() || undefined,
       ...(additionalEnvFields.length > 0 && { additionalEnvValues }),
+      ...(isEndpointProvider && { modelId: selectedModelId }),
     });
+  };
+
+  const handleDiscoverModels = async () => {
+    if (!isEndpointProvider) {
+      return;
+    }
+    const result = await discoverProviderModels.mutateAsync({
+      provider: selectedProvider as 'ollama' | 'vllm' | 'litellm',
+      baseUrl: apiKey.trim() || undefined,
+      apiKey:
+        additionalEnvValues[
+          `${selectedProvider.toUpperCase()}_API_KEY`
+        ]?.trim() || undefined,
+    });
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+    setDiscoveredModels(result.models);
+    setSelectedModelId(result.models[0]?.modelId ?? '');
   };
 
   return (
@@ -311,6 +341,37 @@ export function StepInferenceProvider({
           </div>
         ))}
 
+      {isEndpointProvider ? (
+        <div className="flex max-w-lg items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleDiscoverModels()}
+            disabled={
+              discoverProviderModels.isPending || apiKey.trim().length === 0
+            }
+          >
+            {discoverProviderModels.isPending
+              ? 'Discovering...'
+              : 'Discover models'}
+          </Button>
+          {discoveredModels.length > 0 ? (
+            <Select value={selectedModelId} onValueChange={setSelectedModelId}>
+              <SelectTrigger aria-label="Discovered model">
+                <SelectValue placeholder="Choose a model" />
+              </SelectTrigger>
+              <SelectContent>
+                {discoveredModels.map((model) => (
+                  <SelectItem key={model.modelId} value={model.modelId}>
+                    {model.displayName ?? model.modelId}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+        </div>
+      ) : null}
+
       {selectedProvider === 'openrouter' && !hasRuntimeProviderKey && (
         <div className="flex items-center gap-3">
           <span className="text-sm text-muted-foreground">
@@ -344,7 +405,9 @@ export function StepInferenceProvider({
         <Button
           type="button"
           onClick={() => void handleContinue()}
-          disabled={isActionDisabled}
+          disabled={
+            isActionDisabled || (isEndpointProvider && !selectedModelId)
+          }
         >
           {saveModelConfig.isPending ? (
             <>

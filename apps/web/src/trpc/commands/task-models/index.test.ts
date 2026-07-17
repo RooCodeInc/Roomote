@@ -1439,6 +1439,9 @@ describe('task model provider commands', () => {
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
       'AWS_BEARER_TOKEN_BEDROCK',
       'AWS_REGION',
+      'LITELLM_BASE_URL',
+      'OLLAMA_BASE_URL',
+      'VLLM_BASE_URL',
     ]);
     mockGetPersistedEnvironmentVariableValues.mockResolvedValue({
       AWS_REGION: 'us-west-2',
@@ -1448,6 +1451,9 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
+      'LITELLM_BASE_URL',
+      'OLLAMA_BASE_URL',
+      'VLLM_BASE_URL',
     ]);
     expect(
       result.providerSetup.providers.find(

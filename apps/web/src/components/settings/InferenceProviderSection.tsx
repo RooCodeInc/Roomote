@@ -691,7 +691,7 @@ export function InferenceProviderSection({
   const addableProviders = availableProviders.filter((provider) =>
     provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
       ? !chatgptHasRecord
-      : provider.authKind === 'api-key',
+      : provider.authKind === 'api-key' || provider.authKind === 'endpoint',
   );
   const sortedApiKeyConnectedProviders = useMemo(
     () =>
