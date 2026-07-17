@@ -1781,7 +1781,7 @@ export class OpenCodeServerHarness
     this.connected = false;
     this.clearReplayAbortErrorSuppression();
     this.clearQueuedPromptRetryTimer();
-    this.clearProviderRateLimitRetryTimer();
+    this.clearProviderRateLimitRetryState();
     this.clearAllExecuteToolProgress();
     void this.cleanupVisualAttachmentDirectories();
     this.rejectEventStreamReady?.(
@@ -2153,7 +2153,14 @@ export class OpenCodeServerHarness
 
       if (command.data.autoSteerWhenQueued) {
         this.prompts.prioritize(queuedId);
-        await this.interruptForQueuedReplay();
+        // Steers use prioritize() so they usually jump the FIFO queue, but
+        // during rate-limit backoff the invisible continue prompt must stay
+        // first so we don't replay the user message before the automatic
+        // retry runs (and then drain a stale Continue afterward).
+        this.frontloadProviderRateLimitContinueIfQueued();
+        if (!this.isProviderRateLimitBackoffPending()) {
+          await this.interruptForQueuedReplay();
+        }
       }
 
       return;
@@ -2180,14 +2187,20 @@ export class OpenCodeServerHarness
       this.inFlight = false;
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
+      this.clearProviderRateLimitRetryState();
       this.pendingUserInputRequests.clear();
       this.clearAllExecuteToolProgress();
       return;
     }
 
     const cancelledBy = command?.data?.cancelledBy;
-    const hadActiveTurn =
+    const hadInFlightOrPendingQuestion =
       this.inFlight || this.pendingUserInputRequests.size > 0;
+    // Also treat rate-limit backoff as an active recoverable turn so an
+    // explicit user cancel during the wait still leaves a cancel marker and
+    // clears the automatic retry instead of silently dropping it.
+    const hadActiveTurn =
+      hadInFlightOrPendingQuestion || this.isProviderRateLimitBackoffPending();
 
     // Aborting an in-flight turn makes OpenCode emit a MessageAbortedError on the
     // session.error event. For an explicit cancel that's expected, not a failure
@@ -2203,7 +2216,7 @@ export class OpenCodeServerHarness
     // cancel point, then drop the trailing finalize/part events OpenCode
     // emits for the aborted message — without this, that content re-emerges
     // in the transcript after the cancel.
-    if (hadActiveTurn) {
+    if (hadInFlightOrPendingQuestion) {
       await this.flushAssistantMessageForCancel(sessionId);
     }
     this.suppressAssistantOutputUntilNextPrompt = true;
@@ -2211,6 +2224,7 @@ export class OpenCodeServerHarness
     this.finalizedAssistantTurn = null;
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
+    this.clearProviderRateLimitRetryState();
     // Abandoned questions get an explicit cancelled response so surfaces
     // that clear pending state on request_user_input_response (Slack,
     // Linear, the web store) drop them, and late answers are rejected via
@@ -3154,6 +3168,7 @@ export class OpenCodeServerHarness
     this.inFlight = false;
     this.prompts.clear();
     this.clearQueuedPromptRetryTimer();
+    this.clearProviderRateLimitRetryState();
     this.pendingUserInputRequests.clear();
     this.clearAllExecuteToolProgress();
     this.runtimeEvents.taskStarted(sessionId);
@@ -3550,8 +3565,7 @@ export class OpenCodeServerHarness
       });
       this.prompts.clear();
       this.clearQueuedPromptRetryTimer();
-      this.clearProviderRateLimitRetryTimer();
-      this.providerRateLimitRetryCount = 0;
+      this.clearProviderRateLimitRetryState();
       this.pendingUserInputRequests.clear();
       this.clearAllExecuteToolProgress();
       this.runtimeEvents.taskAborted(sessionId);
@@ -3629,6 +3643,27 @@ export class OpenCodeServerHarness
 
     clearTimeout(this.providerRateLimitRetryTimer);
     this.providerRateLimitRetryTimer = null;
+  }
+
+  private clearProviderRateLimitRetryState(): void {
+    this.clearProviderRateLimitRetryTimer();
+    this.providerRateLimitRetryCount = 0;
+  }
+
+  private frontloadProviderRateLimitContinueIfQueued(): void {
+    const continueQueuedId = this.prompts
+      .snapshot()
+      .find(
+        (message) =>
+          message.text === OPENCODE_RATE_LIMIT_RETRY_PROMPT_TEXT &&
+          message.visibleInTranscript === false,
+      )?.id;
+
+    if (!continueQueuedId) {
+      return;
+    }
+
+    this.prompts.prioritize(continueQueuedId);
   }
 
   private isProviderRateLimitBackoffPending(): boolean {

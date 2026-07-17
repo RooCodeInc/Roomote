@@ -2072,6 +2072,182 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('keeps the rate-limit continue ahead of steers queued during backoff', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerRateLimitBaseDelayMs: 1_000,
+      providerRateLimitMaxRetries: 3,
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'UnknownError',
+            data: {
+              message: JSON.stringify({
+                code: 429,
+                message: 'Provider returned error',
+                metadata: { error_type: 'rate_limit_exceeded' },
+              }),
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Steer during backoff.',
+            visibleInTranscript: true,
+            autoSteerWhenQueued: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      const secondPrompt = client.promptAsync.mock.calls[1]?.[0] as
+        | {
+            request?: {
+              parts?: Array<{ type?: string; text?: string }>;
+            };
+          }
+        | undefined;
+      const secondPromptText = (secondPrompt?.request?.parts ?? [])
+        .map((part) => part.text)
+        .filter((text): text is string => typeof text === 'string')
+        .join('\n');
+      expect(secondPromptText).toContain('temporary provider rate limit');
+      expect(secondPromptText).not.toContain('Steer during backoff.');
+      expect(
+        harness.getQueuedMessages().map((message) => message.text),
+      ).toEqual(['Steer during backoff.']);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels rate-limit backoff so a later resume is not blocked by the timer', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerRateLimitBaseDelayMs: 10_000,
+      providerRateLimitMaxRetries: 3,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'UnknownError',
+            data: {
+              message: JSON.stringify({
+                code: 429,
+                message: 'Provider returned error',
+                metadata: { error_type: 'rate_limit_exceeded' },
+              }),
+            },
+          },
+        },
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.CancelTask,
+          data: {
+            cancelledBy: { name: 'Tester', source: 'web' },
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(
+          taskEvents.some(
+            (event) => event.eventName === TaskEventName.TaskAborted,
+          ),
+        ).toBe(true);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Resume after cancel.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      const secondPrompt = client.promptAsync.mock.calls[1]?.[0] as
+        | {
+            request?: {
+              parts?: Array<{ type?: string; text?: string }>;
+            };
+          }
+        | undefined;
+      const secondPromptText = (secondPrompt?.request?.parts ?? [])
+        .map((part) => part.text)
+        .filter((text): text is string => typeof text === 'string')
+        .join('\n');
+      expect(secondPromptText).toContain('Resume after cancel.');
+
+      // Expired backoff after cancel must not submit a stale continue.
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('aborts after exhausting provider rate-limit retries', async () => {
     vi.useFakeTimers();
     const { client, harness } = createHarness(undefined, {
