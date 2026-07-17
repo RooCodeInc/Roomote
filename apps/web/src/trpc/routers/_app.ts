@@ -2094,7 +2094,6 @@ export const appRouter = createRouter({
         z
           .object({
             globalAgentInstructions: z.string().max(10_000).nullable(),
-            authorshipInstructions: z.string().max(10_000).nullable(),
           })
           .partial(),
       )

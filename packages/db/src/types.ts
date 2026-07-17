@@ -425,7 +425,7 @@ export type CreateLinearPendingSelection = Omit<
  * backgroundAgentSettings
  *
  * The stored columns live on deployment_settings and hold deployment-wide
- * agent settings (manager channel, global instructions, authorship rules).
+ * agent settings (manager channel and global instructions).
  * The flat settings view consumed across the product adds a per-automation
  * projection built from the automations table.
  */
@@ -435,10 +435,6 @@ type StoredBackgroundAgentSettings = Pick<
   | 'id'
   | 'managerSlackChannelId'
   | 'globalAgentInstructions'
-  | 'authorshipInstructions'
-  | 'compiledAuthorshipRules'
-  | 'compiledAuthorshipIssues'
-  | 'compiledAuthorshipAt'
   | 'createdAt'
   | 'updatedAt'
 >;

@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import {
-  type AuthorshipRuleActor,
   type BackgroundAutomationKey,
   type TaskSpec,
   type CodingHarness,
@@ -26,7 +25,6 @@ import {
   DEFAULT_LAUNCH_CODING_HARNESS,
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
-  getUserDisplayName,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -71,8 +69,11 @@ import { type Redis, getRedis } from '@roomote/redis';
 import { captureEvent } from '@roomote/telemetry/server';
 import { generateTaskRunTitle, hasDeterministicTaskRunTitle } from '../utils';
 import { DEFAULT_STANDARD_TASK_MODEL_PROVIDER } from '../task-runtime-defaults';
-import { evaluateCommitAuthor } from './authorship-rules';
-import { findLatestGithubIdentityForUser } from './commit-author';
+import {
+  evaluateCommitAuthor,
+  findLatestGithubIdentityForUser,
+  type MatchedHumanActor,
+} from './commit-author';
 import { resolveEffectiveHarnessModelState } from './harness-model-overrides';
 import {
   generateLlmTaskTitle,
@@ -231,19 +232,10 @@ async function cancelTaskRunBeforeQueue(
 async function resolveMatchedHumanActor(
   tx: typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0],
   linkedUserId: string | null,
-): Promise<AuthorshipRuleActor | null> {
+): Promise<MatchedHumanActor | null> {
   if (!linkedUserId) {
     return null;
   }
-
-  const user = await tx.query.users.findFirst({
-    where: eq(users.id, linkedUserId),
-    columns: {
-      id: true,
-      name: true,
-      email: true,
-    },
-  });
 
   const githubIdentity = await findLatestGithubIdentityForUser(
     tx,
@@ -252,7 +244,6 @@ async function resolveMatchedHumanActor(
 
   return {
     userId: linkedUserId,
-    displayName: getUserDisplayName(user),
     githubLogin: githubIdentity.githubLogin,
     githubUserId: githubIdentity.githubUserId,
   };
@@ -1382,23 +1373,11 @@ async function enqueueFreshLaunch(
         chatgptConnected,
       }) ?? DEFAULT_STANDARD_TASK_MODEL_PROVIDER;
 
-    // Commit-author evaluation is unconditional at fresh enqueue.
-    const [authorshipSettingsRow, matchedHumanActor] = await Promise.all([
-      tx.query.deploymentSettings.findFirst({
-        columns: {
-          compiledAuthorshipRules: true,
-        },
-      }),
-      resolveMatchedHumanActor(tx, linkedUserId),
-    ]);
+    const matchedHumanActor = await resolveMatchedHumanActor(tx, linkedUserId);
     const commitAuthor = evaluateCommitAuthor({
-      compiledRules: authorshipSettingsRow?.compiledAuthorshipRules ?? [],
       initiator,
       matchedHumanActor,
       externalGithubIdentity,
-      workflow,
-      surface,
-      repositoryFullName: repositoryName,
     });
 
     const createdTask = await createTaskWithRetry(

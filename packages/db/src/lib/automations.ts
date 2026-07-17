@@ -693,10 +693,6 @@ export function normalizeBackgroundAgentSettings(
     id: row?.id ?? 'default',
     managerSlackChannelId,
     globalAgentInstructions: row?.globalAgentInstructions ?? null,
-    authorshipInstructions: row?.authorshipInstructions ?? null,
-    compiledAuthorshipRules: row?.compiledAuthorshipRules ?? [],
-    compiledAuthorshipIssues: row?.compiledAuthorshipIssues ?? [],
-    compiledAuthorshipAt: row?.compiledAuthorshipAt ?? null,
     createdAt: row?.createdAt ?? now,
     updatedAt: row?.updatedAt ?? now,
 

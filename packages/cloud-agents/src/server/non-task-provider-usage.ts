@@ -19,7 +19,6 @@ export type NonTaskInferenceTrackingInput = {
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
-  authorshipRulesCompilation: 'authorship_rules_compilation',
   backgroundAnnouncer: 'background_announcer',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent_question_answering',

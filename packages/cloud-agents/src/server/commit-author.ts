@@ -1,5 +1,6 @@
 import {
   type CommitAuthorKind,
+  type TaskInitiator,
   getUserDisplayName,
   PRODUCT_NAME,
 } from '@roomote/types';
@@ -17,6 +18,40 @@ import {
 export type ResolvedGitAuthor = {
   name: string;
   email: string;
+};
+
+/**
+ * The persisted 5-column commit-author block stamped onto tasks at enqueue.
+ */
+export type CommitAuthorSelection = {
+  commitAuthorKind: CommitAuthorKind;
+  commitAuthorUserId: string | null;
+  commitAuthorLogin: string | null;
+  commitAuthorExternalId: string | null;
+  prAssigneeLogin: string | null;
+};
+
+export type MatchedHumanActor = {
+  userId: string;
+  githubLogin: string | null;
+  githubUserId: number | null;
+};
+
+export type EvaluateCommitAuthorInput = {
+  initiator: TaskInitiator;
+  /**
+   * The linked user the initiator resolves to (initiator.userId or
+   * initiator.matchedUserId), enriched with their latest GitHub identity.
+   */
+  matchedHumanActor: MatchedHumanActor | null;
+  /**
+   * Raw GitHub identity supplied by the launch for unlinked humans (e.g. the
+   * PR author on conflict-resolution or webhook-review launches).
+   */
+  externalGithubIdentity?: {
+    githubLogin?: string | null;
+    githubUserId?: number | null;
+  };
 };
 
 export const ROOMOTE_GIT_AUTHOR: ResolvedGitAuthor = {
@@ -63,6 +98,74 @@ function normalizeNullableString(
 ): string | null {
   const normalized = value?.trim();
   return normalized ? normalized : null;
+}
+
+function normalizeOptionalNumber(
+  value: number | null | undefined,
+): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Evaluates the persisted commit-author block for a fresh task launch.
+ *
+ * Defaults:
+ * - automation-initiated -> 'roomote'
+ * - user-initiated with a linked user -> 'user' (+ their latest GitHub
+ *   identity when available)
+ * - user-initiated unlinked -> 'external' (with GitHub login + numeric id
+ *   when the launch supplied one)
+ *
+ * The PR assignee defaults to the effective author's GitHub login.
+ */
+export function evaluateCommitAuthor(
+  input: EvaluateCommitAuthorInput,
+): CommitAuthorSelection {
+  if (input.initiator.kind === 'automation') {
+    return {
+      commitAuthorKind: 'roomote',
+      commitAuthorUserId: null,
+      commitAuthorLogin: null,
+      commitAuthorExternalId: null,
+      prAssigneeLogin: null,
+    };
+  }
+
+  if (input.matchedHumanActor?.userId) {
+    const githubLogin = normalizeNullableString(
+      input.matchedHumanActor.githubLogin,
+    );
+    const githubUserId = normalizeOptionalNumber(
+      input.matchedHumanActor.githubUserId,
+    );
+
+    return {
+      commitAuthorKind: 'user',
+      commitAuthorUserId: input.matchedHumanActor.userId,
+      commitAuthorLogin: githubLogin,
+      commitAuthorExternalId:
+        githubUserId !== null ? String(githubUserId) : null,
+      prAssigneeLogin: githubLogin,
+    };
+  }
+
+  // Unlinked human. Preserve any GitHub identity so their noreply commits
+  // survive; without one the git author falls back to Roomote at read time
+  // while the task still displays the external actor.
+  const githubLogin = normalizeNullableString(
+    input.externalGithubIdentity?.githubLogin,
+  );
+  const githubUserId = normalizeOptionalNumber(
+    input.externalGithubIdentity?.githubUserId,
+  );
+
+  return {
+    commitAuthorKind: 'external',
+    commitAuthorUserId: null,
+    commitAuthorLogin: githubLogin,
+    commitAuthorExternalId: githubUserId !== null ? String(githubUserId) : null,
+    prAssigneeLogin: githubLogin,
+  };
 }
 
 export async function findLatestGithubIdentityForUser(
