@@ -105,6 +105,18 @@ describe('normalizeTranscriptUserText', () => {
       ),
     ).toBe('latest question');
   });
+
+  it('strips leading whitespace with an out_of_band_context block so Slack wrappers stay at offset 0', () => {
+    const block = wrapOutOfBandContext([
+      { sentAtMs: 1_700_000_000_000, text: 'notification text' },
+    ]);
+
+    expect(
+      normalizeTranscriptUserText(
+        `  \n${block}\n\n<slack_message>\nlatest question\n</slack_message>`,
+      ),
+    ).toBe('latest question');
+  });
   it('extracts only the slack_message content when thread context and reply target are present', () => {
     expect(
       normalizeTranscriptUserText(
@@ -418,6 +430,18 @@ describe('normalizeTranscriptUserText', () => {
         ].join('\n'),
       ),
     ).toBe('Again');
+  });
+
+  it('preserves Teams text that only looks like a quoted prefix without a tag boundary', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<communication_message provider="teams">',
+          '<quotedly/>keep this',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('<quotedly/>keep this');
   });
 
   it('returns the original text when no Slack XML blocks are present', () => {

@@ -1646,6 +1646,18 @@ function stripQuotedCommunicationPrefix(value: string): string {
   if (!value.toLowerCase().startsWith(open, index)) {
     return value;
   }
+  const afterTagName = value[index + open.length];
+  if (
+    afterTagName !== undefined &&
+    afterTagName !== '/' &&
+    afterTagName !== ' ' &&
+    afterTagName !== '\t' &&
+    afterTagName !== '\n' &&
+    afterTagName !== '\r' &&
+    afterTagName !== '>'
+  ) {
+    return value;
+  }
   const close = '/>';
   const openEnd = value.indexOf(close, index + open.length);
   if (openEnd === -1) {
@@ -1705,7 +1717,9 @@ function stripLeadingOutOfBandContextBlock(text: string): string {
   ) {
     end += 1;
   }
-  return text.slice(0, index) + text.slice(end);
+  // Drop any leading whitespace that only preceded the OOB block so the
+  // remaining user prompt stays at offset 0 for downstream wrapper parsers.
+  return text.slice(end);
 }
 
 function escapeOutOfBandMessageContent(value: string): string {
