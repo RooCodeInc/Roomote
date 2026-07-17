@@ -833,7 +833,9 @@ export async function resolvePendingGitHubInstallationsCommand(
   }
 
   try {
-    const result = await GitHub.resolvePendingGitHubInstallations();
+    const result = await GitHub.resolvePendingGitHubInstallations({
+      userId: auth.userId,
+    });
 
     return { success: true, ...result };
   } catch (error) {

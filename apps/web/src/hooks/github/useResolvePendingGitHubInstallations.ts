@@ -28,6 +28,7 @@ export const useResolvePendingGitHubInstallations = (
 
   return useMutation({
     mutationFn: () => trpcClient.github.resolvePendingInstallations.mutate(),
+    ...options,
     onSuccess: (data, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({
         queryKey: trpc.github.pendingInstallations.queryKey(),
@@ -43,6 +44,5 @@ export const useResolvePendingGitHubInstallations = (
 
       options?.onSuccess?.(data, variables, onMutateResult, context);
     },
-    ...options,
   });
 };

@@ -1001,17 +1001,26 @@ export async function completePendingGitHubInstallation(
 }
 
 /**
- * Complete any pending GitHub installations whose installation requests have
- * since been approved on GitHub. This covers the case where the
+ * Complete the requesting user's pending GitHub installations whose requests
+ * have since been approved on GitHub. This covers the case where the
  * `installation.created` webhook never reached this deployment (for example a
  * misconfigured webhook URL), leaving the requester stuck on "pending".
+ *
+ * Scoped to a single user so one user's manual re-check can never complete (or
+ * report as approved) another user's request.
  */
-export async function resolvePendingGitHubInstallations(): Promise<{
+export async function resolvePendingGitHubInstallations({
+  userId,
+}: {
+  userId: string;
+}): Promise<{
   pending: number;
   completed: number;
 }> {
   const pendingGitHubInstallations =
-    await db.query.githubPendingInstallations.findMany();
+    await db.query.githubPendingInstallations.findMany({
+      where: eq(githubPendingInstallations.requestedByUserId, userId),
+    });
 
   if (pendingGitHubInstallations.length === 0) {
     return { pending: 0, completed: 0 };

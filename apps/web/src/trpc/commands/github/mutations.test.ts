@@ -456,16 +456,20 @@ describe('resolvePendingGitHubInstallationsCommand', () => {
     expect(mockResolvePendingGitHubInstallations).not.toHaveBeenCalled();
   });
 
-  it('returns the resolution counts on success', async () => {
+  it('returns the resolution counts on success and scopes to the requesting user', async () => {
     mockResolvePendingGitHubInstallations.mockResolvedValue({
       pending: 0,
       completed: 1,
     });
 
-    const result =
-      await resolvePendingGitHubInstallationsCommand(buildMockAuth());
+    const result = await resolvePendingGitHubInstallationsCommand(
+      buildMockAuth({ userId: 'requesting-user' }),
+    );
 
     expect(result).toEqual({ success: true, pending: 0, completed: 1 });
+    expect(mockResolvePendingGitHubInstallations).toHaveBeenCalledWith({
+      userId: 'requesting-user',
+    });
   });
 
   it('reports a failure when resolution throws', async () => {
