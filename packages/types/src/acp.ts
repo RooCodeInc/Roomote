@@ -1346,185 +1346,380 @@ function findStructuralClose(
 }
 
 function matchesThreadActivityOnlyFrom(text: string, index: number): boolean {
-  if (index === text.length) {
-    return true;
+  const openTag = '<thread_activity>';
+  const closeTag = '</thread_activity>';
+
+  // Iterative DFS with explicit close backtracking so long sequences of valid
+  // thread_activity blocks cannot overflow the call stack.
+  const alternateCloseFrom: number[] = [];
+  let pos = index;
+
+  while (true) {
+    if (pos === text.length) {
+      return true;
+    }
+
+    if (!text.startsWith(openTag, pos)) {
+      if (!advanceToNextCloseAlternate()) {
+        return false;
+      }
+      continue;
+    }
+
+    const closeIndex = text.indexOf(closeTag, pos + openTag.length);
+    if (closeIndex === -1) {
+      if (!advanceToNextCloseAlternate()) {
+        return false;
+      }
+      continue;
+    }
+
+    alternateCloseFrom.push(closeIndex + 1);
+    pos = skipAsciiWhitespace(text, closeIndex + closeTag.length);
   }
 
-  const openTag = '<thread_activity>';
-  if (!text.startsWith(openTag, index)) {
+  function advanceToNextCloseAlternate(): boolean {
+    while (alternateCloseFrom.length > 0) {
+      const nextFrom = alternateCloseFrom[alternateCloseFrom.length - 1]!;
+      const closeIndex = text.indexOf(closeTag, nextFrom);
+      if (closeIndex === -1) {
+        alternateCloseFrom.pop();
+        continue;
+      }
+
+      alternateCloseFrom[alternateCloseFrom.length - 1] = closeIndex + 1;
+      pos = skipAsciiWhitespace(text, closeIndex + closeTag.length);
+      return true;
+    }
+
     return false;
   }
-
-  const afterOpen = index + openTag.length;
-  const closeTag = '</thread_activity>';
-  const found = findStructuralClose(
-    text,
-    afterOpen,
-    closeTag,
-    (_close, afterClose) => matchesThreadActivityOnlyFrom(text, afterClose),
-  );
-
-  return found !== null;
 }
 
 function isSlackThreadActivityOnlyBlock(text: string): boolean {
   return text.length > 0 && matchesThreadActivityOnlyFrom(text, 0);
 }
 
-type SlackTranscriptParseStage =
-  | 'leading_activity'
-  | 'thread_context'
-  | 'trailing_activity'
-  | 'replying_to'
-  | 'slack_turn_policy'
-  | 'slack_message';
+/**
+ * Extract slack_message content from:
+ *   thread_activity* thread_context? thread_activity*
+ *   replying_to? slack_turn_policy? slack_message
+ *
+ * Implemented as the original recursive descent with per-(pos, phase) memoization,
+ * executed on an explicit heap stack so thousands of sequential activity blocks
+ * neither overflow the call stack nor O(n^2) re-scan.
+ */
+function extractSlackTranscriptMessageContent(text: string): string | null {
+  return parseSlackTranscriptFrom(text, 0);
+}
 
-function consumeNewlineWrappedBlockForStage(
-  text: string,
-  index: number,
-  tagName: string,
-  allowAttributes: boolean,
-  continueFrom: (afterClose: number) => string | null,
-): string | null {
-  const afterOpen = matchOpenTag(text, index, tagName, allowAttributes);
-  if (afterOpen === null || text[afterOpen] !== '\n') {
+function extractSlackMessageAt(text: string, index: number): string | null {
+  const afterOpen = matchOpenTag(text, index, 'slack_message', true);
+  if (afterOpen === null) {
     return null;
   }
 
-  const closeMarker = `\n</${tagName}>`;
+  let contentStart = afterOpen;
+  if (text[contentStart] === '\n') {
+    contentStart += 1;
+  }
+
+  const closeTag = '</slack_message>';
   const found = findStructuralClose(
     text,
-    afterOpen + 1,
-    closeMarker,
-    (_close, afterClose) => continueFrom(afterClose) !== null,
+    contentStart,
+    closeTag,
+    (_close, afterClose) => afterClose === text.length,
   );
   if (found === null) {
     return null;
   }
 
-  return continueFrom(found.afterClose);
+  let contentEnd = found.closeIndex;
+  if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
+    contentEnd -= 1;
+  }
+
+  return text.slice(contentStart, contentEnd);
 }
 
-function parseSlackTranscriptMessage(
-  text: string,
-  index: number,
-  stage: SlackTranscriptParseStage,
-): string | null {
-  switch (stage) {
-    case 'leading_activity': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_activity',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'leading_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'thread_context');
+function parseSlackRestFrom(text: string, index: number): string | null {
+  const afterReplyingOpen = matchOpenTag(text, index, 'replying_to', true);
+  if (afterReplyingOpen !== null && text[afterReplyingOpen] === '\n') {
+    const closeMarker = '\n</replying_to>';
+    const found = findStructuralClose(
+      text,
+      afterReplyingOpen + 1,
+      closeMarker,
+      (_close, afterClose) => parseSlackRestAfterReplying(afterClose) !== null,
+    );
+    if (found !== null) {
+      return parseSlackRestAfterReplying(found.afterClose);
     }
+  }
 
-    case 'thread_context': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_context',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
+  return parseSlackRestAfterReplying(index);
 
-      return parseSlackTranscriptMessage(text, index, 'trailing_activity');
-    }
-
-    case 'trailing_activity': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'thread_activity',
-        false,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'trailing_activity'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'replying_to');
-    }
-
-    case 'replying_to': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'replying_to',
-        true,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'slack_turn_policy'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'slack_turn_policy');
-    }
-
-    case 'slack_turn_policy': {
-      const consumed = consumeNewlineWrappedBlockForStage(
-        text,
-        index,
-        'slack_turn_policy',
-        true,
-        (afterClose) =>
-          parseSlackTranscriptMessage(text, afterClose, 'slack_message'),
-      );
-      if (consumed !== null) {
-        return consumed;
-      }
-
-      return parseSlackTranscriptMessage(text, index, 'slack_message');
-    }
-
-    case 'slack_message': {
-      const afterOpen = matchOpenTag(text, index, 'slack_message', true);
-      if (afterOpen === null) {
-        return null;
-      }
-
-      let contentStart = afterOpen;
-      if (text[contentStart] === '\n') {
-        contentStart += 1;
-      }
-
-      const closeTag = '</slack_message>';
+  function parseSlackRestAfterReplying(at: number): string | null {
+    const afterPolicyOpen = matchOpenTag(text, at, 'slack_turn_policy', true);
+    if (afterPolicyOpen !== null && text[afterPolicyOpen] === '\n') {
+      const closeMarker = '\n</slack_turn_policy>';
       const found = findStructuralClose(
         text,
-        contentStart,
-        closeTag,
-        (_close, afterClose) => afterClose === text.length,
+        afterPolicyOpen + 1,
+        closeMarker,
+        (_close, afterClose) =>
+          extractSlackMessageAt(text, afterClose) !== null,
       );
-      if (found === null) {
-        return null;
+      if (found !== null) {
+        return extractSlackMessageAt(text, found.afterClose);
       }
-
-      let contentEnd = found.closeIndex;
-      if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
-        contentEnd -= 1;
-      }
-
-      return text.slice(contentStart, contentEnd);
     }
+
+    return extractSlackMessageAt(text, at);
   }
 }
 
-function extractSlackTranscriptMessageContent(text: string): string | null {
-  return parseSlackTranscriptMessage(text, 0, 'leading_activity');
+function parseSlackTranscriptFrom(text: string, start: number): string | null {
+  // phase: 0 = pre-context (leading activities), 1 = post-context (trailing + rest)
+  type Frame = {
+    pos: number;
+    phase: 0 | 1;
+    /** 0 init/activity; 1 scanning activity closes; 2 after child (activity or post); 3 scanning context closes; 4 rest */
+    mode: 0 | 1 | 2 | 3 | 4;
+    scanFrom: number;
+    childPos: number;
+    childPhase: 0 | 1;
+  };
+
+  const stride = text.length + 1;
+  const memo = new Map<number, string | null>();
+  const keyOf = (pos: number, phase: 0 | 1) => phase * stride + pos;
+
+  const stack: Frame[] = [
+    {
+      pos: start,
+      phase: 0,
+      mode: 0,
+      scanFrom: 0,
+      childPos: 0,
+      childPhase: 0,
+    },
+  ];
+  let lastResult: string | null = null;
+
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    const key = keyOf(frame.pos, frame.phase);
+
+    if (frame.mode === 0) {
+      if (memo.has(key)) {
+        lastResult = memo.get(key)!;
+        stack.pop();
+        continue;
+      }
+
+      // Prefer one thread_activity whose remainder solves in the same phase.
+      const afterOpen = matchOpenTag(text, frame.pos, 'thread_activity', false);
+      if (afterOpen !== null && text[afterOpen] === '\n') {
+        frame.scanFrom = afterOpen + 1;
+        frame.mode = 1;
+        continue;
+      }
+
+      // No activity open at this pos.
+      if (frame.phase === 0) {
+        // Optional thread_context, else post phase at same pos.
+        const ctxOpen = matchOpenTag(text, frame.pos, 'thread_context', false);
+        if (ctxOpen !== null && text[ctxOpen] === '\n') {
+          frame.scanFrom = ctxOpen + 1;
+          frame.mode = 3;
+          continue;
+        }
+        frame.childPos = frame.pos;
+        frame.childPhase = 1;
+        frame.mode = 2;
+        const childKey = keyOf(frame.childPos, 1);
+        if (memo.has(childKey)) {
+          lastResult = memo.get(childKey)!;
+        } else {
+          stack.push({
+            pos: frame.childPos,
+            phase: 1,
+            mode: 0,
+            scanFrom: 0,
+            childPos: 0,
+            childPhase: 0,
+          });
+        }
+        continue;
+      }
+
+      // phase post: fall through to rest.
+      frame.mode = 4;
+      continue;
+    }
+
+    if (frame.mode === 1) {
+      const closeMarker = '\n</thread_activity>';
+      const closeIndex = text.indexOf(closeMarker, frame.scanFrom);
+      if (closeIndex === -1) {
+        // No more activity closes — fall through like mode 0 without activity.
+        if (frame.phase === 0) {
+          const ctxOpen = matchOpenTag(
+            text,
+            frame.pos,
+            'thread_context',
+            false,
+          );
+          if (ctxOpen !== null && text[ctxOpen] === '\n') {
+            frame.scanFrom = ctxOpen + 1;
+            frame.mode = 3;
+            continue;
+          }
+          frame.childPos = frame.pos;
+          frame.childPhase = 1;
+          frame.mode = 2;
+          const childKey = keyOf(frame.childPos, 1);
+          if (memo.has(childKey)) {
+            lastResult = memo.get(childKey)!;
+          } else {
+            stack.push({
+              pos: frame.childPos,
+              phase: 1,
+              mode: 0,
+              scanFrom: 0,
+              childPos: 0,
+              childPhase: 0,
+            });
+          }
+          continue;
+        }
+        frame.mode = 4;
+        continue;
+      }
+
+      frame.childPos = skipAsciiWhitespace(
+        text,
+        closeIndex + closeMarker.length,
+      );
+      frame.childPhase = frame.phase;
+      frame.scanFrom = closeIndex + 1;
+      frame.mode = 2;
+
+      const childKey = keyOf(frame.childPos, frame.childPhase);
+      if (memo.has(childKey)) {
+        lastResult = memo.get(childKey)!;
+      } else {
+        stack.push({
+          pos: frame.childPos,
+          phase: frame.childPhase,
+          mode: 0,
+          scanFrom: 0,
+          childPos: 0,
+          childPhase: 0,
+        });
+      }
+      continue;
+    }
+
+    if (frame.mode === 2) {
+      // Child finished in lastResult.
+      if (lastResult !== null) {
+        memo.set(key, lastResult);
+        stack.pop();
+        continue;
+      }
+
+      // Child failed. If we were probing activity closes, try next close;
+      // if we were probing context, try next context close; if post-at-pos failed, done.
+      // Distinguish via childPhase and whether scan is activity vs context:
+      // activity probe uses childPhase === frame.phase and scan on activity closes.
+      // We need a flag: use mode transitions carefully.
+
+      // Heuristic: if scanFrom was activity (mode came from 1), resume mode 1.
+      // If from context (mode 3), resume mode 3.
+      // If from post-at-pos fallback (childPos === pos && childPhase === 1 && phase === 0), fail.
+      if (
+        frame.phase === 0 &&
+        frame.childPhase === 1 &&
+        frame.childPos === frame.pos
+      ) {
+        memo.set(key, null);
+        lastResult = null;
+        stack.pop();
+        continue;
+      }
+
+      if (frame.childPhase === frame.phase) {
+        // activity child failed — next activity close
+        frame.mode = 1;
+        continue;
+      }
+
+      // context child failed — next context close
+      frame.mode = 3;
+      continue;
+    }
+
+    if (frame.mode === 3) {
+      const closeMarker = '\n</thread_context>';
+      const closeIndex = text.indexOf(closeMarker, frame.scanFrom);
+      if (closeIndex === -1) {
+        // No more context — post at same position.
+        frame.childPos = frame.pos;
+        frame.childPhase = 1;
+        frame.mode = 2;
+        const childKey = keyOf(frame.childPos, 1);
+        if (memo.has(childKey)) {
+          lastResult = memo.get(childKey)!;
+        } else {
+          stack.push({
+            pos: frame.childPos,
+            phase: 1,
+            mode: 0,
+            scanFrom: 0,
+            childPos: 0,
+            childPhase: 0,
+          });
+        }
+        continue;
+      }
+
+      frame.childPos = skipAsciiWhitespace(
+        text,
+        closeIndex + closeMarker.length,
+      );
+      frame.childPhase = 1;
+      frame.scanFrom = closeIndex + 1;
+      frame.mode = 2;
+
+      const childKey = keyOf(frame.childPos, 1);
+      if (memo.has(childKey)) {
+        lastResult = memo.get(childKey)!;
+      } else {
+        stack.push({
+          pos: frame.childPos,
+          phase: 1,
+          mode: 0,
+          scanFrom: 0,
+          childPos: 0,
+          childPhase: 0,
+        });
+      }
+      continue;
+    }
+
+    // mode 4: rest
+    {
+      const result = parseSlackRestFrom(text, frame.pos);
+      memo.set(key, result);
+      lastResult = result;
+      stack.pop();
+    }
+  }
+
+  return memo.get(keyOf(start, 0)) ?? null;
 }
 
 function extractCommunicationTranscriptMessage(text: string): string | null {
