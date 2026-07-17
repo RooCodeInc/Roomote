@@ -33,7 +33,7 @@ const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const PENDING_ROUTE_TTL_SECONDS = 15 * 60;
 const PENDING_ROUTE_PREFIX = 'discord:pending_route:';
 // Discord supports at most five action rows. Reserve one for All repositories
-// and one for Nevermind so every stored option is also visible and actionable.
+// and one for Never mind so every stored option is also visible and actionable.
 const MAX_ENVIRONMENT_OPTIONS = 3;
 
 type PendingRouteOption = {
@@ -140,7 +140,7 @@ function routeButtons(id: string, options: PendingRouteOption[]) {
         callbackData: `discord:route:${id}:${index}`,
       },
     ]),
-    [{ text: 'Nevermind', callbackData: `discord:route:${id}:cancel` }],
+    [{ text: 'Never mind', callbackData: `discord:route:${id}:cancel` }],
   ];
 }
 

@@ -1758,7 +1758,7 @@ describe('Telegram webhook handler', () => {
         buttons: [
           [expect.objectContaining({ text: 'Web App' })],
           [expect.objectContaining({ text: 'All repositories' })],
-          [expect.objectContaining({ text: '✖️ Nevermind' })],
+          [expect.objectContaining({ text: '✖️ Never mind' })],
         ],
       }),
     );
@@ -1976,7 +1976,7 @@ describe('Telegram webhook handler', () => {
           ],
           [
             expect.objectContaining({
-              text: '✖️ Nevermind',
+              text: '✖️ Never mind',
               callbackData: expect.stringMatching(/^route_no:[\w-]+$/),
             }),
           ],
@@ -2079,7 +2079,7 @@ describe('Telegram webhook handler', () => {
     );
   });
 
-  it('dismisses the confirmation without launching when Nevermind is clicked', async () => {
+  it('dismisses the confirmation without launching when Never mind is clicked', async () => {
     mockTelegramLinkedSender('launch-owner-25');
     const pending = JSON.stringify({
       launchOwnerUserId: 'launch-owner-25',

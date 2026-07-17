@@ -20,6 +20,16 @@ const PASSWORD_STRENGTH_CLASSES = [
   'bg-accent-bright-foreground',
 ] as const;
 
+const CREDENTIAL_AUTOCOMPLETE_TOKENS = new Set([
+  'name',
+  'email',
+  'username',
+  'nickname',
+  'new-password',
+  'current-password',
+  'one-time-code',
+]);
+
 function getInputValue(
   value: InputProps['value'] | InputProps['defaultValue'],
 ) {
@@ -34,6 +44,20 @@ function getInputValue(
   return '';
 }
 
+function shouldIgnorePasswordManagers(
+  autoComplete: React.HTMLInputAutoCompleteAttribute | undefined,
+  hasExplicitAutoComplete: boolean,
+) {
+  if (!hasExplicitAutoComplete || autoComplete == null || autoComplete === '') {
+    return true;
+  }
+
+  return !String(autoComplete)
+    .toLowerCase()
+    .split(/\s+/)
+    .some((token) => CREDENTIAL_AUTOCOMPLETE_TOKENS.has(token));
+}
+
 const Input = React.forwardRef<HTMLInputElement, InputProps>(
   (
     {
@@ -46,6 +70,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       value,
       defaultValue,
       onChange,
+      autoComplete: autoCompleteProp,
       ...props
     },
     ref,
@@ -55,8 +80,13 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
       getInputValue(defaultValue),
     );
     const inputType = secret ? (showSecretValue ? 'text' : 'password') : type;
+    const hasExplicitAutoComplete = autoCompleteProp !== undefined;
     const autoComplete =
-      props.autoComplete ?? (secret ? 'new-password' : undefined);
+      autoCompleteProp ?? (secret ? 'new-password' : undefined);
+    const ignorePasswordManagers = shouldIgnorePasswordManagers(
+      autoCompleteProp,
+      hasExplicitAutoComplete,
+    );
     const strengthValue =
       value === undefined ? inputValue : getInputValue(value);
     const hasMatch = match !== undefined;
@@ -103,8 +133,9 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           secret && 'pr-10',
           className,
         )}
-        data-1p-ignore
-        data-op-ignore="true"
+        {...(ignorePasswordManagers
+          ? { 'data-1p-ignore': true, 'data-op-ignore': 'true' as const }
+          : {})}
         autoComplete={autoComplete}
         disabled={disabled}
         value={value}

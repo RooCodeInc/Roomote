@@ -589,6 +589,16 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('All source control')).toBeNull();
   });
 
+  it('renders the Source Code and Meta automation sections', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText('Source Code automations'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Meta automations')).toBeInTheDocument();
+    expect(screen.queryByText('Other automations')).toBeNull();
+  });
+
   it('reflects the reviewer all-author setting in the review scope copy', async () => {
     state.settingsQuery.data.reviewer.enabled = true;
     state.settingsQuery.data.reviewer.reviewAllPullRequestAuthors = true;
@@ -598,13 +608,13 @@ describe('AutomationsSettings', () => {
     await openReviewerCard();
 
     expect(
-      screen.getByRole('switch', { name: /review prs from other authors/i }),
+      screen.getByRole('switch', { name: /review prs not created by/i }),
     ).toBeChecked();
     expect(
-      screen.getByText(/all pull requests in connected repositories/),
+      screen.getByText(/Automatically review new PRs and follow-up commits/i),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText(/pull requests opened by Roomote/),
+      screen.queryByText(/Which PRs get reviewed/i),
     ).not.toBeInTheDocument();
   });
 

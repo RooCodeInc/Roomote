@@ -117,12 +117,12 @@ When the router is unsure (confidence < 0.95, workspace remapped, or all-reposit
 - Expect: webhook responds `confirmationPending: true`; a compact card "Planning to run this in **{suggested}** — starting in ~5s." with one row of buttons: ✅ Yes (`route_ok:<id>`) and ✖️ Nope (`route_alt:<id>`). Router `fallback` skips the Yes/Nope step and shows the picker directly ("could not confidently pick a workspace") with no auto-start.
 - Click paths:
   - ✅ Yes → callback answered `Starting in {workspace}.`, the card is edited in place to "Starting in **{workspace}**." (keyboard removed), task launched.
-  - ✖️ Nope → the same message is edited into the picker ("Okay — where should I run this?" + one button per workspace + ✖️ Nevermind), re-keyed under a fresh pending-route id so the 5s timer can never fire the suggestion afterwards. The picker waits — no timer.
+  - ✖️ Nope → the same message is edited into the picker ("Okay — where should I run this?" + one button per workspace + ✖️ Never mind), re-keyed under a fresh pending-route id so the 5s timer can never fire the suggestion afterwards. The picker waits — no timer.
   - Picker choice (`route_pick:<id>:<n>`) → same as Yes but with the chosen workspace.
-  - ✖️ Nevermind (`route_no:<id>`) → callback answered `Okay — not starting a task.`, card finalized, nothing launches (the safe path for live testing: Nope → Nevermind).
+  - ✖️ Never mind (`route_no:<id>`) → callback answered `Okay — not starting a task.`, card finalized, nothing launches (the safe path for live testing: Nope → Never mind).
   - No click → the Yes/Nope card auto-starts the suggestion after ~5s (card edited to "Starting in **{workspace}**." when the timer fires); pickers just expire (15-min Redis TTL).
   - Click from a different Telegram user → `Only the requester can choose a workspace for this task.` and the pending choice is NOT consumed.
-- Assert: state `.messages` (card text edited through the stages, final `reply_markup` empty), `.callbackAnswers`; DB `cloud_jobs` for the launch (or its absence after Nevermind).
+- Assert: state `.messages` (card text edited through the stages, final `reply_markup` empty), `.callbackAnswers`; DB `cloud_jobs` for the launch (or its absence after Never mind).
 - Note: the pending choice is one-shot (`GETDEL`) — a second click on a stale card gets `This choice expired — send the request again.` The 5s window is too short to tap from a phone notification; that is intentional — Nope is for users watching the chat, and the started message's cancel button covers everyone else.
 
 ## 16. suggestion-button
