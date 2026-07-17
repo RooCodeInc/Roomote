@@ -58,7 +58,7 @@ type InferenceProviderSectionProps = {
 };
 
 type ProviderCredentialsDialogState =
-  | { mode: 'add' }
+  | { mode: 'add'; providerId?: SetupModelProviderId }
   | { mode: 'edit'; providerId: SetupModelProviderId };
 
 function getInitialAdditionalEnvValues(
@@ -201,12 +201,15 @@ function ProviderCredentialsDialog({
       return;
     }
 
-    const provider = providers[0] ?? null;
+    const provider =
+      providers.find((candidate) => candidate.id === selectedProviderId) ??
+      providers[0] ??
+      null;
     setSelectedProviderId(provider?.id ?? null);
     setApiKey('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
     setDiscoveredModels([]);
-  }, [open, providers]);
+  }, [open, providers, selectedProviderId]);
 
   useEffect(() => {
     if (!open || mode !== 'add') {
@@ -604,9 +607,16 @@ export function InferenceProviderSection({
         const savedProvider = providerSetup?.providers.find(
           (provider) => provider.id === variables.provider,
         );
-        if (savedProvider?.authKind !== 'endpoint') {
-          setProviderDialog(null);
-        }
+        const shouldDiscoverModels = savedProvider?.authKind === 'endpoint';
+
+        // Endpoint providers discover their models immediately after saving.
+        // Keep the dialog mounted while the setup query moves the provider from
+        // available to connected so the discovery result has somewhere to render.
+        setProviderDialog(
+          shouldDiscoverModels
+            ? { mode: 'add', providerId: variables.provider }
+            : null,
+        );
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
@@ -754,6 +764,14 @@ export function InferenceProviderSection({
     }
 
     if (providerDialog.mode === 'add') {
+      if (providerDialog.providerId) {
+        const savedProvider = providerSetup?.providers.find(
+          (provider) => provider.id === providerDialog.providerId,
+        );
+
+        return savedProvider ? [savedProvider] : [];
+      }
+
       return sortedAddableProviders;
     }
 
@@ -762,7 +780,12 @@ export function InferenceProviderSection({
     );
 
     return editProvider ? [editProvider] : [];
-  }, [providerDialog, sortedAddableProviders, sortedApiKeyConnectedProviders]);
+  }, [
+    providerDialog,
+    providerSetup?.providers,
+    sortedAddableProviders,
+    sortedApiKeyConnectedProviders,
+  ]);
   const deleteProviderStatus = useMemo(
     () =>
       deleteProviderId
