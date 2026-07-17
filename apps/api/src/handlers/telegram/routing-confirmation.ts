@@ -8,6 +8,7 @@ import type { CommunicationMessageButton } from '@roomote/communication';
 import { getRedis } from '@roomote/redis';
 import {
   getAvailableEnvironments,
+  getRoutingAutoConfirmDelayMs,
   type RoutingDecision,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
@@ -29,13 +30,6 @@ import {
 } from './replies.js';
 import { launchTelegramTask, resolveTelegramWorkspace } from './task-launch.js';
 import type { QueuedTelegramCommunicationMessage } from './types.js';
-
-/**
- * Mirrors Slack's routing auto-confirm gate
- * (`SLACK_IMMEDIATE_AUTO_CONFIRM_CONFIDENCE` in `packages/slack/block-kit.ts`):
- * only a high-confidence, un-remapped environment route starts without asking.
- */
-const TELEGRAM_IMMEDIATE_CONFIRM_CONFIDENCE = 0.95;
 
 /**
  * How long the Yes/Nope card waits before auto-starting the suggestion. Kept
@@ -374,10 +368,7 @@ export async function maybeRequestTelegramRoutingConfirmation(input: {
 
   if (
     routed &&
-    routed.workspace.type === 'environment' &&
-    typeof routed.debug?.confidence === 'number' &&
-    routed.debug.confidence >= TELEGRAM_IMMEDIATE_CONFIRM_CONFIDENCE &&
-    routed.debug.workspaceRemapped !== true
+    getRoutingAutoConfirmDelayMs(routed.debug, routed.workspace.type) === 0
   ) {
     return null;
   }
