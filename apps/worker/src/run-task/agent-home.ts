@@ -36,6 +36,7 @@ import { SLACK_SILENCE_HOOK_SCRIPT } from './slack-silence-hook-script';
 import { SLACK_POSTING_TOOL_EXCLUSIONS } from './slack-posting-tools';
 import { SLACK_STOP_HOOK_SCRIPT } from './slack-stop-hook-script';
 import { OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT } from './opencode-slack-hooks-plugin-script';
+import { OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT } from './opencode-chatgpt-gateway-plugin-script';
 import { resolveOpenCodeModelSelection } from './opencode-model';
 import {
   createProofRunnerAgentPrompt,
@@ -167,6 +168,9 @@ const ROOMOTE_OPENCODE_SLACK_SILENCE_HOOK_FILE_NAME =
 const ROOMOTE_OPENCODE_PLUGINS_DIR_NAME = 'plugins';
 
 const ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME = 'roomote-slack-hooks.js';
+
+const ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME =
+  'roomote-chatgpt-gateway.js';
 
 const OPENCODE_ALLOW_ALL_PERMISSION = {
   read: 'allow',
@@ -534,14 +538,18 @@ function createOpenCodeMcpConfig(
   );
 }
 
-function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
+function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   const pluginsDir = path.join(
     openCodeConfigDir,
     ROOMOTE_OPENCODE_PLUGINS_DIR_NAME,
   );
-  const pluginPath = path.join(
+  const slackPluginPath = path.join(
     pluginsDir,
     ROOMOTE_OPENCODE_SLACK_HOOKS_PLUGIN_FILE_NAME,
+  );
+  const chatGptGatewayPluginPath = path.join(
+    pluginsDir,
+    ROOMOTE_OPENCODE_CHATGPT_GATEWAY_PLUGIN_FILE_NAME,
   );
   const silenceHookPath = path.join(
     openCodeConfigDir,
@@ -553,7 +561,12 @@ function writeOpenCodeSlackHookFiles(openCodeConfigDir: string): void {
   );
 
   fs.mkdirSync(pluginsDir, { recursive: true });
-  fs.writeFileSync(pluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(slackPluginPath, OPENCODE_SLACK_HOOKS_PLUGIN_SCRIPT, 'utf8');
+  fs.writeFileSync(
+    chatGptGatewayPluginPath,
+    OPENCODE_CHATGPT_GATEWAY_PLUGIN_SCRIPT,
+    'utf8',
+  );
   fs.writeFileSync(silenceHookPath, SLACK_SILENCE_HOOK_SCRIPT, 'utf8');
   fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
   fs.chmodSync(silenceHookPath, 0o755);
@@ -1388,7 +1401,7 @@ export function generateOpenCodeConfig({
   });
   const instructions: string[] = [];
 
-  writeOpenCodeSlackHookFiles(openCodeConfigDir);
+  writeOpenCodeManagedFiles(openCodeConfigDir);
 
   if (developerInstructionsContent) {
     const developerInstructionsPath = path.join(

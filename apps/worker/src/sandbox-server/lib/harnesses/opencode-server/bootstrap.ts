@@ -12,6 +12,7 @@ import {
 import type { HarnessLogger } from '../../../../logging';
 import {
   GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   type ReasoningEffort,
 } from '@roomote/types';
@@ -271,14 +272,41 @@ async function materializeOpenCodeBashEnvOverlay(options: {
   commandEnv.BASH_ENV = overlayPath;
 }
 
+async function removeOpenCodeAuthJsonForChatGptGateway(options: {
+  commandEnv: Record<string, string>;
+  homeDir: string;
+  logger: HarnessLogger;
+}): Promise<void> {
+  const dataDir = resolveOpenCodeDataDir(options.homeDir, options.commandEnv);
+  const authFilePath = path.join(dataDir, OPENCODE_AUTH_FILE_NAME);
+
+  try {
+    // A resumed filesystem can contain an auth file from a run created before
+    // gateway mode, or from a best-effort snapshot scrub that failed. Remove
+    // the complete file before OpenCode starts: any `openai` auth entry would
+    // reactivate the built-in Codex fetch hook and bypass Roomote's gateway.
+    await fs.rm(authFilePath, { force: true });
+    options.logger.info(
+      `Ensured OpenCode auth.json is absent for ChatGPT gateway mode at ${authFilePath}`,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Unknown auth.json remove error';
+
+    // Fail closed. Starting OpenCode with a stale OAuth record would put the
+    // long-lived subscription credential back in use inside the sandbox.
+    throw new Error(
+      `Failed to remove OpenCode auth.json for ChatGPT gateway mode: ${message}`,
+      { cause: error },
+    );
+  }
+}
+
 /**
- * Write the ChatGPT subscription OAuth record (delivered as
- * `OPENCODE_AUTH_CONTENT`) to the harness `auth.json` so the inner opencode
- * process can self-refresh access tokens during long tasks, then strip the
- * env var so opencode reads the file instead of the static env content.
- * Failures are logged but never derail task startup — the env var remains
- * set on failure so opencode can still read the auth record from it as a
- * fallback.
+ * In direct-subscription mode, write the OAuth record delivered as
+ * `OPENCODE_AUTH_CONTENT` to the harness `auth.json` so OpenCode can refresh
+ * it during long tasks. In gateway mode, remove any snapshotted auth file and
+ * fail closed if that cleanup cannot be completed before OpenCode starts.
  */
 async function materializeOpenCodeAuthJson(options: {
   commandEnv: Record<string, string>;
@@ -286,6 +314,17 @@ async function materializeOpenCodeAuthJson(options: {
   logger: HarnessLogger;
 }): Promise<void> {
   const { commandEnv, homeDir, logger } = options;
+  const routeChatGptThroughGateway =
+    commandEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+
+  if (routeChatGptThroughGateway) {
+    // Defense in depth: dequeue and run-task already omit this value, but a
+    // conflicting deployment env must not survive into the OpenCode process.
+    delete commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+    await removeOpenCodeAuthJsonForChatGptGateway(options);
+    return;
+  }
+
   const authContent = commandEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
 
   if (!authContent) {
