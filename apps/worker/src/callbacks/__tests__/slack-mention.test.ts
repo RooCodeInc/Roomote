@@ -15,6 +15,7 @@ const {
   mockSlackInstallationsFindFirst,
   mockSupportsIntegrationRequestUserInput,
   mockUpdateMessage,
+  mockDeleteMessage,
 } = vi.hoisted(() => ({
   mockBuildSlackRequestUserInputBlocks: vi.fn(() => [
     {
@@ -64,6 +65,7 @@ const {
     .mockResolvedValue({ botAccessToken: 'xoxb-test' }),
   mockSupportsIntegrationRequestUserInput: vi.fn().mockReturnValue(true),
   mockUpdateMessage: vi.fn().mockResolvedValue(undefined),
+  mockDeleteMessage: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
@@ -92,6 +94,7 @@ vi.mock('@roomote/slack/client', () => ({
     fetchThreadMessages = mockFetchThreadMessages;
     removeReaction = mockRemoveReaction;
     updateMessage = mockUpdateMessage;
+    deleteMessage = mockDeleteMessage;
     postMessage = mockPostMessage;
   },
   buildSlackRequestUserInputBlocks: mockBuildSlackRequestUserInputBlocks,
@@ -99,18 +102,15 @@ vi.mock('@roomote/slack/client', () => ({
   convertMarkdownToSlack: vi.fn((text: string) => text),
 }));
 
-vi.mock('../request-user-input', () => ({
-  buildRequestUserInputTaskUrl: mockBuildRequestUserInputTaskUrl,
-  getRequestUserInputPromptSignature: (request: {
-    requestId: string;
-    questions: unknown[];
-  }) =>
-    JSON.stringify({
-      requestId: request.requestId,
-      questions: request.questions,
-    }),
-  supportsIntegrationRequestUserInput: mockSupportsIntegrationRequestUserInput,
-}));
+vi.mock('../request-user-input', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../request-user-input')>();
+  return {
+    ...actual,
+    buildRequestUserInputTaskUrl: mockBuildRequestUserInputTaskUrl,
+    supportsIntegrationRequestUserInput:
+      mockSupportsIntegrationRequestUserInput,
+  };
+});
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 import { type TaskRun, sdk } from '@roomote/sdk/client';
@@ -573,6 +573,10 @@ describe('slackMentionCallbacks', () => {
       context,
     );
 
+    // Streaming placeholders must not post Slack buttons or pending state.
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(sdk.taskRuns.setPendingSlackRequestUserInput).not.toHaveBeenCalled();
+
     await slackMentionCallbacks.onMessage?.(
       taskRun,
       'task_123',
@@ -592,20 +596,8 @@ describe('slackMentionCallbacks', () => {
     );
 
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
-    expect(mockUpdateMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      ts: 'posted-ts',
-      message: {
-        blocks: [
-          {
-            type: 'markdown',
-            text: 'native request_user_input blocks',
-          },
-        ],
-      },
-    });
-    expect(mockBuildSlackRequestUserInputBlocks).toHaveBeenNthCalledWith(
-      2,
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(mockBuildSlackRequestUserInputBlocks).toHaveBeenCalledWith(
       expect.objectContaining({
         requestId,
         questions: [richQuestion],
@@ -620,6 +612,155 @@ describe('slackMentionCallbacks', () => {
       taskId: 'task_row_123',
       questions: [richQuestion],
       promptMessageTs: 'posted-ts',
+    });
+  });
+
+  it('skips Slack buttons for streaming placeholder request_user_input prompts', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'request_user_input',
+        request: {
+          requestId: 'rui:session:turn:call',
+          sessionId: 'session_1',
+          turnId: 'turn_1',
+          callId: 'call_1',
+          questions: [
+            {
+              id: 'response',
+              header: 'Response',
+              question: 'Provide the requested input.',
+              isOther: true,
+              isSecret: false,
+            },
+          ],
+          status: 'pending',
+        },
+        ts: 1000,
+      },
+      context,
+    );
+
+    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockUpdateMessage).not.toHaveBeenCalled();
+    expect(sdk.taskRuns.setPendingSlackRequestUserInput).not.toHaveBeenCalled();
+  });
+
+  it('neutralizes the previous Slack card when enriching via a new post after update fails', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    const requestId = 'rui:session:turn:call';
+    mockPostMessage
+      .mockReset()
+      .mockResolvedValueOnce('first-ts')
+      .mockResolvedValueOnce('second-ts');
+    mockUpdateMessage.mockReset().mockResolvedValue(false);
+
+    const firstQuestion = {
+      id: 'language',
+      header: 'Language',
+      question: 'Which language should I use?',
+      isOther: true,
+      isSecret: false,
+      options: [
+        {
+          label: 'TypeScript',
+          description: 'Use the existing app stack.',
+        },
+      ],
+    };
+    const secondQuestion = {
+      id: 'language-v2',
+      header: 'Language',
+      question: 'Which language should I use?',
+      isOther: true,
+      isSecret: false,
+      options: [
+        {
+          label: 'TypeScript',
+          description: 'Use the existing app stack.',
+        },
+        {
+          label: 'Rust',
+          description: 'Use the OpenCode runtime.',
+        },
+      ],
+    };
+
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'request_user_input',
+        request: {
+          requestId,
+          sessionId: 'session_1',
+          turnId: 'turn_1',
+          callId: 'call_1',
+          questions: [firstQuestion],
+          status: 'pending',
+        },
+        ts: 1000,
+      },
+      context,
+    );
+
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'request_user_input',
+        request: {
+          requestId,
+          sessionId: 'session_1',
+          turnId: 'turn_1',
+          callId: 'call_1',
+          questions: [secondQuestion],
+          status: 'pending',
+        },
+        ts: 1001,
+      },
+      context,
+    );
+
+    expect(mockPostMessage).toHaveBeenCalledTimes(2);
+    // Failed in-place update attempt, then neutralize superseded card.
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'first-ts',
+      message: {
+        blocks: expect.any(Array),
+      },
+    });
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'first-ts',
+      message: {
+        blocks: [
+          {
+            type: 'markdown',
+            text: '_This prompt was updated. Please use the newest question in the thread._',
+          },
+        ],
+      },
+    });
+    expect(mockDeleteMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'first-ts',
+    });
+    expect(
+      sdk.taskRuns.setPendingSlackRequestUserInput,
+    ).toHaveBeenLastCalledWith({
+      runId: 123,
+      threadId: '1710000000.123',
+      requestId,
+      taskId: 'task_row_123',
+      questions: [secondQuestion],
+      promptMessageTs: 'second-ts',
     });
   });
 

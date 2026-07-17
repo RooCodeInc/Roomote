@@ -216,6 +216,10 @@ describe('linearAgentCallbacks', () => {
       context,
     );
 
+    // Streaming placeholders are skipped for integration elicitations.
+    expect(setPendingLinearRequestUserInputMock).not.toHaveBeenCalled();
+    expect(emitElicitationMock).not.toHaveBeenCalled();
+
     await linearAgentCallbacks.onMessage?.(
       taskRun,
       'task_123',
@@ -234,7 +238,7 @@ describe('linearAgentCallbacks', () => {
       context,
     );
 
-    expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledTimes(2);
+    expect(setPendingLinearRequestUserInputMock).toHaveBeenCalledTimes(1);
     expect(setPendingLinearRequestUserInputMock).toHaveBeenLastCalledWith({
       runId: 123,
       sessionId: 'session_123',
@@ -242,7 +246,7 @@ describe('linearAgentCallbacks', () => {
       taskId: 'task_123',
       questions: [richQuestion],
     });
-    expect(emitElicitationMock).toHaveBeenCalledTimes(2);
+    expect(emitElicitationMock).toHaveBeenCalledTimes(1);
     expect(emitElicitationMock).toHaveBeenLastCalledWith(
       'session_123',
       expect.stringContaining('Which language should I use?'),

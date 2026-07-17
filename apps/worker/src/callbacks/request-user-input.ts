@@ -71,6 +71,26 @@ export function getRequestUserInputPromptSignature(
   });
 }
 
+export const STREAMING_PLACEHOLDER_QUESTION_TEXT =
+  'Provide the requested input.';
+
+export function isStreamingPlaceholderRequestUserInput(
+  request: Pick<AcpRequestUserInputPayload, 'questions'>,
+): boolean {
+  if (request.questions.length !== 1) {
+    return false;
+  }
+
+  const question = request.questions[0]!;
+  const hasNoOptions = !question.options || question.options.length === 0;
+
+  return (
+    hasNoOptions &&
+    question.id === 'response' &&
+    question.question === STREAMING_PLACEHOLDER_QUESTION_TEXT
+  );
+}
+
 export function isSingleQuestionRequestUserInput(
   request: AcpRequestUserInputPayload,
 ): boolean {

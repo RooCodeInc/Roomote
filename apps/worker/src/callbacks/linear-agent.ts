@@ -20,6 +20,7 @@ import {
   formatRequestUserInputPrompt,
   getRequestUserInputPromptSignature,
   isSingleQuestionRequestUserInput,
+  isStreamingPlaceholderRequestUserInput,
   supportsIntegrationRequestUserInput,
 } from './request-user-input';
 
@@ -262,6 +263,10 @@ export const linearAgentCallbacks: RunTaskCallbacks = {
       const promptSignature = getRequestUserInputPromptSignature(event.request);
 
       if (postedSignatures.get(event.request.requestId) === promptSignature) {
+        return;
+      }
+
+      if (isStreamingPlaceholderRequestUserInput(event.request)) {
         return;
       }
 
