@@ -54,6 +54,10 @@ import {
 } from './provider.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
+  findDiscordPendingRoutingReply,
+  handleDiscordRoutingReply,
+} from './routing-confirmation.js';
+import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
 } from './task-launch.js';
@@ -300,16 +304,25 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       : {}),
   };
   const forceNewTask = command?.name === 'new';
-  const activeRun = forceNewTask
+  let activeRun = forceNewTask
     ? undefined
     : await findActiveCommunicationTaskRun(conversation);
   const completedRun =
     forceNewTask || activeRun
       ? null
       : await findCompletedCommunicationTaskRunWithSnapshot(conversation);
+  const pendingRoutingReply =
+    message && senderUserId && !forceNewTask
+      ? await findDiscordPendingRoutingReply({
+          channel,
+          replyToMessageId: message.message_reference?.message_id,
+          requesterDiscordUserId: sender.id,
+          launchOwnerUserId: senderUserId,
+        })
+      : null;
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
-    isTaskThread: Boolean(activeRun || completedRun),
+    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
     parentChannelId: channel.parentChannelId,
   });
   if (!isTaskEntry) {
@@ -349,13 +362,46 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
     botUserId: resolved.botUserId,
     userId: senderUserId,
-    isTaskThread: Boolean(activeRun || completedRun),
+    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
     parentChannelId: channel.parentChannelId,
     attachmentImages: processedAttachments.images,
     attachmentText: processedAttachments.attachmentTexts,
   });
   if (!queuedMessage) {
     return { ok: true, ignored: 'empty_task_entry' };
+  }
+
+  if (pendingRoutingReply) {
+    try {
+      await resolved.provider.addReaction({
+        channelId: channel.channelId,
+        messageId: queuedMessage.ts,
+        name: '👀',
+      });
+    } catch {
+      // Routing ownership is already durable; the reaction is only an ack.
+    }
+
+    const handled = await handleDiscordRoutingReply({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      pendingRouteId: pendingRoutingReply.pendingRouteId,
+      requesterDiscordUserId: sender.id,
+      launchOwnerUserId: senderUserId,
+      queuedMessage,
+      channel,
+    });
+    if (handled) {
+      return { ok: true, routingReplyHandled: true };
+    }
+
+    // The auto-confirm timer may have claimed the card between lookup and
+    // classification. If it launched, this message is now a normal task
+    // follow-up and should enter that run instead of becoming a new task.
+    activeRun = await findActiveCommunicationTaskRun(conversation);
+    if (!activeRun) {
+      return { ok: true, ignored: 'routing_reply_expired' };
+    }
   }
 
   // Check the upstream event before conversation routing. In a DM, a retry

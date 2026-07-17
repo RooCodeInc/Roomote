@@ -49,7 +49,7 @@ import {
   type SlackMcpSetupRequirement,
   detectSlackMcpSetupRequirement,
   routeTask,
-  classifyFollowUp,
+  resolveRoutingFollowUp,
   buildSlackRoutingContext,
   getRoutingAutoConfirmDelayMs,
 } from '@roomote/cloud-agents/server';
@@ -2324,19 +2324,55 @@ export async function handleSlackRoutingCorrection({
     return { handled: false };
   }
 
-  // Use the LLM to classify the user's follow-up as confirm, cancel, or correct
-  const classification = await classifyFollowUp({
-    suggestedWorkspace: oldPrefill.workspaceDisplayName,
+  const correctionWithoutMention =
+    stripLeadingSlackProductMention(correctionText);
+  const routingFollowUp = await resolveRoutingFollowUp({
+    suggestion: {
+      workspaceValue: oldPrefill.workspaceValue,
+      workspaceDisplayName: oldPrefill.workspaceDisplayName,
+      modelId: oldPrefill.modelId,
+      modelDisplayName: oldPrefill.modelDisplayName,
+    },
     userResponse: correctionText,
     userId: userMapping.userId,
+    correctionMessage: {
+      user: event.user,
+      text: correctionWithoutMention,
+    },
+    buildCorrectionContext: async () => {
+      const originalEvent = JSON.parse(claimedEventJson) as SlackEvent;
+      const reroutingTaskDescription = appendAttachmentTextsToPromptText({
+        text: correctionWithoutMention,
+        attachmentTexts: originalEvent.processedAttachmentTexts,
+      });
+      const channelName =
+        (await slack.getChannelName?.(event.channel)) ?? undefined;
+
+      return buildSlackRoutingContext({
+        userId: userMapping.userId,
+        taskDescription: reroutingTaskDescription,
+        channelName,
+        threadMessages: oldPrefill.threadMessages?.map((message) => ({
+          text: message.text,
+          user: message.user,
+        })),
+        ...(originalEvent.processedImages?.length
+          ? { images: originalEvent.processedImages }
+          : {}),
+        ...(originalEvent.processedVideoDescriptions?.length
+          ? { videoDescriptions: originalEvent.processedVideoDescriptions }
+          : {}),
+        apiBaseUrl: Env.TRPC_URL,
+      });
+    },
   });
 
   console.log(
-    `[RoutingCorrection] Classified follow-up for thread ${threadId}: ${classification.intent} (${classification.reasoning})`,
+    `[RoutingCorrection] Classified follow-up for thread ${threadId}: ${routingFollowUp.intent}`,
   );
 
   // --- Cancel: user wants to abort the request entirely ---
-  if (classification.intent === 'cancel') {
+  if (routingFollowUp.intent === 'cancel') {
     console.log(
       `[RoutingCorrection] Cancellation detected for thread ${threadId}`,
     );
@@ -2353,7 +2389,7 @@ export async function handleSlackRoutingCorrection({
   }
 
   // --- Confirm: user accepts the routing suggestion as-is ---
-  if (classification.intent === 'confirm') {
+  if (routingFollowUp.intent === 'confirm') {
     console.log(
       `[RoutingCorrection] Confirmation detected for thread ${threadId}`,
     );
@@ -2437,52 +2473,7 @@ export async function handleSlackRoutingCorrection({
 
   // Attempt to re-route with the correction text
   try {
-    let originalEvent: SlackEvent;
-
-    try {
-      originalEvent = JSON.parse(claimedEventJson) as SlackEvent;
-    } catch {
-      await redis.hset(
-        REDIS_KEYS.PENDING_WORKSPACE_SELECTIONS,
-        threadId,
-        claimedEventJson,
-      );
-      return { handled: false };
-    }
-
-    const reroutingTaskDescription = appendAttachmentTextsToPromptText({
-      text: stripLeadingSlackProductMention(correctionText),
-      attachmentTexts: originalEvent.processedAttachmentTexts,
-    });
-    const channelName =
-      (await slack.getChannelName?.(event.channel)) ?? undefined;
-
-    const routingContext = await buildSlackRoutingContext({
-      userId: userMapping.userId,
-      taskDescription: reroutingTaskDescription,
-      channelName,
-      threadMessages: oldPrefill.threadMessages?.map((m) => ({
-        text: m.text,
-        user: m.user,
-      })),
-      ...(originalEvent.processedImages?.length
-        ? { images: originalEvent.processedImages }
-        : {}),
-      ...(originalEvent.processedVideoDescriptions?.length
-        ? { videoDescriptions: originalEvent.processedVideoDescriptions }
-        : {}),
-      apiBaseUrl: Env.TRPC_URL,
-    });
-
-    // Add the previous suggestion so the router can revise the workspace.
-    routingContext.previousSuggestion = {
-      workspaceValue: oldPrefill.workspaceValue,
-      workspaceDisplayName: oldPrefill.workspaceDisplayName,
-      modelId: oldPrefill.modelId,
-      modelDisplayName: oldPrefill.modelDisplayName,
-    };
-
-    const reRoutingDecision = await routeTask(routingContext);
+    const reRoutingDecision = routingFollowUp.routingDecision;
 
     if (reRoutingDecision.status === 'platform_answer') {
       await addSlackProcessingReaction({

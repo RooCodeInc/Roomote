@@ -6,6 +6,7 @@ const {
   answerCallbackQueryMock,
   authUsersFindFirstMock,
   buildTelegramRoutingContextMock,
+  classifyFollowUpMock,
   taskRunsFindFirstMock,
   consumeLinkCodeMock,
   createForumTopicMock,
@@ -29,6 +30,7 @@ const {
   redisGetMock,
   redisGetdelMock,
   redisSetMock,
+  resolveRoutingFollowUpMock,
   routeTaskMock,
   setLatestInboundMessageIdMock,
   setTrustedRunActingUserMock,
@@ -42,6 +44,7 @@ const {
   answerCallbackQueryMock: vi.fn(),
   authUsersFindFirstMock: vi.fn(),
   buildTelegramRoutingContextMock: vi.fn(),
+  classifyFollowUpMock: vi.fn(),
   taskRunsFindFirstMock: vi.fn(),
   consumeLinkCodeMock: vi.fn(),
   createForumTopicMock: vi.fn(),
@@ -70,6 +73,7 @@ const {
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
   redisSetMock: vi.fn(),
+  resolveRoutingFollowUpMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
@@ -280,10 +284,12 @@ vi.mock('../../tasks/task-stop.js', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   buildTelegramRoutingContext: buildTelegramRoutingContextMock,
+  classifyFollowUp: classifyFollowUpMock,
   enqueueTask: enqueueTaskMock,
   getAvailableEnvironments: getAvailableEnvironmentsMock,
   getRoutingAutoConfirmDelayMs: getRoutingAutoConfirmDelayMsMock,
   getTaskUrl: getTaskUrlMock,
+  resolveRoutingFollowUp: resolveRoutingFollowUpMock,
   routeTask: routeTaskMock,
 }));
 
@@ -398,6 +404,39 @@ describe('Telegram webhook handler', () => {
     updateReturningMock.mockResolvedValue([]);
     queueCommunicationMessageMock.mockResolvedValue(undefined);
     buildTelegramRoutingContextMock.mockResolvedValue({ context: true });
+    classifyFollowUpMock.mockResolvedValue({
+      intent: 'correct',
+      reasoning: 'Treat as a correction',
+    });
+    resolveRoutingFollowUpMock.mockImplementation(
+      async (input: {
+        suggestion: Record<string, unknown> | null;
+        userResponse: string;
+        userId?: string | null;
+        correctionMessage?: { user: string; text: string };
+        buildCorrectionContext: () => Promise<Record<string, unknown>>;
+      }) => {
+        const classification = await classifyFollowUpMock({
+          suggestedWorkspace:
+            input.suggestion?.workspaceDisplayName ?? 'the workspace picker',
+          userResponse: input.userResponse,
+          userId: input.userId,
+        });
+        if (classification.intent !== 'correct') {
+          return { intent: classification.intent };
+        }
+        const context = await input.buildCorrectionContext();
+        return {
+          intent: 'correct',
+          routingDecision: await routeTaskMock({
+            ...context,
+            ...(input.suggestion
+              ? { previousSuggestion: input.suggestion }
+              : {}),
+          }),
+        };
+      },
+    );
     routeTaskMock.mockResolvedValue({
       status: 'routed',
       result: {
@@ -1733,6 +1772,190 @@ describe('Telegram webhook handler', () => {
       expect.stringContaining('"launchOwnerUserId":"launch-owner-20"'),
       'EX',
       expect.any(Number),
+    );
+  });
+
+  it('accepts a normal reply to confirm the pending route without replacing the task text', async () => {
+    mockTelegramLinkedSender('launch-owner-20');
+    classifyFollowUpMock.mockResolvedValueOnce({
+      intent: 'confirm',
+      reasoning: 'The user agreed',
+    });
+    const pendingRouteId = 'pendingRoute1';
+    const pending = JSON.stringify({
+      launchOwnerUserId: 'launch-owner-20',
+      queuedMessage: {
+        provider: 'telegram',
+        text: 'fix the login bug',
+        user: 'Ada Lovelace',
+        userId: 'launch-owner-20',
+        ts: '455',
+        channel: '222',
+      },
+      metadata: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '222',
+        communicationMessageId: '455',
+      },
+      routingContext: {
+        taskDescription: 'fix the login bug',
+        source: {
+          type: 'telegram',
+          chatName: 'Ada',
+          threadMessages: [{ user: 'Ada Lovelace', text: 'fix the login bug' }],
+        },
+        availableEnvironments: [],
+      },
+      options: [
+        {
+          label: 'Web App',
+          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
+        },
+      ],
+      suggestedIndex: 0,
+      confirmMessageId: '990',
+    });
+    redisGetMock
+      .mockResolvedValueOnce(pendingRouteId)
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(pendingRouteId);
+    redisGetdelMock.mockResolvedValueOnce(pending);
+    environmentsFindFirstMock.mockResolvedValueOnce({
+      id: 'env-1',
+      name: 'Web App',
+      config: { repositories: [{ repository: 'org/web' }] },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: 'yes' } }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      routingReplyHandled: true,
+    });
+    expect(classifyFollowUpMock).toHaveBeenCalledWith({
+      suggestedWorkspace: 'Web App',
+      userResponse: 'yes',
+      userId: 'launch-owner-20',
+    });
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: 'fix the login bug',
+            environmentId: 'env-1',
+          }),
+        }),
+      }),
+      { launchClass: 'human' },
+    );
+    expect(enqueueTaskMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({ description: 'yes' }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('re-routes a pending task from a normal correction reply and launches the original request', async () => {
+    mockTelegramLinkedSender('launch-owner-20');
+    classifyFollowUpMock.mockResolvedValueOnce({
+      intent: 'correct',
+      reasoning: 'The user named a different workspace',
+    });
+    getRoutingAutoConfirmDelayMsMock.mockReturnValueOnce(0);
+    getAvailableEnvironmentsMock.mockResolvedValueOnce([
+      { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
+      { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
+    ]);
+    routeTaskMock.mockResolvedValueOnce({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-2', name: 'API' },
+        reasoning: 'Explicit correction',
+        debug: { confidence: 0.99 },
+      },
+    });
+    const pendingRouteId = 'pendingRoute2';
+    const pending = JSON.stringify({
+      launchOwnerUserId: 'launch-owner-20',
+      queuedMessage: {
+        provider: 'telegram',
+        text: 'fix the login bug',
+        user: 'Ada Lovelace',
+        userId: 'launch-owner-20',
+        ts: '455',
+        channel: '222',
+      },
+      metadata: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '222',
+        communicationMessageId: '455',
+      },
+      routingContext: {
+        taskDescription: 'fix the login bug',
+        source: {
+          type: 'telegram',
+          chatName: 'Ada',
+          threadMessages: [{ user: 'Ada Lovelace', text: 'fix the login bug' }],
+        },
+        availableEnvironments: [
+          { id: 'env-1', name: 'Web App', repositoryNames: ['org/web'] },
+          { id: 'env-2', name: 'API', repositoryNames: ['org/api'] },
+        ],
+      },
+      options: [
+        {
+          label: 'Web App',
+          workspace: { type: 'environment', id: 'env-1', name: 'Web App' },
+        },
+      ],
+      suggestedIndex: 0,
+      confirmMessageId: '990',
+    });
+    redisGetMock
+      .mockResolvedValueOnce(pendingRouteId)
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce(pendingRouteId);
+    redisGetdelMock.mockResolvedValueOnce(pending);
+    environmentsFindFirstMock.mockResolvedValueOnce({
+      id: 'env-2',
+      name: 'API',
+      config: { repositories: [{ repository: 'org/api' }] },
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({ message: { text: 'use API instead' } }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: false,
+      routingReplyHandled: true,
+    });
+    expect(routeTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskDescription: 'use API instead',
+        previousSuggestion: {
+          workspaceValue: 'env-1',
+          workspaceDisplayName: 'Web App',
+        },
+      }),
+    );
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: 'fix the login bug',
+            environmentId: 'env-2',
+          }),
+        }),
+      }),
+      { launchClass: 'human' },
     );
   });
 

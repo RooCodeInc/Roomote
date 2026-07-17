@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   getChannel: vi.fn(),
   addReaction: vi.fn(),
   channelAutoStart: vi.fn(),
+  findPendingRoutingReply: vi.fn(),
+  handleRoutingReply: vi.fn(),
 }));
 
 vi.mock('../event-gate.js', () => ({
@@ -67,6 +69,11 @@ vi.mock('../attachments.js', () => ({
 
 vi.mock('../channel-auto-start.js', () => ({
   maybeHandleDiscordChannelAutoStart: mocks.channelAutoStart,
+}));
+
+vi.mock('../routing-confirmation.js', () => ({
+  findDiscordPendingRoutingReply: mocks.findPendingRoutingReply,
+  handleDiscordRoutingReply: mocks.handleRoutingReply,
 }));
 
 vi.mock('@roomote/communication/messages', () => ({
@@ -184,10 +191,55 @@ describe('Discord Gateway event handler', () => {
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
+    mocks.findPendingRoutingReply.mockResolvedValue(null);
+    mocks.handleRoutingReply.mockResolvedValue(false);
   });
 
   afterEach(() => {
     delete process.env.R_DISCORD_GATEWAY_SECRET;
+  });
+
+  it('treats an unmentioned task-thread message as a pending routing reply', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      name: 'Fix the flaky tests',
+      type: 11,
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+    });
+    mocks.findPendingRoutingReply.mockResolvedValue({
+      pendingRouteId: 'pending-route-1',
+    });
+    mocks.handleRoutingReply.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'use API instead',
+          channel: {
+            id: 'thread-1',
+            type: 11,
+            guild_id: 'guild-1',
+            parent_id: 'channel-1',
+          },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      routingReplyHandled: true,
+    });
+    expect(mocks.handleRoutingReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pendingRouteId: 'pending-route-1',
+        queuedMessage: expect.objectContaining({ text: 'use API instead' }),
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid Gateway secret before claiming the event', async () => {
