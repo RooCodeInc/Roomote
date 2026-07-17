@@ -17,6 +17,7 @@ import { captureWorkerException } from '../monitoring/sentry';
 
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
+import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
 
 interface PendingCompletionEvents {
   callbackTaskId: string;
@@ -35,12 +36,14 @@ export function subscribeHarnessCallbacks({
   callbacks,
   context,
   logger,
+  mcpTaskEnv,
 }: {
   harness: Harness;
   taskRun: DequeuedTaskRun['taskRun'];
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
   logger: HarnessLogger;
+  mcpTaskEnv?: Record<string, string>;
 }): () => Promise<void> {
   const persistedTaskId = taskRun.taskId;
   const pendingCompletionEventsByCallbackId = new Map<
@@ -107,8 +110,14 @@ export function subscribeHarnessCallbacks({
           taskId: persistedTaskId,
           envelope,
         })
-        .then(() => {
+        .then(async (showWidgetFallbackDelivery) => {
           consecutivePersistenceFailures = 0;
+          await deliverShowWidgetFallback({
+            runId: taskRun.id,
+            delivery: showWidgetFallbackDelivery,
+            mcpTaskEnv,
+            logger,
+          });
         })
         .catch((error) => {
           consecutivePersistenceFailures += 1;

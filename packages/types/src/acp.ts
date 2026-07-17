@@ -1016,6 +1016,12 @@ export interface AcpToolResultPayload {
   flattenedServerNames?: string[] | null;
 }
 
+export interface ShowWidgetFallbackDelivery {
+  toolCallId: string;
+  title: string | null;
+  textFallback: string;
+}
+
 export type AcpPlanEntryStatus = 'pending' | 'in_progress' | 'completed';
 
 export interface AcpPlanEntry {

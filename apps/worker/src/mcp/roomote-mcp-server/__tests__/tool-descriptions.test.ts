@@ -13,6 +13,12 @@ type RegisteredTool = {
   config: {
     description: string;
     inputSchema: Record<string, { description?: string; options?: string[] }>;
+    annotations?: {
+      readOnlyHint?: boolean;
+      destructiveHint?: boolean;
+      idempotentHint?: boolean;
+      openWorldHint?: boolean;
+    };
   };
   handler?: (params: Record<string, unknown>) => Promise<unknown>;
 };
@@ -203,11 +209,23 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Render a presentational HTML widget in the Roomote task transcript.',
     );
+    expect(tool.config.description).toContain(
+      'to demonstrate how something would look',
+    );
+    expect(tool.config.description).toContain(
+      'Do not use it for ordinary prose',
+    );
     expect(tool.config.description).toContain('request_user_input');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',
     );
+    expect(tool.config.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
   });
 
   it('documents manual visual-proof posting when Slack auto-post is disabled', async () => {

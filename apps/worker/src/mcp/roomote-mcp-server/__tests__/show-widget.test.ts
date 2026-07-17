@@ -8,32 +8,12 @@ import {
   SHOW_WIDGET_MIN_HEIGHT,
 } from '../show-widget.js';
 
-vi.mock('../chat-api-client.js', () => ({
-  replyToChatThread: vi.fn(async () => ({ messageTs: 'slack-ts-1' })),
-}));
-
-import { replyToChatThread } from '../chat-api-client.js';
-
 function parseResult(result: { content: Array<{ text?: string }> }) {
   const text = result.content[0]?.text ?? '';
   return JSON.parse(text) as Record<string, unknown>;
 }
 
-const originalEnv = { ...process.env };
-
 describe('handleShowWidget', () => {
-  beforeEach(() => {
-    process.env = { ...originalEnv };
-    delete process.env.ROOMOTE_SLACK_CHANNEL;
-    delete process.env.ROOMOTE_COMMUNICATION_PROVIDER;
-    delete process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID;
-    vi.mocked(replyToChatThread).mockClear();
-  });
-
-  afterAll(() => {
-    process.env = originalEnv;
-  });
-
   it('returns sanitized HTML with defaults', async () => {
     const result = await handleShowWidget({
       html: '<h1 onclick="alert(1)">Hello</h1><script>alert(2)</script>',
@@ -49,7 +29,7 @@ describe('handleShowWidget', () => {
     expect(String(parsed.html)).toContain('<h1>Hello</h1>');
     expect(String(parsed.html)).not.toContain('onclick');
     expect(String(parsed.html)).not.toContain('script');
-    expect(parsed.chatFallbackPosted).toBe(false);
+    expect(parsed.textFallback).toBeNull();
   });
 
   it('does not reconstitute blocked tags through nested multi-character payloads', async () => {
@@ -103,37 +83,22 @@ describe('handleShowWidget', () => {
     expect(css).toContain('p{color:red}');
   });
 
-  it('posts textFallback to chat when a chat surface is available', async () => {
-    process.env.ROOMOTE_SLACK_CHANNEL = 'C123';
-    const result = await handleShowWidget(
-      {
-        html: '<p>ok</p>',
-        title: 'Plan',
-        textFallback: 'Plan fallback for Slack',
-      },
-      {
-        roomoteConfig: {
-          token: 't',
-          platformApiUrl: 'https://platform.example.com',
-        },
-      },
-    );
+  it('returns textFallback for the runtime delivery layer', async () => {
+    const result = await handleShowWidget({
+      html: '<p>ok</p>',
+      title: 'Plan',
+      textFallback: 'Plan fallback for chat',
+    });
 
     const parsed = parseResult(result);
-    expect(parsed.chatFallbackPosted).toBe(true);
-    expect(parsed.chatFallbackMessageTs).toBe('slack-ts-1');
-    expect(replyToChatThread).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 't' }),
-      expect.objectContaining({
-        text: '*Plan*\n\nPlan fallback for Slack',
-      }),
-    );
+    expect(parsed.success).toBe(true);
+    expect(parsed.textFallback).toBe('Plan fallback for chat');
   });
 });
 
 describe('show-widget helpers', () => {
-  it('strips javascript urls and nested frames', () => {
-    const html = sanitizeWidgetHtml(
+  it('strips javascript urls and nested frames', async () => {
+    const html = await sanitizeWidgetHtml(
       '<a href="javascript:alert(1)">x</a><iframe src="https://evil"></iframe><img src="https://evil/x.png">',
     );
     expect(html.toLowerCase()).not.toContain('javascript:');

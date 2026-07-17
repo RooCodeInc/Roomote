@@ -93,6 +93,8 @@ import {
   getResolvedRuntimeEnvVars,
   getResolvedGitAuthor,
   findTaskRunByRunTokenClaims,
+  claimShowWidgetFallbackDelivery,
+  releaseShowWidgetFallbackDelivery,
 } from '../lib/task-runs';
 import {
   findSlackConversationSubjectByUserId,
@@ -438,6 +440,20 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(({ input }) => recordTaskInferenceUsage(input)),
+  claimShowWidgetFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      toolCallId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => claimShowWidgetFallbackDelivery(input)),
+  releaseShowWidgetFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      toolCallId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => releaseShowWidgetFallbackDelivery(input)),
   recordComputeProviderUsage: runScoped(
     z.object({
       runId: z.number(),

@@ -1,9 +1,7 @@
-import createDOMPurify from 'dompurify';
-import { JSDOM } from 'jsdom';
+import type { DOMPurify } from 'dompurify';
 
-import { replyToChatThread } from './chat-api-client.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
-import type { RoomoteConfig, ToolResult } from './types.js';
+import type { ToolResult } from './types.js';
 
 const SHOW_WIDGET_MAX_HTML_CHARS = 100_000;
 const SHOW_WIDGET_MAX_CSS_CHARS = 50_000;
@@ -29,8 +27,6 @@ type ShowWidgetSuccess = {
   css: string | null;
   height: number;
   textFallback: string | null;
-  chatFallbackPosted: boolean;
-  chatFallbackMessageTs: string | null;
 };
 
 function asTrimmedString(value: unknown): string | null {
@@ -42,66 +38,60 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
-function hasChatFallbackSurface(): boolean {
-  if (process.env.ROOMOTE_SLACK_CHANNEL?.trim()) {
-    return true;
+let purifierPromise: Promise<DOMPurify> | null = null;
+
+async function getPurifier(): Promise<DOMPurify> {
+  if (purifierPromise) {
+    return purifierPromise;
   }
 
-  return (
-    Boolean(process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim()) &&
-    Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())
+  purifierPromise = Promise.all([import('dompurify'), import('jsdom')]).then(
+    ([{ default: createDOMPurify }, { JSDOM }]) => {
+      const purifier = createDOMPurify(new JSDOM('').window);
+
+      purifier.addHook('uponSanitizeAttribute', (_node, data) => {
+        const name = data.attrName.toLowerCase();
+
+        if (
+          name.startsWith('on') ||
+          name === 'srcdoc' ||
+          name === 'formaction' ||
+          name === 'xlink:href'
+        ) {
+          data.keepAttr = false;
+          return;
+        }
+
+        if (
+          name === 'href' ||
+          name === 'src' ||
+          name === 'poster' ||
+          name === 'action' ||
+          name === 'srcset'
+        ) {
+          const value = String(data.attrValue ?? '')
+            .trim()
+            .toLowerCase();
+
+          if (
+            value.startsWith('http:') ||
+            value.startsWith('https:') ||
+            value.startsWith('//') ||
+            value.startsWith('javascript:') ||
+            value.startsWith('vbscript:') ||
+            value.startsWith('data:') ||
+            value.startsWith('blob:')
+          ) {
+            data.keepAttr = false;
+          }
+        }
+      });
+
+      return purifier;
+    },
   );
-}
 
-let purifier: ReturnType<typeof createDOMPurify> | null = null;
-
-function getPurifier() {
-  if (purifier) {
-    return purifier;
-  }
-
-  const window = new JSDOM('').window;
-  purifier = createDOMPurify(window);
-
-  purifier.addHook('uponSanitizeAttribute', (_node, data) => {
-    const name = data.attrName.toLowerCase();
-
-    if (
-      name.startsWith('on') ||
-      name === 'srcdoc' ||
-      name === 'formaction' ||
-      name === 'xlink:href'
-    ) {
-      data.keepAttr = false;
-      return;
-    }
-
-    if (
-      name === 'href' ||
-      name === 'src' ||
-      name === 'poster' ||
-      name === 'action' ||
-      name === 'srcset'
-    ) {
-      const value = String(data.attrValue ?? '')
-        .trim()
-        .toLowerCase();
-
-      if (
-        value.startsWith('http:') ||
-        value.startsWith('https:') ||
-        value.startsWith('//') ||
-        value.startsWith('javascript:') ||
-        value.startsWith('vbscript:') ||
-        value.startsWith('data:') ||
-        value.startsWith('blob:')
-      ) {
-        data.keepAttr = false;
-      }
-    }
-  });
-
-  return purifier;
+  return purifierPromise;
 }
 
 /**
@@ -109,8 +99,10 @@ function getPurifier() {
  * Regex multi-pass deletion is intentionally avoided because nested tags can
  * reconstitute blocked markup across passes.
  */
-export function sanitizeWidgetHtml(html: string): string {
-  return getPurifier().sanitize(html, {
+export async function sanitizeWidgetHtml(html: string): Promise<string> {
+  const purifier = await getPurifier();
+
+  return purifier.sanitize(html, {
     USE_PROFILES: { html: true },
     FORBID_TAGS: [
       'script',
@@ -183,9 +175,6 @@ export function clampWidgetHeight(height: number | undefined): number {
 
 export async function handleShowWidget(
   params: ShowWidgetInput,
-  options?: {
-    roomoteConfig?: RoomoteConfig | null;
-  },
 ): Promise<ToolResult> {
   try {
     const rawHtml = asTrimmedString(params.html);
@@ -223,7 +212,7 @@ export async function handleShowWidget(
       );
     }
 
-    const html = sanitizeWidgetHtml(rawHtml);
+    const html = await sanitizeWidgetHtml(rawHtml);
     const css = rawCss ? sanitizeWidgetCss(rawCss) : null;
     const height = clampWidgetHeight(params.height);
 
@@ -231,20 +220,6 @@ export async function handleShowWidget(
       return errorResult(
         'html is empty after sanitization; provide safe non-script markup to display',
       );
-    }
-
-    let chatFallbackPosted = false;
-    let chatFallbackMessageTs: string | null = null;
-
-    // When a chat surface exists, deliver the plain-text fallback so Slack /
-    // Telegram / etc. still see the widget content that cannot render HTML.
-    if (textFallback && hasChatFallbackSurface() && options?.roomoteConfig) {
-      const message = title ? `*${title}*\n\n${textFallback}` : textFallback;
-      const reply = await replyToChatThread(options.roomoteConfig, {
-        text: message,
-      });
-      chatFallbackPosted = true;
-      chatFallbackMessageTs = reply.messageTs ?? null;
     }
 
     const payload: ShowWidgetSuccess = {
@@ -255,8 +230,6 @@ export async function handleShowWidget(
       css,
       height,
       textFallback,
-      chatFallbackPosted,
-      chatFallbackMessageTs,
     };
 
     return successResult(payload);

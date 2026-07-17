@@ -1,13 +1,21 @@
 import { TaskEventName, type TaskEvent } from '@roomote/types';
 
+const { mockDeliverShowWidgetFallback } = vi.hoisted(() => ({
+  mockDeliverShowWidgetFallback: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
-      recordMessageEnvelope: vi.fn().mockResolvedValue(undefined),
+      recordMessageEnvelope: vi.fn().mockResolvedValue(null),
       recordInferenceUsage: vi.fn().mockResolvedValue({ recorded: true }),
       stampMilestone: vi.fn().mockResolvedValue(undefined),
     },
   },
+}));
+
+vi.mock('../show-widget-fallback-delivery', () => ({
+  deliverShowWidgetFallback: mockDeliverShowWidgetFallback,
 }));
 
 vi.mock('../../monitoring/sentry', () => ({
@@ -107,10 +115,11 @@ describe('subscribeHarnessCallbacks', () => {
 
   beforeEach(() => {
     recordMessageEnvelopeMock.mockClear();
-    recordMessageEnvelopeMock.mockResolvedValue(undefined);
+    recordMessageEnvelopeMock.mockResolvedValue(null);
     recordInferenceUsageMock.mockClear();
     recordInferenceUsageMock.mockResolvedValue({ recorded: true });
     captureWorkerExceptionMock.mockClear();
+    mockDeliverShowWidgetFallback.mockClear();
   });
 
   it('persists Roomote runtime user prompt envelopes to task_messages', async () => {
@@ -152,6 +161,62 @@ describe('subscribeHarnessCallbacks', () => {
     });
     // User prompts are persisted but not forwarded to callbacks.
     expect(callbacks.onMessage).not.toHaveBeenCalled();
+
+    await unsubscribe();
+  });
+
+  it('delivers a returned show_widget fallback after persistence', async () => {
+    const { harness, emitEnvelope } = createRuntimeHarness();
+    const fallback = {
+      toolCallId: 'call-widget-1',
+      title: 'Status',
+      textFallback: 'Ready',
+    };
+    recordMessageEnvelopeMock.mockResolvedValue(fallback);
+
+    const logger = {
+      runId: 45,
+      filePath: '/tmp/test.log',
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 45, taskId: 'task-widget' } as never,
+      callbacks: {},
+      context: {},
+      logger,
+      mcpTaskEnv: {
+        ROOMOTE_CLOUD_TOKEN: 'token',
+        ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+        ROOMOTE_SLACK_CHANNEL: 'C123',
+      },
+    });
+
+    emitEnvelope({
+      ts: 1772823376050,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.ToolResult,
+      role: 'tool',
+      protocol: 'roomote_runtime',
+      contentBlocks: [],
+      metadata: { toolCallId: 'call-widget-1' },
+      payload: { toolCallId: 'call-widget-1' },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockDeliverShowWidgetFallback).toHaveBeenCalledWith({
+        runId: 45,
+        delivery: fallback,
+        mcpTaskEnv: {
+          ROOMOTE_CLOUD_TOKEN: 'token',
+          ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+          ROOMOTE_SLACK_CHANNEL: 'C123',
+        },
+        logger,
+      });
+    });
 
     await unsubscribe();
   });
@@ -233,8 +298,8 @@ describe('subscribeHarnessCallbacks', () => {
     let resolvePersist: (() => void) | undefined;
     recordMessageEnvelopeMock.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          resolvePersist = resolve;
+        new Promise<null>((resolve) => {
+          resolvePersist = () => resolve(null);
         }),
     );
 

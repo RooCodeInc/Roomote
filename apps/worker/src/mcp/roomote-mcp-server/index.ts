@@ -121,10 +121,11 @@ roomoteMcpServer.registerTool(
     title: 'Show Widget',
     description:
       'Render a presentational HTML widget in the Roomote task transcript. ' +
-      'Use this to show tables, status cards, annotated plans, mock UI, or other HTML the user should look at. ' +
+      'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
+      'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
       'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked; Roomote injects default styles when css is omitted. ' +
-      'This is display-only — use request_user_input when you need answers. ' +
-      'Optional textFallback is posted to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
+      'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
+      'Optional textFallback is delivered by Roomote to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
       html: z
         .string()
@@ -162,10 +163,7 @@ roomoteMcpServer.registerTool(
       openWorldHint: false,
     },
   },
-  async (params): Promise<ToolResult> =>
-    handleShowWidget(params, {
-      roomoteConfig: getRoomoteConfig(),
-    }),
+  async (params): Promise<ToolResult> => handleShowWidget(params),
 );
 
 roomoteMcpServer.registerTool(

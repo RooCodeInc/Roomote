@@ -173,6 +173,7 @@ export async function createHarness({
     callbacks,
     context,
     logger,
+    mcpTaskEnv,
   });
 
   return {
