@@ -1711,7 +1711,7 @@ describe('Telegram webhook handler', () => {
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
         channelId: '222',
-        text: expect.stringContaining('Planning to run this in **Web App**'),
+        text: 'Planning to run this in **Web App** — starting in ~30s.',
         // Compact Yes/Nope card — the workspace list only appears after Nope.
         buttons: [
           [
