@@ -1536,6 +1536,7 @@ export class OpenCodeServerHarness
   private providerRateLimitRetryCount = 0;
   private providerErrorRecoveryCount = 0;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
+  private ignoreNextProviderRecoverySessionIdle = false;
   private currentWorkflowPhase: string | null = null;
   // Most recent packaged workflow skill loaded by the primary session's agent
   // via the OpenCode skill tool. Drives per-prompt agent selection so plan-mode
@@ -3507,6 +3508,9 @@ export class OpenCodeServerHarness
     const statusType = asString(status?.type);
 
     if (statusType === 'busy' || statusType === 'retry') {
+      // If OpenCode omitted the paired session.idle event, do not let a stale
+      // guard consume the retry's eventual idle transition.
+      this.ignoreNextProviderRecoverySessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3517,7 +3521,7 @@ export class OpenCodeServerHarness
     }
 
     if (statusType === 'idle') {
-      if (await this.drainProviderErrorRecoveryAfterIdle()) {
+      if (await this.drainProviderErrorRecoveryAfterIdle('session_status')) {
         return;
       }
 
@@ -3548,7 +3552,12 @@ export class OpenCodeServerHarness
       this.sessionId = sessionId;
     }
 
-    if (await this.drainProviderErrorRecoveryAfterIdle()) {
+    if (this.ignoreNextProviderRecoverySessionIdle) {
+      this.ignoreNextProviderRecoverySessionIdle = false;
+      return;
+    }
+
+    if (await this.drainProviderErrorRecoveryAfterIdle('session_idle')) {
       return;
     }
 
@@ -3730,9 +3739,12 @@ export class OpenCodeServerHarness
     this.providerRateLimitRetryCount = 0;
     this.providerErrorRecoveryCount = 0;
     this.providerErrorRecoveryQueuedPromptId = null;
+    this.ignoreNextProviderRecoverySessionIdle = false;
   }
 
-  private async drainProviderErrorRecoveryAfterIdle(): Promise<boolean> {
+  private async drainProviderErrorRecoveryAfterIdle(
+    source: 'session_status' | 'session_idle',
+  ): Promise<boolean> {
     const queuedPromptId = this.providerErrorRecoveryQueuedPromptId;
 
     if (!queuedPromptId) {
@@ -3743,6 +3755,10 @@ export class OpenCodeServerHarness
     // not submit the retry until that idle boundary or prompt_async can append
     // it to the dying run without starting a fresh model loop.
     this.providerErrorRecoveryQueuedPromptId = null;
+    // OpenCode 1.17 emits session.status(idle) followed by session.idle for a
+    // single transition. Consume that paired legacy event exactly once so it
+    // cannot finish the recovery turn that is about to start.
+    this.ignoreNextProviderRecoverySessionIdle = source === 'session_status';
     this.inFlight = false;
     this.prompts.prioritize(queuedPromptId);
     await this.drainQueuedPrompts();

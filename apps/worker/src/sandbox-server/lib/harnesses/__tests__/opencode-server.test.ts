@@ -1977,13 +1977,28 @@ describe('OpenCodeServerHarness', () => {
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
 
       await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'idle' } },
       });
 
       await vi.waitFor(() => {
         expect(client.promptAsync).toHaveBeenCalledTimes(2);
       });
+
+      // OpenCode emits this legacy idle event for the same transition after
+      // session.status(idle). It must be consumed instead of completing the
+      // recovery loop that was just started.
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(false);
 
       const retryPrompt = client.promptAsync.mock.calls[1]?.[0] as
         | {
