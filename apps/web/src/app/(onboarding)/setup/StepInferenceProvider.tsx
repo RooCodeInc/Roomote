@@ -366,7 +366,8 @@ export function StepInferenceProvider({
             variant="outline"
             onClick={() => void handleDiscoverModels()}
             disabled={
-              discoverProviderModels.isPending || apiKey.trim().length === 0
+              discoverProviderModels.isPending ||
+              (!apiKey.trim() && !hasRuntimeProviderKey && !hasSavedProviderKey)
             }
           >
             {discoverProviderModels.isPending
