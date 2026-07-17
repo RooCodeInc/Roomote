@@ -2,6 +2,17 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.10.0 (2026-07-17)
+
+### Minor changes
+
+- Operators can configure Ollama, vLLM, or LiteLLM as endpoint-based inference providers. Roomote discovers and qualifies their OpenAI-compatible models server-side, routes tasks through the inference gateway, and records LiteLLM-reported request cost without exposing endpoint credentials to sandboxes.
+
+### Patch changes
+
+- Pending GitHub App install requests now poll for approval, offer a manual re-check, auto-continue once an org owner approves, and DM the requester on linked chat integrations, so setup no longer dead-ends on a static pending screen.
+- Telegram task topic handoffs are explicit in the source conversation: Roomote names the new topic, links to it when Telegram provides a permalink, and explains same-chat fallback when topic creation fails, instead of relying only on an eyes reaction or silent fallback.
+
 ## 0.9.0 (2026-07-17)
 
 ### Minor changes
