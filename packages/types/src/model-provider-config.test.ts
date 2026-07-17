@@ -238,7 +238,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
   it('keeps recommended-model slugs and default models under each provider prefix', () => {
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
-      if (provider.dynamicModels) {
+      if ('dynamicModels' in provider && provider.dynamicModels) {
         expect(provider.defaultRoomoteModel).toBe('');
         expect(provider.suggestedTaskModels).toEqual([]);
         continue;
