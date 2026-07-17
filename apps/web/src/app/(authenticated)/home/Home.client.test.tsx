@@ -874,20 +874,19 @@ describe('Home', () => {
     });
   });
 
-  it('falls back to the first catalog-ordered available provider', async () => {
+  it('falls back to the last catalog-ordered available cloud provider', async () => {
     render(
       <Home
         initialPlaceholderIndex={0}
         defaultComputeProvider="daytona"
         // Server may return providers in a non-catalog order; Home should
-        // still prefer setup-catalog display order for the initial selection.
+        // still prefer configured clouds over Local Docker, using the last
+        // catalog-ordered cloud when more than one is available.
         availableComputeProviders={['docker', 'e2b', 'modal']}
       />,
     );
 
-    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent(
-      'Modal',
-    );
+    expect(screen.getByLabelText('Sandbox provider')).toHaveTextContent('E2B');
 
     fireEvent.click(
       screen.getByRole('button', { name: 'Use single-repo environment' }),
@@ -897,7 +896,7 @@ describe('Home', () => {
     await waitFor(() => {
       expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
         expect.objectContaining({
-          computeProvider: 'modal',
+          computeProvider: 'e2b',
         }),
       );
     });

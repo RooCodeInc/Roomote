@@ -9,6 +9,7 @@ vi.mock('../../encryption', () => ({
 import {
   listConfiguredComputeProviders,
   resolveComputeProviderEnvValues,
+  resolveDefaultComputeProvider,
 } from '../compute-runtime-config';
 
 type Executor = NonNullable<
@@ -17,7 +18,15 @@ type Executor = NonNullable<
 
 type EnvVarRow = { name: string; value: string };
 
-function makeExecutor(rows: EnvVarRow[]): NonNullable<Executor> {
+function makeExecutor(
+  rows: EnvVarRow[],
+  options: {
+    runtimeComputeConfig?: {
+      defaultProvider?: string | null;
+      excludedProviders?: string[];
+    } | null;
+  } = {},
+): NonNullable<Executor> {
   // `where` must satisfy both call shapes used by the module: the direct
   // `inArray` read (awaited) and `resolveSavedWorkerImage`'s `.limit(1)` read.
   const whereResult = {
@@ -31,6 +40,13 @@ function makeExecutor(rows: EnvVarRow[]): NonNullable<Executor> {
         where: vi.fn(() => whereResult),
       })),
     })),
+    query: {
+      deploymentSettings: {
+        findFirst: vi.fn().mockResolvedValue({
+          runtimeComputeConfig: options.runtimeComputeConfig ?? null,
+        }),
+      },
+    },
   } as unknown as NonNullable<Executor>;
 }
 
@@ -250,14 +266,9 @@ describe('listConfiguredComputeProviders', () => {
   });
 
   it('excludes persisted providers from task launch options', async () => {
-    const executor = makeExecutor([]);
-    executor.query = {
-      deploymentSettings: {
-        findFirst: vi.fn().mockResolvedValue({
-          runtimeComputeConfig: { excludedProviders: ['docker'] },
-        }),
-      },
-    } as never;
+    const executor = makeExecutor([], {
+      runtimeComputeConfig: { excludedProviders: ['docker'] },
+    });
 
     const providers = await listConfiguredComputeProviders({
       runtimeEnv: {},
@@ -265,5 +276,101 @@ describe('listConfiguredComputeProviders', () => {
     });
 
     expect(providers).toEqual([]);
+  });
+});
+
+describe('resolveDefaultComputeProvider', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+  });
+
+  it('keeps an explicit persisted default', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+      },
+      executor: makeExecutor([], {
+        runtimeComputeConfig: { defaultProvider: 'docker' },
+      }),
+    });
+
+    expect(provider).toBe('docker');
+  });
+
+  it('prefers configured cloud over DEFAULT_COMPUTE_PROVIDER=docker', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+      },
+      executor: makeExecutor([]),
+    });
+
+    expect(provider).toBe('modal');
+  });
+
+  it('uses the last catalog-ordered configured cloud when several are ready', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+        E2B_API_KEY: 'e2b-key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+      executor: makeExecutor([]),
+    });
+
+    expect(provider).toBe('e2b');
+  });
+
+  it('honors a non-docker env default when it is set', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'modal',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry.example.com/image:tag',
+        E2B_API_KEY: 'e2b-key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+      executor: makeExecutor([]),
+    });
+
+    expect(provider).toBe('modal');
+  });
+
+  it('skips catalog readiness scans for non-docker env defaults', async () => {
+    const executor = makeExecutor([]);
+
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'modal',
+      },
+      executor,
+    });
+
+    expect(provider).toBe('modal');
+    // listConfiguredComputeProviders is the only caller path that hits
+    // environment_variables selects for every catalog provider.
+    expect(executor.select).not.toHaveBeenCalled();
+  });
+
+  it('falls back to docker when only Local Docker is configured', async () => {
+    const provider = await resolveDefaultComputeProvider({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+      },
+      executor: makeExecutor([]),
+    });
+
+    expect(provider).toBe('docker');
   });
 });

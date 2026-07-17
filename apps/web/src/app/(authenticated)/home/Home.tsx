@@ -11,6 +11,7 @@ import {
   type ComputeProvider,
   ALL_REPOSITORIES,
   DEFAULT_LAUNCH_CODING_HARNESS,
+  pickPreferredConfiguredComputeProvider,
   SETUP_COMPUTE_PROVIDER_CATALOG,
 } from '@roomote/types';
 import type { RoutingDecision } from '@roomote/cloud-agents/server';
@@ -86,7 +87,10 @@ function resolveInitialComputeProvider(
     return defaultComputeProvider;
   }
 
-  return availableComputeProviders[0] ?? defaultComputeProvider;
+  return (
+    pickPreferredConfiguredComputeProvider(availableComputeProviders) ??
+    defaultComputeProvider
+  );
 }
 
 type HomeProps = {
