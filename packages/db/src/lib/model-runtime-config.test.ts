@@ -593,6 +593,44 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.OPENCODE_AUTH_CONTENT).toContain('"type":"oauth"');
   });
 
+  it('emits the ChatGPT gateway marker instead of OPENCODE_AUTH_CONTENT in gateway mode', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        openai: { type: 'oauth', refresh: 'rt', access: 'at', expires: 123 },
+      }),
+    );
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      inferenceGateway: true,
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    // The OAuth record must stay on the control plane; the marker tells the
+    // worker to rebase the openai provider onto the gateway instead.
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
+  });
+
+  it('does not emit the ChatGPT gateway marker when no subscription is connected', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
+    });
+    mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      inferenceGateway: true,
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
+    expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_CHATGPT');
+  });
+
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },

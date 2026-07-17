@@ -212,6 +212,25 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases the openai provider onto the ChatGPT gateway segment in gateway mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai/gpt-5.4-codex',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_CHATGPT: '1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider.openai?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openai-chatgpt/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

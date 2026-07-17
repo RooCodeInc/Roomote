@@ -1,12 +1,7 @@
 import { Hono } from 'hono';
 
 import { formatSingleLineLog } from '@roomote/types';
-import {
-  db,
-  eq,
-  resolveModelProviderEnvValue,
-  taskRuns,
-} from '@roomote/db/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 import { isInferenceGatewayEnabledForDeployment } from '@roomote/feature-flags/server';
 import { getRedis } from '@roomote/redis';
 
@@ -18,10 +13,10 @@ import {
   isRunTokenContext,
 } from '../mcp/proxy-utils';
 import {
-  formatProviderAuthHeaderValue,
   getInferenceProvider,
   isInferencePathAllowed,
-  resolveProviderUpstreamBaseUrl,
+  resolveGatewayUpstream,
+  type GatewayUpstreamResolution,
 } from './registry';
 
 /**
@@ -34,6 +29,9 @@ const REQUEST_HEADER_DENYLIST = new Set([
   'authorization',
   'x-api-key',
   'x-goog-api-key',
+  // The gateway sets the ChatGPT account-id authoritatively from the OAuth
+  // record; a sandbox must not be able to smuggle its own.
+  'chatgpt-account-id',
   'cookie',
   'host',
   'connection',
@@ -55,8 +53,7 @@ const REQUEST_HEADER_DENYLIST = new Set([
 
 function buildUpstreamRequestHeaders(
   requestHeaders: Headers,
-  authHeaderName: string,
-  authHeaderValue: string,
+  injectedHeaders: Record<string, string>,
 ): Headers {
   const headers = new Headers();
 
@@ -66,7 +63,9 @@ function buildUpstreamRequestHeaders(
     }
   }
 
-  headers.set(authHeaderName, authHeaderValue);
+  for (const [key, value] of Object.entries(injectedHeaders)) {
+    headers.set(key, value);
+  }
 
   return headers;
 }
@@ -164,12 +163,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     );
   }
 
-  let apiKey: string | undefined;
-  let upstreamBaseUrl: string;
+  const search = new URL(c.req.url).search;
+
+  let resolution: GatewayUpstreamResolution;
 
   try {
-    apiKey = await resolveModelProviderEnvValue(provider.envVarNames);
-    upstreamBaseUrl = await resolveProviderUpstreamBaseUrl(provider);
+    resolution = await resolveGatewayUpstream(provider, upstreamPath, search);
   } catch (error) {
     console.error(
       formatSingleLineLog(`${logPrefix} Failed to resolve provider config`, {
@@ -186,17 +185,11 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     );
   }
 
-  if (!apiKey) {
-    return c.json(
-      {
-        error: `No ${provider.name} API key is configured for this deployment`,
-      },
-      404,
-    );
+  if (!resolution.ok) {
+    return c.json({ error: resolution.error }, resolution.status);
   }
 
-  const search = new URL(c.req.url).search;
-  const upstreamUrl = `${upstreamBaseUrl}${upstreamPath}${search}`;
+  const { upstreamUrl, headers: injectedHeaders } = resolution.resolved;
 
   try {
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(
@@ -205,8 +198,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
         method,
         headers: buildUpstreamRequestHeaders(
           c.req.raw.headers,
-          provider.authHeader.name,
-          formatProviderAuthHeaderValue(provider, apiKey),
+          injectedHeaders,
         ),
         body: c.req.raw.body,
         signal: c.req.raw.signal,

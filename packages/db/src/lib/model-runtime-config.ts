@@ -4,6 +4,7 @@ import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
@@ -329,6 +330,11 @@ export async function resolveEffectiveModelRuntimeEnv(
   // runtime even when both are configured. This single choke point covers
   // both task launches (dequeue-helpers) and routing/title/summary calls
   // (non-task-provider-usage).
+  //
+  // In sandbox gateway mode the OAuth record must stay on the control plane,
+  // so instead of shipping OPENCODE_AUTH_CONTENT the resolver emits the
+  // R_INFERENCE_GATEWAY_CHATGPT marker; the worker rebases the `openai`
+  // provider onto the gateway, which mints and injects the access token.
   const resolvedRoleModels = [
     resolvedRoomoteModel,
     resolvedRoomoteSmallModel,
@@ -345,6 +351,8 @@ export async function resolveEffectiveModelRuntimeEnv(
   const injectedOpenCodeAuthContent = usesOpenAiModel
     ? await resolveOpenCodeAuthContent({ executor })
     : null;
+  const routeChatGptThroughGateway =
+    options.inferenceGateway === true && injectedOpenCodeAuthContent != null;
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
@@ -396,8 +404,10 @@ export async function resolveEffectiveModelRuntimeEnv(
     ...(gatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]: gatewayServedKeyNames.join(','),
     }),
-    ...(injectedOpenCodeAuthContent && {
-      OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent,
-    }),
+    ...(routeChatGptThroughGateway
+      ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }
+      : injectedOpenCodeAuthContent
+        ? { OPENCODE_AUTH_CONTENT: injectedOpenCodeAuthContent }
+        : {}),
   };
 }

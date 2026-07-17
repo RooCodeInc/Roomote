@@ -1,6 +1,7 @@
 import {
   buildInferenceGatewayOpenCodeBaseUrl,
   buildInferenceGatewayUrl,
+  CHATGPT_GATEWAY_PROVIDER_ID,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
@@ -30,6 +31,25 @@ describe('inference gateway URL builders', () => {
         provider!,
       ),
     ).toBe('https://api.example.com/api/inference/anthropic/v1');
+  });
+
+  it('exposes a chatgpt-oauth provider that collapses to the Codex backend', () => {
+    const provider = getInferenceGatewayProvider(CHATGPT_GATEWAY_PROVIDER_ID);
+    expect(provider?.authStrategy).toBe('chatgpt-oauth');
+    // No env key: the gateway holds the OAuth record, so it must not appear in
+    // the withheld-key set that the sandbox strips.
+    expect(provider?.envVarNames).toEqual([]);
+    expect(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES).not.toContain(
+      CHATGPT_GATEWAY_PROVIDER_ID,
+    );
+    expect(provider?.upstreamBaseUrl).toBe('https://chatgpt.com');
+    expect(provider?.collapseToPath).toBe('/backend-api/codex/responses');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/openai-chatgpt/v1');
   });
 });
 
