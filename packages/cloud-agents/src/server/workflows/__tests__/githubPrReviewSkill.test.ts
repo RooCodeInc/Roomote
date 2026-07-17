@@ -46,6 +46,12 @@ function expectAppendixIgnoresCi(
 describe('review-code GitHub workflow paths', () => {
   const skillContent = readSkill('../skills/standard/review-code/SKILL.md');
 
+  it('forbids nested judge subagent spawns during code review', () => {
+    expect(skillContent).toContain(
+      'Do not spawn the `judge` subagent or any other nested review-only subagent',
+    );
+  });
+
   it('keeps the consolidated GitHub review paths in review-code', () => {
     expect(skillContent).toContain(
       '<appendix name="review-github-pr" id="appendix-review-github-pr">',

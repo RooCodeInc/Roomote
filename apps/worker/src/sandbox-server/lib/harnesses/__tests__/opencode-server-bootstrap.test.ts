@@ -532,6 +532,51 @@ describe('opencode-server bootstrap', () => {
     );
   });
 
+  it.each(['github_pr_review', 'github_pr_review_sync'] as const)(
+    'does not configure a judge subagent for %s code-reviewer tasks',
+    async (taskType) => {
+      const { prepareOpenCodeCommandEnv } =
+        await import('../opencode-server/bootstrap');
+
+      const homeDir = createTempHome();
+
+      const { commandEnv: runtimeEnv } = await prepareOpenCodeCommandEnv({
+        runtimeEnv: {
+          ...createDirectHarnessRuntimeEnv(homeDir),
+          ROOMOTE_TASK_TYPE: taskType,
+          R_CODE_REVIEW_MODEL: 'test-provider/review-model',
+        },
+        workspacePath: '/tmp/workspace',
+        logger: createLogger(),
+      });
+
+      const baseConfig = JSON.parse(readOpenCodeConfig(homeDir)) as {
+        agent?: Record<string, unknown>;
+      };
+      const config = readRoomoteOpenCodeOverlay(runtimeEnv) as {
+        agent?: Record<string, unknown>;
+        instructions?: string[];
+      };
+      const judgeModelInstructionsPath = path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-judge-model-instructions.md',
+      );
+      const advisorModelInstructionsPath = path.join(
+        homeDir,
+        '.config',
+        'opencode',
+        'roomote-opencode-advisor-model-instructions.md',
+      );
+
+      expect(baseConfig.agent?.judge).toBeUndefined();
+      expect(config.agent?.judge).toBeUndefined();
+      expect(fs.existsSync(judgeModelInstructionsPath)).toBe(false);
+      expect(config.instructions).toEqual([advisorModelInstructionsPath]);
+    },
+  );
+
   it('registers the architect primary agent unconditionally with the plan-mode permission matrix', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');

@@ -151,6 +151,7 @@ After presenting the table, you are done.
 <constraint>Do not skip the pull-request-specific fetch, comment, summary-update, or approval behavior once a pull-request review path is selected.</constraint>
 <constraint>Do not mix multiple review paths in one run.</constraint>
 <constraint>Do not ignore prompt-supplied task context when it already provides the needed snapshot or identifier. Revalidate mutable provider state before side effects when correctness depends on freshness.</constraint>
+<constraint>Do not spawn the `judge` subagent or any other nested review-only subagent. Perform the review yourself and report findings directly.</constraint>
 </constraints>
 <boundaries>
 <rule>This shared entry point handles local workspace review, pull-request review or re-review, and merge-resolution review.</rule>
