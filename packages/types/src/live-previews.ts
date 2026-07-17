@@ -1,4 +1,4 @@
-import type { EnvironmentConfig, NamedPort } from './environment-config';
+import type { EnvironmentConfig } from './environment-config';
 import {
   PREVIEW_DOMAIN_ENV_VAR,
   PREVIEW_PROXY_BASE_URL_ENV_VAR,
@@ -234,22 +234,6 @@ export function hasConfiguredPreviewPorts(
   config: Pick<EnvironmentConfig, 'ports'> | undefined,
 ): boolean {
   return Boolean(config?.ports?.length);
-}
-
-export function isEnvironmentPreviewEnabledInConfig(
-  config: Pick<EnvironmentConfig, 'previews_enabled'> | undefined,
-): boolean {
-  return config?.previews_enabled !== false;
-}
-
-export function hasAdvancedPreviewConfig(port: NamedPort): boolean {
-  return Boolean(
-    port.unauthenticated ||
-    port.proxied === false ||
-    port.subdomain ||
-    port.wildcard_prefix ||
-    (port.auth_bypass_paths && port.auth_bypass_paths.length > 0),
-  );
 }
 
 export function buildExamplePreviewHostname(domain: string): string {

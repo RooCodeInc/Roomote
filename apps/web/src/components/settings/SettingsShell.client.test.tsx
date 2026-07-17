@@ -93,9 +93,6 @@ describe('SettingsShell', () => {
       screen.getByRole('link', { name: /environments/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('link', { name: /live previews/i }),
-    ).toBeInTheDocument();
-    expect(
       screen.getByRole('link', { name: /agent guidance/i }),
     ).toBeInTheDocument();
     expect(
@@ -147,26 +144,16 @@ describe('SettingsShell', () => {
     );
   });
 
-  it('places live previews after environments in the admin settings rail', () => {
+  it('does not offer a live previews page in the admin settings rail', () => {
     render(
-      <SettingsShell pageId="previews" adminOnly={true}>
+      <SettingsShell pageId="environments" adminOnly={true}>
         <div>content</div>
       </SettingsShell>,
     );
 
-    const environmentsLink = screen.getByRole('link', {
-      name: /environments/i,
-    });
-    const previewsLink = screen.getByRole('link', {
-      name: /live previews/i,
-    });
-
-    expect(environmentsLink.compareDocumentPosition(previewsLink)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    );
     expect(
-      screen.getByText('Enable live previews of the results of Roomote tasks.'),
-    ).toBeInTheDocument();
+      screen.queryByRole('link', { name: /live previews/i }),
+    ).not.toBeInTheDocument();
   });
 
   it('places users after skills in the admin settings rail', () => {

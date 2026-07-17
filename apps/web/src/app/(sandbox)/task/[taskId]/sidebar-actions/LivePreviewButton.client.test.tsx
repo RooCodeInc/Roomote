@@ -6,6 +6,7 @@ const {
   useTaskSidePanelMock,
   usePreviewPaneMock,
   openPreviewViewMock,
+  openPreviewSetupViewMock,
   openPreviewPaneMock,
   resolvePreviewTargetMock,
   restoreSnapshotMutateAsyncMock,
@@ -14,6 +15,7 @@ const {
   useTaskSidePanelMock: vi.fn(),
   usePreviewPaneMock: vi.fn(),
   openPreviewViewMock: vi.fn(),
+  openPreviewSetupViewMock: vi.fn(),
   openPreviewPaneMock: vi.fn(),
   restoreSnapshotMutateAsyncMock: vi.fn(),
   resolvePreviewTargetMock: vi.fn(
@@ -175,6 +177,7 @@ describe('LivePreviewButton', () => {
     });
     useTaskSidePanelMock.mockReturnValue({
       openPreviewView: openPreviewViewMock,
+      openPreviewSetupView: openPreviewSetupViewMock,
       previewPath: null,
       previewServiceName: null,
       isViewActive: vi.fn(() => false),
@@ -188,7 +191,13 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        taskRun={{ id: 123, status: 'running' } as never}
+        taskRun={
+          {
+            id: 123,
+            status: 'running',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
       />,
     );
 
@@ -217,6 +226,7 @@ describe('LivePreviewButton', () => {
   it('reopens the last selected preview service and path after switching away', () => {
     useTaskSidePanelMock.mockReturnValue({
       openPreviewView: openPreviewViewMock,
+      openPreviewSetupView: openPreviewSetupViewMock,
       previewPath: '/docs?tab=api',
       previewServiceName: 'API',
       isViewActive: vi.fn(() => false),
@@ -225,7 +235,13 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        taskRun={{ id: 123, status: 'running' } as never}
+        taskRun={
+          {
+            id: 123,
+            status: 'running',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
       />,
     );
 
@@ -254,7 +270,13 @@ describe('LivePreviewButton', () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        taskRun={{ id: 123, status: 'running' } as never}
+        taskRun={
+          {
+            id: 123,
+            status: 'running',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
       />,
     );
 
@@ -267,11 +289,61 @@ describe('LivePreviewButton', () => {
     expect(openPreviewViewMock).not.toHaveBeenCalled();
   });
 
+  it('renders nothing for repo-only tasks', () => {
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={{ id: 123, status: 'running', payload: {} } as never}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('link', { name: 'Live Preview' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Live Preview' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('opens the setup view when no preview URL is available', () => {
+    usePreviewUrlsMock.mockReturnValue({
+      initialPaths: {},
+      previewUrl: null,
+      previewUrls: null,
+      primaryPortName: null,
+    });
+
+    render(
+      <LivePreviewButton
+        taskId="task-1"
+        taskRun={
+          {
+            id: 123,
+            status: 'running',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Live Preview' }));
+
+    expect(openPreviewSetupViewMock).toHaveBeenCalledTimes(1);
+    expect(openPreviewPaneMock).not.toHaveBeenCalled();
+    expect(openPreviewViewMock).not.toHaveBeenCalled();
+  });
+
   it('asks to wake the task when live preview is opened from a sleeping task', async () => {
     render(
       <LivePreviewButton
         taskId="task-1"
-        taskRun={{ id: 123, snapshotId: 'snapshot-1' } as never}
+        taskRun={
+          {
+            id: 123,
+            snapshotId: 'snapshot-1',
+            payload: { environmentId: 'env-1' },
+          } as never
+        }
       />,
     );
 

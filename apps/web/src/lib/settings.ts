@@ -4,7 +4,6 @@ export const SETTINGS_PATHS = {
   users: '/settings/users',
   environments: '/settings/environments',
   sourceControl: '/settings/source-control',
-  previews: '/settings/previews',
   automations: '/automations',
   agentGuidance: '/settings/agent-guidance',
   integrations: '/settings/integrations',

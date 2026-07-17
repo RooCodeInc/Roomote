@@ -3,7 +3,6 @@ import {
   Brain,
   Cpu,
   FlaskConical,
-  Globe,
   GraduationCap,
   GitMerge,
   IdCard,
@@ -20,7 +19,6 @@ export type SettingsPageId =
   | 'personal'
   | 'users'
   | 'environments'
-  | 'previews'
   | 'agent-guidance'
   | 'automations'
   | 'integrations'
@@ -123,16 +121,6 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     adminOnly: true,
     newGroup: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.environments),
-  },
-  {
-    id: 'previews',
-    label: 'Live Previews',
-    title: 'Live Previews',
-    description: 'Enable live previews of the results of Roomote tasks.',
-    href: SETTINGS_PATHS.previews,
-    icon: Globe,
-    adminOnly: true,
-    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.previews),
   },
   {
     id: 'agent-guidance',

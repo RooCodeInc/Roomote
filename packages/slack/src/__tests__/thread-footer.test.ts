@@ -232,7 +232,7 @@ describe('getSlackThreadFooterText', () => {
     );
   });
 
-  it('omits the live preview link when environment previews are disabled', async () => {
+  it('includes the live preview link even when the config contains the deprecated previews_enabled: false', async () => {
     mockEnvironmentBackedTaskRun({ primaryPortName: 'WEB' });
     environmentFindFirstMock.mockResolvedValue({
       config: {
@@ -251,7 +251,7 @@ describe('getSlackThreadFooterText', () => {
         threadTs: '111.000',
       }),
     ).resolves.toBe(
-      '_Reply or use the <https://app.example.com/task/task-1|web app>._',
+      '_Working on a <https://task-1-web.preview.example.com|live preview>, reply or use the <https://app.example.com/task/task-1|web app>._',
     );
   });
 

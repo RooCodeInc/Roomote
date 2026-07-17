@@ -1,11 +1,8 @@
 import {
-  areDeploymentPreviewsEnabled,
   coerceToBoolean,
   evaluateFeatureFlagFromMetadataSources,
   evaluateFeatureFlagsFromMetadata,
-  getDeploymentPreviewsEnabledSetting,
   normalizeMetadataRecord,
-  setDeploymentPreviewsEnabled,
 } from '../index';
 import { FeatureFlag } from '../types';
 
@@ -80,28 +77,6 @@ describe('coerceToBoolean', () => {
     });
 
     expect(flags[FeatureFlag.SuggestionRouting]).toBe(true);
-  });
-
-  it('treats live previews as disabled unless explicitly set to true', () => {
-    expect(areDeploymentPreviewsEnabled({})).toBe(false);
-    expect(areDeploymentPreviewsEnabled({ previews_enabled: true })).toBe(true);
-    expect(areDeploymentPreviewsEnabled({ previews_enabled: false })).toBe(
-      false,
-    );
-    expect(
-      getDeploymentPreviewsEnabledSetting({ previews_enabled: false }),
-    ).toBe(false);
-    expect(
-      getDeploymentPreviewsEnabledSetting({ previews_enabled: 'false' }),
-    ).toBeUndefined();
-  });
-
-  it('normalizes and updates deployment preview metadata safely', () => {
-    expect(normalizeMetadataRecord(null)).toEqual({});
-    expect(setDeploymentPreviewsEnabled({ chore_queue: true }, false)).toEqual({
-      chore_queue: true,
-      previews_enabled: false,
-    });
   });
 
   it('evaluates all flags from invalid metadata as defaults', () => {

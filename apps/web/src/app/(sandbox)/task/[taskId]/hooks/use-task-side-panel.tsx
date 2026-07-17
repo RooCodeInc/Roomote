@@ -36,6 +36,8 @@ interface TaskSidePanelContextType {
   /** The iframe path currently shown in the preview panel (from URL or last opened). */
   previewPath: string | null;
   openPreviewView: (url: string, runId: number, serviceName?: string) => void;
+  /** Open the preview pane without a running preview (shows the setup state). */
+  openPreviewSetupView: () => void;
   openArtifactsBrowser: () => void;
   openDiffView: () => void;
   openArtifactDetail: (path: string, version?: number) => void;
@@ -65,6 +67,7 @@ const defaultValue: TaskSidePanelContextType = {
   previewServiceName: null,
   previewPath: null,
   openPreviewView: noop,
+  openPreviewSetupView: noop,
   openArtifactsBrowser: noop,
   openDiffView: noop,
   openArtifactDetail: noop,
@@ -106,7 +109,6 @@ function computeBasePath(pathname: string): string {
 function parseViewFromPathname(
   pathname: string,
   search: URLSearchParams,
-  allowPreview: boolean,
 ): {
   view: TaskSidePanelView | null;
   artifactsMode: ArtifactsMode;
@@ -135,7 +137,7 @@ function parseViewFromPathname(
 
   // /task/[id]/previews/[service]?path=[path]
   const previewMatch = pathname.match(/\/previews\/([^/]+)/);
-  if (previewMatch && allowPreview) {
+  if (previewMatch) {
     const serviceName = decodeURIComponent(previewMatch[1]!);
     const iframePath = search.get('path') ?? null;
     return {
@@ -145,6 +147,18 @@ function parseViewFromPathname(
       artifactVersion: undefined,
       previewServiceName: serviceName,
       previewPath: iframePath,
+    };
+  }
+
+  // /task/[id]/previews — preview pane without a running preview (setup state)
+  if (/\/previews\/?$/.test(pathname)) {
+    return {
+      view: 'preview',
+      artifactsMode: 'browser',
+      artifactPath: null,
+      artifactVersion: undefined,
+      previewServiceName: null,
+      previewPath: null,
     };
   }
 
@@ -304,6 +318,18 @@ export function TaskSidePanelProvider({
   );
 
   // -------------------------------------------------------------------
+  // Open preview pane without a running preview (setup state)
+  // -------------------------------------------------------------------
+  const openPreviewSetupView = useCallback(() => {
+    setActiveView('preview');
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${basePath}/previews`,
+    );
+  }, [basePath]);
+
+  // -------------------------------------------------------------------
   // Open artifacts browser (list view)
   // -------------------------------------------------------------------
   const openArtifactsBrowser = useCallback(() => {
@@ -461,7 +487,7 @@ export function TaskSidePanelProvider({
   // Sync state from URL on initial load / URL changes
   // -------------------------------------------------------------------
   useEffect(() => {
-    const parsed = parseViewFromPathname(pathname, searchParams, true);
+    const parsed = parseViewFromPathname(pathname, searchParams);
 
     if (parsed.view === null) {
       // URL has no side-panel segment; keep UI in sync by ensuring panel is closed.
@@ -511,6 +537,7 @@ export function TaskSidePanelProvider({
       previewServiceName,
       previewPath,
       openPreviewView,
+      openPreviewSetupView,
       openArtifactsBrowser,
       openArtifactDetail,
       openTaskInfoView,
@@ -538,6 +565,7 @@ export function TaskSidePanelProvider({
       openArtifactsBrowser,
       openLogsView,
       openPreviewView,
+      openPreviewSetupView,
       openTerminalView,
       openTaskInfoView,
       openDiffView,

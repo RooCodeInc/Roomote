@@ -6,7 +6,6 @@ import {
   evaluateFeatureFlagsFromMetadata,
   isAnonymousAnalyticsEnabledFromMetadata,
   normalizeMetadataRecord,
-  setDeploymentPreviewsEnabled,
 } from '@roomote/feature-flags';
 import { isTelemetryEnvAllowed } from '@roomote/telemetry/server';
 
@@ -104,7 +103,7 @@ async function ensureDeploymentIdentity({
       existingDeploymentSettings.metadata,
     );
   } else {
-    deploymentMetadata = setDeploymentPreviewsEnabled({}, false);
+    deploymentMetadata = {};
 
     await db.insert(deploymentSettings).values({
       id: DEFAULT_DEPLOYMENT_ID,

@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
   ExternalLink,
   Input,
+  LifeBuoyIcon,
   Lock,
   Loader2,
   RectangleHorizontal,
@@ -32,6 +33,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
   DropdownMenuLabel,
+  X,
 } from '@/components/system';
 
 import { buildPreviewIframeUrl } from '../preview-iframe-url';
@@ -41,6 +43,8 @@ import { usePreviewUrls } from '../hooks/use-preview-urls';
 import { useTaskSidePanel } from '../hooks/use-task-side-panel';
 import { shouldIncludeInPreviewServiceList } from '../preview-port-utils';
 
+import { PreviewHelpDialog } from './PreviewHelpDialog';
+import { PreviewSetupState } from './PreviewSetupState';
 import { SidePanelHeader } from './SidePanelHeader';
 
 interface PreviewEntry {
@@ -165,6 +169,22 @@ export function PreviewSidePanel({
     height: MOBILE_HEIGHT,
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [loadTimedOut, setLoadTimedOut] = useState(false);
+  const [isLoadWarningDismissed, setIsLoadWarningDismissed] = useState(false);
+  const [isSetupNoticeDismissed, setIsSetupNoticeDismissed] = useState(false);
+  const wasSetupRunningRef = useRef(false);
+
+  // Environment setup progress, mirrored from the workspace's
+  // .roomote/setup-status.json onto the run. While setup commands and
+  // services are still starting, a failing preview is expected rather than a
+  // problem worth warning about.
+  const environmentSetupState = taskRun?.environmentSetupState ?? null;
+  const environmentSetupRunning = environmentSetupState === 'running';
+  const environmentSetupTroubled =
+    environmentSetupState === 'failed' ||
+    environmentSetupState === 'completed_with_warnings';
 
   const resolvedPrimaryPortName = useMemo(
     () =>
@@ -323,6 +343,8 @@ export function PreviewSidePanel({
       if (event.data?.type === 'roomote-load-complete') {
         setIsNavigating(false);
         setIsWidgetHidden(false);
+        setLoadTimedOut(false);
+        setHasLoadedOnce(true);
         hasInitiallyLoadedRef.current = true;
 
         if (navigatingTimeoutRef.current) {
@@ -392,6 +414,10 @@ export function PreviewSidePanel({
     setCurrentUrl(null);
     setIsNavigating(false);
     setIsWidgetHidden(false);
+    setHasLoadedOnce(false);
+    setLoadTimedOut(false);
+    setIsLoadWarningDismissed(false);
+    setIsSetupNoticeDismissed(false);
     hasInitiallyLoadedRef.current = false;
     pendingIframeNavigationUrlRef.current = null;
     retryCountRef.current = 0;
@@ -402,6 +428,34 @@ export function PreviewSidePanel({
       retryTimeoutRef.current = null;
     }
   }, [effectiveRunId, effectivePreviewUrl]);
+
+  // When environment setup finishes without the preview ever loading, give
+  // the freshly started services a fair chance: reset the retry window and
+  // reload the iframe.
+  useEffect(() => {
+    const wasRunning = wasSetupRunningRef.current;
+    wasSetupRunningRef.current = environmentSetupRunning;
+
+    // hasLoadedOnce (not hasInitiallyLoadedRef) is the guard here: the ref is
+    // also set when the retry window expires, and a timed-out preview is
+    // exactly the case that deserves a fresh chance after setup finishes.
+    if (!wasRunning || environmentSetupRunning || hasLoadedOnce) {
+      return;
+    }
+
+    retryStartRef.current = null;
+    retryCountRef.current = 0;
+    hasInitiallyLoadedRef.current = false;
+    setLoadTimedOut(false);
+
+    const iframe = iframeRef.current;
+
+    if (iframe?.src) {
+      const src = iframe.src;
+      iframe.src = '';
+      iframe.src = src;
+    }
+  }, [environmentSetupRunning, hasLoadedOnce]);
 
   const handleClose = () => {
     closePreviewPane();
@@ -572,7 +626,11 @@ export function PreviewSidePanel({
         }
       }, delay);
     } else {
+      // The retry window is exhausted without the injected widget reporting a
+      // successful load. The app may still be visible (some apps block the
+      // widget), so surface a dismissible warning rather than an error state.
       hasInitiallyLoadedRef.current = true;
+      setLoadTimedOut(true);
     }
   }, []);
 
@@ -614,6 +672,22 @@ export function PreviewSidePanel({
 
   const headerActions = activeEntry ? (
     <>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-8"
+              aria-label="Preview not working?"
+              onClick={() => setIsHelpOpen(true)}
+            >
+              <LifeBuoyIcon />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Preview not working?</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <Button
         asChild
         variant="ghost"
@@ -834,13 +908,64 @@ export function PreviewSidePanel({
                 {Math.round(mobileSize.width)} × {Math.round(mobileSize.height)}
               </div>
             ) : null}
+
+            {!hasLoadedOnce &&
+            environmentSetupRunning &&
+            !isSetupNoticeDismissed ? (
+              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+                <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-3.5 shrink-0 animate-spin" />
+                  Environment services are still starting. The preview will load
+                  once they are ready.
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="size-7 shrink-0"
+                  aria-label="Dismiss preview starting notice"
+                  onClick={() => setIsSetupNoticeDismissed(true)}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            ) : loadTimedOut && !isLoadWarningDismissed ? (
+              <div className="absolute inset-x-3 bottom-3 z-10 flex items-center justify-between gap-3 rounded-md border bg-background/95 p-3 shadow-md">
+                <span className="text-sm text-muted-foreground">
+                  {environmentSetupTroubled
+                    ? 'Environment setup reported problems, which may be why the preview is not loading.'
+                    : "The preview hasn't reported loading. It may still be starting, or something may be blocking it."}
+                </span>
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsHelpOpen(true)}
+                  >
+                    Get help
+                  </Button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-7"
+                    aria-label="Dismiss preview loading warning"
+                    onClick={() => setIsLoadWarningDismissed(true)}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </div>
         ) : (
-          <div className="flex size-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
-            Live Preview is not available for this task.
-          </div>
+          <PreviewSetupState taskRun={taskRun} />
         )}
       </div>
+
+      <PreviewHelpDialog
+        taskId={taskRun?.taskId ?? null}
+        open={isHelpOpen}
+        onOpenChange={setIsHelpOpen}
+      />
     </div>
   );
 }

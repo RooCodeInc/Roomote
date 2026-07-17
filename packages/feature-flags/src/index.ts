@@ -35,12 +35,7 @@ export {
   DEPLOYMENT_METADATA_BOOLEAN_CONFIG,
   FEATURE_FLAG_CONFIG,
 } from './config';
-export {
-  areDeploymentPreviewsEnabled,
-  getDeploymentPreviewsEnabledSetting,
-  normalizeMetadataRecord,
-  setDeploymentPreviewsEnabled,
-} from './deployment-previews';
+export { normalizeMetadataRecord } from './deployment-previews';
 
 /**
  * Coerce a value to boolean for boolean flags.

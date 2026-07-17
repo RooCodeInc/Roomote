@@ -18,8 +18,12 @@ interface PreviewCommandProps {
 export function PreviewCommand({ taskRun, asleep }: PreviewCommandProps) {
   const { initialPaths, previewUrl, previewUrls, primaryPortName } =
     usePreviewUrls(taskRun ?? {});
-  const { openPreviewView, previewPath, previewServiceName } =
-    useTaskSidePanel();
+  const {
+    openPreviewSetupView,
+    openPreviewView,
+    previewPath,
+    previewServiceName,
+  } = useTaskSidePanel();
   const { openPreviewPane } = usePreviewPane();
   const {
     previewServiceName: resolvedPreviewServiceName,
@@ -40,13 +44,18 @@ export function PreviewCommand({ taskRun, asleep }: PreviewCommandProps) {
 
     const commands: Parameters<typeof useRegisterCommands>[0] = [];
 
-    if (resolvedPreviewUrl && taskRun?.id) {
+    if (taskRun?.id && taskRun.payload?.environmentId) {
       commands.push({
         id: 'task-live-preview',
         icon: AppWindow,
         label: 'Live Preview',
         group: 'Task actions',
         action: () => {
+          if (!resolvedPreviewUrl) {
+            openPreviewSetupView();
+            return;
+          }
+
           openPreviewPane(
             resolvedPreviewUrl,
             taskRun.id,
@@ -67,6 +76,7 @@ export function PreviewCommand({ taskRun, asleep }: PreviewCommandProps) {
     asleep,
     taskRun,
     openPreviewPane,
+    openPreviewSetupView,
     openPreviewView,
     resolvedPreviewServiceName,
     resolvedPreviewUrl,

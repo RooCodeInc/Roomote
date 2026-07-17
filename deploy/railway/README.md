@@ -257,7 +257,7 @@ Notes:
 - The three `PREVIEW_*` variables ship **empty** (mark them optional in the
   Template Composer so the deploy screen does not prompt for them). Roomote
   and the preview-proxy service boot fine with them empty; previews report
-  as not configured in **Settings → Live Previews** until the values are
+  as not configured in the task page's preview pane until the values are
   filled in on api (see
   [Enabling live previews](#enabling-live-previews-optional)).
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
@@ -383,8 +383,9 @@ domain, which requires a domain you control:
    services. The other services already reference `${{api.*}}` for all
    three; the `NEXT_PUBLIC_` variant is what the web client uses to build
    preview links, so it must reach the `web` service.
-3. Opt in from **Settings → Live Previews**, which validates the wildcard
-   hostname and enables previews per deployment and environment.
+3. Open any task's preview pane as an admin to validate the wildcard
+   hostname. Previews are always enabled and publish for every environment
+   that defines preview ports.
 
 ## Upgrades, backups, and costs
 
