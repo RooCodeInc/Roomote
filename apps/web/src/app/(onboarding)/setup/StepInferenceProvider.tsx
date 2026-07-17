@@ -110,6 +110,9 @@ export function StepInferenceProvider({
   const discoverProviderModels = useMutation(
     trpc.taskModels.discoverProviderModels.mutationOptions(),
   );
+  const qualifyProviderModel = useMutation(
+    trpc.taskModels.qualifyProviderModel.mutationOptions(),
+  );
 
   useEffect(() => {
     setSelectedProvider(modelSetup.preselectedProvider);
@@ -186,6 +189,21 @@ export function StepInferenceProvider({
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
 
   const handleContinue = async () => {
+    if (isEndpointProvider) {
+      const result = await qualifyProviderModel.mutateAsync({
+        provider: selectedProvider as 'ollama' | 'vllm' | 'litellm',
+        modelId: selectedModelId,
+        baseUrl: apiKey.trim() || undefined,
+        apiKey:
+          additionalEnvValues[
+            `${selectedProvider.toUpperCase()}_API_KEY`
+          ]?.trim() || undefined,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+    }
     await saveModelConfig.mutateAsync({
       provider: selectedProvider,
       apiKey: apiKey.trim() || undefined,

@@ -1221,7 +1221,10 @@ async function resolveLocalProviderConnection(
     envNames.baseUrl,
     ...(envNames.apiKey ? [envNames.apiKey] : []),
   ]);
-  const baseUrl = input?.baseUrl?.trim() || persisted[envNames.baseUrl]?.trim();
+  const baseUrl =
+    input?.baseUrl?.trim() ||
+    process.env[envNames.baseUrl]?.trim() ||
+    persisted[envNames.baseUrl]?.trim();
 
   if (!baseUrl) {
     return null;
@@ -1240,6 +1243,7 @@ async function resolveLocalProviderConnection(
     baseUrl,
     apiKey:
       input?.apiKey?.trim() ||
+      (envNames.apiKey ? process.env[envNames.apiKey] : null) ||
       (envNames.apiKey ? persisted[envNames.apiKey] : null) ||
       null,
   };
