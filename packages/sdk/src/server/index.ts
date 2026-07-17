@@ -152,6 +152,11 @@ export {
 } from './lib/teams-primary-conversation';
 
 export {
+  sendUserDirectMessageBestEffort,
+  type UserDirectMessageProvider,
+} from './lib/user-direct-message';
+
+export {
   SLACK_PR_INACTIVITY_DELAY_MS,
   SLACK_PR_INACTIVITY_QUEUE_NAME,
   enqueueSlackPrInactivityCheck,

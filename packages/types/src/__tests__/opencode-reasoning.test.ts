@@ -119,6 +119,12 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     ).toEqual({ reasoningEffort: 'medium' });
   });
 
+  it('clamps LiteLLM xhigh reasoning to high', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions('litellm/openai/gpt-5.4', 'xhigh'),
+    ).toEqual({ reasoningEffort: 'high' });
+  });
+
   it('returns null for malformed model ids', () => {
     expect(
       buildOpenCodeModelReasoningOptions('no-provider', 'high'),

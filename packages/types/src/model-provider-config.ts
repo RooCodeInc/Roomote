@@ -40,7 +40,7 @@ export type SetupModelProviderId = (typeof SETUP_MODEL_PROVIDER_IDS)[number];
  * var (`envVarName`); OAuth providers are connected through a dedicated flow
  * and carry no env var.
  */
-export type SetupModelProviderAuthKind = 'api-key' | 'oauth';
+export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
 
 /**
  * The default-model roles a deployment configures: one model per kind of
@@ -124,6 +124,8 @@ export type SetupModelProviderDescriptor = {
   defaultRoomoteModel: string;
   authKind: SetupModelProviderAuthKind;
   suggestedTaskModels: readonly SuggestedTaskModel[];
+  /** Models are discovered from the configured endpoint, not a static catalog. */
+  dynamicModels?: boolean;
   /**
    * Hides the provider from the setup wizard and settings connect surfaces
    * unless it is already connected (saved or runtime env). The catalog entry
@@ -448,6 +450,52 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'grok-4-5': 'xai/grok-4.5',
     }),
+  },
+  {
+    id: 'litellm',
+    label: 'LiteLLM',
+    envVarName: 'LITELLM_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'LITELLM_API_KEY',
+        label: 'API key',
+        secret: true,
+        required: true,
+      },
+    ],
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
+  },
+  {
+    id: 'ollama',
+    label: 'Ollama',
+    envVarName: 'OLLAMA_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
+  },
+  {
+    id: 'vllm',
+    label: 'vLLM',
+    envVarName: 'VLLM_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    additionalEnvFields: [
+      {
+        envVarName: 'VLLM_API_KEY',
+        label: 'API key',
+        secret: true,
+        required: false,
+      },
+    ],
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    dynamicModels: true,
   },
   {
     id: CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -1153,7 +1201,17 @@ export function buildSetupModelStatus(input: {
         isConfiguredEnvValue(runtimeEnv[name]);
       const isPersisted = (name: string) => persistedEnvVarNameSet.has(name);
       const additionalEnvValues = Object.fromEntries(
-        getSetupModelProviderAdditionalEnvFields(provider)
+        [
+          ...(provider.authKind === 'endpoint' && provider.envVarName
+            ? [
+                {
+                  envVarName: provider.envVarName,
+                  secret: false,
+                },
+              ]
+            : []),
+          ...getSetupModelProviderAdditionalEnvFields(provider),
+        ]
           .filter((field) => !field.secret)
           .map((field) => {
             const runtimeValue = normalizeOptionalString(

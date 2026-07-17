@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { and, db, eq, or, taskRuns, tasks } from '@roomote/db/server';
+import { LLM_USAGE_COST_SOURCES } from '@roomote/types';
 
 import { router, userOnlyProcedure } from '../trpc';
 import { recordLlmUsage } from '../lib/task-runs/record-task-inference-usage';
@@ -32,10 +33,7 @@ export const llmUsageRouter = router({
         totalTokens: nonNegativeNumber,
         contextTokens: nonNegativeNumber,
         costMicroUsd: z.number().nonnegative().nullable().optional(),
-        costSource: z
-          .enum(['opencode_message', 'missing'])
-          .nullable()
-          .optional(),
+        costSource: z.enum(LLM_USAGE_COST_SOURCES).nullable().optional(),
         messageCreatedAt: z.date().nullable().optional(),
         messageCompletedAt: z.date().nullable().optional(),
         pricingMetadata: z.record(z.unknown()).nullable().optional(),

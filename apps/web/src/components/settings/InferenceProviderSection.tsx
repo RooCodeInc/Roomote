@@ -58,7 +58,7 @@ type InferenceProviderSectionProps = {
 };
 
 type ProviderCredentialsDialogState =
-  | { mode: 'add' }
+  | { mode: 'add'; providerId?: SetupModelProviderId }
   | { mode: 'edit'; providerId: SetupModelProviderId };
 
 function getInitialAdditionalEnvValues(
@@ -88,7 +88,11 @@ function ConnectedProviderRow({
   const runtimeKeyLabel = provider.envVarName
     ? `${provider.label} API key is managed by ${provider.envVarName}`
     : `${provider.label} API key is managed by an environment variable`;
-  const inputValue = MASKED_VALUE;
+  const inputValue =
+    provider.authKind === 'endpoint'
+      ? (provider.additionalEnvValues[provider.envVarName ?? ''] ??
+        'Configured endpoint')
+      : MASKED_VALUE;
 
   return (
     <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
@@ -183,18 +187,30 @@ function ProviderCredentialsDialog({
   const [providerSelectOpen, setProviderSelectOpen] = useState(false);
   const [additionalEnvValues, setAdditionalEnvValues] = useState<
     Record<string, string>
-  >({});
+  >(() => getInitialAdditionalEnvValues(providers[0] ?? null));
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
+    if (
+      selectedProviderId &&
+      providers.some((provider) => provider.id === selectedProviderId)
+    ) {
+      return;
+    }
+
+    // Saving an endpoint provider refreshes its metadata and replaces the
+    // provider objects passed to this dialog. Keep the current selection and
+    // form values when that happens; otherwise the refresh clears the endpoint
+    // while model discovery is in flight and repeatedly reinitializes the
+    // dialog. Only initialize values when the selection is no longer valid.
     const provider = providers[0] ?? null;
     setSelectedProviderId(provider?.id ?? null);
     setApiKey('');
     setAdditionalEnvValues(getInitialAdditionalEnvValues(provider));
-  }, [open, providers]);
+  }, [open, providers, selectedProviderId]);
 
   useEffect(() => {
     if (!open || mode !== 'add') {
@@ -323,7 +339,7 @@ function ProviderCredentialsDialog({
                     </span>
                     <div className="space-y-1.5">
                       <Input
-                        secret
+                        secret={selectedProvider.authKind !== 'endpoint'}
                         className="font-mono"
                         value={apiKey}
                         onChange={(event) => setApiKey(event.target.value)}
@@ -555,18 +571,24 @@ export function InferenceProviderSection({
       onSuccess: async (result, variables) => {
         const providerLabel = getModelProviderLabel(variables.provider);
         const addedModelCount = result.addedRecommendedModelCount;
+        const addedDiscoveredModelCount = result.addedDiscoveredModelCount;
 
         toast.success(
-          addedModelCount > 0
-            ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
-            : `Saved the ${providerLabel} API key.`,
+          addedDiscoveredModelCount > 0
+            ? `Saved the ${providerLabel} API key and made ${addedDiscoveredModelCount} discovered ${addedDiscoveredModelCount === 1 ? 'model' : 'models'} available.`
+            : addedModelCount > 0
+              ? `Saved the ${providerLabel} API key and added ${addedModelCount} recommended ${addedModelCount === 1 ? 'model' : 'models'}.`
+              : `Saved the ${providerLabel} API key.`,
         );
         setProviderDialog(null);
+        if (result.discoveryError) {
+          toast.error(result.discoveryError);
+        }
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: trpc.taskModels.providerSetup.queryKey(),
           }),
-          ...(addedModelCount > 0
+          ...(addedModelCount > 0 || addedDiscoveredModelCount > 0
             ? [
                 queryClient.invalidateQueries({
                   queryKey: trpc.taskModels.get.queryKey(),
@@ -578,7 +600,7 @@ export function InferenceProviderSection({
             : []),
         ]);
 
-        if (addedModelCount > 0) {
+        if (addedModelCount > 0 || addedDiscoveredModelCount > 0) {
           onRecommendedModelsAdded?.();
         }
       },
@@ -687,7 +709,7 @@ export function InferenceProviderSection({
   const addableProviders = availableProviders.filter((provider) =>
     provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
       ? !chatgptHasRecord
-      : provider.authKind === 'api-key',
+      : provider.authKind === 'api-key' || provider.authKind === 'endpoint',
   );
   const sortedApiKeyConnectedProviders = useMemo(
     () =>
@@ -709,6 +731,14 @@ export function InferenceProviderSection({
     }
 
     if (providerDialog.mode === 'add') {
+      if (providerDialog.providerId) {
+        const savedProvider = providerSetup?.providers.find(
+          (provider) => provider.id === providerDialog.providerId,
+        );
+
+        return savedProvider ? [savedProvider] : [];
+      }
+
       return sortedAddableProviders;
     }
 
@@ -717,7 +747,12 @@ export function InferenceProviderSection({
     );
 
     return editProvider ? [editProvider] : [];
-  }, [providerDialog, sortedAddableProviders, sortedApiKeyConnectedProviders]);
+  }, [
+    providerDialog,
+    providerSetup?.providers,
+    sortedAddableProviders,
+    sortedApiKeyConnectedProviders,
+  ]);
   const deleteProviderStatus = useMemo(
     () =>
       deleteProviderId

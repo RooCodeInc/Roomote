@@ -1,6 +1,7 @@
 import type { TelegramUpdateCommunicationMetadata } from '@roomote/communication/telegram-update';
 import {
   ALL_REPOSITORIES,
+  buildTelegramMessagePermalink,
   TaskPayloadKind,
   type TaskSpec,
 } from '@roomote/types';
@@ -179,7 +180,7 @@ export async function launchTelegramTask(input: {
     utm: { source: 'telegram', campaign: 'telegram.thread_start' },
   });
 
-  await postTelegramMessageBestEffort({
+  const taskAcknowledgement = await postTelegramMessageBestEffort({
     chatId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
     // The source message is in the previous topic (usually General), so only
@@ -187,9 +188,11 @@ export async function launchTelegramTask(input: {
     replyToMessageId: createdTopic
       ? topicRootMessage?.messageId
       : metadata.communicationMessageId,
-    text: taskUrl
-      ? `Started a task in ${input.workspace.workspaceDisplayName}.`
-      : `Queued a task in ${input.workspace.workspaceDisplayName}.`,
+    text: buildTelegramTaskAcknowledgementText({
+      workspaceDisplayName: input.workspace.workspaceDisplayName,
+      started: Boolean(taskUrl),
+      topicCreationFailed: Boolean(input.createTopicForTask && !createdTopic),
+    }),
     buttons: [
       ...(taskUrl ? [[{ text: 'Follow Task', url: taskUrl }]] : []),
       [
@@ -201,7 +204,44 @@ export async function launchTelegramTask(input: {
     ],
   });
 
+  if (createdTopic) {
+    const topicUrl = buildTelegramMessagePermalink({
+      chatId: input.metadata.communicationChannelId,
+      threadId: createdTopic.threadId,
+      messageId:
+        topicRootMessage?.messageId ?? taskAcknowledgement?.messageId ?? null,
+    });
+
+    await postTelegramMessageBestEffort({
+      chatId: input.metadata.communicationChannelId,
+      threadId: input.metadata.communicationThreadId,
+      replyToMessageId: input.metadata.communicationMessageId,
+      text: topicUrl
+        ? `Started “${topicName}” in a new topic.`
+        : `Started “${topicName}” in a new topic. Open it from Telegram's topic list.`,
+      buttons: [
+        [
+          ...(topicUrl ? [{ text: 'Open topic', url: topicUrl }] : []),
+          ...(taskUrl ? [{ text: 'Follow Task', url: taskUrl }] : []),
+        ],
+      ].filter((row) => row.length > 0),
+    });
+  }
+
   return launchResult;
+}
+
+function buildTelegramTaskAcknowledgementText(input: {
+  workspaceDisplayName: string;
+  started: boolean;
+  topicCreationFailed: boolean;
+}): string {
+  const action = input.started ? 'Started' : 'Queued';
+  const base = `${action} a task in ${input.workspaceDisplayName}`;
+
+  return input.topicCreationFailed
+    ? `${base} here because I couldn't create a new Telegram topic. If this keeps happening, check Threaded Mode or the bot's Manage Topics permission.`
+    : `${base}.`;
 }
 
 const TELEGRAM_TASK_TOPIC_NAME_MAX_LENGTH = 96;

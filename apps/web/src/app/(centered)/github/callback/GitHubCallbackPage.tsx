@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 import {
@@ -50,6 +50,7 @@ import {
 } from '@/hooks/github';
 
 import { Alert, AlertDescription, Button } from '@/components/system';
+import { GitHubInstallRequestPending } from '@/components/github/GitHubInstallRequestPending';
 
 export default function Page() {
   const router = useRouter();
@@ -74,7 +75,7 @@ export default function Page() {
     ? '/setup?step=source-control-config'
     : '/settings';
 
-  const navigateFromState = () => {
+  const navigateFromState = useCallback(() => {
     const encodedState = params.get('state');
     const decodedState = decodeOAuthState(encodedState);
 
@@ -87,7 +88,7 @@ export default function Page() {
       !redirect.includes('://');
 
     router.push(isValidRedirect ? redirect : '/settings');
-  };
+  }, [params, router]);
 
   const finishAuthentication = useFinishAuthenticateGitHubAccount({
     onSuccess: (result) => {
@@ -153,6 +154,12 @@ export default function Page() {
       setError(error.message);
     },
   });
+
+  const handleInstallApproved = useCallback(() => {
+    setIsInstallRequested(false);
+    setIsInstalled(true);
+    navigateFromState();
+  }, [navigateFromState]);
 
   const hasHandledCallback = useRef(false);
 
@@ -231,26 +238,29 @@ export default function Page() {
 
   return (
     <div className="flex flex-col items-center justify-center gap-2">
-      <div className="flex items-center justify-center gap-2">
-        {isLoading ? (
-          <Github className="animate-pulse" />
-        ) : isInstallRequested || isInstalled || isAuthenticated ? (
-          <CircleCheck className="text-green-500" />
-        ) : (
-          <CircleX className="text-rose-500" />
-        )}
-        <div className="text-sm">
-          {isInstallRequested
-            ? 'GitHub Link Requested'
-            : isAuthenticated
+      {/* The pending-request card carries its own explanation, so the status
+          header (and its success check) would just be a misleading tick while
+          the request is still awaiting approval. */}
+      {!isInstallRequested && (
+        <div className="flex items-center justify-center gap-2">
+          {isLoading ? (
+            <Github className="animate-pulse" />
+          ) : isInstalled || isAuthenticated ? (
+            <CircleCheck className="text-green-500" />
+          ) : (
+            <CircleX className="text-rose-500" />
+          )}
+          <div className="text-sm">
+            {isAuthenticated
               ? 'GitHub Account Linked'
               : isInstalled
                 ? 'GitHub Linked'
                 : error
                   ? 'Error'
                   : 'GitHub Linking...'}
+          </div>
         </div>
-      </div>
+      )}
       {error && (
         <>
           <Alert variant="destructive">
@@ -274,25 +284,18 @@ export default function Page() {
         </>
       )}
       {isInstallRequested && (
-        <Alert className="w-sm">
-          <AlertDescription>
-            <div className="flex flex-col gap-4">
-              <div>
-                Your request is pending admin approval. Upon approval
-                you&apos;ll be able to continue.
-              </div>
-              <div className="self-center">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => router.push('/')}
-                >
-                  <Home />
-                </Button>
-              </div>
-            </div>
-          </AlertDescription>
-        </Alert>
+        <GitHubInstallRequestPending
+          onApproved={handleInstallApproved}
+          footer={
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => router.push('/')}
+            >
+              <Home />
+            </Button>
+          }
+        />
       )}
     </div>
   );

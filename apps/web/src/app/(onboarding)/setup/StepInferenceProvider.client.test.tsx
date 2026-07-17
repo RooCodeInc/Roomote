@@ -7,6 +7,7 @@ import type {
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SetupModelStatus } from '@roomote/types';
+import { toast } from 'sonner';
 
 const { mutateAsyncMock } = vi.hoisted(() => ({
   mutateAsyncMock: vi.fn(),
@@ -15,6 +16,7 @@ const { mutateAsyncMock } = vi.hoisted(() => ({
 vi.mock('sonner', () => ({
   toast: {
     error: vi.fn(),
+    success: vi.fn(),
   },
 }));
 
@@ -31,6 +33,14 @@ vi.mock('@/trpc/client', () => ({
     chatgptSubscription: {
       status: {
         queryOptions: () => ({ queryKey: ['chatgptSubscription.status'] }),
+      },
+    },
+    taskModels: {
+      discoverProviderModels: {
+        mutationOptions: (options: Record<string, unknown>) => options,
+      },
+      qualifyProviderModel: {
+        mutationOptions: (options: Record<string, unknown>) => options,
       },
     },
   }),
@@ -149,6 +159,22 @@ function openrouterProviderStatus(): SetupModelStatus['providers'][number] {
   };
 }
 
+function ollamaProviderStatus(): SetupModelStatus['providers'][number] {
+  return {
+    id: 'ollama',
+    label: 'Ollama',
+    envVarName: 'OLLAMA_BASE_URL',
+    envVarLabel: 'Endpoint URL',
+    defaultRoomoteModel: '',
+    authKind: 'endpoint',
+    suggestedTaskModels: [],
+    additionalEnvFields: [],
+    additionalEnvValues: {},
+    runtimeApiKeySatisfied: false,
+    savedApiKeySatisfied: false,
+  };
+}
+
 function buildModelSetup(
   overrides: Partial<SetupModelStatus> = {},
 ): SetupModelStatus {
@@ -245,6 +271,119 @@ describe('StepInferenceProvider configured API key display', () => {
 
     fireEvent.focus(input);
     expect(input).toHaveValue('');
+  });
+
+  it('checks an endpoint and saves its recommended qualified model without showing a picker', async () => {
+    mutateAsyncMock
+      .mockResolvedValueOnce({
+        error: null,
+        modelCount: 2,
+        recommendedModels: [{ modelId: 'ollama/qwen3-coder:30b' }],
+      })
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce(undefined);
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(mutateAsyncMock).toHaveBeenNthCalledWith(1, {
+        provider: 'ollama',
+        baseUrl: 'http://ollama.example',
+        apiKey: undefined,
+      });
+    });
+    expect(mutateAsyncMock).toHaveBeenNthCalledWith(2, {
+      provider: 'ollama',
+      modelId: 'ollama/qwen3-coder:30b',
+      baseUrl: 'http://ollama.example',
+      apiKey: undefined,
+    });
+    expect(mutateAsyncMock).toHaveBeenNthCalledWith(3, {
+      provider: 'ollama',
+      apiKey: 'http://ollama.example',
+      modelId: 'ollama/qwen3-coder:30b',
+    });
+    expect(
+      screen.queryByRole('combobox', { name: 'Discovered model' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('explains the minimum model requirements when no local model is eligible', async () => {
+    mutateAsyncMock.mockResolvedValueOnce({
+      error: null,
+      modelCount: 2,
+      recommendedModels: [],
+    });
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Found 2 models, but none that can power Roomote. It needs tool calling and at least 7B parameters.',
+      );
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a tool-calling failure separately from model eligibility', async () => {
+    mutateAsyncMock
+      .mockResolvedValueOnce({
+        error: null,
+        modelCount: 1,
+        recommendedModels: [{ modelId: 'ollama/qwen3:8b' }],
+      })
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'The provider requires a tool-call parser.',
+      });
+
+    render(
+      <StepInferenceProvider
+        modelSetup={buildModelSetup({
+          preselectedProvider: 'ollama',
+          providers: [ollamaProviderStatus(), openrouterProviderStatus()],
+        })}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Endpoint URL for Ollama/i), {
+      target: { value: 'http://ollama.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Found 1 model that meets Roomote's 7B minimum, but none support the required tool calling. The provider requires a tool-call parser.",
+      );
+    });
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -361,7 +500,7 @@ describe('StepInferenceProvider ChatGPT subscription', () => {
     });
 
     // The mutation's onSuccess handler calls onContinue after invalidating.
-    const options = mockUseMutation.mock.calls.at(-1)?.[0] as
+    const options = mockUseMutation.mock.calls[0]?.[0] as
       | { onSuccess?: () => Promise<void> | void }
       | undefined;
     await options?.onSuccess?.();

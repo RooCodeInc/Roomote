@@ -48,11 +48,13 @@ import {
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
+  buildTaskModelOption,
   buildSetupAuthStatus,
   buildSetupComputeStatus,
   buildSetupModelStatus,
   buildSetupSourceControlStatus,
   collectSetupModelProviderCredentialValues,
+  createEmptyDeploymentModelConfig,
   createEmptySetupNewState,
   RunStatus,
   TaskPayloadKind,
@@ -64,12 +66,15 @@ import {
   getSetupComputeProvider,
   getComputeFieldValidationError,
   getSetupModelProvider,
+  getSetupModelProviderAdditionalEnvFields,
+  SETUP_MODEL_PROVIDER_CATALOG,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
   isConfiguredEnvValue,
   isExitedRunStatus,
   isRequiredComputeField,
+  normalizeTaskModelSettings,
   NON_SECRET_AUTH_ENV_VAR_NAMES,
   NON_SECRET_COMPUTE_ENV_VAR_NAMES,
   NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
@@ -1313,6 +1318,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedRuntimeComputeConfig,
     envVarNames,
     nonSecretAuthEnvValues,
+    nonSecretModelEnvValues,
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
@@ -1323,6 +1329,16 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     getPersistedRuntimeComputeConfig(),
     getPersistedEnvironmentVariableNames(),
     getPersistedEnvironmentVariableValues([...NON_SECRET_AUTH_ENV_VAR_NAMES]),
+    getPersistedEnvironmentVariableValues(
+      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => [
+        ...(provider.authKind === 'endpoint' && provider.envVarName
+          ? [provider.envVarName]
+          : []),
+        ...getSetupModelProviderAdditionalEnvFields(provider)
+          .filter((field) => !field.secret)
+          .map((field) => field.envVarName),
+      ]),
+    ),
     getPersistedEnvironmentVariableValues([
       ...NON_SECRET_COMPUTE_ENV_VAR_NAMES,
     ]),
@@ -1415,6 +1431,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     runtimeEnv: process.env,
     persistedModelConfig: persistedRuntimeModelConfig,
     persistedEnvVarNames: envVarNames,
+    persistedEnvVarValues: nonSecretModelEnvValues,
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
   });
@@ -1483,6 +1500,7 @@ export async function saveSetupNewModelConfigCommand(
     provider: SetupModelProviderId;
     apiKey?: string;
     additionalEnvValues?: Record<string, string>;
+    modelId?: string;
   },
 ) {
   assertAdmin(auth);
@@ -1558,7 +1576,20 @@ export async function saveSetupNewModelConfigCommand(
     // Connecting a provider applies its recommended per-role model defaults:
     // the provider's default coding model plus any recommended helper,
     // vision, code review, explore, and planning models.
-    const runtimeModelConfig = buildRecommendedDeploymentModelConfig(provider);
+    const selectedDynamicModel = input.modelId?.trim();
+
+    if (provider.dynamicModels && !selectedDynamicModel) {
+      throw new Error(
+        `Choose a discovered ${provider.label} model to continue.`,
+      );
+    }
+
+    const runtimeModelConfig = provider.dynamicModels
+      ? {
+          ...createEmptyDeploymentModelConfig(),
+          roomoteModel: selectedDynamicModel!,
+        }
+      : buildRecommendedDeploymentModelConfig(provider);
 
     // Mirror the models settings page: connecting a provider the deployment
     // has no models for yet auto-adds its recommended models so the first
@@ -1576,13 +1607,35 @@ export async function saveSetupNewModelConfigCommand(
       persistedTaskModelSettings,
       connectedProviderIds,
     });
+    const dynamicModelSettings = provider.dynamicModels
+      ? (() => {
+          const model = buildTaskModelOption({
+            id: selectedDynamicModel!,
+            displayName: selectedDynamicModel!.split('/').at(-1)!,
+          });
+          const current = normalizeTaskModelSettings(
+            persistedTaskModelSettings,
+          );
+
+          return normalizeTaskModelSettings({
+            models: [
+              ...(current.models ?? []).filter((item) => item.id !== model.id),
+              model,
+            ],
+            allowedModelIds: [...current.allowedModelIds, model.id],
+            defaultModelId: model.id,
+          });
+        })()
+      : null;
 
     await Promise.all([
       savePersistedSetupNewState(setupNewState, tx),
       savePersistedRuntimeModelConfig(runtimeModelConfig, tx),
-      ...(autoAdd
-        ? [savePersistedTaskModelSettings(autoAdd.taskModelSettings, tx)]
-        : []),
+      ...(dynamicModelSettings
+        ? [savePersistedTaskModelSettings(dynamicModelSettings, tx)]
+        : autoAdd
+          ? [savePersistedTaskModelSettings(autoAdd.taskModelSettings, tx)]
+          : []),
     ]);
 
     return {

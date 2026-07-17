@@ -103,13 +103,25 @@ export function StepInferenceProvider({
       },
     }),
   );
+  const discoverProviderModels = useMutation(
+    trpc.taskModels.discoverProviderModels.mutationOptions(),
+  );
+  const qualifyProviderModel = useMutation(
+    trpc.taskModels.qualifyProviderModel.mutationOptions(),
+  );
 
   useEffect(() => {
     setSelectedProvider(modelSetup.preselectedProvider);
   }, [modelSetup.preselectedProvider]);
 
   useEffect(() => {
-    setApiKey('');
+    setApiKey(
+      selectedProvider === 'ollama'
+        ? 'http://localhost:11434'
+        : selectedProvider === 'vllm'
+          ? 'http://localhost:8000/v1'
+          : '',
+    );
     setAdditionalEnvValues({});
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
@@ -137,6 +149,7 @@ export function StepInferenceProvider({
   const isChatGptProvider =
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
@@ -155,6 +168,7 @@ export function StepInferenceProvider({
     [modelSetup.providers],
   );
   const shouldShowSavedValueMask =
+    !isEndpointProvider &&
     !hasRuntimeProviderKey &&
     hasSavedProviderKey &&
     apiKey.length === 0 &&
@@ -171,15 +185,75 @@ export function StepInferenceProvider({
     );
   const isActionDisabled =
     saveModelConfig.isPending ||
+    discoverProviderModels.isPending ||
+    qualifyProviderModel.isPending ||
     hasMissingRequiredFields ||
     (!canContinueWithoutApiKey && apiKey.trim().length === 0);
+  const isCheckingEndpoint =
+    isEndpointProvider &&
+    (discoverProviderModels.isPending || qualifyProviderModel.isPending);
 
   const handleContinue = async () => {
+    let modelId: string | undefined;
+    let endpointConnectionMessage: string | undefined;
+    let qualificationError: string | undefined;
+    const submittedCredential = shouldShowConfiguredMask
+      ? undefined
+      : apiKey.trim() || undefined;
+
+    if (isEndpointProvider) {
+      const provider = selectedProvider as 'ollama' | 'vllm' | 'litellm';
+      const connection = {
+        baseUrl: submittedCredential,
+        apiKey:
+          additionalEnvValues[
+            `${selectedProvider.toUpperCase()}_API_KEY`
+          ]?.trim() || undefined,
+      };
+      const discovery = await discoverProviderModels.mutateAsync({
+        provider,
+        baseUrl: connection.baseUrl,
+        apiKey: connection.apiKey,
+      });
+      if (discovery.error) {
+        toast.error(discovery.error);
+        return;
+      }
+
+      for (const candidate of discovery.recommendedModels) {
+        const result = await qualifyProviderModel.mutateAsync({
+          provider,
+          modelId: candidate.modelId,
+          baseUrl: connection.baseUrl,
+          apiKey: connection.apiKey,
+        });
+        if (result.success) {
+          modelId = candidate.modelId;
+          break;
+        }
+        qualificationError = result.error;
+      }
+
+      if (!modelId) {
+        toast.error(
+          discovery.recommendedModels.length === 0
+            ? `Found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model' : 'models'}, but none that can power Roomote. It needs tool calling and at least 7B parameters.`
+            : `Found ${discovery.modelCount} ${discovery.modelCount === 1 ? 'model that meets' : 'models that meet'} Roomote's 7B minimum, but none support the required tool calling. ${qualificationError ?? 'Check the provider tool-calling configuration.'}`,
+        );
+        return;
+      }
+
+      endpointConnectionMessage = `Connected to ${selectedProviderStatus?.label ?? 'the provider'} and selected ${modelId.replace(`${provider}/`, '')} from ${discovery.modelCount} discovered ${discovery.modelCount === 1 ? 'model' : 'models'}.`;
+    }
     await saveModelConfig.mutateAsync({
       provider: selectedProvider,
-      apiKey: apiKey.trim() || undefined,
+      apiKey: submittedCredential,
       ...(additionalEnvFields.length > 0 && { additionalEnvValues }),
+      ...(modelId && { modelId }),
     });
+    if (endpointConnectionMessage) {
+      toast.success(endpointConnectionMessage);
+    }
   };
 
   return (
@@ -199,7 +273,7 @@ export function StepInferenceProvider({
             setSelectedProvider(value as SetupModelProviderId)
           }
         >
-          <SelectTrigger aria-label="Model provider">
+          <SelectTrigger aria-label="Model provider" className="min-w-40">
             <SelectValue placeholder="Choose a provider" />
           </SelectTrigger>
           <SelectContent>
@@ -213,7 +287,7 @@ export function StepInferenceProvider({
 
         {isChatGptProvider ? null : (
           <Input
-            secret={!hasRuntimeProviderKey}
+            secret={!isEndpointProvider && !hasRuntimeProviderKey}
             value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
             onFocus={() => {
               if (shouldShowSavedValueMask) {
@@ -344,9 +418,9 @@ export function StepInferenceProvider({
           onClick={() => void handleContinue()}
           disabled={isActionDisabled}
         >
-          {saveModelConfig.isPending ? (
+          {saveModelConfig.isPending || isCheckingEndpoint ? (
             <>
-              Saving...
+              {isCheckingEndpoint ? 'Checking connection...' : 'Saving...'}
               <Spinner />
             </>
           ) : (

@@ -1,5 +1,5 @@
 import type { ButtonHTMLAttributes, ReactNode, SVGProps } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type {
   SetupSourceControlStatus,
   SourceControlProvider,
@@ -14,6 +14,7 @@ const {
   toastInfoMock,
   toastWarningMock,
   authenticateAdoMutateMock,
+  pendingInstallationsDataRef,
 } = vi.hoisted(() => ({
   createInstallationMutateMock: vi.fn(),
   syncRepositoriesMutateMock: vi.fn(),
@@ -44,6 +45,9 @@ const {
   toastInfoMock: vi.fn(),
   toastWarningMock: vi.fn(),
   authenticateAdoMutateMock: vi.fn(),
+  pendingInstallationsDataRef: {
+    current: undefined as { pending: boolean } | undefined,
+  },
 }));
 
 vi.mock('@tanstack/react-query', async () => {
@@ -95,6 +99,20 @@ vi.mock('@/hooks/github/useCreateGitHubInstallation', () => ({
     mutate: createInstallationMutateMock,
     isPending: false,
   }),
+}));
+
+vi.mock('@/hooks/github', () => ({
+  useGitHubPendingInstallations: () => ({
+    data: pendingInstallationsDataRef.current,
+  }),
+}));
+
+vi.mock('@/components/github/GitHubInstallRequestPending', () => ({
+  GitHubInstallRequestPending: ({ onApproved }: { onApproved: () => void }) => (
+    <button type="button" onClick={() => onApproved()}>
+      github-install-request-pending
+    </button>
+  ),
 }));
 
 vi.mock('@/hooks/source-control/useSyncRepositories', () => ({
@@ -195,6 +213,7 @@ describe('StepSourceControlConnect', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncRepositoriesOptionsRef.current = null;
+    pendingInstallationsDataRef.current = undefined;
     ensureQueryDataMock.mockResolvedValue({
       sourceControlSetup: {
         providers: [
@@ -230,6 +249,82 @@ describe('StepSourceControlConnect', () => {
     expect(createInstallationMutateMock).toHaveBeenCalledWith(
       '/setup?step=source-control-connect',
     );
+  });
+
+  it('shows the pending-request UI instead of the connect CTA when a GitHub install request is pending', async () => {
+    pendingInstallationsDataRef.current = { pending: true };
+    const onContinue = vi.fn();
+
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(
+      screen.getByText(/github-install-request-pending/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /Connect to GitHub/i }),
+    ).not.toBeInTheDocument();
+
+    // Approval advances the wizard.
+    fireEvent.click(
+      screen.getByRole('button', { name: /github-install-request-pending/i }),
+    );
+
+    await waitFor(() => expect(onContinue).toHaveBeenCalled());
+  });
+
+  it('advances when a pending request transitions to approved without falling back to the connect CTA', async () => {
+    pendingInstallationsDataRef.current = { pending: true };
+    const onContinue = vi.fn();
+
+    const { rerender } = render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={onContinue}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: /Connect to GitHub/i }),
+    ).not.toBeInTheDocument();
+
+    // Polling reports the org owner approved: the shared query flips to
+    // pending:false. The step must advance rather than unmount the pending UI
+    // and snap back to the connect CTA.
+    pendingInstallationsDataRef.current = { pending: false };
+    rerender(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={onContinue}
+      />,
+    );
+
+    await waitFor(() => expect(onContinue).toHaveBeenCalled());
+    expect(
+      screen.queryByRole('button', { name: /Connect to GitHub/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the connect CTA when no GitHub install request is pending', () => {
+    pendingInstallationsDataRef.current = { pending: false };
+
+    render(
+      <StepSourceControlConnect
+        sourceControlSetup={buildSourceControlSetup('github')}
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: /Connect to GitHub/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/github-install-request-pending/i),
+    ).not.toBeInTheDocument();
   });
 
   it('renders the runtime-configured token-backed sync CTA', () => {

@@ -7,10 +7,12 @@ const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
+  mockRecordLlmUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
+  mockRecordLlmUsage: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -23,6 +25,10 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  recordLlmUsage: mockRecordLlmUsage,
 }));
 
 import { inference } from '../index';
@@ -298,6 +304,118 @@ describe('inference gateway', () => {
     expect(url).toBe(
       'https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1/messages',
     );
+  });
+
+  it('proxies a configured LiteLLM endpoint with its optional key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        if (nameList.includes('LITELLM_BASE_URL')) {
+          return 'http://litellm.internal:4000/v1/';
+        }
+
+        return nameList.includes('LITELLM_API_KEY') ? 'litellm-key' : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/litellm/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://litellm.internal:4000/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer litellm-key',
+    );
+  });
+
+  it('records a positive LiteLLM response cost without delaying the proxy', async () => {
+    stubUpstreamFetch(
+      new Response('data: [DONE]\n\n', {
+        headers: {
+          'content-type': 'text/event-stream',
+          'x-litellm-response-cost': '0.000321',
+          'x-litellm-model-group': 'coding',
+        },
+      }),
+    );
+    mockFindTaskRun.mockResolvedValue({ taskId: 'task-1' });
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        return nameList.includes('LITELLM_BASE_URL')
+          ? 'http://litellm.internal:4000'
+          : 'litellm-key';
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/litellm/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockRecordLlmUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventKey: expect.stringMatching(/^inference-gateway:/u),
+          taskId: 'task-1',
+          runId: 42,
+          providerId: 'litellm',
+          modelId: 'litellm/coding',
+          costMicroUsd: 321,
+          costSource: 'litellm_gateway',
+        }),
+      );
+    });
+  });
+
+  it('proxies a configured Ollama endpoint without an API key', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('OLLAMA_BASE_URL')
+          ? 'http://ollama.internal:11434'
+          : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/ollama/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('http://ollama.internal:11434/v1/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBeNull();
+  });
+
+  it('rejects malformed dynamic upstream URLs before fetching', async () => {
+    const fetchMock = stubUpstreamFetch();
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+
+        return nameList.includes('VLLM_BASE_URL')
+          ? 'https://token@example.test?redirect=https://evil.test'
+          : undefined;
+      },
+    );
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/vllm/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects invalid Bedrock regions before building the upstream URL', async () => {

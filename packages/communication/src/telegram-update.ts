@@ -29,6 +29,7 @@ const telegramMessageEntitySchema = z
     type: z.string(),
     offset: z.number().int(),
     length: z.number().int(),
+    url: z.string().optional(),
   })
   .passthrough();
 
@@ -281,6 +282,59 @@ function isMatchingBotMention(
 
 type TelegramMessageEntity = z.infer<typeof telegramMessageEntitySchema>;
 
+function isMatchingBotTextLink(
+  entityText: string,
+  entity: TelegramMessageEntity,
+  options: TelegramBotMentionOptions,
+): boolean {
+  const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  const entityUrl = entity.url;
+
+  if (
+    !botUsername ||
+    typeof entityUrl !== 'string' ||
+    !isMatchingBotMention(entityText, options)
+  ) {
+    return false;
+  }
+
+  try {
+    const url = new URL(entityUrl);
+    const hostname = url.hostname.toLowerCase();
+    const linkedUsername = url.pathname
+      .split('/')
+      .filter(Boolean)[0]
+      ?.toLowerCase();
+
+    return (
+      url.protocol === 'https:' &&
+      ['t.me', 'www.t.me', 'telegram.me', 'www.telegram.me'].includes(
+        hostname,
+      ) &&
+      linkedUsername === botUsername
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isMatchingBotInvocationEntity(
+  text: string,
+  entity: TelegramMessageEntity,
+  options: TelegramBotMentionOptions,
+): boolean {
+  const entityText = readEntityText(text, entity);
+
+  if (entity.type === 'mention') {
+    return isMatchingBotMention(entityText, options);
+  }
+
+  return (
+    entity.type === 'text_link' &&
+    isMatchingBotTextLink(entityText, entity, options)
+  );
+}
+
 function findLeadingBotMentionBefore(
   text: string,
   entities: TelegramMessageEntity[],
@@ -289,9 +343,8 @@ function findLeadingBotMentionBefore(
 ): TelegramMessageEntity | undefined {
   return entities.find(
     (candidate) =>
-      candidate.type === 'mention' &&
       candidate.offset + candidate.length <= offset &&
-      isMatchingBotMention(readEntityText(text, candidate), options),
+      isMatchingBotInvocationEntity(text, candidate, options),
   );
 }
 
@@ -331,8 +384,8 @@ function getTelegramInvocationEntity(
   return entities.find((entity) => {
     const entityText = readEntityText(text, entity);
 
-    if (entity.type === 'mention') {
-      return isMatchingBotMention(entityText, options);
+    if (entity.type === 'mention' || entity.type === 'text_link') {
+      return isMatchingBotInvocationEntity(text, entity, options);
     }
 
     if (entity.type === 'bot_command') {

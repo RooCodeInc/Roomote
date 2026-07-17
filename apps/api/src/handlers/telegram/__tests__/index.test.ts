@@ -1828,7 +1828,7 @@ describe('Telegram webhook handler', () => {
     );
     expect(postMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'Started a task in Web App.',
+        text: "Started a task in Web App here because I couldn't create a new Telegram topic. If this keeps happening, check Threaded Mode or the bot's Manage Topics permission.",
       }),
     );
   });

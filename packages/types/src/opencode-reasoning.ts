@@ -173,6 +173,12 @@ export function buildOpenCodeModelReasoningOptions(
     case 'anthropic':
     case 'bedrock-mantle':
       return buildAnthropicReasoningOptions(selection.modelID, reasoningEffort);
+    case 'litellm':
+      // LiteLLM's OpenAI-compatible endpoint rejects `xhigh`; keep the
+      // highest accepted setting instead of failing the inference request.
+      return {
+        reasoningEffort: reasoningEffort === 'xhigh' ? 'high' : reasoningEffort,
+      };
     default:
       return { reasoningEffort };
   }

@@ -230,6 +230,86 @@ describe('Telegram update helpers', () => {
     });
   });
 
+  it('accepts Telegram bot profile links as group mentions', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1006,
+      message: {
+        message_id: 47,
+        text: '@roomote_bot what changed this week?',
+        from: {
+          id: 123,
+          first_name: 'Ada',
+          username: 'ada',
+        },
+        chat: {
+          id: -100456,
+          type: 'supergroup',
+          title: 'Engineering',
+          is_forum: true,
+        },
+        entities: [
+          {
+            type: 'text_link',
+            offset: 0,
+            length: 12,
+            url: 'https://t.me/roomote_bot',
+          },
+        ],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      return;
+    }
+
+    expect(
+      isTelegramTaskEntryUpdate(parsed.data, {
+        botUsername: 'roomote_bot',
+      }),
+    ).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data, {
+        botUsername: 'roomote_bot',
+        userId: 'user-1',
+      }),
+    ).toMatchObject({
+      text: 'what changed this week?',
+      userId: 'user-1',
+    });
+  });
+
+  it('does not treat a text link to another Telegram account as a bot mention', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1007,
+      message: {
+        message_id: 48,
+        text: '@roomote_bot run the tests',
+        chat: {
+          id: -100456,
+          type: 'supergroup',
+          title: 'Engineering',
+          is_forum: true,
+        },
+        entities: [
+          {
+            type: 'text_link',
+            offset: 0,
+            length: 12,
+            url: 'https://t.me/not_roomote',
+          },
+        ],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(
+      isTelegramTaskEntryUpdate(parsed.data!, {
+        botUsername: 'roomote_bot',
+      }),
+    ).toBe(false);
+  });
+
   it('treats a bot command as an invocation only when it leads the message', () => {
     const buildUpdate = (
       text: string,

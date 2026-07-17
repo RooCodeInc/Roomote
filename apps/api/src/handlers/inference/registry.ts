@@ -46,7 +46,7 @@ export async function resolveGatewayUpstream(
     resolveProviderUpstreamBaseUrl(provider),
   ]);
 
-  if (!apiKey) {
+  if (!apiKey && !provider.optionalApiKey) {
     return {
       ok: false,
       status: 404,
@@ -58,12 +58,15 @@ export async function resolveGatewayUpstream(
     ok: true,
     resolved: {
       upstreamUrl: `${upstreamBaseUrl}${upstreamPath}${search}`,
-      headers: {
-        [provider.authHeader.name]: formatProviderAuthHeaderValue(
-          provider,
-          apiKey,
-        ),
-      },
+      headers:
+        apiKey && provider.authHeader
+          ? {
+              [provider.authHeader.name]: formatProviderAuthHeaderValue(
+                provider,
+                apiKey,
+              ),
+            }
+          : {},
     },
   };
 }
@@ -81,9 +84,9 @@ async function resolveChatGptUpstream(
     };
   }
 
-  const upstreamUrl = `${provider.upstreamBaseUrl}${provider.collapseToPath ?? ''}`;
+  const upstreamUrl = `${provider.upstreamBaseUrl!}${provider.collapseToPath ?? ''}`;
   const headers: Record<string, string> = {
-    [provider.authHeader.name]: formatProviderAuthHeaderValue(
+    [provider.authHeader!.name]: formatProviderAuthHeaderValue(
       provider,
       token.access,
     ),
@@ -150,8 +153,25 @@ function hasTraversalOrEncodedSlash(upstreamPath: string): boolean {
 async function resolveProviderUpstreamBaseUrl(
   provider: InferenceGatewayProvider,
 ): Promise<string> {
+  if (provider.upstreamBaseUrlEnvVarName) {
+    const configuredBaseUrl = await resolveModelProviderEnvValue([
+      provider.upstreamBaseUrlEnvVarName,
+    ]);
+
+    if (!configuredBaseUrl) {
+      throw new Error(
+        `${provider.upstreamBaseUrlEnvVarName} must be configured for ${provider.name}.`,
+      );
+    }
+
+    return validateDynamicUpstreamBaseUrl(
+      configuredBaseUrl,
+      provider.upstreamBaseUrlEnvVarName,
+    );
+  }
+
   if (!provider.region) {
-    return provider.upstreamBaseUrl;
+    return provider.upstreamBaseUrl!;
   }
 
   const region =
@@ -164,12 +184,56 @@ async function resolveProviderUpstreamBaseUrl(
     );
   }
 
-  return provider.upstreamBaseUrl.replace('{region}', region);
+  return provider.upstreamBaseUrl!.replace('{region}', region);
+}
+
+function validateDynamicUpstreamBaseUrl(
+  value: string,
+  envVarName: string,
+): string {
+  let url: URL;
+
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`${envVarName} must be an absolute HTTP(S) URL.`);
+  }
+
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error(
+      `${envVarName} must be an HTTP(S) URL without credentials, query parameters, or fragments.`,
+    );
+  }
+
+  const normalizedPath = stripDynamicEndpointVersionSuffix(url.pathname);
+  url.pathname = normalizedPath;
+
+  return url.toString().replace(/\/+$/u, '');
+}
+
+function stripDynamicEndpointVersionSuffix(pathname: string): string {
+  let end = pathname.length;
+
+  while (end > 0 && pathname.charCodeAt(end - 1) === 47 /* '/' */) {
+    end -= 1;
+  }
+
+  const withoutTrailingSlashes = pathname.slice(0, end);
+
+  return withoutTrailingSlashes.endsWith('/v1')
+    ? withoutTrailingSlashes.slice(0, -3) || '/'
+    : withoutTrailingSlashes || '/';
 }
 
 function formatProviderAuthHeaderValue(
   provider: InferenceGatewayProvider,
   apiKey: string,
 ): string {
-  return provider.authHeader.scheme === 'bearer' ? `Bearer ${apiKey}` : apiKey;
+  return provider.authHeader?.scheme === 'bearer' ? `Bearer ${apiKey}` : apiKey;
 }

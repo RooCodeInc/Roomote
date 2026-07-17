@@ -1,6 +1,7 @@
 import { db, eq, llmUsageEvents, taskRuns } from '@roomote/db/server';
+import type { LlmUsageCostSource } from '@roomote/types';
 
-type TaskInferenceUsageCostSource = 'opencode_message' | 'missing';
+type TaskInferenceUsageCostSource = LlmUsageCostSource;
 
 interface RecordTaskInferenceUsageInput {
   runId: number;
@@ -183,7 +184,12 @@ export async function recordLlmUsage(
     totalTokens,
     contextTokens,
     costMicroUsd: clampOptionalCostMicroUsd(input.costMicroUsd),
-    costSource,
+    // The database column is a text column; its generated type can lag this
+    // forward-compatible usage contract.
+    costSource: costSource as
+      | 'opencode_message'
+      | 'litellm_gateway'
+      | 'missing',
     messageCreatedAt: input.messageCreatedAt ?? null,
     messageCompletedAt: input.messageCompletedAt ?? null,
     pricingMetadata: input.pricingMetadata ? { ...input.pricingMetadata } : {},

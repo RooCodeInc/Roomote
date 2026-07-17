@@ -1,4 +1,6 @@
 export * from './useGitHubInstallations';
+export * from './useGitHubPendingInstallations';
+export * from './useResolvePendingGitHubInstallations';
 export * from './useCreateGitHubAppManifest';
 export * from './useCreateGitHubInstallation';
 export * from './useEnableGitHubApp';

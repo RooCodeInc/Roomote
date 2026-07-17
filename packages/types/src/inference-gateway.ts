@@ -85,13 +85,21 @@ export interface InferenceGatewayProvider {
    * in precedence order. Empty for non-key auth strategies.
    */
   envVarNames: readonly string[];
+  /**
+   * Deployment variables withheld from sandboxes when this provider is served
+   * through the gateway. Endpoint providers include their base URL here even
+   * when they have no API key, so the endpoint topology stays server-side.
+   */
+  gatewayEnvVarNames?: readonly string[];
   /** How the gateway authenticates upstream. Defaults to `api-key`. */
   authStrategy?: InferenceGatewayAuthStrategy;
   /**
    * Upstream API base. May contain a `{region}` placeholder resolved
    * per-request from `region` below.
    */
-  upstreamBaseUrl: string;
+  upstreamBaseUrl?: string;
+  /** Deployment env var holding an operator-configured upstream base URL. */
+  upstreamBaseUrlEnvVarName?: string;
   /**
    * When set, every allowed request path is rewritten to this fixed upstream
    * path (the ChatGPT Codex backend collapses `/responses` and
@@ -104,7 +112,9 @@ export interface InferenceGatewayProvider {
    */
   region?: { envVarName: string; default: string };
   /** How the upstream expects its API key when the gateway forwards. */
-  authHeader: InferenceGatewayAuthHeader;
+  authHeader?: InferenceGatewayAuthHeader;
+  /** A configured upstream key is forwarded when present but is not required. */
+  optionalApiKey?: boolean;
   /**
    * Upstream inference endpoints the gateway forwards, matched exactly.
    * Everything else is rejected so a run token can only reach inference
@@ -295,6 +305,41 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      id: 'litellm',
+      name: 'LiteLLM',
+      envVarNames: ['LITELLM_API_KEY'],
+      gatewayEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
+      upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'ollama',
+      name: 'Ollama',
+      envVarNames: [],
+      gatewayEnvVarNames: ['OLLAMA_BASE_URL'],
+      upstreamBaseUrlEnvVarName: 'OLLAMA_BASE_URL',
+      optionalApiKey: true,
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        '/api/tags',
+        '/api/ps',
+      ],
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'vllm',
+      name: 'vLLM',
+      envVarNames: ['VLLM_API_KEY'],
+      gatewayEnvVarNames: ['VLLM_BASE_URL', 'VLLM_API_KEY'],
+      upstreamBaseUrlEnvVarName: 'VLLM_BASE_URL',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      optionalApiKey: true,
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
       // ChatGPT subscription: the gateway holds the OAuth record, mints a
       // fresh access token per request, adds the account-id header, and
       // collapses the request to the Codex backend — mirroring the OpenCode
@@ -324,7 +369,9 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
  * env vars.
  */
 export const INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES: readonly string[] =
-  INFERENCE_GATEWAY_PROVIDERS.flatMap((provider) => provider.envVarNames);
+  INFERENCE_GATEWAY_PROVIDERS.flatMap(
+    (provider) => provider.gatewayEnvVarNames ?? provider.envVarNames,
+  );
 
 export function getInferenceGatewayProvider(
   providerId: string,
@@ -352,7 +399,7 @@ export function getInferenceGatewayProviderByEnvVarName(
   envVarName: string,
 ): InferenceGatewayProvider | undefined {
   return INFERENCE_GATEWAY_PROVIDERS.find((provider) =>
-    provider.envVarNames.includes(envVarName),
+    (provider.gatewayEnvVarNames ?? provider.envVarNames).includes(envVarName),
   );
 }
 
