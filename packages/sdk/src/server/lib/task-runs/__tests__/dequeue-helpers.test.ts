@@ -11,7 +11,6 @@ const {
   mockResolveEffectiveModelRuntimeEnv,
   mockTaskRunsFindFirst,
   mockNotifySourceRunOnSettle,
-  mockIsInferenceGatewayEnabledForDeployment,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
@@ -22,9 +21,6 @@ const {
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
   mockTaskRunsFindFirst: vi.fn(),
   mockNotifySourceRunOnSettle: vi.fn(),
-  mockIsInferenceGatewayEnabledForDeployment: vi.fn(
-    async (_redis?: unknown, _prefix?: string) => false,
-  ),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -90,15 +86,6 @@ vi.mock('@roomote/ado', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   releaseTaskRun: vi.fn(),
-}));
-
-vi.mock('@roomote/feature-flags/server', () => ({
-  isInferenceGatewayEnabledForDeployment: (redis: unknown, prefix?: string) =>
-    mockIsInferenceGatewayEnabledForDeployment(redis, prefix),
-}));
-
-vi.mock('@roomote/redis', () => ({
-  getRedis: vi.fn(() => ({})),
 }));
 
 vi.mock('../notify-source-run-on-settle', () => ({
@@ -614,7 +601,7 @@ describe('fetchResolvedRuntimeEnvVars', () => {
     expect(envVars.R_INFERENCE_GATEWAY_KEYS).toBe('ANTHROPIC_API_KEY');
   });
 
-  it('admits only resolver-selected provider keys when the gateway is off', async () => {
+  it('admits only resolver-selected provider keys when the resolver returns raw keys', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValueOnce({
       R_MODEL: 'anthropic/claude-test',
       ANTHROPIC_API_KEY: 'sk-ant',

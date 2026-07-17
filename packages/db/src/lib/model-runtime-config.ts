@@ -186,9 +186,9 @@ export async function resolveEffectiveModelRuntimeEnv(
      * Route sandbox inference through the gateway: the configured provider
      * keys the gateway can serve stay on the control plane and their names
      * are advertised via `R_INFERENCE_GATEWAY_KEYS` instead. Callers
-     * resolving env for the sandbox pass the evaluated InferenceGateway
-     * feature flag; control-plane callers (routing, titles, summaries) omit it
-     * because that inference holds no run token to present to the gateway.
+     * resolving env for the sandbox pass true; control-plane callers
+     * (routing, titles, summaries) omit it because that inference holds no
+     * run token to present to the gateway.
      */
     inferenceGateway?: boolean;
   } = {},

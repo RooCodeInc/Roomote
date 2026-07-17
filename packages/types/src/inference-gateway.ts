@@ -3,8 +3,8 @@ import type { SetupModelProviderId } from './model-provider-config';
 /**
  * Sandbox-facing env var carrying the gateway base URL (e.g.
  * `https://api.example.com/api/inference`). Emitted by the control plane at
- * dequeue when the InferenceGateway feature flag is enabled; its presence is
- * what switches the worker's OpenCode config onto the gateway.
+ * dequeue; its presence is what switches the worker's OpenCode config onto
+ * the gateway.
  */
 export const INFERENCE_GATEWAY_URL_ENV_VAR_NAME = 'R_INFERENCE_GATEWAY_URL';
 

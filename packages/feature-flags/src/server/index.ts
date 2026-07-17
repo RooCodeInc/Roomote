@@ -8,7 +8,6 @@
 export {
   FeatureFlagEvaluator,
   getFeatureFlagEvaluator,
-  isInferenceGatewayEnabledForDeployment,
   resetFeatureFlagEvaluatorForTests,
 } from '../evaluator';
 export { MetadataCache } from '../cache';

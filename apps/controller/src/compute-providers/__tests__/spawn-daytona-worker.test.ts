@@ -15,10 +15,6 @@ const mockGetNamedPortsForTaskRun = vi.fn();
 const mockPrimeEnvironmentOidcForMachine = vi.fn();
 const mockFindTask = vi.fn();
 
-vi.mock('../inference-gateway-flag', () => ({
-  isInferenceGatewayEnabledForWorkerEnv: vi.fn(async () => false),
-}));
-
 vi.mock('@roomote/db/server', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/db/server')>();
 

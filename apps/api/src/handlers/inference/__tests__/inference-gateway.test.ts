@@ -7,14 +7,10 @@ const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
-  mockIsInferenceGatewayEnabledForDeployment,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
-  mockIsInferenceGatewayEnabledForDeployment: vi.fn(
-    async (_redis?: unknown, _prefix?: string) => true,
-  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -27,15 +23,6 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
-}));
-
-vi.mock('@roomote/feature-flags/server', () => ({
-  isInferenceGatewayEnabledForDeployment: (redis: unknown, prefix?: string) =>
-    mockIsInferenceGatewayEnabledForDeployment(redis, prefix),
-}));
-
-vi.mock('@roomote/redis', () => ({
-  getRedis: vi.fn(() => ({})),
 }));
 
 import { inference } from '../index';
@@ -102,7 +89,6 @@ describe('inference gateway', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    mockIsInferenceGatewayEnabledForDeployment.mockResolvedValue(true);
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {
@@ -129,17 +115,6 @@ describe('inference gateway', () => {
     const response = await postMessages(createApp(undefined));
 
     expect(response.status).toBe(403);
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects requests when the gateway flag is disabled for the deployment', async () => {
-    const fetchMock = stubUpstreamFetch();
-    mockIsInferenceGatewayEnabledForDeployment.mockResolvedValue(false);
-
-    const response = await postMessages(createApp(createRunToken()));
-
-    expect(response.status).toBe(403);
-    expect(mockFindTaskRun).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

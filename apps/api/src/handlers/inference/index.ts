@@ -2,8 +2,6 @@ import { Hono } from 'hono';
 
 import { formatSingleLineLog } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
-import { isInferenceGatewayEnabledForDeployment } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
@@ -107,23 +105,6 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   if (!auth || !isRunTokenContext(auth)) {
     return c.json(
       { error: 'The inference gateway requires a task run token' },
-      403,
-    );
-  }
-
-  // The gateway is only open when the deployment has opted into it. Without
-  // this check the endpoint would serve provider keys on every deployment
-  // regardless of the flag, so a run token could reach a provider key its
-  // sandbox never held. Fails closed (gateway closed) when evaluation is
-  // unavailable, matching the withholding side.
-  const gatewayEnabled = await isInferenceGatewayEnabledForDeployment(
-    getRedis(),
-    logPrefix,
-  );
-
-  if (!gatewayEnabled) {
-    return c.json(
-      { error: 'The inference gateway is not enabled for this deployment' },
       403,
     );
   }

@@ -28,8 +28,6 @@ import {
   sql,
 } from '@roomote/db/server';
 import { decryptSecrets } from '@roomote/db/encryption';
-import { isInferenceGatewayEnabledForDeployment } from '@roomote/feature-flags/server';
-import { getRedis } from '@roomote/redis';
 import { createTaskRunWorkerGitHubToken } from '@roomote/github';
 import { createTaskRunScopedGitLabTokens } from '@roomote/gitlab';
 import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
@@ -252,10 +250,9 @@ export async function fetchResolvedRuntimeEnvVars(
     deploymentEnvVars ?? (await loadPersistedDeploymentEnvVarsFromDb());
   const resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv({
     deploymentEnvVars: envVars,
-    inferenceGateway: await isInferenceGatewayEnabledForDeployment(
-      getRedis(),
-      '[fetchResolvedRuntimeEnvVars]',
-    ),
+    // Sandbox-bound env always routes inference through the gateway so
+    // provider keys stay on the control plane.
+    inferenceGateway: true,
   });
 
   return redactControlPlaneEnvVars(

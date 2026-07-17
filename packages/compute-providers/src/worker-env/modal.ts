@@ -7,7 +7,6 @@ export function buildModalWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
-  inferenceGatewayEnabled,
   deploymentSlug,
   environmentId,
   baseImageRef,
@@ -21,7 +20,6 @@ export function buildModalWorkerEnv({
       authToken,
       sandboxExpiresAtMs,
       extraEnv,
-      inferenceGatewayEnabled,
     }),
     ...buildWorkerContextEnv({
       provider: 'modal',

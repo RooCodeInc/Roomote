@@ -115,7 +115,7 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_SMALL_MODEL).toBeUndefined();
   });
 
-  it('forwards deployment model config and provider keys to workers', () => {
+  it('forwards deployment model config and custom provider keys to workers', () => {
     process.env.R_MODEL = 'openrouter/openai/gpt-5.4';
     process.env.R_SMALL_MODEL = 'openrouter/openai/gpt-5.4-mini';
     process.env.R_VISION_MODEL = 'openrouter/openai/gpt-5.5';
@@ -150,27 +150,17 @@ describe('buildBaseWorkerEnv', () => {
     expect(env.R_EXPLORE_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_PLANNING_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_MODEL_ENV_KEYS).toBe('CUSTOM_PROVIDER_API_KEY');
-    expect(env.OPENROUTER_API_KEY).toBe('openrouter-key');
+    // Gateway-covered keys stay on the control plane; only custom provider
+    // credentials the gateway cannot serve reach the worker.
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
     expect(env.CUSTOM_PROVIDER_API_KEY).toBe('custom-provider-key');
   });
 
-  it('forwards Vercel AI Gateway credentials through the shared provider key list', () => {
-    process.env.R_MODEL = 'vercel/openai/gpt-5.4';
-    process.env.AI_GATEWAY_API_KEY = 'vercel-key';
-
-    const env = buildBaseWorkerEnv({
-      authToken: 'auth-token',
-      extraEnv: {},
-    });
-
-    expect(env.R_MODEL).toBe('vercel/openai/gpt-5.4');
-    expect(env.AI_GATEWAY_API_KEY).toBe('vercel-key');
-  });
-
-  it('holds back gateway-covered provider keys when the inference gateway is enabled', () => {
+  it('holds back gateway-covered provider keys from the worker env', () => {
     process.env.R_MODEL = 'anthropic/claude-sonnet-5';
     process.env.ANTHROPIC_API_KEY = 'anthropic-key';
     process.env.OPENROUTER_API_KEY = 'openrouter-key';
+    process.env.AI_GATEWAY_API_KEY = 'vercel-key';
     process.env.AWS_BEARER_TOKEN_BEDROCK = 'bedrock-key';
     process.env.XAI_API_KEY = 'xai-key';
     process.env.AWS_REGION = 'us-west-2';
@@ -178,12 +168,12 @@ describe('buildBaseWorkerEnv', () => {
     const env = buildBaseWorkerEnv({
       authToken: 'auth-token',
       extraEnv: {},
-      inferenceGatewayEnabled: true,
     });
 
     expect(env.R_MODEL).toBe('anthropic/claude-sonnet-5');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.AI_GATEWAY_API_KEY).toBeUndefined();
     expect(env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
     expect(env.XAI_API_KEY).toBeUndefined();
     // Region config is not a secret and Bedrock's Mantle merge still

@@ -44,9 +44,7 @@ function getOperatorModelProviderEnvKeys(): string[] {
   return [...new Set([...DEFAULT_MODEL_PROVIDER_ENV_KEYS, ...configured])];
 }
 
-function buildOperatorModelProviderEnv(
-  inferenceGatewayEnabled: boolean,
-): Record<string, string> {
+function buildOperatorModelProviderEnv(): Record<string, string> {
   const env: Record<string, string> = {};
 
   for (const key of MODEL_ROLE_ENV_VAR_NAMES) {
@@ -76,13 +74,12 @@ function buildOperatorModelProviderEnv(
     env.R_MODEL_ENV_KEYS = process.env.R_MODEL_ENV_KEYS;
   }
 
-  // When the inference gateway is enabled, gateway-covered provider keys
-  // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay off
-  // the worker daemon process env so they never appear in the sandbox's
-  // /proc; the per-task dequeue env routes the harness through the gateway
-  // instead. ChatGPT subscriptions use their dedicated run-token gateway
-  // route, while disabled-provider credentials such as Vertex are blocked
-  // from the worker env entirely.
+  // Gateway-covered provider keys (OpenRouter, Anthropic, OpenAI, Gemini,
+  // the aggregators, Bedrock) stay off the worker daemon process env so they
+  // never appear in the sandbox's /proc; the per-task dequeue env routes the
+  // harness through the inference gateway instead. ChatGPT subscriptions use
+  // their dedicated run-token gateway route, while disabled-provider
+  // credentials such as Vertex are blocked from the worker env entirely.
   const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
 
   for (const key of getOperatorModelProviderEnvKeys()) {
@@ -90,7 +87,7 @@ function buildOperatorModelProviderEnv(
       continue;
     }
 
-    if (inferenceGatewayEnabled && gatewayCoveredKeys.has(key)) {
+    if (gatewayCoveredKeys.has(key)) {
       continue;
     }
 
@@ -108,7 +105,6 @@ export function buildBaseWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
   extraEnv,
-  inferenceGatewayEnabled = false,
 }: BuildWorkerEnvOptions): Record<string, string> {
   const previewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
 
@@ -157,7 +153,7 @@ export function buildBaseWorkerEnv({
     ...(process.env.PREVIEW_AUTH_COOKIE_NAME && {
       PREVIEW_AUTH_COOKIE_NAME: process.env.PREVIEW_AUTH_COOKIE_NAME,
     }),
-    ...buildOperatorModelProviderEnv(inferenceGatewayEnabled),
+    ...buildOperatorModelProviderEnv(),
     ...filterWorkerExtraEnv(extraEnv),
   };
 }
