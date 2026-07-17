@@ -2,6 +2,7 @@ import {
   type CommunicationProvider,
   type AcpRequestUserInputAnswers,
   buildInferenceGatewayUrl,
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
@@ -646,6 +647,12 @@ export const runTask = async ({
         ROOMOTE_PROOF_BROWSER_TARGET: environmentConfig.initialUrl,
       }),
     };
+    // Google Vertex is disabled until its service-account authentication can
+    // stay on the control plane. Strip ambient or explicitly requested
+    // credentials as defense in depth, even if a stale worker/dequeue payload
+    // still contains them.
+    delete runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
+
     // Inference gateway: dequeue advertises the served provider keys by name
     // (R_INFERENCE_GATEWAY_KEYS) rather than the gateway URL, so the URL is
     // built here from the worker's own platform URL — already rewritten to be

@@ -3445,6 +3445,7 @@ describe('runTask', () => {
           R_MODEL_ENV_KEYS: 'CUSTOM_PROVIDER_API_KEY',
           OPENROUTER_API_KEY: 'openrouter-key',
           CUSTOM_PROVIDER_API_KEY: 'custom-key',
+          GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
           JOB_AUTH_PRIVATE_KEY: 'do-not-forward',
         })),
       } as never,
@@ -3465,6 +3466,9 @@ describe('runTask', () => {
     expect(
       createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
     ).not.toHaveProperty('JOB_AUTH_PRIVATE_KEY');
+    expect(
+      createHarnessMock.mock.calls.at(-1)?.[0]?.runtimeEnv,
+    ).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
   });
 
   it('isolates the task runtime HOME while keeping packaged skill sourcing on the worker HOME', async () => {

@@ -72,7 +72,7 @@ export const FEATURE_FLAG_CONFIG: FeatureFlagConfigMap = {
     defaultValue: false,
     metadataKey: 'inference_gateway',
     description:
-      'Route sandbox inference through the platform inference gateway so API keys for key-authenticated model providers stay on the control plane instead of entering task sandboxes (Vertex and ChatGPT-subscription auth still flow directly)',
+      'Route sandbox inference through the platform inference gateway so provider API keys and ChatGPT subscription auth stay on the control plane instead of entering task sandboxes',
   },
 
   [FeatureFlag.CodeMode]: {

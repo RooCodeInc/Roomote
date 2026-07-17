@@ -143,7 +143,7 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('materializes inline GOOGLE_APPLICATION_CREDENTIALS JSON to a temp file path', () => {
+  it('strips disabled Google Vertex credentials', () => {
     const credentialsJson = JSON.stringify({
       type: 'service_account',
       project_id: 'my-project',
@@ -153,20 +153,20 @@ describe('buildOpenCodeCliEnv', () => {
       GOOGLE_APPLICATION_CREDENTIALS: credentialsJson,
     });
 
-    const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS;
-    expect(credentialsPath).toBeDefined();
-    expect(credentialsPath).not.toBe(credentialsJson);
-    expect(readFileSync(credentialsPath!, 'utf8')).toBe(credentialsJson);
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 
-  it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', () => {
+  it('strips disabled Vertex model role overrides', () => {
     const env = buildOpenCodeCliEnv({
+      R_MODEL: 'google-vertex/gemini-3.5-flash',
+      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
       GOOGLE_APPLICATION_CREDENTIALS: '/etc/roomote/service-account.json',
     });
 
-    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-      '/etc/roomote/service-account.json',
-    );
+    expect(env.R_MODEL).toBeUndefined();
+    expect(env.R_SMALL_MODEL).toBeUndefined();
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(env.OPENCODE_CONFIG_CONTENT).toBeUndefined();
   });
 });
 

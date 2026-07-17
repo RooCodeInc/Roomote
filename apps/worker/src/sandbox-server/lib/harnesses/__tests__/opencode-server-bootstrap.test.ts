@@ -1597,7 +1597,7 @@ describe('opencode-server bootstrap', () => {
     expect(commandEnv.OPENCODE_AUTH_CONTENT).toBe(authContent);
   });
 
-  it('materializes inline GOOGLE_APPLICATION_CREDENTIALS JSON to a file path', async () => {
+  it('strips disabled Vertex credentials after sourcing the shared BASH_ENV', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1611,6 +1611,15 @@ describe('opencode-server bootstrap', () => {
       sharedBashEnvPath,
       `export GOOGLE_APPLICATION_CREDENTIALS='${credentialsJson}'\n`,
     );
+    const credentialsPath = path.join(
+      homeDir,
+      '.local',
+      'share',
+      'opencode',
+      'google-application-credentials.json',
+    );
+    fs.mkdirSync(path.dirname(credentialsPath), { recursive: true });
+    fs.writeFileSync(credentialsPath, credentialsJson);
 
     const { commandEnv } = await prepareOpenCodeCommandEnv({
       runtimeEnv: {
@@ -1622,15 +1631,8 @@ describe('opencode-server bootstrap', () => {
       logger: createLogger(),
     });
 
-    const credentialsPath = path.join(
-      homeDir,
-      '.local',
-      'share',
-      'opencode',
-      'google-application-credentials.json',
-    );
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(credentialsPath);
-    expect(fs.readFileSync(credentialsPath, 'utf8')).toBe(credentialsJson);
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(fs.existsSync(credentialsPath)).toBe(false);
     const openCodeBashEnvPath = commandEnv.BASH_ENV;
     expect(openCodeBashEnvPath).toBe(
       path.join(
@@ -1647,6 +1649,9 @@ describe('opencode-server bootstrap', () => {
     expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).not.toContain(
       credentialsJson,
     );
+    expect(fs.readFileSync(openCodeBashEnvPath, 'utf8')).toContain(
+      'unset GOOGLE_APPLICATION_CREDENTIALS',
+    );
     expect(
       execFileSync(
         'bash',
@@ -1656,10 +1661,10 @@ describe('opencode-server bootstrap', () => {
           encoding: 'utf8',
         },
       ),
-    ).toBe(credentialsPath);
+    ).toBe('');
   });
 
-  it('leaves a GOOGLE_APPLICATION_CREDENTIALS file path untouched', async () => {
+  it('strips a GOOGLE_APPLICATION_CREDENTIALS file path', async () => {
     const { prepareOpenCodeCommandEnv } =
       await import('../opencode-server/bootstrap');
 
@@ -1674,8 +1679,6 @@ describe('opencode-server bootstrap', () => {
       logger: createLogger(),
     });
 
-    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-      '/etc/roomote/service-account.json',
-    );
+    expect(commandEnv.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 });

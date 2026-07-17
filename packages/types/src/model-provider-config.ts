@@ -10,8 +10,9 @@ import {
 } from './recommended-task-models';
 import {
   DEFAULT_TASK_MODEL_ID,
-  DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   getTaskModelProviderId,
+  isTaskModelIdDisabled,
 } from './task-models';
 
 /**
@@ -22,13 +23,13 @@ import {
  * id prefix (opencode's Codex plugin registers OAuth auth under provider id
  * `openai`), so this id is a configuration/connect surface only — it is not
  * a model-id prefix and is intentionally not in
- * `DIRECT_TASK_MODEL_PROVIDER_IDS`.
+ * `ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS`.
  */
 export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
 
 export const SETUP_MODEL_PROVIDER_IDS = [
   'openrouter',
-  ...DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ...ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS,
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
 ] as const;
 
@@ -91,7 +92,7 @@ export type SetupModelProviderDescriptor = {
   envVarName?: string;
   /**
    * Human label for the primary credential when "API key" is not accurate
-   * (e.g. Vertex takes a service account JSON). Defaults to "API key".
+   * for the provider. Defaults to "API key".
    */
   envVarLabel?: string;
   /** Optional guidance rendered below the primary credential input. */
@@ -365,54 +366,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
-    // Provider id matches the models.dev/opencode `google-vertex` provider.
-    // The primary credential accepts either pasted service-account JSON
-    // (materialized to a file before opencode starts) or a file path on the
-    // host for env-managed deployments.
-    id: 'google-vertex',
-    label: 'Google Vertex AI',
-    envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
-    envVarLabel: 'Service account JSON',
-    credentialHelp: {
-      text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
-      href: 'https://console.cloud.google.com/vertex-ai/model-garden',
-      linkLabel: 'Open Vertex AI Model Garden',
-    },
-    additionalEnvFields: [
-      {
-        envVarName: 'GOOGLE_VERTEX_PROJECT',
-        label: 'Project ID',
-        secret: false,
-        required: true,
-        placeholder: 'my-gcp-project',
-      },
-      {
-        envVarName: 'GOOGLE_VERTEX_LOCATION',
-        label: 'Location',
-        secret: false,
-        required: false,
-        placeholder: 'us-central1',
-      },
-    ],
-    defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
-    authKind: 'api-key',
-    suggestedTaskModels: mapRecommendedTaskModels({
-      'claude-haiku-4-5': 'google-vertex/claude-haiku-4-5@20251001',
-      'claude-opus-4-8': 'google-vertex/claude-opus-4-8@default',
-      'claude-sonnet-5': 'google-vertex/claude-sonnet-5@default',
-      'gemini-3-1-pro': 'google-vertex/gemini-3.1-pro-preview',
-      'gemini-3-5-flash': 'google-vertex/gemini-3.5-flash',
-    }),
-    // Mirrors the Anthropic/Bedrock split. Claude models on Vertex may
-    // require Model Garden enablement in the GCP project.
-    recommendedRoleModels: {
-      helper: 'google-vertex/claude-haiku-4-5@20251001',
-      codeReview: 'google-vertex/claude-opus-4-8@default',
-      explore: 'google-vertex/claude-haiku-4-5@20251001',
-      planning: 'google-vertex/claude-opus-4-8@default',
-    },
-  },
-  {
     // Provider id matches the models.dev/opencode `google` provider (Gemini
     // API / AI Studio keys).
     id: 'google',
@@ -633,15 +586,25 @@ export function createEmptyDeploymentModelConfig(): DeploymentModelConfig {
 export function normalizeDeploymentModelConfig(
   value: Partial<DeploymentModelConfig> | null | undefined,
 ): DeploymentModelConfig {
+  const normalizeEnabledModel = (
+    model: string | null | undefined,
+  ): string | null => {
+    const normalizedModel = normalizeOptionalString(model);
+
+    return normalizedModel && !isTaskModelIdDisabled(normalizedModel)
+      ? normalizedModel
+      : null;
+  };
+
   return {
-    roomoteModel: normalizeOptionalString(value?.roomoteModel),
-    roomoteSmallModel: normalizeOptionalString(value?.roomoteSmallModel),
-    roomoteVisionModel: normalizeOptionalString(value?.roomoteVisionModel),
-    roomoteCodeReviewModel: normalizeOptionalString(
+    roomoteModel: normalizeEnabledModel(value?.roomoteModel),
+    roomoteSmallModel: normalizeEnabledModel(value?.roomoteSmallModel),
+    roomoteVisionModel: normalizeEnabledModel(value?.roomoteVisionModel),
+    roomoteCodeReviewModel: normalizeEnabledModel(
       value?.roomoteCodeReviewModel,
     ),
-    roomoteExploreModel: normalizeOptionalString(value?.roomoteExploreModel),
-    roomotePlanningModel: normalizeOptionalString(value?.roomotePlanningModel),
+    roomoteExploreModel: normalizeEnabledModel(value?.roomoteExploreModel),
+    roomotePlanningModel: normalizeEnabledModel(value?.roomotePlanningModel),
     roomoteModelReasoningEffort: normalizeOptionalReasoningEffort(
       value?.roomoteModelReasoningEffort,
     ),
@@ -908,25 +871,9 @@ export function isConfiguredEnvValue(
   return normalizeOptionalString(value) !== null;
 }
 
-/**
- * Env var Google's auth library reads as a *file path* to service-account
- * credentials. Roomote also accepts pasted JSON contents in this variable
- * (the Vertex connect UI collects it that way); runtimes that spawn opencode
- * detect inline JSON with `isInlineGoogleCredentialsValue` and materialize
- * it to a file before the auth library reads the variable.
- */
+/** Legacy Google Vertex credential name, reserved and stripped while the provider is disabled. */
 export const GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME =
   'GOOGLE_APPLICATION_CREDENTIALS';
-
-/**
- * Whether a `GOOGLE_APPLICATION_CREDENTIALS` value is inline service-account
- * JSON rather than a file path.
- */
-export function isInlineGoogleCredentialsValue(
-  value: string | null | undefined,
-): value is string {
-  return normalizeOptionalString(value)?.startsWith('{') ?? false;
-}
 
 /**
  * Validates and collects the env values to persist when connecting an
@@ -1055,7 +1002,7 @@ export function buildSetupModelStatus(input: {
         };
       }
 
-      // Multi-credential providers (e.g. Bedrock, Vertex) are satisfied only
+      // Providers with multiple credential fields (e.g. Bedrock) are satisfied only
       // when every required env var is configured. Runtime satisfaction is
       // runtime-env-only; saved satisfaction allows mixed sources (the
       // effective model runtime env resolves each key runtime-first with a DB

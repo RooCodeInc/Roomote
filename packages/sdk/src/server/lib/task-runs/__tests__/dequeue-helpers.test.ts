@@ -509,7 +509,7 @@ describe('redactSourceControlProviderEnvVars', () => {
 });
 
 describe('redactControlPlaneEnvVars', () => {
-  it('strips instance/control-plane secrets but keeps task env and model keys', () => {
+  it('strips control-plane and disabled-provider secrets but keeps enabled model keys', () => {
     expect(
       redactControlPlaneEnvVars({
         // Control-plane secrets that must never reach the sandbox.
@@ -533,6 +533,7 @@ describe('redactControlPlaneEnvVars', () => {
         R_MICROSOFT_CLIENT_SECRET: 'ms',
         // Teams bot secret (hand-listed bot integration).
         R_TEAMS_BOT_APP_PASSWORD: 'teams',
+        GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
         // Legitimate task + model env that must be preserved.
         OPENAI_API_KEY: 'sk-test',
         ANTHROPIC_API_KEY: 'sk-ant',

@@ -146,10 +146,11 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
 
 /**
  * Providers reachable through the inference gateway. Key-authenticated
- * HTTP-proxyable providers only: providers that need request signing
- * (Vertex service accounts) or client-managed OAuth refresh (ChatGPT
- * subscriptions) are handled separately. Upstream bases follow models.dev,
- * the registry OpenCode itself resolves providers from.
+ * HTTP-proxyable providers only. Google Vertex is disabled while its
+ * service-account request signing cannot stay on the control plane; ChatGPT
+ * subscription OAuth is handled by its dedicated gateway route. Upstream
+ * bases follow models.dev, the registry OpenCode itself resolves providers
+ * from.
  */
 export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
   [

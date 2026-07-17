@@ -64,4 +64,10 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(false);
     }
   });
+
+  it('includes the disabled Vertex service-account credential', () => {
+    expect(
+      CONTROL_PLANE_ENV_VAR_NAMES.has('GOOGLE_APPLICATION_CREDENTIALS'),
+    ).toBe(true);
+  });
 });

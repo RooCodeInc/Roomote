@@ -1,13 +1,17 @@
 import { Env } from '@roomote/env';
 import {
   DEFAULT_MODEL_PROVIDER_ENV_KEYS,
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
   parseModelProviderEnvKeys,
 } from '@roomote/types';
 
 import type { BuildWorkerEnvOptions } from './types';
 
-const BLOCKED_WORKER_ENV_KEYS = new Set(['JOB_AUTH_PRIVATE_KEY']);
+const BLOCKED_WORKER_ENV_KEYS = new Set([
+  'JOB_AUTH_PRIVATE_KEY',
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
+]);
 
 function filterWorkerExtraEnv(
   extraEnv: Record<string, string> | undefined,
@@ -87,8 +91,9 @@ function buildOperatorModelProviderEnv(
   // (OpenRouter, Anthropic, OpenAI, Gemini, the aggregators, Bedrock) stay off
   // the worker daemon process env so they never appear in the sandbox's
   // /proc; the per-task dequeue env routes the harness through the gateway
-  // instead. Keys the gateway cannot serve (Vertex signing, ChatGPT
-  // subscription OAuth) are not covered and still ship with the daemon env.
+  // instead. ChatGPT subscriptions use their dedicated run-token gateway
+  // route, while disabled-provider credentials such as Vertex are blocked
+  // from the worker env entirely.
   const gatewayCoveredKeys = new Set(INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES);
 
   for (const key of getOperatorModelProviderEnvKeys()) {

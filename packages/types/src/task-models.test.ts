@@ -5,6 +5,7 @@ import {
   getEnabledTaskModels,
   getTaskModelCatalog,
   getTaskModelProviderId,
+  isTaskModelIdDisabled,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
 } from './task-models';
@@ -66,6 +67,11 @@ describe('getTaskModelProviderId', () => {
       'anthropic',
     );
     expect(getTaskModelProviderId('')).toBeNull();
+  });
+
+  it('identifies disabled Google Vertex model ids', () => {
+    expect(isTaskModelIdDisabled('google-vertex/gemini-3.5-flash')).toBe(true);
+    expect(isTaskModelIdDisabled('google/gemini-3.5-flash')).toBe(false);
   });
 });
 
@@ -133,5 +139,23 @@ describe('task model settings', () => {
     expect(getEnabledTaskModels(settings).map((model) => model.id)).toEqual([
       'openrouter/openai/gpt-5.6',
     ]);
+  });
+
+  it('removes disabled Vertex models from persisted settings', () => {
+    const settings = normalizeTaskModelSettings({
+      models: [
+        buildTaskModelOption({
+          id: 'google-vertex/gemini-3.5-flash',
+          displayName: 'Gemini 3.5 Flash on Vertex',
+        }),
+      ],
+      allowedModelIds: ['google-vertex/gemini-3.5-flash'],
+      defaultModelId: 'google-vertex/gemini-3.5-flash',
+    });
+
+    expect(settings.models).toEqual(DEFAULT_TASK_MODEL_SETTINGS.models);
+    expect(settings.allowedModelIds).toHaveLength(1);
+    expect(settings.allowedModelIds[0]).not.toMatch(/^google-vertex\//u);
+    expect(settings.defaultModelId).not.toMatch(/^google-vertex\//u);
   });
 });

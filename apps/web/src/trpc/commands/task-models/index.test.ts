@@ -83,9 +83,6 @@ const PROVIDER_ENV_VAR_NAMES = [
   'OPENCODE_API_KEY',
   'AWS_BEARER_TOKEN_BEDROCK',
   'AWS_REGION',
-  'GOOGLE_APPLICATION_CREDENTIALS',
-  'GOOGLE_VERTEX_PROJECT',
-  'GOOGLE_VERTEX_LOCATION',
   'GEMINI_API_KEY',
   'R_MODEL',
 ] as const;
@@ -253,6 +250,16 @@ describe('lookupTaskModelCommand', () => {
       family: 'GPT',
       metadata: null,
     });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects disabled Google Vertex model ids', async () => {
+    await expect(
+      lookupTaskModelCommand(buildMockAuth(), {
+        modelId: 'google-vertex/gemini-3.5-flash',
+      }),
+    ).rejects.toThrow('Google Vertex AI models are currently disabled.');
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -1244,8 +1251,6 @@ describe('task model provider commands', () => {
 
     expect(mockGetPersistedEnvironmentVariableValues).toHaveBeenCalledWith([
       'AWS_REGION',
-      'GOOGLE_VERTEX_PROJECT',
-      'GOOGLE_VERTEX_LOCATION',
     ]);
     expect(
       result.providerSetup.providers.find(
@@ -1460,17 +1465,6 @@ describe('task model provider commands', () => {
         }),
       }),
     );
-  });
-
-  it('rejects saving Google Vertex AI without its required project ID', async () => {
-    await expect(
-      saveTaskModelProviderCommand(buildMockAuth(), {
-        provider: 'google-vertex',
-        apiKey: '{"type":"service_account"}',
-      }),
-    ).rejects.toThrow('Enter the Project ID for Google Vertex AI to save it.');
-
-    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
   });
 
   it('rejects additional env values the provider does not declare', async () => {

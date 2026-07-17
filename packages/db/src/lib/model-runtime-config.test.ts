@@ -537,7 +537,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
-  it('forwards every declared env var for multi-credential providers', async () => {
+  it('ignores disabled Vertex roles and forwards enabled provider credentials', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {
         roomoteModel: 'bedrock-mantle/anthropic.claude-sonnet-5',
@@ -557,14 +557,13 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env).toMatchObject({
       R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
-      R_SMALL_MODEL: 'google-vertex/gemini-3.5-flash',
-      R_MODEL_ENV_KEYS:
-        'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION,GOOGLE_APPLICATION_CREDENTIALS,GOOGLE_VERTEX_PROJECT,GOOGLE_VERTEX_LOCATION',
+      R_MODEL_ENV_KEYS: 'AWS_BEARER_TOKEN_BEDROCK,AWS_REGION',
       AWS_BEARER_TOKEN_BEDROCK: 'bedrock-key',
       AWS_REGION: 'us-west-2',
-      GOOGLE_APPLICATION_CREDENTIALS: '{"type":"service_account"}',
-      GOOGLE_VERTEX_PROJECT: 'my-project',
     });
+    expect(env).not.toHaveProperty('R_SMALL_MODEL');
+    expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
+    expect(env).not.toHaveProperty('GOOGLE_VERTEX_PROJECT');
     expect(env).not.toHaveProperty('GOOGLE_VERTEX_LOCATION');
   });
 
@@ -764,7 +763,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
     });
 
-    it('withholds Bedrock but keeps Vertex, which the gateway cannot serve', async () => {
+    it('drops disabled Vertex credentials even when explicitly requested', async () => {
       const env = await resolveEffectiveModelRuntimeEnv({
         inferenceGateway: true,
         runtimeEnv: {
@@ -780,11 +779,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
       expect(env).not.toHaveProperty('ANTHROPIC_API_KEY');
       expect(env).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
-      // Vertex needs request signing, not header injection, so its
-      // credentials still flow.
-      expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBe(
-        '{"type":"service_account"}',
-      );
+      expect(env).not.toHaveProperty('GOOGLE_APPLICATION_CREDENTIALS');
       expect(env.R_INFERENCE_GATEWAY_KEYS).toBe(
         'ANTHROPIC_API_KEY,AWS_BEARER_TOKEN_BEDROCK',
       );

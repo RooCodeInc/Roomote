@@ -28,6 +28,7 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.R_EXPLORE_MODEL_REASONING_EFFORT;
     delete process.env.R_PLANNING_MODEL_REASONING_EFFORT;
     delete process.env.R_MODEL_ENV_KEYS;
+    delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
   });
 
   afterEach(() => {
@@ -89,6 +90,20 @@ describe('buildBaseWorkerEnv', () => {
 
     expect(env.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
     expect(env.SAFE_CONTEXT).toBe('safe-value');
+  });
+
+  it('blocks disabled Vertex credentials from operator and extra env', () => {
+    process.env.R_MODEL_ENV_KEYS = 'GOOGLE_APPLICATION_CREDENTIALS';
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = '{"type":"service_account"}';
+
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {
+        GOOGLE_APPLICATION_CREDENTIALS: '/run/secrets/google.json',
+      },
+    });
+
+    expect(env.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
   });
 
   it('forwards deployment model config and provider keys to workers', () => {

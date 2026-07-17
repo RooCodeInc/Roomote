@@ -10,7 +10,6 @@ import {
   getModelProviderEnvKeyCandidates,
   getReasoningEffortLabel,
   getSetupModelProvider,
-  isInlineGoogleCredentialsValue,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   SETUP_MODEL_PROVIDER_CATALOG,
@@ -193,6 +192,20 @@ describe('normalizeDeploymentModelConfig', () => {
       roomotePlanningModelReasoningEffort: null,
     });
   });
+
+  it('clears model roles that still reference disabled Google Vertex', () => {
+    expect(
+      normalizeDeploymentModelConfig({
+        roomoteModel: 'google-vertex/claude-sonnet-5@default',
+        roomoteSmallModel: 'google-vertex/gemini-3.5-flash',
+        roomoteVisionModel: 'google/gemini-3.5-flash',
+      }),
+    ).toMatchObject({
+      roomoteModel: null,
+      roomoteSmallModel: null,
+      roomoteVisionModel: 'google/gemini-3.5-flash',
+    });
+  });
 });
 
 describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
@@ -210,7 +223,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'minimax',
         'opencode',
         'amazon-bedrock',
-        'google-vertex',
         'google',
         'xai',
         'chatgpt',
@@ -303,33 +315,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         required: false,
         placeholder: 'us-east-1',
       },
-    ]);
-  });
-
-  it('maps Google Vertex AI to service-account credentials plus project and location', () => {
-    const vertexProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
-      (provider) => provider.id === 'google-vertex',
-    );
-
-    expect(vertexProvider).toMatchObject({
-      label: 'Google Vertex AI',
-      envVarName: 'GOOGLE_APPLICATION_CREDENTIALS',
-      envVarLabel: 'Service account JSON',
-      defaultRoomoteModel: 'google-vertex/claude-sonnet-5@default',
-      credentialHelp: {
-        text: 'Roomote defaults to Anthropic Claude models on Vertex. Enable Claude in Model Garden for this project (and confirm your location serves it) before connecting, or switch models afterward from Settings > Models.',
-        href: 'https://console.cloud.google.com/vertex-ai/model-garden',
-        linkLabel: 'Open Vertex AI Model Garden',
-      },
-    });
-    expect(
-      vertexProvider?.additionalEnvFields?.map((field) => ({
-        envVarName: field.envVarName,
-        required: field.required,
-      })),
-    ).toEqual([
-      { envVarName: 'GOOGLE_VERTEX_PROJECT', required: true },
-      { envVarName: 'GOOGLE_VERTEX_LOCATION', required: false },
     ]);
   });
 
@@ -578,7 +563,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['OPENROUTER_API_KEY', 'CUSTOM_PROVIDER_API_KEY']);
   });
 
-  it('includes every declared env var for multi-credential providers', () => {
+  it('includes every declared env var for enabled multi-credential providers', () => {
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'amazon-bedrock' }),
     ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
@@ -587,11 +572,7 @@ describe('getModelProviderEnvKeyCandidates', () => {
     ).toEqual(['AWS_BEARER_TOKEN_BEDROCK', 'AWS_REGION']);
     expect(
       getModelProviderEnvKeyCandidates({ providerId: 'google-vertex' }),
-    ).toEqual([
-      'GOOGLE_APPLICATION_CREDENTIALS',
-      'GOOGLE_VERTEX_PROJECT',
-      'GOOGLE_VERTEX_LOCATION',
-    ]);
+    ).toEqual([]);
   });
 
   it('merges catalog and extra env keys for the google provider', () => {
@@ -613,11 +594,15 @@ describe('getModelProviderEnvKeyCandidates', () => {
       'AWS_BEARER_TOKEN_BEDROCK',
     );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('AWS_REGION');
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain(
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
       'GOOGLE_APPLICATION_CREDENTIALS',
     );
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GOOGLE_VERTEX_PROJECT');
-    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GOOGLE_VERTEX_LOCATION');
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
+      'GOOGLE_VERTEX_PROJECT',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).not.toContain(
+      'GOOGLE_VERTEX_LOCATION',
+    );
     expect(DEFAULT_MODEL_PROVIDER_ENV_KEYS).toContain('GEMINI_API_KEY');
     // Ambient AWS access keys are intentionally NOT forwarded by default so a
     // controller's own infrastructure credentials never leak into sandboxes;
@@ -871,35 +856,6 @@ describe('buildSetupModelStatus', () => {
 });
 
 describe('buildSetupModelStatus multi-credential providers', () => {
-  it('requires every required Vertex env var before the provider is satisfied', () => {
-    const missingProject = buildSetupModelStatus({
-      persistedEnvVarNames: ['GOOGLE_APPLICATION_CREDENTIALS'],
-    });
-
-    expect(
-      missingProject.providers.find(
-        (provider) => provider.id === 'google-vertex',
-      ),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: false,
-    });
-
-    const complete = buildSetupModelStatus({
-      persistedEnvVarNames: [
-        'GOOGLE_APPLICATION_CREDENTIALS',
-        'GOOGLE_VERTEX_PROJECT',
-      ],
-    });
-
-    expect(
-      complete.providers.find((provider) => provider.id === 'google-vertex'),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: true,
-    });
-  });
-
   it('does not require optional additional env vars for satisfaction', () => {
     const status = buildSetupModelStatus({
       runtimeEnv: {
@@ -935,22 +891,6 @@ describe('buildSetupModelStatus multi-credential providers', () => {
     ).not.toHaveProperty('AWS_BEARER_TOKEN_BEDROCK');
   });
 
-  it('treats mixed runtime and saved credentials as a saved connection', () => {
-    const status = buildSetupModelStatus({
-      runtimeEnv: {
-        GOOGLE_VERTEX_PROJECT: 'my-project',
-      },
-      persistedEnvVarNames: ['GOOGLE_APPLICATION_CREDENTIALS'],
-    });
-
-    expect(
-      status.providers.find((provider) => provider.id === 'google-vertex'),
-    ).toMatchObject({
-      runtimeApiKeySatisfied: false,
-      savedApiKeySatisfied: true,
-    });
-  });
-
   it('treats a persisted Bedrock Mantle model with saved credentials as satisfied', () => {
     const status = buildSetupModelStatus({
       persistedModelConfig: {
@@ -967,9 +907,6 @@ describe('buildSetupModelStatus multi-credential providers', () => {
 describe('collectSetupModelProviderCredentialValues', () => {
   const bedrockProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
     (provider) => provider.id === 'amazon-bedrock',
-  )!;
-  const vertexProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
-    (provider) => provider.id === 'google-vertex',
   )!;
   const anthropicProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
     (provider) => provider.id === 'anthropic',
@@ -1022,65 +959,7 @@ describe('collectSetupModelProviderCredentialValues', () => {
     });
   });
 
-  it('requires a missing required field unless it is already satisfied', () => {
-    expect(() =>
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        isEnvVarSatisfied: () => false,
-        action: 'continue',
-      }),
-    ).toThrow('Enter the Project ID for Google Vertex AI to continue.');
-
-    expect(
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        isEnvVarSatisfied: (name) => name === 'GOOGLE_VERTEX_PROJECT',
-        action: 'continue',
-      }),
-    ).toEqual({
-      values: [
-        {
-          name: 'GOOGLE_APPLICATION_CREDENTIALS',
-          value: '{"type":"service_account"}',
-        },
-      ],
-      clearedEnvVarNames: [],
-    });
-  });
-
-  it('does not clear a blanked required field that is satisfied elsewhere', () => {
-    expect(
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        apiKey: '{"type":"service_account"}',
-        additionalEnvValues: { GOOGLE_VERTEX_PROJECT: '' },
-        isEnvVarSatisfied: (name) => name === 'GOOGLE_VERTEX_PROJECT',
-        action: 'continue',
-      }),
-    ).toEqual({
-      values: [
-        {
-          name: 'GOOGLE_APPLICATION_CREDENTIALS',
-          value: '{"type":"service_account"}',
-        },
-      ],
-      clearedEnvVarNames: [],
-    });
-  });
-
   it('uses the provider credential label when the primary value is missing', () => {
-    expect(() =>
-      collectSetupModelProviderCredentialValues({
-        provider: vertexProvider,
-        isEnvVarSatisfied: () => false,
-        action: 'continue',
-      }),
-    ).toThrow(
-      'Enter the Service account JSON for Google Vertex AI to continue.',
-    );
-
     expect(() =>
       collectSetupModelProviderCredentialValues({
         provider: anthropicProvider,
@@ -1100,21 +979,5 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Amazon Bedrock does not accept a DATABASE_URL value.');
-  });
-});
-
-describe('isInlineGoogleCredentialsValue', () => {
-  it('detects inline service-account JSON', () => {
-    expect(isInlineGoogleCredentialsValue(' {"type":"service_account"} ')).toBe(
-      true,
-    );
-  });
-
-  it('leaves file paths and empty values alone', () => {
-    expect(
-      isInlineGoogleCredentialsValue('/etc/roomote/service-account.json'),
-    ).toBe(false);
-    expect(isInlineGoogleCredentialsValue('')).toBe(false);
-    expect(isInlineGoogleCredentialsValue(undefined)).toBe(false);
   });
 });

@@ -18,7 +18,6 @@ import {
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   type InferenceGatewayProvider,
-  isInlineGoogleCredentialsValue,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
@@ -1384,7 +1383,7 @@ export function generateOpenCodeConfig({
     OPENCODE_CONFIG_DIR_NAME,
   );
   fs.mkdirSync(openCodeConfigDir, { recursive: true });
-  materializeInlineGoogleCredentials(runtimeEnv, homeDir);
+  removeDisabledGoogleVertexCredentials(runtimeEnv, homeDir);
   const resolvedModel = resolveConfiguredPromptModel(model);
   // A variant task model (`openrouter/...:nitro`) surfaces as its catalog base
   // model here (inline config + per-prompt model selection); the operator
@@ -1555,10 +1554,10 @@ export function resolveOpenCodeDataDir(
 }
 
 /**
- * Credential files materialized under the OpenCode data dir for a run: the
- * ChatGPT subscription `auth.json` and the inline Google service-account
- * JSON. Deleted before filesystem snapshots; both are re-materialized from
- * the dequeue/resume env at the next run start.
+ * Credential files under the OpenCode data dir. The ChatGPT subscription
+ * `auth.json` is active only outside gateway mode; the Google service-account
+ * path is retained here solely to scrub files left by snapshots created while
+ * Vertex was enabled.
  */
 export function resolveOpenCodeCredentialFilePaths(
   homeDir: string,
@@ -1573,14 +1572,11 @@ export function resolveOpenCodeCredentialFilePaths(
 }
 
 /**
- * Rewrite the OpenCode credential files the pre-snapshot scrub removed, for
+ * Rewrite the OpenCode auth file the pre-snapshot scrub removed, for
  * a sandbox that survived an abandoned snapshot attempt. Normally these files
- * are materialized once during harness bootstrap and the running harness
- * keeps pointing at their paths (Google's auth library re-reads
- * GOOGLE_APPLICATION_CREDENTIALS per token mint, and OpenCode persists OAuth
- * refreshes back to auth.json), so restoring the same paths from the
- * deployment's current env values heals the live harness without a restart.
- * Files whose source env value is absent are skipped.
+ * are materialized once during harness bootstrap and OpenCode persists OAuth
+ * refreshes back to auth.json, so restoring the same path from the
+ * deployment's current env value heals the live harness without a restart.
  */
 export function rematerializeOpenCodeCredentialFiles(options: {
   homeDir: string;
@@ -1588,20 +1584,7 @@ export function rematerializeOpenCodeCredentialFiles(options: {
   logger: { info(message: string): void; warn(message: string): void };
 }): { failedSteps: string[] } {
   const failedSteps: string[] = [];
-  // materializeInlineGoogleCredentials rewrites the env value to the file
-  // path; work on a copy so the caller's env is untouched.
   const env = { ...options.runtimeEnv };
-
-  try {
-    materializeInlineGoogleCredentials(env, options.homeDir);
-  } catch (error) {
-    options.logger.warn(
-      `[rematerializeOpenCodeCredentialFiles] Failed to rewrite Google application credentials file: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-    failedSteps.push('rewrite Google application credentials file');
-  }
 
   const authContent = env[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
 
@@ -1628,23 +1611,16 @@ export function rematerializeOpenCodeCredentialFiles(options: {
 }
 
 /**
- * OpenCode's Google Vertex provider reads GOOGLE_APPLICATION_CREDENTIALS as a
- * file path. Roomote accepts pasted JSON, so materialize it at the common
- * config-generation boundary before any provider process can observe it.
- * Throw on write failures rather than forwarding raw credentials to OpenCode,
- * whose file-not-found errors may echo the credential value.
+ * Vertex is disabled until its service-account authentication can remain on
+ * the control plane. Remove both the env var and any credential file left by a
+ * pre-disable snapshot before OpenCode starts. File removal fails closed so a
+ * stale long-lived service account can never survive into a task.
  */
-function materializeInlineGoogleCredentials(
+function removeDisabledGoogleVertexCredentials(
   runtimeEnv: Record<string, string>,
   homeDir: string,
 ): void {
-  const credentialsValue =
-    runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
-
-  if (!isInlineGoogleCredentialsValue(credentialsValue)) {
-    return;
-  }
-
+  delete runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME];
   const openCodeDataDir = resolveOpenCodeDataDir(homeDir, runtimeEnv);
   const credentialsFilePath = path.join(
     openCodeDataDir,
@@ -1652,22 +1628,25 @@ function materializeInlineGoogleCredentials(
   );
 
   try {
-    fs.mkdirSync(openCodeDataDir, { recursive: true, mode: 0o700 });
-    fs.writeFileSync(credentialsFilePath, credentialsValue, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
+    fs.rmSync(credentialsFilePath, { force: true });
   } catch (error) {
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ENOENT' || error.code === 'ENOTDIR')
+    ) {
+      return;
+    }
+
     const message =
       error instanceof Error
         ? error.message
-        : 'Unknown credentials write error';
+        : 'Unknown credentials remove error';
     throw new Error(
-      `Failed to materialize inline ${GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME} before starting OpenCode: ${message}`,
+      `Failed to remove disabled Google Vertex credentials before starting OpenCode: ${message}`,
+      { cause: error },
     );
   }
-
-  runtimeEnv[GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME] = credentialsFilePath;
 }
 
 function normalizePackagedFolderName(

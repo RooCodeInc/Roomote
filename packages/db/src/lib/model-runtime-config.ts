@@ -5,6 +5,7 @@ import {
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
+  GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   isConfiguredEnvValue,
@@ -110,6 +111,8 @@ function resolveProviderKeyNames({
 }): string[] {
   const configuredProviderKeys = parseModelProviderEnvKeys(
     runtimeRoomoteModelEnvKeys,
+  ).filter(
+    (envVarName) => envVarName !== GOOGLE_APPLICATION_CREDENTIALS_ENV_VAR_NAME,
   );
 
   if (configuredProviderKeys.length > 0) {
@@ -200,25 +203,33 @@ export async function resolveEffectiveModelRuntimeEnv(
     loadPersistedRuntimeModelConfig(executor),
   ]);
   const persistedRuntimeModelConfig = runtimeModelConfig;
+  const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
+    roomoteModel: runtimeEnv.R_MODEL,
+    roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
+    roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
+    roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
+    roomoteExploreModel: runtimeEnv.R_EXPLORE_MODEL,
+    roomotePlanningModel: runtimeEnv.R_PLANNING_MODEL,
+  });
   const resolvedRoomoteModel =
-    normalizeConfiguredValue(runtimeEnv.R_MODEL) ??
+    runtimeOverrideModelConfig.roomoteModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel);
   const resolvedRoomoteSmallModel =
-    normalizeConfiguredValue(runtimeEnv.R_SMALL_MODEL) ??
+    runtimeOverrideModelConfig.roomoteSmallModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteSmallModel);
   const resolvedRoomoteVisionModel =
-    normalizeConfiguredValue(runtimeEnv.R_VISION_MODEL) ??
+    runtimeOverrideModelConfig.roomoteVisionModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteVisionModel);
   const resolvedRoomoteCodeReviewModel =
-    normalizeConfiguredValue(runtimeEnv.R_CODE_REVIEW_MODEL) ??
+    runtimeOverrideModelConfig.roomoteCodeReviewModel ??
     normalizeConfiguredValue(
       persistedRuntimeModelConfig.roomoteCodeReviewModel,
     );
   const resolvedRoomoteExploreModel =
-    normalizeConfiguredValue(runtimeEnv.R_EXPLORE_MODEL) ??
+    runtimeOverrideModelConfig.roomoteExploreModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteExploreModel);
   const resolvedRoomotePlanningModel =
-    normalizeConfiguredValue(runtimeEnv.R_PLANNING_MODEL) ??
+    runtimeOverrideModelConfig.roomotePlanningModel ??
     normalizeConfiguredValue(persistedRuntimeModelConfig.roomotePlanningModel);
   // Roomote applies per-role reasoning defaults when no explicit level is
   // configured, but only for models that are not known to lack configurable
@@ -321,8 +332,8 @@ export async function resolveEffectiveModelRuntimeEnv(
   // the control plane and are advertised to the worker by name via
   // R_INFERENCE_GATEWAY_KEYS; the worker builds the (container-reachable)
   // gateway URL from its own platform URL and rebases exactly these providers.
-  // Only configured keys are withheld. Providers the gateway cannot serve
-  // (such as Vertex request signing) continue to flow through.
+  // Only configured keys are withheld; credentials for disabled providers are
+  // filtered before this point and never flow to the task runtime.
   const gatewayServedKeyNames = options.inferenceGateway
     ? gatewayProviderKeyNames.filter(
         (name) =>
