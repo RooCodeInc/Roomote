@@ -66,13 +66,8 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
 const MODEL_METADATA_FETCH_TIMEOUT_MS = 10_000;
 const LOCAL_PROVIDER_REQUEST_TIMEOUT_MS = 15_000;
 
-export const LOCAL_TASK_MODEL_PROVIDER_IDS = [
-  'ollama',
-  'vllm',
-  'litellm',
-] as const;
-export type LocalTaskModelProviderId =
-  (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number];
+const LOCAL_TASK_MODEL_PROVIDER_IDS = ['ollama', 'vllm', 'litellm'] as const;
+type LocalTaskModelProviderId = (typeof LOCAL_TASK_MODEL_PROVIDER_IDS)[number];
 
 type LocalProviderConnectionInput = {
   baseUrl?: string;
