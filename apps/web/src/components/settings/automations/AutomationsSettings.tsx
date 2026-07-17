@@ -3828,6 +3828,25 @@ If unclear, send to manager channel.`}
                   <div className="flex items-start gap-2">
                     <Switch
                       className="mt-1"
+                      checked={formState.reviewerReviewDraftPrs}
+                      onCheckedChange={(reviewerReviewDraftPrs) =>
+                        setFormState((prev) =>
+                          prev ? { ...prev, reviewerReviewDraftPrs } : prev,
+                        )
+                      }
+                    />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Review draft PRs</p>
+                      <p className="text-xs text-muted-foreground">
+                        Turn off to only review PRs marked as ready (and save
+                        tokens)
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2">
+                    <Switch
+                      className="mt-1"
                       aria-label={`Review PRs not created by ${PRODUCT_NAME}`}
                       checked={formState.reviewerReviewAllPullRequestAuthors}
                       onCheckedChange={(reviewerReviewAllPullRequestAuthors) =>
@@ -3847,25 +3866,6 @@ If unclear, send to manager channel.`}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Include pull requests opened by people or others
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-2">
-                    <Switch
-                      className="mt-1"
-                      checked={formState.reviewerReviewDraftPrs}
-                      onCheckedChange={(reviewerReviewDraftPrs) =>
-                        setFormState((prev) =>
-                          prev ? { ...prev, reviewerReviewDraftPrs } : prev,
-                        )
-                      }
-                    />
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">Review draft PRs</p>
-                      <p className="text-xs text-muted-foreground">
-                        Turn off to only review PRs marked as ready (and save
-                        tokens)
                       </p>
                     </div>
                   </div>
