@@ -24,9 +24,11 @@ menu for you.
 
 In BotFather, open **Bot Settings > Threaded Mode** and enable it. Roomote will
 then create a separate topic in your private bot chat for each new task. If
-Threaded Mode is unavailable or disabled, Roomote falls back to the existing
-single-chat flow. Telegram's Bot Developer Terms currently withhold a 15% fee
-from Stars purchases made through a bot while private-chat topics are enabled.
+Threaded Mode is unavailable or disabled, Roomote uses the existing single-chat
+flow. When a new topic opens, Roomote replies in the source conversation with
+its name; open it from Telegram's topic list. Telegram's Bot Developer Terms
+currently withhold a 15% fee from Stars purchases made through a bot while
+private-chat topics are enabled.
 When Telegram initially labels an implicit topic **New Chat**, Roomote replaces
 it with the same generated title shown for the task in the web app.
 
@@ -34,7 +36,10 @@ For a shared team chat, create a Telegram supergroup, enable topics, then add
 the Roomote bot as an administrator with **Manage Topics** permission. Telegram
 requires a user to create the group and enable topics; the Bot API cannot do
 those provisioning steps. Once configured, Roomote can create task topics in
-the forum automatically.
+the forum automatically. The source conversation receives an **Open topic**
+button so the handoff is visible instead of relying on the topic list alone.
+If Telegram rejects topic creation, Roomote starts the task in the source
+conversation and explains that Threaded Mode or **Manage Topics** needs attention.
 
 For self-hosted env-var configuration instead of the UI:
 
