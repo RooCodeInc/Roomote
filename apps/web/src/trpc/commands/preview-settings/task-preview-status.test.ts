@@ -53,13 +53,17 @@ async function createEnvironmentBackedTask(params: {
   return task;
 }
 
-async function createActiveSetupTask(environmentId: string) {
+async function createActiveSetupTask(
+  environmentId: string,
+  options: { runsInEnvironment?: boolean } = {},
+) {
   const task = await taskFactory.create({ workflow: 'setup_onboarding' });
   const run = await runFactory.create({
     taskId: task.id,
     payload: {
       repo: 'test/repo',
       environmentDefinitionId: environmentId,
+      ...(options.runsInEnvironment ? { environmentId } : {}),
       description: 'setup',
     } as never,
   });
@@ -163,7 +167,7 @@ describe('getTaskPreviewStatusCommand', () => {
     expect(status.runHasPreviewDomains).toBe(true);
   });
 
-  it('surfaces an active setup task for the environment', async () => {
+  it('classifies the initial repo-only environment setup task as an environment agent', async () => {
     const environment = await environmentFactory.create({
       createdByUserId: null,
     });
@@ -179,6 +183,29 @@ describe('getTaskPreviewStatusCommand', () => {
     expect(status.setupTask).toEqual({
       taskId: setupTask.id,
       status: RunStatus.Running,
+      kind: 'environment',
+    });
+  });
+
+  it('classifies an environment-running definition task as a preview agent', async () => {
+    const environment = await environmentFactory.create({
+      createdByUserId: null,
+    });
+    const task = await createEnvironmentBackedTask({
+      environmentId: environment.id,
+    });
+    const setupTask = await createActiveSetupTask(environment.id, {
+      runsInEnvironment: true,
+    });
+
+    const status = await getTaskPreviewStatusCommand(auth, {
+      taskId: task.id,
+    });
+
+    expect(status.setupTask).toEqual({
+      taskId: setupTask.id,
+      status: RunStatus.Running,
+      kind: 'preview',
     });
   });
 });
@@ -249,9 +276,10 @@ describe('startPreviewSetupTaskCommand', () => {
 
     const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
       title: string;
-      task: { payload: { description: string } };
+      task: { payload: { description: string; environmentId?: string } };
     };
     expect(enqueueInput.title).toMatch(/^Fix live previews: /);
+    expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
     expect(enqueueInput.task.payload.description).toContain(
       ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
     );
@@ -275,9 +303,10 @@ describe('startPreviewSetupTaskCommand', () => {
 
     const enqueueInput = vi.mocked(enqueueTask).mock.calls.at(-1)?.[0] as {
       title: string;
-      task: { payload: { description: string } };
+      task: { payload: { description: string; environmentId?: string } };
     };
     expect(enqueueInput.title).toMatch(/^Set up live previews: /);
+    expect(enqueueInput.task.payload.environmentId).toBe(environment.id);
     expect(enqueueInput.task.payload.description).toContain(
       ENVIRONMENT_PREVIEW_SETUP_CHANGE_REQUEST,
     );

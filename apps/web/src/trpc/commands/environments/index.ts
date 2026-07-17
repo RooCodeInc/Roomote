@@ -870,13 +870,30 @@ async function getActiveVerificationTaskId(
  * `environmentDefinitionId`). Shared by the verification-retry guard and the
  * preview-setup CTA so neither launches a duplicate agent while one is
  * in flight.
+ *
+ * `isPreviewSetupTask` distinguishes preview setup/repair agents (definition
+ * tasks that run inside the environment, i.e. payload `environmentId` matches)
+ * from the initial environment-creation task, which is necessarily repo-only,
+ * and from verification retries.
  */
 export async function getActiveEnvironmentAgentTask(
   dbOrTx: DatabaseOrTransaction,
   environmentId: string,
-): Promise<{ taskId: string; status: RunStatus } | null> {
+): Promise<{
+  taskId: string;
+  status: RunStatus;
+  isPreviewSetupTask: boolean;
+} | null> {
   const [job] = await dbOrTx
-    .select({ taskId: taskRuns.taskId, status: taskRuns.status })
+    .select({
+      taskId: taskRuns.taskId,
+      status: taskRuns.status,
+      isPreviewSetupTask: sql<boolean>`(
+        ${tasks.workflow} = 'setup_onboarding'
+        AND ${taskRuns.payload} ->> 'environmentDefinitionId' = ${environmentId}
+        AND ${taskRuns.payload} ->> 'environmentId' = ${environmentId}
+      )`,
+    })
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(

@@ -15,7 +15,11 @@ const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
         portNames: ['WEB'],
       },
       runHasPreviewDomains: true,
-      setupTask: null as { taskId: string; status: string } | null,
+      setupTask: null as {
+        taskId: string;
+        status: string;
+        kind: 'preview' | 'environment';
+      } | null,
     },
   },
   startSetupMock: vi.fn(
@@ -132,7 +136,7 @@ describe('PreviewHelpDialog', () => {
     authState.isAdmin = true;
     statusState.data = {
       ...statusState.data,
-      setupTask: { taskId: 'fix-task-9', status: 'running' },
+      setupTask: { taskId: 'fix-task-9', status: 'running', kind: 'preview' },
     };
 
     renderDialog();
@@ -140,6 +144,29 @@ describe('PreviewHelpDialog', () => {
     expect(
       await screen.findByRole('link', { name: /view agent task/i }),
     ).toHaveAttribute('href', '/task/fix-task-9');
+    expect(
+      screen.queryByRole('button', { name: /fix previews with an agent/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('explains ongoing environment setup instead of claiming a preview agent', async () => {
+    authState.isAdmin = true;
+    statusState.data = {
+      ...statusState.data,
+      setupTask: {
+        taskId: 'env-setup-9',
+        status: 'running',
+        kind: 'environment',
+      },
+    };
+
+    renderDialog();
+
+    expect(
+      await screen.findByText(
+        'Web App is still being set up. Previews may not work until setup completes.',
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /fix previews with an agent/i }),
     ).not.toBeInTheDocument();

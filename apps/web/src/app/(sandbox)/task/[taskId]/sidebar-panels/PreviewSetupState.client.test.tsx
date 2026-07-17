@@ -17,7 +17,11 @@ const { authState, statusState, startSetupMock } = vi.hoisted(() => ({
         portNames: string[];
       } | null;
       runHasPreviewDomains: boolean;
-      setupTask: { taskId: string; status: string } | null;
+      setupTask: {
+        taskId: string;
+        status: string;
+        kind: 'preview' | 'environment';
+      } | null;
     } | null,
   },
   startSetupMock: vi.fn(async (_variables: { taskId: string }) => ({
@@ -147,7 +151,7 @@ describe('PreviewSetupState', () => {
 
   it('links to an in-flight setup task', async () => {
     statusState.data = buildStatus({
-      setupTask: { taskId: 'setup-task-9', status: 'running' },
+      setupTask: { taskId: 'setup-task-9', status: 'running', kind: 'preview' },
     });
 
     renderSetupState(taskRun);
@@ -160,6 +164,28 @@ describe('PreviewSetupState', () => {
     expect(
       screen.getByRole('link', { name: /view setup task/i }),
     ).toHaveAttribute('href', '/task/setup-task-9');
+  });
+
+  it('explains ongoing environment setup without claiming a preview agent', async () => {
+    statusState.data = buildStatus({
+      setupTask: {
+        taskId: 'env-setup-1',
+        status: 'running',
+        kind: 'environment',
+      },
+    });
+
+    renderSetupState(taskRun);
+
+    expect(
+      await screen.findByText('Web App is still being set up'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/setting up live previews/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: /view setup task/i }),
+    ).toHaveAttribute('href', '/task/env-setup-1');
   });
 
   it('tells non-admins to ask an administrator when the runtime is not ready', async () => {

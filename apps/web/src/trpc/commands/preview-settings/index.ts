@@ -12,9 +12,9 @@ import {
   withEnvironmentVerificationRetryLock,
 } from '@roomote/db/server';
 import {
+  ALL_REPOSITORIES,
   analyzePreviewRuntimeConfig,
   appendEnvironmentDefinitionGuidance,
-  buildEnvironmentDefinitionWorkspacePayload,
   buildExamplePreviewHostname,
   deriveRoomotePreviewDomain,
   ENVIRONMENT_PREVIEW_REPAIR_CHANGE_REQUEST,
@@ -420,7 +420,16 @@ export interface TaskPreviewStatus {
     portNames: string[];
   } | null;
   runHasPreviewDomains: boolean;
-  setupTask: { taskId: string; status: RunStatus } | null;
+  /**
+   * Active agent task for the environment. Kind 'preview' is a preview
+   * setup/repair agent launched from the preview pane; 'environment' is any
+   * other environment agent (initial creation, verification retry).
+   */
+  setupTask: {
+    taskId: string;
+    status: RunStatus;
+    kind: 'preview' | 'environment';
+  } | null;
 }
 
 async function resolveLatestTaskRunForTask(taskId: string) {
@@ -503,7 +512,7 @@ export async function getTaskPreviewStatusCommand(
     };
   }
 
-  const [environment, setupTask] = await Promise.all([
+  const [environment, activeAgentTask] = await Promise.all([
     loadDeploymentEnvironment(environmentId),
     getActiveEnvironmentAgentTask(db, environmentId),
   ]);
@@ -519,7 +528,13 @@ export async function getTaskPreviewStatusCommand(
         }
       : null,
     runHasPreviewDomains,
-    setupTask,
+    setupTask: activeAgentTask
+      ? {
+          taskId: activeAgentTask.taskId,
+          status: activeAgentTask.status,
+          kind: activeAgentTask.isPreviewSetupTask ? 'preview' : 'environment',
+        }
+      : null,
   };
 }
 
@@ -591,8 +606,13 @@ export async function startPreviewSetupTaskCommand(
           : `Set up live previews: ${environment.name}`,
       task: {
         type: TaskPayloadKind.StandardTask,
+        // Runs inside the environment (like verification tasks) so the agent
+        // validates the actually-running services, and so this task is
+        // distinguishable from the initial repo-only environment-creation
+        // task when reporting preview setup progress.
         payload: {
-          ...buildEnvironmentDefinitionWorkspacePayload(repositoryFullNames),
+          repo: ALL_REPOSITORIES,
+          environmentId: environment.id,
           environmentDefinitionId: environment.id,
           description: prompt,
         },
