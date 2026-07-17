@@ -112,6 +112,7 @@ vi.mock('@/components/settings', () => ({
 
 import type {
   ReasoningEffort,
+  RecommendedModelPreset,
   RecommendedRoleModels,
   SetupModelProviderId,
   TaskModelMetadata,
@@ -139,6 +140,8 @@ function buildSettingsData(
     codeReviewEffectiveModelId?: string | null;
     exploreEffectiveModelId?: string | null;
     planningEffectiveModelId?: string | null;
+    codingReasoningEffort?: ReasoningEffort | null;
+    helperReasoningEffort?: ReasoningEffort | null;
   } = {},
 ) {
   return {
@@ -182,7 +185,7 @@ function buildSettingsData(
         persistedModelId: 'openrouter/openai/gpt-5.4',
         source: 'database',
         managedByEnv: overrides.codingManagedByEnv ?? false,
-        reasoningEffort: null as ReasoningEffort | null,
+        reasoningEffort: overrides.codingReasoningEffort ?? null,
         reasoningManagedByEnv: overrides.codingReasoningManagedByEnv ?? false,
       },
       helperModel: {
@@ -190,7 +193,7 @@ function buildSettingsData(
         persistedModelId: null,
         source: 'same-as-coding',
         managedByEnv: overrides.helperManagedByEnv ?? false,
-        reasoningEffort: null as ReasoningEffort | null,
+        reasoningEffort: overrides.helperReasoningEffort ?? null,
         reasoningManagedByEnv: overrides.helperReasoningManagedByEnv ?? false,
       },
       visionModel: {
@@ -264,6 +267,7 @@ function buildProviderSetupData(
       Array<{ id: string; displayName: string }>
     >;
     recommendedRoleModelsByProvider?: Record<string, RecommendedRoleModels>;
+    recommendedPresetsByProvider?: Record<string, RecommendedModelPreset[]>;
   } = {},
 ) {
   const connectedProviderIds = overrides.connectedProviderIds ?? [
@@ -274,6 +278,8 @@ function buildProviderSetupData(
     overrides.suggestedTaskModelsByProvider ?? {};
   const recommendedRoleModelsByProvider =
     overrides.recommendedRoleModelsByProvider ?? {};
+  const recommendedPresetsByProvider =
+    overrides.recommendedPresetsByProvider ?? {};
   const buildProvider = (
     id: SetupModelProviderId,
     label: string,
@@ -286,6 +292,7 @@ function buildProviderSetupData(
     authKind: 'api-key' as const,
     suggestedTaskModels: suggestedTaskModelsByProvider[id] ?? [],
     recommendedRoleModels: recommendedRoleModelsByProvider[id],
+    recommendedPresets: recommendedPresetsByProvider[id],
     runtimeApiKeySatisfied: false,
     savedApiKeySatisfied: connectedProviderIds.includes(id),
     additionalEnvValues: {},
@@ -854,9 +861,15 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
     expect(
-      screen.getByRole('heading', { name: 'Apply Anthropic preset' }),
+      screen.getByRole('heading', {
+        name: 'Apply Anthropic Recommended preset',
+      }),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
@@ -910,7 +923,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'OpenRouter' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'OpenRouter: Recommended (default)',
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {
@@ -925,6 +942,134 @@ describe('ModelSettingsSection', () => {
         codeReviewModelId: null,
         exploreModelId: null,
         planningModelId: null,
+      }),
+    );
+  });
+
+  it('applies a named preset with models outside the suggested catalog and preserves env-managed reasoning', async () => {
+    settingsData.current = buildSettingsData({
+      helperReasoningManagedByEnv: true,
+      helperReasoningEffort: 'high',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'steady',
+            label: 'Steady',
+            default: true,
+            roles: {
+              coding: { modelId: 'anthropic/default-model' },
+            },
+          },
+          {
+            id: 'careful-review',
+            label: 'Careful review',
+            roles: {
+              coding: {
+                modelId: 'anthropic/claude-sonnet-5',
+                displayName: 'Claude Sonnet 5',
+                family: 'Claude',
+                reasoningEffort: 'high',
+              },
+              helper: {
+                modelId: 'anthropic/claude-haiku-4-5',
+                reasoningEffort: 'low',
+              },
+              codeReview: {
+                modelId: 'anthropic/claude-opus-4-8',
+                displayName: 'Claude Opus 4.8',
+                family: 'Claude',
+                reasoningEffort: 'xhigh',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', { name: 'Anthropic: Careful review' }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultModelId: 'anthropic/claude-sonnet-5',
+        codeReviewModelId: 'anthropic/claude-opus-4-8',
+        codingModelReasoningEffort: 'high',
+        helperModelReasoningEffort: 'high',
+        codeReviewModelReasoningEffort: 'xhigh',
+      }),
+    );
+    const payload = updateMutateAsyncMock.mock.calls[0]![0] as {
+      models: Array<{ id: string; displayName: string; family?: string }>;
+      allowedModelIds: string[];
+    };
+    expect(payload.models).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: 'anthropic/claude-opus-4-8',
+          displayName: 'Claude Opus 4.8',
+          family: 'Claude',
+        }),
+      ]),
+    );
+    expect(payload.allowedModelIds).toContain('anthropic/claude-opus-4-8');
+  });
+
+  it('applies preset reasoning when only the role model is env-managed', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'reasoned',
+            label: 'Reasoned',
+            default: true,
+            roles: {
+              coding: { modelId: 'anthropic/default-model' },
+              helper: {
+                modelId: 'anthropic/claude-haiku-4-5',
+                reasoningEffort: 'low',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Reasoned (default)',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        helperModelId: null,
+        helperModelReasoningEffort: 'low',
       }),
     );
   });
@@ -954,7 +1099,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
 
     const dialog = screen.getByRole('dialog');
     expect(
@@ -971,6 +1120,95 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(updateMutateAsyncMock).not.toHaveBeenCalled();
+  });
+
+  it('previews inherited roles with the effective env-managed coding model', async () => {
+    settingsData.current = buildSettingsData({
+      codingManagedByEnv: true,
+      codingEffectiveModelId: 'openrouter/z-ai/glm-5.2',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(6);
+  });
+
+  it('previews inherited roles with the selected coding preset when it is not env-managed', async () => {
+    settingsData.current = buildSettingsData();
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('default-model')).toHaveLength(6);
+  });
+
+  it('matches preset display metadata to the resolved preview model', async () => {
+    settingsData.current = buildSettingsData({
+      helperManagedByEnv: true,
+      helperEffectiveModelId: 'openrouter/acme/env-model',
+    });
+    providerSetupData.current = buildProviderSetupData({
+      connectedProviderIds: ['anthropic'],
+      recommendedPresetsByProvider: {
+        anthropic: [
+          {
+            id: 'named-models',
+            label: 'Named models',
+            default: true,
+            roles: {
+              coding: {
+                modelId: 'anthropic/claude-sonnet-6',
+                displayName: 'Claude Sonnet 6',
+              },
+              helper: {
+                modelId: 'anthropic/claude-haiku-6',
+                displayName: 'Claude Haiku 6',
+              },
+            },
+          },
+        ],
+      },
+    });
+
+    renderModelSettingsSection();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Use a mapping preset' }),
+    );
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Named models (default)',
+      }),
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(5);
+    expect(within(dialog).getByText('env-model')).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText('Claude Haiku 6'),
+    ).not.toBeInTheDocument();
   });
 
   it('leaves env-managed roles untouched when applying recommended defaults', async () => {
@@ -1000,7 +1238,11 @@ describe('ModelSettingsSection', () => {
     fireEvent.click(
       screen.getByRole('button', { name: 'Use a mapping preset' }),
     );
-    fireEvent.click(await screen.findByRole('option', { name: 'Anthropic' }));
+    fireEvent.click(
+      await screen.findByRole('option', {
+        name: 'Anthropic: Recommended (default)',
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => {

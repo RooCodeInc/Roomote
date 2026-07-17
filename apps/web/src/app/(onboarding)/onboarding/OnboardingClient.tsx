@@ -4,11 +4,11 @@ import { AnimatePresence, motion } from 'motion/react';
 
 import { Spinner } from '@/components/system';
 
+import { StepWelcome } from '../setup/StepWelcome';
 import { StepGitHub } from './StepGitHub';
 import { StepInvoke } from './StepInvoke';
 import { StepLinear } from './StepLinear';
 import { StepSlack } from './StepSlack';
-import { StepWelcome } from './StepWelcome';
 import { useOnboardingFlow } from './hooks';
 
 export function OnboardingClient({ githubAppSlug }: { githubAppSlug: string }) {
@@ -47,7 +47,9 @@ export function OnboardingClient({ githubAppSlug }: { githubAppSlug: string }) {
             transition: { duration: 0.2, ease: [0.4, 0.0, 1, 1] },
           }}
         >
-          {step === 'welcome' && <StepWelcome onContinue={goToNextStep} />}
+          {step === 'welcome' && (
+            <StepWelcome isOnboarding onContinue={goToNextStep} />
+          )}
           {step === 'slack' && <StepSlack onContinue={goToNextStep} />}
           {step === 'linear' && (
             <StepLinear
