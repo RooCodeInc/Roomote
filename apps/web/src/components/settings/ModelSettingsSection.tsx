@@ -794,6 +794,11 @@ export function ModelSettingsSection({
       provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
       provider.savedApiKeySatisfied,
   );
+  const openaiConnected = sortedConnectedProviders.some(
+    (provider) =>
+      provider.id === 'openai' &&
+      (provider.savedApiKeySatisfied || provider.runtimeApiKeySatisfied),
+  );
   const activeNewModelProvider = useMemo(
     () =>
       sortedConnectedProviders.find(
@@ -1067,17 +1072,27 @@ export function ModelSettingsSection({
   }, [settingsData]);
   const codingModelGroups = useMemo(
     () =>
-      groupModelsByDisplayProvider(codingModelOptions, { chatgptConnected }),
-    [codingModelOptions, chatgptConnected],
+      groupModelsByDisplayProvider(codingModelOptions, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [codingModelOptions, chatgptConnected, openaiConnected],
   );
   const helperModelGroups = useMemo(
     () =>
-      groupModelsByDisplayProvider(helperModelOptions, { chatgptConnected }),
-    [helperModelOptions, chatgptConnected],
+      groupModelsByDisplayProvider(helperModelOptions, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [helperModelOptions, chatgptConnected, openaiConnected],
   );
   const modelGroups = useMemo(
-    () => groupModelsByDisplayProvider(models, { chatgptConnected }),
-    [models, chatgptConnected],
+    () =>
+      groupModelsByDisplayProvider(models, {
+        chatgptConnected,
+        openaiConnected,
+      }),
+    [models, chatgptConnected, openaiConnected],
   );
   const roleOptionGroups: Record<
     TaskModelRole,

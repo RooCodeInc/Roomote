@@ -359,7 +359,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(chatgptProvider?.envVarName).toBeUndefined();
   });
 
-  it('groups openai/ models under ChatGPT when a subscription is connected', () => {
+  it('groups openai/ models under ChatGPT when only a subscription is connected', () => {
     expect(
       getDisplayModelProviderId('openai/gpt-5.6-terra', {
         chatgptConnected: true,
@@ -375,12 +375,21 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         chatgptConnected: true,
       }),
     ).toBe('anthropic');
-    // Subscription auth wins when both an OpenAI key and ChatGPT are present.
+    // Subscription-only callers (omit openaiConnected) still group under ChatGPT.
     expect(
       getDisplayModelProviderId('openai/gpt-5.6-terra', {
         chatgptConnected: true,
       }),
     ).toBe('chatgpt');
+  });
+
+  it('keeps openai/ models under OpenAI when an API key is also connected', () => {
+    expect(
+      getDisplayModelProviderId('openai/gpt-5.6-terra', {
+        chatgptConnected: true,
+        openaiConnected: true,
+      }),
+    ).toBe('openai');
   });
 
   it('groups model chooser options by display provider and catalog order', () => {
