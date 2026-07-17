@@ -41,7 +41,6 @@ export async function GET(
     auth: {
       userId: authResult.userId,
       isAdmin: authResult.isAdmin,
-      ...('runId' in authResult ? { runId: authResult.runId } : {}),
     },
   });
 

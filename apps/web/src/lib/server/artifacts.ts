@@ -1,12 +1,4 @@
-import {
-  db,
-  taskArtifacts,
-  taskRuns,
-  tasks,
-  eq,
-  and,
-  desc,
-} from '@roomote/db/server';
+import { db, taskArtifacts, tasks, eq, and, desc } from '@roomote/db/server';
 import type { TaskArtifactType } from '@roomote/types';
 
 function withTypedArtifactType<T extends { artifactType: string }>(
@@ -27,31 +19,7 @@ type ArtifactAuth = {
   /** Null for deployment-principal run tokens (no human user). */
   userId: string | null;
   isAdmin: boolean;
-  /** Present when the request is authenticated with a run token. */
-  runId?: number;
 };
-
-/**
- * Run tokens may only touch artifacts for their own task.
- */
-async function assertArtifactAuthAllowsTask({
-  taskId,
-  auth,
-}: {
-  taskId: string;
-  auth: ArtifactAuth;
-}): Promise<boolean> {
-  if (auth.runId === undefined) {
-    return true;
-  }
-
-  const run = await db.query.taskRuns.findFirst({
-    where: eq(taskRuns.id, auth.runId),
-    columns: { taskId: true },
-  });
-
-  return run?.taskId === taskId;
-}
 
 /**
  * Get an artifact by its ID.
@@ -59,16 +27,12 @@ async function assertArtifactAuthAllowsTask({
 export async function getArtifactById({
   taskId,
   artifactId,
-  auth,
+  auth: _auth,
 }: {
   taskId: string;
   artifactId: string;
   auth: ArtifactAuth;
 }) {
-  if (!(await assertArtifactAuthAllowsTask({ taskId, auth }))) {
-    return null;
-  }
-
   const result = await db
     .select()
     .from(taskArtifacts)
@@ -95,17 +59,13 @@ export async function getArtifactByPath({
   taskId,
   path,
   version,
-  auth,
+  auth: _auth,
 }: {
   taskId: string;
   path: string;
   version?: number;
   auth: ArtifactAuth;
 }) {
-  if (!(await assertArtifactAuthAllowsTask({ taskId, auth }))) {
-    return null;
-  }
-
   const whereConditions = [
     eq(taskArtifacts.taskId, taskId),
     eq(taskArtifacts.path, path),
