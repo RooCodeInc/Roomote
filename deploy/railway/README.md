@@ -226,8 +226,8 @@ Notes:
 
 - `R_APP_URL` on api is the **single canonical-origin knob**: it is the
   URL users browse, and web/controller/bullmq/preview-proxy reference
-  `${{api.R_APP_URL}}` rather than repeating the value. It is also the
-  template's one optional deploy-time prompt — the deploy screen shows it
+  `${{api.R_APP_URL}}` rather than repeating the value. It is also one of the
+  template's optional deploy-time prompts — the deploy screen shows it
   pre-filled with the generated-domain reference so a custom domain can be
   entered before first boot. Do not set `R_PUBLIC_URL` — it is
   optional and the app falls back to `R_APP_URL` everywhere it would
@@ -322,7 +322,7 @@ logs a warning when creation fails).
 By default the template boots on Railway-generated domains, and
 `R_APP_URL` — the origin users browse — derives from the web service's
 generated domain. A custom domain can be set either at deploy time (through
-the template's one optional prompt) or after deploy (a one-variable edit).
+the `R_APP_URL` prompt) or after deploy (a one-variable edit).
 Setting it at deploy time is preferable when you already own the domain:
 everything the setup wizard registers — in particular the GitHub App's OAuth
 callback and webhook URLs — derives from the canonical origin, so getting it
