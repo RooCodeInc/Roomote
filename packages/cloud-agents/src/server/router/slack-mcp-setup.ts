@@ -57,11 +57,29 @@ interface AdminConfiguredConnectionStatus {
   authStatus: string | null;
 }
 
-const URL_TOKEN_REGEX =
-  /\[([^\]]+)\]\(((?:https?:\/\/|www\.)[^)\s]+)\)|((?:https?:\/\/|www\.)[^\s<>\]]+)/g;
+function stripTrailingUrlPunctuation(value: string): string {
+  let end = value.length;
+  while (end > 0) {
+    const ch = value[end - 1]!;
+    if (ch === ')' || ch === ',' || ch === '.' || ch === '!' || ch === '?') {
+      end -= 1;
+      continue;
+    }
+    break;
+  }
+  return value.slice(0, end);
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
 
 function normalizeUrlCandidate(rawUrl: string): string {
-  const trimmed = rawUrl.trim().replace(/[),.!?]+$/u, '');
+  const trimmed = stripTrailingUrlPunctuation(rawUrl.trim());
   return trimmed.startsWith('www.') ? `https://${trimmed}` : trimmed;
 }
 
@@ -80,17 +98,72 @@ function parseUrl(rawUrl: string): ExtractedUrl | null {
 
 export function extractUrlsFromSlackText(text: string): ExtractedUrl[] {
   const urls: ExtractedUrl[] = [];
+  const seen = new Set<string>();
 
-  for (const match of text.matchAll(URL_TOKEN_REGEX)) {
-    const url = match[2] ?? match[3];
-    if (!url) {
+  const pushUrl = (raw: string | undefined) => {
+    if (!raw) {
+      return;
+    }
+    const parsed = parseUrl(raw);
+    if (!parsed || seen.has(parsed.rawUrl)) {
+      return;
+    }
+    seen.add(parsed.rawUrl);
+    urls.push(parsed);
+  };
+
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] === '[') {
+      const closeBracket = text.indexOf(']', index + 1);
+      if (
+        closeBracket !== -1 &&
+        closeBracket + 1 < text.length &&
+        text[closeBracket + 1] === '('
+      ) {
+        const closeParen = text.indexOf(')', closeBracket + 2);
+        if (closeParen !== -1) {
+          const candidate = text.slice(closeBracket + 2, closeParen);
+          if (
+            candidate.startsWith('http://') ||
+            candidate.startsWith('https://') ||
+            candidate.startsWith('www.')
+          ) {
+            pushUrl(candidate);
+            index = closeParen + 1;
+            continue;
+          }
+        }
+      }
+    }
+
+    if (
+      text.startsWith('https://', index) ||
+      text.startsWith('http://', index) ||
+      text.startsWith('www.', index)
+    ) {
+      let end = index;
+      while (end < text.length) {
+        const ch = text[end]!;
+        if (
+          ch === ' ' ||
+          ch === '\t' ||
+          ch === '\n' ||
+          ch === '\r' ||
+          ch === '<' ||
+          ch === '>' ||
+          ch === ']'
+        ) {
+          break;
+        }
+        end += 1;
+      }
+      pushUrl(text.slice(index, end));
+      index = end;
       continue;
     }
 
-    const parsed = parseUrl(url);
-    if (parsed) {
-      urls.push(parsed);
-    }
+    index += 1;
   }
 
   return urls;
@@ -173,7 +246,7 @@ function buildSettingsUrl(
   canConfigure: boolean,
   apiBaseUrl?: string,
 ): string {
-  const baseUrl = apiBaseUrl?.replace(/\/+$/u, '') ?? '';
+  const baseUrl = apiBaseUrl ? stripTrailingSlashes(apiBaseUrl) : '';
   const path =
     reason === 'deployment_disabled' || reason === 'deployment_auth_required'
       ? service.deploymentSettingsPath
