@@ -7,11 +7,13 @@ const {
   mockDbTransaction,
   mockFetch,
   mockResolveDeploymentEnvVar,
+  mockResolvePendingGitHubInstallations,
   mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
   mockDbTransaction: vi.fn(),
   mockFetch: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
+  mockResolvePendingGitHubInstallations: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getAppOctokit: vi.fn(),
+  resolvePendingGitHubInstallations: mockResolvePendingGitHubInstallations,
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
@@ -69,6 +72,7 @@ vi.stubGlobal('fetch', mockFetch);
 
 import {
   finishCreateGitHubAppManifestCommand,
+  resolvePendingGitHubInstallationsCommand,
   startAuthenticateGitHubAccountCommand,
   startCreateGitHubInstallationCommand,
   startCreateGitHubAppManifestCommand,
@@ -435,6 +439,47 @@ describe('GitHub App manifest commands', () => {
     });
     expect(mockDbTransaction).not.toHaveBeenCalled();
     expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+  });
+});
+
+describe('resolvePendingGitHubInstallationsCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('refuses non-admin users', async () => {
+    const result = await resolvePendingGitHubInstallationsCommand(
+      buildMockAuth({ isAdmin: false }),
+    );
+
+    expect(result).toEqual({ success: false, error: 'Unauthorized' });
+    expect(mockResolvePendingGitHubInstallations).not.toHaveBeenCalled();
+  });
+
+  it('returns the resolution counts on success', async () => {
+    mockResolvePendingGitHubInstallations.mockResolvedValue({
+      pending: 0,
+      completed: 1,
+    });
+
+    const result =
+      await resolvePendingGitHubInstallationsCommand(buildMockAuth());
+
+    expect(result).toEqual({ success: true, pending: 0, completed: 1 });
+  });
+
+  it('reports a failure when resolution throws', async () => {
+    mockResolvePendingGitHubInstallations.mockRejectedValue(
+      new Error('GitHub API unavailable'),
+    );
+
+    const result =
+      await resolvePendingGitHubInstallationsCommand(buildMockAuth());
+
+    expect(result).toEqual({
+      success: false,
+      error: 'GitHub API unavailable',
+    });
   });
 });
 

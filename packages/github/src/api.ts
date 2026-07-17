@@ -993,9 +993,62 @@ export async function completePendingGitHubInstallation(
         `[completePendingGitHubInstallation] Failed to delete pending GitHub installation: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+
+    return { ...result, requestedByUserId: userId };
   }
 
   return result;
+}
+
+/**
+ * Complete any pending GitHub installations whose installation requests have
+ * since been approved on GitHub. This covers the case where the
+ * `installation.created` webhook never reached this deployment (for example a
+ * misconfigured webhook URL), leaving the requester stuck on "pending".
+ */
+export async function resolvePendingGitHubInstallations(): Promise<{
+  pending: number;
+  completed: number;
+}> {
+  const pendingGitHubInstallations =
+    await db.query.githubPendingInstallations.findMany();
+
+  if (pendingGitHubInstallations.length === 0) {
+    return { pending: 0, completed: 0 };
+  }
+
+  const installations = await getGitHubInstallations();
+
+  let completed = 0;
+
+  for (const pendingGitHubInstallation of pendingGitHubInstallations) {
+    // The pending row's `appId` holds the id of the GitHub account the
+    // installation was requested for.
+    const installation = installations.find(
+      ({ account }) => account?.id === pendingGitHubInstallation.appId,
+    );
+
+    if (!installation) {
+      continue;
+    }
+
+    try {
+      const result = await completePendingGitHubInstallation(installation.id);
+
+      if (result.success) {
+        completed += 1;
+      }
+    } catch (error) {
+      console.error(
+        `[resolvePendingGitHubInstallations] Failed to complete pending GitHub installation: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return {
+    pending: pendingGitHubInstallations.length - completed,
+    completed,
+  };
 }
 
 async function suspendGitHubInstallation({

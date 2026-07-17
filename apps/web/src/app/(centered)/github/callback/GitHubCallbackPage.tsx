@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { z } from 'zod';
 import {
@@ -46,6 +46,8 @@ import {
   useFinishAuthenticateGitHubAccount,
   useFinishCreateGitHubAppManifest,
   useFinishCreateGitHubInstallation,
+  useGitHubPendingInstallations,
+  useResolvePendingGitHubInstallations,
   useSyncGitHubInstallation,
 } from '@/hooks/github';
 
@@ -61,6 +63,9 @@ export default function Page() {
   const [isInstalled, setIsInstalled] = useState(false);
   const [isInstallRequested, setIsInstallRequested] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [manualCheckMessage, setManualCheckMessage] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   useRedirectToSignIn(authStatus === 'signed-out');
 
@@ -74,7 +79,7 @@ export default function Page() {
     ? '/setup?step=source-control-config'
     : '/settings';
 
-  const navigateFromState = () => {
+  const navigateFromState = useCallback(() => {
     const encodedState = params.get('state');
     const decodedState = decodeOAuthState(encodedState);
 
@@ -87,7 +92,7 @@ export default function Page() {
       !redirect.includes('://');
 
     router.push(isValidRedirect ? redirect : '/settings');
-  };
+  }, [params, router]);
 
   const finishAuthentication = useFinishAuthenticateGitHubAccount({
     onSuccess: (result) => {
@@ -153,6 +158,44 @@ export default function Page() {
       setError(error.message);
     },
   });
+
+  // While the install request awaits an org owner's approval, poll for the
+  // webhook-driven completion (which deletes the pending row) so the user can
+  // continue without manually revisiting setup.
+  const pendingInstallations = useGitHubPendingInstallations({
+    enabled: isInstallRequested,
+    refetchInterval: 10_000,
+  });
+
+  const resolvePendingInstallations = useResolvePendingGitHubInstallations({
+    onSuccess: (result) => {
+      if (result.success && result.completed > 0) {
+        setIsInstallRequested(false);
+        setIsInstalled(true);
+        navigateFromState();
+      } else if (result.success) {
+        setManualCheckMessage(
+          'Not approved yet. Hang tight, this page keeps checking on its own.',
+        );
+      } else {
+        setManualCheckMessage(result.error);
+      }
+    },
+    onError: (error) => {
+      setManualCheckMessage(error.message);
+    },
+  });
+
+  const isInstallRequestApproved =
+    isInstallRequested && pendingInstallations.data?.pending === false;
+
+  useEffect(() => {
+    if (isInstallRequestApproved) {
+      setIsInstallRequested(false);
+      setIsInstalled(true);
+      navigateFromState();
+    }
+  }, [isInstallRequestApproved, navigateFromState]);
 
   const hasHandledCallback = useRef(false);
 
@@ -278,10 +321,29 @@ export default function Page() {
           <AlertDescription>
             <div className="flex flex-col gap-4">
               <div>
-                Your request is pending admin approval. Upon approval
-                you&apos;ll be able to continue.
+                Your request is pending approval from a GitHub organization
+                owner. You can wait here and we&apos;ll continue automatically
+                once it&apos;s approved.
               </div>
-              <div className="self-center">
+              {manualCheckMessage && (
+                <div className="text-muted-foreground">
+                  {manualCheckMessage}
+                </div>
+              )}
+              <div className="flex items-center gap-2 self-center">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={resolvePendingInstallations.isPending}
+                  onClick={() => {
+                    setManualCheckMessage(null);
+                    resolvePendingInstallations.mutate();
+                  }}
+                >
+                  {resolvePendingInstallations.isPending
+                    ? 'Checking...'
+                    : 'Check now'}
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"

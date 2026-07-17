@@ -3,6 +3,7 @@ import * as GitHub from '@roomote/github';
 import {
   db,
   githubInstallations,
+  githubPendingInstallations,
   repositories,
   eq,
   and,
@@ -15,6 +16,17 @@ export async function getGitHubInstallationsCommand(_auth: UserAuthSuccess) {
   return db.query.githubInstallations.findMany({
     where: isNull(githubInstallations.suspendedAt),
   });
+}
+
+export async function getGitHubPendingInstallationsCommand(
+  auth: UserAuthSuccess,
+) {
+  const pending = await db.query.githubPendingInstallations.findMany({
+    where: eq(githubPendingInstallations.requestedByUserId, auth.userId),
+    columns: { id: true },
+  });
+
+  return { pending: pending.length > 0 };
 }
 
 export async function getBranchesCommand(
@@ -79,6 +91,7 @@ export {
   startCreateGitHubAppManifestCommand,
   enableGitHubAppCommand,
   finishCreateGitHubInstallationCommand,
+  resolvePendingGitHubInstallationsCommand,
   finishCreateGitHubAppManifestCommand,
   startAuthenticateGitHubAccountCommand,
   finishAuthenticateGitHubAccountCommand,

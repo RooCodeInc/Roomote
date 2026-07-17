@@ -65,6 +65,7 @@ import {
 } from '../commands/artifacts';
 import {
   getGitHubInstallationsCommand,
+  getGitHubPendingInstallationsCommand,
   getBranchesCommand,
   getCollaboratorsCommand,
   getIssuesCommand,
@@ -74,6 +75,7 @@ import {
   enableGitHubAppCommand,
   finishCreateGitHubInstallationCommand,
   finishCreateGitHubAppManifestCommand,
+  resolvePendingGitHubInstallationsCommand,
   startAuthenticateGitHubAccountCommand,
   finishAuthenticateGitHubAccountCommand,
   syncGitHubInstallationCommand,
@@ -765,6 +767,14 @@ export const appRouter = createRouter({
   github: createRouter({
     installations: protectedProcedure.query(({ ctx: { auth } }) =>
       getGitHubInstallationsCommand(auth),
+    ),
+
+    pendingInstallations: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGitHubPendingInstallationsCommand(auth),
+    ),
+
+    resolvePendingInstallations: protectedProcedure.mutation(
+      ({ ctx: { auth } }) => resolvePendingGitHubInstallationsCommand(auth),
     ),
 
     branches: protectedProcedure

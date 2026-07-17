@@ -773,6 +773,13 @@ export async function finishCreateGitHubInstallationCommand(
     }
 
     try {
+      // A user can only be waiting on their latest request; drop older rows
+      // (retries, abandoned attempts) so they can't keep the pending state
+      // alive after this request is approved.
+      await db
+        .delete(githubPendingInstallations)
+        .where(eq(githubPendingInstallations.requestedByUserId, auth.userId));
+
       const [pendingInstallation] = await db
         .insert(githubPendingInstallations)
         .values({
@@ -805,6 +812,33 @@ export async function finishCreateGitHubInstallationCommand(
   } catch (error) {
     console.error(
       '[finishCreateGitHubInstallationCommand] Unhandled error:',
+      error,
+    );
+
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function resolvePendingGitHubInstallationsCommand(
+  auth: UserAuthSuccess,
+): Promise<
+  | { success: true; pending: number; completed: number }
+  | { success: false; error: string }
+> {
+  if (!auth.isAdmin) {
+    return getUnauthorizedResult();
+  }
+
+  try {
+    const result = await GitHub.resolvePendingGitHubInstallations();
+
+    return { success: true, ...result };
+  } catch (error) {
+    console.error(
+      '[resolvePendingGitHubInstallationsCommand] Unhandled error:',
       error,
     );
 
