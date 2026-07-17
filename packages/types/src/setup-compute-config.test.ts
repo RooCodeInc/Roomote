@@ -13,6 +13,7 @@ import {
   isComputeOperatorEditableField,
   normalizeDeploymentComputeConfig,
   parseExcludedComputeProviders,
+  pickPreferredConfiguredComputeProvider,
   resolveDerivedModalBaseImageRef,
   resolveEffectiveDockerWorkerImage,
   resolveEffectiveModalBaseImageRef,
@@ -503,6 +504,22 @@ describe('buildSetupComputeStatus', () => {
     expect(status.preselectedProvider).toBe('modal');
   });
 
+  it('prefers a configured cloud over DEFAULT_COMPUTE_PROVIDER=docker for preselection', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: {
+        DEFAULT_COMPUTE_PROVIDER: 'docker',
+        MODAL_TOKEN_ID: 'id',
+        MODAL_TOKEN_SECRET: 'secret',
+        MODAL_BASE_IMAGE_REF: 'registry/image:tag',
+        E2B_API_KEY: 'key',
+        E2B_TEMPLATE_ID: 'template',
+      },
+    });
+
+    expect(status.runtimeDefaultProvider).toBe('docker');
+    expect(status.preselectedProvider).toBe('e2b');
+  });
+
   it('satisfies the Modal base image via the derived worker-image default', () => {
     const status = buildSetupComputeStatus({
       runtimeEnv: {
@@ -909,8 +926,20 @@ describe('parseExcludedComputeProviders', () => {
   });
 });
 
+describe('pickPreferredConfiguredComputeProvider', () => {
+  it('prefers the last catalog-ordered cloud over Local Docker', () => {
+    expect(
+      pickPreferredConfiguredComputeProvider(['docker', 'modal', 'e2b']),
+    ).toBe('e2b');
+  });
+
+  it('returns docker when it is the only available provider', () => {
+    expect(pickPreferredConfiguredComputeProvider(['docker'])).toBe('docker');
+  });
+});
+
 describe('getDefaultAvailableComputeProvider', () => {
-  it('returns the first non-excluded provider', () => {
+  it('returns the preferred configured non-excluded provider', () => {
     expect(
       getDefaultAvailableComputeProvider(new Set(['docker', 'modal']), [
         { provider: 'daytona', configSatisfied: true },
@@ -918,10 +947,29 @@ describe('getDefaultAvailableComputeProvider', () => {
     ).toBe('daytona');
   });
 
-  it('keeps docker when it is not excluded', () => {
+  it('keeps docker when it is not excluded and no live status is provided', () => {
     expect(getDefaultAvailableComputeProvider(new Set(['modal']))).toBe(
       'docker',
     );
+  });
+
+  it('prefers a configured cloud provider over Local Docker', () => {
+    expect(
+      getDefaultAvailableComputeProvider(new Set(), [
+        { provider: 'modal', configSatisfied: true },
+        { provider: 'docker', configSatisfied: true },
+      ]),
+    ).toBe('modal');
+  });
+
+  it('prefers the last catalog-ordered configured cloud when several are ready', () => {
+    expect(
+      getDefaultAvailableComputeProvider(new Set(), [
+        { provider: 'modal', configSatisfied: true },
+        { provider: 'e2b', configSatisfied: true },
+        { provider: 'docker', configSatisfied: true },
+      ]),
+    ).toBe('e2b');
   });
 
   it('falls back to docker when excluded providers are not configured', () => {
