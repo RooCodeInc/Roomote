@@ -99,6 +99,9 @@ function createHarness(
     executeToolProgressIntervalMs?: number;
     queuedPromptRetryDelayMs?: number;
     stopHookReminderStallTimeoutMs?: number;
+    providerRateLimitMaxRetries?: number;
+    providerRateLimitBaseDelayMs?: number;
+    providerRateLimitMaxDelayMs?: number;
     mcpServerNames?: string[];
     model?: string;
   } = {},
@@ -115,6 +118,9 @@ function createHarness(
     executeToolProgressIntervalMs: options.executeToolProgressIntervalMs,
     queuedPromptRetryDelayMs: options.queuedPromptRetryDelayMs,
     stopHookReminderStallTimeoutMs: options.stopHookReminderStallTimeoutMs,
+    providerRateLimitMaxRetries: options.providerRateLimitMaxRetries,
+    providerRateLimitBaseDelayMs: options.providerRateLimitBaseDelayMs,
+    providerRateLimitMaxDelayMs: options.providerRateLimitMaxDelayMs,
     mcpServerNames: options.mcpServerNames,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
@@ -1897,6 +1903,245 @@ describe('OpenCodeServerHarness', () => {
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
     } finally {
       harness.dispose();
+    }
+  });
+
+  it('automatically retries OpenRouter-style rate_limit_exceeded session errors', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerRateLimitBaseDelayMs: 1_000,
+      providerRateLimitMaxRetries: 3,
+    });
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Queued follow-up.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toHaveLength(1);
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'UnknownError',
+            data: {
+              message: JSON.stringify({
+                code: 429,
+                message: 'Provider returned error',
+                metadata: { error_type: 'rate_limit_exceeded' },
+              }),
+            },
+          },
+        },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'automatically retrying',
+            ),
+        ),
+      ).toBe(true);
+      // Invisible continue prompt stays out of the user-visible queue, while
+      // preserving the existing follow-up for after the retry.
+      expect(
+        harness.getQueuedMessages().map((message) => message.text),
+      ).toEqual(['Queued follow-up.']);
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      const secondPrompt = client.promptAsync.mock.calls[1]?.[0] as
+        | {
+            request?: {
+              parts?: Array<{ type?: string; text?: string }>;
+            };
+          }
+        | undefined;
+      const secondPromptText = (secondPrompt?.request?.parts ?? [])
+        .map((part) => part.text)
+        .filter((text): text is string => typeof text === 'string')
+        .join('\n');
+      expect(secondPromptText).toContain('temporary provider rate limit');
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not drain a rate-limit continue prompt early when session.idle arrives during backoff', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerRateLimitBaseDelayMs: 5_000,
+      providerRateLimitMaxRetries: 3,
+    });
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'UnknownError',
+            data: {
+              message: JSON.stringify({
+                code: 429,
+                message: 'Provider returned error',
+                metadata: { error_type: 'rate_limit_exceeded' },
+              }),
+            },
+          },
+        },
+      });
+
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('aborts after exhausting provider rate-limit retries', async () => {
+    vi.useFakeTimers();
+    const { client, harness } = createHarness(undefined, {
+      providerRateLimitBaseDelayMs: 100,
+      providerRateLimitMaxRetries: 2,
+    });
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const rateLimitError = {
+        name: 'UnknownError',
+        data: {
+          message: JSON.stringify({
+            code: 429,
+            message: 'Provider returned error',
+            metadata: { error_type: 'rate_limit_exceeded' },
+          }),
+        },
+      };
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: rateLimitError },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: rateLimitError },
+      });
+      await vi.advanceTimersByTimeAsync(200);
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: rateLimitError },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toEqual([]);
+    } finally {
+      harness.dispose();
+      vi.useRealTimers();
     }
   });
 
