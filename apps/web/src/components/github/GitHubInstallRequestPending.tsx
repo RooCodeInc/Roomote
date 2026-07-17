@@ -69,7 +69,7 @@ export function GitHubInstallRequestPending({
   return (
     <Alert className="w-sm">
       <AlertDescription>
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-4 text-center">
           <div>
             Your request is pending approval from a GitHub organization owner.
             You can wait here and we&apos;ll continue automatically once

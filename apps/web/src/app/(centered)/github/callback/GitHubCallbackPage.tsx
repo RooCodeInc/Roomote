@@ -238,26 +238,29 @@ export default function Page() {
 
   return (
     <div className="flex flex-col items-center justify-center gap-2">
-      <div className="flex items-center justify-center gap-2">
-        {isLoading ? (
-          <Github className="animate-pulse" />
-        ) : isInstallRequested || isInstalled || isAuthenticated ? (
-          <CircleCheck className="text-green-500" />
-        ) : (
-          <CircleX className="text-rose-500" />
-        )}
-        <div className="text-sm">
-          {isInstallRequested
-            ? 'GitHub Link Requested'
-            : isAuthenticated
+      {/* The pending-request card carries its own explanation, so the status
+          header (and its success check) would just be a misleading tick while
+          the request is still awaiting approval. */}
+      {!isInstallRequested && (
+        <div className="flex items-center justify-center gap-2">
+          {isLoading ? (
+            <Github className="animate-pulse" />
+          ) : isInstalled || isAuthenticated ? (
+            <CircleCheck className="text-green-500" />
+          ) : (
+            <CircleX className="text-rose-500" />
+          )}
+          <div className="text-sm">
+            {isAuthenticated
               ? 'GitHub Account Linked'
               : isInstalled
                 ? 'GitHub Linked'
                 : error
                   ? 'Error'
                   : 'GitHub Linking...'}
+          </div>
         </div>
-      </div>
+      )}
       {error && (
         <>
           <Alert variant="destructive">
