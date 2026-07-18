@@ -227,6 +227,83 @@ describe('buildDiscordContinuationPrompt', () => {
     expect(result.claimedMessageIds).toEqual(['100']);
   });
 
+  it('claims attachments on the latest Roomote reply while keeping text in replying_to', async () => {
+    deliveryMocks.processAttachments.mockResolvedValue({
+      images: ['data:image/png;base64,bot'],
+      attachmentTexts: [],
+      warnings: [],
+    });
+    const provider = {
+      fetchChannelMessages: vi.fn().mockResolvedValue({
+        messages: [
+          {
+            id: '100',
+            user: 'u-alice',
+            username: 'Alice',
+            text: 'Please screenshot the error',
+          },
+          {
+            id: '150',
+            user: 'bot-1',
+            username: 'Roomote',
+            botId: 'bot-1',
+            text: 'Here is what I found.',
+            files: [
+              {
+                id: 'att-bot',
+                name: 'error.png',
+                mimeType: 'image/png',
+                size: 40,
+                url: 'https://cdn.discordapp.com/attachments/error.png',
+              },
+            ],
+          },
+          {
+            id: '200',
+            user: 'u-matt',
+            username: 'Matt',
+            text: 'what does that screenshot show?',
+          },
+        ],
+      }),
+    };
+
+    const result = await buildDiscordContinuationPrompt({
+      provider: provider as never,
+      channelId: 'thread-1',
+      botUserId: 'bot-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'what does that screenshot show?',
+        user: 'Matt',
+        ts: '200',
+      },
+    });
+
+    expect(deliveryMocks.claim).toHaveBeenCalledWith('thread-1', [
+      '100',
+      '150',
+    ]);
+    expect(deliveryMocks.processAttachments).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'att-bot',
+        filename: 'error.png',
+      }),
+    ]);
+    expect(result.message.formattedPrompt).toContain(
+      '<replying_to ts="150">\nRoomote: Here is what I found.\n</replying_to>',
+    );
+    expect(result.message.formattedPrompt).toContain(
+      'Alice: Please screenshot the error',
+    );
+    // Bot text belongs in <replying_to>, not duplicated in <thread_context>.
+    expect(result.message.formattedPrompt).not.toContain(
+      'Roomote: Here is what I found. [attached: error.png]',
+    );
+    expect(result.message.images).toEqual(['data:image/png;base64,bot']);
+    expect(result.claimedMessageIds).toEqual(['100', '150']);
+  });
+
   it('does not re-inject already delivered messages', async () => {
     deliveryMocks.claim.mockResolvedValue([]);
     const provider = {

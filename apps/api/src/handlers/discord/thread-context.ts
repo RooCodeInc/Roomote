@@ -237,18 +237,12 @@ export async function buildDiscordContinuationPrompt(input: {
       ? ownBotEarlier[ownBotEarlier.length - 1]
       : undefined;
 
+  // Match Slack: own bot text lives in <replying_to>, but attachment-carrying
+  // Roomote replies (including the latest) must still be claimable so their
+  // images/documents reach the next user turn.
   const contextCandidates = earlier.filter((message) => {
-    if (latestOwnBotReply && message.id === latestOwnBotReply.id) {
-      return false;
-    }
-    // Own bot text replies stay out of background context unless they carry
-    // attachments; Slack keeps the latest bot reply only in <replying_to>.
-    if (
-      input.botUserId &&
-      message.botId === input.botUserId &&
-      message.attachments.length === 0
-    ) {
-      return false;
+    if (input.botUserId && message.botId === input.botUserId) {
+      return message.attachments.length > 0;
     }
     return messageHasThreadDeliveryContent(message);
   });
@@ -285,18 +279,21 @@ export async function buildDiscordContinuationPrompt(input: {
     console.warn(`[discord] Follow-up thread attachment warning: ${warning}`);
   }
 
+  // Keep own-bot text out of <thread_context> (it is already in <replying_to>
+  // for the latest reply). Attachment filenames from claimed human/side
+  // messages still appear; bot attachments still process via files above.
+  const threadContextMessages = claimedMessages
+    .filter(
+      (message) => !(input.botUserId && message.botId === input.botUserId),
+    )
+    .concat({
+      id: input.queuedMessage.ts,
+      user: input.queuedMessage.user,
+      text: input.queuedMessage.text,
+      attachments: [],
+    });
   const threadContext = formatDiscordThreadContext({
-    // formatDiscordThreadContext filters by currentMessageId; pass claimed +
-    // synthetic current pad so only claimed earlier content is rendered.
-    messages: [
-      ...claimedMessages,
-      {
-        id: input.queuedMessage.ts,
-        user: input.queuedMessage.user,
-        text: input.queuedMessage.text,
-        attachments: [],
-      },
-    ],
+    messages: threadContextMessages,
     currentMessageId: input.queuedMessage.ts,
   });
 
