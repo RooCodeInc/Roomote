@@ -184,6 +184,8 @@ export function buildChatProviderMessageInstructions(
   <${tag}_input_format>
     <context>This task has a ${name} conversation surface. Incoming ${label} follow-ups arrive in provider-neutral chat message blocks and may include earlier thread context when available.</context>
     <rule>${label} bot invocation markup is invocation noise, not part of the user's request.</rule>
+    <rule>When present, a \`<thread_context>...</thread_context>\` block contains earlier messages from the ${label} thread for conversational context. Treat it as background, not as the latest instruction.</rule>
+    <rule>When present, a \`<replying_to>...</replying_to>\` block highlights the most recent earlier ${label} reply the user is responding to, often Roomote's latest message in the thread.</rule>
   </${tag}_input_format>
 
   <${tag}_visibility_contract>
