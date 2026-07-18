@@ -120,10 +120,12 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging
 Roomote in an existing thread, Roomote reads earlier messages in that thread
-(including supported attachments, up to Discord's history limits) so the agent
-has that background. Image attachments are passed to the task as image input,
-and supported documents are downloaded and added to the request. Attachment
-downloads are size-limited and restricted to Discord's media hosts.
+(including supported attachments, up to a few hundred recent thread messages) so the agent
+has that background. Follow-ups in an active or resumed task thread also carry
+undelivered earlier Discord messages the same way Slack does, so the agent keeps
+full thread context across turns. Image attachments are passed to the task as
+image input, and supported documents are downloaded and added to the request.
+Attachment downloads are size-limited and restricted to Discord's media hosts.
 
 ## Self-hosted configuration
 

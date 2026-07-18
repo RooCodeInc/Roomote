@@ -35,6 +35,9 @@ const mocks = vi.hoisted(() => ({
   handleRoutingReply: vi.fn(),
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
+  buildContinuation: vi.fn(),
+  releaseContinuation: vi.fn(),
+  markThreadHistoryDelivered: vi.fn(),
 }));
 
 vi.mock('../event-gate.js', () => ({
@@ -96,6 +99,12 @@ vi.mock('../../tasks/communication-snapshot-resume.js', () => ({
 vi.mock('../../tasks/communication-out-of-band-context.js', () => ({
   attachOutOfBandContextToCommunicationMessage: mocks.attachOutOfBand,
   releaseCommunicationOutOfBandClaim: mocks.releaseOutOfBand,
+}));
+
+vi.mock('../thread-context.js', () => ({
+  buildDiscordContinuationPrompt: mocks.buildContinuation,
+  releaseDiscordContinuationClaim: mocks.releaseContinuation,
+  markDiscordThreadHistoryDelivered: mocks.markThreadHistoryDelivered,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -210,6 +219,23 @@ describe('Discord Gateway event handler', () => {
       }),
     );
     mocks.releaseOutOfBand.mockResolvedValue(undefined);
+    mocks.buildContinuation.mockImplementation(
+      async ({
+        queuedMessage,
+      }: {
+        queuedMessage: Record<string, unknown>;
+      }) => ({
+        message: {
+          ...queuedMessage,
+          formattedPrompt: `<thread_context>\nearlier\n</thread_context>\n\n${queuedMessage.text}`,
+          turnPolicy: { reactionsAllowed: true },
+        },
+        claimedMessageIds: ['100'],
+        channelId: 'thread-1',
+      }),
+    );
+    mocks.releaseContinuation.mockResolvedValue(undefined);
+    mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
     mocks.queueMessage.mockResolvedValue(true);
   });
 
@@ -463,7 +489,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('queues an ordinary message in an active Discord task thread', async () => {
+  it('queues an ordinary message in an active Discord task thread with full thread context', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'thread-1',
       guildId: 'guild-1',
@@ -488,17 +514,33 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.buildContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'thread-1',
+        botUserId: 'bot-1',
+        queuedMessage: expect.objectContaining({
+          text: 'Also fix the type error',
+        }),
+      }),
+    );
     expect(mocks.attachOutOfBand).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 'task-23',
         provider: 'discord',
-        message: expect.objectContaining({ text: 'Also fix the type error' }),
+        message: expect.objectContaining({
+          text: 'Also fix the type error',
+          formattedPrompt: expect.stringContaining('<thread_context>'),
+        }),
       }),
     );
     expect(mocks.queueMessage).toHaveBeenCalledWith(
       'discord',
       23,
-      expect.objectContaining({ text: 'Also fix the type error' }),
+      expect.objectContaining({
+        text: 'Also fix the type error',
+        formattedPrompt: expect.stringContaining('<thread_context>'),
+        turnPolicy: { reactionsAllowed: true },
+      }),
     );
     expect(mocks.setLatestInbound).toHaveBeenCalledWith(
       'discord',
@@ -548,6 +590,10 @@ describe('Discord Gateway event handler', () => {
     expect(response.status).toBe(200);
     expect(mocks.releaseOutOfBand).toHaveBeenCalledWith({
       messageIds: ['oob-1'],
+    });
+    expect(mocks.releaseContinuation).toHaveBeenCalledWith({
+      channelId: 'thread-1',
+      claimedMessageIds: ['100'],
     });
   });
 
@@ -852,6 +898,15 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    expect(mocks.buildContinuation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'thread-1',
+        botUserId: 'bot-1',
+        queuedMessage: expect.objectContaining({
+          text: 'Make one more change',
+        }),
+      }),
+    );
     expect(mocks.resumeTask).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'discord',
@@ -860,6 +915,10 @@ describe('Discord Gateway event handler', () => {
         threadId: 'thread-1',
         guildId: 'guild-1',
         preservePayloadFlags: ['discordTaskThread'],
+        queuedMessage: expect.objectContaining({
+          text: 'Make one more change',
+          formattedPrompt: expect.stringContaining('<thread_context>'),
+        }),
       }),
     );
     expect(mocks.reply).not.toHaveBeenCalled();
