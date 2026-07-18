@@ -17,7 +17,7 @@ export type IssueFixerTriggeringIssue = {
 
 /**
  * Builds the one-task Triage GitHub Issues prompt: investigate a named issue
- * and post a plan on the GitHub issue. Does not implement or open a PR.
+ * and post either clarifying questions or a plan on the GitHub issue.
  */
 export function buildIssueFixerFixPrompt({
   repositoryFullName,
@@ -67,7 +67,7 @@ export function buildIssueFixerFixPrompt({
   </issue>
 </task_context>
 
-Triage GitHub issue #${issue.number} in ${repositoryFullName}. Post a concrete implementation plan on the issue. Do not implement code and do not open a pull request in this task.
+Triage GitHub issue #${issue.number} in ${repositoryFullName}. Post either clarifying questions or a concrete implementation plan as a comment on that issue. Do not implement code and do not open a pull request.
 
 Issue URL: ${issue.url}
 Title: ${issue.title}
@@ -76,14 +76,35 @@ Labels: ${labels}
 Issue body:
 ${bodyPreview || '(empty)'}
 
-Requirements:
-1. Re-fetch the live issue with \`gh\` and read comments before planning.
-2. Explore the codebase enough to ground the plan in real files and patterns.
-3. Write a focused implementation plan: approach, files likely touched, risks, test plan, and open questions.
-4. If anything material is unclear (acceptance criteria, expected behavior, scope, constraints, ownership), ask specific clarifying questions on the GitHub issue. Prefer questions that unblock planning; do not invent product decisions.
-5. Post the plan (and any clarifying questions) as a single GitHub issue comment with \`gh issue comment ${issue.number} --repo ${repositoryFullName} --body "..."\`.
-6. If the issue is closed, is a pull request, already has an active plan/fix PR, or is blocked pending answers you already requested, comment briefly with that finding (or skip with a terse internal note when commenting would be noise) and stop.
-7. Do not edit source files, do not commit, and do not open a PR.
-8. Stay quiet on chat unless you need input outside GitHub, hit a blocker, or finish with a result.
-${environmentSection}`;
+Process:
+1. Re-fetch the live issue and read comments.
+2. Explore the codebase enough to ground any plan in real files and patterns.
+3. If material details are missing (acceptance criteria, expected behavior, scope, constraints, ownership), post clarifying questions and stop. Do not invent product decisions.
+4. Otherwise post a proposed implementation plan and stop.
+5. Skip with a brief comment (or a terse internal note if a comment would be noise) when the issue is closed, is a pull request, already has a recent full plan or active fix PR, or is waiting on unanswered questions you already asked.
+6. Stay quiet on chat unless you need input outside GitHub, hit a blocker, or finish with a result.
+${environmentSection}
+Comment formats (post one GitHub issue comment using one of these body shapes):
+
+**When you need clarification:**
+
+I'd like to help with this issue, but I need some clarification to ensure I implement the right solution. Could you please provide more details on the following:
+
+- What is the expected behavior when [scenario]?
+- Could you provide more details about [unclear aspect]?
+- Are there any specific constraints or requirements I should be aware of?
+
+Please tag @roomote in your response with the answers, and I'll be happy to implement the fix once I have this information.
+
+**When you have a plan:**
+
+I've analyzed this issue and here's my proposed implementation plan:
+
+1. Modify [file/component] to [change]
+2. Add [functionality] to handle [scenario]
+3. Update [tests/docs] accordingly
+
+This approach will [explain the benefits and how it solves the issue].
+
+Please tag @roomote if you'd like me to implement this, or reply with feedback on the plan.`;
 }
