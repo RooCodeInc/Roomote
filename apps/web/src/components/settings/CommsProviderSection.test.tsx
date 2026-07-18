@@ -572,7 +572,7 @@ describe('CommsProviderSection', () => {
   });
 
   describe('numbered setup instructions', () => {
-    it('shows the Slack create-app screen first, then numbered manual setup in settings', () => {
+    it('shows the Slack config-token create-app screen without Back in settings', () => {
       render(
         <CommsProviderSection
           provider={buildSlackProvider()}
@@ -601,19 +601,14 @@ describe('CommsProviderSection', () => {
         screen.getByRole('link', { name: /Slack Apps portal/i }),
       ).toHaveAttribute('href', 'https://api.slack.com/apps');
       expect(
-        screen.getByRole('button', { name: /^Back$/ }),
-      ).toBeInTheDocument();
+        screen.queryByRole('button', { name: /^Back$/ }),
+      ).not.toBeInTheDocument();
       expect(
         screen.queryByRole('heading', { name: 'Configure Slack app' }),
       ).not.toBeInTheDocument();
       expect(
         screen.queryByText('Enter the values below:'),
       ).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: /^Back$/ }));
-      expect(
-        screen.getByRole('button', { name: 'Set it up' }),
-      ).toBeInTheDocument();
     });
 
     it('shows logo actions after creating a Slack app from a config token', async () => {

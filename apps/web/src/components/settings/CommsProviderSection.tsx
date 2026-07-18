@@ -769,11 +769,6 @@ export function CommsProviderSection({
               onCreateSlackApp={(configToken) =>
                 createSlackApp.mutate({ configToken })
               }
-              onBack={
-                provider.id === 'slack' && !hasConfiguredValues
-                  ? () => setExpanded(false)
-                  : undefined
-              }
               onValueChange={(envVarName, value) =>
                 setValues((current) => ({ ...current, [envVarName]: value }))
               }
