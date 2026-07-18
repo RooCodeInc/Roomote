@@ -1,4 +1,3 @@
-import { getRedis } from '@roomote/redis';
 import {
   buildIssueFixerFixPrompt,
   buildRepositoryCoverage,
@@ -19,10 +18,6 @@ import type { WebhookResponse } from '../../types';
 
 const LOG_PREFIX = '[handleGitHubIssueFixer]';
 
-// Label bursts and duplicate deliveries of the same issue should not
-// launch concurrent fixers for one issue.
-const ISSUE_DEBOUNCE_SECONDS = 5 * 60;
-
 interface IssueFixerPayload {
   action: string;
   issue: {
@@ -42,10 +37,6 @@ interface IssueFixerPayload {
   installation?: { id: number } | null;
 }
 
-function buildDebounceKey(repositoryId: string, issueNumber: number): string {
-  return `github:issue-fixer:${repositoryId}:${issueNumber}`;
-}
-
 function issueLabels(labels: IssueFixerPayload['issue']['labels']): string[] {
   if (!labels) {
     return [];
@@ -57,9 +48,8 @@ function issueLabels(labels: IssueFixerPayload['issue']['labels']): string[] {
 }
 
 /**
- * Launch one environment-backed implement-changes task the moment a GitHub
- * issue is opened or reopened, mirroring how Review Code and CI Failure Triage
- * start immediately from webhooks.
+ * Launch one environment-backed plan-only triage task the moment a GitHub
+ * issue is opened or reopened (one task per issue event).
  */
 export async function handleGitHubIssueFixer(
   payload: IssueFixerPayload,
@@ -80,7 +70,6 @@ export async function handleGitHubIssueFixer(
 
   const [match] = await db
     .select({
-      repositoryId: repositories.id,
       repositoryFullName: repositories.fullName,
     })
     .from(repositories)
@@ -117,22 +106,6 @@ export async function handleGitHubIssueFixer(
       status: 'ok',
       message:
         'Repository has no configured environment for Triage GitHub Issues',
-    };
-  }
-
-  const redis = getRedis();
-  const claim = await redis.set(
-    buildDebounceKey(match.repositoryId, payload.issue.number),
-    payload.issue.html_url,
-    'EX',
-    ISSUE_DEBOUNCE_SECONDS,
-    'NX',
-  );
-
-  if (claim !== 'OK') {
-    return {
-      status: 'ok',
-      message: 'Triage GitHub Issues already debounced for this issue',
     };
   }
 
