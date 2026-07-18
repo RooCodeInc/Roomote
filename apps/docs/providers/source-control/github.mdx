@@ -155,6 +155,20 @@ Install the GitHub App on the repositories Roomote should use. Then sign in,
 complete the GitHub step in `/setup`, and confirm repository sync sees the
 expected repositories.
 
+## Start work from issues and pull requests
+
+Once the app is installed and an environment maps the repository:
+
+- mention `@roomote` (or your deployment's GitHub App slug) in a pull request
+  comment to start PR review or follow-up work
+- mention the same handle in a GitHub issue comment, or in a new issue body, to
+  start a standard task against that repository
+- link your GitHub account under Settings -> Linked Accounts so Roomote can
+  attribute the task to you
+
+Issue mentions use the environment mapped to the repository. Map the repository
+to an environment before mentioning Roomote on issues.
+
 ## Verify setup
 
 1. connect GitHub in setup or Settings
@@ -162,6 +176,7 @@ expected repositories.
 3. create or update an environment from that repository
 4. start a small task and confirm Roomote can clone the repository
 5. finish the task and confirm Roomote can push a branch or open a pull request
+6. optionally mention Roomote on a test issue and confirm a reply with a task link
 
 ## URL changes
 

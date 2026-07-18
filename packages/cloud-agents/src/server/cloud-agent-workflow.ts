@@ -1,5 +1,6 @@
 import {
   type TaskSpec,
+  type TaskSurface,
   TaskPayloadKind,
   getCommunicationChannelFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
@@ -52,6 +53,53 @@ import {
 
 import { getTaskUrl } from './task-url';
 
+type StandardTaskSurface = NonNullable<
+  Parameters<typeof standardTask>[0]['taskSurface']
+>;
+
+/**
+ * Resolve the standard-task surface for harness context and delivery
+ * instructions. Chat payload bindings take priority; otherwise use the task
+ * row's launch surface so GitHub/GitLab/etc. mentions get the right rules.
+ */
+export function resolveStandardTaskSurface({
+  hasSlackChannel,
+  communicationProvider,
+  taskSurface,
+}: {
+  hasSlackChannel: boolean;
+  communicationProvider?: string | null;
+  taskSurface?: TaskSurface | null;
+}): StandardTaskSurface {
+  if (hasSlackChannel) {
+    return 'slack';
+  }
+
+  if (
+    communicationProvider === 'teams' ||
+    communicationProvider === 'telegram' ||
+    communicationProvider === 'discord'
+  ) {
+    return communicationProvider;
+  }
+
+  switch (taskSurface) {
+    case 'slack':
+    case 'teams':
+    case 'telegram':
+    case 'discord':
+    case 'linear':
+    case 'github':
+    case 'gitlab':
+    case 'gitea':
+    case 'bitbucket':
+    case 'ado':
+      return taskSurface;
+    default:
+      return 'web';
+  }
+}
+
 export async function generatePrompt({
   taskRun,
   taskSpec,
@@ -90,6 +138,7 @@ export async function generatePrompt({
       prAssigneeLogin: true,
       actorDisplayName: true,
       slackThreadTs: true,
+      surface: true,
     },
   });
   const commitAuthor = taskRow
@@ -285,11 +334,11 @@ export async function generatePrompt({
         description,
         repo: taskSpec.payload.repo,
         repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
-        taskSurface: slackChannel
-          ? 'slack'
-          : nonSlackChatProvider
-            ? nonSlackChatProvider
-            : 'web',
+        taskSurface: resolveStandardTaskSurface({
+          hasSlackChannel: Boolean(slackChannel),
+          communicationProvider,
+          taskSurface: taskRow?.surface,
+        }),
         conflictResolverLabel: enabledConflictResolverLabel,
         taskRunUrl,
         attribution: commitAuthor,

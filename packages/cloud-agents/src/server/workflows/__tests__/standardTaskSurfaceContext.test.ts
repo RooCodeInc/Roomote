@@ -32,6 +32,7 @@ describe('Standard Task surface context', () => {
     expect(harnessInstructions).toContain(
       'If a workflow or packaged skill distinguishes GitHub-started tasks from other surfaces, treat this run as GitHub-started rather than as a generic web dashboard task.',
     );
+    expect(harnessInstructions).toContain('<github_message_instructions>');
     expect(harnessInstructions).not.toContain(
       'When a secure web-task flow exists for the current step, prefer that flow over asking the user to paste secrets into chat or make local-only task edits.',
     );

@@ -843,15 +843,18 @@ export async function persistEarlyGeneratedTaskTitle(input: {
   taskId: string;
   generatedTitle: string;
 }): Promise<boolean> {
-  const shouldPersistGeneratedTitle = !isFallbackTaskTitle(
-    input.generatedTitle,
-  );
+  // Do not advance the checkpoint on fallback titles. Checkpoint 1 is the
+  // first-message refresh gate; locking it without a real title prevents the
+  // transcript path from producing a nicer title on the opening user prompt.
+  if (isFallbackTaskTitle(input.generatedTitle)) {
+    return false;
+  }
   const [updatedTask] = await db
     .update(tasks)
     .set({
       llmTitleCheckpoint: 1,
       updatedAt: new Date(),
-      ...(shouldPersistGeneratedTitle ? { title: input.generatedTitle } : {}),
+      title: input.generatedTitle,
     })
     .where(
       and(
@@ -862,7 +865,7 @@ export async function persistEarlyGeneratedTaskTitle(input: {
     )
     .returning({ id: tasks.id });
 
-  return Boolean(updatedTask && shouldPersistGeneratedTitle);
+  return Boolean(updatedTask);
 }
 
 /**
@@ -1596,11 +1599,22 @@ export function isRelaunchableFailedStartPayloadKind(
 }
 
 function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
+  const payload = {
+    ...(sourceRun.payload as Record<string, unknown>),
+  };
+
+  // Discord launch idempotency keys the original gateway event on the first
+  // run via task_runs_discord_source_event_unique (uncanceled rows only). A
+  // failed-start relaunch creates another uncanceled run on the same task and
+  // must not re-claim that source event, or Postgres rejects the insert with
+  // 23505 and the UI surfaces a raw Failed query / stuck Booting state.
+  delete payload.communicationSourceEventId;
+
   return {
     type: sourceRun.payloadKind,
     harness: sourceRun.harness ?? undefined,
     computeProvider: sourceRun.vendor ?? undefined,
-    payload: { ...(sourceRun.payload as object) },
+    payload,
   } as FreshTask;
 }
 
