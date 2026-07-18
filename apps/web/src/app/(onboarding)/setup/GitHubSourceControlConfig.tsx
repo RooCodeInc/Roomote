@@ -7,19 +7,12 @@ import {
   Button,
   Input,
   Label,
-  Pencil,
   Sparkles,
   Spinner,
 } from '@/components/system';
 import { useCreateGitHubAppManifest } from '@/hooks/github';
 
-export function GitHubSourceControlConfig({
-  onBack,
-  onManualValues,
-}: {
-  onBack?: () => void;
-  onManualValues: () => void;
-}) {
+export function GitHubSourceControlConfig({ onBack }: { onBack?: () => void }) {
   const [githubOrganization, setGithubOrganization] = useState('');
   const [showAdvancedConfig, setShowAdvancedConfig] = useState(false);
   const [manifestForm, setManifestForm] = useState<{
@@ -53,10 +46,9 @@ export function GitHubSourceControlConfig({
           box GitHub app - you need to create your own.
         </p>
         <p>
-          Roomote can create it for you automatically or you can enter values
-          manually if you already have an app or want to do each step yourself.
-          You&apos;ll pick the account or organization to install it on during
-          the GitHub install step.
+          Roomote can create it for you automatically. You&apos;ll pick the
+          account or organization to install it on during the GitHub install
+          step.
         </p>
       </div>
 
@@ -143,15 +135,6 @@ export function GitHubSourceControlConfig({
             <Sparkles />
           )}
           Create GitHub App
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={onManualValues}
-          disabled={createGitHubAppManifest.isPending || manifestForm !== null}
-        >
-          <Pencil />
-          Enter values manually
         </Button>
       </div>
     </>
