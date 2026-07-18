@@ -184,6 +184,22 @@ describe('StepSourceControlConfig', () => {
     expect(screen.queryByText('GitHub App ID')).not.toBeInTheDocument();
   });
 
+  it('shows Back on the GitHub create screen when a previous step exists', () => {
+    const onBack = vi.fn();
+
+    render(
+      <StepSourceControlConfig
+        sourceControlSetup={buildSourceControlSetup()}
+        selectedProviderId="github"
+        onContinue={vi.fn()}
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /^Back$/i }));
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it('creates the app on the personal account when no organization is entered', () => {
     render(
       <StepSourceControlConfig
