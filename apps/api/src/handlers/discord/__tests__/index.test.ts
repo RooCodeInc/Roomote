@@ -502,6 +502,8 @@ describe('Discord Gateway event handler', () => {
       23,
       'message-1',
     );
+    // Slack only platform-acks the first intake message; follow-ups stay silent.
+    expect(mocks.addReaction).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 

@@ -485,15 +485,8 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       throw error;
     }
     await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
-    try {
-      await resolved.provider.addReaction({
-        channelId: channel.channelId,
-        messageId: queuedMessage.ts,
-        name: '👀',
-      });
-    } catch {
-      // The follow-up is already durable; a reaction is only an acknowledgement.
-    }
+    // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
+    // already durable once queued; agents may still react when turn policy allows.
     return { ok: true, queued: true, runId: activeRun.id };
   }
 
