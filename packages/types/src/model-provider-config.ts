@@ -332,7 +332,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'moonshotai/kimi-k2.7-code',
     authKind: 'api-key',
     credentialHelp: {
-      text: 'Paste an Open Platform key from platform.kimi.ai. Kimi Code membership keys will not work here — use Kimi Code (membership) instead.',
+      text: 'Paste an Open Platform key from platform.kimi.ai. Kimi Code membership keys will not work here — use Kimi Code instead.',
       href: 'https://platform.kimi.ai/console/api-keys',
       linkLabel: 'Open Kimi API Platform keys',
     },
@@ -347,10 +347,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     },
   },
   {
-    // Kimi Code membership (subscription) keys authenticate against the
-    // Anthropic-compatible coding endpoint, not Open Platform / moonshotai.
+    // Kimi Code membership keys authenticate against the Anthropic-compatible
+    // coding endpoint, not Open Platform / moonshotai.
     id: 'kimi-for-coding',
-    label: 'Kimi Code (membership)',
+    label: 'Kimi Code',
     envVarName: 'KIMI_API_KEY',
     envVarLabel: 'Kimi Code API key',
     defaultRoomoteModel: 'kimi-for-coding/k3',

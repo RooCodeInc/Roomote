@@ -33,7 +33,7 @@ describe('inference gateway URL builders', () => {
     ).toBe('https://api.example.com/api/inference/anthropic/v1');
   });
 
-  it('registers Kimi Code membership as an Anthropic-compatible gateway provider', () => {
+  it('registers Kimi Code as an Anthropic-compatible gateway provider', () => {
     const provider = getInferenceGatewayProvider('kimi-for-coding');
     expect(provider).toMatchObject({
       envVarNames: ['KIMI_API_KEY'],

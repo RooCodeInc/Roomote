@@ -318,10 +318,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
-  it('registers Kimi Code membership as an Anthropic-style API-key provider', () => {
+  it('registers Kimi Code as an Anthropic-style API-key provider', () => {
     expect(getSetupModelProvider('kimi-for-coding')).toMatchObject({
       id: 'kimi-for-coding',
-      label: 'Kimi Code (membership)',
+      label: 'Kimi Code',
       envVarName: 'KIMI_API_KEY',
       envVarLabel: 'Kimi Code API key',
       authKind: 'api-key',
@@ -567,7 +567,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     });
   });
 
-  it('recommends Kimi Code membership defaults and role models', () => {
+  it('recommends Kimi Code defaults and role models', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('kimi-for-coding'),
