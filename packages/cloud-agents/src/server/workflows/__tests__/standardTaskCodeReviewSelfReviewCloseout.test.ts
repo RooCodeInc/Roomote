@@ -170,7 +170,7 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('hard-appends the self-review note for ready-for-review delivery when draft reviews are off', () => {
+  it('does not hard-append the self-review note for ready-for-review delivery when draft reviews are off', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
@@ -183,8 +183,13 @@ describe('Standard Task code-review self-review closeout', () => {
       prAction: 'create',
     });
 
+    // `$create-draft-pr` can still override to a non-eligible draft, so keep
+    // decision guidance without hard-appending a forced promise.
     expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
     expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
+    );
+    expect(harnessInstructions).not.toContain(
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
     );
   });

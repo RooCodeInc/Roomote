@@ -214,12 +214,12 @@ export function standardTask({
   const automaticSelfReviewNoticeGuidanceEnabled =
     codeReviewsEnabled && codeReviewReviewOnCommit && deliverySkill !== 'push';
   // Hard-append the note into background-proof closeout wording only when every
-  // PR shape this run can still deliver is auto-review eligible (ready PRs, or
-  // drafts too). Otherwise leave it to the decision rules so an overridden
-  // ready/draft delivery is judged from the actual PR.
+  // PR shape this run can still deliver is auto-review eligible. Explicit
+  // `$create-pr` / `$create-draft-pr` can flip draft vs ready after the prompt
+  // is built, so ready-only delivery is never "every shape eligible" while
+  // draft automatic review is off — leave those cases to the decision rules.
   const everyPossiblePrShapeAutoReviewEligible =
-    automaticSelfReviewNoticeGuidanceEnabled &&
-    (codeReviewReviewDraftPrs || deliverySkill === 'create-pr');
+    automaticSelfReviewNoticeGuidanceEnabled && codeReviewReviewDraftPrs;
   // Coding task must not perform the review. User-facing wording stays first-person.
   const selfReviewCloseoutNote = everyPossiblePrShapeAutoReviewEligible
     ? ` and that you plan to do a self-review on ${sourceControlPlatformLabel} and will follow up here with those results`
