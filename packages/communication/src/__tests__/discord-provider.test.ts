@@ -69,7 +69,7 @@ describe('DiscordCommunicationProvider', () => {
           type: 1,
           components: [
             { type: 2, style: 5, label: 'Follow task' },
-            { type: 2, style: 1, label: 'Cancel', custom_id: 'cancel:1' },
+            { type: 2, style: 2, label: 'Cancel', custom_id: 'cancel:1' },
           ],
         },
       ],

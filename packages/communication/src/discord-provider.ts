@@ -294,7 +294,7 @@ function buildDiscordComponents(
         }
         components.push({
           type: 2,
-          style: 1,
+          style: 2,
           label: button.text,
           custom_id: button.callbackData,
         });

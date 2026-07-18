@@ -14,7 +14,7 @@ export function discordTaskButtons(input: {
     ...(input.taskUrl ? [[{ text: 'Follow Task', url: input.taskUrl }]] : []),
     [
       {
-        text: '✖️ Cancel task',
+        text: 'Cancel task',
         callbackData: `discord:cancel:${input.runId}`,
       },
     ],

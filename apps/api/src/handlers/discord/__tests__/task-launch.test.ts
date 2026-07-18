@@ -133,7 +133,7 @@ describe('launchDiscordTask', () => {
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: '✖️ Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel task', callbackData: 'discord:cancel:41' }],
         ]),
       }),
     );
@@ -787,7 +787,7 @@ describe('launchDiscordTask', () => {
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: '✖️ Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel task', callbackData: 'discord:cancel:41' }],
         ],
       }),
     );
