@@ -631,6 +631,7 @@ export class ModalClient implements ComputeProviderClient {
         process.stdout,
         process.stderr,
         waitPromise,
+        input.onExit,
       );
 
       return { commandId: undefined, exitCode: null };
@@ -1245,6 +1246,7 @@ function streamInBackground(
   stdout: ReadableStream<string>,
   stderr: ReadableStream<string>,
   waitPromise: Promise<number>,
+  onExit?: (event: { exitCode: number }) => void | Promise<void>,
 ): void {
   const pipeStream = async (
     stream: ReadableStream<string>,
@@ -1287,12 +1289,14 @@ function streamInBackground(
     pipeStream(stdout, 'stdout'),
     pipeStream(stderr, 'stderr'),
     waitPromise
-      .then((exitCode) => {
+      .then(async (exitCode) => {
         console.log(`[${label}] Detached process exited with code ${exitCode}`);
+
+        await onExit?.({ exitCode });
       })
       .catch((error) => {
         const msg = error instanceof Error ? error.message : String(error);
-        console.warn(`[${label}] Detached process wait error: ${msg}`);
+        console.warn(`[${label}] Detached process exit handler error: ${msg}`);
       }),
   ]).catch(() => {
     // Swallow — individual handlers already log.
