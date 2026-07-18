@@ -63,11 +63,12 @@ You are executing the /address-pr-feedback slash command to address unresolved G
         <description>Close the loop on each unresolved thread through the source-control tool and keep thread state aligned with reality.</description>
         <actions>
           <action>Post a reply on every thread you handled with `mcp__roomote__manage_source_control` `action: "reply_to_pull_request_comment"`, summarizing the shipped change for that thread in terms of the final code result.</action>
+          <action>Do not manually edit previous review comments. Replying or adding new comments is ok; leave original review comments unchanged.</action>
           <action>Resolve only the review threads that are fully handled by the pushed fix, using `action: "resolve_pull_request_thread"` with `resolved: true`; when the provider does not expose thread resolution the tool reports `applied: false`, which is a non-blocking capability gap to state honestly.</action>
           <action>If a thread is only partially addressed, reply with the current status but leave the thread unresolved.</action>
           <action>If closeout fails after the code is pushed, report the exact closeout gap honestly instead of implying the thread state was updated.</action>
         </actions>
-        <validation>The handled threads have matching replies, and only fully addressed threads were resolved.</validation>
+        <validation>The handled threads have matching replies, prior review comments were left unedited, and only fully addressed threads were resolved.</validation>
       </step>
     </steps>
 
