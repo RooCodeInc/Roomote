@@ -621,4 +621,55 @@ describe('buildChatProviderMessageInstructions', () => {
       );
     },
   );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'documents manual visual-proof posting when auto-post is disabled for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider, {
+        visualProofAutoPostEnabled: false,
+      });
+
+      expect(instructions).toContain(
+        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
+      );
+      expect(instructions).toContain('imageArtifactIds');
+      expect(instructions).toContain(
+        'pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`',
+      );
+      expect(instructions).not.toContain(
+        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
+      );
+    },
+  );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'documents built-in visual-proof auto-post when enabled for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider, {
+        visualProofAutoPostEnabled: true,
+      });
+
+      expect(instructions).toContain(
+        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
+      );
+      expect(instructions).toContain(
+        `When that built-in proof auto-post happens, do not send a second ${label} reply that only narrates the visible proof`,
+      );
+      expect(instructions).not.toContain(
+        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
+      );
+    },
+  );
 });
