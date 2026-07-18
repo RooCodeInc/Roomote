@@ -1596,11 +1596,22 @@ export function isRelaunchableFailedStartPayloadKind(
 }
 
 function reconstructFreshTaskFromFailedRun(sourceRun: TaskRun): FreshTask {
+  const payload = {
+    ...(sourceRun.payload as Record<string, unknown>),
+  };
+
+  // Discord launch idempotency keys the original gateway event on the first
+  // run via task_runs_discord_source_event_unique (uncanceled rows only). A
+  // failed-start relaunch creates another uncanceled run on the same task and
+  // must not re-claim that source event, or Postgres rejects the insert with
+  // 23505 and the UI surfaces a raw Failed query / stuck Booting state.
+  delete payload.communicationSourceEventId;
+
   return {
     type: sourceRun.payloadKind,
     harness: sourceRun.harness ?? undefined,
     computeProvider: sourceRun.vendor ?? undefined,
-    payload: { ...(sourceRun.payload as object) },
+    payload,
   } as FreshTask;
 }
 
