@@ -78,6 +78,12 @@ type PendingDiscordRoute = {
    */
   kickoffMessage?: string;
   forceNewThread?: boolean;
+  /**
+   * Agent-facing prompt with thread history / attachment context when the launch
+   * continues an existing Discord thread. Stored through confirmation so the
+   * later button / reply path still receives the full Slack-style transcript.
+   */
+  agentPromptText?: string;
 };
 
 function pendingRouteKey(id: string): string {
@@ -390,6 +396,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   channel: DiscordChannelContext;
   routingDecision: RoutingDecision;
   forceNewThread?: boolean;
+  agentPromptText?: string;
 }): Promise<{ pendingRouteId: string }> {
   const pendingRouteId = randomBytes(9).toString('base64url');
   const suggestedWorkspace =
@@ -438,6 +445,9 @@ export async function requestDiscordRoutingConfirmation(input: {
     suggestedIndex,
     ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
+    ...(input.agentPromptText?.trim()
+      ? { agentPromptText: input.agentPromptText.trim() }
+      : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
   // Only name a best match when the router actually picked one. Without a
@@ -595,6 +605,9 @@ async function launchPendingDiscordRoute(input: {
     channel: input.pending.channel,
     workspace,
     ...(input.pending.forceNewThread ? { forceNewThread: true } : {}),
+    ...(input.pending.agentPromptText?.trim()
+      ? { agentPromptText: input.pending.agentPromptText.trim() }
+      : {}),
     ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.replaceMessage
       ? { replaceMessage: input.replaceMessage }
