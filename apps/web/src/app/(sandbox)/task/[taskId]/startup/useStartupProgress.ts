@@ -23,14 +23,11 @@ interface UseStartupProgressOptions {
   onStatusChange?: (status: RunStatus) => void;
 }
 
-function resolveBootStartedAtMs(taskRun?: TaskRun): number | undefined {
-  if (!taskRun) {
-    return undefined;
-  }
-
-  const candidates = [taskRun.dequeuedAt, taskRun.createdAt];
-
-  for (const value of candidates) {
+function resolveBootStartedAtMs(
+  dequeuedAt?: TaskRun['dequeuedAt'] | null,
+  createdAt?: TaskRun['createdAt'] | null,
+): number | undefined {
+  for (const value of [dequeuedAt, createdAt]) {
     if (!value) {
       continue;
     }
@@ -126,7 +123,9 @@ export function useStartupProgress({
 
     // Prefer dequeuedAt for overall boot duration; fall back to createdAt.
     // Status transitions keep the same timer so users see total boot wait.
-    const startedAtMs = resolveBootStartedAtMs(taskRun) ?? Date.now();
+    const startedAtMs =
+      resolveBootStartedAtMs(taskRun?.dequeuedAt, taskRun?.createdAt) ??
+      Date.now();
 
     const tick = () => {
       setElapsedSeconds(
