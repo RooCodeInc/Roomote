@@ -356,8 +356,12 @@ export async function generatePrompt({
       if (nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
-            ? buildTeamsMessageInstructions()
-            : buildChatProviderMessageInstructions(nonSlackChatProvider);
+            ? buildTeamsMessageInstructions({
+                visualProofAutoPostEnabled,
+              })
+            : buildChatProviderMessageInstructions(nonSlackChatProvider, {
+                visualProofAutoPostEnabled,
+              });
         result.harnessInstructions = result.harnessInstructions
           ? `${chatInstructions}\n\n${result.harnessInstructions}`
           : chatInstructions;

@@ -163,8 +163,21 @@ function getNonSlackChatProviderDisplay(provider: NonSlackChatProvider): {
 
 export function buildChatProviderMessageInstructions(
   provider: NonSlackChatProvider,
+  {
+    visualProofAutoPostEnabled = false,
+  }: {
+    visualProofAutoPostEnabled?: boolean;
+  } = {},
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
+  const proofDeliveryInstructions = visualProofAutoPostEnabled
+    ? `
+    <rule>Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.</rule>
+    <rule>When that built-in proof auto-post happens, do not send a second ${label} reply that only narrates the visible proof, counts screenshots, names localhost capture URLs, mentions internal temp or artifact file paths, repeats the capture summary, or says there was no blocker. Treat the built-in proof post as the proof-ready update unless the proof is blocked or that detail materially changes the user's next step.</rule>
+    <rule>Keep later ${label} replies focused on the user outcome, delivery state, blocker, or next action rather than restating what is already visible in the proof attachments.</rule>`
+    : `
+    <rule>Visual-proof uploads are not auto-posted to ${label} for this task. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
+    <rule>When other task-generated images were uploaded earlier in the same run and still need to be shown in the thread, pass those artifact IDs to \`send_chat_reply\` via \`imageArtifactIds\`.</rule>`;
 
   return `
 <${tag}_message_instructions>
@@ -198,14 +211,22 @@ export function buildChatProviderMessageInstructions(
     <rule>Use \`send_chat_reply\` for lifecycle replies in the originating ${label} thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications.</rule>
     <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers when the current turn allows reactions. Choose the reaction that best matches the intent: \`eyes\` for taking a look, \`thumbsup\` for acknowledgement/go-ahead, \`white_check_mark\` for completed work, \`x\` or \`thumbsdown\` for rejection/failure, and another mapped reaction when it fits better.</rule>
     <rule>Do not use Slack-only tools such as \`post_to_slack_channel\` for ${label} turns.</rule>
+    ${proofDeliveryInstructions}
+    <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the ${label} text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>
     <rule>Every new directed ${label} user turn that you answer still needs its own fresh ${label}-visible response. A prior turn's reply or reaction does not satisfy a later turn. An emoji reaction only satisfies a lightweight ack when the current policy allows reactions; a first-turn or closeout still needs \`send_chat_reply\`.</rule>
   </${tag}_response_delivery>
 </${tag}_message_instructions>
 `.trim();
 }
 
-export function buildTeamsMessageInstructions(): string {
-  return buildChatProviderMessageInstructions('teams');
+export function buildTeamsMessageInstructions({
+  visualProofAutoPostEnabled = false,
+}: {
+  visualProofAutoPostEnabled?: boolean;
+} = {}): string {
+  return buildChatProviderMessageInstructions('teams', {
+    visualProofAutoPostEnabled,
+  });
 }
 
 function formatWorkspaceReadinessContext({
