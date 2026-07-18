@@ -295,7 +295,6 @@ common provider keys into worker containers:
 - `KIMI_API_KEY` (Kimi for Coding, `kimi-for-coding/...` models)
 - `MINIMAX_API_KEY`
 - `OPENCODE_API_KEY`
-- `GITHUB_TOKEN` (GitHub Copilot, `github-copilot/...` models)
 
 If your provider uses another env var name, list it in
 `R_MODEL_ENV_KEYS`:

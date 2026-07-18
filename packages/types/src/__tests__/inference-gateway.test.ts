@@ -118,7 +118,8 @@ describe('inference gateway key lookups', () => {
   it('registers GitHub Copilot with the models.dev base path layout', () => {
     const provider = getInferenceGatewayProvider('github-copilot');
     expect(provider).toMatchObject({
-      envVarNames: ['GITHUB_TOKEN'],
+      authStrategy: 'github-copilot-oauth',
+      envVarNames: [],
       upstreamBaseUrl: 'https://api.githubcopilot.com',
       openCodeBaseUrlSuffix: '',
     });
@@ -131,9 +132,6 @@ describe('inference gateway key lookups', () => {
         provider!,
       ),
     ).toBe('https://api.example.com/api/inference/github-copilot');
-    expect(getInferenceGatewayProviderByEnvVarName('GITHUB_TOKEN')?.id).toBe(
-      'github-copilot',
-    );
   });
 
   it('parses a comma-separated served-keys value', () => {

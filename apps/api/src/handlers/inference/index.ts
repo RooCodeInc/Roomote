@@ -31,6 +31,9 @@ const REQUEST_HEADER_DENYLIST = new Set([
   // The gateway sets the ChatGPT account-id authoritatively from the OAuth
   // record; a sandbox must not be able to smuggle its own.
   'chatgpt-account-id',
+  // Copilot request classification is set authoritatively by the gateway.
+  'openai-intent',
+  'x-initiator',
   'cookie',
   'host',
   'connection',
@@ -252,6 +255,11 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
   }
 
   const { upstreamUrl, headers: injectedHeaders } = resolution.resolved;
+
+  if (providerId === 'github-copilot') {
+    injectedHeaders['x-initiator'] =
+      c.req.header('x-initiator') === 'agent' ? 'agent' : 'user';
+  }
 
   try {
     const upstreamResponse = await fetchWithLongLivedStreamDispatcher(

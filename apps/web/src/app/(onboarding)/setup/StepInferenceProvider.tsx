@@ -23,6 +23,7 @@ import {
   Spinner,
 } from '@/components/system';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
+import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 
 import { StepTitle } from './StepTitle';
 import { SetupFooter } from './SetupFooter';
@@ -84,6 +85,8 @@ export function StepInferenceProvider({
   >({});
   const [editingSavedValue, setEditingSavedValue] = useState(false);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
+  const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
+    useState(false);
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(undefined, {
       enabled: selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID,
@@ -125,6 +128,7 @@ export function StepInferenceProvider({
     setAdditionalEnvValues({});
     setEditingSavedValue(false);
     setIsChatGptDialogOpen(false);
+    setIsGitHubCopilotDialogOpen(false);
   }, [selectedProvider]);
 
   useEffect(() => {
@@ -149,8 +153,11 @@ export function StepInferenceProvider({
   const isChatGptProvider =
     selectedProviderStatus?.authKind === 'oauth' &&
     selectedProvider === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  const isGitHubCopilotProvider = selectedProvider === 'github-copilot';
+  const isOAuthProvider = selectedProviderStatus?.authKind === 'oauth';
   const isEndpointProvider = selectedProviderStatus?.authKind === 'endpoint';
   const chatgptConnected = Boolean(modelSetup.chatgptConnected);
+  const githubCopilotConnected = Boolean(modelSetup.githubCopilotConnected);
   const hasRuntimeProviderKey =
     selectedProviderStatus?.runtimeApiKeySatisfied === true;
   const hasSavedProviderKey =
@@ -285,7 +292,7 @@ export function StepInferenceProvider({
           </SelectContent>
         </Select>
 
-        {isChatGptProvider ? null : (
+        {isOAuthProvider ? null : (
           <Input
             secret={!isEndpointProvider && !hasRuntimeProviderKey}
             value={shouldShowConfiguredMask ? MASKED_VALUE : apiKey}
@@ -356,6 +363,31 @@ export function StepInferenceProvider({
         </div>
       ) : null}
 
+      {isGitHubCopilotProvider && !hasRuntimeProviderKey ? (
+        <div className="flex max-w-lg items-center gap-3">
+          {githubCopilotConnected ? (
+            <span className="text-sm text-muted-foreground">
+              Connected to a GitHub Copilot account.
+            </span>
+          ) : (
+            <>
+              <span className="text-sm text-muted-foreground">
+                Connect a GitHub account with an active Copilot plan:
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={saveModelConfig.isPending}
+                onClick={() => setIsGitHubCopilotDialogOpen(true)}
+              >
+                Connect GitHub Copilot
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
+
       {!hasRuntimeProviderKey &&
         additionalEnvFields.map((field) => (
           <div
@@ -405,6 +437,15 @@ export function StepInferenceProvider({
       <ChatGptConnectDialog
         open={isChatGptDialogOpen}
         onOpenChange={setIsChatGptDialogOpen}
+        onConnected={async () => {
+          await queryClient.invalidateQueries({
+            queryKey: trpc.setupNew.status.queryKey(),
+          });
+        }}
+      />
+      <GitHubCopilotConnectDialog
+        open={isGitHubCopilotDialogOpen}
+        onOpenChange={setIsGitHubCopilotDialogOpen}
         onConnected={async () => {
           await queryClient.invalidateQueries({
             queryKey: trpc.setupNew.status.queryKey(),

@@ -7,11 +7,13 @@ const {
   mockFindTaskRun,
   mockResolveModelProviderEnvValue,
   mockGetFreshChatGptAccessToken,
+  mockGetGitHubCopilotAccessToken,
   mockRecordLlmUsage,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockResolveModelProviderEnvValue: vi.fn(),
   mockGetFreshChatGptAccessToken: vi.fn(),
+  mockGetGitHubCopilotAccessToken: vi.fn(),
   mockRecordLlmUsage: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   resolveModelProviderEnvValue: mockResolveModelProviderEnvValue,
   getFreshChatGptAccessToken: mockGetFreshChatGptAccessToken,
+  getGitHubCopilotAccessToken: mockGetGitHubCopilotAccessToken,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -96,6 +99,7 @@ describe('inference gateway', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     mockFindTaskRun.mockResolvedValue({ id: 42 });
+    mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {
         const nameList = typeof names === 'string' ? [names] : names;
@@ -264,6 +268,7 @@ describe('inference gateway', () => {
   });
 
   it('proxies GitHub Copilot without a /v1 base-path suffix', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(
       createApp(createRunToken()),
@@ -275,11 +280,12 @@ describe('inference gateway', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.githubcopilot.com/chat/completions');
     expect(new Headers(init.headers).get('authorization')).toBe(
-      'Bearer provider-secret-key',
+      'Bearer github-oauth-token',
     );
   });
 
   it('proxies GitHub Copilot responses path', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(
       createApp(createRunToken()),
@@ -291,8 +297,38 @@ describe('inference gateway', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.githubcopilot.com/responses');
     expect(new Headers(init.headers).get('authorization')).toBe(
-      'Bearer provider-secret-key',
+      'Bearer github-oauth-token',
     );
+  });
+
+  it('prefers the connected GitHub Copilot OAuth token and adds Copilot headers', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'x-initiator': 'attacker' },
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer github-oauth-token');
+    expect(headers.get('openai-intent')).toBe('conversation-edits');
+    expect(headers.get('x-initiator')).toBe('user');
+  });
+
+  it('preserves OpenCode agent-initiated Copilot classification', async () => {
+    mockGetGitHubCopilotAccessToken.mockResolvedValue('github-oauth-token');
+    const fetchMock = stubUpstreamFetch();
+    await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+      { 'x-initiator': 'agent' },
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('x-initiator')).toBe('agent');
   });
 
   it('allows nested paths under the Vercel AI Gateway protocol base', async () => {

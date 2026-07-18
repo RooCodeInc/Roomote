@@ -248,6 +248,40 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases GitHub Copilot onto its OAuth-backed gateway segment', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'github-copilot/claude-haiku-4.5',
+        R_MODEL_REASONING_EFFORT: 'medium',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_GITHUB_COPILOT: '1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['github-copilot']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/github-copilot',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(config.provider['github-copilot']).toMatchObject({
+      models: {
+        'claude-haiku-4.5': {
+          options: { thinking_budget: 8_000 },
+        },
+      },
+    });
+    expect(
+      (
+        config.provider['github-copilot'] as {
+          models: Record<string, { options: Record<string, unknown> }>;
+        }
+      ).models['claude-haiku-4.5']?.options.reasoningEffort,
+    ).toBeUndefined();
+  });
+
   it('leaves the openai provider alone when a ChatGPT subscription is present', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

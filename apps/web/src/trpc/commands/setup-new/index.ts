@@ -36,6 +36,7 @@ import {
   resolveDiscordRuntimeCredentials,
   syncSetupQualificationBlock,
   isChatGptSubscriptionConnected,
+  isGitHubCopilotSubscriptionConnected,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
@@ -53,6 +54,7 @@ import {
   buildSetupComputeStatus,
   buildSetupModelStatus,
   buildSetupSourceControlStatus,
+  CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
   createEmptySetupNewState,
@@ -1322,6 +1324,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     nonSecretComputeEnvValues,
     nonSecretSourceControlEnvValues,
     chatgptConnected,
+    githubCopilotConnected,
   ] = await Promise.all([
     getSetupBaseStatus(auth),
     getSetupSlackAccessStatus({ userId }),
@@ -1346,6 +1349,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
       ...NON_SECRET_SOURCE_CONTROL_ENV_VAR_NAMES,
     ]),
     isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
   ]);
   const activeSetupQualificationBlock =
     await getActiveSetupQualificationBlock(auth);
@@ -1434,6 +1438,7 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     persistedEnvVarValues: nonSecretModelEnvValues,
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
+    githubCopilotConnected,
   });
   const computeSetup = buildSetupComputeStatus({
     runtimeEnv: process.env,
@@ -1509,14 +1514,23 @@ export async function saveSetupNewModelConfigCommand(
   const provider = getSetupModelProvider(input.provider);
   const isOauthProvider = provider.authKind === 'oauth';
 
-  const chatgptConnected = await isChatGptSubscriptionConnected();
+  const [chatgptConnected, githubCopilotConnected] = await Promise.all([
+    isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
+  ]);
+  const selectedOauthConnected =
+    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
+      ? chatgptConnected
+      : provider.id === 'github-copilot'
+        ? githubCopilotConnected
+        : false;
 
-  // OAuth providers (the ChatGPT subscription) are connected through the
+  // OAuth providers are connected through their
   // device-code flow rather than an API key. The setup wizard's Continue
   // records the provider choice and default model only after the operator
   // has connected an account, so the env-vars step becomes satisfied without
   // a credential env var.
-  if (isOauthProvider && !chatgptConnected) {
+  if (isOauthProvider && !selectedOauthConnected) {
     throw new Error(
       `Connect your ${provider.label} account to continue, or pick a different provider.`,
     );
@@ -1600,6 +1614,7 @@ export async function saveSetupNewModelConfigCommand(
         runtimeEnv: process.env,
         persistedEnvVarNames,
         chatgptConnected,
+        githubCopilotConnected,
       }),
     ]);
     const autoAdd = buildAutoAddedTaskModelSettings({

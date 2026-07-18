@@ -14,6 +14,7 @@ import {
   getInferenceGatewayProviderByEnvVarName,
   getMcpIntegration,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
@@ -765,6 +766,8 @@ function mergeInferenceGatewayProviderConfig(
   );
   const routeChatGptThroughGateway =
     runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+  const routeGitHubCopilotThroughGateway =
+    runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] === '1';
 
   if (!gatewayUrl) {
     return providerConfig;
@@ -817,6 +820,19 @@ function mergeInferenceGatewayProviderConfig(
         CHATGPT_OPENCODE_PROVIDER_ID,
         gatewayUrl,
         chatGptProvider,
+      );
+    }
+  }
+
+  if (routeGitHubCopilotThroughGateway) {
+    const copilotProvider = getInferenceGatewayProvider('github-copilot');
+
+    if (copilotProvider) {
+      merged = rebaseProviderOntoGateway(
+        merged,
+        'github-copilot',
+        gatewayUrl,
+        copilotProvider,
       );
     }
   }

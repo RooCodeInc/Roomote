@@ -56,6 +56,10 @@ export const CHATGPT_ACCOUNT_ID_HEADER = 'ChatGPT-Account-Id';
 export const INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME =
   'R_INFERENCE_GATEWAY_CHATGPT';
 
+/** Marker indicating that the gateway holds a GitHub Copilot OAuth token. */
+export const INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME =
+  'R_INFERENCE_GATEWAY_GITHUB_COPILOT';
+
 interface InferenceGatewayAuthHeader {
   name: string;
   scheme?: 'bearer';
@@ -67,7 +71,10 @@ interface InferenceGatewayAuthHeader {
  * - `chatgpt-oauth`: mint a fresh ChatGPT-subscription access token
  *   server-side and add the account-id header; the sandbox holds no key.
  */
-export type InferenceGatewayAuthStrategy = 'api-key' | 'chatgpt-oauth';
+export type InferenceGatewayAuthStrategy =
+  | 'api-key'
+  | 'chatgpt-oauth'
+  | 'github-copilot-oauth';
 
 export interface InferenceGatewayProvider {
   /**
@@ -155,12 +162,11 @@ const ANTHROPIC_COMPATIBLE_INFERENCE_PATHS: readonly string[] = [
 ];
 
 /**
- * Providers reachable through the inference gateway. Key-authenticated
- * HTTP-proxyable providers only. Google Vertex is disabled while its
- * service-account request signing cannot stay on the control plane; ChatGPT
- * subscription OAuth is handled by its dedicated gateway route. Upstream
- * bases follow models.dev, the registry OpenCode itself resolves providers
- * from.
+ * Providers reachable through the inference gateway. HTTP-proxyable providers
+ * whose API-key or OAuth credential can stay on the control plane. Google
+ * Vertex is disabled while its service-account request signing cannot stay on
+ * the control plane. Upstream bases follow models.dev, the registry OpenCode
+ * itself resolves providers from.
  */
 export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
   [
@@ -307,7 +313,8 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       // under https://api.githubcopilot.com (no /v1 prefix on the base URL).
       id: 'github-copilot',
       name: 'GitHub Copilot',
-      envVarNames: ['GITHUB_TOKEN'],
+      authStrategy: 'github-copilot-oauth',
+      envVarNames: [],
       upstreamBaseUrl: 'https://api.githubcopilot.com',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: [

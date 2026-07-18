@@ -315,6 +315,13 @@ import {
   startChatGptDeviceAuthCommand,
 } from '../commands/chatgpt-subscription';
 import {
+  disconnectGitHubCopilotSubscriptionCommand,
+  getGitHubCopilotSubscriptionStatusCommand,
+  isGitHubCopilotSubscriptionConnectedCommand,
+  pollGitHubCopilotDeviceAuthCommand,
+  startGitHubCopilotDeviceAuthCommand,
+} from '../commands/github-copilot-subscription';
+import {
   getRouterDebugSettingsCommand,
   updateRouterDebugSettingsCommand,
 } from '../commands/router-debug';
@@ -1818,6 +1825,26 @@ export const appRouter = createRouter({
 
     disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectChatGptSubscriptionCommand(auth),
+    ),
+  }),
+
+  githubCopilotSubscription: createRouter({
+    status: protectedProcedure.query(({ ctx: { auth } }) =>
+      getGitHubCopilotSubscriptionStatusCommand(auth),
+    ),
+    isConnected: protectedProcedure.query(({ ctx: { auth } }) =>
+      isGitHubCopilotSubscriptionConnectedCommand(auth),
+    ),
+    startDeviceAuth: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      startGitHubCopilotDeviceAuthCommand(auth),
+    ),
+    pollDeviceAuth: protectedProcedure
+      .input(z.object({ deviceCode: z.string().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        pollGitHubCopilotDeviceAuthCommand(auth, input),
+      ),
+    disconnect: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      disconnectGitHubCopilotSubscriptionCommand(auth),
     ),
   }),
 

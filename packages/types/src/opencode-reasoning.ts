@@ -115,6 +115,26 @@ function buildAnthropicReasoningOptions(
   };
 }
 
+function buildGitHubCopilotReasoningOptions(
+  modelID: string,
+  reasoningEffort: ReasoningEffort,
+): Record<string, unknown> {
+  // Copilot exposes older Claude models through its OpenAI-compatible chat
+  // endpoint, where extended thinking is configured with the provider's
+  // snake_case `thinking_budget` option. Newer Copilot models expose effort
+  // directly and continue to use `reasoningEffort`.
+  if (
+    modelID.toLowerCase().includes('claude') &&
+    resolveAnthropicThinkingMode(modelID) === 'budget'
+  ) {
+    return {
+      thinking_budget: ANTHROPIC_THINKING_BUDGET_TOKENS[reasoningEffort],
+    };
+  }
+
+  return { reasoningEffort };
+}
+
 export function splitTaskModelId(
   modelId: string,
 ): { providerID: string; modelID: string } | null {
@@ -173,6 +193,11 @@ export function buildOpenCodeModelReasoningOptions(
     case 'anthropic':
     case 'bedrock-mantle':
       return buildAnthropicReasoningOptions(selection.modelID, reasoningEffort);
+    case 'github-copilot':
+      return buildGitHubCopilotReasoningOptions(
+        selection.modelID,
+        reasoningEffort,
+      );
     case 'litellm':
       // LiteLLM's OpenAI-compatible endpoint rejects `xhigh`; keep the
       // highest accepted setting instead of failing the inference request.
