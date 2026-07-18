@@ -330,6 +330,39 @@ describe('spawnModalWorker', () => {
     );
   });
 
+  it('cleans up when a detached worker exits with code zero during launch', async () => {
+    mockRunCommand.mockResolvedValue({
+      exitCode: 0,
+      commandId: undefined,
+      stdout: 'worker stopped before claim\n',
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow('Detached "worker run" exited immediately with code 0');
+
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        phase: 'spawn_worker',
+      }),
+    );
+  });
+
   it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
     const onWorkerExit = vi.fn().mockResolvedValue('restart');
     const onWorkerRestart = vi.fn();
@@ -365,6 +398,41 @@ describe('spawnModalWorker', () => {
         onMutation: expect.any(Function),
       }),
     );
+    expect(onWorkerRestart).toHaveBeenCalledOnce();
+  });
+
+  it('restarts after a claimed exit even when sandbox cleanup fails', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerRestart = vi.fn();
+    mockCleanupModalInstance.mockRejectedValueOnce(
+      new Error('cleanup unavailable'),
+    );
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+        onWorkerRestart,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await expect(
+      runCommandInput.onExit?.({ exitCode: 1 }),
+    ).rejects.toThrow('cleanup unavailable');
+
     expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
 

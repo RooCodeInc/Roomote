@@ -438,27 +438,35 @@ export async function spawnModalWorker(
                 return;
               }
 
-              await cleanupModalInstance({
-                computeClient,
-                instanceId: machine.machineId,
-                phase: 'worker_bootstrap_exit',
-                error: new Error(
-                  `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
-                ),
-                logPrefix: 'spawnModalWorker',
-                onMutation: recordMutation,
-                ...mutationContext,
-              });
-
-              if (disposition === 'restart') {
-                onWorkerRestart?.();
+              try {
+                await cleanupModalInstance({
+                  computeClient,
+                  instanceId: machine.machineId,
+                  phase: 'worker_bootstrap_exit',
+                  error: new Error(
+                    `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
+                  ),
+                  logPrefix: 'spawnModalWorker',
+                  onMutation: recordMutation,
+                  ...mutationContext,
+                });
+              } finally {
+                // The restart decision is already durable. Do not strand it if
+                // provider cleanup fails; the new worker can still be launched
+                // and the orphaned sandbox remains covered by orphan recovery.
+                if (disposition === 'restart') {
+                  onWorkerRestart?.();
+                }
               }
             },
           }
         : {}),
     });
 
-    if (result.exitCode !== null && result.exitCode !== 0) {
+    // A detached worker must remain alive long enough to claim the run. Even
+    // exit code 0 during the grace period means no worker owns the task, so
+    // route it through the normal launch-failure cleanup path.
+    if (result.exitCode !== null) {
       throw buildDetachedWorkerExitError(command, result);
     }
 

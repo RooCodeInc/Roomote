@@ -18,9 +18,11 @@ import {
   type TaskRun,
   db,
   taskRuns,
+  taskRunEvents,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
+  syncTaskStateFromRuns,
   updatePendingEnvironmentSnapshot,
   eq,
   and,
@@ -72,6 +74,9 @@ export abstract class BaseController {
 
   /** Bootstrap retries waiting for a spawn slot or the previous spawn unwind. */
   private pendingWorkerBootstrapRestarts = new Map<number, TaskRun>();
+
+  /** Prevent this controller from recovering a retry before cleanup finishes. */
+  private workerBootstrapRestartsAwaitingCleanup = new Set<number>();
 
   /** Watches local release artifacts for changes (local dev only). */
   private artifactWatchers: fs.FSWatcher[] = [];
@@ -138,7 +143,8 @@ export abstract class BaseController {
           SANDBOX_ORPHAN_SCAN_INTERVAL_MS
         ) {
           lastWorkerBootstrapCheckAt = iterationNow;
-          await this.failTimedOutWorkerBootstrap();
+          await this.recoverPersistedWorkerBootstrapRestarts();
+          await this.failTimedOutWorkerBootstraps();
         }
 
         const pendingRestart = this.pendingWorkerBootstrapRestarts
@@ -570,6 +576,7 @@ export abstract class BaseController {
     exitCode: number,
   ): Promise<WorkerBootstrapExitDisposition> {
     if (await this.claimWorkerBootstrapRestart(taskRun, exitCode)) {
+      this.workerBootstrapRestartsAwaitingCleanup.add(taskRun.id);
       return 'restart';
     }
 
@@ -588,6 +595,8 @@ export abstract class BaseController {
   }
 
   protected scheduleWorkerBootstrapRestart(taskRun: TaskRun): void {
+    this.workerBootstrapRestartsAwaitingCleanup.delete(taskRun.id);
+
     const restartRun: TaskRun = {
       ...taskRun,
       status: RunStatus.Pending,
@@ -624,8 +633,8 @@ export abstract class BaseController {
     );
   }
 
-  protected async failTimedOutWorkerBootstrap(): Promise<boolean> {
-    const taskRun = await db.query.taskRuns.findFirst({
+  protected async failTimedOutWorkerBootstraps(): Promise<number> {
+    const overdueRuns = await db.query.taskRuns.findMany({
       where: and(
         eq(taskRuns.status, RunStatus.Dequeued),
         isNotNull(taskRuns.provisionReadyAt),
@@ -640,26 +649,62 @@ export abstract class BaseController {
       orderBy: [asc(taskRuns.provisionReadyAt)],
     });
 
-    if (!taskRun) {
-      return false;
-    }
-
-    // provisionReadyAt is stamped before the final worker handoff. Do not let
-    // the watchdog race a launch that this controller is still actively
-    // completing (for example, environment OIDC priming).
-    if (this.inFlightSpawns.has(taskRun.id)) {
-      return false;
-    }
-
     const timeoutSeconds = Math.round(
       WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS / 1_000,
     );
     const errorMessage = `Worker did not claim task run within ${timeoutSeconds} seconds after the environment became ready`;
+    let failedCount = 0;
 
-    return this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
-      message: 'Worker did not claim its task run after provisioning',
-      signal: 'worker-bootstrap-timeout',
+    for (const taskRun of overdueRuns) {
+      // provisionReadyAt is stamped before the final worker handoff. Do not
+      // let the watchdog race a launch that this controller is still actively
+      // completing (for example, environment OIDC priming).
+      if (this.inFlightSpawns.has(taskRun.id)) {
+        continue;
+      }
+
+      if (
+        await this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
+          message: 'Worker did not claim its task run after provisioning',
+          signal: 'worker-bootstrap-timeout',
+        })
+      ) {
+        failedCount += 1;
+      }
+    }
+
+    return failedCount;
+  }
+
+  protected async recoverPersistedWorkerBootstrapRestarts(): Promise<number> {
+    const scheduledRuns = await db.query.taskRuns.findMany({
+      where: and(
+        eq(taskRuns.status, RunStatus.Pending),
+        isNull(taskRuns.startedAt),
+        isNull(taskRuns.canceledAt),
+        sql`EXISTS (
+          SELECT 1
+          FROM ${taskRunEvents}
+          WHERE ${taskRunEvents.runId} = ${taskRuns.id}
+            AND ${taskRunEvents.source} = 'run_lifecycle'
+            AND ${taskRunEvents.details} ->> 'stage' = 'worker_bootstrap_restart'
+        )`,
+      ),
+      orderBy: [asc(taskRuns.createdAt)],
     });
+
+    let recoveredCount = 0;
+
+    for (const taskRun of scheduledRuns) {
+      if (this.workerBootstrapRestartsAwaitingCleanup.has(taskRun.id)) {
+        continue;
+      }
+
+      this.scheduleWorkerBootstrapRestart(taskRun);
+      recoveredCount += 1;
+    }
+
+    return recoveredCount;
   }
 
   private async claimWorkerBootstrapFailure(
@@ -672,25 +717,37 @@ export abstract class BaseController {
     },
   ): Promise<boolean> {
     const now = new Date();
-    const claimed = await db
-      .update(taskRuns)
-      .set({
-        status: RunStatus.Failed,
-        error: errorMessage,
-        completedAt: now,
-      })
-      .where(
-        and(
-          eq(taskRuns.id, taskRun.id),
-          eq(taskRuns.status, RunStatus.Dequeued),
-          isNull(taskRuns.startedAt),
-          isNull(taskRuns.workerHeartbeatAt),
-          isNull(taskRuns.canceledAt),
-        ),
-      )
-      .returning({ id: taskRuns.id });
+    const claimed = await db.transaction(async (tx) => {
+      const updatedRuns = await tx
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Failed,
+          error: errorMessage,
+          completedAt: now,
+        })
+        .where(
+          and(
+            eq(taskRuns.id, taskRun.id),
+            eq(taskRuns.status, RunStatus.Dequeued),
+            isNull(taskRuns.startedAt),
+            isNull(taskRuns.workerHeartbeatAt),
+            isNull(taskRuns.canceledAt),
+          ),
+        )
+        .returning({ id: taskRuns.id });
 
-    if (claimed.length === 0) {
+      if (updatedRuns.length === 0) {
+        return false;
+      }
+
+      // Keep the task projection durable with the terminal run transition.
+      // finishRun repeats this sync while applying notifications and cleanup,
+      // but a later side-effect failure cannot leave the task active forever.
+      await syncTaskStateFromRuns(tx, taskRun.taskId);
+      return true;
+    });
+
+    if (!claimed) {
       console.log(
         `[BaseController] Ignoring worker bootstrap failure for task run #${taskRun.id} because the run already advanced`,
       );
