@@ -1,3 +1,4 @@
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import type { DiscordAttachment } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
@@ -5,6 +6,7 @@ import {
   type QueuedCommunicationMessage,
 } from '@roomote/types';
 
+import { processDiscordAttachments } from './attachments.js';
 import {
   claimUndeliveredDiscordThreadMessages,
   markDiscordThreadMessagesDelivered,
@@ -42,6 +44,32 @@ function messageDisplayName(message: DiscordThreadHistoryMessage): string {
   return (message.username?.trim() || message.user || 'Unknown').trim();
 }
 
+function messageHasThreadDeliveryContent(
+  message: DiscordThreadHistoryMessage,
+): boolean {
+  return message.text.trim().length > 0 || message.attachments.length > 0;
+}
+
+function formatDiscordThreadContextEntry(
+  message: DiscordThreadHistoryMessage,
+): string | null {
+  const displayName = messageDisplayName(message);
+  if (!displayName) return null;
+
+  const text = message.text.trim();
+  const attachmentNames = message.attachments
+    .map((attachment) => attachment.filename?.trim())
+    .filter((name): name is string => Boolean(name));
+  const attachmentLabel =
+    attachmentNames.length > 0
+      ? `[attached: ${attachmentNames.join(', ')}]`
+      : '';
+  const body = [text, attachmentLabel].filter(Boolean).join(' ');
+  if (!body) return null;
+
+  return `${escapeDiscordPromptContent(displayName)}: ${escapeDiscordPromptContent(body)}`;
+}
+
 export function formatDiscordThreadContext(input: {
   messages: DiscordThreadHistoryMessage[];
   currentMessageId: string;
@@ -49,13 +77,14 @@ export function formatDiscordThreadContext(input: {
   const earlier = input.messages.filter(
     (message) =>
       compareDiscordSnowflakes(message.id, input.currentMessageId) < 0 &&
-      message.text.trim().length > 0,
+      messageHasThreadDeliveryContent(message),
   );
   if (earlier.length === 0) return undefined;
 
-  const entries = earlier.map((message) => {
-    return `${escapeDiscordPromptContent(messageDisplayName(message))}: ${escapeDiscordPromptContent(message.text.trim())}`;
-  });
+  const entries = earlier
+    .map((message) => formatDiscordThreadContextEntry(message))
+    .filter((entry): entry is string => entry !== null);
+  if (entries.length === 0) return undefined;
 
   return `<thread_context>\n${entries.join('\n\n')}\n</thread_context>`;
 }
@@ -170,7 +199,8 @@ type DiscordContinuationPromptResult = {
 /**
  * Build a Slack-parity Discord follow-up prompt: undelivered earlier human/bot
  * side messages in `<thread_context>`, latest Roomote reply in `<replying_to>`,
- * and the current turn wrapped as a communication_message.
+ * prior supported attachments as images/text, and the current turn wrapped as
+ * a communication_message.
  */
 export async function buildDiscordContinuationPrompt(input: {
   provider: DiscordCommunicationProvider;
@@ -193,7 +223,7 @@ export async function buildDiscordContinuationPrompt(input: {
   const earlier = history.filter(
     (message) =>
       compareDiscordSnowflakes(message.id, input.queuedMessage.ts) < 0 &&
-      (message.text.trim().length > 0 || message.attachments.length > 0),
+      messageHasThreadDeliveryContent(message),
   );
 
   const ownBotEarlier = earlier.filter(
@@ -211,8 +241,8 @@ export async function buildDiscordContinuationPrompt(input: {
     if (latestOwnBotReply && message.id === latestOwnBotReply.id) {
       return false;
     }
-    // Own bot replies without new attachment content stay out of background
-    // context; Slack keeps the latest bot reply only in <replying_to>.
+    // Own bot text replies stay out of background context unless they carry
+    // attachments; Slack keeps the latest bot reply only in <replying_to>.
     if (
       input.botUserId &&
       message.botId === input.botUserId &&
@@ -220,7 +250,7 @@ export async function buildDiscordContinuationPrompt(input: {
     ) {
       return false;
     }
-    return message.text.trim().length > 0;
+    return messageHasThreadDeliveryContent(message);
   });
 
   let claimedIds: string[] = [];
@@ -247,9 +277,17 @@ export async function buildDiscordContinuationPrompt(input: {
     claimedSet.has(message.id),
   );
 
+  const historyAttachments = toDiscordAttachmentsFromHistory(claimedMessages);
+  const processedAttachments = historyAttachments.length
+    ? await processDiscordAttachments(historyAttachments)
+    : { images: [], attachmentTexts: [], warnings: [] };
+  for (const warning of processedAttachments.warnings) {
+    console.warn(`[discord] Follow-up thread attachment warning: ${warning}`);
+  }
+
   const threadContext = formatDiscordThreadContext({
     // formatDiscordThreadContext filters by currentMessageId; pass claimed +
-    // synthetic current pad so only claimed earlier text is rendered.
+    // synthetic current pad so only claimed earlier content is rendered.
     messages: [
       ...claimedMessages,
       {
@@ -275,9 +313,20 @@ export async function buildDiscordContinuationPrompt(input: {
     reactionsAllowed: hasPriorBotReply,
   };
 
+  const textWithAttachments = appendAttachmentTextsToPromptText({
+    text: input.queuedMessage.text,
+    attachmentTexts: processedAttachments.attachmentTexts,
+  });
+  const allImages = [
+    ...(input.queuedMessage.images ?? []),
+    ...processedAttachments.images,
+  ];
+
   const messageWithPolicy: QueuedCommunicationMessage = {
     ...input.queuedMessage,
+    text: textWithAttachments,
     turnPolicy,
+    ...(allImages.length ? { images: allImages } : {}),
   };
 
   const currentMessageBlock = wrapCommunicationMessage(
