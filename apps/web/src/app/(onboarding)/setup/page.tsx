@@ -657,14 +657,15 @@ export default function SetupPage() {
                 setPendingSourceControlProvider(null);
                 goToStep('source-control-connect');
               }}
-              onBack={
-                canGoBack
-                  ? () => {
-                      setPendingSourceControlProvider(null);
-                      goToPreviousStep();
-                    }
-                  : undefined
-              }
+              onBack={() => {
+                setPendingSourceControlProvider(null);
+                if (canGoBack) {
+                  goToPreviousStep();
+                  return;
+                }
+
+                goToStep('source-control-provider');
+              }}
             />
           )}
           {step === 'source-control-connect' && (
