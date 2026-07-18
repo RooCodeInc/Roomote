@@ -41,6 +41,7 @@ import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
 } from '../tasks/communication-out-of-band-context.js';
+import { promptDiscordAccountLink } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
   DISCORD_GATEWAY_SECRET_HEADER,
@@ -78,9 +79,6 @@ const DISCORD_HELP_MESSAGE = [
   '',
   'Follow up by sending another message in the task thread.',
 ].join('\n');
-
-const DISCORD_LINK_REQUIRED_MESSAGE =
-  'Link your Discord account to Roomote before starting tasks. Generate a code under **Settings → Personal → Linked Accounts**, then DM me with `/link code:<code>`.';
 
 function isPermanentDiscordEventError(
   error: unknown,
@@ -352,12 +350,13 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       };
     }
 
-    await replyToDiscordEvent({
+    await promptDiscordAccountLink({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
+      discordUserId: sender.id,
       ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-      text: DISCORD_LINK_REQUIRED_MESSAGE,
+      ...(message?.id ? { replyToMessageId: message.id } : {}),
     });
     return {
       ok: true,

@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   getChannel: vi.fn(),
   addReaction: vi.fn(),
+  createDirectMessage: vi.fn(),
+  postMessage: vi.fn(),
   channelAutoStart: vi.fn(),
   findPendingRoutingReply: vi.fn(),
   handleRoutingReply: vi.fn(),
@@ -118,6 +120,8 @@ app.route('/api/internal/discord', discord);
 const provider = {
   getChannel: mocks.getChannel,
   addReaction: mocks.addReaction,
+  createDirectMessage: mocks.createDirectMessage,
+  postMessage: mocks.postMessage,
 };
 
 function envelope(
@@ -196,6 +200,8 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
+    mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
+    mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
     mocks.findPendingRoutingReply.mockResolvedValue(null);
@@ -584,8 +590,80 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    // Full setup instructions go to DM; the channel only gets a short ack.
+    expect(mocks.createDirectMessage).toHaveBeenCalledWith('discord-user-1');
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-private-1',
+        text: expect.stringContaining('/link'),
+      }),
+    );
     expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('/link') }),
+      expect.objectContaining({
+        text: 'I sent you a DM to link your Discord account.',
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('falls back to public link instructions when the account-link DM fails', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 403,
+        code: 50007,
+        message: 'Cannot send messages to this user',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('/link code:<code>'),
+        replyToMessageId: 'message-1',
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps the full link prompt in the existing DM for unlinked DM senders', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.getChannel.mockResolvedValue({
+      id: 'dm-1',
+      name: 'Direct message',
+      type: 1,
+    });
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.createDirectMessage).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('/link code:<code>'),
+        replyToMessageId: 'message-1',
+      }),
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
