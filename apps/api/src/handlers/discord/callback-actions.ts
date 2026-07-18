@@ -1,4 +1,7 @@
-import { activeRunStatuses } from '@roomote/types';
+import {
+  activeRunStatuses,
+  type QueuedCommunicationMessage,
+} from '@roomote/types';
 import {
   and,
   db,
@@ -14,7 +17,6 @@ import {
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
-import type { QueuedCommunicationMessage } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
@@ -31,6 +33,9 @@ import {
 } from './task-launch.js';
 import { claimDiscordSuggestionLaunch } from './setup-suggestions.js';
 import { startNewDiscordTask } from './task-orchestration.js';
+
+/** Match Slack cancel reaction (`DEFAULT_SLACK_CANCEL_EMOJI`). */
+const DISCORD_CANCEL_REACTION_EMOJI = 'x';
 
 function parseCancelCallbackData(value: string | undefined): number | null {
   const match = /^discord:cancel:(\d+)$/u.exec(value ?? '');
@@ -60,11 +65,66 @@ async function findCancelableDiscordRun(runId: number, channelId: string) {
       status: true,
       sandboxServerUrl: true,
       actingUserId: true,
+      payload: true,
     },
     with: {
       task: { columns: { initiatorUserId: true } },
     },
   });
+}
+
+function getDiscordCancelReactionTarget(payload: unknown): {
+  channelId: string;
+  messageId: string;
+} | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const channelId =
+    typeof (payload as { discordReactionChannelId?: unknown })
+      .discordReactionChannelId === 'string'
+      ? (
+          payload as { discordReactionChannelId: string }
+        ).discordReactionChannelId.trim()
+      : '';
+  const messageId =
+    typeof (payload as { discordReactionMessageId?: unknown })
+      .discordReactionMessageId === 'string'
+      ? (
+          payload as { discordReactionMessageId: string }
+        ).discordReactionMessageId.trim()
+      : '';
+
+  if (!channelId || !messageId) {
+    return null;
+  }
+
+  return { channelId, messageId };
+}
+
+async function addDiscordCancelReactionBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  payload: unknown;
+}): Promise<void> {
+  const target = getDiscordCancelReactionTarget(input.payload);
+  if (!target) {
+    return;
+  }
+
+  try {
+    await input.provider.addReaction({
+      channelId: target.channelId,
+      messageId: target.messageId,
+      name: DISCORD_CANCEL_REACTION_EMOJI,
+    });
+  } catch (error) {
+    apiLogger.warn(
+      `[discord] Failed to add cancel reaction for channel ${target.channelId} message ${target.messageId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 }
 
 async function handleCancelCallback(input: {
@@ -138,6 +198,12 @@ async function handleCancelCallback(input: {
   });
   const canceled =
     result.success || result.statusCode === 404 || result.statusCode === 409;
+  if (canceled) {
+    await addDiscordCancelReactionBestEffort({
+      provider: input.provider,
+      payload: run.payload,
+    });
+  }
   await replyToDiscordEvent({
     provider: input.provider,
     applicationId: input.applicationId,
@@ -275,7 +341,7 @@ async function handleSuggestionCallback(input: {
         ? `Started “${suggestion.title}” in a new task thread.`
         : `Started “${suggestion.title}”.`,
       ...(started.taskUrl
-        ? { buttons: [[{ text: 'Follow Task', url: started.taskUrl }]] }
+        ? { buttons: [[{ text: 'Follow', url: started.taskUrl }]] }
         : {}),
     });
   } catch (error) {

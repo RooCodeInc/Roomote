@@ -107,6 +107,7 @@ import {
   SelectSeparator,
   SelectTrigger,
   SelectValue,
+  MessagesSquare,
   Skeleton,
   SquarePen,
   Slack,
@@ -127,6 +128,7 @@ type FieldErrors = Partial<
     | 'conflictResolverMaxPrAgeDays'
     | 'conflictResolverInstructions'
     | 'channelAutoStartSlackChannels'
+    | 'channelAutoStartDiscordChannels'
     | 'channelAutoStartInstructions'
     | 'managerSlackChannel'
     | 'managerStatsSlackChannel'
@@ -476,10 +478,10 @@ const SCHEDULE_ONLY_AUTOMATIONS_BY_ID = Object.fromEntries(
 const AUTOMATION_DEFINITIONS: Record<AutomationId, AutomationDefinition> = {
   channelAutoStart: {
     id: 'channelAutoStart',
-    label: 'Auto-respond to Slack channels',
+    label: 'Auto-respond to channels',
     description:
-      'Start tasks from selected Slack channels, each with its own custom instructions.',
-    icon: Slack,
+      'Start tasks from selected Slack or Discord channels, each with its own custom instructions.',
+    icon: MessagesSquare,
   },
   managerChannel: {
     id: 'managerChannel',
@@ -684,6 +686,12 @@ function mapSettingsToFormState(
       launchMode?: ChannelAutoStartLaunchMode | null;
       launchCriteria?: string | null;
     }>;
+    channelAutoStartDiscordChannels: Array<{
+      channelId: string;
+      instructions: string | null;
+      launchMode?: ChannelAutoStartLaunchMode | null;
+      launchCriteria?: string | null;
+    }>;
     channelAutoStartSlackChannelNames?: Record<string, string | null>;
     managerSlackChannelId: string | null;
     managerSlackChannelName?: string | null;
@@ -752,18 +760,31 @@ function mapSettingsToFormState(
       DEFAULT_CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS,
     conflictResolverLabel: settings.conflictResolverLabel,
     conflictResolverInstructions: settings.conflictResolverInstructions ?? '',
-    channelAutoStartSlackChannels: settings.channelAutoStartSlackChannels.map(
-      ({ channelId, instructions, launchMode, launchCriteria }) => ({
-        channelId,
-        slackChannel:
-          settings.channelAutoStartSlackChannelNames?.[channelId] ??
-          channelId ??
-          '',
-        instructions: instructions ?? '',
-        launchMode: launchMode ?? DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
-        launchCriteria: launchCriteria ?? '',
-      }),
-    ),
+    channelAutoStartChannels: [
+      ...settings.channelAutoStartSlackChannels.map(
+        ({ channelId, instructions, launchMode, launchCriteria }) => ({
+          provider: 'slack' as const,
+          channelId,
+          slackChannel:
+            settings.channelAutoStartSlackChannelNames?.[channelId] ??
+            channelId ??
+            '',
+          instructions: instructions ?? '',
+          launchMode: launchMode ?? DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+          launchCriteria: launchCriteria ?? '',
+        }),
+      ),
+      ...settings.channelAutoStartDiscordChannels.map(
+        ({ channelId, instructions, launchMode, launchCriteria }) => ({
+          provider: 'discord' as const,
+          channelId,
+          slackChannel: '',
+          instructions: instructions ?? '',
+          launchMode: launchMode ?? DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
+          launchCriteria: launchCriteria ?? '',
+        }),
+      ),
+    ],
     managerSlackChannel:
       settings.managerSlackChannelName ?? settings.managerSlackChannelId ?? '',
     managerStatsFrequency: settings.managerStatsFrequency,
@@ -1107,7 +1128,11 @@ export function isManagerChannelSelectionDisabled(params: {
 function hasConfiguredChannelAutoStartRows(
   rows: ChannelAutoStartFormRow[] | null | undefined,
 ): boolean {
-  return (rows ?? []).some((row) => Boolean(row.slackChannel.trim()));
+  return (rows ?? []).some((row) =>
+    row.provider === 'discord'
+      ? Boolean(row.channelId)
+      : Boolean(row.slackChannel.trim()),
+  );
 }
 
 function shouldShowChannelAutoStartWarning(params: {
@@ -1836,6 +1861,7 @@ export function AutomationsSettings() {
 
           if (
             result.fieldErrors.channelAutoStartSlackChannels ||
+            result.fieldErrors.channelAutoStartDiscordChannels ||
             result.fieldErrors.channelAutoStartInstructions
           ) {
             setOpenAutomationIds((prev) => {
@@ -2192,14 +2218,14 @@ export function AutomationsSettings() {
   const conflictResolverIsEnabled =
     formState?.conflictResolverFrequency !== 'off';
   const channelAutoStartIsEnabled = hasConfiguredChannelAutoStartRows(
-    formState?.channelAutoStartSlackChannels,
+    formState?.channelAutoStartChannels,
   );
   const availableAutoRespondChannelTemplates = useMemo(
     () =>
       getAvailableAutoRespondChannelTemplates(
-        formState?.channelAutoStartSlackChannels,
+        formState?.channelAutoStartChannels,
       ),
-    [formState?.channelAutoStartSlackChannels],
+    [formState?.channelAutoStartChannels],
   );
   const managerChannelIsEnabled = Boolean(
     formState?.managerSlackChannel.trim(),
@@ -2260,7 +2286,11 @@ export function AutomationsSettings() {
   });
   const showChannelAutoStartSlackChannelWarning =
     shouldShowChannelAutoStartWarning({
-      formRows: formState?.channelAutoStartSlackChannels,
+      // Access warnings are a Slack concept (the bot must be invited);
+      // Discord rows come from the catalog of channels the bot can see.
+      formRows: formState?.channelAutoStartChannels.filter(
+        (row) => row.provider === 'slack',
+      ),
       savedChannelIds:
         settingsQuery.data?.settings.channelAutoStartSlackChannels.map(
           ({ channelId }) => channelId,
@@ -2288,6 +2318,35 @@ export function AutomationsSettings() {
   );
   const discordConnected = capabilities?.discordConnected === true;
   const slackConnected = capabilities?.slackConnected === true;
+  // Unprefixed catalog options for the auto-respond editor's Discord rows
+  // (provider is explicit per row, unlike the shared destination combobox).
+  // A persisted channel missing from the catalog stays selectable by raw id.
+  const channelAutoStartDiscordOptions = useMemo(() => {
+    const catalog = (discordChannelsQuery.data?.channels ?? []).map(
+      (channel) => ({
+        id: channel.id,
+        name: channel.name,
+        label: channel.label,
+      }),
+    );
+    const knownIds = new Set(catalog.map((option) => option.id));
+    const persistedFallbacks = (formState?.channelAutoStartChannels ?? [])
+      .filter(
+        (row): row is typeof row & { channelId: string } =>
+          row.provider === 'discord' &&
+          Boolean(row.channelId) &&
+          !knownIds.has(row.channelId ?? ''),
+      )
+      .map((row) => ({
+        id: row.channelId,
+        name: row.channelId,
+        label: row.channelId,
+      }));
+    return [...catalog, ...persistedFallbacks];
+  }, [
+    discordChannelsQuery.data?.channels,
+    formState?.channelAutoStartChannels,
+  ]);
   const renderSlackDestinationField = useCallback(
     ({
       field,
@@ -3254,7 +3313,7 @@ export function AutomationsSettings() {
             })}
 
             <h2 className="pt-2 text-base font-semibold text-foreground">
-              Slack automations
+              Channel automations
             </h2>
 
             <AutomationCard
@@ -3278,11 +3337,13 @@ export function AutomationsSettings() {
             >
               <ChannelAutoStartEditor
                 slackAppMention={slackAppMention}
-                rows={formState.channelAutoStartSlackChannels}
+                rows={formState.channelAutoStartChannels}
                 launchModeOptions={channelAutoStartLaunchModeOptions}
                 showLaunchModePicker={showChannelAutoStartLaunchModePicker}
                 availableTemplates={availableAutoRespondChannelTemplates}
                 isEnabled={channelAutoStartIsEnabled}
+                discordConnected={discordConnected}
+                discordChannelOptions={channelAutoStartDiscordOptions}
                 warning={
                   showChannelAutoStartSlackChannelWarning ? (
                     <SlackChannelAccessWarning
@@ -3291,6 +3352,9 @@ export function AutomationsSettings() {
                   ) : undefined
                 }
                 channelFieldError={fieldErrors.channelAutoStartSlackChannels}
+                discordChannelFieldError={
+                  fieldErrors.channelAutoStartDiscordChannels
+                }
                 instructionsFieldError={
                   fieldErrors.channelAutoStartInstructions
                 }
@@ -3299,7 +3363,7 @@ export function AutomationsSettings() {
                     prev
                       ? {
                           ...prev,
-                          channelAutoStartSlackChannels: rows,
+                          channelAutoStartChannels: rows,
                         }
                       : prev,
                   )

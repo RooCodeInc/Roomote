@@ -5,7 +5,10 @@ import {
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../../commit-author';
 
-import { slackAppMention } from '../slackAppMention';
+import {
+  buildChatProviderMessageInstructions,
+  slackAppMention,
+} from '../slackAppMention';
 
 function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
@@ -599,4 +602,74 @@ describe('slackAppMention', () => {
       'Built-in visual proof for the current proof milestone is already posted back to the originating Slack thread by the worker when trusted Slack context exists.',
     );
   });
+});
+
+describe('buildChatProviderMessageInstructions', () => {
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'allows send_chat_reaction_emoji for %s turns (not Slack-only)',
+    (provider) => {
+      const instructions = buildChatProviderMessageInstructions(provider);
+
+      expect(instructions).toContain('send_chat_reaction_emoji');
+      expect(instructions).toContain('white_check_mark');
+      expect(instructions).toContain('thumbsdown');
+      expect(instructions).toContain(
+        'Do not use Slack-only tools such as `post_to_slack_channel`',
+      );
+      expect(instructions).not.toContain(
+        'Do not use Slack-only tools such as `send_chat_reaction_emoji`',
+      );
+    },
+  );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'documents manual visual-proof posting when auto-post is disabled for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider, {
+        visualProofAutoPostEnabled: false,
+      });
+
+      expect(instructions).toContain(
+        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
+      );
+      expect(instructions).toContain('imageArtifactIds');
+      expect(instructions).toContain(
+        'pass those artifact IDs to `send_chat_reply` via `imageArtifactIds`',
+      );
+      expect(instructions).not.toContain(
+        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
+      );
+    },
+  );
+
+  it.each(['discord', 'teams', 'telegram'] as const)(
+    'documents built-in visual-proof auto-post when enabled for %s',
+    (provider) => {
+      const label =
+        provider === 'discord'
+          ? 'Discord'
+          : provider === 'telegram'
+            ? 'Telegram'
+            : 'Teams';
+      const instructions = buildChatProviderMessageInstructions(provider, {
+        visualProofAutoPostEnabled: true,
+      });
+
+      expect(instructions).toContain(
+        `Built-in visual proof for the current proof milestone is already posted back to the originating ${label} thread by the worker when trusted ${label} context exists.`,
+      );
+      expect(instructions).toContain(
+        `When that built-in proof auto-post happens, do not send a second ${label} reply that only narrates the visible proof`,
+      );
+      expect(instructions).not.toContain(
+        `Visual-proof uploads are not auto-posted to ${label} for this task.`,
+      );
+    },
+  );
 });

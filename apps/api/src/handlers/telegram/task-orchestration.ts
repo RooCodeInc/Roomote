@@ -130,6 +130,7 @@ export async function startNewTelegramTask(input: {
   if (!input.skipRoutingConfirmation) {
     const confirmation = await maybeRequestTelegramRoutingConfirmation({
       routingDecision,
+      routingContext,
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,

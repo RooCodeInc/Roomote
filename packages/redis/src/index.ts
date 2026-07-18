@@ -8,13 +8,14 @@ export const REDIS_KEYS = {
   MENTIONED_THREADS: 'slack:mentioned_threads',
   PENDING_WORKSPACE_SELECTIONS: 'slack:pending_workspace_selections',
   SLACK_AUTO_START_CHANNEL: 'slack:auto-start-channel',
+  DISCORD_AUTO_START_CHANNEL: 'discord:auto-start-channel',
   CONTROLLER_HEARTBEAT: 'controller:heartbeat',
 } as const;
 
-export const SLACK_AUTO_START_EMPTY_SENTINEL = '__roomote_empty__';
-export const SLACK_AUTO_START_CHANNEL_CACHE_TTL_SECONDS = 60;
+export const AUTO_START_EMPTY_SENTINEL = '__roomote_empty__';
+export const AUTO_START_CHANNEL_CACHE_TTL_SECONDS = 60;
 
-export async function syncSlackAutoStartChannelCacheBestEffort(params: {
+export async function syncAutoStartChannelCacheBestEffort(params: {
   redis: Redis;
   key: string;
   channelIds: string[];
@@ -27,12 +28,9 @@ export async function syncSlackAutoStartChannelCacheBestEffort(params: {
       params.key,
       ...(params.channelIds.length > 0
         ? params.channelIds
-        : [SLACK_AUTO_START_EMPTY_SENTINEL]),
+        : [AUTO_START_EMPTY_SENTINEL]),
     );
-    await params.redis.expire(
-      params.key,
-      SLACK_AUTO_START_CHANNEL_CACHE_TTL_SECONDS,
-    );
+    await params.redis.expire(params.key, AUTO_START_CHANNEL_CACHE_TTL_SECONDS);
   } catch (error) {
     params.onError?.(error);
   }

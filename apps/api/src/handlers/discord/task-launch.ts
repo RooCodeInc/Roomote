@@ -2,9 +2,10 @@ import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
+  type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
-import { db, environments, eq } from '@roomote/db/server';
+import { db, environments, eq, sql, taskRuns } from '@roomote/db/server';
 import {
   enqueueTask,
   getTaskUrl,
@@ -35,6 +36,48 @@ const DISCORD_ROOT_TASK_CHANNEL_TYPES = new Set([0, 5, 15, 16]);
 const DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES = new Set([0, 5]);
 const DISCORD_PENDING_TASK_THREAD_PREFIX = 'discord:pending_task_thread:';
 const DISCORD_PENDING_TASK_THREAD_TTL_SECONDS = 24 * 60 * 60;
+
+type DiscordReactionTarget = {
+  channelId: string;
+  messageId: string;
+};
+
+/**
+ * Real MESSAGE_CREATE launches pin 👀 on the triggering message. Interaction
+ * launches (`/new`) have no message target at intake, so they permanently
+ * record the acknowledgement / thread-starter message as the reaction target
+ * after launch.
+ */
+function resolveDiscordOriginReactionTarget(input: {
+  channel: DiscordChannelContext;
+  metadata: DiscordEventCommunicationMetadata;
+}): DiscordReactionTarget | null {
+  const messageId = input.metadata.communicationAnchorMessageId;
+  if (!messageId) {
+    return null;
+  }
+  return {
+    // Intake uses channel.channelId for eyes (thread or parent DM/channel).
+    channelId: input.channel.channelId,
+    messageId,
+  };
+}
+
+async function persistDiscordReactionTarget(input: {
+  runId: number;
+  reaction: DiscordReactionTarget;
+}): Promise<void> {
+  const patch = JSON.stringify({
+    discordReactionChannelId: input.reaction.channelId,
+    discordReactionMessageId: input.reaction.messageId,
+  });
+  await db
+    .update(taskRuns)
+    .set({
+      payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${patch}::jsonb`,
+    })
+    .where(eq(taskRuns.id, input.runId));
+}
 
 export type DiscordChannelContext = {
   channelId: string;
@@ -248,7 +291,20 @@ export async function reserveDiscordAnchoredThread(input: {
 
 export async function launchDiscordTask(input: {
   provider: DiscordCommunicationProvider;
-  launchOwnerUserId: string;
+  /** Required unless an explicit `initiator` carries the attribution. */
+  launchOwnerUserId?: string;
+  /**
+   * Overrides the default `{ kind: 'user', userId: launchOwnerUserId }`
+   * initiator — channel auto-start passes richer user shapes and
+   * automation-owned launches for bot-authored messages.
+   */
+  initiator?: TaskInitiator;
+  /**
+   * Agent-facing prompt override (e.g. auto-respond channel instructions
+   * prepended to the message); the queued message text stays the
+   * user-visible task description.
+   */
+  agentPromptText?: string;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
@@ -262,6 +318,11 @@ export async function launchDiscordTask(input: {
    * a message that lives where the acknowledgement would have gone.
    */
   replaceMessage?: DiscordMessageToReplace;
+  /**
+   * Router free-form kickoff sentence (Slack parity). When set and normalizable,
+   * it becomes the Discord acknowledgement text instead of the static template.
+   */
+  kickoffMessage?: string | null;
 }) {
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
@@ -295,6 +356,20 @@ export async function launchDiscordTask(input: {
     createdThread?.channelId ?? input.metadata.communicationThreadId;
   const communicationMessageId =
     createdThread?.messageId ?? input.metadata.communicationMessageId;
+  const originReaction = resolveDiscordOriginReactionTarget({
+    channel: input.channel,
+    metadata: input.metadata,
+  });
+  // Prefer a real origin message when present. For interaction launches the
+  // thread starter (if any) is a valid target until the acknowledgement posts.
+  let reactionTarget: DiscordReactionTarget | null =
+    originReaction ??
+    (createdThread?.messageId
+      ? {
+          channelId: createdThread.channelId,
+          messageId: createdThread.messageId,
+        }
+      : null);
   const task: Extract<TaskSpec, { type: typeof TaskPayloadKind.StandardTask }> =
     {
       type: TaskPayloadKind.StandardTask,
@@ -304,6 +379,9 @@ export async function launchDiscordTask(input: {
           ? { environmentId: input.workspace.environmentId }
           : {}),
         description: input.queuedMessage.text,
+        ...(input.agentPromptText?.trim()
+          ? { agentPromptText: input.agentPromptText.trim() }
+          : {}),
         ...(input.queuedMessage.images?.length
           ? { images: input.queuedMessage.images }
           : {}),
@@ -316,19 +394,40 @@ export async function launchDiscordTask(input: {
         ...(communicationMessageId ? { communicationMessageId } : {}),
         communicationSourceEventId: input.queuedMessage.ts,
         ...(createdThread ? { discordTaskThread: true } : {}),
+        ...(reactionTarget
+          ? {
+              discordReactionChannelId: reactionTarget.channelId,
+              discordReactionMessageId: reactionTarget.messageId,
+            }
+          : {}),
       },
     };
+
+  const initiator: TaskInitiator | null =
+    input.initiator ??
+    (input.launchOwnerUserId
+      ? { kind: 'user', userId: input.launchOwnerUserId }
+      : null);
+  if (!initiator) {
+    throw new Error(
+      'launchDiscordTask requires an initiator or a launch owner.',
+    );
+  }
 
   const launchResult = await enqueueTask(
     {
       task,
-      initiator: { kind: 'user', userId: input.launchOwnerUserId },
+      initiator,
       workflow: 'standard',
       surface: 'discord',
       trigger: 'message',
     },
     {
-      launchClass: 'human',
+      // Automation initiators derive the 'automation' launch class; forcing
+      // 'human' would misclassify bot-authored auto-respond launches.
+      ...(initiator.kind === 'automation'
+        ? {}
+        : { launchClass: 'human' as const }),
       ...(createdThread
         ? {
             onEarlyTitleGenerated: async ({ title }: { title: string }) => {
@@ -350,6 +449,7 @@ export async function launchDiscordTask(input: {
     text: discordTaskAcknowledgementText({
       workspaceDisplayName: input.workspace.workspaceDisplayName,
       taskUrl,
+      ...(input.kickoffMessage ? { kickoffMessage: input.kickoffMessage } : {}),
     }),
     buttons: discordTaskButtons({ runId: launchResult.id, taskUrl }),
   };
@@ -366,6 +466,35 @@ export async function launchDiscordTask(input: {
         ...(communicationThreadId ? { threadId: communicationThreadId } : {}),
         ...acknowledgementMessage,
       });
+
+  // Interaction launches (`/new`) have no MESSAGE_CREATE origin. Persist the
+  // real acknowledgement (or thread-starter) message so terminal/cancel
+  // reactions have a valid Discord reaction target.
+  if (!originReaction && acknowledgement.messageId) {
+    reactionTarget = {
+      channelId: communicationThreadId ?? communicationChannelId,
+      messageId: acknowledgement.messageId,
+    };
+    await persistDiscordReactionTarget({
+      runId: launchResult.id,
+      reaction: reactionTarget,
+    }).catch((error) => {
+      console.warn(
+        `[discord] Failed to persist reaction target for run ${launchResult.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
+    try {
+      await input.provider.addReaction({
+        channelId: reactionTarget.channelId,
+        messageId: reactionTarget.messageId,
+        name: '👀',
+      });
+    } catch {
+      // Soft ack only — the launch already succeeded.
+    }
+  }
 
   if (createdThread) {
     await forgetPendingTaskThread(input.queuedMessage.ts).catch((error) => {

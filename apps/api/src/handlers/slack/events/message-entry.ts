@@ -1,10 +1,9 @@
 import { Env } from '@roomote/env';
 import {
+  AUTO_START_CHANNEL_CACHE_TTL_SECONDS,
   getRedis,
   REDIS_KEYS,
-  SLACK_AUTO_START_CHANNEL_CACHE_TTL_SECONDS,
-  SLACK_AUTO_START_EMPTY_SENTINEL,
-  syncSlackAutoStartChannelCacheBestEffort,
+  syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import { FeatureFlag } from '@roomote/feature-flags';
 import { getFeatureFlagEvaluator } from '@roomote/feature-flags/server';
@@ -76,7 +75,8 @@ import {
   recordInboundSlackConversationMessage,
 } from '../helpers/conversation-log.js';
 import { getSlackAutomationLaunchIdentity } from '../helpers/launch-identity.js';
-import { evaluateChannelLaunchGate } from '../helpers/channel-launch-gate.js';
+import { checkAutoStartChannelCache } from '../../shared/auto-start-cache.js';
+import { evaluateChannelLaunchGate } from '../../shared/channel-launch-gate.js';
 import type { SlackWebhookContext } from '../context.js';
 import {
   enrichSlackMessageEvent,
@@ -125,84 +125,6 @@ async function runSlackAutoConfirm({
   setTimeout(() => {
     void runAutoConfirm();
   }, delayMs);
-}
-
-function isRedisWrongTypeError(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('WRONGTYPE');
-}
-
-type RedisSetCacheResult =
-  | { status: 'hit' }
-  | { status: 'empty' }
-  | { status: 'miss' }
-  | { status: 'mismatch' }
-  | { status: 'legacy' };
-
-async function hasExpiringAutoStartChannelCache(params: {
-  redis: ReturnType<typeof getRedis>;
-  cacheKey: string;
-}): Promise<boolean> {
-  const ttlSeconds = await params.redis.ttl(params.cacheKey);
-
-  if (ttlSeconds >= 0) {
-    return true;
-  }
-
-  if (ttlSeconds === -1) {
-    apiLogger.warn(
-      '[SlackWebhook] Found non-expiring auto-start channel cache; treating as cache miss',
-    );
-  }
-
-  return false;
-}
-
-async function checkAutoStartChannelCache(params: {
-  redis: ReturnType<typeof getRedis>;
-  cacheKey: string;
-  channelId: string;
-}): Promise<RedisSetCacheResult> {
-  try {
-    const membership = await params.redis.sismember(
-      params.cacheKey,
-      params.channelId,
-    );
-
-    if (membership === 1) {
-      return (await hasExpiringAutoStartChannelCache(params))
-        ? { status: 'hit' }
-        : { status: 'legacy' };
-    }
-
-    const emptySentinelMembership = await params.redis.sismember(
-      params.cacheKey,
-      SLACK_AUTO_START_EMPTY_SENTINEL,
-    );
-
-    if (emptySentinelMembership === 1) {
-      return (await hasExpiringAutoStartChannelCache(params))
-        ? { status: 'empty' }
-        : { status: 'legacy' };
-    }
-
-    const count = await params.redis.scard(params.cacheKey);
-    if (count === 0) {
-      return { status: 'miss' };
-    }
-
-    return (await hasExpiringAutoStartChannelCache(params))
-      ? { status: 'mismatch' }
-      : { status: 'legacy' };
-  } catch (error) {
-    if (!isRedisWrongTypeError(error)) {
-      throw error;
-    }
-
-    apiLogger.warn(
-      '[SlackWebhook] Found legacy auto-start channel cache key type; treating as cache miss',
-    );
-    return { status: 'legacy' };
-  }
 }
 
 async function processNewTaskConfiguration(
@@ -867,6 +789,7 @@ async function processSlackChannelAutoStartTask(params: {
           });
         const gateResult = await evaluateChannelLaunchGate({
           redis,
+          provider: 'slack',
           channelId: event.channel,
           channelName: sourceChannelName,
           messageText: normalizedLaunchGateText,
@@ -1112,6 +1035,7 @@ async function maybeHandleChannelAutoStart(params: {
     redis,
     cacheKey: slackAutoStartChannelCacheKey,
     channelId: channelAutoStartEvent.channel,
+    logContext: 'SlackWebhook',
   });
 
   if (channelAutoStartCacheResult.status === 'empty') {
@@ -1148,13 +1072,13 @@ async function maybeHandleChannelAutoStart(params: {
       !configuredAutoStartChannelIds.includes(channelAutoStartEvent.channel));
 
   if (shouldRefreshCache) {
-    void syncSlackAutoStartChannelCacheBestEffort({
+    void syncAutoStartChannelCacheBestEffort({
       redis,
       key: slackAutoStartChannelCacheKey,
       channelIds: configuredAutoStartChannelIds,
       onError: (error) => {
         apiLogger.warn(
-          `[SlackWebhook] Failed to sync auto-start channel cache (ttl ${SLACK_AUTO_START_CHANNEL_CACHE_TTL_SECONDS}s): ${error instanceof Error ? error.message : String(error)}`,
+          `[SlackWebhook] Failed to sync auto-start channel cache (ttl ${AUTO_START_CHANNEL_CACHE_TTL_SECONDS}s): ${error instanceof Error ? error.message : String(error)}`,
         );
       },
     });

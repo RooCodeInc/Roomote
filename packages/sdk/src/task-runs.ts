@@ -213,6 +213,14 @@ export const recordMessageEnvelope = (
   options: AppRouterInput['taskRuns']['recordMessageEnvelope'],
 ) => client.taskRuns.recordMessageEnvelope.mutate(options);
 
+export const claimShowWidgetFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['claimShowWidgetFallbackDelivery'],
+) => client.taskRuns.claimShowWidgetFallbackDelivery.mutate(options);
+
+export const releaseShowWidgetFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['releaseShowWidgetFallbackDelivery'],
+) => client.taskRuns.releaseShowWidgetFallbackDelivery.mutate(options);
+
 export const recordInferenceUsage = (
   options: AppRouterInput['taskRuns']['recordInferenceUsage'],
 ) => client.taskRuns.recordInferenceUsage.mutate(options);

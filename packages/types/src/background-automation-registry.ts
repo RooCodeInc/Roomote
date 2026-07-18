@@ -287,7 +287,7 @@ function hasSettingsAutomationKey(
 const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: AUTO_RESPOND_CHANNELS_SETTINGS_HASH,
-    label: 'Auto-respond to Slack channels',
+    label: 'Auto-respond to channels',
   },
   {
     hash: MANAGER_CHANNEL_SETTINGS_HASH,

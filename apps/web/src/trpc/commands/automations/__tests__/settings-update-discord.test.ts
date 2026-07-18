@@ -130,6 +130,7 @@ async function insertAvailableDiscordChannel(params: {
   guildId: string;
   channelId: string;
   channelName: string;
+  channelType?: number;
 }) {
   const [installation] = await db
     .insert(discordInstallations)
@@ -150,7 +151,7 @@ async function insertAvailableDiscordChannel(params: {
     discordInstallationId: installation.id,
     channelId: params.channelId,
     channelName: params.channelName,
-    channelType: 0,
+    channelType: params.channelType ?? 0,
     isAvailable: true,
   });
 }
@@ -612,5 +613,323 @@ describe('updateBackgroundAgentSettingsCommand Discord destinations', () => {
         },
       ]);
     }
+  }, 15_000);
+});
+
+async function getAutomationTargetsWithMetadata(key: BackgroundAutomationKey) {
+  const automation = await db.query.automations.findFirst({
+    where: eq(automations.key, key),
+  });
+
+  return automation?.targets ?? [];
+}
+
+describe('updateBackgroundAgentSettingsCommand Discord channel auto-start', () => {
+  beforeEach(async () => {
+    await db.delete(automations);
+    await db.delete(deploymentSettings);
+    await db.delete(discordInstallations);
+    await db.delete(slackInstallations);
+    await db.delete(users);
+  });
+
+  it('writes discord auto-respond targets alongside Slack ones with merged order', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'bugs',
+    });
+    await insertSlackInstallation();
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [
+          {
+            channelId: 'C0BUGS1234',
+            slackChannel: '#bugs',
+            instructions: 'Slack bug triage.',
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+        ],
+        channelAutoStartDiscordChannels: [
+          {
+            channelId: 'D111',
+            instructions: 'Discord bug triage.',
+            launchMode: 'always_start',
+            launchCriteria: 'Only real bugs.',
+          },
+        ],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(
+      await getAutomationTargetsWithMetadata('slack_channel_auto_start'),
+    ).toEqual([
+      {
+        provider: 'slack',
+        targetKind: 'slack_channel',
+        externalRef: 'C0BUGS1234',
+        metadata: { order: 0, instructions: 'Slack bug triage.' },
+      },
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+        metadata: {
+          order: 1,
+          instructions: 'Discord bug triage.',
+          launchCriteria: 'Only real bugs.',
+        },
+      },
+    ]);
+
+    if (!result.success) throw new Error('unreachable');
+    expect(result.settings.channelAutoStartDiscordChannels).toEqual([
+      {
+        channelId: 'D111',
+        instructions: 'Discord bug triage.',
+        launchMode: 'always_start',
+        launchCriteria: 'Only real bugs.',
+      },
+    ]);
+    expect(result.settings.channelAutoStartEnabled).toBe(true);
+  }, 15_000);
+
+  it('supports discord-only auto-respond without a Slack installation', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'bugs',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: [
+          {
+            channelId: 'D111',
+            instructions: null,
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+        ],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('slack_channel_auto_start')).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+      },
+    ]);
+  }, 15_000);
+
+  it('rejects a discord auto-respond channel missing from the catalog', async () => {
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: [
+          {
+            channelId: 'D404',
+            instructions: null,
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+        ],
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: expect.objectContaining({
+        channelAutoStartDiscordChannels:
+          'This Discord channel is not available to Roomote.',
+      }),
+    });
+  }, 15_000);
+
+  it('rejects discord channel types that cannot anchor task threads', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D115',
+      channelName: 'forum',
+      channelType: 15,
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: [
+          {
+            channelId: 'D115',
+            instructions: null,
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+        ],
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: expect.objectContaining({
+        channelAutoStartDiscordChannels:
+          'Auto-respond supports Discord text and announcement channels only.',
+      }),
+    });
+  }, 15_000);
+
+  it('rejects duplicate discord auto-respond channels', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'bugs',
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: [
+          {
+            channelId: 'D111',
+            instructions: null,
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+          {
+            channelId: 'D111',
+            instructions: 'Second copy.',
+            launchMode: 'always_start',
+            launchCriteria: null,
+          },
+        ],
+      }),
+    );
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: expect.objectContaining({
+        channelAutoStartDiscordChannels:
+          'Each auto-respond channel can only be configured once.',
+      }),
+    });
+  }, 15_000);
+
+  it('preserves persisted discord rows when an older client omits the field', async () => {
+    await upsertAutomation(db, {
+      key: 'slack_channel_auto_start',
+      enabled: true,
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D111',
+          metadata: { order: 0, instructions: 'Keep me.' },
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        // channelAutoStartDiscordChannels deliberately omitted (legacy client)
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(
+      await getAutomationTargetsWithMetadata('slack_channel_auto_start'),
+    ).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D111',
+        metadata: { order: 0, instructions: 'Keep me.' },
+      },
+    ]);
+  }, 15_000);
+
+  it('clears discord rows when a new client explicitly submits an empty list', async () => {
+    await upsertAutomation(db, {
+      key: 'slack_channel_auto_start',
+      enabled: true,
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D111',
+          metadata: { order: 0 },
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'channelAutoStart',
+        channelAutoStartSlackChannels: [],
+        channelAutoStartDiscordChannels: [],
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(await getAutomationTargets('slack_channel_auto_start')).toEqual([]);
+  }, 15_000);
+
+  it('keeps discord auto-respond rows intact when saving an unrelated automation', async () => {
+    await insertAvailableDiscordChannel({
+      guildId: 'guild-1',
+      channelId: 'D111',
+      channelName: 'reports',
+    });
+    await upsertAutomation(db, {
+      key: 'slack_channel_auto_start',
+      enabled: true,
+      targets: [
+        {
+          provider: 'discord',
+          targetKind: 'discord_channel',
+          externalRef: 'D222',
+          metadata: { order: 0, instructions: 'Keep me.' },
+        },
+      ],
+    });
+
+    const result = await updateBackgroundAgentSettingsCommand(
+      adminAuth,
+      buildInput({
+        savingAutomation: 'managerStats',
+        managerStatsFrequency: 'weekly',
+        managerStatsDiscordChannel: 'D111',
+      }),
+    );
+
+    expect(result.success).toBe(true);
+    expect(
+      await getAutomationTargetsWithMetadata('slack_channel_auto_start'),
+    ).toEqual([
+      {
+        provider: 'discord',
+        targetKind: 'discord_channel',
+        externalRef: 'D222',
+        metadata: { order: 0, instructions: 'Keep me.' },
+      },
+    ]);
   }, 15_000);
 });

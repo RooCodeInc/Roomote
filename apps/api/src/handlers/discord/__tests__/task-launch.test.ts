@@ -4,6 +4,9 @@ const mocks = vi.hoisted(() => ({
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
+  dbUpdate: vi.fn(),
+  dbSet: vi.fn(),
+  dbWhere: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -16,6 +19,32 @@ vi.mock('@roomote/redis', () => ({
     get: mocks.redisGet,
     set: mocks.redisSet,
     del: mocks.redisDel,
+  }),
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    update: (...args: unknown[]) => {
+      mocks.dbUpdate(...args);
+      return {
+        set: (...setArgs: unknown[]) => {
+          mocks.dbSet(...setArgs);
+          return {
+            where: (...whereArgs: unknown[]) => {
+              mocks.dbWhere(...whereArgs);
+              return Promise.resolve();
+            },
+          };
+        },
+      };
+    },
+  },
+  environments: { id: 'id' },
+  taskRuns: { id: 'id', payload: 'payload' },
+  eq: (...values: unknown[]) => values,
+  sql: (strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings,
+    values,
   }),
 }));
 
@@ -129,11 +158,11 @@ describe('launchDiscordTask', () => {
         buttons: expect.arrayContaining([
           [
             {
-              text: 'Follow Task',
+              text: 'Follow',
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: '✖️ Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel', callbackData: 'discord:cancel:41' }],
         ]),
       }),
     );
@@ -222,11 +251,72 @@ describe('launchDiscordTask', () => {
             communicationThreadId: 'message-1',
             communicationMessageId: 'message-1',
             discordTaskThread: true,
+            discordReactionChannelId: 'channel-1',
+            discordReactionMessageId: 'message-1',
           }),
         },
       }),
       expect.anything(),
     );
+  });
+
+  it('persists the acknowledgement message as the reaction target for interaction launches', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      createThreadFromMessage: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-dm-1' }),
+      addReaction: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Build a fresh dashboard',
+        user: 'Matt',
+        userId: 'user-1',
+        // Interaction snowflake — not a valid Discord reaction target.
+        ts: 'interaction-new',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'interaction-new',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      forceNewThread: true,
+    });
+
+    // No origin message id yet at enqueue; reaction coordinates arrive after ack.
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: {
+          type: 'standard',
+          payload: expect.not.objectContaining({
+            discordReactionMessageId: 'interaction-new',
+          }),
+        },
+      }),
+      expect.anything(),
+    );
+    expect(mocks.dbUpdate).toHaveBeenCalled();
+    expect(provider.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'ack-dm-1',
+      name: '👀',
+    });
   });
 
   it('falls back to a detached thread when the anchor message was deleted', async () => {
@@ -388,6 +478,63 @@ describe('launchDiscordTask', () => {
     expect(provider.postMessage.mock.calls[0]?.[0]).not.toHaveProperty(
       'threadId',
     );
+  });
+
+  it('carries an automation initiator and agent prompt override into the task payload', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn(),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      // No launch owner: automation-owned launch for a bot-authored message.
+      initiator: {
+        kind: 'automation',
+        key: 'slack_channel_auto_start',
+        actor: { externalId: 'alert-bot', displayName: 'alerts' },
+      },
+      agentPromptText: 'Alert triage.\n\nDeploy failed for api@1.2.3',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Deploy failed for api@1.2.3',
+        user: 'alerts',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    const [launch, options] = mocks.enqueueTask.mock.calls[0] ?? [];
+    expect(launch.task.payload).toEqual(
+      expect.objectContaining({
+        description: 'Deploy failed for api@1.2.3',
+        agentPromptText: 'Alert triage.\n\nDeploy failed for api@1.2.3',
+      }),
+    );
+    expect(launch.initiator).toEqual({
+      kind: 'automation',
+      key: 'slack_channel_auto_start',
+      actor: { externalId: 'alert-bot', displayName: 'alerts' },
+    });
+    // Automation launches must not force the 'human' class.
+    expect(options).not.toHaveProperty('launchClass');
   });
 
   it('creates a sibling thread for /new inside an existing task thread', async () => {
@@ -726,11 +873,11 @@ describe('launchDiscordTask', () => {
         buttons: [
           [
             {
-              text: 'Follow Task',
+              text: 'Follow',
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: '✖️ Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel', callbackData: 'discord:cancel:41' }],
         ],
       }),
     );
@@ -818,6 +965,52 @@ describe('launchDiscordTask', () => {
         channelId: 'channel-1',
         threadId: 'message-1',
         text: 'Started a task in Acme.',
+      }),
+    );
+  });
+
+  it('posts the router free-form kickoff as the acknowledgement text', async () => {
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      createThreadFromMessage: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn(),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix the flaky tests',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'dm',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      kickoffMessage: 'Digging into the flaky tests in Acme.',
+    });
+
+    expect(provider.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'dm-1',
+        text: 'Digging into the flaky tests in Acme.',
       }),
     );
   });

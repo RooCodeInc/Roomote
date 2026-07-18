@@ -4,15 +4,17 @@
  * into saying the same thing two different ways.
  */
 
+import { normalizeKickoffMessage } from '@roomote/communication/chat-messages';
+
 export function discordTaskButtons(input: {
   runId: number;
   taskUrl: string | null;
 }) {
   return [
-    ...(input.taskUrl ? [[{ text: 'Follow Task', url: input.taskUrl }]] : []),
+    ...(input.taskUrl ? [[{ text: 'Follow', url: input.taskUrl }]] : []),
     [
       {
-        text: '✖️ Cancel task',
+        text: 'Cancel',
         callbackData: `discord:cancel:${input.runId}`,
       },
     ],
@@ -22,7 +24,16 @@ export function discordTaskButtons(input: {
 export function discordTaskAcknowledgementText(input: {
   workspaceDisplayName: string;
   taskUrl: string | null;
+  /**
+   * Router free-form kickoff sentence, posted as-is when present (Slack parity).
+   */
+  kickoffMessage?: string | null;
 }): string {
+  const kickoff = normalizeKickoffMessage(input.kickoffMessage);
+  if (kickoff) {
+    return kickoff;
+  }
+
   return input.taskUrl
     ? `Started a task in ${input.workspaceDisplayName}.`
     : `Queued a task in ${input.workspaceDisplayName}.`;

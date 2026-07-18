@@ -47,13 +47,14 @@ conflict resolution, and remove it when a human should handle the conflict
 instead. Roomote only tries this on labeled PRs that are still active, and it
 skips PRs older than the age cap you set.
 
-## Slack automations
+## Channel automations
 
-The Slack section starts with **Auto-respond to Slack channels**.
+The channel section starts with **Auto-respond to channels**.
 
 Use it to let Roomote start a task from new top-level messages in selected
-Slack channels, even when nobody mentions Roomote directly. You can add
-multiple channels, and each one can include its own optional instructions.
+Slack or Discord channels, even when nobody mentions Roomote directly. You can
+add multiple channels across both providers, and each one can include its own
+optional instructions and launch criteria.
 
 Good first examples:
 
@@ -62,7 +63,18 @@ Good first examples:
 - `#support-inbound`
 - `#ops-requests`
 
-Invite Roomote to every auto-respond channel before you save it.
+For Slack channels, invite Roomote to every auto-respond channel before you
+save it. For Discord channels, pick from the text and announcement channels
+the Roomote bot can already see in your server.
+
+A few provider-specific behaviors to know:
+
+- On Discord, messages from people who have not linked their Discord account
+  to Roomote do not start tasks; Roomote sends them a direct message
+  explaining how to link instead.
+- Messages posted by other bots or webhooks (for example a deploy or alert
+  feed) can start tasks too. Use launch criteria to keep noisy feeds in
+  check — for example, only launching on new or worsening alerts.
 
 Start with a low-risk channel first. Auto-response can feel noisy if the
 channel mixes casual discussion with requests that should become Roomote

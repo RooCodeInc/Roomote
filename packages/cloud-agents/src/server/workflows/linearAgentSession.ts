@@ -1,4 +1,8 @@
-import { type LinearAgentSessionTask, type PrAction } from '@roomote/types';
+import {
+  type LinearAgentSessionTask,
+  type PrAction,
+  resolveSourceControlProviderFromPayload,
+} from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
 
 import { standardTask } from './standardTask';
@@ -62,6 +66,7 @@ export async function linearAgentSession({
   attribution = undefined,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
+  codeReviewsEnabled,
   prAction,
 }: {
   taskSpec: LinearAgentSessionTask;
@@ -71,6 +76,7 @@ export async function linearAgentSession({
   attribution?: ResolvedTaskCommitAuthor;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
+  codeReviewsEnabled?: boolean;
   prAction?: PrAction;
 }): Promise<{
   prompt: string;
@@ -117,6 +123,10 @@ export async function linearAgentSession({
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
+    codeReviewsEnabled,
+    sourceControlProvider: resolveSourceControlProviderFromPayload(
+      taskSpec.payload,
+    ),
     prAction,
   });
 }

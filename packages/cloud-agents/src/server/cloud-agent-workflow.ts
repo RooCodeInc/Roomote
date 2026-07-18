@@ -25,6 +25,7 @@ import {
   getBackgroundAgentSettings,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
+  getReviewCodeAutomationSettings,
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -119,6 +120,9 @@ export async function generatePrompt({
     FeatureFlag.SlackProofAutoPost,
   );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
+  const codeReviewsEnabled = await getReviewCodeAutomationSettings()
+    .then((settings) => settings.enabled)
+    .catch(() => false);
 
   switch (taskSpec.type) {
     // <Workflow: PR review, Trigger: GitHub>
@@ -173,6 +177,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         visualProofAutoPostEnabled,
         prAction,
       });
@@ -188,6 +193,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         prAction,
       });
 
@@ -195,7 +201,12 @@ export async function generatePrompt({
     case TaskPayloadKind.StandardTask:
     case TaskPayloadKind.Scan:
     case TaskPayloadKind.McpRecommendations: {
-      const baseDescription = taskSpec.payload.description;
+      // agentPromptText is the agent-facing prompt override (e.g. channel
+      // auto-start instructions prepended to the message); the payload's
+      // description remains the user-visible task text.
+      const baseDescription =
+        taskSpec.payload.agentPromptText?.trim() ||
+        taskSpec.payload.description;
       if (!baseDescription) {
         throw new Error(`Description is required for ${taskSpec.type}`);
       }
@@ -325,6 +336,7 @@ export async function generatePrompt({
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         sourceControlProvider: resolveSourceControlProviderFromPayload(
           taskSpec.payload,
         ),
@@ -344,8 +356,12 @@ export async function generatePrompt({
       if (nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
-            ? buildTeamsMessageInstructions()
-            : buildChatProviderMessageInstructions(nonSlackChatProvider);
+            ? buildTeamsMessageInstructions({
+                visualProofAutoPostEnabled,
+              })
+            : buildChatProviderMessageInstructions(nonSlackChatProvider, {
+                visualProofAutoPostEnabled,
+              });
         result.harnessInstructions = result.harnessInstructions
           ? `${chatInstructions}\n\n${result.harnessInstructions}`
           : chatInstructions;

@@ -69,7 +69,7 @@ describe('DiscordCommunicationProvider', () => {
           type: 1,
           components: [
             { type: 2, style: 5, label: 'Follow task' },
-            { type: 2, style: 1, label: 'Cancel', custom_id: 'cancel:1' },
+            { type: 2, style: 2, label: 'Cancel', custom_id: 'cancel:1' },
           ],
         },
       ],
@@ -223,6 +223,16 @@ describe('DiscordCommunicationProvider', () => {
     ).resolves.toMatchObject({
       canUseChannel: true,
       missingPermissions: [],
+      requiredPermissions: expect.arrayContaining([
+        'view_channel',
+        'send_messages',
+        'read_message_history',
+        'embed_links',
+        'attach_files',
+        'add_reactions',
+        'create_public_threads',
+        'send_messages_in_threads',
+      ]),
       permissions: {
         view_channel: true,
         send_messages: true,
@@ -233,6 +243,37 @@ describe('DiscordCommunicationProvider', () => {
         attach_files: true,
         add_reactions: true,
       },
+    });
+  });
+
+  it('treats a denied add_reactions overwrite as missing required channel permission', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const addReactions = String(1n << 6n);
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'no-reactions',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: 'role-roomote',
+          type: 0,
+          allow: '0',
+          deny: addReactions,
+        },
+      ],
+    });
+
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: false,
+      missingPermissions: ['add_reactions'],
+      permissions: { add_reactions: false },
     });
   });
 
@@ -483,6 +524,31 @@ describe('DiscordCommunicationProvider', () => {
 
     await provider.deleteMessage({ channelId, messageId: sent.messageId });
     expect(server.state.messages[channelId]).toHaveLength(0);
+  });
+
+  it('maps Slack-style reaction names onto Discord unicode emoji', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000002';
+    const sent = await provider.postMessage({ channelId, text: 'ack me' });
+
+    for (const [name, emoji] of [
+      ['eyes', '👀'],
+      [':white_check_mark:', '✅'],
+      ['x', '❌'],
+      ['thumbsdown', '👎'],
+      ['+1', '👍'],
+    ] as const) {
+      await provider.addReaction({
+        channelId,
+        messageId: sent.messageId,
+        name,
+      });
+      expect(server.state.reactions.at(-1)).toEqual({
+        channelId,
+        messageId: sent.messageId,
+        emoji,
+      });
+    }
   });
 
   it('defers and completes interaction responses without bot authorization', async () => {

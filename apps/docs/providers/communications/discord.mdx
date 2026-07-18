@@ -38,15 +38,16 @@ After you save the bot token, the **Add to Discord** button appears in Roomote.
 Select it and choose the server. The generated installation link requests the
 permissions Roomote needs; administrator access is not required.
 
-For tasks started in a server, the bot needs permission to:
+For tasks started in a server, the bot needs these permissions:
 
-- view the channel and read message history
-- send messages and links
-- create public threads and send messages in threads
+- view channels
+- send messages
+- read message history
+- embed links
 - attach files
-
-Roomote also uses reactions for lightweight acknowledgements when the bot has
-permission to add them, but reactions are not required to run tasks.
+- create public threads
+- send messages in threads
+- add reactions
 
 A task started from a normal text or announcement channel runs in a public
 thread started on the message that requested it — like a threaded reply — so
@@ -103,6 +104,9 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - send the bot a direct message
 - use `/new request:<request>` to force a fresh task instead of continuing the
   current one
+- when Roomote asks where to run a task, use a button or reply naturally in the
+  same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
+  or revise the pending route
 - reply naturally inside a task thread, forum post, or DM to continue it
 - use `/help` to see the available commands
 

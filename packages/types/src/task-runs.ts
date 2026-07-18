@@ -926,6 +926,16 @@ const sharedTaskPayloadSchema = z.object({
   communicationMessageId: z.string().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
+  /**
+   * Discord channel hosting the origin reaction target. Always a channel that
+   * contains `discordReactionMessageId` (never an interaction id).
+   */
+  discordReactionChannelId: z.string().optional(),
+  /**
+   * Discord message id that platform reactions (👀 / terminal / cancel) target.
+   * Must be a real message id, never an interaction id.
+   */
+  discordReactionMessageId: z.string().optional(),
   /** True when the Telegram topic was created specifically for this task. */
   telegramTaskTopic: z.boolean().optional(),
   /** True when the Discord thread/forum post was created for this task. */
@@ -1188,6 +1198,12 @@ const standardTaskBootstrapSchema = z
 
 const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
   description: z.string().optional(),
+  /**
+   * Optional agent-facing prompt override. When set, the workflow builds the
+   * task prompt from this text (e.g. channel auto-start instructions prepended
+   * to the message) while `description` stays the user-visible task text.
+   */
+  agentPromptText: z.string().optional(),
   images: z.array(z.string()).optional(),
   blank: z.boolean().optional(),
   bootstrap: standardTaskBootstrapSchema,

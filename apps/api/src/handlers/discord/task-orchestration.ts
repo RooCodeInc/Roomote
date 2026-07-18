@@ -10,6 +10,7 @@ import { findDiscordInstallationByGuildId } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
   type QueuedCommunicationMessage,
+  type TaskInitiator,
 } from '@roomote/types';
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
@@ -49,7 +50,8 @@ export async function startNewDiscordTask(input: {
   provider: DiscordCommunicationProvider;
   applicationId: string;
   requesterDiscordUserId: string;
-  launchOwnerUserId: string;
+  /** Absent only for automation-owned channel auto-start launches. */
+  launchOwnerUserId?: string;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
@@ -58,6 +60,16 @@ export async function startNewDiscordTask(input: {
     interactionDeferred: boolean;
   };
   skipRoutingConfirmation?: boolean;
+  /**
+   * Set for configured auto-respond channel launches: the per-channel
+   * instructions become the agent prompt prefix, the supplied initiator
+   * carries attribution, and conversational fallbacks (platform answers,
+   * duplicate-start replies) stay out of the monitored channel.
+   */
+  channelAutoStart?: {
+    agentPromptPrefix?: string;
+    initiator: TaskInitiator;
+  };
   forceNewThread?: boolean;
 }) {
   const existingRun = await findCommunicationTaskRunBySourceEvent({
@@ -69,15 +81,17 @@ export async function startNewDiscordTask(input: {
       taskId: existingRun.taskId,
       utm: { source: 'discord', campaign: 'discord.idempotent_retry' },
     });
-    await replyToDiscordEvent({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      channel: input.channel,
-      ...(input.interaction ? { interaction: input.interaction } : {}),
-      text: taskUrl
-        ? `This request already started a task: ${taskUrl}`
-        : 'This request already started a task.',
-    }).catch(() => undefined);
+    if (!input.channelAutoStart) {
+      await replyToDiscordEvent({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        channel: input.channel,
+        ...(input.interaction ? { interaction: input.interaction } : {}),
+        text: taskUrl
+          ? `This request already started a task: ${taskUrl}`
+          : 'This request already started a task.',
+      }).catch(() => undefined);
+    }
     return {
       status: 'already_started' as const,
       existingRun,
@@ -118,6 +132,12 @@ export async function startNewDiscordTask(input: {
   });
   const routingDecision = await routeTask(routingContext);
   if (routingDecision.status === 'platform_answer') {
+    // Auto-respond channels must not turn Roomote into a channel chatbot:
+    // a question-shaped message that routes to a platform answer is skipped
+    // silently (mirrors Slack's auto-routed path, which never posts answers).
+    if (input.channelAutoStart) {
+      return { status: 'skipped_platform_answer' as const, routingDecision };
+    }
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
@@ -130,6 +150,9 @@ export async function startNewDiscordTask(input: {
 
   if (
     !input.skipRoutingConfirmation &&
+    // Confirmation cards need a launch owner to accept on behalf of; the
+    // ownerless case only arises on auto-start paths, which skip them anyway.
+    input.launchOwnerUserId &&
     !shouldAutoConfirmDiscordRoute(routingDecision)
   ) {
     const confirmation = await requestDiscordRoutingConfirmation({
@@ -140,6 +163,7 @@ export async function startNewDiscordTask(input: {
       launchOwnerUserId: input.launchOwnerUserId,
       queuedMessage: input.queuedMessage,
       metadata: input.metadata,
+      routingContext,
       channel: input.channel,
       routingDecision,
       forceNewThread: input.forceNewThread,
@@ -161,14 +185,28 @@ export async function startNewDiscordTask(input: {
   if (!workspace) {
     throw new Error('Discord task routing selected an unavailable workspace.');
   }
+  const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
+  const kickoffMessage =
+    routingDecision.status === 'routed'
+      ? routingDecision.result.kickoffMessage
+      : undefined;
   const launched = await launchDiscordTask({
     provider: input.provider,
     launchOwnerUserId: input.launchOwnerUserId,
+    ...(input.channelAutoStart
+      ? { initiator: input.channelAutoStart.initiator }
+      : {}),
+    ...(agentPromptPrefix
+      ? {
+          agentPromptText: `${agentPromptPrefix}\n\n${input.queuedMessage.text}`,
+        }
+      : {}),
     queuedMessage: input.queuedMessage,
     metadata: input.metadata,
     channel: input.channel,
     workspace,
     forceNewThread: input.forceNewThread,
+    ...(kickoffMessage ? { kickoffMessage } : {}),
   });
   if (input.interaction) {
     await replyToDiscordEvent({
@@ -180,7 +218,7 @@ export async function startNewDiscordTask(input: {
         ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
         : `Started in **${workspace.workspaceDisplayName}**.`,
       ...(launched.taskUrl
-        ? { buttons: [[{ text: 'Follow Task', url: launched.taskUrl }]] }
+        ? { buttons: [[{ text: 'Follow', url: launched.taskUrl }]] }
         : {}),
     });
   }

@@ -13,6 +13,11 @@ describe('ProviderSetupInstructions', () => {
 
     expect(screen.getByText('Installation permissions')).toBeInTheDocument();
     expect(
+      screen.getByText(
+        /View Channels, Send Messages, Read Message History, Embed Links, Attach Files, Create Public Threads, Send Messages in Threads, and Add Reactions/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
       screen.getByText(/Add to Discord button appears and requests these/i),
     ).toBeInTheDocument();
     expect(screen.queryByText('Permissions integer')).not.toBeInTheDocument();

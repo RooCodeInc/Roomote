@@ -8,7 +8,10 @@ import {
   type RedisLockHandle,
 } from '@roomote/redis';
 
-import { apiLogger } from '../../../logging.js';
+import { apiLogger } from '../../logging.js';
+
+/** Chat providers with a channel auto-start consume path. */
+type ChannelAutoStartProvider = 'slack' | 'discord';
 
 const LAUNCH_RATE_LIMIT_PER_HOUR = 25;
 const LAUNCH_RATE_WINDOW_SECONDS = 60 * 60;
@@ -29,16 +32,28 @@ end
 return count
 `.trim();
 
-function buildLaunchRateKey(channelId: string) {
-  return `slack:launch-gate:rate:${channelId}`;
+// Keys are provider-prefixed so channel-id spaces cannot collide across chat
+// providers. The Slack prefixes predate the shared module and must stay
+// byte-identical for live counters/history to survive the move.
+function buildLaunchRateKey(
+  provider: ChannelAutoStartProvider,
+  channelId: string,
+) {
+  return `${provider}:launch-gate:rate:${channelId}`;
 }
 
-function buildGateHistoryKey(channelId: string) {
-  return `slack:launch-gate:history:${channelId}`;
+function buildGateHistoryKey(
+  provider: ChannelAutoStartProvider,
+  channelId: string,
+) {
+  return `${provider}:launch-gate:history:${channelId}`;
 }
 
-function buildGateLockKey(channelId: string) {
-  return `slack:launch-gate:lock:${channelId}`;
+function buildGateLockKey(
+  provider: ChannelAutoStartProvider,
+  channelId: string,
+) {
+  return `${provider}:launch-gate:lock:${channelId}`;
 }
 
 /**
@@ -49,15 +64,19 @@ function buildGateLockKey(channelId: string) {
  */
 async function acquireChannelGateLock(
   redis: Redis,
+  provider: ChannelAutoStartProvider,
   channelId: string,
   logContext: string,
 ): Promise<RedisLockHandle | null> {
   try {
     for (let attempt = 0; attempt < GATE_LOCK_MAX_POLL_ATTEMPTS; attempt++) {
-      const release = await acquireRedisLock(buildGateLockKey(channelId), {
-        ttlSeconds: GATE_LOCK_TTL_SECONDS,
-        redis,
-      });
+      const release = await acquireRedisLock(
+        buildGateLockKey(provider, channelId),
+        {
+          ttlSeconds: GATE_LOCK_TTL_SECONDS,
+          redis,
+        },
+      );
 
       if (release) {
         return release;
@@ -69,11 +88,11 @@ async function acquireChannelGateLock(
     }
 
     apiLogger.warn(
-      `[SlackLaunchGate] Proceeding without the channel gate lock for ${logContext}: lock still held after ${GATE_LOCK_MAX_POLL_ATTEMPTS * GATE_LOCK_POLL_INTERVAL_MS}ms`,
+      `[ChannelLaunchGate] Proceeding without the channel gate lock for ${logContext}: lock still held after ${GATE_LOCK_MAX_POLL_ATTEMPTS * GATE_LOCK_POLL_INTERVAL_MS}ms`,
     );
   } catch (error) {
     apiLogger.warn(
-      `[SlackLaunchGate] Proceeding without the channel gate lock for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
+      `[ChannelLaunchGate] Proceeding without the channel gate lock for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
@@ -108,12 +127,13 @@ function formatEntryAge(nowMs: number, atMs: number): string {
  */
 async function readRecentGateActivity(
   redis: Redis,
+  provider: ChannelAutoStartProvider,
   channelId: string,
   logContext: string,
 ): Promise<ChannelLaunchGateActivityEntry[]> {
   try {
     const rawEntries = await redis.lrange(
-      buildGateHistoryKey(channelId),
+      buildGateHistoryKey(provider, channelId),
       0,
       GATE_HISTORY_MAX_ENTRIES - 1,
     );
@@ -143,7 +163,7 @@ async function readRecentGateActivity(
     });
   } catch (error) {
     apiLogger.warn(
-      `[SlackLaunchGate] Could not read gate history for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
+      `[ChannelLaunchGate] Could not read gate history for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return [];
   }
@@ -151,13 +171,14 @@ async function readRecentGateActivity(
 
 async function recordGateDecision(params: {
   redis: Redis;
+  provider: ChannelAutoStartProvider;
   channelId: string;
   decision: GateHistoryEntry['decision'];
   messageText: string;
   logContext: string;
 }): Promise<void> {
   try {
-    const key = buildGateHistoryKey(params.channelId);
+    const key = buildGateHistoryKey(params.provider, params.channelId);
     const entry: GateHistoryEntry = {
       at: Date.now(),
       decision: params.decision,
@@ -177,7 +198,7 @@ async function recordGateDecision(params: {
       .exec();
   } catch (error) {
     apiLogger.warn(
-      `[SlackLaunchGate] Could not record gate decision for ${params.logContext}: ${error instanceof Error ? error.message : String(error)}`,
+      `[ChannelLaunchGate] Could not record gate decision for ${params.logContext}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }
@@ -206,6 +227,7 @@ type ChannelLaunchGateResult =
  */
 export async function evaluateChannelLaunchGate(params: {
   redis: Redis;
+  provider: ChannelAutoStartProvider;
   channelId: string;
   channelName?: string | null;
   messageText: string;
@@ -214,34 +236,15 @@ export async function evaluateChannelLaunchGate(params: {
   isBotAuthored: boolean;
   logContext: string;
 }): Promise<ChannelLaunchGateResult> {
-  const {
-    redis,
-    channelId,
-    channelName,
-    messageText,
-    botMentioned,
-    launchCriteria,
-    isBotAuthored,
-    logContext,
-  } = params;
-
   const releaseGateLock = await acquireChannelGateLock(
-    redis,
-    channelId,
-    logContext,
+    params.redis,
+    params.provider,
+    params.channelId,
+    params.logContext,
   );
 
   try {
-    return await evaluateChannelLaunchGateSerialized({
-      redis,
-      channelId,
-      channelName,
-      messageText,
-      botMentioned,
-      launchCriteria,
-      isBotAuthored,
-      logContext,
-    });
+    return await evaluateChannelLaunchGateSerialized(params);
   } finally {
     await releaseGateLock?.();
   }
@@ -249,6 +252,7 @@ export async function evaluateChannelLaunchGate(params: {
 
 async function evaluateChannelLaunchGateSerialized(params: {
   redis: Redis;
+  provider: ChannelAutoStartProvider;
   channelId: string;
   channelName?: string | null;
   messageText: string;
@@ -259,6 +263,7 @@ async function evaluateChannelLaunchGateSerialized(params: {
 }): Promise<ChannelLaunchGateResult> {
   const {
     redis,
+    provider,
     channelId,
     channelName,
     messageText,
@@ -269,11 +274,13 @@ async function evaluateChannelLaunchGateSerialized(params: {
   } = params;
 
   try {
-    const launchesThisWindow = await redis.get(buildLaunchRateKey(channelId));
+    const launchesThisWindow = await redis.get(
+      buildLaunchRateKey(provider, channelId),
+    );
 
     if (Number(launchesThisWindow ?? 0) >= LAUNCH_RATE_LIMIT_PER_HOUR) {
       apiLogger.warn(
-        `[SlackLaunchGate] Skipping launch for ${logContext}: channel hit the ${LAUNCH_RATE_LIMIT_PER_HOUR}/hour gated-launch cap`,
+        `[ChannelLaunchGate] Skipping launch for ${logContext}: channel hit the ${LAUNCH_RATE_LIMIT_PER_HOUR}/hour gated-launch cap`,
       );
       return {
         shouldLaunch: false,
@@ -287,7 +294,7 @@ async function evaluateChannelLaunchGateSerialized(params: {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     apiLogger.warn(
-      `[SlackLaunchGate] Skipping launch for ${logContext}: rate-cap check failed: ${message}`,
+      `[ChannelLaunchGate] Skipping launch for ${logContext}: rate-cap check failed: ${message}`,
     );
     return {
       shouldLaunch: false,
@@ -301,6 +308,7 @@ async function evaluateChannelLaunchGateSerialized(params: {
 
   const recentGateActivity = await readRecentGateActivity(
     redis,
+    provider,
     channelId,
     logContext,
   );
@@ -319,7 +327,7 @@ async function evaluateChannelLaunchGateSerialized(params: {
 
   if (decision.status === 'error') {
     apiLogger.warn(
-      `[SlackLaunchGate] Skipping launch for ${logContext}: classifier failed: ${decision.message}`,
+      `[ChannelLaunchGate] Skipping launch for ${logContext}: classifier failed: ${decision.message}`,
     );
     return {
       shouldLaunch: false,
@@ -333,10 +341,11 @@ async function evaluateChannelLaunchGateSerialized(params: {
 
   if (decision.status === 'skip') {
     apiLogger.info(
-      `[SlackLaunchGate] Skipping launch for ${logContext}: criteria not met (${decision.reason})`,
+      `[ChannelLaunchGate] Skipping launch for ${logContext}: criteria not met (${decision.reason})`,
     );
     await recordGateDecision({
       redis,
+      provider,
       channelId,
       decision: 'skipped',
       messageText,
@@ -362,13 +371,13 @@ async function evaluateChannelLaunchGateSerialized(params: {
     await redis.eval(
       RATE_INCREMENT_SCRIPT,
       1,
-      buildLaunchRateKey(channelId),
+      buildLaunchRateKey(provider, channelId),
       LAUNCH_RATE_WINDOW_SECONDS,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     apiLogger.warn(
-      `[SlackLaunchGate] Skipping launch for ${logContext}: rate bookkeeping failed: ${message}`,
+      `[ChannelLaunchGate] Skipping launch for ${logContext}: rate bookkeeping failed: ${message}`,
     );
     return {
       shouldLaunch: false,
@@ -381,10 +390,11 @@ async function evaluateChannelLaunchGateSerialized(params: {
   }
 
   apiLogger.info(
-    `[SlackLaunchGate] Launching for ${logContext}: criteria met (${decision.reason})`,
+    `[ChannelLaunchGate] Launching for ${logContext}: criteria met (${decision.reason})`,
   );
   await recordGateDecision({
     redis,
+    provider,
     channelId,
     decision: 'launched',
     messageText,

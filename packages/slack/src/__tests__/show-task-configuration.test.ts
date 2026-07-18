@@ -4,6 +4,7 @@ const {
   enqueueTaskMock,
   findActiveSlackTaskRunMock,
   classifyFollowUpMock,
+  resolveRoutingFollowUpMock,
   getTaskUrlMock,
   repositoriesFindManyMock,
   environmentsFindManyMock,
@@ -33,6 +34,7 @@ const {
   enqueueTaskMock: vi.fn(),
   findActiveSlackTaskRunMock: vi.fn(),
   classifyFollowUpMock: vi.fn(),
+  resolveRoutingFollowUpMock: vi.fn(),
   getTaskUrlMock: vi.fn(),
   repositoriesFindManyMock: vi.fn(),
   environmentsFindManyMock: vi.fn(),
@@ -63,6 +65,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   routeTask: routeTaskMock,
   enqueueTask: enqueueTaskMock,
   classifyFollowUp: classifyFollowUpMock,
+  resolveRoutingFollowUp: resolveRoutingFollowUpMock,
   detectSlackMcpSetupRequirement: vi.fn().mockResolvedValue(null),
   getRoutingAutoConfirmDelayMs: vi.fn(() => 0),
   getTaskUrl: getTaskUrlMock,
@@ -258,6 +261,35 @@ describe('Slack deleted-mention suppression', () => {
       intent: 'correct',
       reasoning: 'user supplied a correction',
     });
+    resolveRoutingFollowUpMock.mockImplementation(
+      async (input: {
+        suggestion: Record<string, unknown> | null;
+        userResponse: string;
+        userId?: string | null;
+        correctionMessage?: { user: string; text: string };
+        buildCorrectionContext: () => Promise<Record<string, unknown>>;
+      }) => {
+        const classification = await classifyFollowUpMock({
+          suggestedWorkspace:
+            input.suggestion?.workspaceDisplayName ?? 'the workspace picker',
+          userResponse: input.userResponse,
+          userId: input.userId,
+        });
+        if (classification.intent !== 'correct') {
+          return { intent: classification.intent };
+        }
+        const context = await input.buildCorrectionContext();
+        return {
+          intent: 'correct',
+          routingDecision: await routeTaskMock({
+            ...context,
+            ...(input.suggestion
+              ? { previousSuggestion: input.suggestion }
+              : {}),
+          }),
+        };
+      },
+    );
     setSlackStartedMessageTsMock.mockResolvedValue(undefined);
     deliveryTrackerCommitMock.mockResolvedValue(undefined);
     getTaskUrlMock.mockReturnValue('https://app.example.com/task/task_123');

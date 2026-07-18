@@ -108,6 +108,11 @@ type TelegramTarget = {
 type DiscordTarget = {
   channelId: string;
   threadId?: string;
+  /** Valid Discord message+channel for platform reactions when present. */
+  reaction?: {
+    channelId: string;
+    messageId: string;
+  };
 };
 
 function getTeamsTarget(payload: unknown): TeamsTarget | null {
@@ -176,11 +181,38 @@ function getDiscordTarget(payload: unknown): DiscordTarget | null {
   }
 
   const threadId = getCommunicationThreadIdFromTaskPayload(payload);
+  const reactionChannelId = getNonEmptyPayloadString(
+    payload,
+    'discordReactionChannelId',
+  );
+  const reactionMessageId = getNonEmptyPayloadString(
+    payload,
+    'discordReactionMessageId',
+  );
 
   return {
     channelId,
     ...(threadId ? { threadId } : {}),
+    ...(reactionChannelId && reactionMessageId
+      ? {
+          reaction: {
+            channelId: reactionChannelId,
+            messageId: reactionMessageId,
+          },
+        }
+      : {}),
   };
+}
+
+function getNonEmptyPayloadString(
+  payload: unknown,
+  key: string,
+): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 async function resolveLinearClient() {
@@ -494,6 +526,10 @@ async function deliverDiscordTerminalStatus({
     formatLink: formatMarkdownLink,
     formatStatus: (value) => `**${value}**`,
   });
+  // Match Slack terminal reactions: check on merge, thumbsdown on closed.
+  const terminalReaction =
+    status === 'closed' ? SLACK_PR_CLOSED_REACTION_EMOJI : 'white_check_mark';
+  const ackEmoji = 'eyes';
 
   const notifiedConversations = new Set<string>();
 
@@ -511,6 +547,22 @@ async function deliverDiscordTerminalStatus({
         text: statusNotification.bodyText,
         textFormat: 'markdown',
       });
+
+      const originReaction = target.reaction;
+      if (originReaction && provider.addReaction) {
+        await Promise.all([
+          provider.addReaction({
+            channelId: originReaction.channelId,
+            messageId: originReaction.messageId,
+            name: terminalReaction,
+          }),
+          provider.removeReaction?.({
+            channelId: originReaction.channelId,
+            messageId: originReaction.messageId,
+            name: ackEmoji,
+          }) ?? Promise.resolve(),
+        ]);
+      }
 
       notifiedConversations.add(conversationKey);
 

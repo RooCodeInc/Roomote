@@ -24,11 +24,14 @@ export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 
 export type ChannelAutoStartFormRow = {
-  // Canonical Slack channel ID persisted for this row, or null for rows the
-  // user just added or whose channel field they edited. When present it is the
-  // authoritative identity so saving never has to re-resolve the channel by
-  // name (which fails for archived/renamed/private channels).
+  provider: 'slack' | 'discord';
+  // Canonical channel ID persisted for this row, or null for rows the user
+  // just added or whose channel field they edited. For Slack rows it is the
+  // resolved channel id (authoritative, so saving never has to re-resolve the
+  // channel by name, which fails for archived/renamed/private channels); for
+  // Discord rows it is the catalog channel id selected in the picker.
   channelId: string | null;
+  /** Slack display name / free-text input; unused ('') for Discord rows. */
   slackChannel: string;
   instructions: string;
   launchMode: ChannelAutoStartLaunchMode;
@@ -77,7 +80,8 @@ export type FormState = {
   conflictResolverMaxPrAgeDays: ConflictResolverMaxPrAgeDays;
   conflictResolverLabel: string;
   conflictResolverInstructions: string;
-  channelAutoStartSlackChannels: ChannelAutoStartFormRow[];
+  /** Merged, provider-tagged auto-respond rows (Slack and Discord). */
+  channelAutoStartChannels: ChannelAutoStartFormRow[];
   managerSlackChannel: string;
   managerStatsFrequency: ManagerStatsFrequency;
   sentryTriageFrequency: SentryTriageFrequency;
@@ -129,7 +133,7 @@ const CONFLICT_RESOLVER_FIELDS: Array<keyof FormState> = [
 ];
 
 const CHANNEL_AUTO_START_FIELDS: Array<keyof FormState> = [
-  'channelAutoStartSlackChannels',
+  'channelAutoStartChannels',
 ];
 
 const MANAGER_CHANNEL_FIELDS: Array<keyof FormState> = ['managerSlackChannel'];
@@ -301,10 +305,21 @@ export function buildAutomationSettingsSaveInput(
     conflictResolverLabel: stateToSave.conflictResolverLabel,
     conflictResolverInstructions:
       stateToSave.conflictResolverInstructions.trim() || null,
-    channelAutoStartSlackChannels:
-      stateToSave.channelAutoStartSlackChannels.map((row) => ({
+    channelAutoStartSlackChannels: stateToSave.channelAutoStartChannels
+      .filter((row) => row.provider === 'slack')
+      .map((row) => ({
         channelId: row.channelId,
         slackChannel: row.slackChannel.trim() || null,
+        instructions: row.instructions.trim() || null,
+        launchMode: row.launchMode,
+        launchCriteria: row.launchCriteria.trim() || null,
+      })),
+    // Always sent (even empty) — only legacy clients omit it, which the API
+    // treats as "preserve the persisted Discord rows".
+    channelAutoStartDiscordChannels: stateToSave.channelAutoStartChannels
+      .filter((row) => row.provider === 'discord')
+      .map((row) => ({
+        channelId: row.channelId,
         instructions: row.instructions.trim() || null,
         launchMode: row.launchMode,
         launchCriteria: row.launchCriteria.trim() || null,

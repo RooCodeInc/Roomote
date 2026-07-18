@@ -33,6 +33,7 @@ import {
 } from '../manager-slack';
 import {
   type AcpPersistedEnvelope,
+  type ShowWidgetFallbackDelivery,
   ACP_ENVELOPE_EVENT_TYPES,
   asBoolean,
   asRecord,
@@ -54,6 +55,7 @@ import {
 } from './extract-pull-requests';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
+import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -798,7 +800,7 @@ function scheduleTaskTitleRefresh(input: RecordTaskMessageEnvelopeInput) {
 
 export async function recordTaskMessageEnvelope(
   input: RecordTaskMessageEnvelopeInput,
-): Promise<void> {
+): Promise<ShowWidgetFallbackDelivery | null> {
   const { runId, taskId, userId, envelope } = input;
   const persistedUserId = getPersistedUserId(envelope, userId);
   const normalizedActivityAt = normalizeTaskActivityTimestamp(envelope.ts);
@@ -840,8 +842,12 @@ export async function recordTaskMessageEnvelope(
     .returning({ id: taskMessages.id });
 
   if (!persistedTaskMessage) {
-    return;
+    return null;
   }
+
+  const showWidgetFallbackDelivery = extractShowWidgetFallbackDelivery(
+    input.envelope,
+  );
 
   await db
     .update(tasks)
@@ -872,7 +878,7 @@ export async function recordTaskMessageEnvelope(
   });
 
   if (detectedPrs.length === 0) {
-    return;
+    return showWidgetFallbackDelivery;
   }
 
   for (const pr of detectedPrs) {
@@ -886,4 +892,6 @@ export async function recordTaskMessageEnvelope(
       );
     }
   }
+
+  return showWidgetFallbackDelivery;
 }

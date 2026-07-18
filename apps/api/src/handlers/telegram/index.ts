@@ -31,6 +31,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { handleTelegramCallbackQuery } from './callback-actions.js';
+import { handleTelegramRoutingReply } from './routing-confirmation.js';
 import {
   resolveTelegramSenderUserId,
   upsertTelegramUserMapping,
@@ -373,6 +374,22 @@ telegram.post('/', async (c) => {
 
   if (!queuedMessage && !newTaskCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
+  }
+
+  if (
+    queuedMessage &&
+    !newTaskCommand &&
+    (await handleTelegramRoutingReply({
+      launchOwnerUserId: senderUserId,
+      queuedMessage,
+      metadata,
+    }))
+  ) {
+    return c.json({
+      ok: true,
+      queued: false,
+      routingReplyHandled: true,
+    });
   }
 
   const activeRun = await findActiveTelegramTaskRun(conversation);

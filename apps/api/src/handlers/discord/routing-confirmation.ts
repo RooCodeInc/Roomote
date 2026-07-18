@@ -4,8 +4,10 @@ import {
   getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs,
   getTaskUrl,
+  resolveRoutingFollowUp,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   type RoutingDecision,
+  type RoutingContext,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 import type { DiscordInteraction } from '@roomote/communication/discord-event';
@@ -20,7 +22,10 @@ import type { QueuedCommunicationMessage } from '@roomote/types';
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { apiLogger } from '../../logging.js';
 import { findCommunicationTaskRunBySourceEvent } from '../tasks/communication-task-run-lookup.js';
-import { replyToDiscordEvent } from './replies.js';
+import {
+  replyToDiscordEvent,
+  type DiscordMessageToReplace,
+} from './replies.js';
 import {
   forgetPendingTaskThread,
   launchDiscordTask,
@@ -34,6 +39,9 @@ const DISCORD_CHANNEL_TYPE_ANNOUNCEMENT_THREAD = 10;
 const DISCORD_CHANNEL_TYPE_PUBLIC_THREAD = 11;
 const PENDING_ROUTE_TTL_SECONDS = 15 * 60;
 const PENDING_ROUTE_PREFIX = 'discord:pending_route:';
+const PENDING_ROUTE_CHANNEL_POINTER_PREFIX =
+  'discord:pending_route_channel_ptr:';
+const PENDING_ROUTE_CARD_POINTER_PREFIX = 'discord:pending_route_card_ptr:';
 // Discord supports at most five action rows. Reserve one for All repositories
 // and one for Never mind so every stored option is also visible and actionable.
 const MAX_ENVIRONMENT_OPTIONS = 3;
@@ -48,6 +56,7 @@ type PendingDiscordRoute = {
   launchOwnerUserId: string;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
+  routingContext?: RoutingContext;
   channel: DiscordChannelContext;
   /**
    * The task thread the card was posted into, when the request could anchor
@@ -63,11 +72,35 @@ type PendingDiscordRoute = {
    * and the card is a plain menu. Only a suggestion may be auto-confirmed.
    */
   suggestedIndex: number | null;
+  /**
+   * Router free-form kickoff for the suggested workspace only. Used when the
+   * launch keeps that workspace; manual picks fall back to the static text.
+   */
+  kickoffMessage?: string;
   forceNewThread?: boolean;
 };
 
 function pendingRouteKey(id: string): string {
   return `${PENDING_ROUTE_PREFIX}${id}`;
+}
+
+function pendingRouteChannelPointerKey(channelId: string): string {
+  return `${PENDING_ROUTE_CHANNEL_POINTER_PREFIX}${channelId}`;
+}
+
+function pendingRouteCardPointerKey(messageId: string): string {
+  return `${PENDING_ROUTE_CARD_POINTER_PREFIX}${messageId}`;
+}
+
+function replyChannel(pending: PendingDiscordRoute): DiscordChannelContext {
+  return pending.cardChannel ?? pending.channel;
+}
+
+function safeConversationPointerChannelId(
+  pending: PendingDiscordRoute,
+): string | null {
+  if (pending.cardChannel) return pending.cardChannel.channelId;
+  return pending.channel.isDirectMessage ? pending.channel.channelId : null;
 }
 
 function parsePendingRoute(value: string | null): PendingDiscordRoute | null {
@@ -98,13 +131,56 @@ async function storePendingRoute(
 async function claimPendingRoute(
   id: string,
 ): Promise<PendingDiscordRoute | null> {
-  return parsePendingRoute(await getRedis().getdel(pendingRouteKey(id)));
+  const redis = getRedis();
+  const pending = parsePendingRoute(await redis.getdel(pendingRouteKey(id)));
+  if (!pending) return null;
+
+  const channelId = safeConversationPointerChannelId(pending);
+  if (
+    channelId &&
+    (await redis.get(pendingRouteChannelPointerKey(channelId))) === id
+  ) {
+    await redis.del(pendingRouteChannelPointerKey(channelId));
+  }
+  if (
+    pending.cardMessageId &&
+    (await redis.get(pendingRouteCardPointerKey(pending.cardMessageId))) === id
+  ) {
+    await redis.del(pendingRouteCardPointerKey(pending.cardMessageId));
+  }
+
+  return pending;
+}
+
+async function storePendingRoutePointers(
+  id: string,
+  pending: PendingDiscordRoute,
+): Promise<void> {
+  const redis = getRedis();
+  const channelId = safeConversationPointerChannelId(pending);
+  if (channelId) {
+    await redis.set(
+      pendingRouteChannelPointerKey(channelId),
+      id,
+      'EX',
+      PENDING_ROUTE_TTL_SECONDS,
+    );
+  }
+  if (pending.cardMessageId) {
+    await redis.set(
+      pendingRouteCardPointerKey(pending.cardMessageId),
+      id,
+      'EX',
+      PENDING_ROUTE_TTL_SECONDS,
+    );
+  }
 }
 
 async function restorePendingRoute(
   id: string,
   pending: PendingDiscordRoute,
 ): Promise<void> {
+  await storePendingRoutePointers(id, pending);
   await storePendingRoute(id, pending);
 }
 
@@ -217,13 +293,13 @@ async function autoConfirmDiscordRouting(input: {
   const option = pending.options[pending.suggestedIndex];
   if (!option) return;
   try {
-    const existingRun = await findCommunicationTaskRunBySourceEvent({
-      provider: 'discord',
-      sourceEventId: pending.queuedMessage.ts,
+    const result = await launchPendingDiscordRoute({
+      provider: input.provider,
+      pending,
+      option,
     });
-    if (existingRun) return;
-    const workspace = await resolveDiscordWorkspace(option.workspace);
-    if (!workspace) {
+    if (result.status === 'already_started') return;
+    if (result.status === 'unavailable') {
       await input.provider
         .postMessage({
           channelId:
@@ -236,51 +312,18 @@ async function autoConfirmDiscordRouting(input: {
         .catch(() => undefined);
       return;
     }
-    const launched = await launchDiscordTask({
+    await finalizeDiscordRoutingReceipt({
       provider: input.provider,
-      launchOwnerUserId: pending.launchOwnerUserId,
-      queuedMessage: pending.queuedMessage,
-      metadata: pending.metadata,
-      channel: pending.channel,
-      workspace,
-      ...(pending.forceNewThread ? { forceNewThread: true } : {}),
-      // No interaction here — nobody clicked. A card that already lives in
-      // the task thread becomes the launch acknowledgement itself.
-      ...(pending.cardChannel && pending.cardMessageId
-        ? {
-            replaceMessage: {
-              channel: pending.cardChannel,
-              messageId: pending.cardMessageId,
-            },
-          }
-        : {}),
+      pending,
+      launched: result.launched,
+      workspaceDisplayName: result.workspace.workspaceDisplayName,
+    }).catch((error) => {
+      apiLogger.warn(
+        `[discord] Could not finalize routing card ${pending.cardMessageId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
     });
-
-    if (!pending.cardChannel && pending.cardMessageId) {
-      // DMs, interaction cards, and thread-reservation fallbacks keep their
-      // routing card outside the task conversation. The launch has already
-      // posted its acknowledgement and controls in the right destination;
-      // turn the original card into a terminal receipt so stale route buttons
-      // do not remain visible.
-      await input.provider
-        .editMessage({
-          channelId: pending.channel.channelId,
-          messageId: pending.cardMessageId,
-          text: launched.createdThread
-            ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
-            : `Started in **${workspace.workspaceDisplayName}**.`,
-          buttons: launched.taskUrl
-            ? [[{ text: 'Follow Task', url: launched.taskUrl }]]
-            : [],
-        })
-        .catch((error) => {
-          apiLogger.warn(
-            `[discord] Could not finalize routing card ${pending.cardMessageId}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-        });
-    }
   } catch (error) {
     // The click path restores its claim when lookup, workspace resolution, or
     // launch fails. Auto-confirm must do the same so a transient failure does
@@ -343,6 +386,7 @@ export async function requestDiscordRoutingConfirmation(input: {
   launchOwnerUserId: string;
   queuedMessage: QueuedCommunicationMessage;
   metadata: DiscordEventCommunicationMetadata;
+  routingContext?: RoutingContext;
   channel: DiscordChannelContext;
   routingDecision: RoutingDecision;
   forceNewThread?: boolean;
@@ -378,15 +422,21 @@ export async function requestDiscordRoutingConfirmation(input: {
   const cardChannel = thread
     ? taskThreadChannelContext({ channel: input.channel, thread })
     : null;
+  const kickoffMessage =
+    input.routingDecision.status === 'routed'
+      ? input.routingDecision.result.kickoffMessage?.trim()
+      : undefined;
   const pending: PendingDiscordRoute = {
     requesterDiscordUserId: input.requesterDiscordUserId,
     launchOwnerUserId: input.launchOwnerUserId,
     queuedMessage: input.queuedMessage,
     metadata: input.metadata,
+    ...(input.routingContext ? { routingContext: input.routingContext } : {}),
     channel: input.channel,
     ...(cardChannel ? { cardChannel } : {}),
     options,
     suggestedIndex,
+    ...(kickoffMessage ? { kickoffMessage } : {}),
     ...(input.forceNewThread ? { forceNewThread: true } : {}),
   };
   await storePendingRoute(pendingRouteId, pending);
@@ -404,28 +454,387 @@ export async function requestDiscordRoutingConfirmation(input: {
       : 'Where should I run this?',
     buttons: routeButtons(pendingRouteId, options),
   });
-  if (suggestedIndex === null) {
-    return { pendingRouteId };
-  }
   // Re-store so the timer can turn the card itself into the acknowledgement.
   // The route is stored before the card is posted so a fast click cannot miss
   // it, which leaves the card id as the one thing learned afterwards.
+  const pendingWithCard = {
+    ...pending,
+    ...(card.messageId ? { cardMessageId: card.messageId } : {}),
+  };
+  await storePendingRoutePointers(pendingRouteId, pendingWithCard);
   await storePendingRoute(
     pendingRouteId,
-    {
-      ...pending,
-      ...(card.messageId ? { cardMessageId: card.messageId } : {}),
-    },
+    pendingWithCard,
     // A click can land while the card post is still completing and claim the
     // route. This write must not bring it back from the dead.
     { onlyIfExists: true },
   );
+  if (suggestedIndex === null) {
+    return { pendingRouteId };
+  }
   scheduleDiscordRoutingAutoConfirm({
     provider: input.provider,
     applicationId: input.applicationId,
     pendingRouteId,
   });
   return { pendingRouteId };
+}
+
+/** Locate a pending card that a normal Discord message can safely answer. */
+export async function findDiscordPendingRoutingReply(input: {
+  channel: DiscordChannelContext;
+  replyToMessageId?: string;
+  requesterDiscordUserId: string;
+  launchOwnerUserId: string;
+}): Promise<{ pendingRouteId: string } | null> {
+  const redis = getRedis();
+  const candidateIds: string[] = [];
+
+  if (input.replyToMessageId) {
+    const cardRouteId = await redis.get(
+      pendingRouteCardPointerKey(input.replyToMessageId),
+    );
+    if (cardRouteId) candidateIds.push(cardRouteId);
+  }
+
+  if (input.channel.isDirectMessage || input.channel.isThread) {
+    const channelRouteId = await redis.get(
+      pendingRouteChannelPointerKey(input.channel.channelId),
+    );
+    if (channelRouteId && !candidateIds.includes(channelRouteId)) {
+      candidateIds.push(channelRouteId);
+    }
+  }
+
+  for (const pendingRouteId of candidateIds) {
+    const pending = parsePendingRoute(
+      await redis.get(pendingRouteKey(pendingRouteId)),
+    );
+    if (
+      pending?.routingContext &&
+      pending.requesterDiscordUserId === input.requesterDiscordUserId &&
+      pending.launchOwnerUserId === input.launchOwnerUserId &&
+      replyChannel(pending).channelId === input.channel.channelId
+    ) {
+      return { pendingRouteId };
+    }
+  }
+
+  return null;
+}
+
+async function editPendingDiscordCard(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  pending: PendingDiscordRoute;
+  text: string;
+  buttons?: ReturnType<typeof routeButtons>;
+}): Promise<string | undefined> {
+  const channel = replyChannel(input.pending);
+  if (input.pending.cardMessageId) {
+    try {
+      await input.provider.editMessage({
+        channelId: channel.channelId,
+        messageId: input.pending.cardMessageId,
+        text: input.text,
+        buttons: input.buttons ?? [],
+      });
+      return input.pending.cardMessageId;
+    } catch (error) {
+      apiLogger.warn(
+        `[discord] Could not update routing card ${input.pending.cardMessageId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  const posted = await replyToDiscordEvent({
+    provider: input.provider,
+    applicationId: input.applicationId,
+    channel,
+    text: input.text,
+    ...(input.buttons ? { buttons: input.buttons } : {}),
+  });
+  return posted.messageId;
+}
+
+async function launchPendingDiscordRoute(input: {
+  provider: DiscordCommunicationProvider;
+  pending: PendingDiscordRoute;
+  option: PendingRouteOption;
+  replaceMessage?: DiscordMessageToReplace;
+}) {
+  const existingRun = await findCommunicationTaskRunBySourceEvent({
+    provider: 'discord',
+    sourceEventId: input.pending.queuedMessage.ts,
+  });
+  if (existingRun) {
+    return { status: 'already_started' as const, existingRun };
+  }
+
+  const workspace = await resolveDiscordWorkspace(input.option.workspace);
+  if (!workspace) {
+    return { status: 'unavailable' as const };
+  }
+
+  const suggestedWorkspace =
+    input.pending.suggestedIndex === null
+      ? null
+      : (input.pending.options[input.pending.suggestedIndex]?.workspace ??
+        null);
+  const kickoffMessage =
+    suggestedWorkspace &&
+    sameWorkspace(input.option.workspace, suggestedWorkspace)
+      ? input.pending.kickoffMessage
+      : undefined;
+
+  const launched = await launchDiscordTask({
+    provider: input.provider,
+    launchOwnerUserId: input.pending.launchOwnerUserId,
+    queuedMessage: input.pending.queuedMessage,
+    metadata: input.pending.metadata,
+    channel: input.pending.channel,
+    workspace,
+    ...(input.pending.forceNewThread ? { forceNewThread: true } : {}),
+    ...(kickoffMessage ? { kickoffMessage } : {}),
+    ...(input.replaceMessage
+      ? { replaceMessage: input.replaceMessage }
+      : input.pending.cardChannel && input.pending.cardMessageId
+        ? {
+            replaceMessage: {
+              channel: input.pending.cardChannel,
+              messageId: input.pending.cardMessageId,
+            },
+          }
+        : {}),
+  });
+
+  return { status: 'started' as const, launched, workspace };
+}
+
+async function finalizeDiscordRoutingReceipt(input: {
+  provider: DiscordCommunicationProvider;
+  pending: PendingDiscordRoute;
+  launched: Awaited<ReturnType<typeof launchDiscordTask>>;
+  workspaceDisplayName: string;
+}): Promise<void> {
+  if (input.pending.cardChannel || !input.pending.cardMessageId) return;
+
+  await input.provider.editMessage({
+    channelId: input.pending.channel.channelId,
+    messageId: input.pending.cardMessageId,
+    text: input.launched.createdThread
+      ? `Started in **${input.workspaceDisplayName}**. Continue in the new task thread.`
+      : `Started in **${input.workspaceDisplayName}**.`,
+    buttons: input.launched.taskUrl
+      ? [[{ text: 'Follow', url: input.launched.taskUrl }]]
+      : [],
+  });
+}
+
+async function launchDiscordRoutingReply(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  pending: PendingDiscordRoute;
+  option: PendingRouteOption;
+}): Promise<void> {
+  const result = await launchPendingDiscordRoute(input);
+
+  if (result.status === 'unavailable') {
+    await editPendingDiscordCard({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      pending: input.pending,
+      text: 'Could not start the task — that workspace is no longer available.',
+    });
+    return;
+  }
+
+  if (result.status === 'already_started') {
+    const taskUrl = getTaskUrl({
+      taskId: result.existingRun.taskId,
+      utm: { source: 'discord', campaign: 'discord.route_retry' },
+    });
+    await editPendingDiscordCard({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      pending: input.pending,
+      text: taskUrl
+        ? `This request already started a task: ${taskUrl}`
+        : 'This request already started a task.',
+    });
+    return;
+  }
+
+  await finalizeDiscordRoutingReceipt({
+    provider: input.provider,
+    pending: input.pending,
+    launched: result.launched,
+    workspaceDisplayName: result.workspace.workspaceDisplayName,
+  });
+}
+
+/** Handle a free-text response to a pending Discord routing card. */
+export async function handleDiscordRoutingReply(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  pendingRouteId: string;
+  requesterDiscordUserId: string;
+  launchOwnerUserId: string;
+  queuedMessage: QueuedCommunicationMessage;
+  channel: DiscordChannelContext;
+}): Promise<boolean> {
+  const pending = await claimPendingRoute(input.pendingRouteId);
+  if (
+    !pending?.routingContext ||
+    pending.requesterDiscordUserId !== input.requesterDiscordUserId ||
+    pending.launchOwnerUserId !== input.launchOwnerUserId ||
+    replyChannel(pending).channelId !== input.channel.channelId
+  ) {
+    if (pending) {
+      await restorePendingRoute(input.pendingRouteId, pending);
+    }
+    return false;
+  }
+  const routingContext = pending.routingContext;
+
+  const suggestedOption =
+    pending.suggestedIndex === null
+      ? null
+      : (pending.options[pending.suggestedIndex] ?? null);
+  let replacementRouteId: string | null = null;
+
+  try {
+    const resolution = await resolveRoutingFollowUp({
+      suggestion: suggestedOption
+        ? {
+            workspaceValue:
+              suggestedOption.workspace.type === 'environment'
+                ? suggestedOption.workspace.id
+                : 'all_repositories',
+            workspaceDisplayName: suggestedOption.label,
+          }
+        : null,
+      userResponse: input.queuedMessage.text,
+      userId: input.launchOwnerUserId,
+      correctionMessage: {
+        user: input.queuedMessage.user,
+        text: input.queuedMessage.text,
+      },
+      buildCorrectionContext: async () => ({
+        ...routingContext,
+        taskDescription: input.queuedMessage.text,
+      }),
+    });
+
+    if (resolution.intent === 'cancel') {
+      await forgetPendingTaskThread(pending.queuedMessage.ts).catch(
+        () => undefined,
+      );
+      await editPendingDiscordCard({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        pending,
+        text: 'Canceled the request.',
+      });
+      return true;
+    }
+
+    if (resolution.intent === 'confirm') {
+      if (!suggestedOption) {
+        throw new Error('A Discord routing confirmation had no suggestion.');
+      }
+      await launchDiscordRoutingReply({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        pending,
+        option: suggestedOption,
+      });
+      return true;
+    }
+
+    const routingDecision = resolution.routingDecision;
+    if (routingDecision.status === 'platform_answer') {
+      await editPendingDiscordCard({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        pending,
+        text: routingDecision.result.answer,
+      });
+      return true;
+    }
+
+    const routed =
+      routingDecision.status === 'routed' ? routingDecision.result : null;
+    const options = await buildOptions(routed?.workspace ?? null);
+    const suggestedIndex = findSuggestedIndex(
+      options,
+      routed?.workspace ?? null,
+    );
+    const autoConfirmDelayMs = routed
+      ? getRoutingAutoConfirmDelayMs(routed.debug, routed.workspace.type)
+      : null;
+    const nextSuggestedOption =
+      suggestedIndex === null ? null : (options[suggestedIndex] ?? null);
+    const nextKickoffMessage = routed?.kickoffMessage?.trim();
+    // Drop the prior suggestion's kickoff so a correction never posts stale
+    // workspace copy; only a non-empty re-routed kickoff is keepable.
+    const { kickoffMessage: _priorKickoff, ...pendingWithoutKickoff } = pending;
+    const nextPending: PendingDiscordRoute = {
+      ...pendingWithoutKickoff,
+      options,
+      suggestedIndex,
+      ...(nextKickoffMessage ? { kickoffMessage: nextKickoffMessage } : {}),
+    };
+
+    if (nextSuggestedOption && autoConfirmDelayMs === 0) {
+      await launchDiscordRoutingReply({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        pending: nextPending,
+        option: nextSuggestedOption,
+      });
+      return true;
+    }
+
+    replacementRouteId = randomBytes(9).toString('base64url');
+    const text = nextSuggestedOption
+      ? `Where should I run this? The best match is **${nextSuggestedOption.label}** — starting in ~${Math.round((autoConfirmDelayMs ?? ROUTING_AUTO_CONFIRM_TIMEOUT_MS) / 1_000)}s.`
+      : 'Where should I run this?';
+    const buttons = routeButtons(replacementRouteId, options);
+    await storePendingRoute(replacementRouteId, nextPending);
+    await storePendingRoutePointers(replacementRouteId, nextPending);
+    const cardMessageId = await editPendingDiscordCard({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      pending: nextPending,
+      text,
+      buttons,
+    });
+    if (cardMessageId && cardMessageId !== nextPending.cardMessageId) {
+      nextPending.cardMessageId = cardMessageId;
+      await storePendingRoute(replacementRouteId, nextPending, {
+        onlyIfExists: true,
+      });
+      await storePendingRoutePointers(replacementRouteId, nextPending);
+    }
+
+    if (nextSuggestedOption && autoConfirmDelayMs !== null) {
+      scheduleDiscordRoutingAutoConfirm({
+        provider: input.provider,
+        applicationId: input.applicationId,
+        pendingRouteId: replacementRouteId,
+      });
+    }
+    return true;
+  } catch (error) {
+    if (replacementRouteId) {
+      await claimPendingRoute(replacementRouteId).catch(() => undefined);
+    }
+    await restorePendingRoute(input.pendingRouteId, pending).catch(
+      () => undefined,
+    );
+    throw error;
+  }
 }
 
 export function parseDiscordRouteCallbackData(
@@ -526,74 +935,12 @@ export async function handleDiscordRoutingCallback(input: {
     });
     return;
   }
-  let existingRun: Awaited<
-    ReturnType<typeof findCommunicationTaskRunBySourceEvent>
-  >;
+  let result: Awaited<ReturnType<typeof launchPendingDiscordRoute>>;
   try {
-    existingRun = await findCommunicationTaskRunBySourceEvent({
-      provider: 'discord',
-      sourceEventId: pending.queuedMessage.ts,
-    });
-  } catch (error) {
-    await restorePendingRoute(input.callback.pendingRouteId, pending).catch(
-      () => undefined,
-    );
-    throw error;
-  }
-  if (existingRun) {
-    const taskUrl = getTaskUrl({
-      taskId: existingRun.taskId,
-      utm: { source: 'discord', campaign: 'discord.route_retry' },
-    });
-    await replyToDiscordEvent({
+    result = await launchPendingDiscordRoute({
       provider: input.provider,
-      applicationId: input.applicationId,
-      channel: replyChannel,
-      interaction: {
-        interaction: input.interaction,
-        interactionDeferred: input.interactionDeferred,
-      },
-      text: taskUrl
-        ? `This request already started a task: ${taskUrl}`
-        : 'This request already started a task.',
-    }).catch(() => undefined);
-    return;
-  }
-  let workspace: Awaited<ReturnType<typeof resolveDiscordWorkspace>>;
-  try {
-    workspace = await resolveDiscordWorkspace(option.workspace);
-  } catch (error) {
-    await restorePendingRoute(input.callback.pendingRouteId, pending).catch(
-      () => undefined,
-    );
-    throw error;
-  }
-  if (!workspace) {
-    await replyToDiscordEvent({
-      provider: input.provider,
-      applicationId: input.applicationId,
-      channel: replyChannel,
-      interaction: {
-        interaction: input.interaction,
-        interactionDeferred: input.interactionDeferred,
-      },
-      text: 'That workspace is no longer available. Send the request again.',
-    });
-    return;
-  }
-  let launched: Awaited<ReturnType<typeof launchDiscordTask>>;
-  try {
-    launched = await launchDiscordTask({
-      provider: input.provider,
-      launchOwnerUserId: pending.launchOwnerUserId,
-      queuedMessage: pending.queuedMessage,
-      metadata: pending.metadata,
-      channel: pending.channel,
-      workspace,
-      forceNewThread: pending.forceNewThread,
-      // A card already in the task thread is where the acknowledgement was
-      // going anyway, so the launch turns it into one instead of posting an
-      // identical message beneath it.
+      pending,
+      option,
       ...(pending.cardChannel
         ? {
             replaceMessage: {
@@ -613,6 +960,38 @@ export async function handleDiscordRoutingCallback(input: {
     );
     throw error;
   }
+  if (result.status === 'already_started') {
+    const taskUrl = getTaskUrl({
+      taskId: result.existingRun.taskId,
+      utm: { source: 'discord', campaign: 'discord.route_retry' },
+    });
+    await replyToDiscordEvent({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      channel: replyChannel,
+      interaction: {
+        interaction: input.interaction,
+        interactionDeferred: input.interactionDeferred,
+      },
+      text: taskUrl
+        ? `This request already started a task: ${taskUrl}`
+        : 'This request already started a task.',
+    }).catch(() => undefined);
+    return;
+  }
+  if (result.status === 'unavailable') {
+    await replyToDiscordEvent({
+      provider: input.provider,
+      applicationId: input.applicationId,
+      channel: replyChannel,
+      interaction: {
+        interaction: input.interaction,
+        interactionDeferred: input.interactionDeferred,
+      },
+      text: 'That workspace is no longer available. Send the request again.',
+    });
+    return;
+  }
   // The launch already answered a card that lived in the task thread.
   if (pending.cardChannel) return;
   await replyToDiscordEvent({
@@ -625,11 +1004,11 @@ export async function handleDiscordRoutingCallback(input: {
     },
     // Away from the thread the card stays a routing receipt, pointing at the
     // thread that carries the real acknowledgement.
-    text: launched.createdThread
-      ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
-      : `Started in **${workspace.workspaceDisplayName}**.`,
-    ...(launched.taskUrl
-      ? { buttons: [[{ text: 'Follow Task', url: launched.taskUrl }]] }
+    text: result.launched.createdThread
+      ? `Started in **${result.workspace.workspaceDisplayName}**. Continue in the new task thread.`
+      : `Started in **${result.workspace.workspaceDisplayName}**.`,
+    ...(result.launched.taskUrl
+      ? { buttons: [[{ text: 'Follow', url: result.launched.taskUrl }]] }
       : {}),
   }).catch(() => undefined);
 }

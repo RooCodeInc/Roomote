@@ -33,6 +33,8 @@ import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from './types';
 import { AcpToolDetails } from './AcpToolDetails';
 import { isSubagentToolPayload } from './subagent-tool';
 import { hidesExpandedToolResult } from './tool-detail-visibility';
+import { ShowWidgetPreview } from './ShowWidgetPreview';
+import { resolveShowWidgetForToolMessage } from './show-widget-tool-result';
 import { VisualProofToolPreview } from './VisualProofToolPreview';
 import { resolveVisualProofMediaForToolMessage } from './visual-proof-tool-result';
 
@@ -72,11 +74,13 @@ export function AcpToolMessage({
     artifactLink?.artifacts,
   );
   const showVisualProofPreview = visualProofMedia.length > 0;
+  const showWidget = resolveShowWidgetForToolMessage(msg);
+  const showWidgetPreview = showWidget !== null;
   const isSubagentRow = isSubagentToolPayload(msg.data);
-  // Direct manage_artifacts rows collapse to just the preview; subagent rows
-  // keep their collapsible prompt/result details alongside it.
+  // Direct manage_artifacts / show_widget rows collapse to just the preview;
+  // subagent rows keep their collapsible prompt/result details alongside it.
   const showExpandedDetails =
-    (isSubagentRow || !showVisualProofPreview) &&
+    (isSubagentRow || (!showVisualProofPreview && !showWidgetPreview)) &&
     !hidesExpandedToolResult(msg, {
       showSubagentPayload,
     });
@@ -133,6 +137,9 @@ export function AcpToolMessage({
                 <VisualProofToolPreview key={media.artifactId} media={media} />
               ))}
             </div>
+          ) : null}
+          {showWidgetPreview && showWidget ? (
+            <ShowWidgetPreview widget={showWidget} />
           ) : null}
           {showCollapsibleContent ? (
             <ToolContent className="px-4 ml-1.5 mb-4 mt-2 border-l text-sm font-light text-muted-foreground">
