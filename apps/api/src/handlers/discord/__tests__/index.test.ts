@@ -389,6 +389,26 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('still launches when the initial eyes reaction fails', async () => {
+    mocks.addReaction.mockRejectedValueOnce(new Error('rate limited'));
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
+    expect(mocks.startNewTask).toHaveBeenCalledTimes(1);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        status: 'started',
+      }),
+    );
+  });
+
   it('treats an attachment-only DM as a task entry and passes safe image data', async () => {
     const attachment = {
       id: 'attachment-1',

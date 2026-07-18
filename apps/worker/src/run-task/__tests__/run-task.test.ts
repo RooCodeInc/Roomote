@@ -1260,6 +1260,71 @@ describe('runTask', () => {
     );
   });
 
+  it('initializes Discord reply satisfaction state without first-turn reactions', async () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(678_901);
+
+    try {
+      await runTask({
+        taskRun: {
+          id: 109,
+          taskId: 'task-109',
+          payloadKind: TaskPayloadKind.StandardTask,
+          harness: 'opencode-server',
+          payload: {
+            repo: 'org/repo',
+            description: 'do the thing',
+            communicationProvider: 'discord',
+            communicationChannelId: 'channel-1',
+            communicationThreadId: 'thread-1',
+            communicationMessageId: 'message-1',
+          },
+          result: null,
+        } as never,
+        envVars: {},
+        workspacePath: '/tmp/workspace',
+        prompt: '',
+        harnessInstructions: undefined,
+        agentInstructions: undefined,
+        environmentConfig: undefined,
+        callbacks: {},
+        context: {},
+        logger: {
+          info: vi.fn(),
+          warn: vi.fn(),
+          error: vi.fn(),
+          log: vi.fn(),
+        } as never,
+        harnessSessionId: undefined,
+        workerEnv: {
+          authToken: 'cloud-token',
+          roomoteAppUrl: 'https://api.example.test',
+          trpcUrl: 'https://web.example.test',
+          buildUserFacingEnv: vi.fn(() => ({
+            HOME: '/tmp/home',
+            PATH: '/usr/bin',
+          })),
+        } as never,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    const stateFilePath =
+      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json';
+    expect(writeFileSyncMock).toHaveBeenCalledWith(
+      stateFilePath,
+      JSON.stringify({
+        startedAtMs: 678_901,
+        currentTurnRequiresInitialAck: true,
+        currentTurnMessageTs: 'message-1',
+        currentTurnStartedAtMs: 678_901,
+        // Chat-launched first turns require a real reply, not a reaction.
+        currentTurnReactionsAllowed: false,
+      }),
+      'utf8',
+    );
+  });
+
   it('marks late-bound automation execution tasks as requiring a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(345_678);
 
