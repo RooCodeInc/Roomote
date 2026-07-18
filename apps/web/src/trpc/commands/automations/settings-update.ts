@@ -242,7 +242,6 @@ export async function updateBackgroundAgentSettingsCommand(
         sentryTriageSlackChannel: string | null;
         dependabotTriageSlackChannel: string | null;
         codeqlTriageSlackChannel: string | null;
-        issueFixerSlackChannel: string | null;
         securityAuditorSlackChannel: string | null;
         codeQualityAuditorSlackChannel: string | null;
         ciFailureTriageSlackChannel: string | null;
@@ -500,7 +499,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const dependabotTriageChannelResult =
     destinationResults.dependabotTriage.slack;
   const codeqlTriageChannelResult = destinationResults.codeqlTriage.slack;
-  const issueFixerChannelResult = destinationResults.issueFixer.slack;
   const suggesterChannelResult = destinationResults.suggester.slack;
   const announcerChannelResult = destinationResults.announcer.slack;
   const platformIssueChannelResult =
@@ -514,7 +512,6 @@ export async function updateBackgroundAgentSettingsCommand(
   const dependabotTriageDiscordResult =
     destinationResults.dependabotTriage.discord;
   const codeqlTriageDiscordResult = destinationResults.codeqlTriage.discord;
-  const issueFixerDiscordResult = destinationResults.issueFixer.discord;
   const securityAuditorDiscordResult =
     destinationResults.securityAuditor.discord;
   const codeQualityAuditorDiscordResult =
@@ -598,7 +595,6 @@ export async function updateBackgroundAgentSettingsCommand(
     sentryTriageChannelResult,
     dependabotTriageChannelResult,
     codeqlTriageChannelResult,
-    issueFixerChannelResult,
     suggesterChannelResult,
     announcerChannelResult,
     platformIssueChannelResult,
@@ -783,7 +779,6 @@ export async function updateBackgroundAgentSettingsCommand(
       | 'sentryTriageSlackChannel'
       | 'dependabotTriageSlackChannel'
       | 'codeqlTriageSlackChannel'
-      | 'issueFixerSlackChannel'
       | 'securityAuditorSlackChannel'
       | 'codeQualityAuditorSlackChannel'
       | 'ciFailureTriageSlackChannel'
@@ -837,13 +832,6 @@ export async function updateBackgroundAgentSettingsCommand(
         codeqlTriageChannelResult.channelId ??
         codeqlTriageDiscordResult.channelId,
       field: 'codeqlTriageSlackChannel',
-    },
-    {
-      key: 'issue_fixer',
-      frequency: issueFixerFrequency,
-      channelId:
-        issueFixerChannelResult.channelId ?? issueFixerDiscordResult.channelId,
-      field: 'issueFixerSlackChannel',
     },
     {
       key: 'security_auditor',
@@ -1147,7 +1135,6 @@ export async function updateBackgroundAgentSettingsCommand(
       key: 'issue_fixer',
       enabled: issueFixerFrequency !== 'off',
       schedule: { mode: issueFixerFrequency },
-      ...destinationUpsertFields('issueFixer'),
       updatedAt: now,
     });
 
@@ -1258,7 +1245,6 @@ export async function updateBackgroundAgentSettingsCommand(
     dependabotTriageSlackChannelId:
       updatedSettings.dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId: updatedSettings.codeqlTriageSlackChannelId,
-    issueFixerSlackChannelId: updatedSettings.issueFixerSlackChannelId,
     securityAuditorSlackChannelId:
       updatedSettings.securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId:
@@ -1278,7 +1264,6 @@ export async function updateBackgroundAgentSettingsCommand(
     dependabotTriageSlackChannelId:
       updatedSettings.dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId: updatedSettings.codeqlTriageSlackChannelId,
-    issueFixerSlackChannelId: updatedSettings.issueFixerSlackChannelId,
     securityAuditorSlackChannelId:
       updatedSettings.securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId:

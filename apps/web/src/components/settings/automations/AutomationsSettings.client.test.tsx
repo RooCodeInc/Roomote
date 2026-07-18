@@ -64,8 +64,7 @@ const baseFormState: FormState = {
   codeqlTriageSlackChannel: '',
   codeqlTriageDiscordChannel: '',
   issueFixerFrequency: 'off' as const,
-  issueFixerSlackChannel: '',
-  issueFixerDiscordChannel: '',
+
   securityAuditorFrequency: 'off' as const,
   securityAuditorSlackChannel: '',
   securityAuditorDiscordChannel: '',

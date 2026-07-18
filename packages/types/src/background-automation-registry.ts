@@ -220,11 +220,11 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     availability: 'stable',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new GitHub issues; Run now can still launch manually.
+    // Plans are posted on the GitHub issue itself, not as Slack suggestion cards.
     manualTriggerRequirements: ['github', 'repository'],
-    usesManagerChannel: true,
-    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    usesManagerChannel: false,
+    supportedCommunicationProviders: [],
     supportedSourceControlProviders: ['github'],
-    scheduledSuggestionSource: 'issue_fixer',
   },
   {
     automationKey: 'security_auditor',

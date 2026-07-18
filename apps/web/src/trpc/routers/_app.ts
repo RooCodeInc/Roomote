@@ -504,20 +504,6 @@ const automationsRouter = createRouter({
           .max(160)
           .nullable()
           .optional(),
-        issueFixerSlackChannel: z
-          .string()
-          .trim()
-          .min(1)
-          .max(160)
-          .nullable()
-          .optional(),
-        issueFixerDiscordChannel: z
-          .string()
-          .trim()
-          .min(1)
-          .max(160)
-          .nullable()
-          .optional(),
         ...SCHEDULE_ONLY_FREQUENCY_FIELD_SHAPE,
         suggesterFrequency: z.enum(['off', 'daily', 'weekly']),
         suggesterSlackChannel: z.string().trim().min(1).max(160).nullable(),
@@ -2133,7 +2119,6 @@ export const appRouter = createRouter({
               'sentry_triage',
               'dependabot_triage',
               'codeql_triage',
-              'issue_fixer',
               'security_auditor',
               'code_quality_auditor',
             ])

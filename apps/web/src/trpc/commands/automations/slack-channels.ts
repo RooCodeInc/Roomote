@@ -139,7 +139,6 @@ export async function getSlackChannelAccessWarnings({
   sentryTriageSlackChannelId,
   dependabotTriageSlackChannelId,
   codeqlTriageSlackChannelId,
-  issueFixerSlackChannelId,
   securityAuditorSlackChannelId,
   codeQualityAuditorSlackChannelId,
   ciFailureTriageSlackChannelId,
@@ -153,7 +152,6 @@ export async function getSlackChannelAccessWarnings({
   sentryTriageSlackChannelId: string | null;
   dependabotTriageSlackChannelId: string | null;
   codeqlTriageSlackChannelId: string | null;
-  issueFixerSlackChannelId: string | null;
   securityAuditorSlackChannelId: string | null;
   codeQualityAuditorSlackChannelId: string | null;
   ciFailureTriageSlackChannelId: string | null;
@@ -169,7 +167,6 @@ export async function getSlackChannelAccessWarnings({
       sentryTriageSlackChannel: null,
       dependabotTriageSlackChannel: null,
       codeqlTriageSlackChannel: null,
-      issueFixerSlackChannel: null,
       securityAuditorSlackChannel: null,
       codeQualityAuditorSlackChannel: null,
       ciFailureTriageSlackChannel: null,
@@ -185,7 +182,6 @@ export async function getSlackChannelAccessWarnings({
     sentryTriageSlackChannelId,
     dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId,
-    issueFixerSlackChannelId,
     securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId,
     ciFailureTriageSlackChannelId,
@@ -242,11 +238,6 @@ export async function getSlackChannelAccessWarnings({
       membershipByChannelId.get(codeqlTriageSlackChannelId) !== true
         ? codeqlTriageSlackChannelId
         : null,
-    issueFixerSlackChannel:
-      issueFixerSlackChannelId &&
-      membershipByChannelId.get(issueFixerSlackChannelId) !== true
-        ? issueFixerSlackChannelId
-        : null,
     securityAuditorSlackChannel:
       securityAuditorSlackChannelId &&
       membershipByChannelId.get(securityAuditorSlackChannelId) !== true
@@ -276,7 +267,6 @@ export async function getSlackChannelDisplayNames({
   sentryTriageSlackChannelId,
   dependabotTriageSlackChannelId,
   codeqlTriageSlackChannelId,
-  issueFixerSlackChannelId,
   securityAuditorSlackChannelId,
   codeQualityAuditorSlackChannelId,
   ciFailureTriageSlackChannelId,
@@ -291,7 +281,6 @@ export async function getSlackChannelDisplayNames({
   sentryTriageSlackChannelId: string | null;
   dependabotTriageSlackChannelId: string | null;
   codeqlTriageSlackChannelId: string | null;
-  issueFixerSlackChannelId: string | null;
   securityAuditorSlackChannelId: string | null;
   codeQualityAuditorSlackChannelId: string | null;
   ciFailureTriageSlackChannelId: string | null;
@@ -307,7 +296,6 @@ export async function getSlackChannelDisplayNames({
       sentryTriageSlackChannel: null,
       dependabotTriageSlackChannel: null,
       codeqlTriageSlackChannel: null,
-      issueFixerSlackChannel: null,
       securityAuditorSlackChannel: null,
       codeQualityAuditorSlackChannel: null,
       ciFailureTriageSlackChannel: null,
@@ -325,7 +313,6 @@ export async function getSlackChannelDisplayNames({
     sentryTriageSlackChannel,
     dependabotTriageSlackChannel,
     codeqlTriageSlackChannel,
-    issueFixerSlackChannel,
     securityAuditorSlackChannel,
     codeQualityAuditorSlackChannel,
     ciFailureTriageSlackChannel,
@@ -359,9 +346,6 @@ export async function getSlackChannelDisplayNames({
       : Promise.resolve(null),
     codeqlTriageSlackChannelId
       ? notifier.getChannelName(codeqlTriageSlackChannelId)
-      : Promise.resolve(null),
-    issueFixerSlackChannelId
-      ? notifier.getChannelName(issueFixerSlackChannelId)
       : Promise.resolve(null),
     securityAuditorSlackChannelId
       ? notifier.getChannelName(securityAuditorSlackChannelId)
@@ -402,9 +386,6 @@ export async function getSlackChannelDisplayNames({
       : null,
     codeqlTriageSlackChannel: codeqlTriageSlackChannel
       ? `#${codeqlTriageSlackChannel}`
-      : null,
-    issueFixerSlackChannel: issueFixerSlackChannel
-      ? `#${issueFixerSlackChannel}`
       : null,
     securityAuditorSlackChannel: securityAuditorSlackChannel
       ? `#${securityAuditorSlackChannel}`

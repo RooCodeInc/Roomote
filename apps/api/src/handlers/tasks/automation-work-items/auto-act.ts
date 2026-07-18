@@ -61,12 +61,6 @@ const AUTO_ACT_AUTOMATION_CONFIG: Record<
     executionTaskBootstrap: '$implement-changes',
     enforceUniqueTargetEnvironments: true,
   },
-  issue_fixer: {
-    label: 'Triage GitHub Issues',
-    maxActItems: 0,
-    executionTaskBootstrap: '$implement-changes',
-    enforceUniqueTargetEnvironments: true,
-  },
   security_auditor: {
     label: 'Security Auditor',
     maxActItems: 5,

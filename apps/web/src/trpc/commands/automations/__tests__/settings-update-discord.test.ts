@@ -102,8 +102,7 @@ function buildInput(
     codeqlTriageSlackChannel: null,
     codeqlTriageDiscordChannel: null,
     issueFixerFrequency: 'off',
-    issueFixerSlackChannel: null,
-    issueFixerDiscordChannel: null,
+
     securityAuditorFrequency: 'off',
     securityAuditorSlackChannel: null,
     securityAuditorDiscordChannel: null,

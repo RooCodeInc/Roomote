@@ -138,7 +138,6 @@ type FieldErrors = Partial<
     | 'sentryTriageSlackChannel'
     | 'dependabotTriageSlackChannel'
     | 'codeqlTriageSlackChannel'
-    | 'issueFixerSlackChannel'
     | 'securityAuditorSlackChannel'
     | 'codeQualityAuditorSlackChannel'
     | 'ciFailureTriageSlackChannel'
@@ -146,7 +145,6 @@ type FieldErrors = Partial<
     | 'sentryTriageDiscordChannel'
     | 'dependabotTriageDiscordChannel'
     | 'codeqlTriageDiscordChannel'
-    | 'issueFixerDiscordChannel'
     | 'securityAuditorDiscordChannel'
     | 'codeQualityAuditorDiscordChannel'
     | 'ciFailureTriageDiscordChannel'
@@ -177,7 +175,6 @@ type SlackChannelAccessWarnings = {
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
-  issueFixerSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -291,7 +288,6 @@ const EMPTY_SLACK_CHANNEL_ACCESS_WARNINGS: SlackChannelAccessWarnings = {
   sentryTriageSlackChannel: null,
   dependabotTriageSlackChannel: null,
   codeqlTriageSlackChannel: null,
-  issueFixerSlackChannel: null,
   securityAuditorSlackChannel: null,
   codeQualityAuditorSlackChannel: null,
   ciFailureTriageSlackChannel: null,
@@ -716,9 +712,6 @@ function mapSettingsToFormState(
     codeqlTriageSlackChannelId: string | null;
     codeqlTriageSlackChannelName?: string | null;
     codeqlTriageDiscordChannelId: string | null;
-    issueFixerSlackChannelId: string | null;
-    issueFixerSlackChannelName?: string | null;
-    issueFixerDiscordChannelId: string | null;
     suggesterFrequency: SuggesterFrequency;
     suggesterSlackChannelId: string | null;
     suggesterSlackChannelName?: string | null;
@@ -820,11 +813,6 @@ function mapSettingsToFormState(
       settings.codeqlTriageSlackChannelId ??
       '',
     codeqlTriageDiscordChannel: settings.codeqlTriageDiscordChannelId ?? '',
-    issueFixerSlackChannel:
-      settings.issueFixerSlackChannelName ??
-      settings.issueFixerSlackChannelId ??
-      '',
-    issueFixerDiscordChannel: settings.issueFixerDiscordChannelId ?? '',
     ...mapScheduleOnlyAutomationFormState(settings),
     suggesterFrequency: settings.suggesterFrequency,
     suggesterSlackChannel:
@@ -1796,8 +1784,6 @@ export function AutomationsSettings() {
           .dependabotTriageSlackChannel,
       codeqlTriageSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.codeqlTriageSlackChannel,
-      issueFixerSlackChannelName:
-        settingsQuery.data.slackChannelDisplayNames.issueFixerSlackChannel,
       suggesterSlackChannelName:
         settingsQuery.data.slackChannelDisplayNames.suggesterSlackChannel,
       announcerSlackChannelName:
@@ -1918,8 +1904,6 @@ export function AutomationsSettings() {
             result.slackChannelDisplayNames.dependabotTriageSlackChannel,
           codeqlTriageSlackChannelName:
             result.slackChannelDisplayNames.codeqlTriageSlackChannel,
-          issueFixerSlackChannelName:
-            result.slackChannelDisplayNames.issueFixerSlackChannel,
           suggesterSlackChannelName:
             result.slackChannelDisplayNames.suggesterSlackChannel,
           announcerSlackChannelName:
@@ -2819,21 +2803,7 @@ export function AutomationsSettings() {
                       )
                     }
                   >
-                    {renderSlackDestinationField({
-                      field: 'issueFixerSlackChannel',
-                      inputId: `${automation.id}-slack-channel`,
-                      label: 'Post follow-up work to this Slack channel',
-                      helperText:
-                        'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.',
-                      savedChannelId:
-                        settingsQuery.data?.settings.issueFixerSlackChannelId ??
-                        null,
-                      savedDiscordChannelId:
-                        settingsQuery.data?.settings
-                          .issueFixerDiscordChannelId ?? null,
-                      warningChannelId:
-                        slackChannelAccessWarnings.issueFixerSlackChannel,
-                    })}
+                    {null}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
               );
@@ -3120,17 +3090,13 @@ export function AutomationsSettings() {
                           ? 'securityAuditorSlackChannel'
                           : automation.id === 'codeQualityAuditor'
                             ? 'codeQualityAuditorSlackChannel'
-                            : automation.id === 'issueFixer'
-                              ? 'issueFixerSlackChannel'
-                              : 'ciFailureTriageSlackChannel',
+                            : 'ciFailureTriageSlackChannel',
                       inputId: `${automation.id}-slack-channel`,
                       label: 'Post follow-up work to this Slack channel',
                       helperText:
                         automation.id === 'ciFailureTriage'
                           ? 'Choose where Roomote should post CI failure triage work.'
-                          : automation.id === 'issueFixer'
-                            ? 'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.'
-                            : 'Choose where Roomote should post actionable follow-up work.',
+                          : 'Choose where Roomote should post actionable follow-up work.',
                       savedChannelId:
                         automation.id === 'securityAuditor'
                           ? (settingsQuery.data?.settings
@@ -3138,11 +3104,8 @@ export function AutomationsSettings() {
                           : automation.id === 'codeQualityAuditor'
                             ? (settingsQuery.data?.settings
                                 .codeQualityAuditorSlackChannelId ?? null)
-                            : automation.id === 'issueFixer'
-                              ? (settingsQuery.data?.settings
-                                  .issueFixerSlackChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageSlackChannelId ?? null),
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageSlackChannelId ?? null),
                       savedDiscordChannelId:
                         automation.id === 'securityAuditor'
                           ? (settingsQuery.data?.settings
@@ -3150,19 +3113,14 @@ export function AutomationsSettings() {
                           : automation.id === 'codeQualityAuditor'
                             ? (settingsQuery.data?.settings
                                 .codeQualityAuditorDiscordChannelId ?? null)
-                            : automation.id === 'issueFixer'
-                              ? (settingsQuery.data?.settings
-                                  .issueFixerDiscordChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageDiscordChannelId ?? null),
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageDiscordChannelId ?? null),
                       warningChannelId:
                         automation.id === 'securityAuditor'
                           ? slackChannelAccessWarnings.securityAuditorSlackChannel
                           : automation.id === 'codeQualityAuditor'
                             ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : automation.id === 'issueFixer'
-                              ? slackChannelAccessWarnings.issueFixerSlackChannel
-                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
                     })}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>
@@ -3409,17 +3367,13 @@ export function AutomationsSettings() {
                           ? 'securityAuditorSlackChannel'
                           : automation.id === 'codeQualityAuditor'
                             ? 'codeQualityAuditorSlackChannel'
-                            : automation.id === 'issueFixer'
-                              ? 'issueFixerSlackChannel'
-                              : 'ciFailureTriageSlackChannel',
+                            : 'ciFailureTriageSlackChannel',
                       inputId: `${automation.id}-slack-channel`,
                       label: 'Post follow-up work to this Slack channel',
                       helperText:
                         automation.id === 'ciFailureTriage'
                           ? 'Choose where Roomote should post CI failure triage work.'
-                          : automation.id === 'issueFixer'
-                            ? 'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.'
-                            : 'Choose where Roomote should post actionable follow-up work.',
+                          : 'Choose where Roomote should post actionable follow-up work.',
                       savedChannelId:
                         automation.id === 'securityAuditor'
                           ? (settingsQuery.data?.settings
@@ -3427,11 +3381,8 @@ export function AutomationsSettings() {
                           : automation.id === 'codeQualityAuditor'
                             ? (settingsQuery.data?.settings
                                 .codeQualityAuditorSlackChannelId ?? null)
-                            : automation.id === 'issueFixer'
-                              ? (settingsQuery.data?.settings
-                                  .issueFixerSlackChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageSlackChannelId ?? null),
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageSlackChannelId ?? null),
                       savedDiscordChannelId:
                         automation.id === 'securityAuditor'
                           ? (settingsQuery.data?.settings
@@ -3439,19 +3390,14 @@ export function AutomationsSettings() {
                           : automation.id === 'codeQualityAuditor'
                             ? (settingsQuery.data?.settings
                                 .codeQualityAuditorDiscordChannelId ?? null)
-                            : automation.id === 'issueFixer'
-                              ? (settingsQuery.data?.settings
-                                  .issueFixerDiscordChannelId ?? null)
-                              : (settingsQuery.data?.settings
-                                  .ciFailureTriageDiscordChannelId ?? null),
+                            : (settingsQuery.data?.settings
+                                .ciFailureTriageDiscordChannelId ?? null),
                       warningChannelId:
                         automation.id === 'securityAuditor'
                           ? slackChannelAccessWarnings.securityAuditorSlackChannel
                           : automation.id === 'codeQualityAuditor'
                             ? slackChannelAccessWarnings.codeQualityAuditorSlackChannel
-                            : automation.id === 'issueFixer'
-                              ? slackChannelAccessWarnings.issueFixerSlackChannel
-                              : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
+                            : slackChannelAccessWarnings.ciFailureTriageSlackChannel,
                     })}
                   </ScheduleOnlyAutomationContent>
                 </AutomationCard>

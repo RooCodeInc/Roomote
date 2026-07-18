@@ -76,8 +76,7 @@ const state = vi.hoisted(() => ({
         codeqlTriageSlackChannelId: null,
         codeqlTriageDiscordChannelId: null,
         issueFixerFrequency: 'off' as const,
-        issueFixerSlackChannelId: null,
-        issueFixerDiscordChannelId: null,
+
         securityAuditorFrequency: 'off' as const,
         securityAuditorSlackChannelId: null,
         securityAuditorDiscordChannelId: null,
@@ -112,7 +111,7 @@ const state = vi.hoisted(() => ({
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
         codeqlTriageSlackChannel: null,
-        issueFixerSlackChannel: null,
+
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,
@@ -127,7 +126,7 @@ const state = vi.hoisted(() => ({
         sentryTriageSlackChannel: null,
         dependabotTriageSlackChannel: null,
         codeqlTriageSlackChannel: null,
-        issueFixerSlackChannel: null,
+
         securityAuditorSlackChannel: null,
         codeQualityAuditorSlackChannel: null,
         ciFailureTriageSlackChannel: null,

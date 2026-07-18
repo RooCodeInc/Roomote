@@ -117,14 +117,6 @@ export function buildSuggestionTaskPromptText(params: {
     });
   }
 
-  if (params.suggestionType === 'issue_fixer') {
-    return buildIssueFixerSuggestionTaskPromptText({
-      ...params,
-      baseText,
-      investigationContext,
-    });
-  }
-
   return appendOptionalSections(baseText, [
     {
       heading: 'Workspace readiness',
@@ -258,47 +250,6 @@ Run the repository's normal validation before delivery. Do not ship changes that
       },
       {
         heading: 'Investigation context from the scheduled triage run',
-        body: investigationContext,
-      },
-    ],
-  );
-}
-
-function buildIssueFixerSuggestionTaskPromptText(params: {
-  title: string;
-  brief: string;
-  baseText: string;
-  investigationContext: string | null | undefined;
-  readinessMessage?: string | null;
-  targetRepositoryFullName?: string | null;
-}): string {
-  const repositoryScope = params.targetRepositoryFullName?.trim() || 'unknown';
-  const investigationContext = params.investigationContext?.trim();
-
-  return appendOptionalSections(
-    `$plan-repo-implementation
-
-<task_context>
-  <source>issue_fixer_suggestion</source>
-  <run_mode>issue_plan_follow_up</run_mode>
-  <repository_scope>${repositoryScope}</repository_scope>
-  <requested_action_title>${params.title}</requested_action_title>
-</task_context>
-
-A user chose to continue this Triage GitHub Issues follow-up:
-
-${params.baseText}
-
-Re-verify the exact open GitHub issue before planning. Confirm the issue is still open, capture the issue URL/number, title, labels, acceptance criteria, and relevant comment decisions, then post an updated concrete implementation plan on the GitHub issue.
-
-Do not implement code and do not open a PR in this task unless the user later asks for implementation.`,
-    [
-      {
-        heading: 'Workspace readiness',
-        body: params.readinessMessage,
-      },
-      {
-        heading: 'Investigation context from the triage run',
         body: investigationContext,
       },
     ],
