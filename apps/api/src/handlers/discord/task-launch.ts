@@ -272,18 +272,38 @@ export async function reserveDiscordAnchoredThread(input: {
       ? input.metadata.communicationAnchorMessageId
       : undefined;
   if (!anchorMessageId) return null;
+  const provisionalName = buildCommunicationTaskThreadName(
+    input.queuedMessage.text,
+  );
   let thread: DiscordTaskThread;
   try {
     thread = await input.provider.createThreadFromMessage({
       channelId: parentId,
       messageId: anchorMessageId,
-      name: buildCommunicationTaskThreadName(input.queuedMessage.text),
+      name: provisionalName,
     });
   } catch (error) {
     // The triggering message was deleted before the thread could start; fall
     // back to a detached task thread rather than failing the launch.
     if (isDiscordUnknownMessageError(error)) return null;
     throw error;
+  }
+  // Discord may recover an existing thread with its prior name (for example on
+  // redelivery). Align the provisional title immediately.
+  if (thread.name !== provisionalName) {
+    try {
+      await input.provider.editChannel({
+        channelId: thread.channelId,
+        name: provisionalName,
+      });
+      thread = { ...thread, name: provisionalName };
+    } catch (error) {
+      console.warn(
+        `[discord] Failed to set provisional task thread name for ${thread.channelId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
   await rememberPendingTaskThread(input.queuedMessage.ts, thread);
   return thread;
@@ -414,6 +434,8 @@ export async function launchDiscordTask(input: {
     );
   }
 
+  const taskThreadChannelId = createdThread?.channelId;
+
   const launchResult = await enqueueTask(
     {
       task,
@@ -428,13 +450,21 @@ export async function launchDiscordTask(input: {
       ...(initiator.kind === 'automation'
         ? {}
         : { launchClass: 'human' as const }),
-      ...(createdThread
+      ...(taskThreadChannelId
         ? {
             onEarlyTitleGenerated: async ({ title }: { title: string }) => {
-              await input.provider.editChannel({
-                channelId: createdThread.channelId,
-                name: buildCommunicationTaskThreadName(title),
-              });
+              try {
+                await input.provider.editChannel({
+                  channelId: taskThreadChannelId,
+                  name: buildCommunicationTaskThreadName(title),
+                });
+              } catch (error) {
+                console.warn(
+                  `[discord] Failed to rename task thread ${taskThreadChannelId} with generated title: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                );
+              }
             },
           }
         : {}),
