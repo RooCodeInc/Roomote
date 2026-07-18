@@ -18,6 +18,7 @@ import {
 } from '@roomote/communication/discord-provider';
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
+import { syncTaskCommunicationThreadTitleBestEffort } from '@roomote/sdk/server';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -483,19 +484,10 @@ export async function launchDiscordTask(input: {
         : { launchClass: 'human' as const }),
       ...(taskThreadChannelId
         ? {
-            onEarlyTitleGenerated: async ({ title }: { title: string }) => {
-              try {
-                await input.provider.editChannel({
-                  channelId: taskThreadChannelId,
-                  name: buildCommunicationTaskThreadName(title),
-                });
-              } catch (error) {
-                console.warn(
-                  `[discord] Failed to rename task thread ${taskThreadChannelId} with generated title: ${
-                    error instanceof Error ? error.message : String(error)
-                  }`,
-                );
-              }
+            onEarlyTitleGenerated: async ({ taskRun }) => {
+              await syncTaskCommunicationThreadTitleBestEffort({
+                taskId: taskRun.taskId,
+              });
             },
           }
         : {}),
