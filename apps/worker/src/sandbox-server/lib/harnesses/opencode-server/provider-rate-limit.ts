@@ -171,8 +171,14 @@ export function formatOpenCodeRateLimitRetryNoticeText(options: {
   attemptNumber: number;
   maxAttempts: number;
   delayMs: number;
+  errorSummary?: string;
 }): string {
   const seconds = Math.max(1, Math.round(options.delayMs / 1000));
+  const errorSummary = options.errorSummary?.trim();
+  const headline = errorSummary
+    ? `Provider rate limit: ${errorSummary}`
+    : 'Provider rate limit hit';
+  const attempt = `attempt ${options.attemptNumber}/${options.maxAttempts}`;
 
-  return `Provider rate limit hit; automatically retrying in about ${seconds}s (attempt ${options.attemptNumber}/${options.maxAttempts}).`;
+  return `${headline}\n\nRetrying in ${seconds}s (${attempt}).`;
 }
