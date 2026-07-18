@@ -360,6 +360,50 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('does not fall back openai-compatible to OPENAI_* credentials', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+        OPENAI_API_KEY: 'sk-openai-should-not-leak',
+        OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL: 'https://proxy.example.com/v1',
+      },
+      models: { 'gpt-4o': { name: 'gpt-4o' } },
+    });
+    expect(
+      config.provider['openai-compatible']?.options.apiKey,
+    ).toBeUndefined();
+  });
+
+  it('rebases gateway-backed openai-compatible providers with the run token', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openai-compatible/gpt-4o',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { options: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/openai-compatible/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+  });
+
   it('rebases gateway-backed compatible providers without an Ollama key', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
