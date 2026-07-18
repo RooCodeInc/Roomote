@@ -3,6 +3,7 @@ import {
   getSlackConversationUrlFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
   getSlackTeamIdFromTaskPayload,
+  resolveSourceControlProviderFromPayload,
   type PrAction,
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
@@ -250,6 +251,7 @@ export async function slackAppMention({
   username: _legacyUsername,
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
+  codeReviewsEnabled,
   visualProofAutoPostEnabled,
   prAction,
 }: {
@@ -261,6 +263,7 @@ export async function slackAppMention({
   username?: string;
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
+  codeReviewsEnabled?: boolean;
   visualProofAutoPostEnabled?: boolean;
   prAction?: PrAction;
 }): Promise<{
@@ -332,6 +335,10 @@ export async function slackAppMention({
     linkedWorkItems: taskSpec.payload.linkedWorkItems,
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
+    codeReviewsEnabled,
+    sourceControlProvider: resolveSourceControlProviderFromPayload(
+      taskSpec.payload,
+    ),
     prAction,
   });
 

@@ -70,6 +70,7 @@ export function standardTask({
   requestFormat = 'plain',
   visualProofAutoScreencastEnabled = false,
   backgroundProofCaptureEnabled = false,
+  codeReviewsEnabled = false,
   sourceControlProvider,
   prAction,
 }: {
@@ -114,6 +115,8 @@ export function standardTask({
   requestFormat?: 'plain' | 'structured';
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
+  /** When true, Code Reviewer automation is enabled for the deployment. */
+  codeReviewsEnabled?: boolean;
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
 }) {
@@ -187,8 +190,18 @@ export function standardTask({
   // regardless of the flag.
   const backgroundProofDeliveryActive =
     backgroundProofCaptureEnabled && !interactiveMode;
+  const sourceControlPlatformLabel = sourceControlProvider
+    ? getSourceControlProviderLabel(sourceControlProvider)
+    : 'GitHub/GitLab';
+  // Push-only delivery creates no PR/MR link, so do not hard-require a
+  // self-review follow-up in that closeout path. The documented skip rule
+  // still covers reopen/share cases when a link exists later.
+  const selfReviewCloseoutNote =
+    codeReviewsEnabled && deliverySkill !== 'push'
+      ? ` and that you plan to do a self-review on ${sourceControlPlatformLabel} and will follow up here with those results`
+      : '';
   const autonomousProofInstruction = backgroundProofDeliveryActive
-    ? "For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and validation the active `implement-changes` workflow must proceed directly to the delegated delivery skill without waiting for visual proof. Immediately after delegated delivery succeeds, if repository files changed the active workflow must launch the `capture-visual-proof` delegation with the task tool's `background: true` parameter, then post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling. Launching in the background does not discharge the proof obligation: when the background task's completion notification arrives (a synthetic `<task ...>` result injected into the session), the workflow must in that turn verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via `manage_source_control`, and make the proof visible in the conversation thread — when `ROOMOTE_SLACK_PROOF_AUTO_POST` is set the platform already auto-posts uploaded visual-proof artifacts to the thread, so post only a brief reference instead of re-uploading; otherwise post the artifact links with `send_chat_reply`. If the background proof reports a blocker or the notification says the task failed, update the pull request body with a short `no visual proof: <reason>` note and say so in the thread. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence."
+    ? `For repository-changing work that routes into \`implement-changes\` while Autonomous mode is active and stays on the parent delivery path, after implementation and validation the active \`implement-changes\` workflow must proceed directly to the delegated delivery skill without waiting for visual proof. Immediately after delegated delivery succeeds, if repository files changed the active workflow must launch the \`capture-visual-proof\` delegation with the task tool's \`background: true\` parameter, then post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread${selfReviewCloseoutNote}. The parent must not load or directly use browser tooling. Launching in the background does not discharge the proof obligation: when the background task's completion notification arrives (a synthetic \`<task ...>\` result injected into the session), the workflow must in that turn verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via \`manage_source_control\`, and make the proof visible in the conversation thread — when \`ROOMOTE_SLACK_PROOF_AUTO_POST\` is set the platform already auto-posts uploaded visual-proof artifacts to the thread, so post only a brief reference instead of re-uploading; otherwise post the artifact links with \`send_chat_reply\`. If the background proof reports a blocker or the notification says the task failed, update the pull request body with a short \`no visual proof: <reason>\` note and say so in the thread. If the run later transitions into \`fix-pr\`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.`
     : 'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step. The parent must not load or directly use browser tooling; carry the delegated screenshot or screencast proof result, or an explicit no-op or blocker result, into the later delivery step instead of bypassing proof or improvising another browser path. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
   const primaryImplementationExpectation = interactiveMode
     ? 'In Interactive mode, repository-changing runs keep the active `implement-changes` workflow open so that, after implementation and before any final delivery pause, any repository-file change transitions into `capture-visual-proof`, then continue through validation and self-review and pause before push or pull request actions. If the run later transitions into `fix-pr`, let that child skill own push state, delegated proof before PR metadata refresh, and PR-fixer closeout.'
@@ -290,6 +303,16 @@ export function standardTask({
     }
   </source_control_context>`
     : '';
+  const codeReviewSelfReviewCloseoutContext = codeReviewsEnabled
+    ? `
+  <code_review_self_review_closeout>
+    <rule>Code Reviewer is enabled for this deployment.</rule>
+    <rule>When you share a newly created or refreshed pull request or merge request link back to the originating chat or communications channel (Slack, Discord, Teams, Telegram, or similar closeout), briefly say that you plan to do a self-review on ${sourceControlPlatformLabel} and will follow up here with those results, so the user knows to expect another update after the self-review.</rule>
+    <rule>Name the source-control platform (${sourceControlPlatformLabel}) in that closeout note. Keep the note short and natural — for example after the PR link, add that you are planning a self-review on ${sourceControlPlatformLabel} and will share what you find.</rule>
+    <rule>Do not claim the self-review is already finished unless it actually finished in this same turn. Do not invent review findings while promising the later self-review.</rule>
+    <rule>Skip this expectation note when the closeout has no PR or merge request link, or when you are only refreshing without re-sharing the link.</rule>
+  </code_review_self_review_closeout>`
+    : '';
   const screencastAutoClassificationInstruction =
     visualProofAutoScreencastEnabled
       ? 'Screencast auto-classification is enabled for this task.'
@@ -336,6 +359,7 @@ export function standardTask({
 
   ${taskSurfaceContext}
   ${sourceControlContext}
+  ${codeReviewSelfReviewCloseoutContext}
 
   <todo_policy>
     <purpose>The shared todo discipline lives in the global system prompt. This workflow-owned policy adds the seeding, routing, delegation, and delivery-specific todo semantics that the generic prompt cannot infer on its own.</purpose>
