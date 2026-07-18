@@ -10,6 +10,10 @@ import {
   getSandboxOidcPublicKey,
   getSandboxOidcSecondaryPublicKey,
 } from './client-runtime';
+import {
+  decodeEs256PrivateKeyPem,
+  decodeEs256PublicKeyPem,
+} from './decode-es256-key';
 
 export const SANDBOX_OIDC_TOKEN_TTL_MS = 60 * 60 * 1000;
 export const SANDBOX_OIDC_REFRESH_BUFFER_MS = 20 * 60 * 1000;
@@ -25,8 +29,11 @@ type SandboxOidcPublicJwk = JsonWebKey & {
   use: 'sig';
 };
 
-function decodePem(base64Pem: string): string {
-  return Buffer.from(base64Pem, 'base64').toString('utf-8');
+function decodePublicPem(
+  value: string,
+  envKey = 'SANDBOX_OIDC_PUBLIC_KEY',
+): string {
+  return decodeEs256PublicKeyPem(value, envKey);
 }
 
 function normalizeUrlBase(url: string): string {
@@ -66,7 +73,7 @@ function getSandboxOidcVerificationKeys(): string[] {
 export function getSandboxOidcJwk(
   publicKeyPemBase64 = getSandboxOidcPublicKey(),
 ): SandboxOidcPublicJwk {
-  const publicKey = createPublicKey(decodePem(publicKeyPemBase64));
+  const publicKey = createPublicKey(decodePublicPem(publicKeyPemBase64));
   const exported = publicKey.export({ format: 'jwk' }) as JsonWebKey;
 
   return {
@@ -138,8 +145,15 @@ export function createSandboxOidcToken({
     environment_id: environmentId,
   };
 
-  return jwt.sign(payload, decodePem(getSandboxOidcPrivateKey()), {
-    algorithm: 'ES256',
-    keyid: getSandboxOidcKeyId(),
-  });
+  return jwt.sign(
+    payload,
+    decodeEs256PrivateKeyPem(
+      getSandboxOidcPrivateKey(),
+      'SANDBOX_OIDC_PRIVATE_KEY',
+    ),
+    {
+      algorithm: 'ES256',
+      keyid: getSandboxOidcKeyId(),
+    },
+  );
 }
