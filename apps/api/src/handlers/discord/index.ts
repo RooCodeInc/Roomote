@@ -60,6 +60,7 @@ import {
 import { replyToDiscordEvent } from './replies.js';
 import {
   findDiscordPendingRoutingReply,
+  hasPendingDiscordRouteCallback,
   handleDiscordRoutingReply,
 } from './routing-confirmation.js';
 import {
@@ -160,9 +161,18 @@ async function refreshDiscordUserMappingBestEffort(input: {
 }
 
 async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
-  const resolved = await resolveDiscordProvider();
   const interaction = getDiscordInteractionCreate(event);
   const message = getDiscordMessageCreate(event);
+  if (interaction?.type === 3) {
+    const routePending = await hasPendingDiscordRouteCallback(
+      interaction.data?.custom_id,
+    );
+    if (routePending === false) {
+      return { ok: true, ignored: 'expired_routing_interaction' };
+    }
+  }
+
+  const resolved = await resolveDiscordProvider();
   const channelId = interaction?.channel_id ?? message?.channel_id;
   if (!channelId) {
     return { ok: true, ignored: 'missing_channel' };
@@ -615,6 +625,9 @@ discord.post('/events', async (c) => {
       // stream entry without applying its poison-event attempt cap.
       return c.json({ ok: false, error: 'discord_api_unavailable' }, 503);
     }
+    apiLogger.error(
+      `[discord] Unhandled error while processing ${eventRef.eventType} event ${eventRef.eventId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     throw error;
   }
 });
