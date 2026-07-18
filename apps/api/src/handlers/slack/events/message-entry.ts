@@ -91,6 +91,11 @@ import {
 } from '../helpers/mention-routing.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
+import {
+  compareNumericMessageIds,
+  evaluateUnmentionedThreadReplyRouting,
+  type UnmentionedThreadHistoryMessage,
+} from '../../shared/unmentioned-thread-reply.js';
 import { showManualPickerForAutoRouteFallback } from './auto-route-fallback.js';
 
 async function runSlackAutoConfirm({
@@ -491,16 +496,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  // Replying to the bot needs no @-mention unless somebody else sent a
-  // message or was mentioned since the bot's last message in the thread.
-  // Each new bot reply reopens the no-mention window.
   const botUserId = slackInstallation.botUserId ?? undefined;
-  const eventTsValue = Number(event.ts);
-
-  // The no-mention flow is limited to senders who are already in conversation
-  // with the bot in this thread: the thread's task owner, the thread starter,
-  // or someone who @-mentioned the bot earlier in the thread. Drive-by
-  // replies from anyone else still require an explicit mention.
   const isThreadTaskOwner =
     Boolean(roomoteThreadMatch?.slackUserId) &&
     roomoteThreadMatch?.slackUserId === event.user;
@@ -510,77 +506,45 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
       !message.bot_id &&
       message.user === event.user,
   );
-  const hasMentionedBotEarlierInThread = threadMessages.some((message) => {
-    const tsValue = Number(message.ts);
 
-    return (
-      Number.isFinite(tsValue) &&
-      tsValue < eventTsValue &&
-      !message.bot_id &&
-      message.user === event.user &&
-      mentionsSlackBot(message, slackInstallation.botUserId)
-    );
+  const sharedHistory: UnmentionedThreadHistoryMessage[] = threadMessages.map(
+    (message) => {
+      const isBot = isTargetSlackBotMessage(message, botUserId);
+      const isHumanAuthored =
+        !message.bot_id && Boolean(message.user) && message.user !== botUserId;
+      return {
+        id: message.ts,
+        authorUserId: isHumanAuthored ? message.user : isBot ? botUserId : null,
+        isBot,
+        mentionsBot: mentionsSlackBot(message, slackInstallation.botUserId),
+        mentionsSomebodyElse: mentionsSlackUserOtherThanBotOrUser(
+          message,
+          slackInstallation.botUserId,
+          event.user,
+        ),
+      };
+    },
+  );
+
+  // Shared Slack/Discord/Teams core: eligibility (owner/root/prior mention)
+  // and the interjection window since the bot's last reply.
+  const decision = evaluateUnmentionedThreadReplyRouting({
+    eventMessageId: event.ts,
+    senderUserId: event.user,
+    isThreadTaskOwner,
+    isThreadRootAuthor,
+    threadMessages: sharedHistory,
+    compareMessageIds: compareNumericMessageIds,
   });
 
-  if (
-    !isThreadTaskOwner &&
-    !isThreadRootAuthor &&
-    !hasMentionedBotEarlierInThread
-  ) {
-    return { shouldRoute: false };
-  }
-
-  let latestBotMessageTsValue: number | null = null;
-  for (const message of threadMessages) {
-    if (!isTargetSlackBotMessage(message, botUserId)) {
-      continue;
-    }
-
-    const tsValue = Number(message.ts);
-    if (!Number.isFinite(tsValue) || tsValue >= eventTsValue) {
-      continue;
-    }
-
-    if (latestBotMessageTsValue === null || tsValue > latestBotMessageTsValue) {
-      latestBotMessageTsValue = tsValue;
-    }
-  }
-
-  for (const message of threadMessages) {
-    const tsValue = Number(message.ts);
-
-    // When no bot message is identifiable in the fetched history, the whole
-    // thread is treated as the window on purpose (conservative: an
-    // interjection anywhere in the thread requires an explicit mention).
-    if (
-      !Number.isFinite(tsValue) ||
-      tsValue >= eventTsValue ||
-      (latestBotMessageTsValue !== null && tsValue <= latestBotMessageTsValue)
-    ) {
-      continue;
-    }
-
-    const isHumanAuthored =
-      !message.bot_id && Boolean(message.user) && message.user !== botUserId;
-
-    if (!isHumanAuthored) {
-      continue;
-    }
-
-    const isMessageFromSomebodyElse = message.user !== event.user;
-    const mentionsSomebodyElse = mentionsSlackUserOtherThanBotOrUser(
-      message,
-      slackInstallation.botUserId,
-      event.user,
-    );
-
-    if (isMessageFromSomebodyElse || mentionsSomebodyElse) {
+  if (!decision.shouldRoute) {
+    if (decision.interjectionDetected) {
       await markExplicitMentionRequiredSlackThread({
         event,
         slack,
       });
-      return { shouldRoute: false };
     }
+    return { shouldRoute: false };
   }
 
   return { shouldRoute: true, threadMessages };

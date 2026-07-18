@@ -1,20 +1,14 @@
 import type { DiscordMessage } from '@roomote/communication/discord-event';
 import { isDiscordBotMentioned } from '@roomote/communication/discord-event';
 
+import {
+  compareBigIntMessageIds,
+  evaluateUnmentionedThreadReplyRouting,
+  type UnmentionedThreadHistoryMessage,
+} from '../shared/unmentioned-thread-reply.js';
 import type { DiscordThreadHistoryMessage } from './thread-context.js';
 
 const DISCORD_USER_MENTION_PATTERN = /<@!?(\d+)>/gu;
-
-function compareDiscordSnowflakes(left: string, right: string): number {
-  try {
-    const leftId = BigInt(left);
-    const rightId = BigInt(right);
-    if (leftId === rightId) return 0;
-    return leftId < rightId ? -1 : 1;
-  } catch {
-    return left.localeCompare(right);
-  }
-}
 
 function getMentionedDiscordUserIds(text: string): string[] {
   return Array.from(text.matchAll(DISCORD_USER_MENTION_PATTERN))
@@ -63,24 +57,33 @@ function isHumanAuthoredHistoryMessage(
   );
 }
 
-function isTargetDiscordBotHistoryMessage(
-  message: DiscordThreadHistoryMessage,
-  botUserId: string | undefined,
-): boolean {
-  return Boolean(botUserId) && message.botId === botUserId;
+function toSharedHistoryMessages(
+  threadMessages: DiscordThreadHistoryMessage[],
+  botUserId: string,
+  senderDiscordUserId: string,
+): UnmentionedThreadHistoryMessage[] {
+  return threadMessages.map((message) => {
+    const isBot = message.botId === botUserId;
+    const isHuman = isHumanAuthoredHistoryMessage(message, botUserId);
+    return {
+      id: message.id,
+      authorUserId: isHuman ? message.user : isBot ? botUserId : null,
+      isBot,
+      mentionsBot: mentionsDiscordBotInText(message.text, botUserId),
+      mentionsSomebodyElse: mentionsDiscordUserOtherThanBotOrUser(
+        message.text,
+        botUserId,
+        senderDiscordUserId,
+      ),
+    };
+  });
 }
 
 /**
  * Decides whether a Discord guild-thread reply that does not mention the bot
- * should still route to the agent, mirroring Slack
- * `shouldRouteUnmentionedSlackThreadReplyToAgent` and Teams
- * `shouldRouteUnmentionedTeamsThreadReplyToAgent`.
- *
- * Replying to the bot needs no @-mention unless somebody else sent a message
- * or was mentioned since the bot's last message in the thread. The no-mention
- * flow is limited to senders already in conversation with the bot: the
- * thread's task owner, the thread starter, or someone who mentioned the bot
- * earlier in the thread.
+ * should still route to the agent. Provider filters stay Discord-specific;
+ * eligibility and interjection window rules come from the shared Slack/Teams
+ * core in `handlers/shared/unmentioned-thread-reply`.
  */
 export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   message: DiscordMessage;
@@ -139,95 +142,32 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
     return false;
   }
 
-  const eventMessageId = message.id;
-
-  // The no-mention flow is limited to senders who are already in conversation
-  // with the bot in this thread: the thread's task owner, the thread starter,
-  // or someone who @-mentioned the bot earlier in the thread.
-  //
   // Discord threads created from a message share that message's id as the
   // thread channel id. Only trust root-author eligibility when that exact
   // starter message is present in history so a truncated 500-message window
   // cannot promote some later author to "thread starter".
-  const isThreadTaskOwner =
-    Boolean(params.ownedThreadUserId) &&
-    params.ownedThreadUserId === params.mappedUserId;
   const rootMessage = threadMessages.find(
     (historyMessage) => historyMessage.id === message.channel_id,
   );
   const isThreadRootAuthor =
     Boolean(rootMessage) &&
     isHumanAuthoredHistoryMessage(rootMessage!, botUserId) &&
-    rootMessage!.user === senderDiscordUserId &&
-    compareDiscordSnowflakes(rootMessage!.id, eventMessageId) < 0;
-  const hasMentionedBotEarlierInThread = threadMessages.some(
-    (historyMessage) => {
-      return (
-        compareDiscordSnowflakes(historyMessage.id, eventMessageId) < 0 &&
-        isHumanAuthoredHistoryMessage(historyMessage, botUserId) &&
-        historyMessage.user === senderDiscordUserId &&
-        mentionsDiscordBotInText(historyMessage.text, botUserId)
-      );
-    },
-  );
+    rootMessage!.user === senderDiscordUserId;
 
-  if (
-    !isThreadTaskOwner &&
-    !isThreadRootAuthor &&
-    !hasMentionedBotEarlierInThread
-  ) {
-    return false;
-  }
-
-  // Replying to the bot needs no @-mention unless somebody else sent a
-  // message or was mentioned since the bot's last message in the thread.
-  // Each new bot reply reopens the no-mention window.
-  let latestBotMessageId: string | null = null;
-  for (const historyMessage of threadMessages) {
-    if (!isTargetDiscordBotHistoryMessage(historyMessage, botUserId)) {
-      continue;
-    }
-    if (compareDiscordSnowflakes(historyMessage.id, eventMessageId) >= 0) {
-      continue;
-    }
-    if (
-      latestBotMessageId === null ||
-      compareDiscordSnowflakes(historyMessage.id, latestBotMessageId) > 0
-    ) {
-      latestBotMessageId = historyMessage.id;
-    }
-  }
-
-  for (const historyMessage of threadMessages) {
-    // When no bot message is identifiable in the fetched history, the whole
-    // thread is treated as the window on purpose (conservative: an
-    // interjection anywhere in the thread requires an explicit mention).
-    if (compareDiscordSnowflakes(historyMessage.id, eventMessageId) >= 0) {
-      continue;
-    }
-    if (
-      latestBotMessageId !== null &&
-      compareDiscordSnowflakes(historyMessage.id, latestBotMessageId) <= 0
-    ) {
-      continue;
-    }
-
-    if (!isHumanAuthoredHistoryMessage(historyMessage, botUserId)) {
-      continue;
-    }
-
-    const isMessageFromSomebodyElse =
-      historyMessage.user !== senderDiscordUserId;
-    const mentionsSomebodyElse = mentionsDiscordUserOtherThanBotOrUser(
-      historyMessage.text,
+  const decision = evaluateUnmentionedThreadReplyRouting({
+    eventMessageId: message.id,
+    senderUserId: senderDiscordUserId,
+    isThreadTaskOwner:
+      Boolean(params.ownedThreadUserId) &&
+      params.ownedThreadUserId === params.mappedUserId,
+    isThreadRootAuthor,
+    threadMessages: toSharedHistoryMessages(
+      threadMessages,
       botUserId,
       senderDiscordUserId,
-    );
+    ),
+    compareMessageIds: compareBigIntMessageIds,
+  });
 
-    if (isMessageFromSomebodyElse || mentionsSomebodyElse) {
-      return false;
-    }
-  }
-
-  return true;
+  return decision.shouldRoute;
 }
