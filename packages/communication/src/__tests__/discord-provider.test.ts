@@ -485,6 +485,31 @@ describe('DiscordCommunicationProvider', () => {
     expect(server.state.messages[channelId]).toHaveLength(0);
   });
 
+  it('maps Slack-style reaction names onto Discord unicode emoji', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000002';
+    const sent = await provider.postMessage({ channelId, text: 'ack me' });
+
+    for (const [name, emoji] of [
+      ['eyes', '👀'],
+      [':white_check_mark:', '✅'],
+      ['x', '❌'],
+      ['thumbsdown', '👎'],
+      ['+1', '👍'],
+    ] as const) {
+      await provider.addReaction({
+        channelId,
+        messageId: sent.messageId,
+        name,
+      });
+      expect(server.state.reactions.at(-1)).toEqual({
+        channelId,
+        messageId: sent.messageId,
+        emoji,
+      });
+    }
+  });
+
   it('defers and completes interaction responses without bot authorization', async () => {
     const { server, provider } = createHarness();
 

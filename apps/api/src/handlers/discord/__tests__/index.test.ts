@@ -364,6 +364,11 @@ describe('Discord Gateway event handler', () => {
       eventId: 'message-1',
       token: 'claim-token',
     });
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channelId: 'dm-1',
+      messageId: 'message-1',
+      name: '👀',
+    });
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         requesterDiscordUserId: 'discord-user-1',

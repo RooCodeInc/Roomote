@@ -478,6 +478,18 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     return { ok: true, resumed: true, runId: resumed.id };
   }
 
+  // Match Slack intake: ack the origin message with 👀 before launch work.
+  // Failures are non-fatal — the task launch still proceeds.
+  try {
+    await resolved.provider.addReaction({
+      channelId: channel.channelId,
+      messageId: queuedMessage.ts,
+      name: '👀',
+    });
+  } catch {
+    // Soft ack only.
+  }
+
   const started = await startNewDiscordTask({
     provider: resolved.provider,
     applicationId: resolved.applicationId,
