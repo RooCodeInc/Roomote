@@ -1,5 +1,6 @@
 import {
   TaskRunQueueEnqueueError,
+  buildUntrustedContentPolicy,
   enqueueTask,
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
@@ -105,6 +106,9 @@ function buildExecutionTaskPrompt(
       ? `Investigation context:\n${item.investigationContext}`
       : null,
     item.executionPrompt ? `Execution prompt:\n${item.executionPrompt}` : null,
+    // Work items are distilled from external sources (issues, alerts, PR
+    // discussions), so any text they quote from those sources stays data.
+    buildUntrustedContentPolicy(),
   ];
 
   return lines.filter(Boolean).join('\n');

@@ -12,9 +12,24 @@ const {
   mockDbSelect: vi.fn(),
 }));
 
+// Prompt-framing fakes use distinctive markers so tests can assert the
+// handler routes each piece of text through the right builder; the real
+// escaping/wrapping behavior is unit-tested in @roomote/cloud-agents.
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
   getTaskUrl: mockGetTaskUrl,
+  buildMentionRequestBlock: (text: string) =>
+    `<mention_request>${text}</mention_request>`,
+  buildUntrustedExternalContentBlock: ({
+    source,
+    text,
+  }: {
+    source: string;
+    text: string;
+  }) =>
+    `<untrusted_external_content source="${source}">${text}</untrusted_external_content>`,
+  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
+  escapeTaskContextText: (value: string) => value,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -166,6 +181,50 @@ describe('handleGitHubIssueComment', () => {
         body: expect.stringContaining('See task'),
       }),
     );
+  });
+
+  it('frames the mention comment and issue body as delimited untrusted content', async () => {
+    const result = await handleGitHubIssueComment(makePayload());
+
+    expect(result.status).toBe('ok');
+    const description = mockEnqueueTask.mock.calls[0]?.[0].task.payload
+      .description as string;
+    expect(description).toContain(
+      '<mention_request>@roomote please take a look</mention_request>',
+    );
+    expect(description).toContain(
+      '<untrusted_external_content source="github_issue_body">Please fix the bug</untrusted_external_content>',
+    );
+    expect(description).toContain('authored by @bob');
+    expect(description).toContain('<untrusted_content_policy/>');
+  });
+
+  it('does not duplicate the issue body when the mention is the issue body itself', async () => {
+    const issueBody = 'Take a look at this crash please, @roomote';
+    const base = makePayload();
+    // `issues.opened` shape: no comment object, the issue body is the mention.
+    const result = await handleGitHubIssueComment({
+      installation: base.installation,
+      repository: base.repository,
+      sender: base.sender,
+      issue: {
+        number: 42,
+        title: 'Ship it',
+        body: issueBody,
+        html_url: 'https://github.com/acme/api/issues/42',
+        user: { login: 'alice' },
+      },
+      mentionBody: issueBody,
+    });
+
+    expect(result.status).toBe('ok');
+    const description = mockEnqueueTask.mock.calls[0]?.[0].task.payload
+      .description as string;
+    expect(description).toContain(
+      `<mention_request>${issueBody}</mention_request>`,
+    );
+    expect(description).not.toContain('source="github_issue_body"');
+    expect(description).toContain('<untrusted_content_policy/>');
   });
 
   it('prompts the commenter to link GitHub before starting work', async () => {

@@ -1,4 +1,11 @@
-import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
+import {
+  buildMentionRequestBlock,
+  buildUntrustedContentPolicy,
+  buildUntrustedExternalContentBlock,
+  enqueueTask,
+  escapeTaskContextText,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
 import { db, environmentRepositoryMappings, eq, asc } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
 import {
@@ -48,6 +55,7 @@ function buildIssueMentionPrompt({
   issueNumber,
   issueTitle,
   issueBody,
+  issueAuthorLogin,
   issueUrl,
   commentBody,
   commenterLogin,
@@ -56,21 +64,38 @@ function buildIssueMentionPrompt({
   issueNumber: number;
   issueTitle: string;
   issueBody?: string | null;
+  issueAuthorLogin?: string | null;
   issueUrl: string;
   commentBody: string;
   commenterLogin: string;
 }): string {
-  const issueBodySection = issueBody?.trim()
-    ? `\n\nIssue body:\n${issueBody.trim()}`
-    : '';
+  const trimmedIssueBody = issueBody?.trim() ?? '';
+  const trimmedCommentBody = commentBody.trim();
+  // `issues.opened` mentions arrive with the issue body as the mention text,
+  // so skip the duplicate issue-body context block when the two match.
+  const issueBodySection =
+    trimmedIssueBody && trimmedIssueBody !== trimmedCommentBody
+      ? [
+          '',
+          `Issue body (context only, authored by ${
+            issueAuthorLogin ? `@${issueAuthorLogin}` : 'an unknown user'
+          }):`,
+          buildUntrustedExternalContentBlock({
+            source: 'github_issue_body',
+            text: trimmedIssueBody,
+          }),
+        ]
+      : [];
 
   return [
-    `${commenterLogin} mentioned Roomote on GitHub issue #${issueNumber} (${issueTitle}) in ${repositoryFullName}.`,
+    `${commenterLogin} mentioned Roomote on GitHub issue #${issueNumber} (${escapeTaskContextText(issueTitle)}) in ${repositoryFullName}.`,
     `Issue URL: ${issueUrl}`,
-    issueBodySection,
     '',
-    'Mention comment:',
-    commentBody.trim(),
+    'Mention comment (the request to act on):',
+    buildMentionRequestBlock(trimmedCommentBody),
+    ...issueBodySection,
+    '',
+    buildUntrustedContentPolicy(),
   ].join('\n');
 }
 
@@ -271,6 +296,7 @@ export async function handleGitHubIssueComment(
     issueNumber,
     issueTitle,
     issueBody,
+    issueAuthorLogin: issue.user?.login ?? null,
     issueUrl,
     commentBody,
     commenterLogin: sender.login,

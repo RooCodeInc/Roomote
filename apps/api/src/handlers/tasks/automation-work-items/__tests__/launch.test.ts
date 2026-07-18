@@ -42,6 +42,7 @@ const {
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   TaskRunQueueEnqueueError: MockTaskRunQueueEnqueueError,
+  buildUntrustedContentPolicy: () => '<untrusted_content_policy/>',
   enqueueTask: mockEnqueueTask,
 }));
 
@@ -280,6 +281,9 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining('without posting status updates back to Slack'),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining('<untrusted_content_policy/>'),
     );
     expect(enqueuePayload.visibleInTranscript).toBe(false);
     expect(enqueuePayload).not.toHaveProperty('channel');
