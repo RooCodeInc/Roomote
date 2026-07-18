@@ -71,7 +71,7 @@ describe('replyToDiscordEvent', () => {
       channelId: 'thread-1',
       messageId: 'fallback-1',
     }));
-    const buttons = [[{ text: 'Follow Task', url: 'https://example.com' }]];
+    const buttons = [[{ text: 'Follow', url: 'https://example.com' }]];
 
     await expect(
       replyToDiscordEvent({

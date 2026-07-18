@@ -626,7 +626,7 @@ async function finalizeDiscordRoutingReceipt(input: {
       ? `Started in **${input.workspaceDisplayName}**. Continue in the new task thread.`
       : `Started in **${input.workspaceDisplayName}**.`,
     buttons: input.launched.taskUrl
-      ? [[{ text: 'Follow Task', url: input.launched.taskUrl }]]
+      ? [[{ text: 'Follow', url: input.launched.taskUrl }]]
       : [],
   });
 }
@@ -1008,7 +1008,7 @@ export async function handleDiscordRoutingCallback(input: {
       ? `Started in **${result.workspace.workspaceDisplayName}**. Continue in the new task thread.`
       : `Started in **${result.workspace.workspaceDisplayName}**.`,
     ...(result.launched.taskUrl
-      ? { buttons: [[{ text: 'Follow Task', url: result.launched.taskUrl }]] }
+      ? { buttons: [[{ text: 'Follow', url: result.launched.taskUrl }]] }
       : {}),
   }).catch(() => undefined);
 }

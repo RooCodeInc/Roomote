@@ -218,7 +218,7 @@ export async function startNewDiscordTask(input: {
         ? `Started in **${workspace.workspaceDisplayName}**. Continue in the new task thread.`
         : `Started in **${workspace.workspaceDisplayName}**.`,
       ...(launched.taskUrl
-        ? { buttons: [[{ text: 'Follow Task', url: launched.taskUrl }]] }
+        ? { buttons: [[{ text: 'Follow', url: launched.taskUrl }]] }
         : {}),
     });
   }
