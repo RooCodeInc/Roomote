@@ -632,15 +632,37 @@ describe('inference gateway', () => {
     stubUpstreamFetch(
       new Response(upstreamBody, {
         status: 200,
-        headers: { 'content-type': 'text/event-stream' },
+        headers: {
+          'cache-control': 'no-cache',
+          'content-type': 'text/event-stream',
+        },
       }),
     );
 
     const response = await postMessages(createApp(createRunToken()));
 
     expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe(
+      'no-cache, no-transform',
+    );
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toBe(upstreamBody);
+  });
+
+  it('does not change cache directives on non-streaming responses', async () => {
+    stubUpstreamFetch(
+      new Response(JSON.stringify({ id: 'msg_1' }), {
+        status: 200,
+        headers: {
+          'cache-control': 'private',
+          'content-type': 'application/json',
+        },
+      }),
+    );
+
+    const response = await postMessages(createApp(createRunToken()));
+
+    expect(response.headers.get('cache-control')).toBe('private');
   });
 
   it('passes upstream error statuses through', async () => {

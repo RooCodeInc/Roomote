@@ -368,7 +368,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       helper: 'kimi-for-coding/k2p7',
       vision: 'kimi-for-coding/k3',
       codeReview: 'kimi-for-coding/k3',
-      explore: 'kimi-for-coding/kimi-for-coding-highspeed',
+      explore: 'kimi-for-coding/k2p7',
       planning: 'kimi-for-coding/k3',
     },
   },

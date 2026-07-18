@@ -577,7 +577,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteSmallModel: 'kimi-for-coding/k2p7',
       roomoteVisionModel: 'kimi-for-coding/k3',
       roomoteCodeReviewModel: 'kimi-for-coding/k3',
-      roomoteExploreModel: 'kimi-for-coding/kimi-for-coding-highspeed',
+      roomoteExploreModel: 'kimi-for-coding/k2p7',
       roomotePlanningModel: 'kimi-for-coding/k3',
       roomoteModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
