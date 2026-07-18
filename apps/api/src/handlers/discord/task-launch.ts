@@ -18,7 +18,6 @@ import {
 } from '@roomote/communication/discord-provider';
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
 import { getRedis } from '@roomote/redis';
-import { syncTaskCommunicationThreadTitleBestEffort } from '@roomote/sdk/server';
 
 import { buildCommunicationTaskThreadName } from '../tasks/communication-task-thread.js';
 import {
@@ -466,7 +465,7 @@ export async function launchDiscordTask(input: {
     );
   }
 
-  const taskThreadChannelId = createdThread?.channelId;
+  const titleThreadId = createdThread?.channelId;
 
   const launchResult = await enqueueTask(
     {
@@ -482,12 +481,25 @@ export async function launchDiscordTask(input: {
       ...(initiator.kind === 'automation'
         ? {}
         : { launchClass: 'human' as const }),
-      ...(taskThreadChannelId
+      // Mirror Telegram: apply the early LLM title directly onto the task-
+      // owned thread with the same provider credentials that reserved it.
+      // Going through runtime-credential sync can skip the rename when this
+      // request already holds a working Discord provider.
+      ...(titleThreadId
         ? {
-            onEarlyTitleGenerated: async ({ taskRun }) => {
-              await syncTaskCommunicationThreadTitleBestEffort({
-                taskId: taskRun.taskId,
-              });
+            onEarlyTitleGenerated: async ({ title }: { title: string }) => {
+              try {
+                await input.provider.editChannel({
+                  channelId: titleThreadId,
+                  name: buildCommunicationTaskThreadName(title),
+                });
+              } catch (error) {
+                console.warn(
+                  `[discord] Failed to rename task thread ${titleThreadId} with generated title: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                );
+              }
             },
           }
         : {}),

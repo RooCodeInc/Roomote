@@ -843,15 +843,18 @@ export async function persistEarlyGeneratedTaskTitle(input: {
   taskId: string;
   generatedTitle: string;
 }): Promise<boolean> {
-  const shouldPersistGeneratedTitle = !isFallbackTaskTitle(
-    input.generatedTitle,
-  );
+  // Do not advance the checkpoint on fallback titles. Checkpoint 1 is the
+  // first-message refresh gate; locking it without a real title prevents the
+  // transcript path from producing a nicer title on the opening user prompt.
+  if (isFallbackTaskTitle(input.generatedTitle)) {
+    return false;
+  }
   const [updatedTask] = await db
     .update(tasks)
     .set({
       llmTitleCheckpoint: 1,
       updatedAt: new Date(),
-      ...(shouldPersistGeneratedTitle ? { title: input.generatedTitle } : {}),
+      title: input.generatedTitle,
     })
     .where(
       and(
@@ -862,7 +865,7 @@ export async function persistEarlyGeneratedTaskTitle(input: {
     )
     .returning({ id: tasks.id });
 
-  return Boolean(updatedTask && shouldPersistGeneratedTitle);
+  return Boolean(updatedTask);
 }
 
 /**

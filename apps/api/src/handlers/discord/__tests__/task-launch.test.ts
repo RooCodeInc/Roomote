@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
-  syncTaskThreadTitle: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -49,10 +48,6 @@ vi.mock('@roomote/db/server', () => ({
   }),
 }));
 
-vi.mock('@roomote/sdk/server', () => ({
-  syncTaskCommunicationThreadTitleBestEffort: mocks.syncTaskThreadTitle,
-}));
-
 import { DiscordApiError } from '@roomote/communication/discord-provider';
 
 import { launchDiscordTask } from '../task-launch.js';
@@ -65,10 +60,9 @@ describe('launchDiscordTask', () => {
     mocks.redisDel.mockResolvedValue(1);
     mocks.enqueueTask.mockResolvedValue({ id: 41, taskId: 'task-41' });
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/tasks/task-41');
-    mocks.syncTaskThreadTitle.mockResolvedValue(undefined);
   });
 
-  it('creates a public task thread and synchronizes its canonical title', async () => {
+  it('creates a public task thread and renames it with the generated title', async () => {
     const reservedThread = {
       channelId: 'thread-41',
       parentChannelId: 'channel-1',
@@ -161,8 +155,9 @@ describe('launchDiscordTask', () => {
       taskRun: { taskId: 'task-41' },
       title: 'Repair flaky authentication tests',
     });
-    expect(mocks.syncTaskThreadTitle).toHaveBeenCalledWith({
-      taskId: 'task-41',
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'thread-41',
+      name: 'Repair flaky authentication tests',
     });
     expect(provider.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
