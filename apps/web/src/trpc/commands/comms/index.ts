@@ -733,6 +733,8 @@ export async function listDiscordChannelsCommand(
     return {
       channels: channels.map((channel) => {
         const requiresTag = discordChannelRequiresTag(channel);
+        const requiredTagUnavailable =
+          requiresTag && (channel.availableTags?.length ?? 0) === 0;
         return {
           id: channel.id,
           name: channel.name,
@@ -743,7 +745,7 @@ export async function listDiscordChannelsCommand(
           flags: channel.flags ?? 0,
           availableTags: channel.availableTags ?? [],
           requiresTag,
-          supported: !requiresTag,
+          supported: !requiredTagUnavailable,
         };
       }),
     };

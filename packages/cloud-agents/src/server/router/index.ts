@@ -48,6 +48,11 @@ export type {
   ChannelLaunchGateDecision,
 } from './channel-launch-gate';
 export {
+  selectDiscordForumTag,
+  type DiscordForumTagCandidate,
+  type DiscordForumTagSelection,
+} from './discord-forum-tag';
+export {
   detectSlackMcpSetupRequirement,
   extractUrlsFromSlackText,
   matchSlackMcpSetupService,

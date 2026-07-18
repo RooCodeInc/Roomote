@@ -66,6 +66,10 @@ export type DiscordForumTag = {
   emojiName: string | null;
 };
 
+export type DiscordForumTagSelector = (
+  tags: DiscordForumTag[],
+) => string | null | Promise<string | null>;
+
 export type DiscordChannel = {
   id: string;
   guildId?: string;
@@ -381,7 +385,7 @@ export function isDiscordUnknownMessageError(error: unknown): boolean {
 }
 export const DISCORD_CHANNEL_FLAG_REQUIRE_TAG = 1 << 4;
 export const DISCORD_REQUIRED_TAG_FORUM_ERROR =
-  'Roomote does not yet support Discord forum or media channels that require a tag. Turn off Require Tag in Discord or choose another channel.';
+  'Discord requires a tag for new posts in this forum, but no tag is available for Roomote to select.';
 
 export function discordChannelRequiresTag(
   channel: Pick<DiscordChannel, 'type' | 'flags'>,
@@ -390,6 +394,16 @@ export function discordChannelRequiresTag(
     DISCORD_CHANNEL_TYPES_FORUM.has(channel.type) &&
     ((channel.flags ?? 0) & DISCORD_CHANNEL_FLAG_REQUIRE_TAG) !== 0
   );
+}
+
+function selectAutomaticForumTag(
+  tags: DiscordForumTag[] | undefined,
+): DiscordForumTag | null {
+  if (!tags?.length) return null;
+  // Anyone who can create a post can apply an unmoderated tag. Prefer one so
+  // automatic task threads do not depend on MANAGE_THREADS; installations
+  // with that permission can still use a moderated-only forum as a fallback.
+  return tags.find((tag) => !tag.moderated) ?? tags[0]!;
 }
 
 export class DiscordCommunicationProvider implements CommunicationProviderAdapter {
@@ -614,6 +628,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     channelId: string;
     name: string;
     text: string;
+    appliedTagIds?: string[];
     buttons?: CommunicationMessageButton[][];
     images?: Array<{ url: string; altText: string }>;
     autoArchiveDuration?: 60 | 1440 | 4320 | 10080;
@@ -630,6 +645,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       {
         name: input.name.slice(0, 100),
         auto_archive_duration: input.autoArchiveDuration ?? 1440,
+        ...(input.appliedTagIds?.length
+          ? { applied_tags: input.appliedTagIds }
+          : {}),
         message: {
           content: input.text,
           allowed_mentions: { parse: [] },
@@ -676,18 +694,35 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     name: string;
     initialText: string;
     buttons?: CommunicationMessageButton[][];
+    selectForumTag?: DiscordForumTagSelector;
   }): Promise<DiscordTaskThread> {
     const channel = await this.getChannel(input.channelId);
     if (DISCORD_CHANNEL_TYPES_FORUM.has(channel.type)) {
-      if (discordChannelRequiresTag(channel)) {
+      const requiresTag = discordChannelRequiresTag(channel);
+      const fallbackTag = requiresTag
+        ? selectAutomaticForumTag(channel.availableTags)
+        : null;
+      if (requiresTag && !fallbackTag) {
         throw new Error(DISCORD_REQUIRED_TAG_FORUM_ERROR);
       }
+      const selectableTags = channel.availableTags?.some(
+        (tag) => !tag.moderated,
+      )
+        ? channel.availableTags.filter((tag) => !tag.moderated)
+        : (channel.availableTags ?? []);
+      const selectedTagId =
+        requiresTag && input.selectForumTag
+          ? await input.selectForumTag(selectableTags)
+          : null;
+      const automaticTag =
+        selectableTags.find((tag) => tag.id === selectedTagId) ?? fallbackTag;
       return this.createForumPost({
         channelId: input.channelId,
         name: input.name,
         // Forum creation accepts exactly one starter message. Keep the full
         // request in the task payload while fitting the visible starter.
         text: truncateDiscordMessage(input.initialText),
+        ...(automaticTag ? { appliedTagIds: [automaticTag.id] } : {}),
         ...(input.buttons ? { buttons: input.buttons } : {}),
       });
     }
@@ -728,6 +763,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     name: string;
     initialText: string;
     buttons?: CommunicationMessageButton[][];
+    selectForumTag?: DiscordForumTagSelector;
   }): Promise<DiscordTaskThread> {
     const thread = await this.reserveTaskThread(input);
     return this.completeTaskThread({
@@ -1178,6 +1214,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     );
     const normalizedChannel = this.normalizeChannel(channel);
     const requiresTag = discordChannelRequiresTag(normalizedChannel);
+    const requiredTagUnavailable =
+      requiresTag && !selectAutomaticForumTag(normalizedChannel.availableTags);
     return {
       guildId: input.guildId,
       channelId: input.channelId,
@@ -1187,8 +1225,8 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       missingPermissions,
       requiresTag,
       availableTags: normalizedChannel.availableTags ?? [],
-      unsupportedReason: requiresTag ? 'forum_requires_tag' : null,
-      canUseChannel: missingPermissions.length === 0 && !requiresTag,
+      unsupportedReason: requiredTagUnavailable ? 'forum_requires_tag' : null,
+      canUseChannel: missingPermissions.length === 0 && !requiredTagUnavailable,
     };
   }
 

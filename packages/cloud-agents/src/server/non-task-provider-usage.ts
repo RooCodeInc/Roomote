@@ -24,6 +24,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   fastAgentQuestionAnswering: 'fast_agent_question_answering',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
+  routerDiscordForumTag: 'router_discord_forum_tag',
   routerFollowupClassification: 'router_followup_classification',
   routerGitHubRouting: 'router_github_routing',
   routerTaskRouting: 'router_task_routing',

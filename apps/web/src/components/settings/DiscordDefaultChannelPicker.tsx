@@ -134,7 +134,7 @@ export function DiscordDefaultChannelPicker() {
               >
                 #{channel.name}
                 {channel.kind === 'forum' ? ' (forum)' : ''}
-                {channel.supported ? '' : ' — requires a tag'}
+                {channel.supported ? '' : ' — no available tag'}
               </SelectItem>
             ))}
           </SelectContent>
