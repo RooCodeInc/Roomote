@@ -607,7 +607,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
-  it('falls back to public link instructions when the account-link DM fails', async () => {
+  it('falls back to public link instructions when the account-link DM is blocked', async () => {
     mocks.findMappedUserId.mockResolvedValue(null);
     mocks.createDirectMessage.mockRejectedValue(
       new DiscordApiError({
@@ -644,6 +644,39 @@ describe('Discord Gateway event handler', () => {
         replyToMessageId: 'message-1',
       }),
     );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 for a transient account-link DM failure so the Gateway can retry', async () => {
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.createDirectMessage.mockRejectedValue(
+      new DiscordApiError({
+        method: 'POST',
+        path: '/users/@me/channels',
+        status: 503,
+        message: 'Service Unavailable',
+      }),
+    );
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      guildId: 'guild-1',
+      name: 'general',
+      type: 0,
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'channel-1',
+          guild_id: 'guild-1',
+          content: '<@bot-1> fix this',
+          mentions: [{ id: 'bot-1', username: 'Roomote', bot: true }],
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(503);
+    expect(mocks.reply).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 

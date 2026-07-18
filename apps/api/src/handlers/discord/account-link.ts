@@ -64,15 +64,16 @@ export async function promptDiscordAccountLink(input: {
     });
     dmPromptSent = true;
   } catch (error) {
-    if (isDmBlockedError(error)) {
-      apiLogger.info(
-        `[discord] Could not DM link prompt to ${input.discordUserId} (DMs blocked)`,
-      );
-    } else {
-      apiLogger.warn(
-        `[discord] Failed to DM link prompt to ${input.discordUserId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    // Only treat confirmed recipient-side blocks as a soft failure that may
+    // fall back publicly. Network/429/5xx DM failures are retryable and must
+    // bubble so the Gateway retains the event instead of posting full setup
+    // instructions in the channel on a transient outage.
+    if (!isDmBlockedError(error)) {
+      throw error;
     }
+    apiLogger.info(
+      `[discord] Could not DM link prompt to ${input.discordUserId} (DMs blocked)`,
+    );
   }
 
   await replyToDiscordEvent({
