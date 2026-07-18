@@ -260,6 +260,132 @@ describe('launchDiscordTask', () => {
     );
   });
 
+  it('renames a recovered anchored thread when Discord keeps a stale provisional name', async () => {
+    const recoveredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'please fix this for <@589419970627239947> Image: image.png',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(recoveredThread),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi
+        .fn()
+        .mockImplementation(async ({ thread }) => thread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'please fix this for @Sky Relifer\n\nImage: image.png',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+  });
+
+  it('renames a Redis-memoized pending thread when it still has a stale provisional name', async () => {
+    const stalePendingThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'please fix this for <@589419970627239947> Image: image.png',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    mocks.redisGet.mockResolvedValue(JSON.stringify(stalePendingThread));
+    const provider = {
+      createThreadFromMessage: vi.fn(),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi
+        .fn()
+        .mockImplementation(async ({ thread }) => thread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'please fix this for @Sky Relifer\n\nImage: image.png',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).not.toHaveBeenCalled();
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:pending_task_thread:message-1',
+      JSON.stringify({
+        ...stalePendingThread,
+        name: 'please fix this for @Sky Relifer',
+      }),
+      'EX',
+      86400,
+    );
+  });
+
   it('persists the acknowledgement message as the reaction target for interaction launches', async () => {
     const provider = {
       reserveTaskThread: vi.fn(),
