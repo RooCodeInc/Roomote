@@ -6,6 +6,7 @@ import {
   getDiscordInteractionCreate,
   getDiscordInteractionUser,
   getDiscordMessageCreate,
+  isDiscordBotMentioned,
   isDiscordTaskEntryEvent,
   parseDiscordGatewayEvent,
   type DiscordGatewayEvent,
@@ -36,6 +37,10 @@ import {
   findCommunicationTaskRunBySourceEvent,
 } from '../tasks/communication-task-run-lookup.js';
 import { resumeCommunicationTaskFromSnapshot } from '../tasks/communication-snapshot-resume.js';
+import {
+  attachOutOfBandContextToCommunicationMessage,
+  releaseCommunicationOutOfBandClaim,
+} from '../tasks/communication-out-of-band-context.js';
 import { processDiscordAttachments } from './attachments.js';
 import {
   DISCORD_GATEWAY_SECRET_HEADER,
@@ -330,6 +335,23 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (!senderUserId) {
+    // Mirror Slack: unlinked people chatting in a task thread without
+    // @mentioning Roomote are ignored. Only explicit task entry (DM,
+    // @mention, or slash command) should nudge them to link.
+    const addressedBot =
+      Boolean(command) ||
+      channel.isDirectMessage ||
+      (message != null && isDiscordBotMentioned(message, resolved.botUserId));
+    if (!addressedBot) {
+      apiLogger.debug(
+        `[discord] Ignoring unaddressed task-thread message from unlinked Discord sender ${sender.id}`,
+      );
+      return {
+        ok: true,
+        ignored: 'discord_sender_not_linked_unmentioned',
+      };
+    }
+
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
@@ -438,17 +460,33 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       runId: activeRun.id,
       senderUserId,
     });
-    await queueCommunicationMessageOnce('discord', activeRun.id, queuedMessage);
-    await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
-    try {
-      await resolved.provider.addReaction({
-        channelId: channel.channelId,
-        messageId: queuedMessage.ts,
-        name: '👀',
+    // Mirror Slack: out-of-band PR review/status notifications are posted
+    // outside the harness session and must be re-surfaced on the next user
+    // turn so the agent knows what the user is replying to.
+    const { message: messageWithOutOfBand, claim: outOfBandClaim } =
+      await attachOutOfBandContextToCommunicationMessage({
+        taskId: activeRun.taskId,
+        provider: 'discord',
+        message: queuedMessage,
       });
-    } catch {
-      // The follow-up is already durable; a reaction is only an acknowledgement.
+    try {
+      const queued = await queueCommunicationMessageOnce(
+        'discord',
+        activeRun.id,
+        messageWithOutOfBand,
+      );
+      // Dedupe hit: nothing new will be delivered, so put claimed OOB
+      // messages back for a later real follow-up.
+      if (!queued) {
+        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      }
+    } catch (error) {
+      await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+      throw error;
     }
+    await setLatestInboundMessageId('discord', activeRun.id, queuedMessage.ts);
+    // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
+    // already durable once queued; agents may still react when turn policy allows.
     return { ok: true, queued: true, runId: activeRun.id };
   }
 
@@ -476,6 +514,21 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
         : 'Reconnected this Discord thread to the task.',
     });
     return { ok: true, resumed: true, runId: resumed.id };
+  }
+
+  // Match Slack intake: ack the origin message with 👀 before launch work.
+  // Only real MESSAGE_CREATE messages can receive Discord reactions; slash-
+  // command interaction ids are not message targets and would 404.
+  if (message?.id) {
+    try {
+      await resolved.provider.addReaction({
+        channelId: channel.channelId,
+        messageId: message.id,
+        name: '👀',
+      });
+    } catch {
+      // Soft ack only.
+    }
   }
 
   const started = await startNewDiscordTask({

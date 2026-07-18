@@ -126,6 +126,9 @@ const discordPayload = {
   communicationProvider: 'discord',
   communicationChannelId: 'channel-1',
   communicationThreadId: 'discord-thread-1',
+  discordReactionChannelId: 'channel-1',
+  discordReactionMessageId: 'origin-msg-1',
+  discordTaskThread: true,
 };
 
 const teamsAdapter = {
@@ -138,6 +141,8 @@ const telegramAdapter = {
 
 const discordAdapter = {
   postMessage: mockPostMessage,
+  addReaction: mockAddReaction,
+  removeReaction: mockRemoveReaction,
 };
 
 const baseParams = {
@@ -287,6 +292,16 @@ describe('notifyPullRequestTerminalStatus', () => {
       threadId: 'discord-thread-1',
       text: '[Test PR](https://github.com/owner/repo/pull/42) was **merged** by merger',
       textFormat: 'markdown',
+    });
+    expect(mockAddReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-msg-1',
+      name: 'white_check_mark',
+    });
+    expect(mockRemoveReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-msg-1',
+      name: 'eyes',
     });
   });
 

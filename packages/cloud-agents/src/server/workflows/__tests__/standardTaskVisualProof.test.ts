@@ -110,7 +110,7 @@ describe('Standard Task visual-proof delegation', () => {
       'verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via `manage_source_control`',
     );
     expect(harnessInstructions).toContain(
-      'when `ROOMOTE_SLACK_PROOF_AUTO_POST` is set the platform already auto-posts uploaded visual-proof artifacts to the thread, so post only a brief reference instead of re-uploading; otherwise post the artifact links with `send_chat_reply`',
+      'when `ROOMOTE_SLACK_PROOF_AUTO_POST` is set the platform already auto-posts uploaded visual-proof artifacts to the thread, so post only a brief reference instead of re-uploading; otherwise share screenshots with `send_chat_reply` via `imageArtifactIds`, and use artifact `viewUrl`/`rawUrl` links in the reply text for non-image proof',
     );
     expect(harnessInstructions).toContain(
       'update the pull request body with a short `no visual proof: <reason>` note and say so in the thread',

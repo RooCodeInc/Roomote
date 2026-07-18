@@ -41,4 +41,26 @@ describe('wrapCommunicationMessage', () => {
       '<communication_message provider="teams" ts="activity-2" author="&lt;at&gt;Bot&lt;/at&gt; &quot;Friend&quot;">\nwatch out for &lt;tags&gt; &amp; "quotes"\n</communication_message>',
     );
   });
+
+  it('prefixes Discord turns with an emoji reaction policy when present', () => {
+    expect(
+      wrapCommunicationMessage('discord', {
+        ts: 'message-1',
+        user: 'Ada',
+        channel: 'channel-1',
+        text: 'please continue',
+        turnPolicy: { reactionsAllowed: true },
+      }),
+    ).toBe(
+      [
+        '<discord_turn_policy reactions_allowed="true" prefer_emoji_ack="true">',
+        'Emoji reactions are allowed on the current discord message. Prefer `send_chat_reaction_emoji` instead of a short text acknowledgement when a lightweight acknowledgement or emoji-only answer is enough.',
+        '</discord_turn_policy>',
+        '',
+        '<communication_message provider="discord" ts="message-1" author="Ada" channel="channel-1">',
+        'please continue',
+        '</communication_message>',
+      ].join('\n'),
+    );
+  });
 });

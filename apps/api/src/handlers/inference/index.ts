@@ -122,6 +122,33 @@ function buildUpstreamRequestHeaders(
   return headers;
 }
 
+function buildInferenceResponseHeaders(upstreamHeaders: Headers): Headers {
+  const headers = buildProxyResponseHeaders(upstreamHeaders);
+
+  if (
+    !headers.get('content-type')?.toLowerCase().includes('text/event-stream')
+  ) {
+    return headers;
+  }
+
+  const cacheControl = headers.get('cache-control');
+  const directives =
+    cacheControl?.split(',').map((directive) => directive.trim()) ?? [];
+
+  // Keep intermediaries from compressing provider SSE. OpenCode's Bun runtime
+  // can otherwise complete the request without exposing any stream events.
+  if (
+    !directives.some((directive) => directive.toLowerCase() === 'no-transform')
+  ) {
+    headers.set(
+      'cache-control',
+      [...directives, 'no-transform'].filter(Boolean).join(', '),
+    );
+  }
+
+  return headers;
+}
+
 /**
  * The upstream path is everything after the provider segment. The router
  * only matches `/:provider/*`, so the marker is always present.
@@ -285,7 +312,7 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
       }),
       {
         status: upstreamResponse.status,
-        headers: buildProxyResponseHeaders(upstreamResponse.headers),
+        headers: buildInferenceResponseHeaders(upstreamResponse.headers),
       },
     );
   } catch (error) {
