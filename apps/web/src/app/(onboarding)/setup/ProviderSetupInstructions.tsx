@@ -167,10 +167,9 @@ export function ProviderSetupInstructions({
         </InstructionText>
         <InstructionText heading="Installation permissions">
           Roomote needs View Channels, Send Messages, Read Message History,
-          Embed Links, Attach Files, Create Public Threads, and Send Messages in
-          Threads. Add Reactions enables acknowledgements. After you save the
-          bot token, the Add to Discord button appears and requests these
-          permissions automatically.
+          Embed Links, Attach Files, Create Public Threads, Send Messages in
+          Threads, and Add Reactions. After you save the bot token, the Add to
+          Discord button appears and requests these permissions automatically.
         </InstructionText>
         <InstructionText heading="Bot token">
           Paste the token below. Roomote derives the bot and application names

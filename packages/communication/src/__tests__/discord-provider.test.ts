@@ -223,6 +223,16 @@ describe('DiscordCommunicationProvider', () => {
     ).resolves.toMatchObject({
       canUseChannel: true,
       missingPermissions: [],
+      requiredPermissions: expect.arrayContaining([
+        'view_channel',
+        'send_messages',
+        'read_message_history',
+        'embed_links',
+        'attach_files',
+        'add_reactions',
+        'create_public_threads',
+        'send_messages_in_threads',
+      ]),
       permissions: {
         view_channel: true,
         send_messages: true,
@@ -233,6 +243,37 @@ describe('DiscordCommunicationProvider', () => {
         attach_files: true,
         add_reactions: true,
       },
+    });
+  });
+
+  it('treats a denied add_reactions overwrite as missing required channel permission', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const addReactions = String(1n << 6n);
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'no-reactions',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: 'role-roomote',
+          type: 0,
+          allow: '0',
+          deny: addReactions,
+        },
+      ],
+    });
+
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: false,
+      missingPermissions: ['add_reactions'],
+      permissions: { add_reactions: false },
     });
   });
 
