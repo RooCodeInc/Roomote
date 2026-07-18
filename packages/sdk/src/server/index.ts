@@ -139,6 +139,8 @@ export { createTeamsCommunicationProviderFromRuntimeCredentials } from './lib/te
 
 export { createTelegramCommunicationProviderFromRuntimeCredentials } from './lib/telegram-communication';
 
+export { syncTaskCommunicationThreadTitleBestEffort } from './lib/task-thread-title-sync';
+
 export { getCommunicationProviderAdapter } from './lib/communication-providers';
 
 export {

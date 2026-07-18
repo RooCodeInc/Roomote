@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { getOpenCodeProviderErrorRecovery } from './provider-error-recovery';
+import {
+  formatOpenCodeProviderErrorRetryNoticeText,
+  getOpenCodeProviderErrorRecovery,
+  isOpenCodeTerminalProviderError,
+  summarizeOpenCodeProviderError,
+} from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
   it('detects an UnknownError-wrapped cyber policy refusal', () => {
@@ -58,5 +63,79 @@ describe('getOpenCodeProviderErrorRecovery', () => {
         },
       }),
     ).toBeNull();
+  });
+
+  it.each([
+    'Your account org-redacted is suspended due to insufficient balance, please recharge your account or check your plan and billing details',
+    JSON.stringify({
+      error: {
+        code: 'insufficient_balance',
+        message: 'There is not enough credit to run this request.',
+      },
+    }),
+  ])(
+    'classifies provider billing and suspension errors as terminal',
+    (error) => {
+      expect(isOpenCodeTerminalProviderError(error)).toBe(true);
+      expect(getOpenCodeProviderErrorRecovery(error)).toBeNull();
+    },
+  );
+
+  it('classifies payment-required responses as terminal', () => {
+    expect(
+      isOpenCodeTerminalProviderError({
+        name: 'APIError',
+        data: {
+          message: 'Payment required',
+          statusCode: 402,
+          isRetryable: true,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it('classifies message-only payment-required retry status as terminal', () => {
+    // handleSessionStatus only has the retry status message, not statusCode/code.
+    expect(
+      isOpenCodeTerminalProviderError({ message: 'Payment required' }),
+    ).toBe(true);
+    expect(
+      getOpenCodeProviderErrorRecovery({ message: 'Payment required' }),
+    ).toBeNull();
+  });
+});
+
+describe('summarizeOpenCodeProviderError', () => {
+  it('prefers nested provider messages over raw JSON wrappers', () => {
+    expect(
+      summarizeOpenCodeProviderError({
+        name: 'UnknownError',
+        data: {
+          message: JSON.stringify({
+            type: 'error',
+            error: {
+              code: 'cyber_policy',
+              message:
+                'This content was flagged for possible cybersecurity risk.',
+            },
+          }),
+        },
+      }),
+    ).toBe('This content was flagged for possible cybersecurity risk.');
+  });
+});
+
+describe('formatOpenCodeProviderErrorRetryNoticeText', () => {
+  it('includes the error summary and an immediate retry status', () => {
+    expect(
+      formatOpenCodeProviderErrorRetryNoticeText({
+        kind: 'provider_error',
+        attemptNumber: 1,
+        maxAttempts: 1,
+        errorSummary: 'Upstream connection closed unexpectedly.',
+      }),
+    ).toBe(
+      'Provider error: Upstream connection closed unexpectedly.\n\nRetrying now (attempt 1/1).',
+    );
   });
 });

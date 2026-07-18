@@ -6,6 +6,7 @@ import {
   ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
   TaskEventName,
+  asRecord,
   type AcpMessage,
   type AcpPersistedEnvelope,
   type AcpTurnCompletedEvent,
@@ -1913,6 +1914,156 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('terminates an OpenCode retry loop for provider billing suspension', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Queued follow-up.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await client.emit({
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: {
+            type: 'retry',
+            attempt: 1,
+            message:
+              'Your account org-redacted is suspended due to insufficient balance, please recharge your account.',
+            next: Date.now() + 2_000,
+          },
+        },
+      });
+
+      expect(client.abort).toHaveBeenCalledWith({
+        sessionId: 'ses_1',
+        signal: expect.any(AbortSignal),
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toEqual([]);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'suspended due to insufficient balance',
+            ),
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('terminates an OpenCode retry loop for message-only payment required status', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Start work.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.SendMessage,
+          data: {
+            text: 'Queued follow-up.',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      // Retry status only carries message; no statusCode/code fields.
+      await client.emit({
+        type: 'session.status',
+        properties: {
+          sessionID: 'ses_1',
+          status: {
+            type: 'retry',
+            attempt: 1,
+            message: 'Payment required',
+            next: Date.now() + 2_000,
+          },
+        },
+      });
+
+      expect(client.abort).toHaveBeenCalledWith({
+        sessionId: 'ses_1',
+        signal: expect.any(AbortSignal),
+      });
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(harness.getQueuedMessages()).toEqual([]);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes('Payment required'),
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('retries a cyber policy refusal with safer framing without aborting the task', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
@@ -2024,8 +2175,11 @@ describe('OpenCodeServerHarness', () => {
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
             String(envelope.payload.text ?? '').includes(
-              'Provider safety refusal; automatically retrying the turn',
-            ),
+              'Provider safety refusal',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'policy_refusal',
         ),
       ).toBe(true);
       expect(
@@ -2039,8 +2193,12 @@ describe('OpenCodeServerHarness', () => {
   it('retries an unknown provider error once before aborting', async () => {
     const { client, harness } = createHarness();
     const taskEvents: TaskEvent[] = [];
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
     harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -2070,6 +2228,18 @@ describe('OpenCodeServerHarness', () => {
       });
 
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      expect(
+        persistedEnvelopes.some(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
+            String(envelope.payload.text ?? '').includes(
+              'Upstream connection closed unexpectedly.',
+            ) &&
+            String(envelope.payload.text ?? '').includes('Retrying now') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'provider_error',
+        ),
+      ).toBe(true);
 
       await client.emit({
         type: 'session.idle',
@@ -2168,9 +2338,9 @@ describe('OpenCodeServerHarness', () => {
         persistedEnvelopes.some(
           (envelope) =>
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantMessage &&
-            String(envelope.payload.text ?? '').includes(
-              'automatically retrying',
-            ),
+            String(envelope.payload.text ?? '').includes('Retrying in') &&
+            asRecord(envelope.payload.providerRetryNotice)?.kind ===
+              'rate_limit',
         ),
       ).toBe(true);
       // Invisible continue prompt stays out of the user-visible queue, while

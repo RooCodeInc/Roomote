@@ -3,6 +3,7 @@ import Image from 'next/image';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
   type AcpRequestUserInputPayload,
+  getProviderRetryNoticeFromMessageData,
   parseLinkedReviewResults,
   stripLlmCitationArtifacts,
 } from '@roomote/types';
@@ -36,6 +37,7 @@ import { getTaskToolByInvocation } from '../../task-tools';
 import { useInternalTranscriptRowsVisible } from '../../useInternalTranscriptRowsVisible';
 import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
+import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 
 const UserMessageToggle = ({
   isExpanded,
@@ -162,6 +164,12 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
   const linkedReviewResult = isUser
     ? parseLinkedReviewResults(baseContent)
     : null;
+  const providerRetryNotice =
+    !isUser && msg.kind === 'text'
+      ? getProviderRetryNoticeFromMessageData(
+          msg.data as Record<string, unknown>,
+        )
+      : null;
   const requestUserInputResponse =
     isUser &&
     msg.updateType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInputResponse
@@ -180,7 +188,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     : baseContent;
   const shouldShowContentActions = isUser
     ? msg.partial !== true && !taskTool && !linkedReviewResult
-    : msg.partial !== true && msg.isTurnCompletion === true;
+    : msg.partial !== true &&
+      msg.isTurnCompletion === true &&
+      !providerRetryNotice;
   const messageContentClassName = cn(
     'min-w-0 flex-1',
     isUser ? 'pt-8' : 'py-0',
@@ -269,6 +279,11 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
                 {linkedReviewResult.summary}
               </p>
             </div>
+          ) : providerRetryNotice ? (
+            <ProviderRetryNoticeMessage
+              data={msg.data as Record<string, unknown>}
+              text={content}
+            />
           ) : isUser ? (
             <CollapsibleContent renderToggle={UserMessageToggle}>
               <MessagePlainText

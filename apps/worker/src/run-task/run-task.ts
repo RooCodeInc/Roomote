@@ -4,6 +4,7 @@ import {
   buildInferenceGatewayUrl,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
+  INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   isTaskModelIdDisabled,
@@ -685,8 +686,14 @@ export const runTask = async ({
     // record, which the gateway holds and injects server-side.
     const inferenceGatewayChatGpt =
       unsanitizedEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME] === '1';
+    const inferenceGatewayGitHubCopilot =
+      unsanitizedEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] === '1';
 
-    if (inferenceGatewayServedKeys.length > 0 || inferenceGatewayChatGpt) {
+    if (
+      inferenceGatewayServedKeys.length > 0 ||
+      inferenceGatewayChatGpt ||
+      inferenceGatewayGitHubCopilot
+    ) {
       for (const servedKey of inferenceGatewayServedKeys) {
         delete runtimeEnv[servedKey];
       }
@@ -709,10 +716,17 @@ export const runTask = async ({
       } else {
         delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
       }
+      if (inferenceGatewayGitHubCopilot) {
+        runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME] = '1';
+        delete runtimeEnv[OPENCODE_AUTH_CONTENT_ENV_VAR_NAME];
+      } else {
+        delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
+      }
     } else {
       delete runtimeEnv[INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME];
       delete runtimeEnv[INFERENCE_GATEWAY_URL_ENV_VAR_NAME];
       delete runtimeEnv[INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME];
+      delete runtimeEnv[INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME];
     }
 
     const workerHomeDir = runtimeEnv.HOME ?? sanitizedEnv.HOME ?? '';

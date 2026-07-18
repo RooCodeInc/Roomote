@@ -262,6 +262,8 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     messageId?: string;
     text: string;
     hadDelta?: boolean;
+    payload?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
   }): void {
     const envelope = this.withLogicalEventId(
       {
@@ -273,11 +275,13 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
         metadata: {
           sessionId: options.sessionId,
           ...(options.messageId ? { turnId: options.messageId } : {}),
+          ...(options.metadata ?? {}),
         },
         payload: {
           sessionId: options.sessionId,
           ...(options.messageId ? { turnId: options.messageId } : {}),
           text: options.text,
+          ...(options.payload ?? {}),
         },
       } satisfies PersistableEnvelope,
       { sessionId: options.sessionId, messageId: options.messageId },

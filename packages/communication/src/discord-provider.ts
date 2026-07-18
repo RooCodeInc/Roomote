@@ -123,6 +123,8 @@ type DiscordApiMessage = {
     filename: string;
     content_type?: string;
     size: number;
+    url?: string;
+    proxy_url?: string;
   }>;
   thread?: { id: string };
 };
@@ -308,12 +310,16 @@ function buildDiscordComponents(
 function toCommunicationMessage(
   message: DiscordApiMessage,
 ): CommunicationMessage {
-  const files = (message.attachments ?? []).map((attachment) => ({
-    id: attachment.id,
-    name: attachment.filename,
-    mimeType: attachment.content_type ?? 'application/octet-stream',
-    size: attachment.size,
-  }));
+  const files = (message.attachments ?? []).map((attachment) => {
+    const url = attachment.url?.trim() || attachment.proxy_url?.trim();
+    return {
+      id: attachment.id,
+      name: attachment.filename,
+      mimeType: attachment.content_type ?? 'application/octet-stream',
+      size: attachment.size,
+      ...(url ? { url } : {}),
+    };
+  });
   return {
     provider: 'discord',
     id: message.id,

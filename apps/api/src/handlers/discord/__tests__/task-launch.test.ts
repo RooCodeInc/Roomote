@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   dbUpdate: vi.fn(),
   dbSet: vi.fn(),
   dbWhere: vi.fn(),
+  syncTaskThreadTitle: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -48,6 +49,10 @@ vi.mock('@roomote/db/server', () => ({
   }),
 }));
 
+vi.mock('@roomote/sdk/server', () => ({
+  syncTaskCommunicationThreadTitleBestEffort: mocks.syncTaskThreadTitle,
+}));
+
 import { DiscordApiError } from '@roomote/communication/discord-provider';
 
 import { launchDiscordTask } from '../task-launch.js';
@@ -60,9 +65,10 @@ describe('launchDiscordTask', () => {
     mocks.redisDel.mockResolvedValue(1);
     mocks.enqueueTask.mockResolvedValue({ id: 41, taskId: 'task-41' });
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/tasks/task-41');
+    mocks.syncTaskThreadTitle.mockResolvedValue(undefined);
   });
 
-  it('creates a public task thread and renames it with the generated title', async () => {
+  it('creates a public task thread and synchronizes its canonical title', async () => {
     const reservedThread = {
       channelId: 'thread-41',
       parentChannelId: 'channel-1',
@@ -144,12 +150,19 @@ describe('launchDiscordTask', () => {
         onEarlyTitleGenerated: expect.any(Function),
       }),
     );
-    const onTitle = mocks.enqueueTask.mock.calls[0]?.[1]
-      .onEarlyTitleGenerated as (input: { title: string }) => Promise<void>;
-    await onTitle({ title: 'Repair flaky authentication tests' });
-    expect(provider.editChannel).toHaveBeenCalledWith({
-      channelId: 'thread-41',
-      name: 'Repair flaky authentication tests',
+    const enqueueOptions = mocks.enqueueTask.mock.calls[0]?.[1] as {
+      onEarlyTitleGenerated: (input: {
+        taskRun: { taskId: string };
+        title: string;
+      }) => Promise<void>;
+    };
+    const onTitle = enqueueOptions.onEarlyTitleGenerated;
+    await onTitle({
+      taskRun: { taskId: 'task-41' },
+      title: 'Repair flaky authentication tests',
+    });
+    expect(mocks.syncTaskThreadTitle).toHaveBeenCalledWith({
+      taskId: 'task-41',
     });
     expect(provider.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -257,6 +270,132 @@ describe('launchDiscordTask', () => {
         },
       }),
       expect.anything(),
+    );
+  });
+
+  it('renames a recovered anchored thread when Discord keeps a stale provisional name', async () => {
+    const recoveredThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'please fix this for <@589419970627239947> Image: image.png',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    const provider = {
+      createThreadFromMessage: vi.fn().mockResolvedValue(recoveredThread),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi
+        .fn()
+        .mockImplementation(async ({ thread }) => thread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'please fix this for @Sky Relifer\n\nImage: image.png',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+  });
+
+  it('renames a Redis-memoized pending thread when it still has a stale provisional name', async () => {
+    const stalePendingThread = {
+      channelId: 'message-1',
+      parentChannelId: 'channel-1',
+      name: 'please fix this for <@589419970627239947> Image: image.png',
+      kind: 'thread' as const,
+      messageId: 'message-1',
+    };
+    mocks.redisGet.mockResolvedValue(JSON.stringify(stalePendingThread));
+    const provider = {
+      createThreadFromMessage: vi.fn(),
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi
+        .fn()
+        .mockImplementation(async ({ thread }) => thread),
+      postMessage: vi.fn().mockResolvedValue({ messageId: 'ack-1' }),
+      editChannel: vi.fn().mockResolvedValue({}),
+    };
+
+    await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'please fix this for @Sky Relifer\n\nImage: image.png',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationGuildId: 'guild-1',
+        communicationChannelId: 'channel-1',
+        communicationMessageId: 'message-1',
+        communicationAnchorMessageId: 'message-1',
+      },
+      channel: {
+        channelId: 'channel-1',
+        channelName: 'general',
+        channelType: 0,
+        guildId: 'guild-1',
+        isDirectMessage: false,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+    });
+
+    expect(provider.createThreadFromMessage).not.toHaveBeenCalled();
+    expect(provider.editChannel).toHaveBeenCalledWith({
+      channelId: 'message-1',
+      name: 'please fix this for @Sky Relifer',
+    });
+    expect(mocks.redisSet).toHaveBeenCalledWith(
+      'discord:pending_task_thread:message-1',
+      JSON.stringify({
+        ...stalePendingThread,
+        name: 'please fix this for @Sky Relifer',
+      }),
+      'EX',
+      86400,
     );
   });
 

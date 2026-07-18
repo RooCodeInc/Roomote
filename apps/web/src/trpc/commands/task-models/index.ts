@@ -6,6 +6,7 @@ import {
   eq,
   inArray,
   isChatGptSubscriptionConnected,
+  isGitHubCopilotSubscriptionConnected,
   isNull,
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
@@ -339,11 +340,13 @@ export async function getTaskModelSettingsCommand(
     persistedRuntimeModelConfig,
     persistedEnvVarNames,
     chatgptConnected,
+    githubCopilotConnected,
   ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
     isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
   ]);
   // The Available Models list always shows the full recommended set for
   // every connected provider; entries that are not persisted yet render
@@ -352,6 +355,7 @@ export async function getTaskModelSettingsCommand(
     runtimeEnv: process.env,
     persistedEnvVarNames,
     chatgptConnected,
+    githubCopilotConnected,
   });
   // A provider must be connected before its models can be selected. This also
   // removes stale rows created by the old implicit OpenRouter default catalog.
@@ -431,6 +435,7 @@ export async function getTaskModelProviderSetupCommand(
     persistedAdditionalEnvValues,
     setupNewState,
     chatgptConnected,
+    githubCopilotConnected,
   ] = await Promise.all([
     getDeploymentRuntimeModelConfig(),
     getPersistedEnvironmentVariableNames(),
@@ -446,6 +451,7 @@ export async function getTaskModelProviderSetupCommand(
     ),
     getDeploymentSetupNewState(),
     isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
   ]);
 
   const providerSetup = buildSetupModelStatus({
@@ -455,6 +461,7 @@ export async function getTaskModelProviderSetupCommand(
     persistedEnvVarValues: persistedAdditionalEnvValues,
     selectedProvider: setupNewState.modelProvider,
     chatgptConnected,
+    githubCopilotConnected,
   });
 
   return { providerSetup };
@@ -849,15 +856,22 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
-  const [settings, chatgptConnected, persistedEnvVarNames] = await Promise.all([
+  const [
+    settings,
+    chatgptConnected,
+    githubCopilotConnected,
+    persistedEnvVarNames,
+  ] = await Promise.all([
     getDeploymentTaskModelSettings(),
     isChatGptSubscriptionConnected(),
+    isGitHubCopilotSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
   ]);
   const providerSetup = buildSetupModelStatus({
     runtimeEnv: process.env,
     persistedEnvVarNames,
     chatgptConnected,
+    githubCopilotConnected,
   });
   const openaiConnected = Boolean(
     providerSetup.providers.find(

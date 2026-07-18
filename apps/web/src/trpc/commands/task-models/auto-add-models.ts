@@ -27,11 +27,13 @@ export function collectConnectedTaskModelProviderIds(options: {
   runtimeEnv: Partial<Record<string, string | undefined>>;
   persistedEnvVarNames: Iterable<string>;
   chatgptConnected: boolean;
+  githubCopilotConnected?: boolean;
 }): Set<string> {
   const status = buildSetupModelStatus({
     runtimeEnv: options.runtimeEnv,
     persistedEnvVarNames: options.persistedEnvVarNames,
     chatgptConnected: options.chatgptConnected,
+    githubCopilotConnected: options.githubCopilotConnected,
   });
 
   return new Set([

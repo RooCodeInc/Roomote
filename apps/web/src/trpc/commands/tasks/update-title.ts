@@ -1,4 +1,5 @@
 import { db, tasks, eq, and, isNull } from '@roomote/db/server';
+import { syncTaskCommunicationThreadTitleBestEffort } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -34,6 +35,10 @@ export async function updateTaskTitleCommand(
       'Task not found or you do not have permission to rename it',
     );
   }
+
+  await syncTaskCommunicationThreadTitleBestEffort({
+    taskId: updatedTask.id,
+  });
 
   return { success: true as const, task: updatedTask };
 }

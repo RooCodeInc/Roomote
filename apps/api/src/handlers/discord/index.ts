@@ -501,18 +501,6 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       guildId: metadata.communicationGuildId,
       preservePayloadFlags: ['discordTaskThread'],
     });
-    const taskUrl = getTaskUrl({
-      taskId: resumed.taskId,
-      utm: { source: 'discord', campaign: 'discord.snapshot_resume' },
-    });
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      text: taskUrl
-        ? `Reconnected this Discord thread to the task: ${taskUrl}`
-        : 'Reconnected this Discord thread to the task.',
-    });
     return { ok: true, resumed: true, runId: resumed.id };
   }
 
@@ -540,10 +528,10 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
     metadata,
     channel,
     ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
-    // A mention inside an unrelated server thread cannot own that shared
-    // conversation. Create a sibling task thread/forum post just as `/new`
-    // does, while known task threads were handled by the active/resume paths.
-    forceNewThread: forceNewTask || channel.isThread,
+    // Match Slack: a mention inside an existing thread continues in that same
+    // thread (with thread history as context). Only `/new` forces a sibling
+    // task thread; known task threads were already handled above.
+    forceNewThread: forceNewTask,
   });
   return { ok: true, ...started };
 }

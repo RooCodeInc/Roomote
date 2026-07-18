@@ -55,4 +55,11 @@ export {
 
 export { configureAuthClientEnv } from './client-runtime';
 
+export {
+  assertEs256KeyPem,
+  decodeEs256KeyPem,
+  decodeEs256PrivateKeyPem,
+  decodeEs256PublicKeyPem,
+} from './decode-es256-key';
+
 export { validateToken } from './validate-token';

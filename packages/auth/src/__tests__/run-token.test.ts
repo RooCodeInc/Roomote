@@ -1,3 +1,11 @@
+import { generateKeyPairSync } from 'node:crypto';
+
+const testKeyPair = generateKeyPairSync('ec', {
+  namedCurve: 'P-256',
+  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+  publicKeyEncoding: { type: 'spki', format: 'pem' },
+});
+
 const { mockJwtSign, mockJwtVerify } = vi.hoisted(() => ({
   mockJwtSign: vi.fn(),
   mockJwtVerify: vi.fn(),
@@ -11,8 +19,10 @@ vi.mock('jsonwebtoken', () => ({
 }));
 
 vi.mock('../client-runtime', () => ({
-  getJobAuthPrivateKey: () => Buffer.from('private-key').toString('base64'),
-  getJobAuthPublicKey: () => Buffer.from('public-key').toString('base64'),
+  getJobAuthPrivateKey: () =>
+    Buffer.from(testKeyPair.privateKey).toString('base64'),
+  getJobAuthPublicKey: () =>
+    Buffer.from(testKeyPair.publicKey).toString('base64'),
   isAuthClientTestEnv: () => false,
 }));
 
@@ -51,7 +61,7 @@ describe('run tokens', () => {
       expect.objectContaining({
         r: { u: 'user-1', t: 'run' },
       }),
-      'private-key',
+      testKeyPair.privateKey,
       { algorithm: 'ES256' },
     );
   });

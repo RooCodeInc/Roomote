@@ -110,6 +110,30 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     });
   });
 
+  it('maps Copilot Claude budget reasoning to thinking_budget', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'github-copilot/claude-haiku-4.5',
+        'medium',
+      ),
+    ).toEqual({ thinking_budget: 8_000 });
+  });
+
+  it('keeps reasoningEffort for Copilot models that support effort', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'github-copilot/claude-sonnet-5',
+        'high',
+      ),
+    ).toEqual({ reasoningEffort: 'high' });
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'github-copilot/gpt-5.6-terra',
+        'medium',
+      ),
+    ).toEqual({ reasoningEffort: 'medium' });
+  });
+
   it('uses the generic reasoningEffort option for other providers', () => {
     expect(buildOpenCodeModelReasoningOptions('openai/gpt-5.4', 'low')).toEqual(
       { reasoningEffort: 'low' },

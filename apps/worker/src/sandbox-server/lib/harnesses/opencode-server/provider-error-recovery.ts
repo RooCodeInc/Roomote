@@ -28,19 +28,23 @@ const POLICY_CODES = new Set([
 ]);
 
 const TERMINAL_CODES = new Set([
+  'account_suspended',
   'authentication_error',
   'billing_error',
   'context_length_exceeded',
+  'credit_balance_too_low',
   'forbidden',
+  'insufficient_balance',
   'insufficient_quota',
   'invalid_api_key',
   'invalid_model',
   'model_not_found',
+  'payment_required',
   'permission_denied',
   'unauthorized',
 ]);
 
-const TERMINAL_STATUS_CODES = new Set([400, 401, 403, 404, 422]);
+const TERMINAL_STATUS_CODES = new Set([400, 401, 402, 403, 404, 422]);
 
 function collectProviderErrorValues(error: unknown): unknown[] {
   const pending: Array<{ value: unknown; depth: number }> = [
@@ -146,6 +150,10 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
         lower.includes('model is not available') ||
         lower.includes('model not found') ||
         lower.includes('maximum context length') ||
+        lower.includes('insufficient balance') ||
+        lower.includes('please recharge') ||
+        (lower.includes('account') && lower.includes('is suspended')) ||
+        lower.includes('payment required') ||
         lower.includes('insufficient quota')
       ) {
         return true;
@@ -154,6 +162,16 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
   }
 
   return false;
+}
+
+/**
+ * OpenCode exposes errors it has decided to retry through session.status
+ * before it emits a terminal session.error. Providers occasionally mark
+ * billing or account failures as retryable, so the harness must be able to
+ * override that decision before OpenCode enters an unbounded backoff loop.
+ */
+export function isOpenCodeTerminalProviderError(error: unknown): boolean {
+  return isExplicitlyTerminal(collectProviderErrorValues(error));
 }
 
 /**
@@ -186,15 +204,138 @@ export function getOpenCodeProviderErrorRecovery(
   };
 }
 
+const ERROR_SUMMARY_MAX_CHARS = 280;
+
+/**
+ * Prefer a short operator-facing provider message over raw OpenCode error
+ * envelopes (status codes, headers, nested provider JSON).
+ */
+export function summarizeOpenCodeProviderError(error: unknown): string {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const messages: string[] = [];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+
+    if (!current || current.depth > 4) {
+      continue;
+    }
+
+    const { value, depth } = current;
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+
+      if (!trimmed) {
+        continue;
+      }
+
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          pending.push({
+            value: JSON.parse(trimmed) as unknown,
+            depth: depth + 1,
+          });
+        } catch {
+          // Ignore non-JSON blobs; only structured message fields below are used.
+        }
+      }
+
+      continue;
+    }
+
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    const messageCandidates = [
+      record.message,
+      record.error,
+      record.data,
+      record.cause,
+    ];
+
+    for (const candidate of messageCandidates) {
+      if (typeof candidate === 'string') {
+        const trimmed = candidate.trim();
+
+        if (!trimmed) {
+          continue;
+        }
+
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            pending.push({
+              value: JSON.parse(trimmed) as unknown,
+              depth: depth + 1,
+            });
+          } catch {
+            // Keep the raw string if it is readable; JSON parsers already failed.
+            if (trimmed.length > 8) {
+              messages.push(trimmed);
+            }
+          }
+          continue;
+        }
+
+        messages.push(trimmed);
+        continue;
+      }
+
+      if (candidate && typeof candidate === 'object') {
+        pending.push({ value: candidate, depth: depth + 1 });
+      }
+    }
+  }
+
+  const summary = messages
+    .map((message) => message.replace(/\s+/gu, ' ').trim())
+    .filter((message) => message.length > 0)
+    // Prefer concrete messages over short tokens like "error".
+    .sort((left, right) => right.length - left.length)[0];
+
+  if (!summary) {
+    return 'Unknown provider error';
+  }
+
+  if (summary.length <= ERROR_SUMMARY_MAX_CHARS) {
+    return summary;
+  }
+
+  return `${summary.slice(0, ERROR_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
 export function formatOpenCodeProviderErrorRetryNoticeText(options: {
-  kind: OpenCodeProviderErrorRecovery['kind'];
+  kind: OpenCodeProviderErrorRecovery['kind'] | 'opencode_retry';
   attemptNumber: number;
   maxAttempts: number;
+  errorSummary?: string;
+  delayMs?: number;
+  showAttempt?: boolean;
 }): string {
   const label =
     options.kind === 'policy_refusal'
       ? 'Provider safety refusal'
-      : 'Provider error';
+      : options.kind === 'opencode_retry'
+        ? 'Provider error'
+        : 'Provider error';
+  const errorSummary = options.errorSummary?.trim();
+  const headline = errorSummary ? `${label}: ${errorSummary}` : label;
+  const showAttempt = options.showAttempt !== false;
+  const attempt = showAttempt
+    ? ` (attempt ${options.attemptNumber}/${options.maxAttempts})`
+    : '';
+  const delayMs = options.delayMs;
 
-  return `${label}; automatically retrying the turn (attempt ${options.attemptNumber}/${options.maxAttempts}).`;
+  const retryLine =
+    delayMs !== undefined && delayMs > 0
+      ? `Retrying in ${Math.max(1, Math.round(delayMs / 1000))}s${attempt}.`
+      : `Retrying now${attempt}.`;
+
+  return `${headline}\n\n${retryLine}`;
 }

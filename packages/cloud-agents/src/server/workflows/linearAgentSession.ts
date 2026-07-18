@@ -67,6 +67,8 @@ export async function linearAgentSession({
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
   codeReviewsEnabled,
+  codeReviewReviewOnCommit,
+  codeReviewReviewDraftPrs,
   prAction,
 }: {
   taskSpec: LinearAgentSessionTask;
@@ -77,6 +79,8 @@ export async function linearAgentSession({
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
   codeReviewsEnabled?: boolean;
+  codeReviewReviewOnCommit?: boolean;
+  codeReviewReviewDraftPrs?: boolean;
   prAction?: PrAction;
 }): Promise<{
   prompt: string;
@@ -124,6 +128,8 @@ export async function linearAgentSession({
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
     codeReviewsEnabled,
+    codeReviewReviewOnCommit,
+    codeReviewReviewDraftPrs,
     sourceControlProvider: resolveSourceControlProviderFromPayload(
       taskSpec.payload,
     ),

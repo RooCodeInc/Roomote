@@ -3,6 +3,7 @@ export * from './discord-event';
 export * from './discord-provider';
 export * from './messages';
 export * from './provider';
+export * from './task-thread-title';
 export * from './teams-activity';
 export * from './teams-bot-framework-client';
 export * from './teams-graph-client';

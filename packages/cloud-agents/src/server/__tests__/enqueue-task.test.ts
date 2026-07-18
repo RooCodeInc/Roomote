@@ -45,6 +45,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  persistEarlyGeneratedTaskTitle,
   resolveFreshTaskComputeProvider,
   resolveQueueScope,
   type FreshTaskLaunch,
@@ -139,6 +140,47 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('rejects an early generated title after a user edit wins the database race', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+    const editedAt = new Date();
+
+    await db
+      .update(tasks)
+      .set({
+        title: 'Manual title',
+        titleEditedByUserAt: editedAt,
+      })
+      .where(eq(tasks.id, run.taskId));
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Rejected generated title',
+      }),
+    ).resolves.toBe(false);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        titleEditedByUserAt: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+
+    expect(task).toEqual({
+      title: 'Manual title',
+      titleEditedByUserAt: editedAt,
+      llmTitleCheckpoint: 0,
+    });
+  });
+
   it('persists an intentional pre-dispatch phase and error', async () => {
     const userId = await createUser();
 

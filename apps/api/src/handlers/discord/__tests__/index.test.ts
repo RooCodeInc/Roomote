@@ -787,7 +787,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('creates a sibling task thread for a mention in an unrelated thread', async () => {
+  it('continues in the same thread when mentioned in an existing thread reply', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'discussion-thread',
       guildId: 'guild-1',
@@ -815,7 +815,8 @@ describe('Discord Gateway event handler', () => {
           parentChannelId: 'channel-1',
           isThread: true,
         }),
-        forceNewThread: true,
+        // Match Slack: stay in the tagged thread. Only `/new` forces a sibling.
+        forceNewThread: false,
       }),
     );
   });
@@ -836,7 +837,6 @@ describe('Discord Gateway event handler', () => {
     };
     mocks.findCompletedRun.mockResolvedValue(completedRun);
     mocks.resumeTask.mockResolvedValue({ id: 32, taskId: 'task-32' });
-    mocks.getTaskUrl.mockReturnValue('https://roomote.example/tasks/task-32');
 
     const response = await postEvent(
       envelope(
@@ -859,11 +859,7 @@ describe('Discord Gateway event handler', () => {
         preservePayloadFlags: ['discordTaskThread'],
       }),
     );
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('task-32'),
-      }),
-    );
+    expect(mocks.reply).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 

@@ -12,6 +12,10 @@ import {
   getPreviewAuthPublicKey,
   isAuthClientTestEnv,
 } from './client-runtime';
+import {
+  decodeEs256PrivateKeyPem,
+  decodeEs256PublicKeyPem,
+} from './decode-es256-key';
 
 const ISSUER = 'rcc';
 const PREVIEW_KEY_ID = 'preview-v1';
@@ -53,8 +57,9 @@ export async function createPreviewToken({
     },
   };
 
-  const privateKey = Buffer.from(getPreviewAuthPrivateKey(), 'base64').toString(
-    'utf-8',
+  const privateKey = decodeEs256PrivateKeyPem(
+    getPreviewAuthPrivateKey(),
+    'PREVIEW_AUTH_PRIVATE_KEY',
   );
 
   return jwt.sign(payload, privateKey, {
@@ -66,8 +71,9 @@ export async function createPreviewToken({
 export async function validatePreviewToken(
   token: string,
 ): Promise<PreviewTokenContext> {
-  const publicKey = Buffer.from(getPreviewAuthPublicKey(), 'base64').toString(
-    'utf-8',
+  const publicKey = decodeEs256PublicKeyPem(
+    getPreviewAuthPublicKey(),
+    'PREVIEW_AUTH_PUBLIC_KEY',
   );
 
   const rawPayload = jwt.verify(token, publicKey, {
