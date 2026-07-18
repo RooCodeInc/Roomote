@@ -1,13 +1,12 @@
 'use client';
 
-import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 
 import {
   buildShowWidgetSrcDoc,
-  readShowWidgetHostTheme,
-  type ShowWidgetHostTheme,
   type ShowWidgetPayload,
 } from './show-widget-tool-result';
+import { useShowWidgetHostTheme } from './use-show-widget-host-theme';
 
 interface ShowWidgetPreviewProps {
   widget: ShowWidgetPayload;
@@ -19,37 +18,12 @@ interface ShowWidgetPreviewProps {
  * forms, top-navigation, or same-origin access).
  */
 export function ShowWidgetPreview({ widget }: ShowWidgetPreviewProps) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const [hostTheme, setHostTheme] = useState<ShowWidgetHostTheme | null>(null);
+  const { hostRef, hostTheme, hostThemeKey } = useShowWidgetHostTheme();
   const srcDoc = useMemo(
     () => buildShowWidgetSrcDoc(widget, hostTheme ?? undefined),
     [hostTheme, widget],
   );
   const label = widget.title?.trim() || 'Widget';
-
-  useLayoutEffect(() => {
-    const host = hostRef.current;
-    if (!host) {
-      return;
-    }
-
-    const syncTheme = () => setHostTheme(readShowWidgetHostTheme(host));
-    const observer = new MutationObserver(syncTheme);
-
-    syncTheme();
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['class', 'style'],
-    });
-    if (document.body !== document.documentElement) {
-      observer.observe(document.body, {
-        attributes: true,
-        attributeFilter: ['class', 'style'],
-      });
-    }
-
-    return () => observer.disconnect();
-  }, []);
 
   return (
     <div
@@ -62,7 +36,7 @@ export function ShowWidgetPreview({ widget }: ShowWidgetPreviewProps) {
         </div>
       ) : null}
       <iframe
-        key={hostTheme?.colorScheme ?? 'initial'}
+        key={hostThemeKey}
         title={label}
         srcDoc={srcDoc}
         sandbox=""

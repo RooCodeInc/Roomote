@@ -1,10 +1,9 @@
 import {
   buildShowWidgetSrcDoc,
-  readShowWidgetHostTheme,
   resolveShowWidgetForToolMessage,
   SHOW_WIDGET_TOOL_NAME,
-  type ShowWidgetHostTheme,
 } from '../show-widget-tool-result';
+import type { ShowWidgetHostTheme } from '../show-widget-theme';
 import type { AcpToolCallUiMessage, AcpToolResultUiMessage } from '../types';
 
 function buildResult(
@@ -256,29 +255,5 @@ describe('buildShowWidgetSrcDoc', () => {
     expect(doc).not.toContain('</style><script>');
     expect(doc).not.toContain('<script>');
     expect(doc).toContain('p{color:red}');
-  });
-});
-
-describe('readShowWidgetHostTheme', () => {
-  it('copies Roomote host tokens and its selected color scheme', () => {
-    const host = document.createElement('div');
-    host.className = 'dark';
-    host.style.setProperty('--background', '#101010');
-    host.style.setProperty('--card', '#080808');
-    host.style.setProperty('--foreground', '#fefefe');
-    host.style.setProperty('--accent-foreground', '#d8fb2b');
-    document.body.append(host);
-
-    const theme = readShowWidgetHostTheme(host);
-
-    expect(theme).toMatchObject({
-      colorScheme: 'dark',
-      background: '#101010',
-      surface: '#080808',
-      text: '#fefefe',
-      accent: '#d8fb2b',
-    });
-
-    host.remove();
   });
 });
