@@ -69,6 +69,7 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    resolveDefaultComputeProvider: vi.fn().mockResolvedValue('docker'),
     updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
       mockUpdatePendingEnvironmentSnapshot(...args),
   };
@@ -136,6 +137,17 @@ class TestController extends BaseController {
   public async testDequeueTaskRun(taskRun: TaskRun) {
     return this.dequeueTaskRun(taskRun);
   }
+
+  public async testHandleWorkerExitBeforeStart(
+    taskRun: TaskRun,
+    exitCode: number,
+  ) {
+    return this.handleWorkerExitBeforeStart(taskRun, exitCode);
+  }
+
+  public async testFailTimedOutWorkerBootstrap() {
+    return this.failTimedOutWorkerBootstrap();
+  }
 }
 
 class SaturatedTestController extends TestController {
@@ -176,7 +188,7 @@ function resetControllerMocks() {
   mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
   mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
-  mockUpdateWhere.mockReturnValue({
+  mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
 }
@@ -480,5 +492,115 @@ describe('BaseController.dequeueTaskRun', () => {
 
     expect(result).toBeNull();
     expect(mockRecordTaskRunLifecycleEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('BaseController.handleWorkerExitBeforeStart', () => {
+  let controller: TestController;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetControllerMocks();
+    mockUpdateWhere.mockReturnValue({
+      returning: vi.fn().mockResolvedValue([{ id: 42 }]),
+    });
+    controller = new TestController();
+  });
+
+  it('fails a dequeued run immediately when its worker exits before starting', async () => {
+    const job = makeTaskRun({
+      id: 42,
+      status: RunStatus.Dequeued,
+      startedAt: null,
+      workerHeartbeatAt: null,
+    });
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(job, 1),
+    ).resolves.toBe(true);
+
+    expect(mockDbUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RunStatus.Failed,
+        error: 'Worker process exited before claiming task run (exit code 1)',
+        completedAt: expect.any(Date),
+      }),
+    );
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 42,
+      status: RunStatus.Failed,
+      error: 'Worker process exited before claiming task run (exit code 1)',
+    });
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Detached worker exited before claiming its task run',
+      expect.objectContaining({
+        runId: 42,
+        exitCode: 1,
+        phase: 'worker_bootstrap',
+      }),
+      expect.objectContaining({ signal: 'worker-bootstrap-exit' }),
+    );
+  });
+
+  it('ignores an exit when the run already advanced', async () => {
+    mockUpdateWhere.mockReturnValueOnce({
+      returning: vi.fn().mockResolvedValue([]),
+    });
+
+    const claimed = await controller.testHandleWorkerExitBeforeStart(
+      makeTaskRun({ id: 42, status: RunStatus.Processing }),
+      0,
+    );
+
+    expect(claimed).toBe(false);
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
+  });
+
+  it('fails a provisioned run when no worker claims it before the watchdog', async () => {
+    mockTaskRunsFindFirst.mockResolvedValueOnce(
+      makeTaskRun({
+        id: 43,
+        status: RunStatus.Dequeued,
+        provisionReadyAt: new Date(Date.now() - 3 * 60_000),
+        startedAt: null,
+        workerHeartbeatAt: null,
+      }),
+    );
+
+    await expect(controller.testFailTimedOutWorkerBootstrap()).resolves.toBe(
+      true,
+    );
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 43,
+      status: RunStatus.Failed,
+      error:
+        'Worker did not claim task run within 120 seconds after the environment became ready',
+    });
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Worker did not claim its task run after provisioning',
+      expect.objectContaining({ runId: 43, phase: 'worker_bootstrap' }),
+      expect.objectContaining({ signal: 'worker-bootstrap-timeout' }),
+    );
+  });
+
+  it('keeps the claimed failure durable when finalization side effects fail', async () => {
+    mockFinishRun.mockRejectedValueOnce(new Error('notification failed'));
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({ id: 44, status: RunStatus.Dequeued }),
+        1,
+      ),
+    ).resolves.toBe(true);
+
+    expect(mockCaptureControllerException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'notification failed' }),
+      expect.objectContaining({
+        runId: 44,
+        phase: 'worker_bootstrap_finalize',
+      }),
+    );
   });
 });

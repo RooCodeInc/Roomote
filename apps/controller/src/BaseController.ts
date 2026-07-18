@@ -9,6 +9,7 @@ import {
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
+  WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
 import { Env } from '@roomote/env';
@@ -23,7 +24,10 @@ import {
   updatePendingEnvironmentSnapshot,
   eq,
   and,
+  asc,
   isNull,
+  isNotNull,
+  lt,
 } from '@roomote/db/server';
 import { dequeueTaskRun } from '@roomote/cloud-agents/server';
 import { finishRun } from '@roomote/sdk/server';
@@ -105,6 +109,7 @@ export abstract class BaseController {
     this.watchLocalArtifacts();
 
     let lastOrphanCheckAt = 0;
+    let lastWorkerBootstrapCheckAt = 0;
     const orphanCheckInterval = SANDBOX_ORPHAN_SCAN_INTERVAL_MS;
 
     console.log('Looping for task runs...');
@@ -119,6 +124,16 @@ export abstract class BaseController {
           'EX',
           this.HEARTBEAT_TTL_SECONDS,
         );
+
+        const iterationNow = Date.now();
+
+        if (
+          iterationNow - lastWorkerBootstrapCheckAt >
+          SANDBOX_ORPHAN_SCAN_INTERVAL_MS
+        ) {
+          lastWorkerBootstrapCheckAt = iterationNow;
+          await this.failTimedOutWorkerBootstrap();
+        }
 
         if (this.inFlightSpawns.size >= this.MAX_CONCURRENT_SPAWNS) {
           await new Promise((resolve) => setTimeout(resolve, 1_000));
@@ -508,6 +523,145 @@ export abstract class BaseController {
       `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
 
+    await this.finishFailedTaskRun(taskRun, errorMessage);
+
+    throw error;
+  }
+
+  /**
+   * Atomically claims a detached worker exit as a bootstrap failure. The
+   * worker's own dequeue transition races this conditional update, so a late
+   * process exit cannot overwrite a run that reached processing.
+   *
+   * Returns true when the exit was claimed and provider cleanup is safe.
+   */
+  protected async handleWorkerExitBeforeStart(
+    taskRun: TaskRun,
+    exitCode: number,
+  ): Promise<boolean> {
+    const errorMessage = `Worker process exited before claiming task run (exit code ${exitCode})`;
+    return this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
+      message: 'Detached worker exited before claiming its task run',
+      signal: 'worker-bootstrap-exit',
+      exitCode,
+    });
+  }
+
+  protected async failTimedOutWorkerBootstrap(): Promise<boolean> {
+    const taskRun = await db.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.status, RunStatus.Dequeued),
+        isNotNull(taskRuns.provisionReadyAt),
+        lt(
+          taskRuns.provisionReadyAt,
+          new Date(Date.now() - WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS),
+        ),
+        isNull(taskRuns.startedAt),
+        isNull(taskRuns.workerHeartbeatAt),
+        isNull(taskRuns.canceledAt),
+      ),
+      orderBy: [asc(taskRuns.provisionReadyAt)],
+    });
+
+    if (!taskRun) {
+      return false;
+    }
+
+    // provisionReadyAt is stamped before the final worker handoff. Do not let
+    // the watchdog race a launch that this controller is still actively
+    // completing (for example, environment OIDC priming).
+    if (this.inFlightSpawns.has(taskRun.id)) {
+      return false;
+    }
+
+    const timeoutSeconds = Math.round(
+      WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS / 1_000,
+    );
+    const errorMessage = `Worker did not claim task run within ${timeoutSeconds} seconds after the environment became ready`;
+
+    return this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
+      message: 'Worker did not claim its task run after provisioning',
+      signal: 'worker-bootstrap-timeout',
+    });
+  }
+
+  private async claimWorkerBootstrapFailure(
+    taskRun: TaskRun,
+    errorMessage: string,
+    diagnostic: {
+      message: string;
+      signal: string;
+      exitCode?: number;
+    },
+  ): Promise<boolean> {
+    const now = new Date();
+    const claimed = await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: errorMessage,
+        completedAt: now,
+      })
+      .where(
+        and(
+          eq(taskRuns.id, taskRun.id),
+          eq(taskRuns.status, RunStatus.Dequeued),
+          isNull(taskRuns.startedAt),
+          isNull(taskRuns.workerHeartbeatAt),
+          isNull(taskRuns.canceledAt),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimed.length === 0) {
+      console.log(
+        `[BaseController] Ignoring worker bootstrap failure for task run #${taskRun.id} because the run already advanced`,
+      );
+      return false;
+    }
+
+    captureControllerMessage(
+      diagnostic.message,
+      {
+        runId: taskRun.id,
+        payloadKind: taskRun.payloadKind,
+        provider: taskRun.vendor,
+        ...(diagnostic.exitCode === undefined
+          ? {}
+          : { exitCode: diagnostic.exitCode }),
+        phase: 'worker_bootstrap',
+      },
+      {
+        component: 'worker-lifecycle',
+        signal: diagnostic.signal,
+      },
+    );
+
+    console.error(
+      `[BaseController] ❌ ${errorMessage} for task run #${taskRun.id}`,
+    );
+
+    try {
+      await this.finishFailedTaskRun(taskRun, errorMessage);
+    } catch (error) {
+      captureControllerException(error, {
+        runId: taskRun.id,
+        payloadKind: taskRun.payloadKind,
+        provider: taskRun.vendor,
+        phase: 'worker_bootstrap_finalize',
+      });
+      console.error(
+        `[BaseController] Failed to complete bootstrap-failure side effects for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    return true;
+  }
+
+  private async finishFailedTaskRun(
+    taskRun: TaskRun,
+    errorMessage: string,
+  ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
     // Linear notifications, lock release, etc.) are applied consistently.
     await finishRun({
@@ -540,7 +694,5 @@ export abstract class BaseController {
         });
       }
     }
-
-    throw error;
   }
 }

@@ -330,6 +330,70 @@ describe('spawnModalWorker', () => {
     );
   });
 
+  it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue(true);
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await runCommandInput.onExit?.({ exitCode: 1 });
+
+    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 1 });
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        phase: 'worker_bootstrap_exit',
+        onMutation: expect.any(Function),
+      }),
+    );
+  });
+
+  it('leaves the sandbox alone when a detached exit belongs to an advanced run', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue(false);
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_1' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+        modalVmMemoryMiB: 8192,
+        modalTimeoutMs: 60_000,
+        onWorkerExit,
+      },
+    );
+
+    const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
+      onExit?: (event: { exitCode: number }) => Promise<void>;
+    };
+    await runCommandInput.onExit?.({ exitCode: 0 });
+
+    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 0 });
+    expect(mockCleanupModalInstance).not.toHaveBeenCalled();
+  });
+
   it('does not resolve or persist a bypass when no exposed surface needs one', async () => {
     mockShouldEnableAuthBypassForTaskRun.mockReturnValue(false);
 

@@ -141,6 +141,11 @@ export async function spawnModalWorker(
     localTarballPath?: string;
     deploymentSlug?: string;
     modalTags?: Record<string, string>;
+    /**
+     * Returns true when the controller claimed the exit as a pre-start
+     * bootstrap failure and the now-unused sandbox should be destroyed.
+     */
+    onWorkerExit?: (event: { exitCode: number }) => Promise<boolean>;
   },
 ): Promise<{
   machineId: string;
@@ -164,6 +169,7 @@ export async function spawnModalWorker(
     localTarballPath,
     deploymentSlug,
     modalTags,
+    onWorkerExit,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
   const environmentId = taskRun.payload.environmentId;
@@ -419,6 +425,29 @@ export async function spawnModalWorker(
       }),
       detached: true,
       signal: AbortSignal.timeout(60_000),
+      ...(onWorkerExit
+        ? {
+            onExit: async ({ exitCode }: { exitCode: number }) => {
+              const shouldCleanup = await onWorkerExit({ exitCode });
+
+              if (!shouldCleanup) {
+                return;
+              }
+
+              await cleanupModalInstance({
+                computeClient,
+                instanceId: machine.machineId,
+                phase: 'worker_bootstrap_exit',
+                error: new Error(
+                  `Detached worker exited before task run #${taskRun.id} started (exit code ${exitCode})`,
+                ),
+                logPrefix: 'spawnModalWorker',
+                onMutation: recordMutation,
+                ...mutationContext,
+              });
+            },
+          }
+        : {}),
     });
 
     if (result.exitCode !== null && result.exitCode !== 0) {
