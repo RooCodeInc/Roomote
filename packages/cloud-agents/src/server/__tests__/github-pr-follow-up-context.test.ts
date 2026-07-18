@@ -42,7 +42,7 @@ describe('github PR follow-up context helpers', () => {
       '<requested-follow-up>\n@roomote thanks for the update\n</requested-follow-up>',
     );
     expect(message).toContain(
-      'For that non-actionable mention case, leave one brief GitHub reply on the same PR conversation surface if a reply is still useful, then conclude with a no-op result.',
+      'For that non-actionable mention case, leave one brief GitHub reply on the same conversation surface if a reply is still useful, then conclude with a no-op result.',
     );
   });
 
