@@ -24,4 +24,59 @@ stderr -> fatal: 'origin/main' is not a commit and a branch 'main' cannot be cre
       'Environment not found',
     );
   });
+
+  it('explains missing Docker worker images instead of only showing docker run', () => {
+    const error = `Failed to run docker run.
+
+Unable to find image 'roomote-worker:local' locally
+docker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'
+
+command:
+docker run -d --name roomote-worker-12 roomote-worker:local sleep infinity`;
+
+    const display = getTaskRunErrorDisplayMessage(error);
+
+    expect(display).toContain("couldn't find or pull the worker image");
+    expect(display).toContain('pull access denied for roomote-worker');
+    expect(display).not.toMatch(/^docker run -d/);
+  });
+
+  it('explains Docker daemon connectivity failures', () => {
+    const error = `Failed to run docker run.
+
+Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+
+command:
+docker run -d roomote-worker:local`;
+
+    expect(getTaskRunErrorDisplayMessage(error)).toContain(
+      "couldn't reach the Docker daemon",
+    );
+  });
+
+  it('explains worker start timeouts and keeps docker logs when present', () => {
+    const error = `Docker worker for task run #9 did not start within 60s.
+
+The sandbox container started, but the Roomote worker process never appeared.
+
+Recent Docker logs:
+worker exited before receiving a task`;
+
+    const display = getTaskRunErrorDisplayMessage(error);
+
+    expect(display).toContain('did not come up in time');
+    expect(display).toContain('worker exited before receiving a task');
+  });
+
+  it('explains worker fetch failures seen in container logs', () => {
+    const error = `Docker worker container exited before task run #3 started.
+
+Recent Docker logs:
+❌ Job <unknown> failed: fetch failed`;
+
+    const display = getTaskRunErrorDisplayMessage(error);
+
+    expect(display).toContain('fetch failed');
+    expect(display).toContain('host.docker.internal');
+  });
 });

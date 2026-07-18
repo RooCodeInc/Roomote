@@ -39,6 +39,7 @@ import {
   captureControllerException,
   captureControllerMessage,
 } from './monitoring/sentry';
+import { formatSpawnWorkerError } from './compute-providers/docker-sandbox-security';
 import { resolveFromWorkspaceRoot } from './repo-paths';
 import { findPersistedWorkerBootstrapRestarts } from './worker-bootstrap-restarts';
 
@@ -545,7 +546,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     error: unknown,
   ): Promise<void> {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatSpawnWorkerError(error);
 
     captureControllerException(error, {
       runId: taskRun.id,

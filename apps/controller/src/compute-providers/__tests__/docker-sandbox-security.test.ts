@@ -5,11 +5,14 @@ import {
   buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerResourceArgs,
   cleanupStaleDockerSandboxes,
+  formatDockerCommandError,
+  formatSpawnWorkerError,
   getDockerTaskNetworkName,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
   removeDockerSandboxResources,
   restoreDockerStandbyNetworking,
+  sanitizeDockerCommandForDisplay,
   type DockerCommand,
 } from '../docker-sandbox-security';
 
@@ -642,5 +645,64 @@ describe('cleanupStaleDockerSandboxes', () => {
         runDocker,
       ),
     ).resolves.toBe(taskNetwork);
+  });
+});
+
+describe('formatDockerCommandError', () => {
+  it('leads with Docker stderr instead of the raw argv list', () => {
+    const message = formatDockerCommandError(
+      ['run', '-d', 'roomote-worker:local'],
+      {
+        message: 'Command failed: docker run -d roomote-worker:local',
+        cmd: 'docker run -d roomote-worker:local',
+        code: 125,
+        stderr:
+          "Unable to find image 'roomote-worker:local' locally\ndocker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'\n",
+        stdout: '',
+      },
+    );
+
+    expect(message.startsWith('Failed to run docker run.')).toBe(true);
+    expect(message).toContain('pull access denied for roomote-worker');
+    expect(message.indexOf('pull access denied')).toBeLessThan(
+      message.indexOf('command:'),
+    );
+  });
+
+  it('redacts docker -e environment values from command diagnostics', () => {
+    const message = formatDockerCommandError(
+      ['exec', '-e', 'AUTH_TOKEN=super-secret', 'roomote-worker-1', 'true'],
+      {
+        message: 'Command failed',
+        cmd: 'docker exec -e AUTH_TOKEN=super-secret roomote-worker-1 true',
+        code: 1,
+        stderr: 'container not running',
+        stdout: '',
+      },
+    );
+
+    expect(message).toContain('AUTH_TOKEN=<redacted>');
+    expect(message).not.toContain('super-secret');
+    expect(
+      sanitizeDockerCommandForDisplay([
+        'exec',
+        '-e',
+        'AUTH_TOKEN=super-secret',
+        'roomote-worker-1',
+      ]),
+    ).toBe('docker exec -e AUTH_TOKEN=<redacted> roomote-worker-1');
+  });
+
+  it('formats plain Error messages for finishRun storage', () => {
+    expect(formatSpawnWorkerError(new Error('Machine unavailable'))).toBe(
+      'Machine unavailable',
+    );
+    expect(
+      formatSpawnWorkerError(
+        new Error(
+          'Failed to run docker run.\n\npull access denied\n\ncommand:\ndocker run -d x',
+        ),
+      ),
+    ).toContain('Failed to run docker run');
   });
 });

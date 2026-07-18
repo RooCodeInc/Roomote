@@ -57,7 +57,8 @@ const DOCKER_CONTAINER_READY_ARGS = ['infinity'];
 const DOCKER_WORKER_ARCHIVE_PATH = '/sandbox/worker.tar.gz';
 const DOCKER_WORKER_ROOT = '/sandbox';
 const DOCKER_INSTALL_WORKER_SCRIPT = `${DOCKER_WORKER_ROOT}/install-worker.sh`;
-const DOCKER_WORKER_START_TIMEOUT_MS = 15_000;
+// Image pulls and cold worker installs can exceed 15s on first boot (self-host).
+const DOCKER_WORKER_START_TIMEOUT_MS = 60_000;
 const DOCKER_WORKER_START_POLL_MS = 500;
 const DOCKER_TASK_DAEMON_IMAGE = 'docker:28-dind';
 /** Upper bound for fresh Docker provisioning so a stuck daemon cannot hang forever. */
@@ -610,6 +611,7 @@ async function assertDetachedWorkerStarted(
       throw new Error(
         [
           `Docker worker container exited before task run #${runId} started.`,
+          'The sandbox container stopped during boot. Common causes include a missing worker image, a failed entrypoint, or the worker crashing on startup.',
           logs.trim() ? `Recent Docker logs:\n${logs.trim()}` : undefined,
         ]
           .filter(Boolean)
@@ -641,9 +643,12 @@ async function assertDetachedWorkerStarted(
     allowFailure: true,
   });
 
+  const timeoutSeconds = Math.round(DOCKER_WORKER_START_TIMEOUT_MS / 1000);
+
   throw new Error(
     [
-      `Docker worker command for task run #${runId} was not observed during startup.`,
+      `Docker worker for task run #${runId} did not start within ${timeoutSeconds}s.`,
+      'The container stayed running, but the Roomote worker process never appeared. Check that the local worker image and release archive are available, and inspect container logs for fetch/start failures.',
       processList.trim()
         ? `Docker process list:\n${processList.trim()}`
         : 'Docker process list was empty.',
