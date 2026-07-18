@@ -2,6 +2,21 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.12.0 (2026-07-18)
+
+### Minor changes
+
+- Continue Discord tasks in the mentioned thread with earlier thread history and attachments instead of opening a separate task thread.
+- Add GitHub Copilot as a connectable inference provider with GitHub device-code OAuth. Copilot credentials stay on the control plane while `github-copilot/...` inference routes through the run-scoped gateway.
+
+### Patch changes
+
+- Make Discord task thread titles readable by expanding mentions and stripping attachment noise, then replace provisional titles with the task title.
+- Skip the Discord reconnect notice when a completed task resumes from snapshot in the same thread.
+- Fix environment start failures on ES256 signing keys by accepting common key encodings (raw PEM and base64 DER) instead of only base64-encoded PEM.
+- Show OpenCode provider retry errors in chat with a retrying indicator and countdown.
+- Stop endless retries when a provider reports billing, suspension, or payment-required failures; surface the provider message and end the task.
+
 ## 0.11.0 (2026-07-18)
 
 ### Minor changes
