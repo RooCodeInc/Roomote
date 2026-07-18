@@ -1142,6 +1142,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       'read_message_history',
       'embed_links',
       'attach_files',
+      'add_reactions',
     ];
     if (DISCORD_CHANNEL_TYPES_FORUM.has(channel.type)) {
       requiredPermissions.push('send_messages_in_threads');
