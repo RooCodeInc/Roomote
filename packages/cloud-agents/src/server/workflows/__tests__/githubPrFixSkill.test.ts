@@ -104,6 +104,12 @@ describe('implement-changes PR fixer appendix', () => {
     expect(skillContent).toContain(
       'Do not treat a dismissed, invalid, stale, or out-of-scope finding as fixed, and do not resolve its review thread by default.',
     );
+    expect(skillContent).toContain(
+      'Do not manually edit previous review comments. Replying or adding new comments is ok.',
+    );
+    expect(skillContent).toContain(
+      'Do not manually edit previous review comments with `update_pull_request_comment`. Replying with `reply_to_pull_request_comment` or adding a new comment with `create_pull_request_comment` is the correct way to respond on earlier review discussion.',
+    );
   });
 
   it('requires fix-pr itself to own delegated visual-proof handoff before PR metadata refresh', () => {
