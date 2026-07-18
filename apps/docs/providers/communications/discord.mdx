@@ -101,6 +101,8 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 ## Start and continue tasks
 
 - mention the bot with a request in a server channel
+- mention the bot in a thread reply to start work in that same thread (Slack-
+  style), with earlier thread messages and supported attachments as context
 - send the bot a direct message
 - use `/new request:<request>` to force a fresh task instead of continuing the
   current one
@@ -111,10 +113,12 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - use `/help` to see the available commands
 
 Roomote does not quote every message it answers. In a task thread, the
-conversation itself supplies the context. Image attachments are passed to the
-task as image input, and supported documents are downloaded and added to the
-request. Attachment downloads are size-limited and restricted to Discord's
-media hosts.
+conversation itself supplies the context. When you start a task by tagging
+Roomote in an existing thread, Roomote reads earlier messages in that thread
+(including supported attachments, up to Discord's history limits) so the agent
+has that background. Image attachments are passed to the task as image input,
+and supported documents are downloaded and added to the request. Attachment
+downloads are size-limited and restricted to Discord's media hosts.
 
 ## Self-hosted configuration
 

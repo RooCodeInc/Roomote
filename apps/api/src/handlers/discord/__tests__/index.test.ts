@@ -787,7 +787,7 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('creates a sibling task thread for a mention in an unrelated thread', async () => {
+  it('continues in the same thread when mentioned in an existing thread reply', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'discussion-thread',
       guildId: 'guild-1',
@@ -815,7 +815,8 @@ describe('Discord Gateway event handler', () => {
           parentChannelId: 'channel-1',
           isThread: true,
         }),
-        forceNewThread: true,
+        // Match Slack: stay in the tagged thread. Only `/new` forces a sibling.
+        forceNewThread: false,
       }),
     );
   });
