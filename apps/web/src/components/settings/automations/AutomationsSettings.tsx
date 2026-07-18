@@ -2728,8 +2728,6 @@ export function AutomationsSettings() {
               const frequency = formState[automation.frequencyField];
               const isEnabled =
                 scheduleOnlyAutomationEnabledState[automation.id];
-              const blockedReason =
-                scheduleOnlyAutomationBlockedReasons[automation.id];
               const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
 
               return (
@@ -2742,32 +2740,6 @@ export function AutomationsSettings() {
                   }
                   iconEnabled={iconEnabled[automation.id]}
                   debugSection={renderDebugRunsSection(automation.id)}
-                  runAction={
-                    <BasicTooltip
-                      content={getRunTooltip(
-                        automation.id,
-                        isEnabled,
-                        blockedReason,
-                      )}
-                    >
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          triggerMutation.mutate({
-                            automationKey: automation.automationKey,
-                          })
-                        }
-                        disabled={isRunDisabled(
-                          automation.id,
-                          isEnabled,
-                          blockedReason != null,
-                        )}
-                      >
-                        <Play />
-                      </Button>
-                    </BasicTooltip>
-                  }
                   footer={
                     <AutomationFooter
                       isDirty={isDirty[automation.id]}

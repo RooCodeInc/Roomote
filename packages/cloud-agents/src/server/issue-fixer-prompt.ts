@@ -80,9 +80,10 @@ Requirements:
 1. Re-fetch the live issue with \`gh\` and read comments before planning.
 2. Explore the codebase enough to ground the plan in real files and patterns.
 3. Write a focused implementation plan: approach, files likely touched, risks, test plan, and open questions.
-4. Post that plan as a single GitHub issue comment with \`gh issue comment ${issue.number} --repo ${repositoryFullName} --body "..."\`.
-5. If the issue is closed, is a pull request, already has an active plan/fix PR, or is blocked on product decisions, comment briefly with that finding (or skip with a terse internal note when commenting would be noise) and stop.
-6. Do not edit source files, do not commit, and do not open a PR.
-7. Stay quiet on chat unless you need input, hit a blocker, or finish with a result.
+4. If anything material is unclear (acceptance criteria, expected behavior, scope, constraints, ownership), ask specific clarifying questions on the GitHub issue. Prefer questions that unblock planning; do not invent product decisions.
+5. Post the plan (and any clarifying questions) as a single GitHub issue comment with \`gh issue comment ${issue.number} --repo ${repositoryFullName} --body "..."\`.
+6. If the issue is closed, is a pull request, already has an active plan/fix PR, or is blocked pending answers you already requested, comment briefly with that finding (or skip with a terse internal note when commenting would be noise) and stop.
+7. Do not edit source files, do not commit, and do not open a PR.
+8. Stay quiet on chat unless you need input outside GitHub, hit a blocker, or finish with a result.
 ${environmentSection}`;
 }

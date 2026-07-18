@@ -219,9 +219,9 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     label: 'Triage GitHub Issues',
     availability: 'stable',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
-    // Webhook-driven on new GitHub issues; Run now can still launch manually.
+    // Webhook-driven on new GitHub issues only (no Run now / batch scan).
     // Plans are posted on the GitHub issue itself, not as Slack suggestion cards.
-    manualTriggerRequirements: ['github', 'repository'],
+    manualTriggerRequirements: [],
     usesManagerChannel: false,
     supportedCommunicationProviders: [],
     supportedSourceControlProviders: ['github'],
