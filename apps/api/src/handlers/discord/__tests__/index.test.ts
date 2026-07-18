@@ -38,6 +38,8 @@ const mocks = vi.hoisted(() => ({
   buildContinuation: vi.fn(),
   releaseContinuation: vi.fn(),
   markThreadHistoryDelivered: vi.fn(),
+  fetchThreadHistory: vi.fn(),
+  shouldRouteUnmentioned: vi.fn(),
 }));
 
 vi.mock('../event-gate.js', () => ({
@@ -103,8 +105,13 @@ vi.mock('../../tasks/communication-out-of-band-context.js', () => ({
 
 vi.mock('../thread-context.js', () => ({
   buildDiscordContinuationPrompt: mocks.buildContinuation,
+  fetchDiscordThreadHistoryBestEffort: mocks.fetchThreadHistory,
   releaseDiscordContinuationClaim: mocks.releaseContinuation,
   markDiscordThreadHistoryDelivered: mocks.markThreadHistoryDelivered,
+}));
+
+vi.mock('../unmentioned-thread-reply.js', () => ({
+  shouldRouteUnmentionedDiscordThreadReplyToAgent: mocks.shouldRouteUnmentioned,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -236,6 +243,8 @@ describe('Discord Gateway event handler', () => {
     );
     mocks.releaseContinuation.mockResolvedValue(undefined);
     mocks.markThreadHistoryDelivered.mockResolvedValue(undefined);
+    mocks.fetchThreadHistory.mockResolvedValue([]);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
   });
 
@@ -610,6 +619,44 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({ text: expect.stringContaining('task-23') }),
     );
+  });
+
+  it('ignores unmentioned task-thread follow-ups that Slack-style gating rejects', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'task-thread',
+      type: 11,
+    });
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      userId: 'roomote-user-1',
+      actingUserId: 'roomote-user-1',
+    });
+    mocks.shouldRouteUnmentioned.mockResolvedValue(false);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'keep going after chatter',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: 'discord_unmentioned_requires_mention',
+      }),
+    );
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalled();
+    expect(mocks.queueMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('nudges an unlinked mentioned user without launching work', async () => {
