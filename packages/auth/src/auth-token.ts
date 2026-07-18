@@ -12,6 +12,10 @@ import {
   getJobAuthPublicKey,
   isAuthClientTestEnv,
 } from './client-runtime';
+import {
+  decodeEs256PrivateKeyPem,
+  decodeEs256PublicKeyPem,
+} from './decode-es256-key';
 
 const ISSUER = 'rcc';
 export const DEFAULT_USER_AUTH_TOKEN_TIMEOUT_MS = 60_000;
@@ -60,8 +64,9 @@ export async function createAuthToken({
     },
   };
 
-  const privateKey = Buffer.from(getJobAuthPrivateKey(), 'base64').toString(
-    'utf-8',
+  const privateKey = decodeEs256PrivateKeyPem(
+    getJobAuthPrivateKey(),
+    'JOB_AUTH_PRIVATE_KEY',
   );
 
   return jwt.sign(payload, privateKey, { algorithm: 'ES256' });
@@ -86,8 +91,9 @@ export async function createPublicAuthToken(options: {
 export async function validateAuthToken(
   token: string,
 ): Promise<AuthTokenContext> {
-  const publicKey = Buffer.from(getJobAuthPublicKey(), 'base64').toString(
-    'utf-8',
+  const publicKey = decodeEs256PublicKeyPem(
+    getJobAuthPublicKey(),
+    'JOB_AUTH_PUBLIC_KEY',
   );
 
   const rawPayload = jwt.verify(token, publicKey, {
