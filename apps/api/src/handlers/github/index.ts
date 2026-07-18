@@ -20,6 +20,7 @@ import { handlePrReadyForReview } from './handlePrReadyForReview';
 import { handlePrReopen } from './handlePrReopen';
 import { handlePrSynchronize } from './handlePrSynchronize';
 import { handlePrComment } from './handlePrComment';
+import { handleGitHubIssueComment } from './handleGitHubIssueComment';
 
 // PR merge handling:
 import { handlePrMerge } from './handlePrMerge';
@@ -174,7 +175,7 @@ github.post('/', async (c) => {
         }
 
         if (!payload.issue.pull_request) {
-          return { status: 'ok' as const, message: 'not_a_pr_comment' };
+          return handleGitHubIssueComment(payload);
         }
 
         queuePrReviewSummaryNotification(payload);
@@ -201,6 +202,25 @@ github.post('/', async (c) => {
         queuePrReviewSummaryNotification(payload);
 
         return { status: 'ok' as const };
+      }),
+    );
+
+    webhooks.on('issues.opened', ({ id, name, payload }) =>
+      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return {
+            status: 'ok' as const,
+            message: `Skipping issue webhook for ${payload.repository.full_name}`,
+          };
+        }
+
+        return handleGitHubIssueComment({
+          installation: payload.installation,
+          repository: payload.repository,
+          sender: payload.sender,
+          issue: payload.issue,
+          mentionBody: payload.issue.body ?? '',
+        });
       }),
     );
 
