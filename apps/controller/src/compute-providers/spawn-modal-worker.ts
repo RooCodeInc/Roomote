@@ -349,6 +349,8 @@ export async function spawnModalWorker(
   const command = getWorkerLaunchCommand(taskRun);
   const args = getWorkerLaunchArgs(taskRun, machine.machineId);
 
+  let immediateExitDisposition: 'restart' | 'failed' | undefined;
+
   try {
     await updateTaskRunMachine({
       taskRun,
@@ -463,11 +465,25 @@ export async function spawnModalWorker(
         : {}),
     });
 
-    // A detached worker must remain alive long enough to claim the run. Even
-    // exit code 0 during the grace period means no worker owns the task, so
-    // route it through the normal launch-failure cleanup path.
+    // A detached worker must remain alive long enough to claim the run. Route
+    // grace-period exits through the same classifier as later exits so the
+    // first bootstrap failure gets its one durable replacement.
     if (result.exitCode !== null) {
-      throw buildDetachedWorkerExitError(command, result);
+      const exitError = buildDetachedWorkerExitError(command, result);
+
+      if (onWorkerExit) {
+        const disposition = await onWorkerExit({ exitCode: result.exitCode });
+
+        if (disposition !== 'ignore') {
+          immediateExitDisposition = disposition;
+          throw exitError;
+        }
+
+        // The worker claimed the run before exiting, so its normal lifecycle
+        // owns terminal state and sandbox cleanup from this point onward.
+      } else {
+        throw exitError;
+      }
     }
 
     await recordMutation({
@@ -519,6 +535,34 @@ export async function spawnModalWorker(
         error: error instanceof Error ? error.message : String(error),
       }),
     });
+
+    if (immediateExitDisposition) {
+      try {
+        await cleanupModalInstance({
+          computeClient,
+          instanceId: machine.machineId,
+          phase: 'spawn_worker',
+          error,
+          logPrefix: 'spawnModalWorker',
+          onMutation: recordMutation,
+          ...mutationContext,
+        });
+      } catch (cleanupError) {
+        console.error(
+          `[spawnModalWorker] Cleanup failed after classified bootstrap exit for task run #${taskRun.id}`,
+          cleanupError,
+        );
+      } finally {
+        if (immediateExitDisposition === 'restart') {
+          onWorkerRestart?.();
+        }
+      }
+
+      // The controller already committed either Pending for a retry or Failed
+      // for the exhausted retry budget. Avoid terminally failing it again in
+      // BaseController.handleSpawnTaskRunError.
+      return { machineId: machine.machineId };
+    }
 
     await cleanupModalInstance({
       computeClient,

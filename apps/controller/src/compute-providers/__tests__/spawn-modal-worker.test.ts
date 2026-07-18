@@ -363,6 +363,45 @@ describe('spawnModalWorker', () => {
     );
   });
 
+  it('restarts when an immediate detached exit is claimed as the first bootstrap failure', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerRestart = vi.fn();
+    mockRunCommand.mockResolvedValue({
+      exitCode: 1,
+      commandId: undefined,
+      stderr: 'worker failed before claim\n',
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+          onWorkerExit,
+          onWorkerRestart,
+        },
+      ),
+    ).resolves.toEqual({ machineId: 'modal-machine-123' });
+
+    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 1 });
+    expect(mockCleanupModalInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        phase: 'spawn_worker',
+      }),
+    );
+    expect(onWorkerRestart).toHaveBeenCalledOnce();
+  });
+
   it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
     const onWorkerExit = vi.fn().mockResolvedValue('restart');
     const onWorkerRestart = vi.fn();
