@@ -340,8 +340,9 @@ export function SourceControl() {
         </>
       ) : (
         <>
-          Create a GitHub App for this deployment, or enter an existing
-          app&apos;s credentials, then connect it to select repositories.
+          Create a GitHub App for this deployment, then connect it to select
+          repositories. Existing apps can be configured with deployment
+          environment variables.
         </>
       ),
       adminHelp: isAdmin
