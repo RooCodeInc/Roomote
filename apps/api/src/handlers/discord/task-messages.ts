@@ -11,10 +11,10 @@ export function discordTaskButtons(input: {
   taskUrl: string | null;
 }) {
   return [
-    ...(input.taskUrl ? [[{ text: 'Follow Task', url: input.taskUrl }]] : []),
+    ...(input.taskUrl ? [[{ text: 'Follow', url: input.taskUrl }]] : []),
     [
       {
-        text: 'Cancel task',
+        text: 'Cancel',
         callbackData: `discord:cancel:${input.runId}`,
       },
     ],

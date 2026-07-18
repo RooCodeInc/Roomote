@@ -129,11 +129,11 @@ describe('launchDiscordTask', () => {
         buttons: expect.arrayContaining([
           [
             {
-              text: 'Follow Task',
+              text: 'Follow',
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: 'Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel', callbackData: 'discord:cancel:41' }],
         ]),
       }),
     );
@@ -783,11 +783,11 @@ describe('launchDiscordTask', () => {
         buttons: [
           [
             {
-              text: 'Follow Task',
+              text: 'Follow',
               url: 'https://roomote.example/tasks/task-41',
             },
           ],
-          [{ text: 'Cancel task', callbackData: 'discord:cancel:41' }],
+          [{ text: 'Cancel', callbackData: 'discord:cancel:41' }],
         ],
       }),
     );

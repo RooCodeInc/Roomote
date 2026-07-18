@@ -583,7 +583,7 @@ describe('Discord routing confirmation', () => {
         buttons: [
           [
             {
-              text: 'Follow Task',
+              text: 'Follow',
               url: 'https://roomote.example/task/task-1',
             },
           ],

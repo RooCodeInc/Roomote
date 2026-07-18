@@ -275,7 +275,7 @@ async function handleSuggestionCallback(input: {
         ? `Started “${suggestion.title}” in a new task thread.`
         : `Started “${suggestion.title}”.`,
       ...(started.taskUrl
-        ? { buttons: [[{ text: 'Follow Task', url: started.taskUrl }]] }
+        ? { buttons: [[{ text: 'Follow', url: started.taskUrl }]] }
         : {}),
     });
   } catch (error) {
