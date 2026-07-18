@@ -796,6 +796,21 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     return { provider: 'discord', ...input };
   }
 
+  async removeReaction(input: {
+    channelId: string;
+    messageId: string;
+    name: string;
+  }): Promise<CommunicationReactionResult> {
+    const emoji = encodeURIComponent(resolveDiscordReactionEmoji(input.name));
+    await this.request(
+      'DELETE',
+      `/channels/${input.channelId}/messages/${input.messageId}/reactions/${emoji}/@me`,
+      undefined,
+      { retryNetworkErrors: true, retryServerErrors: true },
+    );
+    return { provider: 'discord', ...input };
+  }
+
   /**
    * Shows the bot as typing in the channel or thread for ~10 seconds (or
    * until the bot's next message lands). Callers that deliver slowly should

@@ -68,11 +68,23 @@ describe('Discord component callbacks', () => {
       status: 'running',
       sandboxServerUrl: null,
       actingUserId: 'user-1',
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'thread-1',
+        communicationSourceEventId: 'origin-1',
+        discordTaskThread: true,
+      },
       task: { initiatorUserId: 'owner-user' },
     };
     mocks.findRun.mockResolvedValue(run);
     mocks.stopTaskRun.mockResolvedValue({ success: true, statusCode: 200 });
-    const provider = {} as never;
+    const addReaction = vi.fn().mockResolvedValue(undefined);
+    const provider = {
+      addReaction,
+    } as unknown as {
+      addReaction: typeof addReaction;
+    };
     const interaction = {
       id: 'interaction-1',
       application_id: 'app-1',
@@ -87,7 +99,7 @@ describe('Discord component callbacks', () => {
     };
 
     const result = await handleDiscordComponentInteraction({
-      provider,
+      provider: provider as never,
       applicationId: 'app-1',
       interaction,
       interactionDeferred: true,
@@ -110,6 +122,11 @@ describe('Discord component callbacks', () => {
       allowDirectCancelWithoutSandbox: true,
       terminate: true,
       cancelledBy: { name: 'Matt', source: 'discord' },
+    });
+    expect(addReaction).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      messageId: 'origin-1',
+      name: 'x',
     });
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
