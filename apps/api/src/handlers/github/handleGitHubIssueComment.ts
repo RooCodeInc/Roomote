@@ -1,10 +1,17 @@
 import { enqueueTask, getTaskUrl } from '@roomote/cloud-agents/server';
-import { db, environmentRepositoryMappings, eq, asc } from '@roomote/db/server';
+import {
+  db,
+  environmentRepositoryMappings,
+  eq,
+  asc,
+  findReusableGitHubIssueTaskOwner,
+} from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
 import {
   type TaskPayload,
   PRODUCT_NAME,
   TaskPayloadKind,
+  isActivelyRunningTask,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -12,6 +19,10 @@ import {
   buildSourceControlAccountLinkRequiredMessage,
   buildSourceControlEnvironmentRequiredMessage,
 } from '../source-control-account-linking';
+import {
+  sendMessageToTask,
+  steerMessageToTask,
+} from '../tasks/sendMessageToTask';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { isMention } from './isMention';
 import type {
@@ -68,6 +79,32 @@ function buildIssueMentionPrompt({
     `${commenterLogin} mentioned Roomote on GitHub issue #${issueNumber} (${issueTitle}) in ${repositoryFullName}.`,
     `Issue URL: ${issueUrl}`,
     issueBodySection,
+    '',
+    'Mention comment:',
+    commentBody.trim(),
+  ].join('\n');
+}
+
+function buildIssueFollowUpMessage({
+  repositoryFullName,
+  issueNumber,
+  issueTitle,
+  issueUrl,
+  commentBody,
+  commenterLogin,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl: string;
+  commentBody: string;
+  commenterLogin: string;
+}): string {
+  return [
+    `${commenterLogin} mentioned Roomote again on GitHub issue #${issueNumber} (${issueTitle}) in ${repositoryFullName}.`,
+    `Issue URL: ${issueUrl}`,
+    '',
+    'This is a follow-up on the existing Roomote task for this issue. Continue that work instead of starting a separate task.',
     '',
     'Mention comment:',
     commentBody.trim(),
@@ -141,6 +178,14 @@ function formatStartedReply(taskLink: string | null): string {
   return `I'm on it. I started a task for this issue, and I'll keep updates here.`;
 }
 
+function formatFollowUpReply(taskLink: string | null): string {
+  if (taskLink) {
+    return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.\n\n[See task](${taskLink})`;
+  }
+
+  return `I'm on it. I routed this request into the existing task for this issue so follow-up work stays on one Roomote thread, and I'll keep updates here.`;
+}
+
 function buildGateMissComment(): string {
   return `I saw the mention, but I could not start work on this issue with the current ${PRODUCT_NAME} GitHub setup.`;
 }
@@ -172,7 +217,8 @@ async function resolveMappedEnvironmentId(
 
 /**
  * Handle @mentions on plain GitHub issues (not pull requests).
- * Starts a standard task against the issue's repository.
+ * Starts a standard task against the issue's repository, or continues an
+ * existing task already linked to the same issue.
  */
 export async function handleGitHubIssueComment(
   eventPayload: IssueMentionPayload,
@@ -266,6 +312,61 @@ export async function handleGitHubIssueComment(
     `https://github.com/${repositoryFullName}/issues/${issueNumber}`;
   const issueTitle = issue.title ?? `Issue #${issueNumber}`;
   const issueBody = issue.body ?? null;
+  const commenterUserId = target.properties.userId;
+
+  const existingIssueOwner = await findReusableGitHubIssueTaskOwner({
+    repoFullName: repositoryFullName,
+    issueNumber,
+  });
+
+  if (existingIssueOwner?.taskId) {
+    const followUpMessage = buildIssueFollowUpMessage({
+      repositoryFullName,
+      issueNumber,
+      issueTitle,
+      issueUrl,
+      commentBody,
+      commenterLogin: sender.login,
+    });
+
+    const delivery = isActivelyRunningTask(
+      existingIssueOwner.status,
+      existingIssueOwner.taskPhase,
+    )
+      ? await steerMessageToTask({
+          taskId: existingIssueOwner.taskId,
+          userId: commenterUserId,
+          message: followUpMessage,
+          senderMode: 'github_pr_follow_up',
+          workerQuoteUserName: target.properties.githubLogin ?? sender.login,
+        })
+      : await sendMessageToTask({
+          taskId: existingIssueOwner.taskId,
+          userId: commenterUserId,
+          message: followUpMessage,
+          senderMode: 'github_pr_follow_up',
+          workerQuoteUserName: target.properties.githubLogin ?? sender.login,
+        });
+
+    if (delivery.success) {
+      await postIssueComment({
+        ...replyTarget,
+        body: formatFollowUpReply(
+          tryBuildTaskLink({
+            taskId: existingIssueOwner.taskId,
+            campaign: 'github.issue.mention.active-owner',
+          }),
+        ),
+      });
+
+      return { status: 'ok', message: 'active_issue_owner_routed' };
+    }
+
+    console.warn(
+      `[handleGitHubIssueComment] failed to deliver issue mention to reusable task ${existingIssueOwner.taskId}: ${delivery.error}`,
+    );
+  }
+
   const prompt = buildIssueMentionPrompt({
     repositoryFullName,
     issueNumber,
@@ -300,7 +401,7 @@ export async function handleGitHubIssueComment(
         githubUserId: target.properties.githubUserId,
         payload,
       },
-      initiator: { kind: 'user', userId: target.properties.userId },
+      initiator: { kind: 'user', userId: commenterUserId },
       workflow: 'standard',
       surface: 'github',
       trigger: 'message',
