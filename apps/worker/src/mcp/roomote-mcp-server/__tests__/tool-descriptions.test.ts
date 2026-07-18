@@ -217,10 +217,19 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(tool.config.description).toContain('rw-card');
     expect(tool.config.description).toContain('`--rw-*` theme variables');
+    expect(tool.config.description).toContain(
+      'Keep widgets compact enough to fit without scrolling',
+    );
     expect(tool.config.description).toContain('request_user_input');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
+    expect(getInputSchemaField(tool, 'html').description).toContain(
+      'Avoid long prose',
+    );
     expect(getInputSchemaField(tool, 'css').description).toContain(
       '--rw-surface',
+    );
+    expect(getInputSchemaField(tool, 'height').description).toContain(
+      'without a vertical scrollbar',
     );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',

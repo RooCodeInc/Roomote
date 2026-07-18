@@ -36,7 +36,7 @@ export const SHOW_WIDGET_DEFAULT_CSS = `
   --rw-card: var(--rw-surface);
   --rw-code-bg: var(--rw-code-background);
 }
-*, *::before, *::after { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; min-width: 0; }
 html, body {
   margin: 0;
   padding: 0;
@@ -46,6 +46,7 @@ html, body {
 }
 body {
   padding: var(--rw-space-4);
+  overflow-x: hidden;
   word-wrap: break-word;
   overflow-wrap: anywhere;
 }
@@ -75,7 +76,9 @@ pre {
   border: 1px solid var(--rw-border);
   border-radius: var(--rw-radius-lg);
   padding: 10px 12px;
-  overflow: auto;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 pre code {
   background: transparent;
@@ -84,6 +87,7 @@ pre code {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 0.95em;
 }
 th, td {
@@ -91,6 +95,7 @@ th, td {
   padding: var(--rw-space-2) var(--rw-space-3);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 th { color: var(--rw-text-muted); font-size: 0.85em; font-weight: 600; }
 blockquote {
