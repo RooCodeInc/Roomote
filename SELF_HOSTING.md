@@ -292,6 +292,7 @@ common provider keys into worker containers:
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `MOONSHOT_API_KEY`
+- `KIMI_API_KEY` (Kimi for Coding, `kimi-for-coding/...` models)
 - `MINIMAX_API_KEY`
 - `OPENCODE_API_KEY`
 

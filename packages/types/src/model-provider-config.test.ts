@@ -224,6 +224,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'openai',
         'anthropic',
         'moonshotai',
+        'kimi-for-coding',
         'minimax',
         'opencode',
         'amazon-bedrock',
@@ -313,7 +314,19 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'openrouter', modelId: 'openrouter/moonshotai/kimi-k3' },
       { providerId: 'vercel', modelId: 'vercel/moonshotai/kimi-k3' },
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
+      { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
     ]);
+  });
+
+  it('registers Kimi for Coding as an Anthropic-style API-key provider', () => {
+    expect(getSetupModelProvider('kimi-for-coding')).toMatchObject({
+      id: 'kimi-for-coding',
+      label: 'Kimi for Coding',
+      envVarName: 'KIMI_API_KEY',
+      envVarLabel: 'Kimi for Coding API key',
+      authKind: 'api-key',
+      defaultRoomoteModel: 'kimi-for-coding/k3',
+    });
   });
 
   it('maps Amazon Bedrock to a Bedrock API key plus an optional AWS region', () => {
@@ -545,6 +558,27 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       roomoteCodeReviewModel: 'moonshotai/kimi-k3',
       roomoteExploreModel: null,
       roomotePlanningModel: 'moonshotai/kimi-k3',
+      roomoteModelReasoningEffort: null,
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
+    });
+  });
+
+  it('recommends Kimi for Coding defaults and role models', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('kimi-for-coding'),
+      ),
+    ).toEqual({
+      roomoteModel: 'kimi-for-coding/k3',
+      roomoteSmallModel: 'kimi-for-coding/k2p7',
+      roomoteVisionModel: 'kimi-for-coding/k3',
+      roomoteCodeReviewModel: 'kimi-for-coding/k3',
+      roomoteExploreModel: 'kimi-for-coding/k2p7',
+      roomotePlanningModel: 'kimi-for-coding/k3',
       roomoteModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
