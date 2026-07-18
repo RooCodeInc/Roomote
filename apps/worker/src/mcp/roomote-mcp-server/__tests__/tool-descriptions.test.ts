@@ -207,8 +207,9 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'show_widget');
 
     expect(tool.config.description).toContain(
-      'Render a presentational HTML widget in the Roomote task transcript.',
+      'Render a presentational HTML widget in the current task transcript.',
     );
+    expect(tool.config.description).not.toContain('Roomote');
     expect(tool.config.description).toContain(
       'to demonstrate how something would look',
     );
@@ -234,6 +235,11 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',
     );
+    for (const field of ['html', 'title', 'css', 'height', 'textFallback']) {
+      expect(getInputSchemaField(tool, field).description).not.toContain(
+        'Roomote',
+      );
+    }
     expect(tool.config.annotations).toEqual({
       readOnlyHint: true,
       destructiveHint: false,
