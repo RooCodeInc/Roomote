@@ -123,7 +123,9 @@ roomoteMcpServer.registerTool(
       'Render a presentational HTML widget in the Roomote task transcript. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
-      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked; Roomote injects default styles when css is omitted. ' +
+      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
+      'Prefer semantic HTML with Roomote theme classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the task view theme. ' +
+      'For custom CSS, use the `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered by Roomote to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
@@ -131,7 +133,7 @@ roomoteMcpServer.registerTool(
         .string()
         .min(1)
         .describe(
-          'HTML fragment or full document to display. Scripts and nested browsing contexts are stripped.',
+          'HTML fragment or full document to display. Scripts and nested browsing contexts are stripped. Roomote-themed classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
         ),
       title: z
         .string()
@@ -141,7 +143,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Optional extra CSS injected into the widget document after Roomote defaults',
+          'Optional extra CSS injected after Roomote defaults. Prefer --rw-background, --rw-surface, --rw-surface-muted, --rw-text, --rw-text-muted, --rw-border, --rw-primary, --rw-accent, --rw-success, --rw-warning, and --rw-danger instead of hard-coded colors.',
         ),
       height: z
         .number()

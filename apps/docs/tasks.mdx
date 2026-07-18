@@ -44,6 +44,20 @@ detail to review the work. Presentational widgets remain available in the task
 transcript; when an agent provides a text fallback, Roomote also sends that
 fallback to the originating Slack, Teams, Telegram, or Discord conversation.
 
+### Native widget styling
+
+Roomote widgets inherit the task view's selected light or dark theme. Agents can
+use the built-in `rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`,
+`rw-badge`, `rw-callout`, and `rw-muted` classes for common layouts without
+supplying custom CSS.
+
+When a widget needs a custom layout, its CSS can use Roomote's `--rw-*` theme
+variables. The main variables are `--rw-background`, `--rw-surface`,
+`--rw-surface-muted`, `--rw-text`, `--rw-text-muted`, `--rw-border`,
+`--rw-primary`, `--rw-accent`, `--rw-success`, `--rw-warning`, and
+`--rw-danger`. This keeps the result visually consistent with Roomote and lets
+the same widget adapt when the viewer changes themes.
+
 ## Review the evidence
 
 Roomote is most useful when it can show its work. For implementation tasks,

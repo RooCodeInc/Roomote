@@ -215,8 +215,13 @@ describe('roomote MCP tool descriptions', () => {
     expect(tool.config.description).toContain(
       'Do not use it for ordinary prose',
     );
+    expect(tool.config.description).toContain('rw-card');
+    expect(tool.config.description).toContain('`--rw-*` theme variables');
     expect(tool.config.description).toContain('request_user_input');
     expect(getInputSchemaField(tool, 'html').description).toContain('HTML');
+    expect(getInputSchemaField(tool, 'css').description).toContain(
+      '--rw-surface',
+    );
     expect(getInputSchemaField(tool, 'textFallback').description).toContain(
       'originating chat surface',
     );
