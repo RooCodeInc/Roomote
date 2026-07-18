@@ -6,6 +6,7 @@ import {
   getDiscordInteractionCreate,
   getDiscordInteractionUser,
   getDiscordMessageCreate,
+  isDiscordBotMentioned,
   isDiscordTaskEntryEvent,
   parseDiscordGatewayEvent,
   type DiscordGatewayEvent,
@@ -330,6 +331,23 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   }
 
   if (!senderUserId) {
+    // Mirror Slack: unlinked people chatting in a task thread without
+    // @mentioning Roomote are ignored. Only explicit task entry (DM,
+    // @mention, or slash command) should nudge them to link.
+    const addressedBot =
+      Boolean(command) ||
+      channel.isDirectMessage ||
+      (message != null && isDiscordBotMentioned(message, resolved.botUserId));
+    if (!addressedBot) {
+      apiLogger.debug(
+        `[discord] Ignoring unaddressed task-thread message from unlinked Discord sender ${sender.id}`,
+      );
+      return {
+        ok: true,
+        ignored: 'discord_sender_not_linked_unmentioned',
+      };
+    }
+
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,

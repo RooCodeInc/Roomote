@@ -524,6 +524,44 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
+  it('ignores unlinked task-thread messages without a bot mention', async () => {
+    // Same as Slack: drive-by chat in a task thread from an unlinked user
+    // should not get a "link your account" nudge.
+    mocks.findMappedUserId.mockResolvedValue(null);
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      actingUserId: 'roomote-user-1',
+    });
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      name: 'task-thread',
+      type: 11,
+      parentId: 'channel-1',
+    });
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Just chiming in without a mention',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({
+        ok: true,
+        ignored: 'discord_sender_not_linked_unmentioned',
+      }),
+    );
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.queueMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
   it('lets channel auto-start consume a message before mention gating', async () => {
     mocks.channelAutoStart.mockResolvedValue(true);
     mocks.getChannel.mockResolvedValue({
