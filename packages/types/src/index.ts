@@ -44,6 +44,7 @@ export * from './mcp-service-detection';
 export * from './platform-issue-reports';
 export * from './preview-proxy';
 export * from './primitives';
+export * from './provider-retry-notice';
 export * from './provider-usage-workflow-phase';
 export * from './request-observability';
 export * from './sandbox-server';

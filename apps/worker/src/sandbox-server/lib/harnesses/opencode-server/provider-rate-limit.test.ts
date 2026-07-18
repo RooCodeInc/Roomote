@@ -89,15 +89,16 @@ describe('resolveOpenCodeRateLimitRetryDelayMs', () => {
 });
 
 describe('formatOpenCodeRateLimitRetryNoticeText', () => {
-  it('includes attempt and delay in the user-facing notice', () => {
+  it('includes the error, attempt, and delay in the user-facing notice', () => {
     expect(
       formatOpenCodeRateLimitRetryNoticeText({
         attemptNumber: 2,
         maxAttempts: 3,
         delayMs: 10_000,
+        errorSummary: 'Too many requests',
       }),
     ).toBe(
-      'Provider rate limit hit; automatically retrying in about 10s (attempt 2/3).',
+      'Provider rate limit: Too many requests\n\nRetrying in 10s (attempt 2/3).',
     );
   });
 });

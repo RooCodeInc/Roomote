@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
   isOpenCodeTerminalProviderError,
+  summarizeOpenCodeProviderError,
 } from './provider-error-recovery';
 
 describe('getOpenCodeProviderErrorRecovery', () => {
@@ -100,5 +102,40 @@ describe('getOpenCodeProviderErrorRecovery', () => {
     expect(
       getOpenCodeProviderErrorRecovery({ message: 'Payment required' }),
     ).toBeNull();
+  });
+});
+
+describe('summarizeOpenCodeProviderError', () => {
+  it('prefers nested provider messages over raw JSON wrappers', () => {
+    expect(
+      summarizeOpenCodeProviderError({
+        name: 'UnknownError',
+        data: {
+          message: JSON.stringify({
+            type: 'error',
+            error: {
+              code: 'cyber_policy',
+              message:
+                'This content was flagged for possible cybersecurity risk.',
+            },
+          }),
+        },
+      }),
+    ).toBe('This content was flagged for possible cybersecurity risk.');
+  });
+});
+
+describe('formatOpenCodeProviderErrorRetryNoticeText', () => {
+  it('includes the error summary and an immediate retry status', () => {
+    expect(
+      formatOpenCodeProviderErrorRetryNoticeText({
+        kind: 'provider_error',
+        attemptNumber: 1,
+        maxAttempts: 1,
+        errorSummary: 'Upstream connection closed unexpectedly.',
+      }),
+    ).toBe(
+      'Provider error: Upstream connection closed unexpectedly.\n\nRetrying now (attempt 1/1).',
+    );
   });
 });
