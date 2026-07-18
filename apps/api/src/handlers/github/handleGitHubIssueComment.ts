@@ -8,10 +8,12 @@ import {
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
 import {
+  type RunStatus,
   type TaskPayload,
   PRODUCT_NAME,
   TaskPayloadKind,
   isActivelyRunningTask,
+  isExitedRunStatus,
 } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -19,6 +21,7 @@ import {
   buildSourceControlAccountLinkRequiredMessage,
   buildSourceControlEnvironmentRequiredMessage,
 } from '../source-control-account-linking';
+import { findLatestTaskRun } from '../tasks/helpers';
 import {
   sendMessageToTask,
   steerMessageToTask,
@@ -31,6 +34,9 @@ import type {
   WebhookInstallation,
   WebhookUser,
 } from './types';
+
+const EXISTING_TASK_WAIT_TIMEOUT_MS = 15_000;
+const EXISTING_TASK_WAIT_POLL_MS = 500;
 
 type IssueMentionIssue = {
   number: number;
@@ -215,6 +221,103 @@ async function resolveMappedEnvironmentId(
   return mappings[0]?.environmentId ?? null;
 }
 
+async function waitForTaskToAcceptMessages({
+  taskId,
+  timeoutMs = EXISTING_TASK_WAIT_TIMEOUT_MS,
+}: {
+  taskId: string;
+  timeoutMs?: number;
+}) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const latestRun = await findLatestTaskRun(taskId, {
+      id: true,
+      status: true,
+      taskPhase: true,
+      sandboxServerUrl: true,
+    });
+
+    if (!latestRun || isExitedRunStatus(latestRun.status)) {
+      return null;
+    }
+
+    if (latestRun.sandboxServerUrl) {
+      return latestRun;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, EXISTING_TASK_WAIT_POLL_MS),
+    );
+  }
+
+  return null;
+}
+
+async function deliverIssueFollowUpToExistingTask({
+  taskId,
+  userId,
+  message,
+  status,
+  taskPhase,
+  commenterDisplayName,
+}: {
+  taskId: string;
+  userId: string;
+  message: string;
+  status: RunStatus;
+  taskPhase: string | null;
+  commenterDisplayName?: string;
+}) {
+  const deliver = ({
+    status,
+    taskPhase,
+  }: {
+    status: RunStatus;
+    taskPhase: string | null;
+  }) =>
+    isActivelyRunningTask(status, taskPhase)
+      ? steerMessageToTask({
+          taskId,
+          userId,
+          message,
+          senderMode: 'github_pr_follow_up',
+          ...(commenterDisplayName
+            ? { workerQuoteUserName: commenterDisplayName }
+            : {}),
+        })
+      : sendMessageToTask({
+          taskId,
+          userId,
+          message,
+          senderMode: 'github_pr_follow_up',
+          ...(commenterDisplayName
+            ? { workerQuoteUserName: commenterDisplayName }
+            : {}),
+        });
+
+  const initialAttempt = await deliver({ status, taskPhase });
+
+  if (
+    initialAttempt.success ||
+    initialAttempt.status !== 409 ||
+    !initialAttempt.error.includes('no active sandbox')
+  ) {
+    return initialAttempt;
+  }
+
+  const readyRun = await waitForTaskToAcceptMessages({ taskId });
+
+  if (!readyRun) {
+    return initialAttempt;
+  }
+
+  return deliver({
+    status: readyRun.status,
+    taskPhase: readyRun.taskPhase,
+  });
+}
+
 /**
  * Handle @mentions on plain GitHub issues (not pull requests).
  * Starts a standard task against the issue's repository, or continues an
@@ -329,24 +432,14 @@ export async function handleGitHubIssueComment(
       commenterLogin: sender.login,
     });
 
-    const delivery = isActivelyRunningTask(
-      existingIssueOwner.status,
-      existingIssueOwner.taskPhase,
-    )
-      ? await steerMessageToTask({
-          taskId: existingIssueOwner.taskId,
-          userId: commenterUserId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-          workerQuoteUserName: target.properties.githubLogin ?? sender.login,
-        })
-      : await sendMessageToTask({
-          taskId: existingIssueOwner.taskId,
-          userId: commenterUserId,
-          message: followUpMessage,
-          senderMode: 'github_pr_follow_up',
-          workerQuoteUserName: target.properties.githubLogin ?? sender.login,
-        });
+    const delivery = await deliverIssueFollowUpToExistingTask({
+      taskId: existingIssueOwner.taskId,
+      userId: commenterUserId,
+      message: followUpMessage,
+      status: existingIssueOwner.status,
+      taskPhase: existingIssueOwner.taskPhase,
+      commenterDisplayName: target.properties.githubLogin ?? sender.login,
+    });
 
     if (delivery.success) {
       await postIssueComment({

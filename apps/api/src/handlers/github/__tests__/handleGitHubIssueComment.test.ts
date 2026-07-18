@@ -7,6 +7,7 @@ const {
   mockFindReusableGitHubIssueTaskOwner,
   mockSendMessageToTask,
   mockSteerMessageToTask,
+  mockFindLatestTaskRun,
 } = vi.hoisted(() => ({
   mockGetGitHubAutomationTargets: vi.fn(),
   mockGetInstallationOctokit: vi.fn(),
@@ -16,6 +17,7 @@ const {
   mockFindReusableGitHubIssueTaskOwner: vi.fn(),
   mockSendMessageToTask: vi.fn(),
   mockSteerMessageToTask: vi.fn(),
+  mockFindLatestTaskRun: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -51,6 +53,10 @@ vi.mock('../getGitHubAutomationTargets', () => ({
 vi.mock('../../tasks/sendMessageToTask', () => ({
   sendMessageToTask: mockSendMessageToTask,
   steerMessageToTask: mockSteerMessageToTask,
+}));
+
+vi.mock('../../tasks/helpers', () => ({
+  findLatestTaskRun: mockFindLatestTaskRun,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -106,6 +112,7 @@ describe('handleGitHubIssueComment', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.useRealTimers();
 
     mockGetInstallationOctokit.mockResolvedValue({
       rest: {
@@ -119,6 +126,7 @@ describe('handleGitHubIssueComment', () => {
     mockFindReusableGitHubIssueTaskOwner.mockResolvedValue(null);
     mockSendMessageToTask.mockResolvedValue({ success: true, result: {} });
     mockSteerMessageToTask.mockResolvedValue({ success: true, result: {} });
+    mockFindLatestTaskRun.mockResolvedValue(null);
     mockGetGitHubAutomationTargets.mockResolvedValue({
       status: 'ok',
       targets: [
@@ -256,6 +264,49 @@ describe('handleGitHubIssueComment', () => {
     expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
+  it('waits for a booting issue task to accept messages before falling back', async () => {
+    vi.useFakeTimers();
+    mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
+      runId: 9,
+      taskId: 'task-existing',
+      type: TaskPayloadKind.StandardTask,
+      status: RunStatus.Pending,
+      taskPhase: null,
+      delivery: 'attach',
+    });
+    mockSteerMessageToTask
+      .mockResolvedValueOnce({
+        success: false,
+        error: 'no active sandbox',
+        status: 409,
+      })
+      .mockResolvedValueOnce({ success: true, result: {} });
+    mockFindLatestTaskRun
+      .mockResolvedValueOnce({
+        id: 9,
+        status: RunStatus.Pending,
+        taskPhase: null,
+        sandboxServerUrl: null,
+      })
+      .mockResolvedValueOnce({
+        id: 9,
+        status: RunStatus.Running,
+        taskPhase: 'running',
+        sandboxServerUrl: 'https://sandbox.example',
+      });
+
+    const resultPromise = handleGitHubIssueComment(makePayload());
+    await vi.advanceTimersByTimeAsync(500);
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      status: 'ok',
+      message: 'active_issue_owner_routed',
+    });
+    expect(mockSteerMessageToTask).toHaveBeenCalledTimes(2);
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
   it('falls back to starting a new task when follow-up delivery fails', async () => {
     mockFindReusableGitHubIssueTaskOwner.mockResolvedValue({
       runId: 9,
@@ -267,8 +318,8 @@ describe('handleGitHubIssueComment', () => {
     });
     mockSteerMessageToTask.mockResolvedValue({
       success: false,
-      error: 'no active sandbox',
-      status: 409,
+      error: 'permanent failure',
+      status: 500,
     });
 
     const result = await handleGitHubIssueComment(makePayload());
@@ -278,6 +329,7 @@ describe('handleGitHubIssueComment', () => {
       metadata: { ids: [11] },
     });
     expect(mockEnqueueTask).toHaveBeenCalled();
+    expect(mockFindLatestTaskRun).not.toHaveBeenCalled();
   });
 
   it('prompts the commenter to link GitHub before starting work', async () => {
