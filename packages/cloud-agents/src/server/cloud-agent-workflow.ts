@@ -255,6 +255,23 @@ export async function generatePrompt({
         getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
         taskRow?.slackThreadTs ??
         null;
+      const automationWorkItemId = (() => {
+        const payload = taskSpec.payload as {
+          automationWorkItemId?: unknown;
+        };
+        return typeof payload.automationWorkItemId === 'string' &&
+          payload.automationWorkItemId.trim().length > 0
+          ? payload.automationWorkItemId.trim()
+          : null;
+      })();
+      // Channel-only Slack metadata (for example scheduled triage scans that can
+      // post rare blockers via post_to_slack_channel) is not a Slack conversation
+      // surface: there is no originating thread and send_chat_reply cannot reply.
+      // Treat only thread-backed or late-bound automation execution tasks as
+      // Slack-started.
+      const isSlackConversationSurface = Boolean(
+        slackChannel && (slackThreadTs || automationWorkItemId),
+      );
       // Telegram, Teams, and Discord persist generic conversation ids on the payload;
       // resolve them into the surface-specific fields the PR provenance line
       // needs to deep-link back to the originating chat message.
@@ -278,7 +295,7 @@ export async function generatePrompt({
         description,
         repo: taskSpec.payload.repo,
         repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
-        taskSurface: slackChannel
+        taskSurface: isSlackConversationSurface
           ? 'slack'
           : nonSlackChatProvider
             ? nonSlackChatProvider

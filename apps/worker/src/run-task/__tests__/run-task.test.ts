@@ -1383,6 +1383,66 @@ describe('runTask', () => {
     );
   });
 
+  it('does not enforce Slack reply satisfaction for channel-only scan tasks', async () => {
+    await runTask({
+      taskRun: {
+        id: 108,
+        taskId: 'task-108',
+        payloadKind: TaskPayloadKind.Scan,
+        harness: 'opencode-server',
+        payload: {
+          slackChannel: 'C123',
+          notifySlack: true,
+        },
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      harnessSessionId: 'session-108',
+      workerEnv: {
+        authToken: 'cloud-token',
+        roomoteAppUrl: 'https://api.example.test',
+        trpcUrl: 'https://web.example.test',
+        buildUserFacingEnv: vi.fn(() => ({
+          HOME: '/tmp/home',
+          PATH: '/usr/bin',
+        })),
+      } as never,
+    });
+
+    expect(writeFileSyncMock).not.toHaveBeenCalledWith(
+      '/tmp/workspace/.roomote-runtime-home/.config/opencode/roomote-slack-reply-satisfaction.json',
+      expect.anything(),
+      'utf8',
+    );
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpTaskEnv: expect.objectContaining({
+          ROOMOTE_SLACK_CHANNEL: 'C123',
+        }),
+      }),
+    );
+    expect(createHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpTaskEnv: expect.not.objectContaining({
+          ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: expect.anything(),
+        }),
+      }),
+    );
+  });
+
   it('checks Slack drain during sleep fallback when the worker started before thread ts was persisted', async () => {
     waitForExternalSleepActionMock.mockResolvedValueOnce({
       claimed: true,
