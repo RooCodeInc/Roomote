@@ -11,6 +11,7 @@
     "./messages": "./src/messages.ts",
     "./mock-discord-server": "./src/mock-discord-server.ts",
     "./provider": "./src/provider.ts",
+    "./task-thread-title": "./src/task-thread-title.ts",
     "./teams-activity": "./src/teams-activity.ts",
     "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",
     "./teams-graph-client": "./src/teams-graph-client.ts",

@@ -839,6 +839,32 @@ export type TaskChannelBindings = {
   linearOrganizationId?: string | null;
 };
 
+export async function persistEarlyGeneratedTaskTitle(input: {
+  taskId: string;
+  generatedTitle: string;
+}): Promise<boolean> {
+  const shouldPersistGeneratedTitle = !isFallbackTaskTitle(
+    input.generatedTitle,
+  );
+  const [updatedTask] = await db
+    .update(tasks)
+    .set({
+      llmTitleCheckpoint: 1,
+      updatedAt: new Date(),
+      ...(shouldPersistGeneratedTitle ? { title: input.generatedTitle } : {}),
+    })
+    .where(
+      and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.titleEditedByUserAt),
+        lt(tasks.llmTitleCheckpoint, 1),
+      ),
+    )
+    .returning({ id: tasks.id });
+
+  return Boolean(updatedTask && shouldPersistGeneratedTitle);
+}
+
 /**
  * PR linkage persisted as a task_pull_requests row inside the create
  * transaction. Required for 'pr_review' and 'pr_conflict_resolve' launches;
@@ -1516,25 +1542,12 @@ async function enqueueFreshLaunch(
           taskId: taskRun.taskId,
           messages: [{ role: 'user', text: description }],
         });
-        const shouldPersistGeneratedTitle =
-          !isFallbackTaskTitle(generatedTitle);
+        const persistedGeneratedTitle = await persistEarlyGeneratedTaskTitle({
+          taskId: taskRun.taskId,
+          generatedTitle,
+        });
 
-        await db
-          .update(tasks)
-          .set({
-            llmTitleCheckpoint: 1,
-            updatedAt: new Date(),
-            ...(shouldPersistGeneratedTitle ? { title: generatedTitle } : {}),
-          })
-          .where(
-            and(
-              eq(tasks.id, taskRun.taskId),
-              isNull(tasks.titleEditedByUserAt),
-              lt(tasks.llmTitleCheckpoint, 1),
-            ),
-          );
-
-        if (shouldPersistGeneratedTitle && options.onEarlyTitleGenerated) {
+        if (persistedGeneratedTitle && options.onEarlyTitleGenerated) {
           try {
             await options.onEarlyTitleGenerated({
               taskRun,
