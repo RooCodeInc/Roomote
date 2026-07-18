@@ -77,6 +77,7 @@ import {
 import {
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
+  isOpenCodeTerminalProviderError,
   type OpenCodeProviderErrorRecovery,
 } from './provider-error-recovery';
 import type {
@@ -3507,7 +3508,32 @@ export class OpenCodeServerHarness
     const status = asRecord(properties?.status);
     const statusType = asString(status?.type);
 
-    if (statusType === 'busy' || statusType === 'retry') {
+    if (statusType === 'retry') {
+      const sessionId =
+        asString(properties?.sessionID) ??
+        asString(properties?.sessionId) ??
+        this.sessionId;
+      const message = asString(status?.message);
+
+      if (
+        sessionId &&
+        message &&
+        isOpenCodeTerminalProviderError({ message })
+      ) {
+        await this.terminateOpenCodeProviderRetry(sessionId, message);
+        return;
+      }
+
+      // Retry transitions prove the session is alive, but not that the turn's
+      // loop advanced. Keep the stall watchdog armed during transient backoff.
+      this.ignoreNextProviderRecoverySessionIdle = false;
+      this.inFlight = true;
+      this.stallWatchdogs.noteActivity();
+      this.stallWatchdogs.ensureTurnStallArmed();
+      return;
+    }
+
+    if (statusType === 'busy') {
       // If OpenCode omitted the paired session.idle event, do not let a stale
       // guard consume the retry's eventual idle transition.
       this.ignoreNextProviderRecoverySessionIdle = false;
@@ -3527,6 +3553,42 @@ export class OpenCodeServerHarness
 
       await this.finishCurrentTurn();
     }
+  }
+
+  private async terminateOpenCodeProviderRetry(
+    sessionId: string,
+    message: string,
+  ): Promise<void> {
+    this.logger.error(
+      `OpenCode reported a terminal provider error as retryable sessionId=${sessionId}: ${message}`,
+    );
+
+    // Stop OpenCode's internal retry loop. It reports the intentional abort as
+    // MessageAbortedError, which is redundant with the provider error below.
+    this.armReplayAbortErrorSuppression();
+    try {
+      await this.client.abort({
+        sessionId,
+        signal: this.eventAbortController.signal,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Failed to abort OpenCode after terminal provider retry status sessionId=${sessionId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    await this.handleSessionError({
+      type: 'session.error',
+      properties: {
+        sessionID: sessionId,
+        error: {
+          name: 'APIError',
+          data: { message, isRetryable: false },
+        },
+      },
+    });
   }
 
   private async handleSessionIdle(

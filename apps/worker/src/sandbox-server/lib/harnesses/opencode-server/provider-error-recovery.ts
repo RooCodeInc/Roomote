@@ -28,19 +28,23 @@ const POLICY_CODES = new Set([
 ]);
 
 const TERMINAL_CODES = new Set([
+  'account_suspended',
   'authentication_error',
   'billing_error',
   'context_length_exceeded',
+  'credit_balance_too_low',
   'forbidden',
+  'insufficient_balance',
   'insufficient_quota',
   'invalid_api_key',
   'invalid_model',
   'model_not_found',
+  'payment_required',
   'permission_denied',
   'unauthorized',
 ]);
 
-const TERMINAL_STATUS_CODES = new Set([400, 401, 403, 404, 422]);
+const TERMINAL_STATUS_CODES = new Set([400, 401, 402, 403, 404, 422]);
 
 function collectProviderErrorValues(error: unknown): unknown[] {
   const pending: Array<{ value: unknown; depth: number }> = [
@@ -146,6 +150,10 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
         lower.includes('model is not available') ||
         lower.includes('model not found') ||
         lower.includes('maximum context length') ||
+        lower.includes('insufficient balance') ||
+        lower.includes('please recharge') ||
+        (lower.includes('account') && lower.includes('is suspended')) ||
+        lower.includes('payment required') ||
         lower.includes('insufficient quota')
       ) {
         return true;
@@ -154,6 +162,16 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
   }
 
   return false;
+}
+
+/**
+ * OpenCode exposes errors it has decided to retry through session.status
+ * before it emits a terminal session.error. Providers occasionally mark
+ * billing or account failures as retryable, so the harness must be able to
+ * override that decision before OpenCode enters an unbounded backoff loop.
+ */
+export function isOpenCodeTerminalProviderError(error: unknown): boolean {
+  return isExplicitlyTerminal(collectProviderErrorValues(error));
 }
 
 /**
