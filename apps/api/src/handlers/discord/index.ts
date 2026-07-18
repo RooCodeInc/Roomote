@@ -70,9 +70,11 @@ import {
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
   buildDiscordContinuationPrompt,
+  fetchDiscordThreadHistoryBestEffort,
   releaseDiscordContinuationClaim,
   markDiscordThreadHistoryDelivered,
 } from './thread-context.js';
+import { shouldRouteUnmentionedDiscordThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
 const DISCORD_HELP_MESSAGE = [
   "👋 I'm Roomote. Mention me in a server channel or message me directly to start a task.",
@@ -340,9 +342,12 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
           launchOwnerUserId: senderUserId,
         })
       : null;
+  const isRoomoteThread = Boolean(
+    activeRun || completedRun || pendingRoutingReply,
+  );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
   });
   if (!isTaskEntry) {
@@ -380,6 +385,46 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       reason: 'discord_sender_not_linked',
     };
   }
+
+  // Mirror Slack/Teams: unmentioned guild-thread follow-ups only route when the
+  // sender is already in the conversation and nobody else interjected since
+  // the bot's last reply. Explicit @mentions, DMs, and slash commands stay on
+  // the normal task-entry path above.
+  if (
+    message &&
+    !channel.isDirectMessage &&
+    !command &&
+    !isDiscordBotMentioned(message, resolved.botUserId) &&
+    isRoomoteThread
+  ) {
+    const shouldRouteUnmentioned =
+      await shouldRouteUnmentionedDiscordThreadReplyToAgent({
+        message,
+        botUserId: resolved.botUserId,
+        mappedUserId: senderUserId,
+        isRoomoteThread: true,
+        ownedThreadUserId:
+          activeRun?.userId ??
+          completedRun?.userId ??
+          (pendingRoutingReply ? senderUserId : null),
+        fetchThreadMessages: async () => {
+          const history = await fetchDiscordThreadHistoryBestEffort({
+            provider: resolved.provider,
+            channelId: channel.channelId,
+          });
+          return history.length > 0 ? history : null;
+        },
+      });
+    if (!shouldRouteUnmentioned) {
+      apiLogger.debug(
+        `[discord] Ignoring unmentioned guild-thread reply from ${sender.id} (requires @mention after interjection or ineligible sender)`,
+      );
+      return {
+        ok: true,
+        ignored: 'discord_unmentioned_requires_mention',
+      };
+    }
+  }
   await refreshDiscordUserMappingBestEffort({
     discordUserId: sender.id,
     discordUsername: sender.username,
@@ -399,7 +444,7 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
   const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
     botUserId: resolved.botUserId,
     userId: senderUserId,
-    isTaskThread: Boolean(activeRun || completedRun || pendingRoutingReply),
+    isTaskThread: isRoomoteThread,
     parentChannelId: channel.parentChannelId,
     attachmentImages: processedAttachments.images,
     attachmentText: processedAttachments.attachmentTexts,
