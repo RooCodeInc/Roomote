@@ -2,6 +2,25 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.11.0 (2026-07-18)
+
+### Minor changes
+
+- Allow natural replies to confirm, cancel, or correct pending workspace routing choices in Telegram and Discord.
+- Let Roomote agents show sandboxed, presentational HTML widgets directly in task transcripts, with text fallbacks for chat-originated tasks.
+- Operators can enable Auto-respond on Discord text and announcement channels, so linked posts and matching bot/webhook feeds start tasks with per-channel instructions—no @mention required.
+- Add Kimi for Coding as a first-class inference provider with keys from the Kimi Code console, separate from Moonshot Open Platform.
+
+### Patch changes
+
+- When visual-proof auto-post is off, Discord, Teams, and Telegram agents are guided to attach screenshots in the originating thread (same fallback Slack already had) so proofs are less likely to remain task-UI-only.
+- Discord install docs and channel diagnostics require Add Reactions, so channels missing that permission fail closed instead of looking usable.
+- Discord task starts use the router's free-form kickoff when available and show cleaner Follow / Cancel controls instead of long primary-style button labels.
+- Discord task reactions now match Slack: eyes on real intake messages, mapped terminal/cancel reactions on the launch target, and no automatic eyes spam on every active-thread follow-up.
+- On Discord and Teams, agents re-receive out-of-band PR review and status notices on the next user follow-up so “fix those” stays grounded after Idle notifications.
+- Unlinked Discord users are no longer prompted to link their account for ordinary unmentioned chat inside an existing task thread; link nudges still apply for DMs, slash commands, and @mentions.
+- When Code Reviewer is enabled, chat closeouts that share a new or refreshed PR/MR link briefly note that a source-control self-review will follow.
+
 ## 0.10.0 (2026-07-17)
 
 ### Minor changes
