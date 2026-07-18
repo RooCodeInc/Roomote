@@ -44,6 +44,7 @@ type ScheduledTriageAutomationConfig = {
     | 'sentry_triage'
     | 'dependabot_triage'
     | 'codeql_triage'
+    | 'issue_fixer'
     | 'ci_failure_triage';
   /**
    * Builds the scan task payload for the deployment, or skips with a logged

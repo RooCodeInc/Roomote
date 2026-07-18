@@ -20,6 +20,7 @@ export type ManagerStatsFrequency = 'off' | 'weekly';
 export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
 export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
+export type IssueFixerFrequency = 'off' | 'daily' | 'weekly';
 export type ReviewerEnvironmentScope = 'all' | 'specific';
 export type ReviewerAuthorReviewMode = 'all' | 'specific' | 'none';
 
@@ -88,6 +89,7 @@ export type FormState = {
   sentryTriageProjectSlugs: string;
   dependabotTriageFrequency: DependabotTriageFrequency;
   codeqlTriageFrequency: CodeqlTriageFrequency;
+  issueFixerFrequency: IssueFixerFrequency;
   suggesterFrequency: SuggesterFrequency;
   suggesterInstructions: string;
   suggesterRoutingMode: SuggesterRoutingMode;
@@ -104,6 +106,7 @@ export type AutomationId =
   | 'sentryTriage'
   | 'dependabotTriage'
   | 'codeqlTriage'
+  | 'issueFixer'
   | ScheduleOnlyBackgroundAutomationId
   | 'reviewer'
   | 'conflictResolver'
@@ -159,6 +162,11 @@ const CODEQL_TRIAGE_FIELDS: Array<keyof FormState> = [
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.codeqlTriage,
 ];
 
+const ISSUE_FIXER_FIELDS: Array<keyof FormState> = [
+  'issueFixerFrequency',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.issueFixer,
+];
+
 const SUGGESTER_FIELDS: Array<keyof FormState> = [
   'suggesterFrequency',
   ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.suggester,
@@ -195,6 +203,7 @@ const AUTOMATION_FIELDS: Record<AutomationId, Array<keyof FormState>> = {
   sentryTriage: SENTRY_TRIAGE_FIELDS,
   dependabotTriage: DEPENDABOT_TRIAGE_FIELDS,
   codeqlTriage: CODEQL_TRIAGE_FIELDS,
+  issueFixer: ISSUE_FIXER_FIELDS,
   ...SCHEDULE_ONLY_AUTOMATION_FIELDS,
   reviewer: REVIEWER_FIELDS,
   conflictResolver: CONFLICT_RESOLVER_FIELDS,
@@ -331,6 +340,7 @@ export function buildAutomationSettingsSaveInput(
       stateToSave.sentryTriageProjectSlugs.trim() || null,
     dependabotTriageFrequency: stateToSave.dependabotTriageFrequency,
     codeqlTriageFrequency: stateToSave.codeqlTriageFrequency,
+    issueFixerFrequency: stateToSave.issueFixerFrequency,
     ...buildScheduleOnlyAutomationSaveInput(stateToSave),
     suggesterFrequency: stateToSave.suggesterFrequency,
     suggesterInstructions: stateToSave.suggesterInstructions.trim() || null,

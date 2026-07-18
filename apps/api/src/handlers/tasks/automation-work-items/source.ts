@@ -5,6 +5,7 @@ export type AutomationKey = Extract<
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
+  | 'issue_fixer'
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage'
@@ -17,6 +18,7 @@ export function isAutomationWorkItemSource(
     source === 'sentry_triage' ||
     source === 'dependabot_triage' ||
     source === 'codeql_triage' ||
+    source === 'issue_fixer' ||
     source === 'security_auditor' ||
     source === 'code_quality_auditor' ||
     source === 'ci_failure_triage'

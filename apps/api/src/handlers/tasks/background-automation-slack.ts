@@ -22,6 +22,7 @@ type ScheduledSuggestionSurfaceConfig = {
     | 'sentry_triage'
     | 'dependabot_triage'
     | 'codeql_triage'
+    | 'issue_fixer'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -30,6 +31,7 @@ type ScheduledSuggestionSurfaceConfig = {
     | 'sentry_triage'
     | 'dependabot_triage'
     | 'codeql_triage'
+    | 'issue_fixer'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -47,6 +49,7 @@ export type ScheduledSuggestionSlackConfig = {
     | 'sentry_triage'
     | 'dependabot_triage'
     | 'codeql_triage'
+    | 'issue_fixer'
     | 'security_auditor'
     | 'code_quality_auditor'
     | 'ci_failure_triage';
@@ -58,6 +61,7 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
   | 'sentry_triage'
   | 'dependabot_triage'
   | 'codeql_triage'
+  | 'issue_fixer'
   | 'security_auditor'
   | 'code_quality_auditor'
   | 'ci_failure_triage',
@@ -143,6 +147,26 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
         'I went through the open CodeQL alerts for security findings worth fixing now, and a few stood out.',
     },
   },
+  issue_fixer: {
+    suggestionType: 'issue_fixer',
+    summaryKind: 'issue_fixer',
+    actionFooterText:
+      'I pulled the strongest open-issue fix candidates into the thread for review.',
+    prompt: {
+      automationDescription: 'an Issue Fixer automation',
+      mainActionLine: 'Summarize the open GitHub issues worth fixing.',
+      highlightLabel: 'issues worth fixing',
+      openerSignal: 'an open GitHub issue triage pass',
+      openerExamples: [
+        'I went through open GitHub issues for clear, high-confidence fixes worth picking up',
+        'I did an issue pass, separating well-specified bugs from noisy discussion threads',
+        'I triaged the current open issues, watching for tightly scoped work with clear acceptance criteria',
+      ],
+      overflowLabel: 'issue fix',
+      fallbackLead:
+        'I went through open GitHub issues for clear fixes worth taking now, and a few stood out.',
+    },
+  },
   security_auditor: {
     suggestionType: 'security_auditor',
     summaryKind: 'security_auditor',
@@ -222,6 +246,7 @@ function getScheduledSuggestionSurfaceConfig(
     automationKey === 'sentry_triage' ||
     automationKey === 'dependabot_triage' ||
     automationKey === 'codeql_triage' ||
+    automationKey === 'issue_fixer' ||
     automationKey === 'security_auditor' ||
     automationKey === 'code_quality_auditor' ||
     automationKey === 'ci_failure_triage'

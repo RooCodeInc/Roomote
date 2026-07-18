@@ -7,6 +7,7 @@ import type {
   ConflictResolverFrequency,
   CodeqlTriageFrequency,
   DependabotTriageFrequency,
+  IssueFixerFrequency,
   ManagerStatsFrequency,
   SecurityAuditorFrequency,
   SentryTriageFrequency,
@@ -24,6 +25,7 @@ export const SUGGEST_IDEAS_SETTINGS_HASH = 'suggest-ideas';
 export const SENTRY_TRIAGE_SETTINGS_HASH = 'sentry-triage';
 export const DEPENDABOT_TRIAGE_SETTINGS_HASH = 'dependabot-triage';
 export const CODEQL_TRIAGE_SETTINGS_HASH = 'codeql-triage';
+export const ISSUE_FIXER_SETTINGS_HASH = 'issue-fixer';
 export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
 export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
@@ -37,6 +39,7 @@ export type BackgroundAutomationSettingsHash =
   | typeof SENTRY_TRIAGE_SETTINGS_HASH
   | typeof DEPENDABOT_TRIAGE_SETTINGS_HASH
   | typeof CODEQL_TRIAGE_SETTINGS_HASH
+  | typeof ISSUE_FIXER_SETTINGS_HASH
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
   | typeof CODE_QUALITY_AUDITOR_SETTINGS_HASH
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
@@ -98,6 +101,7 @@ const DAILY_WEEKLY_SCHEDULE_MODES = [
   | SentryTriageFrequency
   | DependabotTriageFrequency
   | CodeqlTriageFrequency
+  | IssueFixerFrequency
 )[];
 
 // CI failure triage is webhook-driven; 'daily' only means enabled.
@@ -207,6 +211,17 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
     scheduledSuggestionSource: 'codeql_triage',
   },
   {
+    automationKey: 'issue_fixer',
+    label: 'Issue Fixer',
+    availability: 'stable',
+    scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
+    manualTriggerRequirements: ['slack', 'github', 'repository'],
+    usesManagerChannel: true,
+    supportedCommunicationProviders: ['slack', 'teams', 'telegram', 'discord'],
+    supportedSourceControlProviders: ['github'],
+    scheduledSuggestionSource: 'issue_fixer',
+  },
+  {
     automationKey: 'security_auditor',
     label: 'Security Auditor',
     availability: 'stable',
@@ -312,6 +327,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: CODEQL_TRIAGE_SETTINGS_HASH,
     automationKey: 'codeql_triage',
+  },
+  {
+    hash: ISSUE_FIXER_SETTINGS_HASH,
+    automationKey: 'issue_fixer',
   },
   {
     hash: SECURITY_AUDITOR_SETTINGS_HASH,

@@ -81,6 +81,7 @@ const RUN_HISTORY_KEYS: BackgroundAutomationKey[] = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
@@ -271,6 +272,7 @@ export async function getBackgroundAgentSettingsCommand(
     sentryTriageSlackChannel: string | null;
     dependabotTriageSlackChannel: string | null;
     codeqlTriageSlackChannel: string | null;
+    issueFixerSlackChannel: string | null;
     securityAuditorSlackChannel: string | null;
     codeQualityAuditorSlackChannel: string | null;
     ciFailureTriageSlackChannel: string | null;
@@ -337,6 +339,7 @@ export async function getBackgroundAgentSettingsCommand(
     dependabotTriageSlackChannelId:
       visibleSettings.dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
+    issueFixerSlackChannelId: visibleSettings.issueFixerSlackChannelId,
     securityAuditorSlackChannelId:
       visibleSettings.securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId:
@@ -359,6 +362,7 @@ export async function getBackgroundAgentSettingsCommand(
     dependabotTriageSlackChannelId:
       visibleSettings.dependabotTriageSlackChannelId,
     codeqlTriageSlackChannelId: visibleSettings.codeqlTriageSlackChannelId,
+    issueFixerSlackChannelId: visibleSettings.issueFixerSlackChannelId,
     securityAuditorSlackChannelId:
       visibleSettings.securityAuditorSlackChannelId,
     codeQualityAuditorSlackChannelId:

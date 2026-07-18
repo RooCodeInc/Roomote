@@ -117,6 +117,14 @@ export function buildSuggestionTaskPromptText(params: {
     });
   }
 
+  if (params.suggestionType === 'issue_fixer') {
+    return buildIssueFixerSuggestionTaskPromptText({
+      ...params,
+      baseText,
+      investigationContext,
+    });
+  }
+
   return appendOptionalSections(baseText, [
     {
       heading: 'Workspace readiness',
@@ -250,6 +258,49 @@ Run the repository's normal validation before delivery. Do not ship changes that
       },
       {
         heading: 'Investigation context from the scheduled triage run',
+        body: investigationContext,
+      },
+    ],
+  );
+}
+
+function buildIssueFixerSuggestionTaskPromptText(params: {
+  title: string;
+  brief: string;
+  baseText: string;
+  investigationContext: string | null | undefined;
+  readinessMessage?: string | null;
+  targetRepositoryFullName?: string | null;
+}): string {
+  const repositoryScope = params.targetRepositoryFullName?.trim() || 'unknown';
+  const investigationContext = params.investigationContext?.trim();
+
+  return appendOptionalSections(
+    `$implement-changes
+
+<task_context>
+  <source>issue_fixer_suggestion</source>
+  <run_mode>issue_follow_up</run_mode>
+  <repository_scope>${repositoryScope}</repository_scope>
+  <requested_action_title>${params.title}</requested_action_title>
+</task_context>
+
+A user chose to implement this Issue Fixer follow-up suggestion:
+
+${params.baseText}
+
+Re-verify the exact open GitHub issue before changing source code. Confirm the issue is still open, capture the issue URL/number, title, labels, acceptance criteria, and relevant comment decisions, and then choose the smallest high-quality fix that satisfies the named issue.
+
+Prefer narrow, targeted fixes over broad rewrites. If the cited issue is already closed or already resolved by an open PR, report that and stop unless the request still names another open issue that clearly belongs in the same change.
+
+Run the repository's normal validation before delivery. Do not ship changes that fail the required validation gate. When opening a PR, reference the issue number so it can be linked or closed.`,
+    [
+      {
+        heading: 'Workspace readiness',
+        body: params.readinessMessage,
+      },
+      {
+        heading: 'Investigation context from the scheduled Issue Fixer run',
         body: investigationContext,
       },
     ],

@@ -92,6 +92,7 @@ manager-facing updates and suggestions.
 | **Triage Sentry Issues**     | Prioritized Sentry follow-up work                                | Daily or weekly                             |
 | **Triage Dependabot Alerts** | Suggested follow-up tasks for open dependency alerts             | Daily or weekly                             |
 | **Triage CodeQL Alerts**     | Remediation follow-up tasks for open code-scanning / CodeQL alerts | Daily or weekly                           |
+| **Issue Fixer**              | Focused fix follow-up tasks for open GitHub issues                 | Daily or weekly                           |
 | **Security Auditor**         | Security follow-up work from recently merged PRs                 | Every hour, every 6 hours, daily, or weekly |
 | **Code Quality Auditor**     | Code quality follow-up work from recently merged PRs             | Every hour, every 6 hours, daily, or weekly |
 | **Suggest Ideas**            | Useful coding work Roomote thinks the team could do              | Daily or weekly                             |
@@ -113,7 +114,7 @@ surfaces).
 
 Cards also show capability badges for what each automation supports today:
 the chat surfaces it can report to and the source-control providers it works
-with. Triage Dependabot Alerts, Triage CodeQL Alerts, and CI Failure Triage are
+with. Triage Dependabot Alerts, Triage CodeQL Alerts, Issue Fixer, and CI Failure Triage are
 GitHub-only by nature. Security Auditor, Code Quality Auditor, Weekly Manager
 Stats, Suggest Ideas, Summarize Merged PRs, and Triage Sentry Issues work with
 any connected source-control provider. Resolve PR Conflicts supports GitHub,
@@ -137,6 +138,10 @@ does not open PRs directly from the scheduled scan.
 CodeQL findings) across your active repositories and launches tightly scoped
 remediation follow-up tasks. It does not open PRs directly from the scheduled
 scan.
+
+**Issue Fixer** scans open GitHub issues across your active repositories and
+launches tightly scoped implement-changes follow-up tasks for clear,
+high-confidence fixes. It does not open PRs directly from the scheduled scan.
 
 **Security Auditor** reviews recently merged PRs for concrete security issues
 and secure-by-default gaps that are worth a real follow-up task.

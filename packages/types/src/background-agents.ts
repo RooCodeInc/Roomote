@@ -25,6 +25,8 @@ export type SentryTriageFrequency = 'off' | 'daily' | 'weekly';
 export type DependabotTriageFrequency = 'off' | 'daily' | 'weekly';
 
 export type CodeqlTriageFrequency = 'off' | 'daily' | 'weekly';
+
+export type IssueFixerFrequency = 'off' | 'daily' | 'weekly';
 export const SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES = [
   'off',
   'every_hour',
@@ -92,6 +94,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
@@ -259,6 +262,7 @@ export const BETA_BACKGROUND_AUTOMATION_KEYS = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',

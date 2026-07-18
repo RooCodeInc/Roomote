@@ -7,6 +7,7 @@ import type {
   ConflictResolverFrequency,
   DependabotTriageFrequency,
   CodeqlTriageFrequency,
+  IssueFixerFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
   ScheduleOnlyBackgroundAutomationFrequency,
@@ -37,6 +38,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
+  | 'issueFixerSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
@@ -44,6 +46,7 @@ export type BackgroundAgentFieldErrorKey =
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
   | 'codeqlTriageDiscordChannel'
+  | 'issueFixerDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
@@ -70,6 +73,7 @@ export type SlackChannelFieldErrorKey = Extract<
   | 'sentryTriageSlackChannel'
   | 'dependabotTriageSlackChannel'
   | 'codeqlTriageSlackChannel'
+  | 'issueFixerSlackChannel'
   | 'securityAuditorSlackChannel'
   | 'codeQualityAuditorSlackChannel'
   | 'ciFailureTriageSlackChannel'
@@ -81,6 +85,7 @@ export type DiscordChannelFieldErrorKey = Extract<
   | 'sentryTriageDiscordChannel'
   | 'dependabotTriageDiscordChannel'
   | 'codeqlTriageDiscordChannel'
+  | 'issueFixerDiscordChannel'
   | 'securityAuditorDiscordChannel'
   | 'codeQualityAuditorDiscordChannel'
   | 'ciFailureTriageDiscordChannel'
@@ -108,6 +113,7 @@ export interface SlackChannelAccessWarnings {
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
+  issueFixerSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -123,6 +129,7 @@ export interface SlackChannelDisplayNames {
   sentryTriageSlackChannel: string | null;
   dependabotTriageSlackChannel: string | null;
   codeqlTriageSlackChannel: string | null;
+  issueFixerSlackChannel: string | null;
   securityAuditorSlackChannel: string | null;
   codeQualityAuditorSlackChannel: string | null;
   ciFailureTriageSlackChannel: string | null;
@@ -140,6 +147,7 @@ export const MANAGER_REPORTING_AUTOMATION_KEYS = [
   'sentry_triage',
   'dependabot_triage',
   'codeql_triage',
+  'issue_fixer',
   'security_auditor',
   'code_quality_auditor',
   'ci_failure_triage',
@@ -225,6 +233,7 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
     | 'sentryTriage'
     | 'dependabotTriage'
     | 'codeqlTriage'
+    | 'issueFixer'
     | ScheduleOnlyBackgroundAutomationId
     | 'announcer'
     | 'platformIssueAlerts';
@@ -266,6 +275,9 @@ export interface UpdateBackgroundAgentSettingsInput extends ScheduleOnlyAutomati
   codeqlTriageFrequency?: CodeqlTriageFrequency;
   codeqlTriageSlackChannel?: string | null;
   codeqlTriageDiscordChannel?: string | null;
+  issueFixerFrequency?: IssueFixerFrequency;
+  issueFixerSlackChannel?: string | null;
+  issueFixerDiscordChannel?: string | null;
   suggesterFrequency: SuggesterFrequency;
   suggesterSlackChannel: string | null;
   suggesterDiscordChannel?: string | null;

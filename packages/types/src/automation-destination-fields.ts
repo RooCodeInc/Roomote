@@ -17,6 +17,7 @@ export type AutomationDestinationAutomationId =
   | 'sentryTriage'
   | 'dependabotTriage'
   | 'codeqlTriage'
+  | 'issueFixer'
   | 'securityAuditor'
   | 'codeQualityAuditor'
   | 'ciFailureTriage'
@@ -97,6 +98,17 @@ export const AUTOMATION_DESTINATION_DESCRIPTORS = [
     discordField: 'codeqlTriageDiscordChannel',
     slackSettingsKey: 'codeqlTriageSlackChannelId',
     discordSettingsKey: 'codeqlTriageDiscordChannelId',
+    slackSettingsIncludesManagerFallback: true,
+    optionalDiscordInput: false,
+    managedTargetKinds: ['slack_channel', 'discord_channel'],
+  },
+  {
+    automationId: 'issueFixer',
+    automationKey: 'issue_fixer',
+    slackField: 'issueFixerSlackChannel',
+    discordField: 'issueFixerDiscordChannel',
+    slackSettingsKey: 'issueFixerSlackChannelId',
+    discordSettingsKey: 'issueFixerDiscordChannelId',
     slackSettingsIncludesManagerFallback: true,
     optionalDiscordInput: false,
     managedTargetKinds: ['slack_channel', 'discord_channel'],

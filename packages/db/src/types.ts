@@ -8,6 +8,7 @@ import type {
   ConflictResolverMaxPrAgeDays,
   CodeqlTriageFrequency,
   DependabotTriageFrequency,
+  IssueFixerFrequency,
   ManagerStatsFrequency,
   PrReviewSettings,
   SecurityAuditorFrequency,
@@ -490,6 +491,10 @@ export type BackgroundAgentSettings = StoredBackgroundAgentSettings & {
   codeqlTriageSlackChannelId: string | null;
   codeqlTriageDiscordChannelId: string | null;
   codeqlTriageLastRunAt: Date | null;
+  issueFixerFrequency: IssueFixerFrequency;
+  issueFixerSlackChannelId: string | null;
+  issueFixerDiscordChannelId: string | null;
+  issueFixerLastRunAt: Date | null;
   securityAuditorFrequency: SecurityAuditorFrequency;
   securityAuditorSlackChannelId: string | null;
   securityAuditorDiscordChannelId: string | null;
