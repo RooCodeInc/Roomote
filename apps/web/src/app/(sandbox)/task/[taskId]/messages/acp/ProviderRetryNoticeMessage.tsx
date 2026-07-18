@@ -5,6 +5,7 @@ import {
 } from '@roomote/types';
 
 import { RefreshCw } from '@/components/system';
+import { cn } from '@/lib/utils';
 
 function getRetryTitle(notice: ProviderRetryNotice): string {
   switch (notice.kind) {
@@ -96,36 +97,35 @@ export function ProviderRetryNoticeMessage({
 
   return (
     <div
-      className="max-w-2xl rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm"
+      className="w-fit max-w-2xl -ml-1 space-y-1 text-sm"
       data-testid="provider-retry-notice"
       role="status"
     >
-      <div className="flex items-start gap-2">
+      <div className="flex items-center gap-2">
         <RefreshCw
-          className={`mt-0.5 size-4 shrink-0 text-muted-foreground ${
-            isCountingDown ? 'animate-spin' : ''
-          }`}
+          className={cn(
+            'size-4 shrink-0 text-muted-foreground',
+            isCountingDown && 'animate-spin',
+          )}
         />
-        <div className="min-w-0 flex-1">
-          <p className="font-medium" data-testid="provider-retry-notice-title">
-            {getRetryTitle(notice)}
-          </p>
-          {errorText ? (
-            <p
-              className="mt-1 whitespace-pre-wrap break-words text-muted-foreground"
-              data-testid="provider-retry-notice-error"
-            >
-              {errorText}
-            </p>
-          ) : null}
-          <p
-            className="mt-1 text-muted-foreground"
-            data-testid="provider-retry-notice-status"
-          >
-            {statusText}
-          </p>
-        </div>
+        <span className="font-medium" data-testid="provider-retry-notice-title">
+          {getRetryTitle(notice)}
+        </span>
       </div>
+      {errorText ? (
+        <p
+          className="whitespace-pre-wrap break-words pl-6 text-muted-foreground"
+          data-testid="provider-retry-notice-error"
+        >
+          {errorText}
+        </p>
+      ) : null}
+      <p
+        className="pl-6 text-muted-foreground"
+        data-testid="provider-retry-notice-status"
+      >
+        {statusText}
+      </p>
     </div>
   );
 }
