@@ -104,7 +104,7 @@ export async function handleGitHubIssueFixer(
   const settings = await getBackgroundAgentSettingsForDeployment();
 
   if (settings.issueFixerFrequency === 'off') {
-    return { status: 'ok', message: 'Issue Fixer is disabled' };
+    return { status: 'ok', message: 'Triage GitHub Issues is disabled' };
   }
 
   const repositoryCoverage = await buildRepositoryCoverage([
@@ -115,7 +115,8 @@ export async function handleGitHubIssueFixer(
   if (!environmentId) {
     return {
       status: 'ok',
-      message: 'Repository has no configured environment for Issue Fixer',
+      message:
+        'Repository has no configured environment for Triage GitHub Issues',
     };
   }
 
@@ -131,7 +132,7 @@ export async function handleGitHubIssueFixer(
   if (claim !== 'OK') {
     return {
       status: 'ok',
-      message: 'Issue Fixer already debounced for this issue',
+      message: 'Triage GitHub Issues already debounced for this issue',
     };
   }
 
@@ -183,7 +184,7 @@ export async function handleGitHubIssueFixer(
 
     return {
       status: 'ok',
-      message: `Launched Issue Fixer for ${match.repositoryFullName}#${payload.issue.number}`,
+      message: `Launched Triage GitHub Issues for ${match.repositoryFullName}#${payload.issue.number}`,
       metadata: { taskId: launchResult.taskId },
     };
   } catch (error) {
@@ -197,7 +198,7 @@ export async function handleGitHubIssueFixer(
     }).catch(() => undefined);
 
     console.error(
-      `${LOG_PREFIX} Failed to launch Issue Fixer for ${match.repositoryFullName}#${payload.issue.number}: ${message}`,
+      `${LOG_PREFIX} Failed to launch Triage GitHub Issues for ${match.repositoryFullName}#${payload.issue.number}: ${message}`,
     );
 
     return { status: 'error', message };

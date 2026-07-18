@@ -16,8 +16,8 @@ export type IssueFixerTriggeringIssue = {
 };
 
 /**
- * Builds the one-task Issue Fixer prompt: fix the named GitHub issue in this
- * same task (not a batch scan), matching Review Code / CI Failure immediacy.
+ * Builds the one-task Triage GitHub Issues prompt: investigate a named issue
+ * and post a plan on the GitHub issue. Does not implement or open a PR.
  */
 export function buildIssueFixerFixPrompt({
   repositoryFullName,
@@ -50,11 +50,11 @@ export function buildIssueFixerFixPrompt({
       : '(none)';
   const bodyPreview = (issue.body ?? '').trim().slice(0, 4000);
 
-  return `$implement-changes
+  return `$plan-repo-implementation
 
 <task_context>
   <source>issue_fixer</source>
-  <run_mode>issue_fix</run_mode>
+  <run_mode>issue_plan_only</run_mode>
   <trigger>${trigger}</trigger>
   <repository_scope>${repositoryFullName}</repository_scope>
   <target_environment_id>${environmentId}</target_environment_id>
@@ -67,7 +67,7 @@ export function buildIssueFixerFixPrompt({
   </issue>
 </task_context>
 
-Fix GitHub issue #${issue.number} in ${repositoryFullName} immediately in this task.
+Triage GitHub issue #${issue.number} in ${repositoryFullName}. Post a concrete implementation plan on the issue. Do not implement code and do not open a pull request in this task.
 
 Issue URL: ${issue.url}
 Title: ${issue.title}
@@ -77,11 +77,12 @@ Issue body:
 ${bodyPreview || '(empty)'}
 
 Requirements:
-1. Re-fetch the live issue with \`gh\` to confirm it is still open and capture any comments or decisions before coding.
-2. Implement the narrowest high-quality fix that satisfies the issue. Avoid unrelated churn.
-3. Run the repository's normal validation before delivery.
-4. Open a PR that references #${issue.number} so it can be linked or closed.
-5. If the issue is already closed, already has an active fix PR, or is blocked on product decisions, report that and stop without guessing.
-6. Stay quiet on chat unless you need input, hit a blocker, or finish with a result.
+1. Re-fetch the live issue with \`gh\` and read comments before planning.
+2. Explore the codebase enough to ground the plan in real files and patterns.
+3. Write a focused implementation plan: approach, files likely touched, risks, test plan, and open questions.
+4. Post that plan as a single GitHub issue comment with \`gh issue comment ${issue.number} --repo ${repositoryFullName} --body "..."\`.
+5. If the issue is closed, is a pull request, already has an active plan/fix PR, or is blocked on product decisions, comment briefly with that finding (or skip with a terse internal note when commenting would be noise) and stop.
+6. Do not edit source files, do not commit, and do not open a PR.
+7. Stay quiet on chat unless you need input, hit a blocker, or finish with a result.
 ${environmentSection}`;
 }

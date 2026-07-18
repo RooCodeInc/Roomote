@@ -276,31 +276,29 @@ function buildIssueFixerSuggestionTaskPromptText(params: {
   const investigationContext = params.investigationContext?.trim();
 
   return appendOptionalSections(
-    `$implement-changes
+    `$plan-repo-implementation
 
 <task_context>
   <source>issue_fixer_suggestion</source>
-  <run_mode>issue_follow_up</run_mode>
+  <run_mode>issue_plan_follow_up</run_mode>
   <repository_scope>${repositoryScope}</repository_scope>
   <requested_action_title>${params.title}</requested_action_title>
 </task_context>
 
-A user chose to implement this Issue Fixer follow-up suggestion:
+A user chose to continue this Triage GitHub Issues follow-up:
 
 ${params.baseText}
 
-Re-verify the exact open GitHub issue before changing source code. Confirm the issue is still open, capture the issue URL/number, title, labels, acceptance criteria, and relevant comment decisions, and then choose the smallest high-quality fix that satisfies the named issue.
+Re-verify the exact open GitHub issue before planning. Confirm the issue is still open, capture the issue URL/number, title, labels, acceptance criteria, and relevant comment decisions, then post an updated concrete implementation plan on the GitHub issue.
 
-Prefer narrow, targeted fixes over broad rewrites. If the cited issue is already closed or already resolved by an open PR, report that and stop unless the request still names another open issue that clearly belongs in the same change.
-
-Run the repository's normal validation before delivery. Do not ship changes that fail the required validation gate. When opening a PR, reference the issue number so it can be linked or closed.`,
+Do not implement code and do not open a PR in this task unless the user later asks for implementation.`,
     [
       {
         heading: 'Workspace readiness',
         body: params.readinessMessage,
       },
       {
-        heading: 'Investigation context from the scheduled Issue Fixer run',
+        heading: 'Investigation context from the triage run',
         body: investigationContext,
       },
     ],

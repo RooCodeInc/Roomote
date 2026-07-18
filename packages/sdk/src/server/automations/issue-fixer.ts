@@ -27,20 +27,20 @@ import {
 const LOG_PREFIX = '[issue-fixer]';
 
 /**
- * Manual "Run now" launches one environment-backed investigate-and-fix task
- * that picks a single high-confidence open GitHub issue. Day-to-day operation
- * is webhook-driven on issues.opened / issues.reopened.
+ * Manual "Run now" launches one environment-backed triage task that picks a
+ * single high-confidence open GitHub issue and posts a plan. Day-to-day
+ * operation is webhook-driven on issues.opened / issues.reopened.
  */
 export async function issueFixerJob(
   opts: AutomationRunOpts = {},
 ): Promise<AutomationJobResult> {
-  console.log(`${LOG_PREFIX} Starting issue fixer evaluator`);
+  console.log(`${LOG_PREFIX} Starting triage GitHub issues evaluator`);
 
   const result = emptyJobResult();
 
   if (opts.manualTrigger !== true) {
     result.skippedReason =
-      'Issue Fixer is webhook-driven; only manual Run now is supported offline.';
+      'Triage GitHub Issues is webhook-driven; only manual Run now is supported offline.';
     return result;
   }
 
@@ -88,7 +88,7 @@ export async function issueFixerJob(
             repo: coverage.repositoryFullName,
             environmentId,
             selectedRepositories: [coverage.repositoryFullName],
-            description: `$implement-changes
+            description: `$plan-repo-implementation
 
 <task_context>
   <source>issue_fixer</source>
@@ -97,13 +97,14 @@ export async function issueFixerJob(
   <target_environment_id>${environmentId}</target_environment_id>
 </task_context>
 
-Issue Fixer was triggered manually (Run now).
+Triage GitHub Issues was triggered manually (Run now).
 
 1. Use \`gh\` to list open issues in ${coverage.repositoryFullName} (exclude pull requests).
-2. Pick the single highest-confidence open issue with clear requirements that has no active fix PR.
-3. Implement the narrowest high-quality fix and open a PR that references the issue.
-4. If nothing is actionable, end with a terse internal note and do not open a PR.
-5. Stay quiet on chat unless you need input, hit a blocker, or finish with a result.
+2. Pick the single highest-confidence open issue that needs a plan and has no recent comprehensive plan comment or active fix PR.
+3. Explore the codebase enough to ground the plan, then post one concrete implementation plan as a GitHub issue comment.
+4. Do not implement code and do not open a PR.
+5. If nothing is actionable, end with a terse internal note.
+6. Stay quiet on chat unless you need input, hit a blocker, or finish with a result.
 `,
             visibleInTranscript: false,
             ...(destination?.provider === 'slack'

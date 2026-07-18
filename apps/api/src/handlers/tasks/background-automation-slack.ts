@@ -153,9 +153,9 @@ const SCHEDULED_SUGGESTION_SURFACE_CONFIG: Record<
     actionFooterText:
       'I pulled the strongest open-issue fix candidates into the thread for review.',
     prompt: {
-      automationDescription: 'an Issue Fixer automation',
-      mainActionLine: 'Summarize the open GitHub issues worth fixing.',
-      highlightLabel: 'issues worth fixing',
+      automationDescription: 'a Triage GitHub Issues automation',
+      mainActionLine: 'Summarize the open GitHub issues that need a plan.',
+      highlightLabel: 'issues that need a plan',
       openerSignal: 'an open GitHub issue triage pass',
       openerExamples: [
         'I went through open GitHub issues for clear, high-confidence fixes worth picking up',

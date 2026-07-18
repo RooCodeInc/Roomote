@@ -237,8 +237,15 @@ export const SCHEDULE_ONLY_BACKGROUND_AUTOMATIONS = {
   },
   issueFixer: {
     id: 'issueFixer',
-    label: 'Issue Fixer',
-    hashAliases: ['issue-fixer', 'issuefixer'],
+    label: 'Triage GitHub Issues',
+    hashAliases: [
+      'issue-fixer',
+      'issuefixer',
+      'fix-issues',
+      'fixissues',
+      'triage-github-issues',
+      'triagegithubissues',
+    ],
     availability: 'stable',
     automationKey: 'issue_fixer',
     frequencyField: 'issueFixerFrequency',

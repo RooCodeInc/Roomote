@@ -2733,6 +2733,112 @@ export function AutomationsSettings() {
               </div>
             </AutomationCard>
 
+            {(
+              [
+                'issueFixer',
+              ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
+            ).map((automationId) => {
+              const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
+              const automationUi =
+                SCHEDULE_ONLY_AUTOMATION_UI_DEFINITIONS[automation.id];
+              const frequency = formState[automation.frequencyField];
+              const isEnabled =
+                scheduleOnlyAutomationEnabledState[automation.id];
+              const blockedReason =
+                scheduleOnlyAutomationBlockedReasons[automation.id];
+              const fieldId = `${automation.automationKey.replaceAll('_', '-')}-frequency`;
+
+              return (
+                <AutomationCard
+                  key={automation.id}
+                  automation={AUTOMATION_DEFINITIONS[automation.id]}
+                  isOpen={openAutomationIds.has(automation.id)}
+                  onOpenChange={(open) =>
+                    setAutomationOpen(automation.id, open)
+                  }
+                  iconEnabled={iconEnabled[automation.id]}
+                  debugSection={renderDebugRunsSection(automation.id)}
+                  runAction={
+                    <BasicTooltip
+                      content={getRunTooltip(
+                        automation.id,
+                        isEnabled,
+                        blockedReason,
+                      )}
+                    >
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() =>
+                          triggerMutation.mutate({
+                            automationKey: automation.automationKey,
+                          })
+                        }
+                        disabled={isRunDisabled(
+                          automation.id,
+                          isEnabled,
+                          blockedReason != null,
+                        )}
+                      >
+                        <Play />
+                      </Button>
+                    </BasicTooltip>
+                  }
+                  footer={
+                    <AutomationFooter
+                      isDirty={isDirty[automation.id]}
+                      isPending={
+                        updateMutation.isPending &&
+                        savingAutomation === automation.id
+                      }
+                      onSave={() => saveAgent(automation.id)}
+                      onReset={() => resetAgent(automation.id)}
+                    />
+                  }
+                >
+                  <ScheduleOnlyAutomationContent
+                    automationLabel={automation.label}
+                    control={
+                      automationUi.control.kind === 'schedule'
+                        ? {
+                            ...automationUi.control,
+                            scheduleOptions:
+                              SCHEDULE_ONLY_AUTOMATION_FREQUENCY_OPTIONS,
+                          }
+                        : automationUi.control
+                    }
+                    details={automationUi.details}
+                    frequency={frequency}
+                    isEnabled={isEnabled}
+                    disabled={false}
+                    fieldId={fieldId}
+                    onFrequencyChange={(nextFrequency) =>
+                      setScheduleOnlyAutomationFrequency(
+                        automation.id,
+                        nextFrequency,
+                      )
+                    }
+                  >
+                    {renderSlackDestinationField({
+                      field: 'issueFixerSlackChannel',
+                      inputId: `${automation.id}-slack-channel`,
+                      label: 'Post follow-up work to this Slack channel',
+                      helperText:
+                        'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.',
+                      savedChannelId:
+                        settingsQuery.data?.settings.issueFixerSlackChannelId ??
+                        null,
+                      savedDiscordChannelId:
+                        settingsQuery.data?.settings
+                          .issueFixerDiscordChannelId ?? null,
+                      warningChannelId:
+                        slackChannelAccessWarnings.issueFixerSlackChannel,
+                    })}
+                  </ScheduleOnlyAutomationContent>
+                </AutomationCard>
+              );
+            })}
+
             <AutomationCard
               automation={AUTOMATION_DEFINITIONS.conflictResolver}
               isOpen={openAutomationIds.has('conflictResolver')}
@@ -2925,7 +3031,6 @@ export function AutomationsSettings() {
             {(
               [
                 'ciFailureTriage',
-                'issueFixer',
               ] as const satisfies readonly ScheduleOnlyBackgroundAutomationId[]
             ).map((automationId) => {
               const automation = SCHEDULE_ONLY_AUTOMATIONS_BY_ID[automationId];
@@ -3024,7 +3129,7 @@ export function AutomationsSettings() {
                         automation.id === 'ciFailureTriage'
                           ? 'Choose where Roomote should post CI failure triage work.'
                           : automation.id === 'issueFixer'
-                            ? 'Optional. Issue Fixer launches fix tasks immediately; choose a channel if you want alerts.'
+                            ? 'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.'
                             : 'Choose where Roomote should post actionable follow-up work.',
                       savedChannelId:
                         automation.id === 'securityAuditor'
@@ -3313,7 +3418,7 @@ export function AutomationsSettings() {
                         automation.id === 'ciFailureTriage'
                           ? 'Choose where Roomote should post CI failure triage work.'
                           : automation.id === 'issueFixer'
-                            ? 'Optional. Issue Fixer launches fix tasks immediately; choose a channel if you want alerts.'
+                            ? 'Optional. Triage GitHub Issues posts plans on the issue; choose a channel if you want alerts.'
                             : 'Choose where Roomote should post actionable follow-up work.',
                       savedChannelId:
                         automation.id === 'securityAuditor'

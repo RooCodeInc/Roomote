@@ -62,8 +62,8 @@ const AUTO_ACT_AUTOMATION_CONFIG: Record<
     enforceUniqueTargetEnvironments: true,
   },
   issue_fixer: {
-    label: 'Issue Fixer',
-    maxActItems: 3,
+    label: 'Triage GitHub Issues',
+    maxActItems: 0,
     executionTaskBootstrap: '$implement-changes',
     enforceUniqueTargetEnvironments: true,
   },

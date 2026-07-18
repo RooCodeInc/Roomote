@@ -216,7 +216,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   },
   {
     automationKey: 'issue_fixer',
-    label: 'Issue Fixer',
+    label: 'Triage GitHub Issues',
     availability: 'stable',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new GitHub issues; Run now can still launch manually.
