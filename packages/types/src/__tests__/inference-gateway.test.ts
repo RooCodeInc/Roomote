@@ -33,6 +33,25 @@ describe('inference gateway URL builders', () => {
     ).toBe('https://api.example.com/api/inference/anthropic/v1');
   });
 
+  it('registers Kimi Code membership as an Anthropic-compatible gateway provider', () => {
+    const provider = getInferenceGatewayProvider('kimi-for-coding');
+    expect(provider).toMatchObject({
+      envVarNames: ['KIMI_API_KEY'],
+      upstreamBaseUrl: 'https://api.kimi.com/coding',
+      authHeader: { name: 'x-api-key' },
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/kimi-for-coding/v1');
+    expect(getInferenceGatewayProviderByEnvVarName('KIMI_API_KEY')?.id).toBe(
+      'kimi-for-coding',
+    );
+  });
+
   it('exposes a chatgpt-oauth provider that collapses to the Codex backend', () => {
     const provider = getInferenceGatewayProvider(CHATGPT_GATEWAY_PROVIDER_ID);
     expect(provider?.authStrategy).toBe('chatgpt-oauth');

@@ -247,6 +247,22 @@ describe('inference gateway', () => {
     );
   });
 
+  it('proxies Kimi Code membership through its Anthropic-compatible endpoint', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/kimi-for-coding/v1/messages',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.kimi.com/coding/v1/messages');
+    expect(new Headers(init.headers).get('x-api-key')).toBe(
+      'provider-secret-key',
+    );
+  });
+
   it('allows nested paths under the Vercel AI Gateway protocol base', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(

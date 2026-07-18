@@ -258,6 +258,17 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      id: 'kimi-for-coding',
+      name: 'Kimi Code (membership)',
+      envVarNames: ['KIMI_API_KEY'],
+      // models.dev registers Kimi For Coding as @ai-sdk/anthropic against
+      // https://api.kimi.com/coding/v1 (membership keys, not Open Platform).
+      upstreamBaseUrl: 'https://api.kimi.com/coding',
+      authHeader: { name: 'x-api-key' },
+      allowedPaths: ANTHROPIC_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
       id: 'minimax',
       name: 'MiniMax',
       envVarNames: ['MINIMAX_API_KEY'],

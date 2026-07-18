@@ -331,6 +331,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     envVarName: 'MOONSHOT_API_KEY',
     defaultRoomoteModel: 'moonshotai/kimi-k2.7-code',
     authKind: 'api-key',
+    credentialHelp: {
+      text: 'Paste an Open Platform key from platform.kimi.ai. Kimi Code membership keys will not work here — use Kimi Code (membership) instead.',
+      href: 'https://platform.kimi.ai/console/api-keys',
+      linkLabel: 'Open Kimi API Platform keys',
+    },
     suggestedTaskModels: mapRecommendedTaskModels({
       'kimi-k3': 'moonshotai/kimi-k3',
       'kimi-k2-7-code': 'moonshotai/kimi-k2.7-code',
@@ -339,6 +344,32 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       vision: 'moonshotai/kimi-k3',
       codeReview: 'moonshotai/kimi-k3',
       planning: 'moonshotai/kimi-k3',
+    },
+  },
+  {
+    // Kimi Code membership (subscription) keys authenticate against the
+    // Anthropic-compatible coding endpoint, not Open Platform / moonshotai.
+    id: 'kimi-for-coding',
+    label: 'Kimi Code (membership)',
+    envVarName: 'KIMI_API_KEY',
+    envVarLabel: 'Kimi Code API key',
+    defaultRoomoteModel: 'kimi-for-coding/k3',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Create a key in the Kimi Code console after activating membership. Do not use a platform.kimi.ai / Moonshot Open Platform key here.',
+      href: 'https://www.kimi.com/code/console',
+      linkLabel: 'Open Kimi Code console',
+    },
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'kimi-k3': 'kimi-for-coding/k3',
+      'kimi-k2-7-code': 'kimi-for-coding/k2p7',
+    }),
+    recommendedRoleModels: {
+      helper: 'kimi-for-coding/k2p7',
+      vision: 'kimi-for-coding/k3',
+      codeReview: 'kimi-for-coding/k3',
+      explore: 'kimi-for-coding/kimi-for-coding-highspeed',
+      planning: 'kimi-for-coding/k3',
     },
   },
   {

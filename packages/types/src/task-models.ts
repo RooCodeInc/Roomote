@@ -23,6 +23,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'openai',
   'anthropic',
   'moonshotai',
+  'kimi-for-coding',
   'minimax',
   'opencode',
   'amazon-bedrock',
