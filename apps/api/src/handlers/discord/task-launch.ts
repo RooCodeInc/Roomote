@@ -5,7 +5,7 @@ import {
   type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
-import { db, environments, eq, sql, taskRuns } from '@roomote/db/server';
+import { db, environments, eq, sql, taskRuns, tasks } from '@roomote/db/server';
 import {
   enqueueTask,
   getTaskUrl,
@@ -485,20 +485,43 @@ export async function launchDiscordTask(input: {
       // owned thread with the same provider credentials that reserved it.
       // Going through runtime-credential sync can skip the rename when this
       // request already holds a working Discord provider.
+      // Re-read the canonical task title after each provider call so a concurrent
+      // manual rename that lands later cannot be overwritten by this older
+      // early-title request.
       ...(titleThreadId
         ? {
-            onEarlyTitleGenerated: async ({ title }: { title: string }) => {
-              try {
-                await input.provider.editChannel({
-                  channelId: titleThreadId,
-                  name: buildCommunicationTaskThreadName(title),
-                });
-              } catch (error) {
-                console.warn(
-                  `[discord] Failed to rename task thread ${titleThreadId} with generated title: ${
-                    error instanceof Error ? error.message : String(error)
-                  }`,
-                );
+            onEarlyTitleGenerated: async ({
+              taskRun,
+              title,
+            }: {
+              taskRun: { taskId: string };
+              title: string;
+            }) => {
+              let canonicalTitle = title;
+              for (let attempt = 0; attempt < 2; attempt += 1) {
+                try {
+                  await input.provider.editChannel({
+                    channelId: titleThreadId,
+                    name: buildCommunicationTaskThreadName(canonicalTitle),
+                  });
+                } catch (error) {
+                  console.warn(
+                    `[discord] Failed to rename task thread ${titleThreadId} with generated title: ${
+                      error instanceof Error ? error.message : String(error)
+                    }`,
+                  );
+                  return;
+                }
+
+                const [latestTask] = await db
+                  .select({ title: tasks.title })
+                  .from(tasks)
+                  .where(eq(tasks.id, taskRun.taskId))
+                  .limit(1);
+                if (!latestTask || latestTask.title === canonicalTitle) {
+                  return;
+                }
+                canonicalTitle = latestTask.title;
               }
             },
           }
