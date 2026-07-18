@@ -188,6 +188,8 @@ function resetControllerMocks() {
   mockRecordTaskRunLifecycleEvent.mockResolvedValue(undefined);
   mockRedisSet.mockResolvedValue('OK');
   mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
+  mockDbExecute.mockReset().mockResolvedValue([]);
+  mockDbTransaction.mockReset();
   mockUpdateWhere.mockReset().mockReturnValue({
     returning: vi.fn().mockResolvedValue([{}]),
   });
@@ -504,42 +506,79 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
     mockUpdateWhere.mockReturnValue({
       returning: vi.fn().mockResolvedValue([{ id: 42 }]),
     });
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          execute: (...args: unknown[]) => mockDbExecute(...args),
+          update: (...args: unknown[]) => mockDbUpdate(...args),
+        }),
+    );
     controller = new TestController();
   });
 
-  it('fails a dequeued run immediately when its worker exits before starting', async () => {
+  it('schedules one fresh sandbox when the first worker exits before starting', async () => {
+    mockDbExecute.mockResolvedValueOnce([{ id: 42 }]).mockResolvedValueOnce([]);
     const job = makeTaskRun({
       id: 42,
       status: RunStatus.Dequeued,
+      machineId: 'sandbox-old',
       startedAt: null,
       workerHeartbeatAt: null,
     });
 
     await expect(
       controller.testHandleWorkerExitBeforeStart(job, 1),
-    ).resolves.toBe(true);
+    ).resolves.toBe('restart');
 
     expect(mockDbUpdateSet).toHaveBeenCalledWith(
       expect.objectContaining({
-        status: RunStatus.Failed,
-        error: 'Worker process exited before claiming task run (exit code 1)',
-        completedAt: expect.any(Date),
+        status: RunStatus.Pending,
+        machineId: null,
+        provisionStartedAt: null,
+        provisionReadyAt: null,
       }),
     );
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 42,
+        details: expect.objectContaining({
+          stage: 'worker_bootstrap_restart',
+          restartAttempt: 1,
+          previousMachineId: 'sandbox-old',
+        }),
+      }),
+    );
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      'Controller scheduled a fresh sandbox after worker bootstrap failure',
+      expect.objectContaining({
+        runId: 42,
+        exitCode: 1,
+        restartAttempt: 1,
+        phase: 'worker_bootstrap',
+      }),
+      expect.objectContaining({ signal: 'worker-bootstrap-restart' }),
+    );
+  });
+
+  it('fails the run when the replacement worker also exits before starting', async () => {
+    mockDbExecute
+      .mockResolvedValueOnce([{ id: 42 }])
+      .mockResolvedValueOnce([{ id: 'restart-event' }]);
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({ id: 42, status: RunStatus.Dequeued }),
+        1,
+      ),
+    ).resolves.toBe('failed');
+
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 42,
       status: RunStatus.Failed,
       error: 'Worker process exited before claiming task run (exit code 1)',
     });
-    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
-      'Detached worker exited before claiming its task run',
-      expect.objectContaining({
-        runId: 42,
-        exitCode: 1,
-        phase: 'worker_bootstrap',
-      }),
-      expect.objectContaining({ signal: 'worker-bootstrap-exit' }),
-    );
   });
 
   it('ignores an exit when the run already advanced', async () => {
@@ -552,7 +591,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       0,
     );
 
-    expect(claimed).toBe(false);
+    expect(claimed).toBe('ignore');
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockCaptureControllerMessage).not.toHaveBeenCalled();
   });
@@ -586,6 +625,9 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
   });
 
   it('keeps the claimed failure durable when finalization side effects fail', async () => {
+    mockDbExecute
+      .mockResolvedValueOnce([{ id: 44 }])
+      .mockResolvedValueOnce([{ id: 'restart-event' }]);
     mockFinishRun.mockRejectedValueOnce(new Error('notification failed'));
 
     await expect(
@@ -593,7 +635,7 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
         makeTaskRun({ id: 44, status: RunStatus.Dequeued }),
         1,
       ),
-    ).resolves.toBe(true);
+    ).resolves.toBe('failed');
 
     expect(mockCaptureControllerException).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'notification failed' }),

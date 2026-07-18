@@ -142,10 +142,13 @@ export async function spawnModalWorker(
     deploymentSlug?: string;
     modalTags?: Record<string, string>;
     /**
-     * Returns true when the controller claimed the exit as a pre-start
-     * bootstrap failure and the now-unused sandbox should be destroyed.
+     * Classifies a post-launch exit so the provider can clean up before an
+     * optional fresh launch is scheduled.
      */
-    onWorkerExit?: (event: { exitCode: number }) => Promise<boolean>;
+    onWorkerExit?: (event: {
+      exitCode: number;
+    }) => Promise<'ignore' | 'restart' | 'failed'>;
+    onWorkerRestart?: () => void;
   },
 ): Promise<{
   machineId: string;
@@ -170,6 +173,7 @@ export async function spawnModalWorker(
     deploymentSlug,
     modalTags,
     onWorkerExit,
+    onWorkerRestart,
   } = config;
   const parsedModalRegions = parseModalRegions(modalRegions);
   const environmentId = taskRun.payload.environmentId;
@@ -428,9 +432,9 @@ export async function spawnModalWorker(
       ...(onWorkerExit
         ? {
             onExit: async ({ exitCode }: { exitCode: number }) => {
-              const shouldCleanup = await onWorkerExit({ exitCode });
+              const disposition = await onWorkerExit({ exitCode });
 
-              if (!shouldCleanup) {
+              if (disposition === 'ignore') {
                 return;
               }
 
@@ -445,6 +449,10 @@ export async function spawnModalWorker(
                 onMutation: recordMutation,
                 ...mutationContext,
               });
+
+              if (disposition === 'restart') {
+                onWorkerRestart?.();
+              }
             },
           }
         : {}),

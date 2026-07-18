@@ -491,6 +491,7 @@ describe('RoomoteController', () => {
         modalRegions: 'us,us-west',
         modalVmMemoryMiB: 8192,
         onWorkerExit: expect.any(Function),
+        onWorkerRestart: expect.any(Function),
       }),
     );
   });

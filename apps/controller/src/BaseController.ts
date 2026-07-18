@@ -28,6 +28,7 @@ import {
   isNull,
   isNotNull,
   lt,
+  sql,
 } from '@roomote/db/server';
 import { dequeueTaskRun } from '@roomote/cloud-agents/server';
 import { finishRun } from '@roomote/sdk/server';
@@ -38,6 +39,8 @@ import {
   captureControllerMessage,
 } from './monitoring/sentry';
 import { resolveFromWorkspaceRoot } from './repo-paths';
+
+type WorkerBootstrapExitDisposition = 'ignore' | 'restart' | 'failed';
 
 export abstract class BaseController {
   private static readonly SOURCE_DIR = path.dirname(
@@ -66,6 +69,9 @@ export abstract class BaseController {
 
   /** Track in-flight spawn operations by run ID. */
   private inFlightSpawns = new Map<number, Promise<void>>();
+
+  /** Bootstrap retries waiting for a spawn slot or the previous spawn unwind. */
+  private pendingWorkerBootstrapRestarts = new Map<number, TaskRun>();
 
   /** Watches local release artifacts for changes (local dev only). */
   private artifactWatchers: fs.FSWatcher[] = [];
@@ -133,6 +139,30 @@ export abstract class BaseController {
         ) {
           lastWorkerBootstrapCheckAt = iterationNow;
           await this.failTimedOutWorkerBootstrap();
+        }
+
+        const pendingRestart = this.pendingWorkerBootstrapRestarts
+          .values()
+          .next().value;
+
+        if (
+          pendingRestart &&
+          this.inFlightSpawns.size < this.MAX_CONCURRENT_SPAWNS &&
+          !this.inFlightSpawns.has(pendingRestart.id)
+        ) {
+          this.pendingWorkerBootstrapRestarts.delete(pendingRestart.id);
+
+          if (this.spawnWorkerInBackground(pendingRestart)) {
+            console.log(
+              `[BaseController] Retrying worker bootstrap for task run #${pendingRestart.id}`,
+            );
+            continue;
+          }
+
+          this.pendingWorkerBootstrapRestarts.set(
+            pendingRestart.id,
+            pendingRestart,
+          );
         }
 
         if (this.inFlightSpawns.size >= this.MAX_CONCURRENT_SPAWNS) {
@@ -538,13 +568,60 @@ export abstract class BaseController {
   protected async handleWorkerExitBeforeStart(
     taskRun: TaskRun,
     exitCode: number,
-  ): Promise<boolean> {
+  ): Promise<WorkerBootstrapExitDisposition> {
+    if (await this.claimWorkerBootstrapRestart(taskRun, exitCode)) {
+      return 'restart';
+    }
+
     const errorMessage = `Worker process exited before claiming task run (exit code ${exitCode})`;
-    return this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
-      message: 'Detached worker exited before claiming its task run',
-      signal: 'worker-bootstrap-exit',
-      exitCode,
-    });
+    const failed = await this.claimWorkerBootstrapFailure(
+      taskRun,
+      errorMessage,
+      {
+        message: 'Detached worker exited before claiming its task run',
+        signal: 'worker-bootstrap-exit',
+        exitCode,
+      },
+    );
+
+    return failed ? 'failed' : 'ignore';
+  }
+
+  protected scheduleWorkerBootstrapRestart(taskRun: TaskRun): void {
+    const restartRun: TaskRun = {
+      ...taskRun,
+      status: RunStatus.Pending,
+      dequeuedAt: null,
+      machineId: null,
+      machineDomain: null,
+      machineDomains: null,
+      primaryPortName: null,
+      sandboxServerUrl: null,
+      sandboxCmdId: null,
+      proxyPorts: null,
+      provisionStartedAt: null,
+      provisionReadyAt: null,
+    };
+
+    if (!this.isRunning) {
+      this.pendingWorkerBootstrapRestarts.set(taskRun.id, restartRun);
+      console.log(
+        `[BaseController] Queued worker bootstrap retry for task run #${taskRun.id} while the controller is stopped`,
+      );
+      return;
+    }
+
+    if (this.spawnWorkerInBackground(restartRun)) {
+      console.log(
+        `[BaseController] Retrying worker bootstrap for task run #${taskRun.id}`,
+      );
+      return;
+    }
+
+    this.pendingWorkerBootstrapRestarts.set(taskRun.id, restartRun);
+    console.log(
+      `[BaseController] Queued worker bootstrap retry for task run #${taskRun.id}`,
+    );
   }
 
   protected async failTimedOutWorkerBootstrap(): Promise<boolean> {
@@ -654,6 +731,98 @@ export abstract class BaseController {
         `[BaseController] Failed to complete bootstrap-failure side effects for task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+
+    return true;
+  }
+
+  private async claimWorkerBootstrapRestart(
+    taskRun: TaskRun,
+    exitCode: number,
+  ): Promise<boolean> {
+    const claimed = await db.transaction(async (tx) => {
+      const [lockedRun] = await tx.execute<{ id: number }>(sql`
+        SELECT id
+        FROM task_runs
+        WHERE id = ${taskRun.id}
+          AND status = ${RunStatus.Dequeued}
+          AND started_at IS NULL
+          AND worker_heartbeat_at IS NULL
+          AND canceled_at IS NULL
+        FOR UPDATE
+      `);
+
+      if (!lockedRun) {
+        return false;
+      }
+
+      const [previousRestart] = await tx.execute<{ id: string }>(sql`
+        SELECT id
+        FROM task_run_events
+        WHERE run_id = ${taskRun.id}
+          AND source = 'run_lifecycle'
+          AND details ->> 'stage' = 'worker_bootstrap_restart'
+        LIMIT 1
+      `);
+
+      if (previousRestart) {
+        return false;
+      }
+
+      await tx
+        .update(taskRuns)
+        .set({
+          status: RunStatus.Pending,
+          dequeuedAt: null,
+          machineId: null,
+          machineDomain: null,
+          machineDomains: null,
+          primaryPortName: null,
+          sandboxServerUrl: null,
+          sandboxCmdId: null,
+          proxyPorts: null,
+          provisionStartedAt: null,
+          provisionReadyAt: null,
+        })
+        .where(eq(taskRuns.id, taskRun.id));
+
+      await recordTaskRunLifecycleEvent(tx, {
+        runId: taskRun.id,
+        taskId: taskRun.taskId,
+        eventType: 'decision',
+        message:
+          'Controller scheduled one fresh sandbox after a worker bootstrap exit.',
+        details: {
+          stage: 'worker_bootstrap_restart',
+          status: RunStatus.Pending,
+          provider: taskRun.vendor ?? null,
+          previousMachineId: taskRun.machineId ?? null,
+          exitCode,
+          restartAttempt: 1,
+        },
+      });
+
+      return true;
+    });
+
+    if (!claimed) {
+      return false;
+    }
+
+    captureControllerMessage(
+      'Controller scheduled a fresh sandbox after worker bootstrap failure',
+      {
+        runId: taskRun.id,
+        payloadKind: taskRun.payloadKind,
+        provider: taskRun.vendor,
+        exitCode,
+        restartAttempt: 1,
+        phase: 'worker_bootstrap',
+      },
+      {
+        component: 'worker-lifecycle',
+        signal: 'worker-bootstrap-restart',
+      },
+    );
 
     return true;
   }

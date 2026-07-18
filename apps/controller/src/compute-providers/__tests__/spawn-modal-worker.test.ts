@@ -331,7 +331,8 @@ describe('spawnModalWorker', () => {
   });
 
   it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue(true);
+    const onWorkerExit = vi.fn().mockResolvedValue('restart');
+    const onWorkerRestart = vi.fn();
 
     await spawnModalWorker(
       mockTaskRun({
@@ -347,6 +348,7 @@ describe('spawnModalWorker', () => {
         modalVmMemoryMiB: 8192,
         modalTimeoutMs: 60_000,
         onWorkerExit,
+        onWorkerRestart,
       },
     );
 
@@ -363,10 +365,11 @@ describe('spawnModalWorker', () => {
         onMutation: expect.any(Function),
       }),
     );
+    expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
 
   it('leaves the sandbox alone when a detached exit belongs to an advanced run', async () => {
-    const onWorkerExit = vi.fn().mockResolvedValue(false);
+    const onWorkerExit = vi.fn().mockResolvedValue('ignore');
 
     await spawnModalWorker(
       mockTaskRun({

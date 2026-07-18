@@ -141,6 +141,7 @@ export class RoomoteController extends BaseController {
           localTarballPath: this.localWorkerReleasePath,
           onWorkerExit: ({ exitCode }) =>
             this.handleWorkerExitBeforeStart(taskRun, exitCode),
+          onWorkerRestart: () => this.scheduleWorkerBootstrapRestart(taskRun),
         });
         return;
       }
