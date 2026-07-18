@@ -56,6 +56,7 @@ import {
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
 import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
+import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
 
 interface RecordTaskMessageEnvelopeInput {
   runId: number;
@@ -745,6 +746,12 @@ async function refreshTaskTitle(input: {
 
   if (!updatedTask) {
     return;
+  }
+
+  if (shouldPersistGeneratedTitle) {
+    await syncTaskCommunicationThreadTitleBestEffort({
+      taskId: updatedTask.id,
+    });
   }
 }
 
