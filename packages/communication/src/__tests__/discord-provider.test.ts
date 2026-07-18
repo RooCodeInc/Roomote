@@ -238,6 +238,7 @@ describe('DiscordCommunicationProvider', () => {
         send_messages: true,
         send_messages_in_threads: true,
         create_public_threads: true,
+        manage_threads: false,
         read_message_history: true,
         embed_links: true,
         attach_files: true,
@@ -589,7 +590,7 @@ describe('DiscordCommunicationProvider', () => {
     });
   });
 
-  it('retains forum tags and rejects required-tag forums before creating a post', async () => {
+  it('retains forum tags and automatically applies an unmoderated required tag', async () => {
     const { server, provider } = createHarness();
     const forumId = '400000000000000016';
     server.addChannel({
@@ -599,6 +600,13 @@ describe('DiscordCommunicationProvider', () => {
       type: 16,
       flags: 1 << 4,
       available_tags: [
+        {
+          id: '600000000000000000',
+          name: 'Maintainers',
+          moderated: true,
+          emoji_id: null,
+          emoji_name: '🔐',
+        },
         {
           id: '600000000000000001',
           name: 'Engineering',
@@ -611,7 +619,7 @@ describe('DiscordCommunicationProvider', () => {
 
     await expect(provider.getChannel(forumId)).resolves.toMatchObject({
       flags: 1 << 4,
-      availableTags: [
+      availableTags: expect.arrayContaining([
         {
           id: '600000000000000001',
           name: 'Engineering',
@@ -619,8 +627,57 @@ describe('DiscordCommunicationProvider', () => {
           emojiId: null,
           emojiName: '🛠️',
         },
-      ],
+      ]),
     });
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId: forumId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: true,
+      requiresTag: true,
+      unsupportedReason: null,
+      availableTags: expect.arrayContaining([
+        expect.objectContaining({ name: 'Engineering' }),
+      ]),
+    });
+    const selectForumTag = vi.fn(async () => '600000000000000001');
+    await expect(
+      provider.createTaskThread({
+        channelId: forumId,
+        name: 'Required tag task',
+        initialText: 'This should launch with a tag.',
+        selectForumTag,
+      }),
+    ).resolves.toMatchObject({ kind: 'forum_post' });
+    expect(selectForumTag).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: '600000000000000001',
+        moderated: false,
+      }),
+    ]);
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'POST' &&
+          request.path === `/channels/${forumId}/threads`,
+      )?.body,
+    ).toMatchObject({ applied_tags: ['600000000000000001'] });
+  });
+
+  it('rejects a required-tag forum only when it exposes no tags', async () => {
+    const { server, provider } = createHarness();
+    const forumId = '400000000000000016';
+    server.addChannel({
+      id: forumId,
+      guild_id: server.guildId,
+      name: 'triage',
+      type: 16,
+      flags: 1 << 4,
+      available_tags: [],
+    });
+
     await expect(
       provider.diagnoseChannelPermissions({
         guildId: server.guildId,
@@ -630,17 +687,14 @@ describe('DiscordCommunicationProvider', () => {
       canUseChannel: false,
       requiresTag: true,
       unsupportedReason: 'forum_requires_tag',
-      availableTags: [expect.objectContaining({ name: 'Engineering' })],
     });
     await expect(
       provider.createTaskThread({
         channelId: forumId,
         name: 'Required tag task',
-        initialText: 'This should not launch.',
+        initialText: 'This cannot launch.',
       }),
-    ).rejects.toThrow(
-      'Roomote does not yet support Discord forum or media channels that require a tag.',
-    );
+    ).rejects.toThrow('no tag is available for Roomote to select');
     expect(
       server.state.requests.filter(
         (request) =>
@@ -648,6 +702,112 @@ describe('DiscordCommunicationProvider', () => {
           request.path === `/channels/${forumId}/threads`,
       ),
     ).toHaveLength(0);
+  });
+
+  it('requires manage_threads when a required-tag forum only has moderated tags', async () => {
+    const { server, provider } = createHarness();
+    const forumId = '400000000000000017';
+    server.addChannel({
+      id: forumId,
+      guild_id: server.guildId,
+      name: 'maintainers',
+      type: 15,
+      flags: 1 << 4,
+      available_tags: [
+        {
+          id: '600000000000000010',
+          name: 'Maintainers',
+          moderated: true,
+          emoji_id: null,
+          emoji_name: '🔐',
+        },
+      ],
+    });
+
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId: forumId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: false,
+      requiresTag: true,
+      unsupportedReason: null,
+      missingPermissions: ['manage_threads'],
+      requiredPermissions: expect.arrayContaining(['manage_threads']),
+      permissions: { manage_threads: false },
+    });
+    await expect(
+      provider.createTaskThread({
+        channelId: forumId,
+        name: 'Moderated only task',
+        initialText: 'This needs manage_threads.',
+      }),
+    ).rejects.toThrow('no tag is available for Roomote to select');
+    expect(
+      server.state.requests.filter(
+        (request) =>
+          request.method === 'POST' &&
+          request.path === `/channels/${forumId}/threads`,
+      ),
+    ).toHaveLength(0);
+  });
+
+  it('applies a moderated required tag when the bot has manage_threads', async () => {
+    const { server, provider } = createHarness();
+    const forumId = '400000000000000018';
+    server.botRolePermissions |= 1n << 34n;
+    server.addChannel({
+      id: forumId,
+      guild_id: server.guildId,
+      name: 'maintainers',
+      type: 15,
+      flags: 1 << 4,
+      available_tags: [
+        {
+          id: '600000000000000011',
+          name: 'Maintainers',
+          moderated: true,
+          emoji_id: null,
+          emoji_name: '🔐',
+        },
+      ],
+    });
+
+    await expect(
+      provider.diagnoseChannelPermissions({
+        guildId: server.guildId,
+        channelId: forumId,
+      }),
+    ).resolves.toMatchObject({
+      canUseChannel: true,
+      requiresTag: true,
+      unsupportedReason: null,
+      missingPermissions: [],
+      permissions: { manage_threads: true },
+    });
+    const selectForumTag = vi.fn(async () => '600000000000000011');
+    await expect(
+      provider.createTaskThread({
+        channelId: forumId,
+        name: 'Moderated task',
+        initialText: 'This should launch with a moderated tag.',
+        selectForumTag,
+      }),
+    ).resolves.toMatchObject({ kind: 'forum_post' });
+    expect(selectForumTag).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: '600000000000000011',
+        moderated: true,
+      }),
+    ]);
+    expect(
+      server.state.requests.find(
+        (request) =>
+          request.method === 'POST' &&
+          request.path === `/channels/${forumId}/threads`,
+      )?.body,
+    ).toMatchObject({ applied_tags: ['600000000000000011'] });
   });
 });
 

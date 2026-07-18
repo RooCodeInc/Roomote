@@ -9,6 +9,7 @@ import { db, environments, eq, sql, taskRuns, tasks } from '@roomote/db/server';
 import {
   enqueueTask,
   getTaskUrl,
+  selectDiscordForumTag,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 import {
@@ -385,6 +386,14 @@ export async function launchDiscordTask(input: {
         channelId: parentId,
         name: buildCommunicationTaskThreadName(input.queuedMessage.text),
         initialText,
+        selectForumTag: async (availableTags) =>
+          (
+            await selectDiscordForumTag({
+              taskDescription: input.queuedMessage.text,
+              availableTags,
+              tracking: { userId: input.launchOwnerUserId },
+            })
+          )?.tagId ?? null,
       });
       // Persist the external coordinate before the public-thread starter is
       // sent, so a failed send can resume in this exact thread on redelivery.

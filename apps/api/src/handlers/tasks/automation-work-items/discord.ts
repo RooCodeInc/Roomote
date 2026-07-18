@@ -4,6 +4,7 @@ import {
   type DiscordCommunicationProvider,
   type DiscordTaskThread,
 } from '@roomote/communication/discord-provider';
+import { selectDiscordForumTag } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 import {
   findDiscordAutomationDestination,
@@ -172,6 +173,16 @@ export async function createAutomationDiscordTaskThread(params: {
         channelId: params.target.channelId,
         name: buildCommunicationTaskThreadName(params.workItem.title),
         initialText,
+        selectForumTag: async (availableTags) =>
+          (
+            await selectDiscordForumTag({
+              taskDescription: [
+                params.workItem.title,
+                params.workItem.brief,
+              ].join('\n\n'),
+              availableTags,
+            })
+          )?.tagId ?? null,
       });
       // A queue publish failure reopens this same work item. Save the Discord
       // coordinate before posting the starter so that every retry resumes

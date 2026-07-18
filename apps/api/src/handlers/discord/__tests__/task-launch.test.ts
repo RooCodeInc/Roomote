@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
+  selectDiscordForumTag: vi.fn(),
   redisGet: vi.fn(),
   redisSet: vi.fn(),
   redisDel: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
   getTaskUrl: mocks.getTaskUrl,
+  selectDiscordForumTag: mocks.selectDiscordForumTag,
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -81,6 +83,10 @@ describe('launchDiscordTask', () => {
     mocks.redisDel.mockResolvedValue(1);
     mocks.enqueueTask.mockResolvedValue({ id: 41, taskId: 'task-41' });
     mocks.getTaskUrl.mockReturnValue('https://roomote.example/tasks/task-41');
+    mocks.selectDiscordForumTag.mockResolvedValue({
+      tagId: 'tag-bug',
+      reasoning: 'The request describes a defect.',
+    });
     mocks.dbLimit.mockResolvedValue([
       { title: 'Repair flaky authentication tests' },
     ]);
@@ -142,6 +148,25 @@ describe('launchDiscordTask', () => {
       channelId: 'channel-1',
       name: 'Fix the flaky tests',
       initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      selectForumTag: expect.any(Function),
+    });
+    const selectForumTag = provider.reserveTaskThread.mock.calls[0]?.[0]
+      .selectForumTag as (tags: unknown[]) => Promise<string | null>;
+    await expect(
+      selectForumTag([
+        {
+          id: 'tag-bug',
+          name: 'Bug',
+          moderated: false,
+          emojiId: null,
+          emojiName: null,
+        },
+      ]),
+    ).resolves.toBe('tag-bug');
+    expect(mocks.selectDiscordForumTag).toHaveBeenCalledWith({
+      taskDescription: 'Fix the flaky tests',
+      availableTags: [expect.objectContaining({ id: 'tag-bug' })],
+      tracking: { userId: 'user-1' },
     });
     expect(provider.completeTaskThread).toHaveBeenCalledWith({
       thread: reservedThread,
@@ -616,6 +641,7 @@ describe('launchDiscordTask', () => {
       channelId: 'channel-1',
       name: 'Fix the flaky tests',
       initialText: 'Task request from Matt:\n\nFix the flaky tests',
+      selectForumTag: expect.any(Function),
     });
   });
 

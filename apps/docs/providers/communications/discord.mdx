@@ -48,11 +48,15 @@ For tasks started in a server, the bot needs these permissions:
 - create public threads
 - send messages in threads
 - add reactions
+- manage threads (only when a required-tag forum has no unmoderated tags)
 
 A task started from a normal text or announcement channel runs in a public
 thread started on the message that requested it — like a threaded reply — so
 the conversation stays anchored where it began. A task started in a forum gets
-its own forum post, and `/new` starts a fresh, separate task thread.
+its own forum post, and `/new` starts a fresh, separate task thread. When a
+forum requires a tag, Roomote applies an available unmoderated tag
+automatically. If every tag is moderated, the bot needs Manage Threads to
+apply one.
 
 <Warning>
   Unlike a Slack workspace, a Discord server can be public or shared with
@@ -92,7 +96,8 @@ messages that are not replies to an existing conversation) to a default
 channel you pick. Choose it in the Discord section of Roomote's comms settings:
 select a server and a text or forum channel where the bot has permission to
 post and create threads. Replies always stay in the conversation they started
-in. Forum channels that require a tag are not supported as the default channel.
+in. Required-tag forums work when Roomote can apply a usable tag — an
+unmoderated tag, or a moderated tag when the bot has Manage Threads.
 
 Individual automations can also report to their own Discord channel instead of
 the default: pick a Discord channel in that automation's destination selector
