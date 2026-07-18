@@ -120,9 +120,12 @@ export async function generatePrompt({
     FeatureFlag.SlackProofAutoPost,
   );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
-  const codeReviewsEnabled = await getReviewCodeAutomationSettings()
-    .then((settings) => settings.enabled)
-    .catch(() => false);
+  const reviewCodeSettings = await getReviewCodeAutomationSettings().catch(
+    () => null,
+  );
+  const codeReviewsEnabled = reviewCodeSettings?.enabled ?? false;
+  const codeReviewReviewOnCommit = reviewCodeSettings?.reviewOnCommit ?? true;
+  const codeReviewReviewDraftPrs = reviewCodeSettings?.reviewDraftPrs ?? true;
 
   switch (taskSpec.type) {
     // <Workflow: PR review, Trigger: GitHub>
@@ -178,6 +181,8 @@ export async function generatePrompt({
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         codeReviewsEnabled,
+        codeReviewReviewOnCommit,
+        codeReviewReviewDraftPrs,
         visualProofAutoPostEnabled,
         prAction,
       });
@@ -194,6 +199,8 @@ export async function generatePrompt({
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         codeReviewsEnabled,
+        codeReviewReviewOnCommit,
+        codeReviewReviewDraftPrs,
         prAction,
       });
 
@@ -337,6 +344,8 @@ export async function generatePrompt({
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
         codeReviewsEnabled,
+        codeReviewReviewOnCommit,
+        codeReviewReviewDraftPrs,
         sourceControlProvider: resolveSourceControlProviderFromPayload(
           taskSpec.payload,
         ),

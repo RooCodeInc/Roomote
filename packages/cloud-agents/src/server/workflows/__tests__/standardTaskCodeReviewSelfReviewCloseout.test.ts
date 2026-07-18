@@ -36,7 +36,7 @@ describe('Standard Task code-review self-review closeout', () => {
 
     expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
     expect(harnessInstructions).toContain(
-      'Code Reviewer is enabled for this deployment.',
+      'Code Reviewer is enabled for this deployment',
     );
     expect(harnessInstructions).toContain(
       'When you share a newly created or refreshed pull request or merge request link back to the originating chat or communications channel',
@@ -45,7 +45,19 @@ describe('Standard Task code-review self-review closeout', () => {
       'plan to do a self-review on GitHub and will follow up here with those results',
     );
     expect(harnessInstructions).toContain(
-      'Do not claim the self-review is already finished unless it actually finished in this same turn.',
+      'Do not perform that Code Reviewer self-review yourself in this task.',
+    );
+    expect(harnessInstructions).toContain(
+      'Do not open a PR review, post inline review comments, invoke `review-code`/`review-and-fix` for that purpose',
+    );
+    expect(harnessInstructions).toContain(
+      'Do not mention separate agents, automated reviewer tasks, or internal review plumbing in that user-facing note.',
+    );
+    expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
+    );
+    expect(harnessInstructions).not.toContain(
+      'a separate automated self-review will run',
     );
   });
 
@@ -76,13 +88,14 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('folds the self-review note into background-proof closeout text when both flags are on', () => {
+  it('folds the self-review note into background-proof closeout text when every PR shape is auto-review eligible', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
       backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
+      codeReviewReviewDraftPrs: true,
       sourceControlProvider: 'github',
     });
 
@@ -104,6 +117,77 @@ describe('Standard Task code-review self-review closeout', () => {
 
     expect(harnessInstructions).toContain(
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
+    );
+    expect(harnessInstructions).not.toContain(
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+    );
+  });
+
+  it('omits the automatic self-review notice when reviewOnCommit is disabled', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
+      codeReviewsEnabled: true,
+      codeReviewReviewOnCommit: false,
+      sourceControlProvider: 'github',
+    });
+
+    expect(harnessInstructions).not.toContain(
+      '<code_review_self_review_closeout>',
+    );
+    expect(harnessInstructions).not.toContain(
+      'plan to do a self-review on GitHub',
+    );
+    expect(harnessInstructions).toContain(
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
+    );
+  });
+
+  it('keeps decision guidance for draft default delivery when reviewDraftPrs is disabled without hard-appending the note', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
+      codeReviewsEnabled: true,
+      codeReviewReviewOnCommit: true,
+      codeReviewReviewDraftPrs: false,
+      sourceControlProvider: 'github',
+      // default prAction is draft delivery
+    });
+
+    expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
+    expect(harnessInstructions).toContain(
+      'Draft automatic review is disabled for this deployment',
+    );
+    expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
+    );
+    expect(harnessInstructions).not.toContain(
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+    );
+  });
+
+  it('does not hard-append the self-review note for ready-for-review delivery when draft reviews are off', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
+      codeReviewsEnabled: true,
+      codeReviewReviewOnCommit: true,
+      codeReviewReviewDraftPrs: false,
+      sourceControlProvider: 'github',
+      prAction: 'create',
+    });
+
+    // `$create-draft-pr` can still override to a non-eligible draft, so keep
+    // decision guidance without hard-appending a forced promise.
+    expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
+    expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
     );
     expect(harnessInstructions).not.toContain(
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',

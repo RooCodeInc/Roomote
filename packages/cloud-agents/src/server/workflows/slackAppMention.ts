@@ -273,6 +273,8 @@ export async function slackAppMention({
   visualProofAutoScreencastEnabled,
   backgroundProofCaptureEnabled,
   codeReviewsEnabled,
+  codeReviewReviewOnCommit,
+  codeReviewReviewDraftPrs,
   visualProofAutoPostEnabled,
   prAction,
 }: {
@@ -285,6 +287,8 @@ export async function slackAppMention({
   visualProofAutoScreencastEnabled?: boolean;
   backgroundProofCaptureEnabled?: boolean;
   codeReviewsEnabled?: boolean;
+  codeReviewReviewOnCommit?: boolean;
+  codeReviewReviewDraftPrs?: boolean;
   visualProofAutoPostEnabled?: boolean;
   prAction?: PrAction;
 }): Promise<{
@@ -357,6 +361,8 @@ export async function slackAppMention({
     visualProofAutoScreencastEnabled,
     backgroundProofCaptureEnabled,
     codeReviewsEnabled,
+    codeReviewReviewOnCommit,
+    codeReviewReviewDraftPrs,
     sourceControlProvider: resolveSourceControlProviderFromPayload(
       taskSpec.payload,
     ),
