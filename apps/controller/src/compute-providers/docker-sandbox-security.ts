@@ -91,8 +91,92 @@ export async function docker(
       return '';
     }
 
-    throw error;
+    throw formatDockerCommandError(args, error);
   }
+}
+
+/**
+ * Prefer docker daemon stderr/stdout over Node's default "Command failed:
+ * docker run ..." dump so spawn failures keep the actionable cause (image
+ * missing, pull denied, etc.) without burying it under the full argv list.
+ */
+export function formatDockerCommandError(
+  args: string[],
+  error: unknown,
+): Error {
+  const stderr = getStringErrorField(error, 'stderr');
+  const stdout = getStringErrorField(error, 'stdout');
+  const originalMessage =
+    error instanceof Error ? error.message.trim() : String(error).trim();
+  const details =
+    [stderr, stdout].filter(Boolean).join('\n').trim() ||
+    stripDockerCommandFailedPrefix(originalMessage) ||
+    originalMessage ||
+    'unknown docker error';
+  const commandSummary = summarizeDockerCommand(args);
+  const message = `Docker command failed (${commandSummary}):\n${details}`;
+
+  if (error instanceof Error) {
+    const wrapped = new Error(message, { cause: error });
+    wrapped.name = error.name;
+    // Preserve Node exec stderr/stdout so callers that inspect those fields
+    // (disk-limit detection, not-found checks) keep working.
+    Object.assign(wrapped, {
+      stderr: getRawErrorField(error, 'stderr'),
+      stdout: getRawErrorField(error, 'stdout'),
+      code: getRawErrorField(error, 'code'),
+      signal: getRawErrorField(error, 'signal'),
+      killed: getRawErrorField(error, 'killed'),
+      cmd: getRawErrorField(error, 'cmd'),
+    });
+    return wrapped;
+  }
+
+  return new Error(message);
+}
+
+function getStringErrorField(error: unknown, field: string): string {
+  const value = getRawErrorField(error, field);
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function getRawErrorField(error: unknown, field: string): unknown {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  return (error as Record<string, unknown>)[field];
+}
+
+function stripDockerCommandFailedPrefix(message: string): string {
+  return message
+    .replace(/^Command failed:\s*docker(?:\s+[^\n]+)?\n?/i, '')
+    .trim();
+}
+
+function summarizeDockerCommand(args: string[]): string {
+  const verb = args[0]?.trim();
+  const nonOptionArgs = args.filter(
+    (arg) => arg.length > 0 && !arg.startsWith('-'),
+  );
+  // Prefer an image-like arg (contains ':' or '/') over container names.
+  const imageLike = [...nonOptionArgs]
+    .reverse()
+    .find((arg) => arg.includes(':') || arg.includes('/'));
+
+  if (verb && imageLike) {
+    return `docker ${verb} ${imageLike}`;
+  }
+
+  if (verb && nonOptionArgs[1]) {
+    return `docker ${verb} ${nonOptionArgs[1]}`;
+  }
+
+  if (verb) {
+    return `docker ${verb}`;
+  }
+
+  return 'docker';
 }
 
 export function getDockerTaskNetworkName(taskRunId: number): string {

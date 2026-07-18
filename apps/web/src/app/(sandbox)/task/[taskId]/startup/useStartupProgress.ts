@@ -22,6 +22,28 @@ interface UseStartupProgressOptions {
   onStatusChange?: (status: RunStatus) => void;
 }
 
+function resolveActiveStepSinceMs(taskRun?: TaskRun | null): number {
+  const timestampCandidates = [
+    taskRun?.startedAt,
+    taskRun?.dequeuedAt,
+    taskRun?.createdAt,
+  ];
+
+  for (const value of timestampCandidates) {
+    if (!value) {
+      continue;
+    }
+
+    const ms = new Date(value).getTime();
+
+    if (Number.isFinite(ms)) {
+      return ms;
+    }
+  }
+
+  return Date.now();
+}
+
 export function useStartupProgress({
   runId,
   initialTaskRun,
@@ -35,6 +57,9 @@ export function useStartupProgress({
       completed: isExitedRunStatus(initialStatus),
     },
   ]);
+  const [activeStepSinceMs, setActiveStepSinceMs] = useState(() =>
+    resolveActiveStepSinceMs(initialTaskRun),
+  );
 
   const streamedTaskRun = useSSE<TaskRun | undefined>('message', undefined);
 
@@ -58,6 +83,7 @@ export function useStartupProgress({
   useEffect(() => {
     if (status !== statusRef.current) {
       statusRef.current = status;
+      setActiveStepSinceMs(Date.now());
       onStatusChange?.(status);
     }
 
@@ -103,5 +129,6 @@ export function useStartupProgress({
     sandboxLogs,
     logsConnected,
     logsError,
+    activeStepSinceMs,
   };
 }

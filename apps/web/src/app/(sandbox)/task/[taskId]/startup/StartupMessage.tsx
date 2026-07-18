@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import type { LucideIcon } from '@/components/system';
 import {
   Check,
@@ -32,7 +33,12 @@ export interface StartupStep {
 interface StartupMessageProps {
   step: StartupStep;
   isActive: boolean;
+  /** When the current active step became active (epoch ms). */
+  activeSinceMs?: number;
 }
+
+/** Show elapsed time after the status has been active this long. */
+const BOOT_ELAPSED_HINT_AFTER_MS = 15_000;
 
 const getStepIcon = (step: StartupStep): LucideIcon => {
   if (
@@ -97,21 +103,83 @@ const getStepMessage = (step: StartupStep) => {
   })();
 };
 
-const StartupMessage = ({ step, isActive }: StartupMessageProps) => {
+function formatBootElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(1, Math.floor(elapsedMs / 1000));
+
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  if (minutes < 60) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+function useBootElapsedSeconds(
+  isActive: boolean,
+  activeSinceMs?: number,
+): number | null {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!isActive || activeSinceMs === undefined) {
+      return;
+    }
+
+    setNowMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [isActive, activeSinceMs]);
+
+  if (!isActive || activeSinceMs === undefined) {
+    return null;
+  }
+
+  return Math.max(0, nowMs - activeSinceMs);
+}
+
+const StartupMessage = ({
+  step,
+  isActive,
+  activeSinceMs,
+}: StartupMessageProps) => {
   const Icon = getStepIcon(step);
   const message = getStepMessage(step);
+  const elapsedMs = useBootElapsedSeconds(isActive, activeSinceMs);
+  const showElapsedHint =
+    isActive && elapsedMs !== null && elapsedMs >= BOOT_ELAPSED_HINT_AFTER_MS;
 
   return (
     <Message from="assistant">
       <MessageContent>
-        <div className="flex items-center gap-2 text-sm">
-          <Icon className="size-4 shrink-0 text-muted-foreground" />
-          {isActive ? (
-            <Shimmer direction="rl" duration={1}>
-              {message}
-            </Shimmer>
-          ) : (
-            <span className="text-muted-foreground">{message}</span>
+        <div className="flex flex-col gap-1 text-sm">
+          <div className="flex items-center gap-2">
+            <Icon className="size-4 shrink-0 text-muted-foreground" />
+            {isActive ? (
+              <Shimmer direction="rl" duration={1}>
+                {message}
+              </Shimmer>
+            ) : (
+              <span className="text-muted-foreground">{message}</span>
+            )}
+          </div>
+          {showElapsedHint && elapsedMs !== null && (
+            <div className="pl-6 text-xs text-muted-foreground">
+              Still booting… (elapsed: {formatBootElapsed(elapsedMs)})
+            </div>
           )}
         </div>
       </MessageContent>
@@ -278,6 +346,8 @@ interface StartupSequenceProps {
   logsError?: string | null;
   prompt?: StartupPromptPreview | null;
   retryAction?: StartupRetryAction;
+  /** Epoch ms when the latest active step started. */
+  activeStepSinceMs?: number;
 }
 
 export const StartupSequence = ({
@@ -288,6 +358,7 @@ export const StartupSequence = ({
   logsError = null,
   prompt,
   retryAction,
+  activeStepSinceMs,
 }: StartupSequenceProps) => {
   const lastStep = steps[steps.length - 1];
   const status = lastStep?.status ?? RunStatus.Pending;
@@ -325,6 +396,11 @@ export const StartupSequence = ({
             <StartupMessage
               step={step}
               isActive={index === steps.length - 1 && !step.completed}
+              activeSinceMs={
+                index === steps.length - 1 && !step.completed
+                  ? activeStepSinceMs
+                  : undefined
+              }
             />
             {index === logInsertIndex && (
               <SandboxLogsTerminal

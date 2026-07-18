@@ -182,6 +182,46 @@ describe('StartupSequence', () => {
     ).toHaveAttribute('href', 'https://example.com/shot.png');
   });
 
+  it('shows actionable missing worker image copy on failed environment starts', () => {
+    render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Failed, completed: true }]}
+        error={`Docker command failed (docker run sleep):
+Unable to find image 'roomote-worker:local' locally
+docker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'`}
+      />,
+    );
+
+    expect(
+      screen.getByText('There was an error starting this environment:'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Roomote couldn't start because the worker image `roomote-worker:local` is missing or can't be pulled. Build or pull that image on the host (for local Docker, run the worker image build), or set DOCKER_WORKER_IMAGE to an image the host can access.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/docker run/i)).not.toBeInTheDocument();
+  });
+
+  it('shows still-booting elapsed time after the active step has been waiting', () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now() - 20_000;
+
+    render(
+      <StartupSequence
+        steps={[{ status: RunStatus.Dequeued, completed: false }]}
+        activeStepSinceMs={startedAt}
+      />,
+    );
+
+    expect(screen.getByText('Booting environment')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Still booting… \(elapsed: 20s\)/),
+    ).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
   it('uses a flex-bounded scroll container when startup content exceeds the available height', () => {
     const { container } = render(
       <StartupSequence

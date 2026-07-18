@@ -24,4 +24,31 @@ stderr -> fatal: 'origin/main' is not a commit and a branch 'main' cannot be cre
       'Environment not found',
     );
   });
+
+  it('rewrites missing or unpullable worker image failures', () => {
+    const error = `Docker command failed (docker run sleep):
+Unable to find image 'roomote-worker:local' locally
+docker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'`;
+
+    expect(getTaskRunErrorDisplayMessage(error)).toBe(
+      "Roomote couldn't start because the worker image `roomote-worker:local` is missing or can't be pulled. Build or pull that image on the host (for local Docker, run the worker image build), or set DOCKER_WORKER_IMAGE to an image the host can access.",
+    );
+  });
+
+  it('surfaces docker stderr instead of a raw command-failed dump', () => {
+    const error = `Command failed: docker run -d --name roomote-worker-12 roomote-worker:local sleep infinity
+permission denied while trying to connect to the Docker daemon socket`;
+
+    expect(getTaskRunErrorDisplayMessage(error)).toBe(
+      'Docker failed while starting the environment:\npermission denied while trying to connect to the Docker daemon socket',
+    );
+  });
+
+  it('rewrites worker fetch-failed boot errors', () => {
+    expect(
+      getTaskRunErrorDisplayMessage('❌ Job sandbox-1 failed: fetch failed'),
+    ).toBe(
+      'Roomote reached the worker, but the sandbox failed while contacting the Roomote API (`fetch failed`). Check that the API is reachable from the worker network and that API/controller URLs are configured correctly.',
+    );
+  });
 });

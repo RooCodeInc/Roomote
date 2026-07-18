@@ -183,6 +183,19 @@ function resetControllerMocks() {
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
+describe('formatSpawnErrorMessage', () => {
+  it('prefers child-process stderr when the message does not already include it', async () => {
+    const { formatSpawnErrorMessage } = await import('../BaseController');
+    const error = Object.assign(new Error('Command failed: docker run -d'), {
+      stderr: "Unable to find image 'roomote-worker:local' locally\n",
+    });
+
+    expect(formatSpawnErrorMessage(error)).toBe(
+      "Command failed: docker run -d\nUnable to find image 'roomote-worker:local' locally",
+    );
+  });
+});
+
 describe('BaseController.handleSpawnTaskRunError', () => {
   let controller: TestController;
   const originalCwd = process.cwd();
@@ -208,6 +221,26 @@ describe('BaseController.handleSpawnTaskRunError', () => {
   afterEach(() => {
     process.chdir(originalCwd);
     delete process.env.USE_WORKER_RELEASE;
+  });
+
+  it('includes child-process stderr in finishRun when spawn fails with exec output', async () => {
+    const job = makeTaskRun({ id: 43 });
+    const error = Object.assign(new Error('Command failed: docker run -d'), {
+      stderr:
+        "Unable to find image 'roomote-worker:local' locally\ndocker: Error response from daemon: pull access denied for roomote-worker\n",
+    });
+
+    await expect(
+      controller.testHandleSpawnTaskRunError(job, error),
+    ).rejects.toThrow(/Command failed: docker run -d/);
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 43,
+      status: RunStatus.Failed,
+      error: expect.stringContaining(
+        "Unable to find image 'roomote-worker:local'",
+      ),
+    });
   });
 
   it('calls finishRun with Failed status and error message', async () => {

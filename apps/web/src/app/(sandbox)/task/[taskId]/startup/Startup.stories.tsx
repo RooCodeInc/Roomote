@@ -123,6 +123,38 @@ export const StepDequeued: Story = {
   ),
 };
 
+/** Active boot step that has been waiting long enough to show elapsed time. */
+export const StepDequeuedStillBooting: Story = {
+  name: 'Step – Dequeued still booting',
+  render: () => (
+    <StartupSequence
+      steps={[mockStep(RunStatus.Dequeued, false)]}
+      activeStepSinceMs={Date.now() - 45_000}
+    />
+  ),
+};
+
+/** Failed boot with a missing/unpullable Docker worker image error. */
+export const FailedMissingWorkerImage: Story = {
+  name: 'Failed – Missing worker image',
+  render: () => (
+    <StartupSequence
+      steps={[
+        mockStep(RunStatus.Pending, true),
+        mockStep(RunStatus.Dequeued, true),
+        mockStep(RunStatus.Failed, true),
+      ]}
+      error={`Docker command failed (docker run roomote-worker:local):
+Unable to find image 'roomote-worker:local' locally
+docker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'`}
+      retryAction={{
+        label: 'Retry',
+        onClick: () => undefined,
+      }}
+    />
+  ),
+};
+
 /** A completed step (no shimmer animation). */
 export const StepCompletedProcessing: Story = {
   name: 'Step – Processing (completed)',

@@ -494,7 +494,7 @@ export abstract class BaseController {
     taskRun: TaskRun,
     error: unknown,
   ): Promise<void> {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorMessage = formatSpawnErrorMessage(error);
 
     captureControllerException(error, {
       runId: taskRun.id,
@@ -543,4 +543,36 @@ export abstract class BaseController {
 
     throw error;
   }
+}
+
+/**
+ * Build the user-visible spawn failure string. Prefer stderr/stdout from
+ * child-process errors so daemon causes (missing image, pull denied) are not
+ * buried under "Command failed: docker run …" argv dumps.
+ */
+export function formatSpawnErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const errorRecord = error as Error & {
+    stderr?: unknown;
+    stdout?: unknown;
+  };
+  const stderr =
+    typeof errorRecord.stderr === 'string' ? errorRecord.stderr.trim() : '';
+  const stdout =
+    typeof errorRecord.stdout === 'string' ? errorRecord.stdout.trim() : '';
+  const message = error.message.trim();
+
+  const hasStructuredOutput = Boolean(stderr || stdout);
+  const messageAlreadyIncludesOutput =
+    (stderr && message.includes(stderr)) ||
+    (stdout && message.includes(stdout));
+
+  if (!hasStructuredOutput || messageAlreadyIncludesOutput) {
+    return message || stderr || stdout || 'Unknown spawn error';
+  }
+
+  return [message, stderr, stdout].filter(Boolean).join('\n');
 }

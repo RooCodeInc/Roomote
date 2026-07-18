@@ -5,6 +5,7 @@ import {
   buildDockerTaskDaemonResourceArgs,
   buildDockerWorkerResourceArgs,
   cleanupStaleDockerSandboxes,
+  formatDockerCommandError,
   getDockerTaskNetworkName,
   isUnsupportedDockerDiskLimitError,
   prepareDockerTaskNetwork,
@@ -117,6 +118,37 @@ describe('isUnsupportedDockerDiskLimitError', () => {
         new Error('image roomote-worker:test not found'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('formatDockerCommandError', () => {
+  it('prefers docker stderr over the full argv command-failed dump', () => {
+    const original = Object.assign(new Error('Command failed: docker run -d'), {
+      stderr:
+        "Unable to find image 'roomote-worker:local' locally\ndocker: Error response from daemon: pull access denied for roomote-worker, repository does not exist or may require 'docker login'\n",
+      stdout: '',
+      code: 125,
+    });
+
+    const formatted = formatDockerCommandError(
+      ['run', '-d', '--name', 'roomote-worker-42', 'roomote-worker:local'],
+      original,
+    );
+
+    expect(formatted.message).toContain(
+      'Docker command failed (docker run roomote-worker:local):',
+    );
+    expect(formatted.message).toContain(
+      "Unable to find image 'roomote-worker:local' locally",
+    );
+    expect(formatted.message).toContain(
+      'pull access denied for roomote-worker',
+    );
+    expect(formatted.message).not.toContain('--name');
+    expect((formatted as { stderr?: string }).stderr).toContain(
+      'pull access denied',
+    );
+    expect(isUnsupportedDockerDiskLimitError(formatted)).toBe(false);
   });
 });
 
