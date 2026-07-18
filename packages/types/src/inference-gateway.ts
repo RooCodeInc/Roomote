@@ -259,7 +259,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
     },
     {
       id: 'kimi-for-coding',
-      name: 'Kimi Code',
+      name: 'Kimi for Coding',
       envVarNames: ['KIMI_API_KEY'],
       // models.dev registers Kimi For Coding as @ai-sdk/anthropic against
       // https://api.kimi.com/coding/v1 (membership keys, not Open Platform).

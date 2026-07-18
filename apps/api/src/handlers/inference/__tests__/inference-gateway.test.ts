@@ -247,7 +247,7 @@ describe('inference gateway', () => {
     );
   });
 
-  it('proxies Kimi Code through its Anthropic-compatible endpoint', async () => {
+  it('proxies Kimi for Coding through its Anthropic-compatible endpoint', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(
       createApp(createRunToken()),

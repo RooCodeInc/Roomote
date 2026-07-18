@@ -318,12 +318,12 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     ]);
   });
 
-  it('registers Kimi Code as an Anthropic-style API-key provider', () => {
+  it('registers Kimi for Coding as an Anthropic-style API-key provider', () => {
     expect(getSetupModelProvider('kimi-for-coding')).toMatchObject({
       id: 'kimi-for-coding',
-      label: 'Kimi Code',
+      label: 'Kimi for Coding',
       envVarName: 'KIMI_API_KEY',
-      envVarLabel: 'Kimi Code API key',
+      envVarLabel: 'Kimi for Coding API key',
       authKind: 'api-key',
       defaultRoomoteModel: 'kimi-for-coding/k3',
     });
@@ -567,7 +567,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     });
   });
 
-  it('recommends Kimi Code defaults and role models', () => {
+  it('recommends Kimi for Coding defaults and role models', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('kimi-for-coding'),
