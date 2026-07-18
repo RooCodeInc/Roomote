@@ -558,6 +558,20 @@ export class MockDiscordServer {
       });
       return jsonResponse(undefined, 204);
     }
+    if (reaction && method === 'DELETE') {
+      const channelId = reaction[1] ?? '';
+      const messageId = reaction[2] ?? '';
+      const emoji = decodeURIComponent(reaction[3] ?? '');
+      this.state.reactions = this.state.reactions.filter(
+        (item) =>
+          !(
+            item.channelId === channelId &&
+            item.messageId === messageId &&
+            item.emoji === emoji
+          ),
+      );
+      return jsonResponse(undefined, 204);
+    }
 
     if (
       method === 'POST' &&

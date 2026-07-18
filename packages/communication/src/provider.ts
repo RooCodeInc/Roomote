@@ -126,6 +126,11 @@ export interface CommunicationProviderAdapter {
     messageId: string;
     name: string;
   }): Promise<CommunicationReactionResult>;
+  removeReaction?(input: {
+    channelId: string;
+    messageId: string;
+    name: string;
+  }): Promise<CommunicationReactionResult>;
 }
 
 export interface CommunicationInboundProvider {
