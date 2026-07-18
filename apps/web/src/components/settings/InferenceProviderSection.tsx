@@ -40,6 +40,7 @@ import {
 } from '@/components/system';
 import { Section } from '@/components/settings/Section';
 import { ChatGptConnectDialog } from '@/components/settings/ChatGptConnectDialog';
+import { GitHubCopilotConnectDialog } from '@/components/settings/GitHubCopilotConnectDialog';
 
 const MASKED_VALUE = '••••••••••••••••••••••••••••';
 const PROVIDER_GRID_ROW_CLASS =
@@ -167,7 +168,7 @@ function ProviderCredentialsDialog({
   isSaving,
   onSave,
   onOpenChange,
-  onConnectChatGpt,
+  onConnectOAuth,
 }: {
   open: boolean;
   mode: 'add' | 'edit';
@@ -179,7 +180,7 @@ function ProviderCredentialsDialog({
     additionalEnvValues?: Record<string, string>,
   ) => Promise<void>;
   onOpenChange: (open: boolean) => void;
-  onConnectChatGpt: () => void;
+  onConnectOAuth: (providerId: SetupModelProviderId) => void;
 }) {
   const [selectedProviderId, setSelectedProviderId] =
     useState<SetupModelProviderId | null>(providers[0]?.id ?? null);
@@ -267,6 +268,8 @@ function ProviderCredentialsDialog({
 
   const isChatGptProvider =
     selectedProvider?.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID;
+  const isGitHubCopilotProvider = selectedProvider?.id === 'github-copilot';
+  const isOAuthProvider = selectedProvider?.authKind === 'oauth';
   const title =
     mode === 'add'
       ? 'Add Provider'
@@ -323,12 +326,13 @@ function ProviderCredentialsDialog({
                 </Select>
               </div>
 
-              {isChatGptProvider ? (
+              {isOAuthProvider ? (
                 <div className={PROVIDER_GRID_ROW_CLASS}>
                   <span className="text-sm font-medium">Account</span>
                   <p className="min-w-0 text-sm text-muted-foreground">
-                    Connect a ChatGPT Plus or Pro account to run tasks on your
-                    subscription.
+                    {isChatGptProvider
+                      ? 'Connect a ChatGPT Plus or Pro account to run tasks on your subscription.'
+                      : 'Connect a GitHub account with an active Copilot plan.'}
                   </p>
                 </div>
               ) : (
@@ -405,9 +409,17 @@ function ProviderCredentialsDialog({
           >
             Cancel
           </Button>
-          {isChatGptProvider ? (
-            <Button size="sm" onClick={onConnectChatGpt} disabled={isSaving}>
-              Connect ChatGPT
+          {isOAuthProvider ? (
+            <Button
+              size="sm"
+              onClick={() =>
+                selectedProvider && onConnectOAuth(selectedProvider.id)
+              }
+              disabled={isSaving || !selectedProvider}
+            >
+              {isGitHubCopilotProvider
+                ? 'Connect GitHub Copilot'
+                : 'Connect ChatGPT'}
             </Button>
           ) : (
             <Button
@@ -496,6 +508,50 @@ function ChatGptSubscriptionRow({
   );
 }
 
+function GitHubCopilotSubscriptionRow({
+  errored,
+  errorMessage,
+  onReconnect,
+  onDisconnect,
+  isDisconnecting,
+}: {
+  errored: boolean;
+  errorMessage?: string;
+  onReconnect: () => void;
+  onDisconnect: () => Promise<void>;
+  isDisconnecting: boolean;
+}) {
+  return (
+    <div className={`${PROVIDER_GRID_ROW_CLASS} py-3 first:pt-0 last:pb-0`}>
+      <span className="min-w-0 truncate text-sm font-medium">
+        {getModelProviderLabel('github-copilot')}
+      </span>
+      <div className="flex min-w-0 items-center gap-2">
+        <p
+          className={`min-w-0 flex-1 truncate text-sm ${errored ? 'text-destructive' : 'text-muted-foreground'}`}
+        >
+          {errored
+            ? (errorMessage ?? 'GitHub Copilot needs to be reconnected.')
+            : 'Connected to a GitHub Copilot account.'}
+        </p>
+        {errored ? (
+          <Button size="sm" variant="outline" onClick={onReconnect}>
+            Reconnect
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void onDisconnect()}
+          disabled={isDisconnecting}
+        >
+          {isDisconnecting ? <Spinner /> : 'Disconnect'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function DeleteProviderDialog({
   provider,
   open,
@@ -560,11 +616,17 @@ export function InferenceProviderSection({
   const [deleteProviderId, setDeleteProviderId] =
     useState<SetupModelProviderId | null>(null);
   const [isChatGptDialogOpen, setIsChatGptDialogOpen] = useState(false);
+  const [isGitHubCopilotDialogOpen, setIsGitHubCopilotDialogOpen] =
+    useState(false);
 
   const chatgptStatusQuery = useQuery(
     trpc.chatgptSubscription.status.queryOptions(),
   );
   const chatgptStatus = chatgptStatusQuery.data ?? null;
+  const githubCopilotStatusQuery = useQuery(
+    trpc.githubCopilotSubscription.status.queryOptions(),
+  );
+  const githubCopilotStatus = githubCopilotStatusQuery.data ?? null;
 
   const saveProvider = useMutation(
     trpc.taskModels.saveProvider.mutationOptions({
@@ -634,6 +696,25 @@ export function InferenceProviderSection({
       },
     }),
   );
+  const disconnectGitHubCopilot = useMutation(
+    trpc.githubCopilotSubscription.disconnect.mutationOptions({
+      onSuccess: async () => {
+        toast.success('Disconnected GitHub Copilot subscription.');
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.providerSetup.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.taskModels.launchOptions.queryKey(),
+          }),
+          queryClient.invalidateQueries({
+            queryKey: trpc.githubCopilotSubscription.status.queryKey(),
+          }),
+        ]);
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
 
   const deleteProvider = useMutation(
     trpc.taskModels.deleteProvider.mutationOptions({
@@ -676,6 +757,9 @@ export function InferenceProviderSection({
   const handleDisconnectChatGpt = async () => {
     await disconnectChatGpt.mutateAsync();
   };
+  const handleDisconnectGitHubCopilot = async () => {
+    await disconnectGitHubCopilot.mutateAsync();
+  };
 
   const handleDeleteProvider = async () => {
     if (!deleteProviderId) {
@@ -698,18 +782,28 @@ export function InferenceProviderSection({
     chatgptStatus?.status === 'error' ||
     (chatgptStatusQuery.isPending && Boolean(providerSetup?.chatgptConnected));
   const chatgptErrored = chatgptStatus?.status === 'error';
+  const githubCopilotHasRecord =
+    githubCopilotStatus?.status === 'connected' ||
+    githubCopilotStatus?.status === 'error' ||
+    (githubCopilotStatusQuery.isPending &&
+      Boolean(providerSetup?.githubCopilotConnected));
+  const githubCopilotErrored = githubCopilotStatus?.status === 'error';
 
   // The ChatGPT provider is OAuth-backed: it renders as a connected row with
   // Disconnect/Reconnect when a subscription record exists, and otherwise
   // joins the add-provider dropdown with a Connect button instead of an API
   // key field. Exclude it from the API-key connected rows either way.
   const apiKeyConnectedProviders = connectedProviders.filter(
-    (provider) => provider.id !== CHATGPT_SUBSCRIPTION_PROVIDER_ID,
+    (provider) =>
+      provider.id !== CHATGPT_SUBSCRIPTION_PROVIDER_ID &&
+      provider.id !== 'github-copilot',
   );
   const addableProviders = availableProviders.filter((provider) =>
     provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
       ? !chatgptHasRecord
-      : provider.authKind === 'api-key' || provider.authKind === 'endpoint',
+      : provider.id === 'github-copilot'
+        ? !githubCopilotHasRecord
+        : provider.authKind === 'api-key' || provider.authKind === 'endpoint',
   );
   const sortedApiKeyConnectedProviders = useMemo(
     () =>
@@ -789,10 +883,13 @@ export function InferenceProviderSection({
   }
 
   const hasConnectedApiKeys = sortedApiKeyConnectedProviders.length > 0;
-  const hasConnectedProviders = hasConnectedApiKeys || chatgptHasRecord;
+  const hasConnectedProviders =
+    hasConnectedApiKeys || chatgptHasRecord || githubCopilotHasRecord;
   const canAddProvider = sortedAddableProviders.length > 0;
   const connectedProviderCount =
-    sortedApiKeyConnectedProviders.length + (chatgptHasRecord ? 1 : 0);
+    sortedApiKeyConnectedProviders.length +
+    (chatgptHasRecord ? 1 : 0) +
+    (githubCopilotHasRecord ? 1 : 0);
 
   return (
     <Section icon={KeyRound} title="Inference Providers">
@@ -815,6 +912,10 @@ export function InferenceProviderSection({
         open={isChatGptDialogOpen}
         onOpenChange={setIsChatGptDialogOpen}
       />
+      <GitHubCopilotConnectDialog
+        open={isGitHubCopilotDialogOpen}
+        onOpenChange={setIsGitHubCopilotDialogOpen}
+      />
       {providerDialog ? (
         <ProviderCredentialsDialog
           open={true}
@@ -827,9 +928,13 @@ export function InferenceProviderSection({
               setProviderDialog(null);
             }
           }}
-          onConnectChatGpt={() => {
+          onConnectOAuth={(providerId) => {
             setProviderDialog(null);
-            setIsChatGptDialogOpen(true);
+            if (providerId === 'github-copilot') {
+              setIsGitHubCopilotDialogOpen(true);
+            } else {
+              setIsChatGptDialogOpen(true);
+            }
           }}
         />
       ) : null}
@@ -856,6 +961,15 @@ export function InferenceProviderSection({
                 onReconnect={() => setIsChatGptDialogOpen(true)}
                 onDisconnect={handleDisconnectChatGpt}
                 isDisconnecting={disconnectChatGpt.isPending}
+              />
+            ) : null}
+            {githubCopilotHasRecord ? (
+              <GitHubCopilotSubscriptionRow
+                errored={githubCopilotErrored}
+                errorMessage={githubCopilotStatus?.error}
+                onReconnect={() => setIsGitHubCopilotDialogOpen(true)}
+                onDisconnect={handleDisconnectGitHubCopilot}
+                isDisconnecting={disconnectGitHubCopilot.isPending}
               />
             ) : null}
             {sortedApiKeyConnectedProviders.map((provider) => (

@@ -74,6 +74,10 @@ vi.mock('@/components/settings/ChatGptConnectDialog', () => ({
     ) : null,
 }));
 
+vi.mock('@/components/settings/GitHubCopilotConnectDialog', () => ({
+  GitHubCopilotConnectDialog: () => null,
+}));
+
 vi.mock('@/components/system', () => ({
   ArrowRight: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Button: ({

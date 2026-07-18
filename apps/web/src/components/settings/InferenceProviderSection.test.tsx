@@ -11,11 +11,18 @@ const providerSetupData = vi.hoisted(() => ({
 const chatgptStatusData = vi.hoisted(() => ({
   current: null as Record<string, unknown> | null,
 }));
+const githubCopilotStatusData = vi.hoisted(() => ({
+  current: null as Record<string, unknown> | null,
+}));
 const mutateAsyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ mutateAsync: mutateAsyncMock }),
-  useQuery: () => ({ data: chatgptStatusData.current }),
+  useQuery: (options: { queryKey?: string[] }) => ({
+    data: options.queryKey?.[0]?.includes('githubCopilot')
+      ? githubCopilotStatusData.current
+      : chatgptStatusData.current,
+  }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
@@ -61,11 +68,26 @@ vi.mock('@/trpc/client', () => ({
         mutationOptions: () => ({ mutationKey: ['pollDeviceAuth'] }),
       },
     },
+    githubCopilotSubscription: {
+      status: {
+        queryOptions: () => ({
+          queryKey: ['githubCopilotSubscription', 'status'],
+        }),
+        queryKey: () => ['githubCopilotSubscription', 'status'],
+      },
+      disconnect: {
+        mutationOptions: () => ({ mutationKey: ['disconnectCopilot'] }),
+      },
+    },
   }),
 }));
 
 vi.mock('@/components/settings/ChatGptConnectDialog', () => ({
   ChatGptConnectDialog: () => null,
+}));
+
+vi.mock('@/components/settings/GitHubCopilotConnectDialog', () => ({
+  GitHubCopilotConnectDialog: () => null,
 }));
 
 vi.mock('@/components/settings/Section', () => ({

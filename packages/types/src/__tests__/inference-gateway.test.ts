@@ -115,6 +115,25 @@ describe('inference gateway key lookups', () => {
     });
   });
 
+  it('registers GitHub Copilot with the models.dev base path layout', () => {
+    const provider = getInferenceGatewayProvider('github-copilot');
+    expect(provider).toMatchObject({
+      authStrategy: 'github-copilot-oauth',
+      envVarNames: [],
+      upstreamBaseUrl: 'https://api.githubcopilot.com',
+      openCodeBaseUrlSuffix: '',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining(['/chat/completions', '/responses']),
+    );
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/github-copilot');
+  });
+
   it('parses a comma-separated served-keys value', () => {
     expect(
       parseInferenceGatewayKeys('ANTHROPIC_API_KEY, OPENROUTER_API_KEY'),

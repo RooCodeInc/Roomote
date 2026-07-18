@@ -25,6 +25,7 @@ const MODEL_RUNTIME_ENV_KEYS = [
   // allowlisted here so it survives into the harness env for config rebasing.
   'R_INFERENCE_GATEWAY_KEYS',
   'R_INFERENCE_GATEWAY_CHATGPT',
+  'R_INFERENCE_GATEWAY_GITHUB_COPILOT',
   'R_MODEL',
   'R_SMALL_MODEL',
   'R_VISION_MODEL',

@@ -3,11 +3,13 @@ const {
   mockDeploymentSettingsFindFirst,
   mockEnvironmentVariablesFindMany,
   mockResolveOpenCodeAuthContent,
+  mockResolveGitHubCopilotOpenCodeAuthContent,
 } = vi.hoisted(() => ({
   mockDecryptSecrets: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockResolveOpenCodeAuthContent: vi.fn(),
+  mockResolveGitHubCopilotOpenCodeAuthContent: vi.fn(),
 }));
 
 vi.mock('../encryption', () => ({
@@ -38,6 +40,11 @@ vi.mock('./chatgpt-subscription', () => ({
     mockResolveOpenCodeAuthContent(...args),
 }));
 
+vi.mock('./github-copilot-subscription', () => ({
+  resolveGitHubCopilotOpenCodeAuthContent: (...args: unknown[]) =>
+    mockResolveGitHubCopilotOpenCodeAuthContent(...args),
+}));
+
 vi.mock('../schema', () => ({
   deploymentSettings: { id: 'deploymentSettings.id' },
   eq: vi.fn(),
@@ -53,6 +60,7 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     vi.clearAllMocks();
     mockDecryptSecrets.mockImplementation(async (value) => value);
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
     mockResolveOpenCodeAuthContent.mockResolvedValue(null);
   });
 
@@ -655,6 +663,32 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
 
     expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
     expect(env).not.toHaveProperty('R_INFERENCE_GATEWAY_CHATGPT');
+  });
+
+  it('emits the GitHub Copilot gateway marker without exposing its OAuth token', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'github-copilot/claude-sonnet-5',
+      },
+    });
+    mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(
+      JSON.stringify({
+        'github-copilot': {
+          type: 'oauth',
+          refresh: 'gho-secret',
+          access: 'gho-secret',
+          expires: 0,
+        },
+      }),
+    );
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {},
+    });
+
+    expect(env.R_INFERENCE_GATEWAY_GITHUB_COPILOT).toBe('1');
+    expect(env).not.toHaveProperty('OPENCODE_AUTH_CONTENT');
   });
 
   it('does not inject OPENCODE_AUTH_CONTENT when no openai/ model is used', async () => {
