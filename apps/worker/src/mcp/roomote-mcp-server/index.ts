@@ -123,7 +123,7 @@ roomoteMcpServer.registerTool(
       'Render a presentational HTML widget in the current task transcript. ' +
       'Use it when a structured or visual presentation is clearer than plain text, or to demonstrate how something would look. ' +
       'Examples include mock UI, status cards, tables, annotated plans, and other visual examples. ' +
-      'HTML is displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
+      'HTML, CSS, and inline SVG are displayed in a sandboxed iframe with scripts disabled and network requests blocked. ' +
       'Prefer semantic HTML with the built-in widget classes (`rw-card`, `rw-stack`, `rw-row`, `rw-grid`, `rw-stat`, `rw-badge`, `rw-callout`, `rw-muted`) so the widget follows the host task theme. ' +
       'For custom CSS, use the provided `--rw-*` theme variables instead of hard-coded colors; omit css when the built-in styles are sufficient. ' +
       'Keep widgets compact enough to fit without scrolling: use concise labels and a small number of cards, rows, or table entries, and choose a height that fully fits the expected content. Use ordinary prose or an artifact for long content. ' +
@@ -134,7 +134,7 @@ roomoteMcpServer.registerTool(
         .string()
         .min(1)
         .describe(
-          'Compact HTML fragment or full document to display. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
+          'Compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
         ),
       title: z
         .string()
