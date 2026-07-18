@@ -33,8 +33,8 @@ A linked user @mentions the bot in a guild root channel.
 A second message arrives in the task thread while the run is active.
 
 - Inject: scenario 3, then another `message` whose `channel_id` is the created thread id (no mention needed).
-- Expect: the follow-up is **queued to the running job**, acked with eyes — no second task-started reply, no second task.
-- Assert: state shows the reaction on the follow-up but no new task-start message; DB still has one active run for the thread.
+- Expect: the follow-up is **queued to the running job** without a platform eyes reaction (Slack-style intake-only ack) — no second task-started reply, no second task.
+- Assert: state shows no new eyes reaction on the follow-up and no new task-start message; DB still has one active run for the thread.
 - Regression risk: if the task-thread lookup breaks, every follow-up silently launches a parallel task — the worst UX failure this surface has.
 
 ## 5. slash-new-command
