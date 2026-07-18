@@ -242,6 +242,35 @@ export async function forgetPendingTaskThread(
 }
 
 /**
+ * Align a reserved Discord task thread to the cleaned provisional title used
+ * for the current request. Covers Discord redelivery recoveries and Redis
+ * pending-thread memos that may still carry a pre-cleanup title.
+ */
+async function alignProvisionalTaskThreadName(input: {
+  provider: DiscordCommunicationProvider;
+  thread: DiscordTaskThread;
+  provisionalName: string;
+}): Promise<DiscordTaskThread> {
+  if (input.thread.name === input.provisionalName) {
+    return input.thread;
+  }
+  try {
+    await input.provider.editChannel({
+      channelId: input.thread.channelId,
+      name: input.provisionalName,
+    });
+    return { ...input.thread, name: input.provisionalName };
+  } catch (error) {
+    console.warn(
+      `[discord] Failed to set provisional task thread name for ${input.thread.channelId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return input.thread;
+  }
+}
+
+/**
  * Starts the task thread on the message that asked for the task, ahead of the
  * launch itself, so a routing card can be posted inside it the way Slack posts
  * its card into the thread on the requesting message. `launchDiscordTask`
@@ -261,20 +290,32 @@ export async function reserveDiscordAnchoredThread(input: {
 }): Promise<DiscordTaskThread | null> {
   const parentId = taskThreadParentId(input);
   if (!parentId) return null;
+  const provisionalName = buildCommunicationTaskThreadName(
+    input.queuedMessage.text,
+  );
   const existing = await findPendingTaskThread(
     input.queuedMessage.ts,
     parentId,
   );
-  if (existing) return existing;
+  if (existing) {
+    // Redis memoranda can outlive a deploy and still hold a pre-cleanup title
+    // (or a title from an older sibling message). Reconcile before launching.
+    const aligned = await alignProvisionalTaskThreadName({
+      provider: input.provider,
+      thread: existing,
+      provisionalName,
+    });
+    if (aligned !== existing) {
+      await rememberPendingTaskThread(input.queuedMessage.ts, aligned);
+    }
+    return aligned;
+  }
   const anchorMessageId =
     !input.channel.isThread &&
     DISCORD_MESSAGE_ANCHORED_CHANNEL_TYPES.has(input.channel.channelType)
       ? input.metadata.communicationAnchorMessageId
       : undefined;
   if (!anchorMessageId) return null;
-  const provisionalName = buildCommunicationTaskThreadName(
-    input.queuedMessage.text,
-  );
   let thread: DiscordTaskThread;
   try {
     thread = await input.provider.createThreadFromMessage({
@@ -290,21 +331,11 @@ export async function reserveDiscordAnchoredThread(input: {
   }
   // Discord may recover an existing thread with its prior name (for example on
   // redelivery). Align the provisional title immediately.
-  if (thread.name !== provisionalName) {
-    try {
-      await input.provider.editChannel({
-        channelId: thread.channelId,
-        name: provisionalName,
-      });
-      thread = { ...thread, name: provisionalName };
-    } catch (error) {
-      console.warn(
-        `[discord] Failed to set provisional task thread name for ${thread.channelId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-  }
+  thread = await alignProvisionalTaskThreadName({
+    provider: input.provider,
+    thread,
+    provisionalName,
+  });
   await rememberPendingTaskThread(input.queuedMessage.ts, thread);
   return thread;
 }
