@@ -90,4 +90,23 @@ describe('Standard Task code-review self-review closeout', () => {
       'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
     );
   });
+
+  it('does not hard-require a self-review note on push-only closeouts even when code reviews and background proof are enabled', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement behavior change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
+      codeReviewsEnabled: true,
+      sourceControlProvider: 'github',
+      prAction: 'push',
+    });
+
+    expect(harnessInstructions).toContain(
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread. The parent must not load or directly use browser tooling',
+    );
+    expect(harnessInstructions).not.toContain(
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
+    );
+  });
 });
