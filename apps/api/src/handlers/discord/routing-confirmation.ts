@@ -864,6 +864,22 @@ export function parseDiscordRouteCallbackData(
   };
 }
 
+/**
+ * Check whether a component interaction still points at actionable routing
+ * state. The Gateway delivers events in order, so an expired button must be
+ * acknowledged before any Discord API lookup can let it poison the queue.
+ * `null` means the component is not a routing callback.
+ */
+export async function hasPendingDiscordRouteCallback(
+  value: string | undefined,
+): Promise<boolean | null> {
+  const callback = parseDiscordRouteCallbackData(value);
+  if (!callback) return null;
+  return Boolean(
+    await getRedis().get(pendingRouteKey(callback.pendingRouteId)),
+  );
+}
+
 export async function handleDiscordRoutingCallback(input: {
   provider: DiscordCommunicationProvider;
   applicationId: string;
@@ -885,6 +901,9 @@ export async function handleDiscordRoutingCallback(input: {
     isThread: false,
   };
   if (!pending) {
+    // Another delivery may have claimed the route after the intake preflight.
+    // The click is terminal once its state is gone; an expired interaction
+    // token or inaccessible fallback channel must not block newer events.
     await replyToDiscordEvent({
       provider: input.provider,
       applicationId: input.applicationId,
@@ -894,6 +913,10 @@ export async function handleDiscordRoutingCallback(input: {
         interactionDeferred: input.interactionDeferred,
       },
       text: 'That routing choice is no longer available.',
+    }).catch((error) => {
+      apiLogger.warn(
+        `[discord] Could not acknowledge expired routing choice ${input.callback.pendingRouteId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     });
     return;
   }

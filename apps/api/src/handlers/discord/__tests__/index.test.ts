@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   addReaction: vi.fn(),
   channelAutoStart: vi.fn(),
   findPendingRoutingReply: vi.fn(),
+  hasPendingRouteCallback: vi.fn(),
   handleRoutingReply: vi.fn(),
   attachOutOfBand: vi.fn(),
   releaseOutOfBand: vi.fn(),
@@ -75,6 +76,7 @@ vi.mock('../channel-auto-start.js', () => ({
 
 vi.mock('../routing-confirmation.js', () => ({
   findDiscordPendingRoutingReply: mocks.findPendingRoutingReply,
+  hasPendingDiscordRouteCallback: mocks.hasPendingRouteCallback,
   handleDiscordRoutingReply: mocks.handleRoutingReply,
 }));
 
@@ -199,6 +201,7 @@ describe('Discord Gateway event handler', () => {
     mocks.component.mockResolvedValue('handled');
     mocks.channelAutoStart.mockResolvedValue(false);
     mocks.findPendingRoutingReply.mockResolvedValue(null);
+    mocks.hasPendingRouteCallback.mockResolvedValue(null);
     mocks.handleRoutingReply.mockResolvedValue(false);
     mocks.attachOutOfBand.mockImplementation(
       async ({ message }: { message: Record<string, unknown> }) => ({
@@ -963,5 +966,65 @@ describe('Discord Gateway event handler', () => {
       interactionDeferred: true,
       channel: expect.objectContaining({ channelId: 'dm-1' }),
     });
+  });
+
+  it('acknowledges a routing interaction whose pending state expired', async () => {
+    mocks.hasPendingRouteCallback.mockResolvedValue(false);
+    const interaction = {
+      id: 'interaction-route-expired',
+      application_id: 'app-1',
+      type: 3,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      member: {
+        user: { id: 'discord-user-1', username: 'matt' },
+      },
+      data: {
+        custom_id: 'discord:route:abcdefghijkl:0',
+        component_type: 2,
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: 'expired_routing_interaction',
+    });
+    expect(mocks.resolveProvider).not.toHaveBeenCalled();
+    expect(mocks.getChannel).not.toHaveBeenCalled();
+    expect(mocks.component).not.toHaveBeenCalled();
+    expect(mocks.completeEvent).toHaveBeenCalledWith({
+      eventType: 'INTERACTION_CREATE',
+      eventId: 'interaction-route-expired',
+      token: 'claim-token',
+    });
+    expect(mocks.releaseEvent).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a routing interaction while its pending state exists', async () => {
+    mocks.hasPendingRouteCallback.mockResolvedValue(true);
+    const interaction = {
+      id: 'interaction-route-live',
+      application_id: 'app-1',
+      type: 3,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        custom_id: 'discord:route:abcdefghijkl:0',
+        component_type: 2,
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.component).toHaveBeenCalledOnce();
   });
 });
