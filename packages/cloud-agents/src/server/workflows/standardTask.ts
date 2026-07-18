@@ -71,6 +71,8 @@ export function standardTask({
   visualProofAutoScreencastEnabled = false,
   backgroundProofCaptureEnabled = false,
   codeReviewsEnabled = false,
+  codeReviewReviewOnCommit = true,
+  codeReviewReviewDraftPrs = true,
   sourceControlProvider,
   prAction,
 }: {
@@ -117,6 +119,16 @@ export function standardTask({
   backgroundProofCaptureEnabled?: boolean;
   /** When true, Code Reviewer automation is enabled for the deployment. */
   codeReviewsEnabled?: boolean;
+  /**
+   * When true, Code Reviewer auto-starts on PR open/push. When false, only
+   * explicit @mention reviews start — no automatic self-review follow-up.
+   */
+  codeReviewReviewOnCommit?: boolean;
+  /**
+   * When true, automatic reviews also cover draft PRs. When false, draft PR
+   * delivery must not promise an automatic self-review follow-up.
+   */
+  codeReviewReviewDraftPrs?: boolean;
   sourceControlProvider?: SourceControlProvider;
   prAction?: PrAction;
 }) {
@@ -193,15 +205,22 @@ export function standardTask({
   const sourceControlPlatformLabel = sourceControlProvider
     ? getSourceControlProviderLabel(sourceControlProvider)
     : 'GitHub/GitLab';
-  // Push-only delivery creates no PR/MR link, so do not hard-require a
-  // self-review follow-up note in that closeout path. The documented skip
-  // rule still covers reopen/share cases when a link exists later.
+  // Only announce an automatic self-review follow-up when Code Reviewer is
+  // enabled and the open/push path can actually start a separate review task
+  // for this delivery shape. Push-only creates no PR/MR. When reviewOnCommit
+  // is off, no automated review targets match. Draft delivery also requires
+  // reviewDraftPrs. Explicit @mention reviews are out of scope for this note.
+  const automaticSelfReviewNoticeEnabled =
+    codeReviewsEnabled &&
+    codeReviewReviewOnCommit &&
+    deliverySkill !== 'push' &&
+    (deliverySkill !== 'create-draft-pr' || codeReviewReviewDraftPrs);
   // The separate automated Code Reviewer task owns the actual PR review;
-  // this coding task only announces that it will run.
-  const selfReviewCloseoutNote =
-    codeReviewsEnabled && deliverySkill !== 'push'
-      ? ` and that a separate automated self-review will run on ${sourceControlPlatformLabel} and follow up here with those results`
-      : '';
+  // this coding task only announces expectation when eligible and must not
+  // perform the review itself. User-facing wording stays first-person.
+  const selfReviewCloseoutNote = automaticSelfReviewNoticeEnabled
+    ? ` and that you plan to do a self-review on ${sourceControlPlatformLabel} and will follow up here with those results`
+    : '';
   const autonomousProofInstruction = backgroundProofDeliveryActive
     ? `For repository-changing work that routes into \`implement-changes\` while Autonomous mode is active and stays on the parent delivery path, after implementation and validation the active \`implement-changes\` workflow must proceed directly to the delegated delivery skill without waiting for visual proof. Immediately after delegated delivery succeeds, if repository files changed the active workflow must launch the \`capture-visual-proof\` delegation with the task tool's \`background: true\` parameter, then post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread${selfReviewCloseoutNote}. The parent must not load or directly use browser tooling. Launching in the background does not discharge the proof obligation: when the background task's completion notification arrives (a synthetic \`<task ...>\` result injected into the session), the workflow must in that turn verify the uploaded artifact URLs from the report, update the pull request body with the proof screenshots and links via \`manage_source_control\`, and make the proof visible in the conversation thread — when \`ROOMOTE_SLACK_PROOF_AUTO_POST\` is set the platform already auto-posts uploaded visual-proof artifacts to the thread, so post only a brief reference instead of re-uploading; otherwise share screenshots with \`send_chat_reply\` via \`imageArtifactIds\`, and use artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-image proof. If the background proof reports a blocker or the notification says the task failed, update the pull request body with a short \`no visual proof: <reason>\` note and say so in the thread. If the run later transitions into \`fix-pr\`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.`
     : 'For repository-changing work that routes into `implement-changes` while Autonomous mode is active and stays on the parent delivery path, after implementation and before the delegated delivery skill, if repository files changed the active `implement-changes` workflow must transition into `capture-visual-proof` for one constrained proof step. The parent must not load or directly use browser tooling; carry the delegated screenshot or screencast proof result, or an explicit no-op or blocker result, into the later delivery step instead of bypassing proof or improvising another browser path. If the run later transitions into `fix-pr`, let that child skill own any required delegated proof handoff before PR metadata refresh instead of inheriting this parent-owned delivery sequence.';
@@ -305,13 +324,13 @@ export function standardTask({
     }
   </source_control_context>`
     : '';
-  const codeReviewSelfReviewCloseoutContext = codeReviewsEnabled
+  const codeReviewSelfReviewCloseoutContext = automaticSelfReviewNoticeEnabled
     ? `
   <code_review_self_review_closeout>
-    <rule>Code Reviewer is enabled for this deployment. Opening or refreshing a pull request that matches the reviewer gate starts a separate automated self-review agent task on ${sourceControlPlatformLabel}; that separate task posts review comments and later relays results into this conversation.</rule>
-    <rule>When you share a newly created or refreshed pull request or merge request link back to the originating chat or communications channel (Slack, Discord, Teams, Telegram, or similar closeout), briefly say that a separate automated self-review will run on ${sourceControlPlatformLabel} and follow up here with those results, so the user knows to expect another update after that review finishes.</rule>
-    <rule>Name the source-control platform (${sourceControlPlatformLabel}) in that closeout note. Keep the note short and natural — for example after the PR link, add that a separate self-review will run on ${sourceControlPlatformLabel} and results will land here.</rule>
-    <rule>Do not perform that Code Reviewer self-review yourself in this task. Do not open a PR review, post inline review comments, invoke \`review-code\`/\`review-and-fix\` for that purpose, wait on the separate review task, or invent review findings. Your only duty here is the short set-expectation note when sharing the PR/MR link.</rule>
+    <rule>Code Reviewer is enabled for this deployment, and pull requests this run opens or refreshes that match the automated review gate will get a later self-review on ${sourceControlPlatformLabel}. Results can relay back into this conversation when configured.</rule>
+    <rule>When you share a newly created or refreshed pull request or merge request link back to the originating chat or communications channel (Slack, Discord, Teams, Telegram, or similar closeout), briefly say that you plan to do a self-review on ${sourceControlPlatformLabel} and will follow up here with those results, so the user knows to expect another update after the self-review.</rule>
+    <rule>Name the source-control platform (${sourceControlPlatformLabel}) in that closeout note. Keep the note short and natural — for example after the PR link, add that you are planning a self-review on ${sourceControlPlatformLabel} and will share what you find. Do not mention separate agents, automated reviewer tasks, or internal review plumbing in that user-facing note.</rule>
+    <rule>Do not perform that Code Reviewer self-review yourself in this task. Do not open a PR review, post inline review comments, invoke \`review-code\`/\`review-and-fix\` for that purpose, wait on a review to finish, or invent review findings. Your only duty here is the short set-expectation note when sharing the PR/MR link; the platform handles the later self-review outside this task.</rule>
     <rule>Skip this expectation note when the closeout has no PR or merge request link, or when you are only refreshing without re-sharing the link.</rule>
   </code_review_self_review_closeout>`
     : '';
