@@ -106,7 +106,7 @@ function tryDerCandidate(
  * Decode auth-key env material into PEM that jsonwebtoken accepts for ES256.
  *
  * Accepted encodings (matching install.sh, auto-generate, and common operator
- * mistakes that previously surfaces as
+ * mistakes that previously surfaced as
  * "secretOrPrivateKey must be an asymmetric key when using ES256"):
  * - base64-encoded PEM (canonical)
  * - raw PEM, including flattened/escaped-newline forms
