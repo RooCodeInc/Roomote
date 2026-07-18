@@ -1,7 +1,9 @@
 import {
   TaskRunQueueEnqueueError,
   buildUntrustedContentPolicy,
+  buildUntrustedExternalContentBlock,
   enqueueTask,
+  escapeTaskContextText,
 } from '@roomote/cloud-agents/server';
 import { TaskPayloadKind, type BackgroundAutomationKey } from '@roomote/types';
 import {
@@ -83,8 +85,16 @@ function buildExecutionTaskPrompt(
   const lines = [
     options.executionTaskBootstrap,
     '',
-    `Automation work item: ${item.title}`,
-    item.brief,
+    // Work-item fields are distilled by a scan run from external sources
+    // (issues, alerts, PR discussions), so the descriptive fields stay inside
+    // escaped untrusted-content boundaries.
+    `Automation work item: ${escapeTaskContextText(item.title)}`,
+    item.brief.trim()
+      ? buildUntrustedExternalContentBlock({
+          source: 'automation_work_item_brief',
+          text: item.brief,
+        })
+      : null,
     '',
     `Action kind: ${item.actionKind}`,
     `Disposition: ${item.disposition}`,
@@ -103,11 +113,17 @@ function buildExecutionTaskPrompt(
         )
       : DEFAULT_AUTOMATION_EXECUTION_INSTRUCTIONS,
     item.investigationContext
-      ? `Investigation context:\n${item.investigationContext}`
+      ? `Investigation context:\n${buildUntrustedExternalContentBlock({
+          source: 'automation_investigation_context',
+          text: item.investigationContext,
+        })}`
       : null,
+    // The execution prompt is the automation's instruction channel (the
+    // policy names an automation's execution instructions as a valid
+    // instruction source), so it stays unwrapped; the untrusted boundary for
+    // its provenance belongs to the scan run that distills external sources
+    // into the work item.
     item.executionPrompt ? `Execution prompt:\n${item.executionPrompt}` : null,
-    // Work items are distilled from external sources (issues, alerts, PR
-    // discussions), so any text they quote from those sources stays data.
     buildUntrustedContentPolicy(),
   ];
 
