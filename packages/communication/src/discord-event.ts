@@ -340,7 +340,7 @@ function isDirectMessage(message: DiscordMessage): boolean {
   return !message.guild_id;
 }
 
-function isBotMentioned(
+export function isDiscordBotMentioned(
   message: DiscordMessage,
   botUserId: string | undefined,
 ): boolean {
@@ -415,7 +415,7 @@ export function isDiscordTaskEntryEvent(
       (options.channelAutoStart === true ||
         isDirectMessage(message) ||
         options.isTaskThread === true ||
-        isBotMentioned(message, options.botUserId))
+        isDiscordBotMentioned(message, options.botUserId))
     );
   }
   return getDiscordInteractionCommand(event)?.name === 'new';
