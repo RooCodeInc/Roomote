@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import { processListIncludesDockerWorkerRun } from '../docker-sandbox-security';
 import {
+  assertDockerWorkerLaunchEnv,
   buildDockerSandboxServerUrl,
+  buildDockerWorkerExecEnvArgs,
+  DOCKER_CONTROL_PLANE_TRPC_URL,
   getDockerWorkerCommand,
   resolveDockerWorkerOwnershipTargetFromLookup,
+  resolveDockerWorkerTrpcUrl,
   resumeDockerTaskDaemon,
   shouldRetryDockerWorkerWithoutDiskLimit,
   shouldAutoRemoveDockerWorkerContainer,
@@ -156,6 +160,67 @@ describe('toContainerReachableUrl', () => {
     expect(toContainerReachableUrl('https://roomote.example.com/')).toBe(
       'https://roomote.example.com',
     );
+  });
+});
+
+describe('resolveDockerWorkerTrpcUrl', () => {
+  it('uses the in-network API alias when a control network is configured', () => {
+    expect(
+      resolveDockerWorkerTrpcUrl({
+        trpcUrl: 'https://roomote.example.com/_roomote-api',
+        controlNetwork: 'roomote_worker',
+      }),
+    ).toBe(DOCKER_CONTROL_PLANE_TRPC_URL);
+  });
+
+  it('strips public-proxy path prefixes from already-in-network api hosts', () => {
+    expect(
+      resolveDockerWorkerTrpcUrl({
+        trpcUrl: 'http://api:3001/_roomote-api',
+        controlNetwork: 'roomote_worker',
+      }),
+    ).toBe(DOCKER_CONTROL_PLANE_TRPC_URL);
+  });
+
+  it('rewrites localhost TRPC URLs for non-control-network Docker workers', () => {
+    expect(
+      resolveDockerWorkerTrpcUrl({
+        trpcUrl: 'http://localhost:13001',
+      }),
+    ).toBe('http://host.docker.internal:13001');
+  });
+});
+
+describe('assertDockerWorkerLaunchEnv', () => {
+  it('rejects missing required launch env values', () => {
+    expect(() =>
+      assertDockerWorkerLaunchEnv({
+        AUTH_TOKEN: '',
+        TRPC_URL: 'http://api:3001',
+        R_APP_URL: 'https://roomote.example.com',
+      }),
+    ).toThrow('AUTH_TOKEN');
+  });
+
+  it('accepts a complete launch env', () => {
+    expect(() =>
+      assertDockerWorkerLaunchEnv({
+        AUTH_TOKEN: 'token',
+        TRPC_URL: 'http://api:3001',
+        R_APP_URL: 'https://roomote.example.com',
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('buildDockerWorkerExecEnvArgs', () => {
+  it('flattens env into docker exec -e KEY=value pairs', () => {
+    expect(
+      buildDockerWorkerExecEnvArgs({
+        AUTH_TOKEN: 'token',
+        TRPC_URL: 'http://api:3001',
+      }),
+    ).toEqual(['-e', 'AUTH_TOKEN=token', '-e', 'TRPC_URL=http://api:3001']);
   });
 });
 
