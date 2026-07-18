@@ -501,18 +501,6 @@ async function processDiscordGatewayEvent(event: DiscordGatewayEvent) {
       guildId: metadata.communicationGuildId,
       preservePayloadFlags: ['discordTaskThread'],
     });
-    const taskUrl = getTaskUrl({
-      taskId: resumed.taskId,
-      utm: { source: 'discord', campaign: 'discord.snapshot_resume' },
-    });
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      text: taskUrl
-        ? `Reconnected this Discord thread to the task: ${taskUrl}`
-        : 'Reconnected this Discord thread to the task.',
-    });
     return { ok: true, resumed: true, runId: resumed.id };
   }
 
