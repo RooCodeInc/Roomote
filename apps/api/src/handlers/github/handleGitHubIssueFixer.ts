@@ -12,6 +12,7 @@ import {
   recordAutomationRunOutcome,
   repositories,
 } from '@roomote/db/server';
+import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import { TaskPayloadKind } from '@roomote/types';
 
 import type { WebhookResponse } from '../../types';
@@ -110,11 +111,13 @@ export async function handleGitHubIssueFixer(
   }
 
   try {
+    const githubAppSlug = await resolveConfiguredGitHubAppSlug();
     const description = buildIssueFixerFixPrompt({
       repositoryFullName: match.repositoryFullName,
       environmentId,
       trigger: 'webhook',
       repositoryCoverage,
+      githubAppSlug,
       issue: {
         repositoryFullName: match.repositoryFullName,
         number: payload.issue.number,
