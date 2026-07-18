@@ -96,8 +96,6 @@ export function StepDiscordSetup({
           editingSavedValues={editingSavedValues}
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={null}
-          showManualSlackValues={false}
-          onShowManualSlackValues={() => undefined}
           onBack={onBack}
           onValueChange={(envVarName, value) =>
             setValues((current) => ({ ...current, [envVarName]: value }))

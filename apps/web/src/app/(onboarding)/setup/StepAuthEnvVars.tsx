@@ -263,10 +263,7 @@ export function StepAuthEnvVars({
     : !bootstrapMode && teamsBotAppIdStored
       ? '/api/teams/app-package'
       : null;
-  const [showManualSlackValues, setShowManualSlackValues] = useState(false);
-
   useEffect(() => {
-    setShowManualSlackValues(false);
     setCreatedSlackAppSettingsUrl(null);
   }, [effectiveSelectedProviderId]);
 
@@ -285,7 +282,6 @@ export function StepAuthEnvVars({
   // continue. Keep this in sync with SlackSetupExperience's intro guard.
   const providerOwnsActions =
     selectedProvider?.id === 'slack' &&
-    !showManualSlackValues &&
     !showingCreatedSlackAppStep &&
     !selectedProvider.runtimeSatisfied &&
     !selectedProvider.savedSatisfied;
@@ -334,7 +330,6 @@ export function StepAuthEnvVars({
           editingSavedValues={editingSavedValues}
           clearedSavedValues={clearedSavedValues}
           teamsAppPackageHref={teamsAppPackageHref}
-          showManualSlackValues={showManualSlackValues}
           createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
           createSlackAppPending={
             createSlackApp.isPending || saveAuthConfig.isPending
@@ -346,7 +341,6 @@ export function StepAuthEnvVars({
               ...(bootstrapMode && setupToken ? { setupToken } : {}),
             })
           }
-          onShowManualSlackValues={() => setShowManualSlackValues(true)}
           onToggleMicrosoftAdvancedConfig={() =>
             setShowMicrosoftAdvancedConfig((current) => !current)
           }

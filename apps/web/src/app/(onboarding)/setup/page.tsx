@@ -485,7 +485,7 @@ export default function SetupPage() {
                 authSetup={bootstrapStatus.authSetup}
                 selectedProviderId={bootstrapAuthProvider}
                 onContinue={() => undefined}
-                onBack={() => setBootstrapStepWithTransition('email-account')}
+                onBack={() => setBootstrapStepWithTransition('auth-provider')}
                 bootstrapMode={true}
                 setupToken={setupToken}
               />
@@ -616,14 +616,15 @@ export default function SetupPage() {
                   setPendingAuthProvider(null);
                   goToNextStep();
                 }}
-                onBack={
-                  canGoBack
-                    ? () => {
-                        setPendingAuthProvider(null);
-                        goToPreviousStep();
-                      }
-                    : undefined
-                }
+                onBack={() => {
+                  setPendingAuthProvider(null);
+                  if (canGoBack) {
+                    goToPreviousStep();
+                    return;
+                  }
+
+                  goToStep('auth-provider');
+                }}
                 bootstrapMode={false}
               />
             ))}

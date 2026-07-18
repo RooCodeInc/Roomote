@@ -18,7 +18,6 @@ import {
   ExternalLink,
   Input,
   Button,
-  Pencil,
   Sparkles,
   Spinner,
 } from '@/components/system';
@@ -294,14 +293,12 @@ type ProviderSetupExperienceProps = {
   editingSavedValues: Record<string, boolean>;
   clearedSavedValues: Record<string, boolean>;
   teamsAppPackageHref: string | null;
-  showManualSlackValues: boolean;
   createdSlackAppSettingsUrl?: string | null;
   createSlackAppPending?: boolean;
   showMicrosoftAdvancedConfig?: boolean;
   surface?: 'setup' | 'settings';
   envVarsInfoNote?: React.ReactNode;
   onCreateSlackApp?: (configToken: string) => void;
-  onShowManualSlackValues: () => void;
   onToggleMicrosoftAdvancedConfig?: () => void;
   onValueChange: (envVarName: string, value: string) => void;
   onEditingSavedValueChange: (envVarName: string, editing: boolean) => void;
@@ -368,11 +365,7 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
     );
   }
 
-  if (
-    !props.showManualSlackValues &&
-    !props.provider.runtimeSatisfied &&
-    !props.provider.savedSatisfied
-  ) {
+  if (!props.provider.runtimeSatisfied && !props.provider.savedSatisfied) {
     const createSlackAppPending = props.createSlackAppPending === true;
     const createSlackAppDisabled =
       !props.onCreateSlackApp || props.disabled || createSlackAppPending;
@@ -462,15 +455,6 @@ function SlackSetupExperience(props: ProviderSetupExperienceProps) {
           >
             {createSlackAppPending ? <Spinner /> : <Sparkles />}
             Create Slack app
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={props.onShowManualSlackValues}
-            disabled={createSlackAppPending}
-          >
-            <Pencil />
-            Create app manually
           </Button>
         </div>
       </div>
@@ -674,7 +658,6 @@ function GenericSetupExperience(props: ProviderSetupExperienceProps) {
             target="_blank"
             rel="noopener noreferrer"
             className="text-foreground underline"
-            onClick={props.onShowManualSlackValues}
           >
             prefilled manifest
           </a>{' '}

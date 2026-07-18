@@ -595,22 +595,25 @@ describe('CommsProviderSection', () => {
         screen.getByLabelText('App configuration token'),
       ).toBeInTheDocument();
       expect(
-        screen.getByRole('button', { name: /Create app manually/ }),
+        screen.queryByRole('button', { name: /Create app manually/ }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('link', { name: /Slack Apps portal/i }),
+      ).toHaveAttribute('href', 'https://api.slack.com/apps');
+      expect(
+        screen.getByRole('button', { name: /^Back$/ }),
       ).toBeInTheDocument();
-
-      fireEvent.click(
-        screen.getByRole('button', { name: /Create app manually/ }),
-      );
-
       expect(
         screen.queryByRole('heading', { name: 'Configure Slack app' }),
       ).not.toBeInTheDocument();
-      expect(screen.getByText('1')).toBeInTheDocument();
-      expect(screen.getByText('2')).toBeInTheDocument();
-      expect(screen.getByText('3')).toBeInTheDocument();
-      expect(screen.getByText(/Create a new Slack app/)).toBeInTheDocument();
-      expect(screen.getByText('Authorized redirect URLs')).toBeInTheDocument();
-      expect(screen.getByText('Enter the values below:')).toBeInTheDocument();
+      expect(
+        screen.queryByText('Enter the values below:'),
+      ).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /^Back$/ }));
+      expect(
+        screen.getByRole('button', { name: 'Set it up' }),
+      ).toBeInTheDocument();
     });
 
     it('shows logo actions after creating a Slack app from a config token', async () => {
@@ -698,9 +701,6 @@ describe('CommsProviderSection', () => {
       expect(screen.getByLabelText('App configuration token')).toBeDisabled();
       expect(
         screen.getByRole('button', { name: /Create Slack app/ }),
-      ).toBeDisabled();
-      expect(
-        screen.getByRole('button', { name: /Create app manually/ }),
       ).toBeDisabled();
     });
 

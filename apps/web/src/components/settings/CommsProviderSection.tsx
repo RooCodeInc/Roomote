@@ -64,7 +64,6 @@ const TELEGRAM_WEBHOOK_STATUS_COPY: Record<
 };
 
 import {
-  ArrowLeft,
   BrandIcon,
   Button,
   Check,
@@ -562,7 +561,6 @@ export function CommsProviderSection({
   const [clearedSavedValues, setClearedSavedValues] = useState<
     Record<string, boolean>
   >({});
-  const [showManualSlackValues, setShowManualSlackValues] = useState(false);
   const [createdSlackAppSettingsUrl, setCreatedSlackAppSettingsUrl] = useState<
     string | null
   >(null);
@@ -576,7 +574,6 @@ export function CommsProviderSection({
     setValues(nonSecretInitialValues);
     setEditingSavedValues({});
     setClearedSavedValues({});
-    setShowManualSlackValues(false);
     setRemoveDialogOpen(false);
     // nonSecretInitialValues is content-keyed to avoid identity-only resets.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- content-keyed
@@ -665,8 +662,7 @@ export function CommsProviderSection({
   const hasEditableFields = visibleFields.some(
     (field) => !field.runtimeSatisfied,
   );
-  const providerOwnsActions =
-    provider.id === 'slack' && !showManualSlackValues && !hasConfiguredValues;
+  const providerOwnsActions = provider.id === 'slack' && !hasConfiguredValues;
 
   const teamsBotAppIdField = provider.fields.find(
     (field) => field.envVarName === 'R_TEAMS_BOT_APP_ID',
@@ -760,7 +756,6 @@ export function CommsProviderSection({
               editingSavedValues={editingSavedValues}
               clearedSavedValues={clearedSavedValues}
               teamsAppPackageHref={teamsAppPackageHref}
-              showManualSlackValues={showManualSlackValues}
               createdSlackAppSettingsUrl={createdSlackAppSettingsUrl}
               createSlackAppPending={createSlackApp.isPending}
               surface="settings"
@@ -774,7 +769,11 @@ export function CommsProviderSection({
               onCreateSlackApp={(configToken) =>
                 createSlackApp.mutate({ configToken })
               }
-              onShowManualSlackValues={() => setShowManualSlackValues(true)}
+              onBack={
+                provider.id === 'slack' && !hasConfiguredValues
+                  ? () => setExpanded(false)
+                  : undefined
+              }
               onValueChange={(envVarName, value) =>
                 setValues((current) => ({ ...current, [envVarName]: value }))
               }
@@ -850,16 +849,6 @@ export function CommsProviderSection({
 
             {providerOwnsActions ? null : (
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                {provider.id === 'slack' && !hasConfiguredValues && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowManualSlackValues(false)}
-                  >
-                    <ArrowLeft />
-                    Back
-                  </Button>
-                )}
                 {provider.savedSatisfied && (
                   <Button
                     type="button"
