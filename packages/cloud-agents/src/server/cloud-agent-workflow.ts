@@ -25,6 +25,7 @@ import {
   getBackgroundAgentSettings,
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
+  getReviewCodeAutomationSettings,
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -119,6 +120,9 @@ export async function generatePrompt({
     FeatureFlag.SlackProofAutoPost,
   );
   const prAction = await getDeploymentPrAction().catch(() => undefined);
+  const codeReviewsEnabled = await getReviewCodeAutomationSettings()
+    .then((settings) => settings.enabled)
+    .catch(() => false);
 
   switch (taskSpec.type) {
     // <Workflow: PR review, Trigger: GitHub>
@@ -173,6 +177,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         visualProofAutoPostEnabled,
         prAction,
       });
@@ -188,6 +193,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         prAction,
       });
 
@@ -330,6 +336,7 @@ export async function generatePrompt({
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
         visualProofAutoScreencastEnabled,
         backgroundProofCaptureEnabled,
+        codeReviewsEnabled,
         sourceControlProvider: resolveSourceControlProviderFromPayload(
           taskSpec.payload,
         ),
