@@ -294,6 +294,7 @@ common provider keys into worker containers:
 - `MOONSHOT_API_KEY`
 - `MINIMAX_API_KEY`
 - `OPENCODE_API_KEY`
+- `GITHUB_TOKEN` (GitHub Copilot, `github-copilot/...` models)
 
 If your provider uses another env var name, list it in
 `R_MODEL_ENV_KEYS`:

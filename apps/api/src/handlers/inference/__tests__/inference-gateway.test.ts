@@ -247,6 +247,38 @@ describe('inference gateway', () => {
     );
   });
 
+  it('proxies GitHub Copilot without a /v1 base-path suffix', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.githubcopilot.com/chat/completions');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
+  it('proxies GitHub Copilot responses path', async () => {
+    const fetchMock = stubUpstreamFetch();
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/github-copilot/responses',
+    );
+
+    expect(response.status).toBe(200);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.githubcopilot.com/responses');
+    expect(new Headers(init.headers).get('authorization')).toBe(
+      'Bearer provider-secret-key',
+    );
+  });
+
   it('allows nested paths under the Vercel AI Gateway protocol base', async () => {
     const fetchMock = stubUpstreamFetch();
     const response = await postMessages(

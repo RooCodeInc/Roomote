@@ -28,6 +28,7 @@ export const ENABLED_DIRECT_TASK_MODEL_PROVIDER_IDS = [
   'amazon-bedrock',
   'google',
   'xai',
+  'github-copilot',
   'litellm',
   'ollama',
   'vllm',

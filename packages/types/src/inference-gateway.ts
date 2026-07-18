@@ -292,6 +292,24 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       openCodeBaseUrlSuffix: '/v1',
     },
     {
+      // GitHub Copilot's OpenCode SDK hits /chat/completions and /responses
+      // under https://api.githubcopilot.com (no /v1 prefix on the base URL).
+      id: 'github-copilot',
+      name: 'GitHub Copilot',
+      envVarNames: ['GITHUB_TOKEN'],
+      upstreamBaseUrl: 'https://api.githubcopilot.com',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        '/chat/completions',
+        '/responses',
+        '/v1/chat/completions',
+        '/v1/responses',
+        '/models',
+        '/v1/models',
+      ],
+      openCodeBaseUrlSuffix: '',
+    },
+    {
       id: BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
       name: 'Amazon Bedrock',
       envVarNames: ['AWS_BEARER_TOKEN_BEDROCK'],

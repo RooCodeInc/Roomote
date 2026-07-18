@@ -452,6 +452,40 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
   },
   {
+    // Provider id matches models.dev / OpenCode (`github-copilot`). Auth uses
+    // GITHUB_TOKEN the same way OpenCode and models.dev do — a GitHub token
+    // with Copilot access (OAuth token or PAT), not a separate Copilot key.
+    id: 'github-copilot',
+    label: 'GitHub Copilot',
+    envVarName: 'GITHUB_TOKEN',
+    envVarLabel: 'GitHub token',
+    credentialHelp: {
+      text: 'Paste a GitHub token that can access Copilot (a classic PAT with the Copilot capability, a fine-grained token with Copilot access, or an OAuth token from a Copilot-capable login).',
+      href: 'https://docs.github.com/en/copilot',
+      linkLabel: 'GitHub Copilot docs',
+    },
+    defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+    authKind: 'api-key',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5': 'github-copilot/claude-fable-5',
+      'claude-haiku-4-5': 'github-copilot/claude-haiku-4.5',
+      'claude-opus-4-8': 'github-copilot/claude-opus-4.8',
+      'claude-sonnet-5': 'github-copilot/claude-sonnet-5',
+      'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
+      'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
+      'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
+      'gemini-3-1-pro': 'github-copilot/gemini-3.1-pro-preview',
+      'gemini-3-5-flash': 'github-copilot/gemini-3.5-flash',
+      'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
+    }),
+    recommendedRoleModels: {
+      helper: 'github-copilot/claude-haiku-4.5',
+      codeReview: 'github-copilot/claude-opus-4.8',
+      explore: 'github-copilot/claude-haiku-4.5',
+      planning: 'github-copilot/claude-opus-4.8',
+    },
+  },
+  {
     id: 'litellm',
     label: 'LiteLLM',
     envVarName: 'LITELLM_BASE_URL',
