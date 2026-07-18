@@ -1728,43 +1728,115 @@ function parseSlackTranscriptFrom(text: string, start: number): string | null {
   return memo.get(keyOf(start, 0)) ?? null;
 }
 
-function extractCommunicationTranscriptMessage(text: string): string | null {
-  const openPrefix = '<communication_message';
-  if (!text.startsWith(openPrefix)) {
+/**
+ * Non-Slack providers may prefix the user turn with Slack-parity blocks before
+ * the communication_message wrapper:
+ *   thread_context? replying_to? {provider}_turn_policy? communication_message
+ *
+ * Only the communication_message body is user-visible in the transcript.
+ */
+const COMMUNICATION_TURN_POLICY_TAGS = [
+  'discord_turn_policy',
+  'teams_turn_policy',
+  'telegram_turn_policy',
+] as const;
+
+function extractCommunicationMessageAt(
+  text: string,
+  index: number,
+): string | null {
+  const afterOpen = matchOpenTag(text, index, 'communication_message', true);
+  if (afterOpen === null) {
     return null;
   }
 
-  const openEnd = text.indexOf('>');
-  if (openEnd === -1) {
-    return null;
-  }
-
-  const openInner = text.slice(openPrefix.length, openEnd);
-  if (openInner.length > 0 && openInner[0] !== ' ' && openInner[0] !== '\t') {
-    return null;
-  }
-
-  let contentStart = openEnd + 1;
+  let contentStart = afterOpen;
   if (text[contentStart] === '\n') {
     contentStart += 1;
   }
 
   const closeTag = '</communication_message>';
-  const closeIndex = text.indexOf(closeTag, contentStart);
-  if (closeIndex === -1) {
+  const found = findStructuralClose(
+    text,
+    contentStart,
+    closeTag,
+    (_close, afterClose) => afterClose === text.length,
+  );
+  if (found === null) {
     return null;
   }
 
-  if (text.slice(closeIndex + closeTag.length).trim() !== '') {
-    return null;
-  }
-
-  let contentEnd = closeIndex;
+  let contentEnd = found.closeIndex;
   if (contentEnd > contentStart && text[contentEnd - 1] === '\n') {
     contentEnd -= 1;
   }
 
   return text.slice(contentStart, contentEnd);
+}
+
+function parseCommunicationRestAfterReplying(
+  text: string,
+  at: number,
+): string | null {
+  for (const tag of COMMUNICATION_TURN_POLICY_TAGS) {
+    const afterPolicyOpen = matchOpenTag(text, at, tag, true);
+    if (afterPolicyOpen !== null && text[afterPolicyOpen] === '\n') {
+      const closeMarker = `\n</${tag}>`;
+      const found = findStructuralClose(
+        text,
+        afterPolicyOpen + 1,
+        closeMarker,
+        (_close, afterClose) =>
+          extractCommunicationMessageAt(text, afterClose) !== null,
+      );
+      if (found !== null) {
+        return extractCommunicationMessageAt(text, found.afterClose);
+      }
+    }
+  }
+
+  return extractCommunicationMessageAt(text, at);
+}
+
+function parseCommunicationRestFrom(
+  text: string,
+  index: number,
+): string | null {
+  const afterReplyingOpen = matchOpenTag(text, index, 'replying_to', true);
+  if (afterReplyingOpen !== null && text[afterReplyingOpen] === '\n') {
+    const closeMarker = '\n</replying_to>';
+    const found = findStructuralClose(
+      text,
+      afterReplyingOpen + 1,
+      closeMarker,
+      (_close, afterClose) =>
+        parseCommunicationRestAfterReplying(text, afterClose) !== null,
+    );
+    if (found !== null) {
+      return parseCommunicationRestAfterReplying(text, found.afterClose);
+    }
+  }
+
+  return parseCommunicationRestAfterReplying(text, index);
+}
+
+function extractCommunicationTranscriptMessage(text: string): string | null {
+  const afterContextOpen = matchOpenTag(text, 0, 'thread_context', false);
+  if (afterContextOpen !== null && text[afterContextOpen] === '\n') {
+    const closeMarker = '\n</thread_context>';
+    const found = findStructuralClose(
+      text,
+      afterContextOpen + 1,
+      closeMarker,
+      (_close, afterClose) =>
+        parseCommunicationRestFrom(text, afterClose) !== null,
+    );
+    if (found !== null) {
+      return parseCommunicationRestFrom(text, found.afterClose);
+    }
+  }
+
+  return parseCommunicationRestFrom(text, 0);
 }
 
 function extractGithubFollowUpTranscriptMessage(text: string): string | null {

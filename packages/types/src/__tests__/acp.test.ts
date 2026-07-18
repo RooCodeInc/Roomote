@@ -415,6 +415,86 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('Is this the same thread');
   });
 
+  it('extracts the user turn when Discord prefixes include replying_to and turn policy', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<replying_to ts="1528095670643462227">',
+          'Roomote: I reviewed [RooCodeInc/Roomote#557](https://github.com/RooCodeInc/Roomote/pull/557) on GitHub and found no code issues. All CI checks are passing.',
+          '</replying_to>',
+          '',
+          '<discord_turn_policy reactions_allowed="true" prefer_emoji_ack="true">',
+          'Emoji reactions are allowed on the current discord message. Prefer `send_chat_reaction_emoji` instead of a short text acknowledgement when a lightweight acknowledgement or emoji-only answer is enough.',
+          '</discord_turn_policy>',
+          '',
+          '<communication_message provider="discord" ts="152812108142368784" author="MrUbens" channel="1527716172924195047" thread="1528087996853653804">',
+          'We should strip this information out of the message',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('We should strip this information out of the message');
+  });
+
+  it('extracts the user turn when Discord includes thread_context before the turn', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<thread_context>',
+          'Alice: Start behaving like hermes',
+          '</thread_context>',
+          '',
+          '<replying_to ts="150">',
+          'Roomote: On it.',
+          '</replying_to>',
+          '',
+          '<discord_turn_policy reactions_allowed="true" prefer_emoji_ack="true">',
+          'Emoji reactions are allowed on the current discord message.',
+          '</discord_turn_policy>',
+          '',
+          '<communication_message provider="discord" ts="200" author="Matt">',
+          'you heard the man',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('you heard the man');
+  });
+
+  it('extracts communication_message content after a leading turn policy only', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<discord_turn_policy reactions_allowed="false" prefer_emoji_ack="false">',
+          'Emoji reactions are not allowed on the current discord message.',
+          '</discord_turn_policy>',
+          '',
+          '<communication_message provider="discord" ts="message-1" author="Ada" channel="channel-1">',
+          'please continue',
+          '</communication_message>',
+        ].join('\n'),
+      ),
+    ).toBe('please continue');
+  });
+
+  it('extracts the Discord user turn when prefix wrappers are HTML-escaped', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '&lt;replying_to ts="150"&gt;',
+          'Roomote: On it.',
+          '&lt;/replying_to&gt;',
+          '',
+          '&lt;discord_turn_policy reactions_allowed="true" prefer_emoji_ack="true"&gt;',
+          'Emoji reactions are allowed on the current discord message.',
+          '&lt;/discord_turn_policy&gt;',
+          '',
+          '&lt;communication_message provider="discord" ts="200" author="Matt"&gt;',
+          'Use &lt;literal&gt; tags &amp; entities',
+          '&lt;/communication_message&gt;',
+        ].join('\n'),
+      ),
+    ).toBe('Use <literal> tags & entities');
+  });
+
   it('extracts escaped communication_message content after stripping the wrapper', () => {
     expect(
       normalizeTranscriptUserText(
