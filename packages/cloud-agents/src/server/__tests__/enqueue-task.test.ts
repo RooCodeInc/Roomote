@@ -181,6 +181,34 @@ describe('enqueueTask initiator stamping', () => {
     });
   });
 
+  it('does not lock the first-message title checkpoint on a fallback title', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    await expect(
+      persistEarlyGeneratedTaskTitle({
+        taskId: run.taskId,
+        generatedTitle: 'Untitled task',
+      }),
+    ).resolves.toBe(false);
+
+    const task = await db.query.tasks.findFirst({
+      where: eq(tasks.id, run.taskId),
+      columns: {
+        title: true,
+        llmTitleCheckpoint: true,
+      },
+    });
+
+    expect(task?.llmTitleCheckpoint).toBe(0);
+    expect(task?.title).not.toBe('Untitled task');
+  });
+
   it('persists an intentional pre-dispatch phase and error', async () => {
     const userId = await createUser();
 
