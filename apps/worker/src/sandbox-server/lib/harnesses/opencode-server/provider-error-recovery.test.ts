@@ -91,4 +91,14 @@ describe('getOpenCodeProviderErrorRecovery', () => {
       }),
     ).toBe(true);
   });
+
+  it('classifies message-only payment-required retry status as terminal', () => {
+    // handleSessionStatus only has the retry status message, not statusCode/code.
+    expect(
+      isOpenCodeTerminalProviderError({ message: 'Payment required' }),
+    ).toBe(true);
+    expect(
+      getOpenCodeProviderErrorRecovery({ message: 'Payment required' }),
+    ).toBeNull();
+  });
 });

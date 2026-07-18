@@ -153,6 +153,7 @@ function isExplicitlyTerminal(values: unknown[]): boolean {
         lower.includes('insufficient balance') ||
         lower.includes('please recharge') ||
         (lower.includes('account') && lower.includes('is suspended')) ||
+        lower.includes('payment required') ||
         lower.includes('insufficient quota')
       ) {
         return true;
