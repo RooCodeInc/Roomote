@@ -53,6 +53,9 @@ describe('Standard Task code-review self-review closeout', () => {
     expect(harnessInstructions).toContain(
       'Do not mention separate agents, automated reviewer tasks, or internal review plumbing in that user-facing note.',
     );
+    expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
+    );
     expect(harnessInstructions).not.toContain(
       'a separate automated self-review will run',
     );
@@ -85,13 +88,14 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('folds the self-review note into background-proof closeout text when both flags are on', () => {
+  it('folds the self-review note into background-proof closeout text when every PR shape is auto-review eligible', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
       backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
+      codeReviewReviewDraftPrs: true,
       sourceControlProvider: 'github',
     });
 
@@ -141,11 +145,12 @@ describe('Standard Task code-review self-review closeout', () => {
     );
   });
 
-  it('omits the automatic self-review notice for draft delivery when reviewDraftPrs is disabled', () => {
+  it('keeps decision guidance for draft default delivery when reviewDraftPrs is disabled without hard-appending the note', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       codeReviewReviewOnCommit: true,
       codeReviewReviewDraftPrs: false,
@@ -153,19 +158,24 @@ describe('Standard Task code-review self-review closeout', () => {
       // default prAction is draft delivery
     });
 
-    expect(harnessInstructions).not.toContain(
-      '<code_review_self_review_closeout>',
+    expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
+    expect(harnessInstructions).toContain(
+      'Draft automatic review is disabled for this deployment',
+    );
+    expect(harnessInstructions).toContain(
+      'Judge from the PR you actually opened or refreshed (including after explicit `$create-pr` / `$create-draft-pr` overrides)',
     );
     expect(harnessInstructions).not.toContain(
-      'plan to do a self-review on GitHub',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
     );
   });
 
-  it('keeps the automatic self-review notice for ready-for-review delivery when draft reviews are off', () => {
+  it('hard-appends the self-review note for ready-for-review delivery when draft reviews are off', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',
       repo: 'Roomote/example-app',
       taskRunUrl: 'https://example.com/task/123',
+      backgroundProofCaptureEnabled: true,
       codeReviewsEnabled: true,
       codeReviewReviewOnCommit: true,
       codeReviewReviewDraftPrs: false,
@@ -175,7 +185,7 @@ describe('Standard Task code-review self-review closeout', () => {
 
     expect(harnessInstructions).toContain('<code_review_self_review_closeout>');
     expect(harnessInstructions).toContain(
-      'plan to do a self-review on GitHub and will follow up here with those results',
+      'post the closeout noting the pull request link and that visual proof is being captured in the background and will follow in this thread and that you plan to do a self-review on GitHub and will follow up here with those results',
     );
   });
 });
