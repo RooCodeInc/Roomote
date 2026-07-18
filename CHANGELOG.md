@@ -2,6 +2,18 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.12.1 (2026-07-18)
+
+### Patch changes
+
+- Apply generated titles to Discord first-message task threads early so they no longer stay on provisional names
+- Allow Discord Retry after a failed environment start without hitting the source-event unique constraint or leaving the run stuck Booting
+- Automatically choose a Discord forum tag when launching tasks in tag-required forum or media channels, and require Manage Threads before applying moderated tags
+- Acknowledge expired or duplicate Discord routing-button clicks without blocking newer gateway events
+- Start standard tasks from GitHub issue @mentions (comments and new issue bodies), not only pull request comments
+- Simplify Create GitHub App and Create Slack app setup by keeping the automated in-UI path only and restoring reliable Back navigation when earlier setup steps are skipped
+- Default the /tasks user filter to any user for admins instead of only the signed-in admin
+
 ## 0.12.0 (2026-07-18)
 
 ### Minor changes
