@@ -429,9 +429,9 @@ describe('spawnModalWorker', () => {
     const runCommandInput = mockRunCommand.mock.calls[0]?.[0] as {
       onExit?: (event: { exitCode: number }) => Promise<void>;
     };
-    await expect(
-      runCommandInput.onExit?.({ exitCode: 1 }),
-    ).rejects.toThrow('cleanup unavailable');
+    await expect(runCommandInput.onExit?.({ exitCode: 1 })).rejects.toThrow(
+      'cleanup unavailable',
+    );
 
     expect(onWorkerRestart).toHaveBeenCalledOnce();
   });
