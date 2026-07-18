@@ -902,6 +902,7 @@ describe('Discord routing confirmation', () => {
       result: {
         workspace: { type: 'environment', id: 'env-2', name: 'API' },
         reasoning: 'Explicit correction',
+        kickoffMessage: 'Rerouting the matchmaking fix into API.',
         debug: { confidence: 0.99 },
       },
     });
@@ -962,6 +963,7 @@ describe('Discord routing confirmation', () => {
           ts: 'message-1',
         }),
         workspace: expect.objectContaining({ environmentId: 'env-2' }),
+        kickoffMessage: 'Rerouting the matchmaking fix into API.',
       }),
     );
   });

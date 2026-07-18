@@ -186,6 +186,10 @@ export async function startNewDiscordTask(input: {
     throw new Error('Discord task routing selected an unavailable workspace.');
   }
   const agentPromptPrefix = input.channelAutoStart?.agentPromptPrefix?.trim();
+  const kickoffMessage =
+    routingDecision.status === 'routed'
+      ? routingDecision.result.kickoffMessage
+      : undefined;
   const launched = await launchDiscordTask({
     provider: input.provider,
     launchOwnerUserId: input.launchOwnerUserId,
@@ -202,6 +206,7 @@ export async function startNewDiscordTask(input: {
     channel: input.channel,
     workspace,
     forceNewThread: input.forceNewThread,
+    ...(kickoffMessage ? { kickoffMessage } : {}),
   });
   if (input.interaction) {
     await replyToDiscordEvent({
