@@ -1,3 +1,5 @@
+import { getGitHubAppMention } from '@roomote/types';
+
 import {
   formatRepositoryEnvironmentLines,
   type RepositoryCoverage,
@@ -25,12 +27,15 @@ export function buildIssueFixerFixPrompt({
   trigger,
   issue,
   repositoryCoverage,
+  githubAppSlug,
 }: {
   repositoryFullName: string;
   environmentId: string;
   trigger: IssueFixerTrigger;
   issue: IssueFixerTriggeringIssue;
   repositoryCoverage?: RepositoryCoverage[];
+  /** Deployment-configured GitHub App slug used for @mentions. */
+  githubAppSlug: string;
 }): string {
   const coverage =
     repositoryCoverage ??
@@ -49,6 +54,7 @@ export function buildIssueFixerFixPrompt({
       ? issue.labels.join(', ')
       : '(none)';
   const bodyPreview = (issue.body ?? '').trim().slice(0, 4000);
+  const appMention = getGitHubAppMention(githubAppSlug.trim() || 'roomote');
 
   return `$plan-repo-implementation
 
@@ -58,6 +64,7 @@ export function buildIssueFixerFixPrompt({
   <trigger>${trigger}</trigger>
   <repository_scope>${repositoryFullName}</repository_scope>
   <target_environment_id>${environmentId}</target_environment_id>
+  <github_app_mention>${appMention}</github_app_mention>
   <issue>
     <url>${issue.url}</url>
     <number>${issue.number}</number>
@@ -83,6 +90,7 @@ Process:
 4. Otherwise post a proposed implementation plan and stop.
 5. Skip with a brief comment (or a terse internal note if a comment would be noise) when the issue is closed, is a pull request, already has a recent full plan or active fix PR, or is waiting on unanswered questions you already asked.
 6. Stay quiet on chat unless you need input outside GitHub, hit a blocker, or finish with a result.
+7. When asking humans to follow up so Roomote continues, tell them to tag ${appMention} (the configured GitHub App mention from task_context). Do not hard-code a different app handle.
 ${environmentSection}
 Comment formats (post one GitHub issue comment using one of these body shapes):
 
@@ -94,7 +102,7 @@ I'd like to help with this issue, but I need some clarification to ensure I impl
 - Could you provide more details about [unclear aspect]?
 - Are there any specific constraints or requirements I should be aware of?
 
-Please tag @roomote in your response with the answers, and I'll be happy to implement the fix once I have this information.
+Please tag ${appMention} in your response with the answers, and I'll be happy to implement the fix once I have this information.
 
 **When you have a plan:**
 
@@ -106,5 +114,5 @@ I've analyzed this issue and here's my proposed implementation plan:
 
 This approach will [explain the benefits and how it solves the issue].
 
-Please tag @roomote if you'd like me to implement this, or reply with feedback on the plan.`;
+Please tag ${appMention} if you'd like me to implement this, or reply with feedback on the plan.`;
 }
