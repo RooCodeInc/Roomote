@@ -19,6 +19,7 @@ describe('LOCAL_TASK_MODEL_PROVIDER_IDS', () => {
     expect([...LOCAL_TASK_MODEL_PROVIDER_IDS].sort()).toEqual([
       'litellm',
       'ollama',
+      'openai-compatible',
       'vllm',
     ]);
   });

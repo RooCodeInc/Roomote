@@ -1,0 +1,67 @@
+---
+title: OpenAI-compatible
+icon: plug
+description: Connect any OpenAI API endpoint as a Roomote inference provider.
+---
+
+OpenAI-compatible is the generic option for any server that implements the
+OpenAI `/v1` API. Use it for LiteLLM proxies, vLLM, local OpenAI servers, or
+other OpenAI-shaped gateways when you do not need a provider-specific setup page.
+
+## Configure an OpenAI-compatible endpoint
+
+In **Settings > Models**, add **OpenAI-compatible** and provide the endpoint URL.
+An API key is optional and only needed when your endpoint requires bearer auth.
+You can instead manage both values as deployment environment variables:
+
+```sh
+OPENAI_COMPATIBLE_BASE_URL=https://proxy.example.com/v1
+OPENAI_COMPATIBLE_API_KEY=...
+```
+
+The endpoint must be reachable from the Roomote deployment. For a Compose
+deployment, use a service DNS name such as `http://litellm:4000/v1` when the
+proxy runs on the same private network. Do not use `localhost` unless the
+endpoint runs in the same network namespace as the Roomote service that proxies
+inference requests.
+
+After saving the provider, Roomote discovers models from `/v1/models`. Enable
+the models you want and select a default coding model and any specialized roles.
+Model IDs use the `openai-compatible/<model-id>` form, where `<model-id>` is the
+name returned by your endpoint.
+
+## When to use this versus LiteLLM, Ollama, or vLLM
+
+Choose **OpenAI-compatible** when you want one clear setup path for any OpenAI
+API endpoint. Choose the named LiteLLM, Ollama, or vLLM providers when you
+prefer those labels or their dedicated env var names. Runtime discovery and
+chat completion behavior are the same OpenAI `/v1` protocol for all of them.
+
+## Secure the endpoint
+
+Keep the endpoint private to Roomote whenever possible. Put it on an internal
+network or behind a private ingress, require an API key when the server supports
+it, and use TLS when traffic crosses an untrusted network. Store
+`OPENAI_COMPATIBLE_API_KEY` in your deployment secret manager or as an encrypted
+Roomote deployment variable, not in an environment's task variables or
+repository files.
+
+Roomote proxies model traffic through its inference gateway, so task sandboxes
+do not need direct network access to the endpoint or the API key.
+
+## Verify setup
+
+1. save the endpoint URL and optional API key
+2. confirm models appear in **Settings > Models**
+3. enable one model and make it the default coding model
+4. start a small Roomote task and confirm it completes through the endpoint
+5. check the upstream server logs for the request
+
+## Common issues
+
+- **No models appear.** Confirm the endpoint URL includes the OpenAI `/v1` API
+  path and that the API key can list models when auth is required.
+- **Tasks cannot reach the endpoint.** Check DNS, container networking, firewall
+  rules, and whether the endpoint is reachable from the Roomote deployment.
+- **Tool calling fails.** Roomote needs models that support tool calling. Confirm
+  the upstream model and gateway configuration expose tools over chat completions.

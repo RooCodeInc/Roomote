@@ -101,6 +101,14 @@ describe('inference gateway key lookups', () => {
   });
 
   it('registers local OpenAI-compatible endpoint providers', () => {
+    expect(getInferenceGatewayProvider('openai-compatible')).toMatchObject({
+      upstreamBaseUrlEnvVarName: 'OPENAI_COMPATIBLE_BASE_URL',
+      gatewayEnvVarNames: [
+        'OPENAI_COMPATIBLE_BASE_URL',
+        'OPENAI_COMPATIBLE_API_KEY',
+      ],
+      optionalApiKey: true,
+    });
     expect(getInferenceGatewayProvider('litellm')).toMatchObject({
       upstreamBaseUrlEnvVarName: 'LITELLM_BASE_URL',
       gatewayEnvVarNames: ['LITELLM_BASE_URL', 'LITELLM_API_KEY'],
